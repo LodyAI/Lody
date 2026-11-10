@@ -107,6 +107,8 @@ class CatalogRepository(private val account: AccountController, private val owne
       }
       is RuntimeEvent.SessionUpdated -> Unit
       is RuntimeEvent.CreationChanged -> Unit
+      is RuntimeEvent.ProviderProgress -> Unit
+      is RuntimeEvent.ProvidersChanged -> Unit
       RuntimeEvent.GrantRequested -> Unit
      }
     }

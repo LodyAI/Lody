@@ -3827,6 +3827,72 @@ void test('member controls use ordinary durable records and keep the old epoch a
   )
 })
 
+void test('ownership transfer signs one ordinary record and leaves the former owner an admin', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      const prepared = yield* bind(owner)
+      const records = yield* makeRecords(owner.custody, prepared, 2)
+      yield* owner.host.open(workspaceId)
+      yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+      const remote = () => ({
+        staging: () => ({
+          stageGroup: () => Effect.die('member commands must not stage a candidate'),
+          readGroup: () => Effect.die('member commands must not read a candidate'),
+          deleteGroup: () => Effect.die('member commands must not delete a candidate')
+        }),
+        mailbox: () => {
+          throw new Error('member commands must not receive a candidate')
+        },
+        log: {
+          read: () =>
+            Effect.sync(() => ({
+              records: records.map((x) => new Uint8Array(x)),
+              checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+            })),
+          appendCas: (_genesis, point, original) =>
+            Effect.sync(() => {
+              assert.equal(
+                hex(point.head.toBytes()),
+                hex(hashRecordBytes(records.at(-1)).toBytes())
+              )
+              records.push(new Uint8Array(original))
+            })
+        },
+        history: () => Effect.succeed(page(records, prepared.genesisHashHex, 0))
+      })
+      const membershipId = '11'.repeat(16)
+      // A member that does not exist cannot receive ownership.
+      const missing = yield* Effect.result(
+        owner.host.manage(
+          workspaceId,
+          { type: 'transferOwner', membershipId: '99'.repeat(16) },
+          remote
+        )
+      )
+      assert.equal(missing._tag, 'Failure')
+      assert.equal(
+        yield* owner.host.manage(workspaceId, { type: 'transferOwner', membershipId }, remote),
+        'Committed'
+      )
+      assert.equal(
+        Result.getOrThrow(decodeRecord(records.at(-1))).body.operation.type,
+        'transferOwner'
+      )
+      const status = yield* owner.host.status(workspaceId)
+      assert.equal(status.memberRole, 'admin')
+      // Keys are unchanged: a transfer is not a removal.
+      assert.equal(status.rotationRequired, false)
+      // The former owner has no authority to transfer again.
+      const again = yield* Effect.result(
+        owner.host.manage(workspaceId, { type: 'transferOwner', membershipId }, remote)
+      )
+      assert.equal(again._tag, 'Failure')
+    })
+  )
+})
+
 void test('member removal reopens its uncertain original and never signs a replacement', async (t) => {
   const directory = await fixture(t)
   let records,

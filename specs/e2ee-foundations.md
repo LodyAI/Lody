@@ -709,3 +709,7 @@ transaction, retaining offset, signer, SHA-256 digest, original credential windo
 and phase. Archived identities remain idempotent, reject different bytes at the
 same offset and can never become current again. Capacity budgets count retained
 bodies rather than archived identities.
+
+## Automatic current-workspace pairing (draft increment, 2026-11-10)
+
+The approved UI removes manual code transfer: a native device opening a workspace automatically requests access; the person compares six-digit codes and approves once on an existing personal device. Approval grants only that workspace. A committed ephemeral key exchange derives the secret for the existing authenticated pairing protocol; the relay receives public messages only. Both clients bind account, workspace, genesis and the original ten-minute expiry, and retain exact originals on retry. The comparison is mandatory: six decimal digits provide approximately 20 bits of substitution detection, rather than the manual protocol’s 128-bit out-of-band authentication. This protocol increment is draft and has no independent cryptographic approval. The existing approved manual protocol remains unchanged. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10) records ordering, lifetime and validation limits.

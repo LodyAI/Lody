@@ -9,7 +9,10 @@ import type {
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
-import type { E2eeAccountPairingRuntime } from './e2ee-account-pairing';
+import type {
+  E2eeAccountPairingRuntime,
+  E2eeAutomaticPairingRuntime,
+} from './e2ee-account-pairing';
 import type { ReadonlyStore } from './store';
 import type { PlatformSessionState } from './provider';
 
@@ -158,7 +161,8 @@ export interface E2eeAccountApprovalSession {
 }
 
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
-export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
+export interface E2eeWorkspaceRuntime
+  extends E2eeAccountPairingRuntime, E2eeAutomaticPairingRuntime {
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';
   /** Portable hosts that can sign an account-pairing admission from an already
@@ -187,6 +191,8 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     membershipId: string,
     role: 'admin' | 'member'
   ): Promise<void>;
+  /** Owner-only transfer to an existing member, checked against the latest verified ledger. */
+  transferOwnership?(workspaceId: string, membershipId: string): Promise<void>;
   /** Create public email/link pins using a current manager's native device. */
   createMemberInvitation?(input: {
     workspaceId: string;

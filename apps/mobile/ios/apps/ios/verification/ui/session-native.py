@@ -1,5 +1,6 @@
 """Native read-only session page: cached then live transcript, title menu, header actions, find, offline reconnect and deletion return."""
 import sys
+import os
 import subprocess
 from driver import UI
 import catalog
@@ -40,6 +41,41 @@ def tap_menu_item(title):
     item = ui.wait(lambda items: next((i for i in items if (i.get('AXLabel') or '').startswith(title)), None), f'Missing {title}')
     frame = item['frame']
     ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.6')
+
+
+def check_archive():
+    tap_label(more)
+    tap_label(catalog.text('session.action.archive'))
+    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'session-preview-probe' for i in items),
+            'Archived session page did not return', timeout=10)
+    assert not any(i.get('AXLabel') == catalog.text('session.toast.archived') for i in ui.state()), 'Archive success must be silent'
+    ui.capture('archive-return')
+
+    ui.open_case('session-preview-archive-error')
+    wait_probe('live', 'Archive failure scenario did not start')
+    tap_label(more)
+    tap_label(catalog.text('session.action.archive'))
+    ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('session.toast.archiveFailed') for i in items),
+            'Missing archive failure')
+    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'session-preview-probe' for i in items),
+            'Failed archive did not return immediately')
+    ui.capture('archive-failure-return')
+
+    ui.open_case('session-preview-archived')
+    wait_probe('live', 'Archived scenario did not start')
+    tap_label(more)
+    ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('session.action.unarchive') for i in items), 'Archive state did not refresh the menu')
+    ui.capture('archived-menu')
+    tap_label(catalog.text('session.action.unarchive'))
+    wait_probe('unarchive', 'Unarchive did not reach the session service')
+    ui.element('chat-navigation-title')
+    ui.capture('unarchive-stays')
+
+
+if os.environ.get("LODY_VERIFY_SESSION_ARCHIVE_ONLY") == "1":
+    wait_probe("live", "Archive scenario did not start")
+    check_archive()
+    sys.exit(0)
 
 
 wait_probe('live', 'Live envelope was not delivered')
@@ -124,31 +160,7 @@ ui.axe('tap', '--id', 'chat-navigation-title', '--post-delay', '.6')
 tap_menu_item(catalog.text('session.title.copyBranch'))
 wait_clipboard('feature/native-session')
 
-tap_label(more)
-tap_label(catalog.text('session.action.archive'))
-ui.wait(lambda items: not any(i.get('AXUniqueId') == 'session-preview-probe' for i in items),
-        'Archived session page did not return', timeout=10)
-ui.capture('archive-return')
-
-ui.open_case('session-preview-archive-error')
-wait_probe('live', 'Archive failure scenario did not start')
-tap_label(more)
-tap_label(catalog.text('session.action.archive'))
-ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('session.toast.archiveFailed') for i in items),
-        'Missing archive failure')
-ui.element('session-preview-probe')
-ui.element('chat-navigation-title')
-ui.capture('archive-failure-stays')
-
-ui.open_case('session-preview-archived')
-wait_probe('live', 'Archived scenario did not start')
-tap_label(more)
-ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('session.action.unarchive') for i in items), 'Archive state did not refresh the menu')
-ui.capture('archived-menu')
-tap_label(catalog.text('session.action.unarchive'))
-wait_probe('unarchive', 'Unarchive did not reach the session service')
-ui.element('chat-navigation-title')
-ui.capture('unarchive-stays')
+check_archive()
 
 # Web SessionHeaderMenu's Copy submenu: every option reaches the clipboard.
 copy_menu = catalog.text('session.copy.title')

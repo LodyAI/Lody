@@ -66,6 +66,7 @@ internal class CloudAuthHttp(private val transport: AuthTransport) : CloudAuthAp
                 user.optString("name").ifBlank { "Lody account" },
                 (0 until list.length()).map { list.getJSONObject(it).let { row -> Workspace(row.text("id"), row.text("name"), httpsImage(row.optString("logo")), row.optString("slug").takeIf { it.isNotBlank() && it != "null" }) } },
                 httpsImage(user.optString("image")),
+                user.optString("email").takeUnless { it == "null" }.orEmpty(),
             )
         }
     }

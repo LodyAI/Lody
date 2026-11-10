@@ -22,7 +22,7 @@ CHAT = ROOT / 'apps/ios/verification/kit/chat'
 BATCHES = {
     'pages': ['onboarding', 'home', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'project-history', 'project-history-entry', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
     'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
-    'settings': ['agents-settings', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
+    'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
 }
 SUITES = {
     'settings-workspace': BATCHES['settings'],
@@ -55,7 +55,10 @@ PREVIEW = {
     'github-settings': 'github-settings-preview',
     'project-visibility': 'project-visibility-preview',
     'prompt-shortcuts': 'prompt-shortcuts-preview',
-    'agents-settings': 'settings-preview',
+    'agents-settings': 'agent-providers-preview',
+    'agents-presets': 'agent-presets-preview',
+    'agents-pi': 'agent-pi-preview',
+    'agents-auth-methods': 'agent-auth-methods-preview',
     'settings-form-backgrounds': 'settings-forms-preview',
     'machine-settings': 'machine-settings-preview',
     'settings-baseline': 'settings-baseline-live',
@@ -171,7 +174,10 @@ READY = {
     'github-settings': 'list-unavailable-action',
     'project-visibility': 'visibility:m1:same',
     'prompt-shortcuts': 'list-unavailable-action',
-    'agents-settings': 'settings-agent',
+    'agents-settings': 'provider-machine-picker',
+    'agents-presets': 'provider-machine-picker',
+    'agents-pi': 'provider-machine-picker',
+    'agents-auth-methods': 'provider-auth-start',
     'settings-form-backgrounds': 'form-machine',
     'machine-settings': 'list-notice-action',
     'settings-baseline': 'settings-baseline-ready',
@@ -569,7 +575,9 @@ try:
                 if case in ['send-transition', 'send-transition-handoff']:
                     script = Path(__file__).with_name('send-transition.py')
                 if case == 'agents-settings':
-                    script = Path(__file__).with_name('settings.py')
+                    script = Path(__file__).with_name('agent-providers.py')
+                if case in ('agents-presets', 'agents-pi', 'agents-auth-methods'):
+                    script = Path(__file__).with_name('agent-provider-advanced.py')
                 command = [sys.executable, str(script), args.udid]
                 if case in ['composer-success', 'composer-failure']:
                     command += ['--expect', case.removeprefix('composer-'), '--output', str(output)]
@@ -581,6 +589,8 @@ try:
                     command.append(case.removeprefix('send-scroll-'))
                 if case == 'agents-settings':
                     command.append('--agents-only')
+                if case in ('agents-presets', 'agents-pi', 'agents-auth-methods'):
+                    command.append(case)
                 check_timeout = 180
                 if case == 'morph':
                     # Send, open and dismiss loops; ~175s alone with the driver's HID padding.
@@ -590,9 +600,13 @@ try:
                     check_timeout = 300
                 if case in ('agent-roles', 'published-shares', 'published-share-states'):
                     check_timeout = 420
-                if case in ('settings', 'agents-settings'):
+                if case in ('settings', 'agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods'):
                     # These cases visit several Settings contexts or editors; settings reaches ~300s under load.
                     check_timeout = 420
+                if case == 'agents-settings':
+                    # Full CRUD, setup, write-only env, ACP, operations and failure recovery
+                    # exceed seven minutes with native keyboard and scroll verification.
+                    check_timeout = 900
                 if case == 'settings-baseline':
                     # Six fixture scenarios plus page visits; ~305s under load.
                     check_timeout = 420

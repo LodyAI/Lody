@@ -1,3 +1,4 @@
+import { isMissingHistoryUserTurn } from '@lody/shared';
 /**
  * Pure decision functions for session dispatch.
  *
@@ -306,7 +307,7 @@ export function resolveSessionCancelAction(
  * 4. **Meta pointer: latestUserMsgId ≠ lastHandledUserMsgId**: Legacy dispatch
  *    mechanism.
  *
- * A turn matching `lastMissingHistoryUserMsgId` is excluded from every path:
+ * Every ID retained by `isMissingHistoryUserTurn` is excluded from every path:
  * recovery already surfaced its delivery failure, so a late payload must not be
  * resurrected by an unrelated activation. The exclusion is permanent for that
  * exact turn — the UI offers resending its content as a NEW message (new turn
@@ -336,7 +337,7 @@ export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
     // the failed turn when an unrelated signal opens the room later.
     // `settledActivationUserMsgId` needs no twin exclusion here: a settled turn
     // is terminal in history by construction, so no path below can return it.
-    if (entry.id === meta.lastMissingHistoryUserMsgId) {
+    if (isMissingHistoryUserTurn(meta, entry.id)) {
       continue;
     }
 

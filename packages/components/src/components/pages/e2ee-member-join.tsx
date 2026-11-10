@@ -6,7 +6,8 @@ import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { Check } from 'lucide-react';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useStableSession } from '@/hooks/useStableSession';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -24,7 +25,64 @@ const styles = stylex.create({
   card: { width: '100%', maxWidth: 460 },
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
+  steps: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' },
+  step: { display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr)', columnGap: space[3] },
+  rail: { display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  dot: {
+    width: 22,
+    height: 22,
+    borderRadius: '50%',
+    display: 'grid',
+    placeItems: 'center',
+    fontSize: text.captionSize,
+    fontWeight: 700,
+    backgroundColor: colors.secondaryBackground,
+    color: colors.tertiaryLabel,
+  },
+  dotDone: { backgroundColor: colors.success, color: '#ffffff' },
+  dotCurrent: { backgroundColor: colors.label, color: colors.background },
+  line: { width: 2, flexGrow: 1, minHeight: space[3], backgroundColor: colors.separator },
+  lineDone: { backgroundColor: colors.success },
+  stepText: { paddingBottom: space[3], color: colors.tertiaryLabel },
+  stepTextActive: { color: colors.label },
 });
+
+const JOIN_STEPS = ['accept', 'approval', 'key', 'open'] as const;
+
+/** One card, four steps: where the request is and whom it waits on. Display only. */
+function JoinProgress(props: { current: number }) {
+  const { t } = useTranslation();
+  return (
+    <ol aria-label={t('e2ee.team.progress')} {...stylex.props(styles.steps)}>
+      {JOIN_STEPS.map((step, index) => {
+        const done = index < props.current;
+        const current = index === props.current;
+        return (
+          <li
+            key={step}
+            data-join-step={step}
+            aria-current={current ? 'step' : undefined}
+            {...stylex.props(styles.step)}
+          >
+            <span {...stylex.props(styles.rail)}>
+              <span
+                {...stylex.props(styles.dot, done && styles.dotDone, current && styles.dotCurrent)}
+              >
+                {done ? <Check size={12} aria-hidden="true" /> : index + 1}
+              </span>
+              {index < JOIN_STEPS.length - 1 && (
+                <span {...stylex.props(styles.line, done && styles.lineDone)} />
+              )}
+            </span>
+            <span {...stylex.props(styles.stepText, (done || current) && styles.stepTextActive)}>
+              {t(`e2ee.team.steps.${step}`)}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
   'prepareMemberJoin' | 'pendingMemberJoin' | 'claimMemberJoin'
@@ -230,6 +288,11 @@ function JoinSession({
             )}
           </Card.Header>
           <div {...stylex.props(styles.stack)}>
+            {accountId && emailVerified && native && (pinMatches || request) && !terminal && (
+              <JoinProgress
+                current={ready ? 4 : request?.state === 'committed' ? 2 : request ? 1 : 0}
+              />
+            )}
             {email && <p>{email}</p>}
             {error && <p role="status">{t('e2ee.team.retryOriginal')}</p>}
             {slowWait && !ready && message === 'e2ee.team.waitingKey' && (
@@ -256,7 +319,11 @@ function JoinSession({
                 pinMatches &&
                 available?.matchesRecipient !== false &&
                 !request && (
-                  <Button data-testid="e2ee-invitation-submit" disabled={busy} onClick={() => void accept()}>
+                  <Button
+                    data-testid="e2ee-invitation-submit"
+                    disabled={busy}
+                    onClick={() => void accept()}
+                  >
                     {t(offer.mode === 'email' ? 'e2ee.team.accept' : 'e2ee.team.submit')}
                   </Button>
                 )}

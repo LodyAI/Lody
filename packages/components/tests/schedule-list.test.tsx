@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -278,6 +277,45 @@ describe('schedule list rows', () => {
     [...container.querySelectorAll('[data-schedule-row]')].map(
       (row) => row.querySelector('button span:nth-child(2)')?.textContent
     );
+
+  it('filters ownership across tasks and messages, composes with project, and clears filters', () => {
+    const teammateTask = { ...blocked, ownerId: 'teammate' };
+    const teammateMessage = { ...pending, ownerId: 'teammate' };
+    const rows = [manual, teammateTask, sent, teammateMessage];
+    renderList({ rows, currentUserId: 'owner', initialFilters: { owner: 'mine' } });
+    expect(titles()).toEqual(expect.arrayContaining([manual.title, sent.title]));
+    expect(titles()).toHaveLength(2);
+    expect(rowOf(manual.title).textContent).toContain('You');
+
+    renderList({ rows, currentUserId: 'owner', initialFilters: { owner: 'others' } });
+    expect(titles()).toEqual(expect.arrayContaining([blocked.title, pending.title]));
+    expect(titles()).toHaveLength(2);
+    expect(rowOf(blocked.title).textContent).toContain('teammate');
+
+    renderList({
+      rows,
+      currentUserId: 'owner',
+      initialFilters: {
+        owner: 'others',
+        project: { kind: 'project', name: 'loro-dev/lody' },
+      },
+    });
+    expect(titles()).toEqual([blocked.title]);
+    const clear = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Clear filters'
+    )!;
+    act(() => clear.click());
+    expect(titles()).toHaveLength(4);
+
+    renderList({
+      rows,
+      currentUserId: 'owner',
+      query: 'missing task',
+      initialFilters: { owner: 'mine' },
+    });
+    expect(titles()).toEqual([]);
+    expect(container.textContent).toContain(en['schedules.noMatches']);
+  });
 
   it('clears only finished scheduled messages, and opens a message’s chat from its row', () => {
     renderList();

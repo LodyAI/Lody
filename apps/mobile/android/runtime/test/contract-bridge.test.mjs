@@ -21,3 +21,25 @@ test('contract bridge translates requests, events and native grant replies',asyn
  assert.equal(sent.at(-1).id,'grant-1');assert.equal(sent.at(-1).kind,'result');
  delete globalThis.androidRuntimeMessage;
 });
+
+import {providerCommands} from '../src/provider-commands.mjs';
+test('provider adapter uses verified scope and retains auth-required refresh results',async()=>{
+ const adapter=providerCommands({async agentProviders(input){assert.equal(input.workspaceId,'workspace');assert.equal(input.userId,'user');return {machines:[],providers:[],setups:[],catalog:[],authRequired:true};}},()=>({workspaceId:'workspace',userId:'user'}));
+ assert.equal((await adapter.agentProviders({action:'refresh',workspaceId:'foreign',userId:'other',base:{id:'provider'}})).authRequired,true);
+ const offline=providerCommands({agentProviders(){throw Error('must not run')}},()=>null);
+ assert.deepEqual(await offline.agentProviders({action:'list'}),{error:'not_connected'});
+});
+test('provider failure hides private diagnostics and does not retry an uncertain write',async()=>{
+ let applied=false;
+ const adapter=providerCommands({async agentProviders(){assert.equal(applied,false);applied=true;throw Error('private backend diagnostic');}},()=>({workspaceId:'workspace',userId:'user'}));
+ assert.deepEqual(await adapter.agentProviders({action:'delete',base:{id:'provider'}}),{error:'provider_write_unknown'});
+ assert.equal(applied,true);
+});
+test('provider detail and interactive auth use native scope and redact failures', async()=>{
+ const adapter=providerCommands({
+  async agentProviderDetail(input){ assert.equal(input.workspaceId,'workspace');assert.equal(input.userId,'user');return {env:[{key:'EXAMPLE_TOKEN',hasValue:true}],revision:'opaque'}; },
+  async agentProviderAuth(input){ assert.equal(input.workspaceId,'workspace');assert.equal(input.userId,'user');assert.equal(input.values.key,'synthetic');throw Error('credential diagnostic'); }
+ },()=>({workspaceId:'workspace',userId:'user'}));
+ assert.deepEqual((await adapter.agentProviderDetail({machineId:'machine',id:'provider',workspaceId:'other'})).env,[{key:'EXAMPLE_TOKEN',hasValue:true}]);
+ assert.deepEqual(await adapter.agentProviderAuth({action:'submit',values:{key:'synthetic'},userId:'other'}),{error:'provider_write_unknown'});
+});

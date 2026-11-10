@@ -327,7 +327,9 @@ describe('remote encrypted machine approval', () => {
         root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
       );
       await click('e2ee.remoteMachine.create');
-      expect(container.querySelector('textarea')?.value).toContain('synthetic-command');
+      expect(
+        container.querySelector('[aria-label="e2ee.remoteMachine.command"]')?.textContent
+      ).toContain('synthetic-command');
       expect(container.textContent).not.toContain(summary);
       await click('e2ee.remoteMachine.check');
       expect(state).toBe('claimed');

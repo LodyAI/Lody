@@ -130,3 +130,36 @@ var unsupportedQuotas = scopedQuotas
 unsupportedQuotas.configs[0].rateLimitsAvailable = false
 precondition(SessionUsageSelection.quota(unsupportedQuotas, configId: "a", provider: "codex", model: nil) == nil)
 print("PASS: session quota exact account, model-specific Spark selection and capability gating")
+
+let providerSnapshot = AgentProviderSnapshot(
+  machines: [AgentProviderMachine(id: "m1", name: "Studio", online: true, readOnly: false, supportsSetup: true),
+             AgentProviderMachine(id: "empty", name: "Empty", online: false, readOnly: true)],
+  providers: [AgentProviderItem(id: "codex-one", machineId: "m1", name: "Codex", cliType: "builtin", agentType: "codex")],
+  setups: [], catalog: [])
+let providerSections = AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: false, usage: ["m1": subscription])
+precondition(providerSections[0].rows[0].id == "provider-machine-picker")
+precondition(providerSections[1].rows[0].menuActions.map(\.id) == ["edit", "refresh", "delete"])
+precondition(providerSections[1].visual?.items.isEmpty == false, "Provider page preserves subscription quota display")
+let emptyProviderSections = AgentProviderSections.make(providerSnapshot, selectedID: "empty", busy: false)
+precondition(emptyProviderSections[1].rows.map(\.id) == ["providers-empty"], "Read-only empty machines remain selectable without create")
+precondition(AgentProviderSections.picker(providerSnapshot.machines, selectedID: "empty")[0].rows.count == 2)
+let staleProviders = AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: true)
+precondition(staleProviders[1].rows.allSatisfy { !$0.action && $0.menuActions.isEmpty }, "Failed or pending refresh cannot authorize writes")
+print("PASS: provider machine selection, management gating and subscription quotas")
+
+var multiMachineProviders = providerSnapshot
+multiMachineProviders.providers.append(AgentProviderItem(id: "other", machineId: "empty", name: "Other", cliType: "builtin", agentType: "claude"))
+multiMachineProviders.setups = [AgentProviderSetup(id: "other-setup", machineId: "empty", name: "Other setup", agentType: "codex", status: "queued", attempt: 1)]
+var mutation = providerSnapshot
+mutation.providers[0].name = "Renamed"
+let mergedProviders = AgentProviderSections.merging(mutation, into: multiMachineProviders, machineID: "m1")
+precondition(mergedProviders.providers.first { $0.id == "codex-one" }?.name == "Renamed")
+precondition(AgentProviderSections.make(mergedProviders, selectedID: "empty", busy: false)[1].rows.contains { $0.id == "provider:other" }, "Switching machine after mutation retains its provider")
+precondition(mergedProviders.setups.map(\.id) == ["other-setup"], "Mutation retains other-machine setup")
+mutation.providers = []
+let deletedProviders = AgentProviderSections.merging(mutation, into: mergedProviders, machineID: "m1")
+precondition(deletedProviders.providers.map(\.id) == ["other"], "Empty target projection removes the deleted provider")
+mutation.machines.removeAll { $0.id == "empty" }
+let removedMachine = AgentProviderSections.merging(mutation, into: mergedProviders, machineID: "m1")
+precondition(removedMachine.providers.isEmpty && removedMachine.setups.isEmpty, "Removed machines cannot retain cached providers or setups")
+print("PASS: target-machine mutation merge preserves other machines and removes deleted targets")

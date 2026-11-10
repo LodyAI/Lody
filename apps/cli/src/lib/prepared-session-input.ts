@@ -140,6 +140,5 @@ export async function commitPreparedSessionDispatch(
   if (await isPreparedSessionDispatched(manager, prepared)) return;
   await manager.repo.upsertDocMeta(getSessionRoomId(prepared.sessionId), {
     latestUserMsgId: prepared.userTurn.id,
-    lastMissingHistoryUserMsgId: undefined,
   } satisfies Partial<SessionMeta>);
 }

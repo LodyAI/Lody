@@ -8,7 +8,10 @@ import {
   hashRecordBytes,
   type LedgerView,
 } from '@lody/e2ee-core/protocol';
-import { ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS } from './account-requester';
+import {
+  personalHostAccountPairing,
+  ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS,
+} from './account-requester';
 import { makeOwnedPersonalDeviceHost, type PersonalHostPorts } from './owned-host';
 import { PersonalPairingOfferSchema, type PersonalPairingOffer } from './pairing';
 import { fail, PersonalRuntimeFailure } from './errors';
@@ -790,5 +793,5 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         } satisfies Pick<E2eeWorkspaceRuntime, 'readMachineSharing' | 'updateMachineSharing'>)
       : {}),
   };
-  return Object.freeze(runtime);
+  return Object.freeze({ ...runtime, accountRequester: personalHostAccountPairing(host) });
 });

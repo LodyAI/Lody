@@ -1,5 +1,7 @@
+import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
+import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
 import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
@@ -3349,6 +3351,7 @@ export function LoroAppSidebar({
         planTier: planTierByWorkspaceId.get(org.id) ?? null,
         memberCount:
           org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
+        encrypted: isListedEncryptedWorkspace(org),
       }));
   }, [
     activeOrganization,
@@ -3928,7 +3931,12 @@ export function LoroAppSidebar({
         // header inset so the sidebar's first row aligns with the top bar.
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
-        topContent={sidebarTopContent ?? undefined}
+        topContent={
+          <>
+            <E2eeDeviceRequestsButton className="mb-2 w-full justify-start" />
+            {sidebarTopContent}
+          </>
+        }
         desktopFilterAction={sidebarFilterPopover ?? undefined}
         afterSessionListContent={sidebarChatsContent ?? undefined}
         bottomFloatingContent={sidebarBottomFloatingContent ?? undefined}

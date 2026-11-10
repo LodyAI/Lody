@@ -33,7 +33,6 @@ export async function dispatchQuotaSchedule(options: {
       return 'discarded';
     await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
       latestUserMsgId: prepared.userTurn.id,
-      lastMissingHistoryUserMsgId: undefined,
     } satisfies Partial<SessionMeta>);
     return 'dispatched';
   });

@@ -5,7 +5,7 @@ export function contractBridge(runtime, emit) {
  function call(method,payload={}) {
   const id=`android-${++serial}`;
   return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>{pending.delete(id);reject(Error('runtime_timeout'));},method==='editSession' || method==='forkSession' ? 130000 : method==='scheduleCommand' ? 75000 : 45000);
+   const timer=setTimeout(()=>{pending.delete(id);reject(Error('runtime_timeout'));},method==='agentProviderOperation' ? 355000 : method==='agentProviderAuth' ? 65000 : method==='agentProviderProbe' || method==='agentProviders' ? 140000 : method==='editSession' || method==='forkSession' ? 130000 : method==='scheduleCommand' ? 75000 : 45000);
    pending.set(id,{resolve,reject,timer,method});
    receive({v:1,gen:1,kind:'request',id,method,payload});
   });
@@ -42,6 +42,11 @@ export function contractBridge(runtime, emit) {
   setTabClosed:args=>invoke('setTabClosed',args),
   createTab:args=>invoke('createTab',args),
   // Agent Roles readable by this user, listed for the new-chat Role row.
+  agentProviders:args=>invoke('agentProviders',args),
+  agentProviderDetail:args=>invoke('agentProviderDetail',args),
+  agentProviderProbe:args=>invoke('agentProviderProbe',args),
+  agentProviderAuth:args=>invoke('agentProviderAuth',args),
+  agentProviderOperation:args=>invoke('agentProviderOperation',args),
   agentRoles:args=>invoke('agentRoles',args),
   // The composer's @ panel: one mention category for a session.
   mentionCatalog:args=>invoke('mentionCatalog',args),

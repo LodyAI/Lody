@@ -50,12 +50,12 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
         val json = load(accountFile, 1024 * 1024) ?: return null
         return try {
             val workspaces = json.getJSONArray("workspaces").objects().map { Workspace(it.getString("id"), it.getString("name"), httpsImage(it.optString("image")), it.optString("slug").takeIf { slug -> slug.isNotBlank() && slug != "null" }) }
-            val account = Account(json.getString("id"), json.getString("name"), workspaces, httpsImage(json.optString("image")))
+            val account = Account(json.getString("id"), json.getString("name"), workspaces, httpsImage(json.optString("image")), json.optString("email").takeUnless { it == "null" }.orEmpty())
             AccountContext(account, json.optString("selected").takeIf { id -> workspaces.any { it.id == id } })
         } catch (_: Exception) { AtomicFile(accountFile).delete(); null }
     }
     private fun saveContext(context: AccountContext) {
-        save(accountFile, JSONObject().put("id", context.account.id).put("name", context.account.name).put("image", context.account.image)
+        save(accountFile, JSONObject().put("id", context.account.id).put("name", context.account.name).put("image", context.account.image).put("email", context.account.email)
             .put("workspaces", JSONArray(context.account.workspaces.map { JSONObject().put("id", it.id).put("name", it.name).put("image", it.image).put("slug", it.slug) }))
             .put("selected", context.workspaceId), 1024 * 1024)
     }

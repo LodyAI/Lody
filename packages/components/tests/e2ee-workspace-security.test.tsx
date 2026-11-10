@@ -25,7 +25,12 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../src/components/settings/account-setting', () => ({
-  AccountSettingsComponent: () => <p>ordinary settings</p>,
+  AccountSettingsComponent: (props: { encryptedTeamManagement?: boolean }) => (
+    <p>
+      ordinary settings
+      {props.encryptedTeamManagement === false ? ' without team management' : ''}
+    </p>
+  ),
 }));
 describe('recovery vault settings', () => {
   it('asks the desktop for its recovery state once, not on every render', async () => {
@@ -363,12 +368,21 @@ describe('encrypted workspace settings', () => {
       )
     );
   const click = async (key: string) => {
-    const button = [...container.querySelectorAll('button')].find(
+    const button = [...document.body.querySelectorAll('button')].find(
       (node) => node.textContent === key
     );
     if (!button) throw new Error(`missing ${key}`);
     await act(async () => button.click());
   };
+  // Devices and recovery live in the encryption console the General card opens.
+  const openConsole = async (tab: 'devices' | 'recovery' | 'members') => {
+    await click('e2ee.security.openConsole');
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    const target = document.body.querySelector(`[data-console-tab="${tab}"]`);
+    if (!(target instanceof HTMLButtonElement)) throw new Error(`missing console tab ${tab}`);
+    await act(async () => target.click());
+  };
+  const page = () => document.body.textContent ?? '';
   it.each(['plan', 'failure'] as const)(
     'drops the previous account recovery %s as soon as the account changes',
     async (shown) => {
@@ -397,9 +411,10 @@ describe('encrypted workspace settings', () => {
       store.set(e2eeRecoveryVaultEnabledAtom, true);
       try {
         await render();
+        await openConsole('recovery');
         for (let tick = 0; tick < 5; tick++) await act(async () => {});
         const previous = shown === 'plan' ? 'Account A workspace' : 'e2ee.recovery.planFailed';
-        expect(container.textContent).toContain(previous);
+        expect(page()).toContain(previous);
 
         account = 'account-b';
         platform = {
@@ -416,7 +431,7 @@ describe('encrypted workspace settings', () => {
         store.set(workspaceContentModeAtom, { ...mode, accountId: 'account-b' });
         await render();
         for (let tick = 0; tick < 5; tick++) await act(async () => {});
-        expect(container.textContent).not.toContain(previous);
+        expect(page()).not.toContain(previous);
       } finally {
         vi.unstubAllGlobals();
       }
@@ -599,10 +614,14 @@ describe('encrypted workspace settings', () => {
     fail = true;
     await click('e2ee.security.complete');
     expect(container.textContent).toContain('e2ee.security.retryHint');
-    expect(container.textContent).toContain('synthetic-machine');
+    await openConsole('devices');
+    expect(page()).toContain('synthetic-machine');
     expect(signed).toBe(false);
     fail = false;
-    await click('e2ee.security.complete');
+    const complete = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'e2ee.security.complete'
+    )!;
+    await act(async () => complete.click());
     expect(signed).toBe(true);
     expect(container.textContent).toContain('e2ee.security.current');
     expect(container.querySelector('[role=status]')).toBeNull();
@@ -612,8 +631,9 @@ describe('encrypted workspace settings', () => {
     await render();
     expect(container.textContent).toContain('e2ee.security.useManager');
     expect(container.querySelector('[role=status]')).toBeNull();
+    await openConsole('devices');
     await click('e2ee.security.revoke');
-    expect(container.textContent).not.toContain('synthetic-machine');
+    expect(page()).not.toContain('synthetic-machine');
     expect(signed).toBe(false);
   });
   it('keeps a continuation action after the epoch committed but installation/ack is pending', async () => {
@@ -627,13 +647,39 @@ describe('encrypted workspace settings', () => {
     await render();
     expect(container.textContent).toContain('e2ee.security.updating');
     expect(container.textContent).not.toContain('e2ee.security.complete');
-    const buttons = [...container.querySelectorAll('button')];
-    const update = buttons.find((button) => button.textContent === 'e2ee.security.updating');
+    const update = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'e2ee.security.updating'
+    );
     expect(update?.disabled).toBe(true);
-    const revoke = buttons.find((button) => button.textContent === 'e2ee.security.revoke');
+    await openConsole('devices');
+    const revoke = [...document.body.querySelectorAll('button')].find(
+      (button) => button.textContent === 'e2ee.security.revoke'
+    );
     expect(revoke?.disabled).toBe(true);
-    const refresh = buttons.find((button) => button.textContent === 'e2ee.security.refresh');
-    expect(refresh?.disabled).toBe(false);
+  });
+  it('keeps the ordinary General page and leaves encrypted team management to the console', async () => {
+    state = { ...state, rotationRequired: false };
+    await render();
+    expect(container.textContent).toContain('ordinary settings without team management');
+    expect(container.textContent).toContain('e2ee.security.current');
+    expect(container.textContent).not.toContain('e2ee.security.attention');
+    await click('e2ee.security.openConsole');
+    // The console opens over Settings instead of leaving the workspace.
+    expect(navigation.target).toBeNull();
+    expect(document.body.querySelector('[data-testid="e2ee-workspace-console"]')).not.toBeNull();
+  });
+  it('turns a waiting link request into a review item that opens the console', async () => {
+    state = { ...state, rotationRequired: false };
+    platform.e2eeWorkspaces!.runtime!.memberJoinRequests = async () =>
+      ({ items: [{ source: 'link', state: 'pending' }] }) as never;
+    await render();
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(container.textContent).toContain('e2ee.security.joinRequests');
+    await click('e2ee.security.review');
+    expect(navigation.target).toBeNull();
+    expect(
+      document.body.querySelector('[data-console-tab="members"]')?.getAttribute('aria-current')
+    ).toBe('page');
   });
   it('reuses the settings badge for a pending link request and clears it after approval', async () => {
     vi.useFakeTimers();

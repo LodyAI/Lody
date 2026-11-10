@@ -39,6 +39,7 @@ export type DesktopE2eeManagementCommand =
   | { type: 'revoke'; target: string }
   | { type: 'removeMember'; membershipId: string }
   | { type: 'setRole'; membershipId: string; role: 'admin' | 'member' | 'guest' }
+  | { type: 'transferOwner'; membershipId: string }
 
 export type DesktopE2eeManagementRemote = {
   log: LedgerLog['Service']
@@ -220,6 +221,11 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
               parsed.body.operation.type === 'setRole' &&
               parsed.body.operation.role === command.role &&
               Buffer.from(parsed.body.operation.membershipId.toBytes()).toString('hex') ===
+                command.membershipId) ||
+            (command.type === 'transferOwner' &&
+              parsed.body.type === 'ordinary' &&
+              parsed.body.operation.type === 'transferOwner' &&
+              Buffer.from(parsed.body.operation.successorMembershipId.toBytes()).toString('hex') ===
                 command.membershipId)
           )
             return result.outcome
@@ -264,12 +270,15 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     if (
       actorDevice?.kind !== 'personal' ||
       !actor ||
-      (command.type === 'setRole'
+      (command.type === 'setRole' || command.type === 'transferOwner'
         ? actor.role !== 'owner'
         : actor.role !== 'owner' && actor.role !== 'admin') ||
       target?.role === 'owner' ||
       (command.type === 'removeMember' && actor.role === 'admin' && target?.role === 'admin')
     )
+      return yield* Effect.fail(new Error('e2ee_member_management_forbidden'))
+    // Removal and role changes are already satisfied by a missing target; a transfer is not.
+    if (command.type === 'transferOwner' && (!target || target.role === 'guest'))
       return yield* Effect.fail(new Error('e2ee_member_management_forbidden'))
     if (!target || (command.type === 'setRole' && target.role === command.role)) return 'Committed'
     if (command.type === 'removeMember' && !state.capabilities.includes(1)) {
@@ -280,7 +289,9 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     const intent: LedgerCommand =
       command.type === 'removeMember'
         ? { _tag: 'RemoveMember', membershipId }
-        : { _tag: 'SetRole', membershipId, role: command.role }
+        : command.type === 'transferOwner'
+          ? { _tag: 'TransferOwner', successorMembershipId: membershipId }
+          : { _tag: 'SetRole', membershipId, role: command.role }
     const result = yield* control.execute(intent)
     yield* control.acknowledge(result)
     return result.outcome

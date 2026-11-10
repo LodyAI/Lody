@@ -39,6 +39,38 @@ The application UI and native state run in Swift and UIKit. LodyKit owns navigat
 
 ---
 
+## Agent settings
+
+Settings → Agent follows the Web mobile provider page: select a machine in a native
+sheet, then manage that machine’s providers and setup requests. Forms support
+provider names and instructions, custom commands and arguments, preset credentials
+and endpoints, write-only environment patches, Codex authentication profiles,
+runtime paths, and capability-driven title options. Save and test persists changes
+before probing a persisted agent; newly queued setups continue through setup status
+and authentication. Managed-runtime status/install and Pi extension discovery are
+also available while creating a supported provider. Saved providers expose a separate usage refresh;
+quota and pace displays remain sourced from the catalog usage projection.
+
+ACP sign-in supports method selection, browser authorization, user codes, consent,
+and typed input requests through the public machine RPC. Pending setups awaiting
+authentication expose the same flow. Browser links stay disabled until any required
+consent is accepted by the machine. Auth events are scoped to the active flow, and
+provider-change events refresh and merge only the affected machine. Credentials stay on the selected machine;
+list data and local caches exclude environment values. Existing keys offer Keep,
+Replace, or Remove, and submitted secrets are cleared. Ownership, machine
+capabilities, offline state, and revision checks gate writes. Sorbet connection and
+endpoint-store management still require native encrypted feature transport and
+show their specific unavailable capability.
+
+`agents-settings`, `agents-presets`, `agents-pi`, and `agents-auth-methods` are
+independent offline UI verification cases for provider CRUD and failure recovery,
+preset/secret preservation, Pi runtime patches, and method-selection flow identity
+plus consent-before-browser behavior. They use production controllers with synthetic
+service boundaries and perform no external sign-in.
+
+Roles remain a separate setting. Settings home has no Machines entry; machine
+details and execution-machine selectors elsewhere remain available.
+
 ## How this was built
 
 Lody iOS started as a one-day prototype and became a usable TestFlight client in about a week, driven by coding agents under tight product constraints: iOS only, one native kit module, system UI when React Native cannot meet HIG, and an offscreen WebView for Flock/Loro because official Node/CRDT packages do not bundle in Metro.
@@ -381,3 +413,11 @@ This supersedes the optional pure-black background described in the historical
 Home design and settings migration documents. Masks, scrims, shadows, media
 content and foreground colors remain unchanged. The native `design` check tests
 legacy values, both themes and increased contrast, including text readability.
+
+Conversation More → Archive returns to Home immediately while the write continues.
+Success is silent; a failed write shows a warning only while its original Home,
+account and workspace remain active. Unarchive stays on the conversation.
+The existing native session suite can isolate these menu actions with
+`LODY_VERIFY_SESSION_ARCHIVE_ONLY=1 pnpm verify:ui --case session-native --require-video --app /absolute/path/to/Lody.app`.
+The `session-info-bar` native check explicitly holds and releases archive writes
+to verify immediate navigation, silent delayed success and scoped delayed failure.

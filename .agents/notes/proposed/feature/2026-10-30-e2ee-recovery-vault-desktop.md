@@ -151,9 +151,9 @@ Run these in order on a Mac. Stop at the first failure.
 1. **Signing.** Build with the profile and new entitlements. `codesign -d --entitlements - Lody.app`
    lists the three keys, `spctl -a -vv Lody.app` accepts it, and it launches after notarization.
    A launch failure here is the main risk.
-2. **Association.** `curl https://app-site-association.cdn-apple.com/a/v1/vault.lody.ai` returns
+2. **Association.** `curl https://app-site-association.cdn-apple.com/a/v1/lody.ai` returns
    the file, and `sudo swcutil show` lists the app against the domain.
-3. **Ceremony.** A minimal addon creates a platform passkey for `vault.lody.ai` with a PRF
+3. **Ceremony.** A minimal addon creates a platform passkey for `lody.ai` with a PRF
    input, anchored to the `BrowserWindow`. The system sheet names the RP, and registration
    reports PRF support.
 4. **PRF.** Assertion returns 32 bytes, the same bytes on a second assertion and on a second
@@ -163,21 +163,16 @@ Run these in order on a Mac. Stop at the first failure.
 If step 1 or 2 fails, Developer ID cannot carry this path. The fallback is the recovery file on
 macOS, with passkeys only on iPhone and the Web surface, which needs an owner decision.
 
-## Web unlock surface: minimal plan
+## Same-origin Web recovery revision
 
-Not started. It follows macOS and iPhone, once those pass on real devices. The approved shape is
-in the [Spec](../../../../specs/e2ee/recovery-vault.md#passkey-unlock). The smallest build:
-
-1. A separate static app on `vault.lody.ai`, served by the Worker that already serves AASA, with
-   no third-party scripts or telemetry, a strict CSP, and its own deployment credentials.
-2. A browser `E2eePasskeyPort` over `navigator.credentials`, reusing `@lody/e2ee-client`. If the
-   browser returns no PRF, the page offers the recovery file on the same surface.
-3. One flow only: sign in, unlock, restore into a browser device C on this origin, then show a
-   pairing code so the regular Web app or another device joins through C.
-4. V is never stored, and V, R and the PRF result never reach the regular Web app.
-
-Open before starting: how sign-in works on this origin without sharing the regular app's session.
-A hostile operator controlling this host can still attempt a ceremony; the Spec accepts this.
+Owner's 2026-11-10 direction supersedes the dedicated-host plan: recovery runs in the
+ordinary `lody.ai` client, with RP `lody.ai`, no device C, cross-page channel or manual
+copy fallback. This expands ceremony trust to the parent domain and subdomains,
+including marketing/analytics code. System verification remains required. The
+[revised Spec](../../../../specs/e2ee/recovery-vault.md#passkey-unlock) was approved by zxch3n on 2026-11-10; this does not enable rollout.
+Temporary plaintext is wiped after settlement; encrypted journals remain durable.
+Existing application ownership is reused: setup borrows only its own reader and
+restore uses the same retained device identity. Failure must not close content readers.
 
 ## Consequences and limits
 
@@ -190,3 +185,43 @@ unchanged. Several things remain unverified:
 - the backend work listed above.
 
 The owner approved the R credential parameters with the Spec revision.
+
+## Browser recovery trade-offs
+
+PRF plus a recovery file remains the owner-approved choice from 2026-11-09.
+The 2026-11-10 same-origin direction trades dedicated-host isolation for direct
+in-app use. Password plus Secret Key would still require a complete KDF/wrapping
+review; a short password alone adds offline guessing exposure.
+
+The following was checked in official public sources on 2026-11-10. This is not
+reverse engineering, device testing or an independent security audit. Implications
+for Lody are design judgments:
+
+| Product | Verified mechanism and source | Implication for Lody |
+| --- | --- | --- |
+| 1Password password plus Secret Key path | Its [SRP explanation](https://1password.com/blog/developers-how-we-use-srp-and-you-can-too) distinguishes two-secret derivation from authentication without transmitting the password. Its [Secret Key guide](https://support.1password.com/secret-key-security/) explains strengthening protection of server ciphertext with a random secret. | Borrow local unlocking, without claiming an equivalent model from merely adding a password field. This proposal does not migrate Lody authentication to SRP. |
+| Proton Pass | Its [security model](https://proton.me/blog/proton-pass-security-model) describes SRP authentication, password/bcrypt protection of the user key, then vault/item keys. | Layered client decryption can work in browsers; its password wrapper does not establish compatibility with Lody recovery formats. |
+| MetaMask Extension seed-phrase path | Its [passkey guide](https://support.metamask.io/configure/wallet/passkeys/) describes a password-protected local vault and passkey wrapping of the local encryption key. Syncing a passkey does not transfer that vault to another installation. Here SRP means Secret Recovery Phrase, not Secure Remote Password. | An extension-local vault does not establish ordinary website recovery of cloud workspace keys. No inference about its social-login path. |
+| WhatsApp Web linked devices | Its [multi-device architecture](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/) describes independent identities, phone QR linking and independent operation afterward. This is a 2021 architecture source. | Keep device approval as an alternative; it does not supply first unlock without another device. No claim that every current flow is unchanged. |
+| WebAuthn PRF | The [W3C specification](https://www.w3.org/TR/webauthn-3/#prf-extension) defines per-credential 32-byte pseudorandom outputs usable for encryption. | A normal passkey signature is not a decryption key. Verify actual PRF rather than a browser name. |
+
+**Ownership and supersession.** This existing proposed note retains the shared native
+and recovery rationale; only its Web plan is superseded. Historical approval records
+remain unchanged. No implemented note is fully replaced.
+
+**Evidence limits.** This work inspected public Specs,
+`packages/e2ee-core/src/internal/recovery/crypto.ts` and the fixed-vector location.
+No unlock or pairing was executed, and neither private deployment nor the Ryugi
+artboard was verified. Earlier product-integration, PR-state and platform-gap
+statements above are historical inspections, not current facts established here.
+
+### Portable recovery host boundary
+
+The explicit restore command owns one prepared identity and its recovered-key Scope.
+It authenticates the package/account before preparation, retains original admission,
+then uses a verified admitted session to install keys. Cancellation/close follows the
+existing owned host drain; no new background owner or replacement path is added.
+Installation failure preserves identity and original for retry; independent bindings
+and already admitted content remain usable. Chromium tests cover bad packages,
+wrong accounts, revoked R, failed installation, exact retry and persistent reopen.
+The private Web entry and deployment remain separate acceptance.

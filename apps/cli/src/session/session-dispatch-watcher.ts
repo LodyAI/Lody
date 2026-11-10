@@ -1,3 +1,4 @@
+import { isMissingHistoryUserTurn } from '@lody/shared';
 import { createDaemonLossTasks } from '@/lib/e2ee/client-loss-observer';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { MemoryBindingSchema } from '@lody/shared';
@@ -395,7 +396,7 @@ const isConfigOptionValueRecord = (
  *
  * If the five-minute window expires, we mark dispatch recovery unhealthy,
  * preserve the producer/executor pointers and `lastHandledUserMsgId`, record the
- * exact id in `lastMissingHistoryUserMsgId`, and unload the session doc. Watch
+ * exact id in the retained missing-history acknowledgement map, and unload the session doc. Watch
  * activation and turn selection ignore a pointer only while it equals that
  * negative acknowledgement. A future send publishes a different id (and clears
  * the marker), which naturally wakes dispatch again. Preserving the pointers is
@@ -873,9 +874,9 @@ export class SessionDispatchWatcher {
    * e.g. the renderer superseding an undelivered turn to `canceled` when its
    * content is resent as a new message.
    *
-   * An entry whose id matches `lastMissingHistoryUserMsgId` stays stashed but
+   * An entry with a retained missing-history acknowledgement stays stashed but
    * is never returned: the negative acknowledgement is PERMANENT for that
-   * exact turn while it stands, so no turn source may dispatch it — a
+   * exact turn, including after another timeout, so no turn source may dispatch it — a
    * duplicate RPC offer must not resurrect the turn. Recovery is a fresh send
    * with a new turn id (the conversation's resend entry), never a revival.
    */
@@ -901,7 +902,7 @@ export class SessionDispatchWatcher {
         stash.delete(userTurnId);
         continue;
       }
-      if (userTurnId === meta.lastMissingHistoryUserMsgId) {
+      if (isMissingHistoryUserTurn(meta, userTurnId)) {
         continue;
       }
       this.turnSourceHints.set(`${sessionId}:${userTurnId}`, 'rpc');
@@ -2697,7 +2698,7 @@ export class SessionDispatchWatcher {
     return (
       meta.lastHandledUserMsgId === turnId ||
       meta.settledActivationUserMsgId === turnId ||
-      meta.lastMissingHistoryUserMsgId === turnId ||
+      isMissingHistoryUserTurn(meta, turnId) ||
       this.deps.executionService.getTerminalUserTurnStatusWithoutEntry?.(meta.id, turnId) !==
         undefined ||
       history.some((entry) => {
@@ -2814,7 +2815,7 @@ export class SessionDispatchWatcher {
    * activation entirely, going unwatched and silently unrun. `settledActivationUserMsgId`
    * suppresses only a matching pointer, and the turn it names is already
    * terminal, so a later settlement may replace it freely — unlike
-   * `lastMissingHistoryUserMsgId`, whose eviction would revive a pending turn.
+   * missing-history acknowledgement IDs, whose eviction would revive pending turns.
    *
    * `processingUserMsgId` is different: it is execution-owned, dispatch is
    * serialized per session, and we only reach here with no active turn, so
@@ -3170,7 +3171,8 @@ export class SessionDispatchWatcher {
     if (
       meta.machineId !== this.deps.machineId ||
       meta.isArchived ||
-      !hasPendingUserTurnActivation(meta)
+      !hasPendingUserTurnActivation(meta) ||
+      getPendingUserTurnActivationId(meta) !== getPendingUserTurnActivationId(previousMeta)
     ) {
       return;
     }
@@ -3184,6 +3186,13 @@ export class SessionDispatchWatcher {
     };
     if (pendingUserMsgId) {
       recoveryPatch.lastMissingHistoryUserMsgId = pendingUserMsgId;
+      recoveryPatch.missingHistoryUserMsgIds = {
+        ...meta.missingHistoryUserMsgIds,
+        ...(meta.lastMissingHistoryUserMsgId
+          ? { [meta.lastMissingHistoryUserMsgId]: true as const }
+          : {}),
+        [pendingUserMsgId]: true,
+      };
     }
     this.deps.logger.warn(
       `[${sessionId}] Marking missing-history recovery for user turn ${pendingUserMsgId ?? 'unknown'} (message_delivery_failed)`
@@ -3305,7 +3314,7 @@ export class SessionDispatchWatcher {
       preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
       if (
         preferred &&
-        (meta.lastMissingHistoryUserMsgId === preferred ||
+        (isMissingHistoryUserTurn(meta, preferred) ||
           meta.lastHandledUserMsgId === preferred ||
           history.some(
             (e) =>

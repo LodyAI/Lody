@@ -41,6 +41,8 @@ These rules also bind callers outside the owning directory.
 
 - Navigating native list rows retain selection until the owning controller returns. Deselect alongside the navigation transition and restore selection when an interactive return is cancelled; ordinary action rows deselect immediately. Diffable snapshots preserve selection themselves; never reselect a captured row in snapshot completion, which can run after return-time deselection.
 
+- Settings has no Machines entry. Agent uses `AgentProvidersController`: a machine sheet picker followed by providers, with management through `agentProviders` and subscription quotas from the existing catalog usage projection. Keep Roles separate and preserve machine details and execution-machine selection elsewhere. Provider list DTOs and caches must exclude credentials and environment values. Detail editors read environment keys only, omit untouched fields, encode explicit removal separately, and clear submitted secrets. ACP sign-in and provider operations use the public runtime contracts; Sorbet encrypted connection/store management remains explicitly unavailable without its native transport.
+
 - Settings offers the app icon under Preferences. Do not restore Appearance, MCP-server management or Memory management pages; conversation MCP selection and Role memory bindings remain independent.
 
 ## Pages and native APIs

@@ -101,6 +101,15 @@ const isAccessLossMessage = (error: unknown) =>
   error instanceof Error &&
   (error.message === 'e2ee_member_removed' || error.message === 'e2ee_device_revoked')
 type Owner = Parameters<Parameters<typeof withDesktopE2eeAccount>[0]>[0]
+/** Only the lifetime of one explicit personal approval, never a persistent gate. */
+type PersonalApproval = {
+  accountId: string
+  generation: number
+  workspaceId: string
+  owner?: Owner
+  cancelled: boolean
+}
+
 type RemovalFence = ReturnType<Owner['fenceLoss']>
 type LossAccess = {
   accountId: string
@@ -181,6 +190,7 @@ function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
   }
 }
 const PAIRING_REFUSALS = new Set([
+  'pairing-elsewhere',
   'pairing-tampered',
   'pairing-expired',
   'pairing-used',
@@ -371,10 +381,25 @@ export class E2eeIpc extends IpcService {
     },
     clear: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>)
   }
+  private readonly personalApprovals = new Set<PersonalApproval>()
+  private personalApprovalLive(approval: PersonalApproval, owner?: Owner) {
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    return (
+      !approval.cancelled &&
+      identity.userId === approval.accountId &&
+      identity.generation === approval.generation &&
+      (!owner ||
+        (owner.accountId === approval.accountId && (!approval.owner || owner === approval.owner)))
+    )
+  }
+  private assertPersonalApproval(approval: PersonalApproval) {
+    if (!this.personalApprovalLive(approval)) throw new Error('e2ee_account_mismatch')
+  }
   private readonly keyDeliveries = new Map<
     string,
     {
       requests: Map<string, MemberKeyDelivery>
+      generation: number | undefined
       running?: Promise<void>
       again: boolean
       timer?: unknown
@@ -386,8 +411,13 @@ export class E2eeIpc extends IpcService {
   private keyDeliverySlot(accountId: string, workspaceId: string) {
     const key = `${accountId}\n${workspaceId}`
     let slot = this.keyDeliveries.get(key)
+    const generation = this.keyDeliveryIdentity()?.generation
+    if (slot && slot.generation !== generation) {
+      this.dropKeyDeliverySlot(accountId, workspaceId)
+      slot = undefined
+    }
     if (!slot) {
-      slot = { requests: new Map(), again: false, autoRetries: 0 }
+      slot = { requests: new Map(), generation, again: false, autoRetries: 0 }
       this.keyDeliveries.set(key, slot)
     }
     return slot
@@ -402,17 +432,28 @@ export class E2eeIpc extends IpcService {
     slot.timer = undefined
     this.keyDeliveries.delete(key)
   }
-  /** The signed-in account, or undefined when it cannot be read. */
-  private keyDeliveryAccount() {
+  private keyDeliveryIdentity() {
     try {
-      return getIpcServiceDeps().authService.getCachedSessionIdentity().userId ?? undefined
+      return getIpcServiceDeps().authService.getCachedSessionIdentity()
     } catch {
       return undefined
     }
   }
+  /** Old delivery work never borrows a later login, even for the same account. */
+  private keyDeliveryCurrent(accountId: string, slot: { generation: number | undefined }) {
+    const identity = this.keyDeliveryIdentity()
+    return identity?.userId === accountId && identity.generation === slot.generation
+  }
   /** Drops every slot of a removed or reset workspace (all accounts when `accountId` is
    * absent, every workspace when `workspaceId` is too): nothing reopens it afterwards. */
   private dropKeyDeliveryWorkspace(workspaceId?: string, accountId?: string) {
+    // Invalidate pending approvals too: reset may arrive before any slot exists.
+    for (const approval of this.personalApprovals)
+      if (
+        (workspaceId === undefined || approval.workspaceId === workspaceId) &&
+        (accountId === undefined || approval.accountId === accountId)
+      )
+        approval.cancelled = true
     for (const key of [...this.keyDeliveries.keys()]) {
       const [account, workspace] = key.split('\n')
       if (
@@ -452,13 +493,7 @@ export class E2eeIpc extends IpcService {
       () => {
         if (this.keyDeliveries.get(key) !== slot) return
         slot.timer = undefined
-        let current: string | null | undefined
-        try {
-          current = getIpcServiceDeps().authService.getCachedSessionIdentity().userId
-        } catch {
-          current = undefined
-        }
-        if (current !== accountId) {
+        if (!this.keyDeliveryCurrent(accountId, slot)) {
           this.dropKeyDeliverySlot(accountId, workspaceId)
           return
         }
@@ -493,6 +528,10 @@ export class E2eeIpc extends IpcService {
   }
   private retryDueKeyDeliveries(accountId: string, workspaceId: string) {
     const slot = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
+    if (slot && !this.keyDeliveryCurrent(accountId, slot)) {
+      this.dropKeyDeliverySlot(accountId, workspaceId)
+      return
+    }
     if (!slot || slot.running) return
     const now = this.keyDeliveryNow()
     if (
@@ -517,7 +556,7 @@ export class E2eeIpc extends IpcService {
       // A request admitted during a round gets one follow-up pass; later ones wait for a poll.
       for (let pass = 0; pass < 2; pass++) {
         // Sign-out or an account change ends this account's delivery at once.
-        if (!slot.aborted && this.keyDeliveryAccount() !== accountId)
+        if (!slot.aborted && !this.keyDeliveryCurrent(accountId, slot))
           this.dropKeyDeliverySlot(accountId, workspaceId)
         if (slot.aborted) return
         slot.again = false
@@ -551,11 +590,14 @@ export class E2eeIpc extends IpcService {
             accountId,
             workspaceId,
             new Set(covered.map((delivery) => delivery.device)),
-            () => slot.aborted === true
+            () => slot.aborted === true || !this.keyDeliveryCurrent(accountId, slot)
           )
         } catch (cause) {
           this.pairingFailure = cause
-          if (this.keyDeliveryAccount() !== accountId)
+          if (
+            !this.keyDeliveryCurrent(accountId, slot) &&
+            this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot
+          )
             this.dropKeyDeliverySlot(accountId, workspaceId)
           if (slot.aborted) return
           const code = keyDeliveryCode(cause)
@@ -570,6 +612,12 @@ export class E2eeIpc extends IpcService {
           for (const delivery of covered) retry(delivery, code)
           return
         }
+        if (!this.keyDeliveryCurrent(accountId, slot)) {
+          if (this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot)
+            this.dropKeyDeliverySlot(accountId, workspaceId)
+          return
+        }
+        if (slot.aborted) return
         // Delivered only on positive per-device evidence; every other outcome retries.
         for (const delivery of covered) {
           const outcome = evidence.get(delivery.device) ?? KEY_DELIVERY_NOT_INGESTED
@@ -667,7 +715,23 @@ export class E2eeIpc extends IpcService {
       const credential = await scope((owner) => owner.bootstrap.deviceCredential(workspaceId))
       const mailbox = (signal: AbortSignal) =>
         cloud.client.mailbox({ workspaceId, credential }, signal)
-      // Distribution only: this device's own receive and repair run in full rounds.
+      // #2459: the control-only approver may not hold the current key yet.
+      // Receive on this main-owned reader, without putting it back on the approval wait.
+      if (!(await scope((owner) => owner.host.status(workspaceId))).hasCurrentKey) {
+        if (aborted()) return evidence
+        const receive = await scope((owner) =>
+          Effect.succeed(
+            owner.host
+              .receiveKeys(workspaceId, mailbox, (signal) =>
+                cloud.client.staging({ workspaceId, credential }, signal)
+              )
+              .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
+          )
+        )
+        await runDesktopE2eeOperation(accountId, receive)
+      }
+      if (aborted()) return evidence
+      // Distribution: report flush and repair remain owned by full rounds.
       const work = await scope((owner) =>
         Effect.succeed(
           owner.host
@@ -1175,16 +1239,21 @@ export class E2eeIpc extends IpcService {
   }
   @IpcMethod()
   async retryMemberKeyDelivery(workspaceId: string, requestId: string) {
-    // Member admissions use 32-hex ids; account pairing keeps its journaled admission id.
+    // Member admissions use 32-hex ids; account and personal pairing keep their journaled ids.
     if (
       typeof requestId !== 'string' ||
-      !/^(?:[0-9a-f]{32}|account-device-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(
+      !/^(?:[0-9a-f]{32}|(?:account|personal)-device-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(
         requestId
       )
     )
       throw new Error('e2ee_invalid-input')
     const accountId = await this.readerAccount(workspaceId, sender())
-    const delivery = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)?.requests.get(requestId)
+    const current = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
+    if (current && !this.keyDeliveryCurrent(accountId, current)) {
+      this.dropKeyDeliverySlot(accountId, workspaceId)
+      throw new Error('e2ee_invalid-input')
+    }
+    const delivery = current?.requests.get(requestId)
     if (!delivery) throw new Error('e2ee_invalid-input')
     // An explicit retry skips the backoff wait, never the terminal access-loss result.
     if (delivery.state === 'failed') delivery.retryAt = 0
@@ -1615,11 +1684,25 @@ export class E2eeIpc extends IpcService {
   }
   @IpcMethod()
   async inspectPersonalJoin(workspaceId: string, pairingSessionId: string) {
+    return (await this.readPersonalJoin(workspaceId, pairingSessionId)).preview
+  }
+  /** One immutable request read and its verified preview, reused by explicit approval. */
+  private async readPersonalJoin(
+    workspaceId: string,
+    pairingSessionId: string,
+    approval?: PersonalApproval
+  ) {
     const id = sender()
     pairingSession(pairingSessionId)
+    const service = this
     const access = await withDesktopE2eeAccount(
       (owner) =>
         Effect.gen(function* () {
+          if (approval) {
+            if (!service.personalApprovalLive(approval, owner))
+              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            approval.owner ??= owner
+          }
           if (!owner.readers.get(workspaceId)?.has(id))
             return yield* refuseUnopened(owner, workspaceId)
           return {
@@ -1630,15 +1713,20 @@ export class E2eeIpc extends IpcService {
       workspaceId,
       false
     )
+    if (approval) this.assertPersonalApproval(approval)
     const cloud = await desktopE2eeCloudClient()
+    if (approval) this.assertPersonalApproval(approval)
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
     const request = await Effect.runPromise(
       cloud.client.joinReadRequest({ workspaceId, pairingSessionId, credential: access.credential })
     )
+    if (approval) this.assertPersonalApproval(approval)
     if (request.status === 'cancelled') {
       await withDesktopE2eeAccount(
         (owner) =>
-          owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+          owner.accountId === access.accountId &&
+          owner.readers.get(workspaceId)?.has(id) &&
+          (!approval || service.personalApprovalLive(approval, owner))
             ? owner.host.cancelPersonalPairing(workspaceId, pairingSessionId)
             : Effect.fail(new Error('e2ee_account_mismatch')),
         workspaceId,
@@ -1656,7 +1744,9 @@ export class E2eeIpc extends IpcService {
       }
       await withDesktopE2eeAccount(
         (owner) =>
-          owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+          owner.accountId === access.accountId &&
+          owner.readers.get(workspaceId)?.has(id) &&
+          (!approval || service.personalApprovalLive(approval, owner))
             ? owner.host.retirePersonalPairing(workspaceId, pairingSessionId)
             : Effect.fail(new Error('e2ee_account_mismatch')),
         workspaceId,
@@ -1664,89 +1754,145 @@ export class E2eeIpc extends IpcService {
       )
       throw new Error('e2ee_join_conflict')
     }
-    return withDesktopE2eeAccount(
+    const preview = await withDesktopE2eeAccount(
       (owner) =>
-        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+        owner.accountId === access.accountId &&
+        owner.readers.get(workspaceId)?.has(id) &&
+        (!approval || service.personalApprovalLive(approval, owner))
           ? owner.host.previewPersonalAdmission(workspaceId, request.requestHex)
           : Effect.fail(new Error('e2ee_account_mismatch')),
       workspaceId,
       false
     )
+    return { preview, request }
   }
   @IpcMethod()
   async approvePersonalJoin(workspaceId: string, pairingSessionId: string) {
     const id = sender()
     pairingSession(pairingSessionId)
-    // The separate inspection call displays verified public evidence. This
-    // explicit operation is the only one permitted to sign an admission.
-    const preview = await this.inspectPersonalJoin(workspaceId, pairingSessionId)
-    if (preview.pairingSessionId !== pairingSessionId) throw new Error('e2ee_conflict')
-    const cloud = await desktopE2eeCloudClient()
-    const access = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (owner.accountId !== cloud.accountId || !owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
-          return { credential: yield* owner.bootstrap.deviceCredential(workspaceId) }
-        }),
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    if (!identity.userId) throw new Error('e2ee_account_unavailable')
+    const approval: PersonalApproval = {
+      accountId: identity.userId,
+      generation: identity.generation,
       workspaceId,
-      false
-    )
-    const material = await Effect.runPromise(
-      cloud.client.joinReadRequest({ workspaceId, pairingSessionId, credential: access.credential })
-    )
-    const pending = await withDesktopE2eeAccount(
-      (owner) =>
-        owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.preparePersonalAdmission(workspaceId, material.requestHex)
-          : Effect.fail(new Error('e2ee_account_mismatch')),
-      workspaceId,
-      false
-    )
-    let appendFailure: unknown
-    try {
-      await Effect.runPromise(cloud.client.appendRecord(pending))
-    } catch (error) {
-      appendFailure = error
+      cancelled: false
     }
+    this.personalApprovals.add(approval)
     try {
-      await this.refresh(workspaceId)
-    } catch (error) {
-      this.pairingFailure = error
-    }
-    let invitation
-    try {
-      invitation = await withDesktopE2eeAccount(
+      // The separate inspection call displays verified public evidence. This
+      // explicit operation is the only one permitted to sign an admission.
+      const { preview, request: material } = await this.readPersonalJoin(
+        workspaceId,
+        pairingSessionId,
+        approval
+      )
+      this.assertPersonalApproval(approval)
+      if (preview.pairingSessionId !== pairingSessionId) throw new Error('e2ee_conflict')
+      const cloud = await desktopE2eeCloudClient()
+      this.assertPersonalApproval(approval)
+      const service = this
+      const access = await withDesktopE2eeAccount(
         (owner) =>
-          owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-            ? owner.host.personalInvitation(workspaceId, pairingSessionId)
+          Effect.gen(function* () {
+            if (
+              owner.accountId !== cloud.accountId ||
+              !owner.readers.get(workspaceId)?.has(id) ||
+              !service.personalApprovalLive(approval, owner)
+            )
+              return yield* Effect.fail(new Error('e2ee_not_open'))
+            return { credential: yield* owner.bootstrap.deviceCredential(workspaceId) }
+          }),
+        workspaceId,
+        false
+      )
+      const pending = await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === cloud.accountId &&
+          owner.readers.get(workspaceId)?.has(id) &&
+          this.personalApprovalLive(approval, owner)
+            ? owner.host.preparePersonalAdmission(workspaceId, material.requestHex)
             : Effect.fail(new Error('e2ee_account_mismatch')),
         workspaceId,
         false
       )
-    } catch (error) {
-      this.pairingFailure = new AggregateError(
-        [...(appendFailure === undefined ? [] : [appendFailure]), error],
-        'e2ee_append_unconfirmed'
-      )
-      // Raw causes stay in main; the IPC decorator logs rejected Errors.
-      // eslint-disable-next-line preserve-caught-error
-      throw new Error('e2ee_append_unconfirmed')
-    }
-    if (invitation === null) return { admitted: true as const, invitationPublished: false }
-    try {
-      await Effect.runPromise(
-        cloud.client.joinPublish({
+      this.assertPersonalApproval(approval)
+      let appendFailure: unknown
+      try {
+        await Effect.runPromise(cloud.client.appendRecord(pending))
+      } catch (error) {
+        appendFailure = error
+      }
+      this.assertPersonalApproval(approval)
+      try {
+        // Admission must be verified locally before publishing its invitation. Own-key
+        // receive/repair and unrelated deliveries do not belong to this approval wait.
+        await this.refresh(workspaceId, { installKeys: false })
+      } catch (error) {
+        this.pairingFailure = error
+      }
+      this.assertPersonalApproval(approval)
+      let invitation
+      try {
+        invitation = await withDesktopE2eeAccount(
+          (owner) =>
+            owner.accountId === cloud.accountId &&
+            owner.readers.get(workspaceId)?.has(id) &&
+            this.personalApprovalLive(approval, owner)
+              ? owner.host.personalInvitation(workspaceId, pairingSessionId)
+              : Effect.fail(new Error('e2ee_account_mismatch')),
           workspaceId,
-          pairingSessionId,
-          credential: access.credential,
-          ...invitation
-        })
+          false
+        )
+      } catch (error) {
+        this.pairingFailure = new AggregateError(
+          [...(appendFailure === undefined ? [] : [appendFailure]), error],
+          'e2ee_append_unconfirmed'
+        )
+        // Raw causes stay in main; the IPC decorator logs rejected Errors.
+        // eslint-disable-next-line preserve-caught-error
+        throw new Error('e2ee_append_unconfirmed')
+      }
+      this.assertPersonalApproval(approval)
+      // Register before the publication await so reset/sign-out can fence this task;
+      // a late publication result must never register a fresh delivery after reset.
+      // The main-owned round is not awaited by approval, even if publication fails.
+      await withDesktopE2eeAccount(
+        (owner) =>
+          Effect.sync(() => {
+            if (!this.personalApprovalLive(approval, owner))
+              throw new Error('e2ee_account_mismatch')
+            this.trackKeyDelivery(
+              cloud.accountId,
+              workspaceId,
+              pending.requestId,
+              preview.signingPublicKey
+            )
+          }),
+        workspaceId,
+        false
       )
-      return { admitted: true as const, invitationPublished: true }
-    } catch (error) {
-      this.pairingFailure = error
-      return { admitted: true as const, invitationPublished: false }
+      this.assertPersonalApproval(approval)
+      let invitationPublished = false
+      if (invitation !== null) {
+        try {
+          await Effect.runPromise(
+            cloud.client.joinPublish({
+              workspaceId,
+              pairingSessionId,
+              credential: access.credential,
+              ...invitation
+            })
+          )
+          invitationPublished = true
+        } catch (error) {
+          this.pairingFailure = error
+        }
+      }
+      this.assertPersonalApproval(approval)
+      return { admitted: true as const, invitationPublished }
+    } finally {
+      this.personalApprovals.delete(approval)
     }
   }
   // ----- Account-wide personal device pairing (default off in the renderer) -----
@@ -1788,7 +1934,16 @@ export class E2eeIpc extends IpcService {
       })
       this.accountPairings.set(cloud.accountId, current)
     }
-    if (hints) current.hints = hints
+    if (hints) {
+      const retained = new Map(current.hints.map((hint) => [hint.workspaceId, hint]))
+      for (const hint of hints) {
+        const previous = retained.get(hint.workspaceId)
+        if (previous && previous.genesisHash !== hint.genesisHash)
+          throw new Error('e2ee_pairing-tampered')
+        if (!previous) retained.set(hint.workspaceId, { ...hint })
+      }
+      current.hints = [...retained.values()]
+    }
     return current.pairing
   }
   /** Only the typed refusals the UI explains leave main; causes stay here. */
@@ -1807,17 +1962,31 @@ export class E2eeIpc extends IpcService {
     }
   }
   @IpcMethod()
-  async requestAccountPairing(input: { pairingString?: string }, workspaces: unknown) {
+  async requestAccountPairing(
+    input: { pairingString?: string; expiresAt?: number; preserveExisting?: true },
+    workspaces: unknown
+  ) {
     sender()
     const hints = pairingHints(workspaces)
     if (input?.pairingString !== undefined && typeof input.pairingString !== 'string')
       throw new Error('e2ee_invalid-input')
+    if (input?.expiresAt !== undefined && !Number.isSafeInteger(input.expiresAt))
+      throw new Error('e2ee_invalid-input')
+    if (
+      input?.preserveExisting !== undefined &&
+      (input.preserveExisting !== true || hints.length !== 1)
+    )
+      throw new Error('e2ee_invalid-input')
     const pairing = await this.accountPairing(hints)
     return this.pairingCall(() =>
       Effect.runPromise(
-        pairing.requestAccountPairing(
-          input?.pairingString === undefined ? {} : { pairingString: input.pairingString }
-        )
+        pairing.requestAccountPairing({
+          ...(input?.pairingString === undefined ? {} : { pairingString: input.pairingString }),
+          ...(input?.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+          ...(input?.preserveExisting
+            ? { preserveExisting: true as const, workspaceId: hints[0]!.workspaceId }
+            : {})
+        })
       )
     )
   }
@@ -1828,10 +1997,12 @@ export class E2eeIpc extends IpcService {
     return this.pairingCall(() => Effect.runPromise(pairing.accountPairingRequest()))
   }
   @IpcMethod()
-  async cancelAccountPairing() {
+  async cancelAccountPairing(input?: { expectedLookupId: string }) {
     sender()
+    if (input && !/^[0-9a-f]{32}$/.test(input.expectedLookupId))
+      throw new Error('e2ee_invalid-input')
     const pairing = await this.accountPairing()
-    return this.pairingCall(() => Effect.runPromise(pairing.cancelAccountPairing()))
+    return this.pairingCall(() => Effect.runPromise(pairing.cancelAccountPairing(input)))
   }
   @IpcMethod()
   async accountPairingCode() {
@@ -2487,6 +2658,13 @@ export class E2eeIpc extends IpcService {
     )
       throw new Error('e2ee_invalid-input')
     await this.manage(workspaceId, { type: 'setRole', membershipId, role })
+  }
+  /** Owner-only: hands ownership to an existing member; this owner becomes an admin. */
+  @IpcMethod()
+  async transferOwnership(workspaceId: string, membershipId: string) {
+    if (typeof membershipId !== 'string' || !/^[0-9a-f]{32}$/.test(membershipId))
+      throw new Error('e2ee_invalid-input')
+    await this.manage(workspaceId, { type: 'transferOwner', membershipId })
   }
   @IpcMethod()
   async contentStreamsToken(
@@ -3238,7 +3416,9 @@ export class E2eeIpc extends IpcService {
     )
     if (result === 'Conflict')
       throw new Error(
-        command.type === 'removeMember' || command.type === 'setRole'
+        command.type === 'removeMember' ||
+          command.type === 'setRole' ||
+          command.type === 'transferOwner'
           ? 'e2ee_member_management_conflict'
           : 'e2ee_management_conflict'
       )
