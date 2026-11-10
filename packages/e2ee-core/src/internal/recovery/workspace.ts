@@ -548,6 +548,25 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           personal.encryptionPublicKey.equals(identity.encryptionPublicKey)
         )
           return yield* vaultError('invalid-input');
+        // A retained, currently admitted personal identity may have lost its local
+        // installed key. R has authenticated the current epoch above; restore the
+        // key without a duplicate admission. Retired/foreign/mismatched identities
+        // still follow the normal rejection path and can never be revived here.
+        const retained = view.inspectState().devices.get(hex(personal.publicKey.toBytes()));
+        if (retained) {
+          if (
+            retained.kind !== 'personal' ||
+            !retained.membershipId.equals(membership) ||
+            !retained.encryptionPublicKey.equals(personal.encryptionPublicKey)
+          )
+            return yield* vaultError('unauthorized');
+          return {
+            outcome: 'Committed' as const,
+            epoch,
+            personal: personal.publicKey,
+            role: view.inspectState().members.get(hex(membership.toBytes()))!.role,
+          };
+        }
         const restoreKey = `${key}/restore`,
           before = yield* local.read(restoreKey);
         let intent: typeof RestoreSchema.Type;

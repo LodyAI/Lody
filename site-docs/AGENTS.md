@@ -18,8 +18,8 @@ tuning shortcut are in [`README.md`](README.md).
 - Ordinary site HTTPS navigation must remain in the browser. The global head owns
   an app-id-only iOS Smart App Banner; never add an `app-argument`. The empty files
   in `public/.well-known/` deliberately revoke previously published iOS/Android
-  app-link associations; keep them empty unless a public client explicitly owns
-  and documents universal-link handling.
+  app-link associations; keep Android associations empty and allow only the recovery
+  `webcredentials` exception below for Apple. Universal links remain revoked.
 
 ## Marketing shell (pricing / download / changelog)
 
@@ -118,3 +118,13 @@ tuning shortcut are in [`README.md`](README.md).
   imports, and fully rendered in the prerendered HTML. Register the component in
   `components/mdx.tsx`; rationale:
   [docs preview note](../.agents/notes/implemented/feature/2026-10-06-docs-embedded-product-previews.md).
+
+## Recovery passkey association exception
+
+Owner's 2026-11-10 Web recovery direction permits
+`public/.well-known/apple-app-site-association` (relative to `site-docs`) to contain
+only `webcredentials.apps` for the reviewed native app identifiers. This is a
+passkey-only exception to empty association revocations. Never add `applinks`,
+`appclips`, universal-link handlers or Android website VIEW filters. Keep
+`.well-known/assetlinks.json` as the empty array. Ordinary HTTPS links still open
+in the browser; this exception grants no app-link navigation.

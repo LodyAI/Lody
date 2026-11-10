@@ -2,6 +2,9 @@ import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSetAtom } from 'jotai';
+import { settingsDialogOpenAtom } from '@/atoms';
+import { Button } from '@lody/ui/button';
 import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -101,6 +104,19 @@ function CloudAccountSettings({
   );
   const signOut = useAuthSignOut();
   const router = useRouter();
+  const closeSettings = useSetAtom(settingsDialogOpenAtom);
+  const recoveryEntry =
+    surface === 'account' && router?.options?.context?.recoveryPage ? (
+      <Button
+        variant="secondary"
+        onClick={() => {
+          closeSettings(false);
+          void router.navigate({ to: '/recovery' });
+        }}
+      >
+        {t('e2ee.recovery.manage')}
+      </Button>
+    ) : null;
   const {
     activeOrganization,
     organizations,
@@ -709,6 +725,8 @@ function CloudAccountSettings({
 
   if (orgLoading) {
     return (
+      <>
+        {recoveryEntry}
       <AccountSettingsPure
         surface={surface}
         loading
@@ -732,19 +750,25 @@ function CloudAccountSettings({
         onRenameOrganization={handleRenameOrganization}
         getInviteLink={getInviteLink}
       />
+      </>
     );
   }
 
   if (!activeOrganization) {
     return (
       <>
+        {recoveryEntry}
+      <>
         <p {...stylex.props(styles.empty)}>No organization</p>
         {surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : null}
+      </>
       </>
     );
   }
 
   return (
+    <>
+      {recoveryEntry}
     <AccountSettingsPure
       surface={surface}
       currentUser={currentUser}
@@ -851,5 +875,6 @@ function CloudAccountSettings({
       onRevokeCliApiKey={handleRevokeCliApiKey}
       revokingCliApiKeyId={revokingCliApiKeyId}
     />
+    </>
   );
 }

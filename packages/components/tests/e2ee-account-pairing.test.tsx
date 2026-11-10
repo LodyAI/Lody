@@ -737,3 +737,104 @@ describe('automatic pairing product flow', () => {
     }
   });
 });
+
+it('in-app recovery requires consent and never starts pairing; only a completed workspace resumes content', async () => {
+  const host = requesterHost();
+  const opened: string[] = [];
+  let joined = false;
+  const runtime = {
+    ...host.runtime,
+    openBrowserRecovery: async (id: string) => {
+      opened.push(id);
+      return true;
+    },
+  };
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest
+        runtime={runtime}
+        autoStart={false}
+        workspaceId="workspace-A"
+        onJoined={() => {
+          joined = true;
+        }}
+      />
+    )
+  );
+  expect((button('e2ee.browserUnlock.open') as HTMLButtonElement).disabled).toBe(true);
+  expect(host.state).toBeNull();
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.browserUnlock.open');
+  expect(opened).toEqual(['workspace-A']);
+  expect(joined).toBe(true);
+  expect(host.state).toBeNull();
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')).toBeNull();
+});
+
+it('cancelled recovery keeps the device approval choice usable without creating a request', async () => {
+  const host = requesterHost();
+  let joined = false;
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest
+        runtime={{ ...host.runtime, openBrowserRecovery: async () => false }}
+        autoStart={false}
+        workspaceId="workspace-A"
+        onJoined={() => {
+          joined = true;
+        }}
+      />
+    )
+  );
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.browserUnlock.open');
+  expect(joined).toBe(false);
+  expect(host.state).toBeNull();
+  expect((button('e2ee.accountPair.request.start') as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('browser device requests retain personal-computer consent while automatic opening is unavailable', async () => {
+  const host = requesterHost();
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest
+        runtime={{ ...host.runtime, requirePersonalComputer: true }}
+        autoStart={false}
+        onJoined={() => {}}
+      />
+    )
+  );
+  expect((button('e2ee.accountPair.request.start') as HTMLButtonElement).disabled).toBe(true);
+  expect(host.state).toBeNull();
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.accountPair.request.start');
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
+    CODE
+  );
+});
+
+it('automatic-capable browsers choose recovery without pairing, or consent before the existing six-digit approval flow', async () => {
+  const { E2eeAutomaticPairingPage } = await import('../src/components/pages/e2ee-automatic-pairing');
+  const host = requesterHost();
+  let requested = false;
+  let opened = false;
+  const runtime = {
+    ...host.runtime,
+    requirePersonalComputer: true,
+    openBrowserRecovery: async () => { opened = true; return false; },
+    automaticPairingState: async () => null,
+    startAutomaticPairing: async () => { requested = true; return { id: 'a1'.repeat(16), phase: 'waiting', workspaceId: 'workspace-A', workspaceName: 'Alpha', deviceName: 'Web', comparisonCode: '123456', expiresAt: NOW + 600_000 }; },
+  } as unknown as E2eeWorkspaceRuntime;
+  await act(async () => root.render(<E2eeAutomaticPairingPage runtime={runtime} workspaceId="workspace-A" onJoined={() => {}} onBack={() => {}} />));
+  expect(requested).toBe(false);
+  expect((button('e2ee.browserUnlock.open') as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.browserUnlock.open');
+  expect(opened).toBe(true);
+  expect(requested).toBe(false);
+  expect(host.state).toBeNull();
+  await click('e2ee.accountPair.request.start');
+  expect(requested).toBe(true);
+  expect(container.textContent).toContain('123 456');
+  expect(host.state).toBeNull();
+});
