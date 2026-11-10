@@ -554,17 +554,34 @@ private struct PrimaryActionFrame: PreferenceKey {
 
 /// A native anchored menu rather than an action sheet's oversized pill buttons.
 final class MergeOptionsController: UIHostingController<MergeOptionsContent>, UIPopoverPresentationControllerDelegate {
+  /// The last method chosen, shared by the action bar and the PR page (web `usePreferredPrMergeMethod`).
+  static let preferenceKey = "lody.prMergeMethod"
+  static var preferred: String { UserDefaults.standard.string(forKey: preferenceKey) ?? "merge" }
+
   init(title: String, preferred: String, source: UIView, rect: CGRect, onMerge: @escaping (String) -> Void) {
-    let preferred = ["merge", "squash", "rebase"].contains(preferred) ? preferred : "merge"
-    super.init(rootView: MergeOptionsContent(title: title, preferred: preferred, onMerge: { _ in }))
+    super.init(rootView: MergeOptionsContent(title: title, preferred: MergeOptionsController.method(preferred), onMerge: { _ in }))
+    configure(onMerge)
+    popoverPresentationController?.sourceView = source
+    popoverPresentationController?.sourceRect = rect
+  }
+
+  /// Anchored to a toolbar item (the PR page's Merge button).
+  init(title: String, preferred: String, item: UIBarButtonItem, onMerge: @escaping (String) -> Void) {
+    super.init(rootView: MergeOptionsContent(title: title, preferred: MergeOptionsController.method(preferred), onMerge: { _ in }))
+    configure(onMerge)
+    popoverPresentationController?.sourceItem = item
+  }
+
+  private static func method(_ value: String) -> String { ["merge", "squash", "rebase"].contains(value) ? value : "merge" }
+
+  private func configure(_ onMerge: @escaping (String) -> Void) {
     rootView.onMerge = { [weak self] method in
+      UserDefaults.standard.set(method, forKey: Self.preferenceKey)
       self?.dismiss(animated: true) { onMerge(method) }
     }
     modalPresentationStyle = .popover
     view.backgroundColor = .clear
     preferredContentSize = sizeThatFits(in: CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude))
-    popoverPresentationController?.sourceView = source
-    popoverPresentationController?.sourceRect = rect
     popoverPresentationController?.permittedArrowDirections = .down
     popoverPresentationController?.delegate = self
   }

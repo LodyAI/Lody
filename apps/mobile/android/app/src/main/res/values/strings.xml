@@ -198,6 +198,16 @@
     <string name="bar_error_not_open">This pull request is no longer open.</string>
     <string name="bar_error_forbidden">You do not have permission to change this pull request.</string>
     <string name="bar_open_github">Open on GitHub</string>
+    <string name="pr_merge">Merge</string>
+    <string name="pr_delete_branch">Delete branch</string>
+    <string name="pr_deleting_branch">Deleting branch…</string>
+    <string name="pr_delete_branch_title">Delete branch?</string>
+    <string name="pr_delete_branch_message">Delete %1$s on GitHub? You can restore it from the pull request page on GitHub.</string>
+    <string name="pr_delete_branch_cancel">Cancel</string>
+    <string name="pr_delete_branch_done">Branch deleted</string>
+    <string name="pr_delete_branch_error">Failed to delete branch</string>
+    <string name="pr_error_delete_unknown">Couldn\'t confirm the branch was deleted. Check on GitHub.</string>
+    <string name="pr_error_branch_protected">This branch is protected and can\'t be deleted.</string>
     <string name="chat_activity_thought">Thought</string>
     <string name="chat_activity_thinking">Thinking…</string>
     <string name="chat_step_ran">Ran</string>

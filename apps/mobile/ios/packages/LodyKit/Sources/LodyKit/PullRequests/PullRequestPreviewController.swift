@@ -33,6 +33,8 @@ private final class PullRequestFixture {
     }
     data = try! JSONDecoder().decode(PullRequestSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
     data.state = state
+    if state == "open" { data.mergeState = "c" }
+    if state == "merged" { data.branchExists = true }
     if mode == "empty" { data.checks = [] }
   }
   var service: PullRequestService {
@@ -46,6 +48,11 @@ private final class PullRequestFixture {
       if mode == "comment", writes == 1 { throw PullRequestStore.failure("forbidden") }
       data.comments = [.init(id: 1, author: "Preview", body: body, url: "")]
       return true
+    }, merge: { [self] _ in
+      if mode == "merge" { throw PullRequestStore.failure("not_mergeable") }
+      data.state = "merged"; data.mergeState = nil; data.branchExists = true
+    }, deleteBranch: { [self] in
+      data.branchExists = false
     })
   }
   private static let json = #"""

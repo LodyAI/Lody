@@ -61,6 +61,58 @@ internal class GitHubPullRequestWrites(private val http: GitHubHttp = GitHubHttp
         return PullRequestMergeSettle.code(state, mergeable, pr.optBoolean("draft"))
     }
 
+    /**
+     * Web `githubBranchExists`: whether a merged PR's own head branch still exists, so Delete
+     * branch shows only while it lives. Null when it does not apply (open, a fork's head, the base
+     * branch itself). A read grant.
+     */
+    suspend fun headBranchExists(credential: Credential, workspace: String, repo: String, number: Int): Boolean? {
+        val token = grant(credential, workspace, repo, number, operation = "read")
+        val base = "https://api.github.com/repos/$repo"
+        val pr = read("$base/pulls/$number", token)
+        if (!pr.optBoolean("merged")) return null
+        val ref = deletableRef(pr, repo) ?: return null
+        val (status, _) = try { http.request("GET", "$base/branches/${branchPath(ref)}", token, null) }
+            catch (_: java.io.IOException) { throw GitHubWriteFailure("unavailable") }
+        return when (status) {
+            in 200..299 -> true
+            404 -> false
+            else -> null
+        }
+    }
+
+    /**
+     * Web `githubDeleteBranch` after a merge, with the write grant. Re-reads the PR so only a
+     * merged PR's own head branch can go; a branch already gone counts as deleted. Never retried.
+     */
+    suspend fun deleteBranch(credential: Credential, workspace: String, repo: String, number: Int) {
+        val token = grant(credential, workspace, repo, number)
+        val base = "https://api.github.com/repos/$repo"
+        val pr = read("$base/pulls/$number", token)
+        if (!pr.optBoolean("merged")) throw GitHubWriteFailure("not_merged")
+        val ref = deletableRef(pr, repo) ?: throw GitHubWriteFailure("branch_not_deletable")
+        val (status, body) = try { http.request("DELETE", "$base/git/refs/heads/${branchPath(ref)}", token, null) }
+            catch (_: java.io.IOException) { throw GitHubWriteFailure("delete_unknown") }
+        // 422: a protected or default branch, or one already gone (a success).
+        if (status == 422) {
+            if (body.contains("reference does not exist", ignoreCase = true)) return
+            throw GitHubWriteFailure("branch_protected")
+        }
+        expect(status to body, "delete_unknown")
+    }
+
+    /** The head branch when it lives in this same repository (never a fork's, whose name may collide) and is not the base. */
+    private fun deletableRef(pr: JSONObject, repo: String): String? {
+        val head = pr.optJSONObject("head") ?: return null
+        val ref = head.optString("ref").takeIf { it.isNotEmpty() } ?: return null
+        if (ref == pr.optJSONObject("base")?.optString("ref")) return null
+        val owner = head.optJSONObject("repo")?.optString("full_name").orEmpty()
+        return ref.takeIf { owner.equals(repo, ignoreCase = true) }
+    }
+
+    private fun branchPath(ref: String): String =
+        ref.split('/').filter { it.isNotEmpty() }.joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+
     private suspend fun grant(credential: Credential, workspace: String, repo: String, number: Int, operation: String = "write"): String {
         if (!repo.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}")) || repo.substringAfter('/') in listOf(".", "..") || number <= 0) {
             throw GitHubWriteFailure("invalid_request")

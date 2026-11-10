@@ -197,6 +197,16 @@
     <string name="bar_error_not_open">这个 PR 已不是打开状态。</string>
     <string name="bar_error_forbidden">你没有修改这个 PR 的权限。</string>
     <string name="bar_open_github">在 GitHub 打开</string>
+    <string name="pr_merge">合并</string>
+    <string name="pr_delete_branch">删除分支</string>
+    <string name="pr_deleting_branch">正在删除分支…</string>
+    <string name="pr_delete_branch_title">删除分支？</string>
+    <string name="pr_delete_branch_message">要删除 GitHub 上的分支 %1$s 吗？之后仍可在 GitHub 的 Pull Request 页面恢复。</string>
+    <string name="pr_delete_branch_cancel">取消</string>
+    <string name="pr_delete_branch_done">分支已删除</string>
+    <string name="pr_delete_branch_error">删除分支失败</string>
+    <string name="pr_error_delete_unknown">无法确认分支是否已删除，请在 GitHub 上查看。</string>
+    <string name="pr_error_branch_protected">该分支受保护，无法删除。</string>
     <string name="chat_activity_thought">思考过程</string>
     <string name="chat_activity_thinking">思考中…</string>
     <string name="chat_step_ran">运行</string>
