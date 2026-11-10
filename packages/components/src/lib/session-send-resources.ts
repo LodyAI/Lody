@@ -31,10 +31,7 @@ function ownedPromise<A>(work: (signal: AbortSignal) => Promise<A>): Effect.Effe
 
 export type SessionSendResources = ReturnType<typeof createSessionSendResources>;
 
-export function createSessionSendResources(stores: {
-  acquire: (sessionId: SessionId) => Promise<SessionDocStore>;
-  releaseRef: (sessionId: SessionId) => void;
-}) {
+export function createSessionOperationScope() {
   const managed = ManagedRuntime.make(
     Layer.effect(
       SendScope,
@@ -93,12 +90,26 @@ export function createSessionSendResources(stores: {
   return {
     run: runTracked,
     getActiveCount: () => activeOperations,
+    dispose: (): Promise<void> => {
+      closing ??= Promise.resolve().then(() => managed.dispose());
+      return closing;
+    },
+  };
+}
+
+export function createSessionSendResources(stores: {
+  acquire: (sessionId: SessionId) => Promise<SessionDocStore>;
+  releaseRef: (sessionId: SessionId) => void;
+}) {
+  const operations = createSessionOperationScope();
+  return {
+    ...operations,
     withSessionStore: <A>(
       sessionId: SessionId,
       use: (store: SessionDocStore, signal: AbortSignal) => Promise<A> | A,
       signal?: AbortSignal
     ): Promise<A> =>
-      runTracked(async (ownedSignal) => {
+      operations.run(async (ownedSignal) => {
         const store = await stores.acquire(sessionId);
         try {
           throwIfSendAborted(ownedSignal);
@@ -108,9 +119,5 @@ export function createSessionSendResources(stores: {
           stores.releaseRef(sessionId);
         }
       }, signal),
-    dispose: (): Promise<void> => {
-      closing ??= Promise.resolve().then(() => managed.dispose());
-      return closing;
-    },
   };
 }
