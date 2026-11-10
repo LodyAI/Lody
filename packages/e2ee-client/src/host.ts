@@ -693,6 +693,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       rpc: !!platform.rpc,
       contentToken: !!platform.contentToken,
       machineSharing: !!platform.machineSharing,
+      members: !!platform.members,
     }),
     open: (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
       run(

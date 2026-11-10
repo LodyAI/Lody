@@ -1,5 +1,10 @@
 import { Cause, Clock, Effect, Exit, Result, Semaphore, type Layer } from 'effect';
-import type { E2eeWorkspaceRuntime, E2eeRuntimeStatus, E2eeContentRoom } from '@lody/platform';
+import type {
+  E2eeWorkspaceRuntime,
+  E2eeRuntimeStatus,
+  E2eeContentRoom,
+  E2eeMemberKeyDelivery,
+} from '@lody/platform';
 import { encryptedWorkspaceRoom } from '@lody/shared/workspace-streams-content';
 import {
   Bytes,
@@ -17,6 +22,7 @@ import { makeOwnedPersonalDeviceHost, type PersonalHostPorts } from './owned-hos
 import { PersonalPairingOfferSchema, type PersonalPairingOffer } from './pairing';
 import { fail, PersonalRuntimeFailure } from './errors';
 import { fromHex, toHex } from './bytes';
+import { decodeMemberKeyPackage } from './member';
 import { captureSeal, captureOpen, capturePage } from './runtime-input';
 
 const requesters = new WeakMap<E2eeWorkspaceRuntime, AccountPairingIdentityHost>();
@@ -225,6 +231,106 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     if (result.outcome !== 'Committed') return yield* fail('conflict');
     return undefined;
   });
+  // Key delivery after a member admission. Delivery never holds or undoes the admission;
+  // its state is reason codes only, and a failed delivery can be retried from here.
+  const deliveries = new Map<
+    string,
+    { device: string } & Omit<E2eeMemberKeyDelivery, 'requestId'>
+  >();
+  const deliveryView = (requestId: string): E2eeMemberKeyDelivery => {
+    const entry = deliveries.get(requestId)!;
+    return { requestId, state: entry.state, ...(entry.code ? { code: entry.code } : {}) };
+  };
+  const deliver = (id: string, requestId: string) =>
+    withSession(id, (session) =>
+      Effect.gen(function* () {
+        const entry = deliveries.get(requestId);
+        if (!entry || entry.state === 'delivering' || entry.state === 'delivered') return;
+        entry.state = 'delivering';
+        delete entry.code;
+        const exit = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* session.keyRound();
+            return yield* session.keyDeliveryEvidence(entry.device);
+          })
+        );
+        if (Exit.isSuccess(exit) && exit.value === 'delivered') entry.state = 'delivered';
+        else {
+          entry.state = 'failed';
+          entry.code = Exit.isSuccess(exit) ? exit.value : 'e2ee_key_delivery_failed';
+        }
+      })
+    );
+  const startDelivery = (id: string, requestId: string) => {
+    void run(deliver(id, requestId)).catch(() => {
+      const entry = deliveries.get(requestId);
+      if (entry?.state === 'delivering') {
+        entry.state = 'failed';
+        entry.code = 'e2ee_key_delivery_failed';
+      }
+    });
+  };
+  const memberRuntime = host.capabilities.members
+    ? ({
+        createMemberInvitation: (input) =>
+          run(
+            withSession(input.workspaceId, (session) =>
+              input.mode === 'email' || input.mode === 'link'
+                ? session.members.invite(input.mode, input.email)
+                : Effect.fail(fail('invalid-input'))
+            )
+          ),
+        memberJoinRequests: (id) => run(withSession(id, (session) => session.members.pending())),
+        approveMemberJoin: (id, requestId, mode) =>
+          run(
+            withSession(id, (session) =>
+              Effect.gen(function* () {
+                if (mode !== 'automatic' && mode !== 'explicit')
+                  return yield* fail('invalid-input');
+                const command = yield* session.members.admission(requestId, mode);
+                if (command) {
+                  // The session journals the signed original; a lost reply is settled from
+                  // the verified ledger and never signed again.
+                  const result = yield* session.execute(command);
+                  yield* session.acknowledge(result);
+                  if (result.outcome !== 'Committed') return { admitted: false, keyPending: true };
+                }
+                const material = yield* session.members.read(requestId);
+                if (material.state !== 'committed') return { admitted: false, keyPending: true };
+                const device = toHex(
+                  decodeMemberKeyPackage(material.keyPackageHex).request.signingPublicKey.toBytes()
+                );
+                if (!deliveries.has(requestId))
+                  deliveries.set(requestId, { device, state: 'pending' });
+                startDelivery(id, requestId);
+                return { admitted: true, keyPending: true, keyDelivery: 'delivering' as const };
+              })
+            )
+          ),
+        memberKeyDeliveries: async () => ({
+          items: [...deliveries.keys()].map(deliveryView),
+        }),
+        retryMemberKeyDelivery: async (id, requestId) => {
+          const entry = deliveries.get(requestId);
+          if (!entry) throw fail('invalid-input');
+          if (entry.state === 'failed') startDelivery(id, requestId);
+          return deliveryView(requestId);
+        },
+        rejectMemberJoin: (id, requestId) =>
+          run(withSession(id, (session) => session.members.reject(requestId))),
+        revokeMemberInvitation: (id, token) =>
+          run(withSession(id, (session) => session.members.revoke(token))),
+      } satisfies Pick<
+        E2eeWorkspaceRuntime,
+        | 'createMemberInvitation'
+        | 'memberJoinRequests'
+        | 'approveMemberJoin'
+        | 'memberKeyDeliveries'
+        | 'retryMemberKeyDelivery'
+        | 'rejectMemberJoin'
+        | 'revokeMemberInvitation'
+      >)
+    : {};
   const runtime: E2eeWorkspaceRuntime = {
     readerLeases: 'preallocated-v1',
     account: (input) => run(account(input)),
@@ -777,6 +883,25 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           })
         )
       ),
+    /** Owner only, as on desktop: hands ownership to an existing non-guest member and
+     * this owner becomes an admin. Core authorizes the signed record again. */
+    transferOwnership: (id, membership) =>
+      run(
+        withSession(id, (session) =>
+          Effect.gen(function* () {
+            if (!/^[0-9a-f]{32}$/.test(membership)) return yield* fail('invalid-input');
+            const state = (yield* session.ledger()).inspectState();
+            const target = state.members.get(membership);
+            if (!target || target.role === 'guest') return yield* fail('invalid-input');
+            yield* finish(session, {
+              _tag: 'TransferOwner',
+              successorMembershipId: Result.getOrThrow(Bytes.membershipId(fromHex(membership))),
+            });
+            return undefined;
+          })
+        )
+      ),
+    ...memberRuntime,
     ...(host.capabilities.rpc
       ? ({
           prepareDispatch: (id, target, input) =>

@@ -306,6 +306,8 @@ it.each(['chromium', 'webkit'] as const)(
       });
       const beforeRole = await good(page, 'ledger');
       expect((await call(page, 'forbiddenRole')).ok).toBe(false);
+      // Ownership moves only to an existing member; nothing is signed or appended otherwise.
+      expect((await call(page, 'forbiddenTransfer')).ok).toBe(false);
       expect(await good(page, 'ledger')).toEqual(beforeRole);
       expect((await raw(page, 'addMachine')).ok).toBe(true);
       await good(page, 'refresh');
@@ -326,6 +328,24 @@ it.each(['chromium', 'webkit'] as const)(
       expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
       expect(await good(page, 'sealOldHint')).toEqual({ epoch: 1 });
       expect(await good(page, 'openBody')).toEqual([72, 105]);
+      // Team management on the portable runtime: invite, list, admit exactly the shown
+      // applicant, never twice, and never one the relay swapped after the preview.
+      expect(await good(page, 'memberInvite')).toBe('link');
+      const applicant = await good(page, 'memberApplicant');
+      expect((await call(page, 'memberApprove')).ok).toBe(false);
+      expect(await good(page, 'memberList')).toEqual([applicant]);
+      expect((await call(page, 'memberAutomatic')).ok).toBe(false);
+      await good(page, 'memberSwap');
+      expect(await good(page, 'memberList')).toEqual([]);
+      expect((await call(page, 'memberApprove')).ok).toBe(false);
+      expect(await good(page, 'memberAdmitted')).toBe(false);
+      await good(page, 'memberRestore');
+      const beforeAdmission = (await good(page, 'memberRecordCount')) as number;
+      expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true, keyPending: true });
+      expect(await good(page, 'memberAdmitted')).toBe(true);
+      expect(await good(page, 'memberRecordCount')).toBe(beforeAdmission + 1);
+      expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
+      expect(await good(page, 'memberRecordCount')).toBe(beforeAdmission + 1);
       // A key delivery's approval sessions never leak a reader: the last release
       // closes the workspace the approval opened.
       expect(await good(page, 'approvalRelease')).toEqual({

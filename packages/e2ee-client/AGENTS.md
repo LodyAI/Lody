@@ -56,3 +56,8 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - `personalRuntimeRecovery` exposes only closed setup/restore commands on the
   existing owned host. Setup requires an active reader; callers release only
   their own reader. Recovery failure never retires unrelated content readers.
+
+- Member approval on the portable runtime uses the optional `members` platform port with
+  the session's own credential. A listed key package is pinned per session; approval
+  signs only that pinned package through the session's ledger journal, never re-signs on
+  a lost reply, and key delivery afterwards never holds or undoes the admission.
