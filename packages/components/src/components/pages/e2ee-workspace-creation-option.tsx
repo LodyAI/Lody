@@ -53,6 +53,7 @@ const styles = stylex.create({
     fontSize: text.footnoteSize,
     lineHeight: 1.6,
   },
+  warning: { color: colors.warning },
   help: { color: colors.secondaryLabel, fontSize: '0.9em', lineHeight: 1.5, marginTop: space[2] },
   requests: {
     display: 'flex',
@@ -127,6 +128,11 @@ export function E2eeWorkspaceCreationOption(props: {
           </ul>
         </button>
       </div>
+      {props.selected && (
+        <p role="note" {...stylex.props(styles.help, styles.warning)}>
+          {t('e2ee.create.lossWarning')}
+        </p>
+      )}
       <p {...stylex.props(styles.help)}>{t('e2ee.create.description')}</p>
       {!props.supported && <p {...stylex.props(styles.help)}>{t('e2ee.create.unsupported')}</p>}
       {props.pending && (

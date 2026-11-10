@@ -5,7 +5,8 @@ import { Button } from '@lody/ui/button';
 import { Alert } from '@lody/ui/alert';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { KeyRound, ShieldCheck, ShieldQuestion, UserPlus } from 'lucide-react';
+import { Info, KeyRound, ShieldCheck, ShieldQuestion, UserPlus } from 'lucide-react';
+import { Tooltip } from '@lody/ui/tooltip';
 import type { ReactNode } from 'react';
 import { CompactSection, CompactRow } from '../compact-layout';
 
@@ -175,10 +176,19 @@ export function E2eeSecurityPanel({
             </Glyph>
           }
           label={t(state ? 'e2ee.security.current' : 'e2ee.security.identityMissing')}
-          helper={
-            state ? t('e2ee.security.deviceCount', { count: state.devices.length }) : undefined
-          }
         >
+          {state && (
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                render={
+                  <Button variant="ghost" size="small" icon aria-label={t('e2ee.security.about')}>
+                    <Info size={15} aria-hidden="true" />
+                  </Button>
+                }
+              />
+              <Tooltip.Content side="left">{t('e2ee.security.aboutHelp')}</Tooltip.Content>
+            </Tooltip.Root>
+          )}
           {onOpenConsole && (
             <Button disabled={busy} onClick={() => onOpenConsole()}>
               {t('e2ee.security.openConsole')}
