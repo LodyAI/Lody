@@ -908,16 +908,23 @@ export function MachineAgentSettings({
     !!currentUserId &&
     selectedOwnerUserId === currentUserId;
   // Probed for the single selected machine (both mobile detail + desktop pills).
+  const selectedSupportsManagedUpdates = machineSupportsProtocolCapability(
+    resolvedSelectedMachine,
+    MACHINE_PROTOCOL_CAPABILITIES.managedDaemonUpdates,
+    1
+  );
   const selectedLifecycleCapability = useMachineLifecycleCapability({
     machineId: resolvedSelectedMachine?.id ?? null,
     enabled: selectedCanManageLifecycle && selectedIsOnline,
     onUpdateStatus: receiveManagedUpdate,
+    supportsUpdateStatus: selectedSupportsManagedUpdates,
   });
   const selectedCanRemoteRestart =
     selectedCanManageLifecycle &&
     selectedIsOnline &&
     selectedLifecycleCapability?.canRemoteRestart === true;
   const selectedCanRemoteUpgrade =
+    selectedSupportsManagedUpdates &&
     selectedCanManageLifecycle &&
     selectedIsOnline &&
     selectedLifecycleCapability?.canRemoteUpgrade === true;

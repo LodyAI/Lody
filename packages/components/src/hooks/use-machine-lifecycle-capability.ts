@@ -17,10 +17,12 @@ import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 export function useMachineLifecycleCapability({
   machineId,
   enabled,
+  supportsUpdateStatus = false,
   onUpdateStatus,
 }: {
   machineId: MachineId | null;
   enabled: boolean;
+  supportsUpdateStatus?: boolean;
   onUpdateStatus?: (status: ManagedDaemonUpdateStatus | null | undefined) => void;
 }): MachineLifecycleCapability | null {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -35,9 +37,12 @@ export function useMachineLifecycleCapability({
     }
 
     let cancelled = false;
+    let baseRead = false;
+    let canReadUpdateStatus = supportsUpdateStatus;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async () => {
       if (cancelled) return;
+      const includeUpdate = baseRead && canReadUpdateStatus && !!onUpdateStatus;
       try {
         const responsePromise = runtime.waitForMachineStatusResponse(machineId, {
           timeoutMs: 30000,
@@ -46,23 +51,30 @@ export function useMachineLifecycleCapability({
           type: 'machine/status',
           machineId,
           workspaceId,
-          ...(onUpdateStatus ? { includeDaemonUpdate: true } : {}),
+          ...(includeUpdate ? { includeDaemonUpdate: true } : {}),
         });
         const response = await responsePromise;
         if (cancelled) return;
-        setCapability(response?.success ? (response.lifecycle ?? null) : null);
+        if (response?.success) setCapability(response.lifecycle ?? null);
+        else if (includeUpdate) canReadUpdateStatus = false;
+        else setCapability(null);
+        const firstBaseRead = !baseRead;
+        if (response?.success) baseRead = true;
         onUpdateStatus?.(response?.success ? response.daemonUpdate : undefined);
         if (onUpdateStatus)
           timer = setTimeout(
             () => void read(),
-            response?.daemonUpdate &&
-              !['applied', 'rolled-back', 'failed'].includes(response.daemonUpdate.phase)
-              ? 2000
-              : 10000
+            firstBaseRead && baseRead && canReadUpdateStatus
+              ? 0
+              : response?.daemonUpdate &&
+                  !['applied', 'rolled-back', 'failed'].includes(response.daemonUpdate.phase)
+                ? 2000
+                : 10000
           );
       } catch {
         if (cancelled) return;
-        setCapability(null);
+        if (includeUpdate) canReadUpdateStatus = false;
+        else setCapability(null);
         onUpdateStatus?.(undefined);
         if (onUpdateStatus) timer = setTimeout(() => void read(), 10000);
       }
@@ -72,7 +84,7 @@ export function useMachineLifecycleCapability({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [machineId, enabled, runtime, workspaceId, onUpdateStatus]);
+  }, [machineId, enabled, runtime, workspaceId, supportsUpdateStatus, onUpdateStatus]);
 
   return capability;
 }

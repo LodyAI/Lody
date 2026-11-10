@@ -68,6 +68,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   bugReportClientLog: 'bugReportClientLog',
   sessionLiveActivity: 'sessionLiveActivity',
   machineDiskStatus: 'machineDiskStatus',
+  managedDaemonUpdates: 'managedDaemonUpdates',
   sessionInputWithdraw: 'sessionInputWithdraw',
 } as const;
 
@@ -178,6 +179,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity]: 1,
   // `machine/status` accepts `includeDisk` and may answer with `disk`.
   [MACHINE_PROTOCOL_CAPABILITIES.machineDiskStatus]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.managedDaemonUpdates]: 1,
   // Daemon answers `session/withdraw-input` for queued Agent inputs.
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputWithdraw]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers]:
