@@ -51,7 +51,7 @@ describe('ChatComposer auto resize', () => {
   });
 
   it('grows through 11 rows and becomes internally scrollable after that', async () => {
-    const promptRef = createRef<HTMLTextAreaElement>();
+    const promptRef = createRef<HTMLElement>();
     const renderComposer = (promptValue: string) => (
       <ChatComposer
         variant="session"
@@ -68,12 +68,15 @@ describe('ChatComposer auto resize', () => {
     await act(async () => root.render(renderComposer('one line')));
 
     const textarea = promptRef.current;
-    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+    expect(textarea?.hasAttribute('data-composer-editor')).toBe(true);
     textarea!.style.lineHeight = '24px';
+    // The editor's paragraph lays out at its full content height.
     let scrollHeight = 240;
-    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
-      return scrollHeight;
-    });
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.parentElement?.hasAttribute('data-composer-editor') ? scrollHeight : 0;
+      }
+    );
 
     await act(async () => root.render(renderComposer('ten\n'.repeat(10))));
 
@@ -95,7 +98,8 @@ describe('ChatComposer auto resize', () => {
     await act(async () => root.render(renderComposer('three\nlines\nhere')));
     expect(textarea?.style.height).toBe('72px');
     expect(textarea?.style.overflowY).toBe('hidden');
-    expect(document.querySelectorAll('textarea')).toHaveLength(1);
+    // Measuring leaves no clone behind.
+    expect(document.querySelectorAll('textarea')).toHaveLength(0);
 
     // Cleared (e.g. after sending): back to the two-row minimum, whatever the
     // wrapped placeholder would report as scrollHeight.
@@ -110,7 +114,7 @@ describe('ChatComposer auto resize', () => {
   });
 
   it('grows an empty composer to hold a wrapped prompt suggestion, within maxRows', async () => {
-    const promptRef = createRef<HTMLTextAreaElement>();
+    const promptRef = createRef<HTMLElement>();
     let suggestionHeight = 72;
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
       function (this: HTMLElement) {

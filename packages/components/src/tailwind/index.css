@@ -1319,7 +1319,11 @@ pre,
      Escape is `:focus-visible` too. Text entry keeps it (see the modality rule
      at the end of this file). */
   :where(html[data-focus-modality='pointer'])
-    :where(a, button, select, [tabindex]):not(input, textarea):focus-visible {
+    :where(a, button, select, [tabindex]):not(
+      input,
+      textarea,
+      [data-composer-editor]
+    ):focus-visible {
     box-shadow: none;
   }
 

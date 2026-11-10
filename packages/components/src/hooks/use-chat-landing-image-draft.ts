@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { chatLandingPendingImagesAtomFamily, type PendingImage } from '@/atoms/chat-landing-draft';
 import { selectPastedClipboardFiles } from '@/lib/file-drop';
 import { validateSessionImageFile } from '@/lib/session-image-upload';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 
 export type ChatLandingImageDraftItem = {
   id: string;
@@ -149,7 +150,7 @@ export function useChatLandingImageDraft(args: {
   );
 
   const handlePromptPaste = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       if (isMobile) {
         return;
       }

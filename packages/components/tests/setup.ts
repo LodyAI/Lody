@@ -132,3 +132,11 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
       }) as MediaQueryList,
   });
 }
+
+// jsdom has no layout, so Range carries no geometry; the composer editor
+// (Lexical) measures the caret to keep it scrolled into view.
+if (typeof Range !== 'undefined' && typeof Range.prototype.getBoundingClientRect !== 'function') {
+  Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+  Range.prototype.getClientRects = () =>
+    Object.assign([] as DOMRect[], { item: () => null }) as unknown as DOMRectList;
+}

@@ -36,7 +36,7 @@ import {
 } from './composer-document';
 import {
   type ComposerController,
-  type ComposerInputElement,
+  type ComposerEditorElement,
   type ComposerSelection,
   registerComposerController,
 } from './composer-input';
@@ -58,7 +58,7 @@ const INPUT_NAME = 'MentionInput';
 /** Updates that copy the owner's value into the editor. They are not edits. */
 const SYNC_TAG = 'lody-composer-sync';
 
-type InputElement = ComposerInputElement;
+type InputElement = ComposerEditorElement;
 
 type PendingSelection = {
   start: number;
@@ -203,9 +203,13 @@ function usePlaceholderPaint(
       probe.style.cssText =
         'position:absolute;visibility:hidden;pointer-events:none;height:0;min-height:0;';
       (element.parentElement ?? document.body).appendChild(probe);
-      const style = window.getComputedStyle(probe, '::placeholder');
-      element.style.setProperty('--composer-placeholder-color', style.color);
-      element.style.setProperty('--composer-placeholder-opacity', style.opacity || '1');
+      try {
+        const style = window.getComputedStyle(probe, '::placeholder');
+        element.style.setProperty('--composer-placeholder-color', style.color);
+        element.style.setProperty('--composer-placeholder-opacity', style.opacity || '1');
+      } catch {
+        // Engines without pseudo-element styles keep the CSS default.
+      }
       probe.remove();
     };
     measure();
@@ -344,7 +348,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   const onBeforeInputRef = React.useRef(onBeforeInput);
   onBeforeInputRef.current = onBeforeInput;
   const [element, setElement] = React.useState<InputElement | null>(null);
-  const composedRef = useComposedRefs(forwardedRef, context.inputRef, setElement);
+  const composedRef = useComposedRefs(
+    forwardedRef,
+    context.inputRef as React.Ref<InputElement>,
+    setElement
+  );
 
   const [editor] = React.useState(() =>
     createEditor({
@@ -356,6 +364,13 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     })
   );
 
+  // Composing per the DOM's composition events as well as Lexical's own state:
+  // Lexical marks composition only once it holds a range selection.
+  const composingRef = React.useRef(false);
+  const isComposingNow = React.useCallback(
+    () => composingRef.current || editor.isComposing(),
+    [editor]
+  );
   const contextRef = React.useRef(context);
   contextRef.current = context;
   const documentRef = React.useRef<ComposerDocument>(EMPTY_DOCUMENT);
@@ -369,10 +384,15 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   }>({ empty: true, offsets: {}, selection: null });
   const [focused, setFocused] = React.useState(false);
 
+  // Set when the browser may have moved the caret natively (a keydown Lexical let
+  // through) before Lexical heard its asynchronous `selectionchange`; cleared on
+  // the next editor update, which carries the DOM selection in.
+  const domSelectionAheadRef = React.useRef(false);
   const readSelection = React.useCallback((): ComposerSelection => {
     const root = editor.getRootElement();
     const dom = root?.ownerDocument.getSelection();
     if (
+      domSelectionAheadRef.current &&
       root &&
       dom &&
       dom.rangeCount > 0 &&
@@ -399,8 +419,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     [element]
   );
 
+  const selectionWritesRef = React.useRef(0);
   const writeSelection = React.useCallback(
     (start: number, end: number = start) => {
+      selectionWritesRef.current += 1;
       editor.update(() => $setSelectionOffsets(start, end), {
         discrete: true,
         tag: isFocused() ? undefined : SKIP_DOM_SELECTION_TAG,
@@ -454,7 +476,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     (value: string, currentPosition: number) => {
       const ctx = contextRef.current;
       if (ctx.disabled || ctx.readonly) return false;
-      if (editor.isComposing()) return false;
+      if (isComposingNow()) return false;
       if (!element) return false;
 
       const candidates = findTriggerCandidates(value, ctx.triggers, currentPosition);
@@ -605,7 +627,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
             getText: () => documentRef.current.text,
             getSelection: readSelection,
             setSelection: writeSelection,
-            isComposing: () => editor.isComposing(),
+            isComposing: () => isComposingNow(),
             getCaretRect: (offset) => measureCaretRect(editor, element, offset),
             getRangeRects: (start, end) => {
               const range = createDomRange(editor, start, end);
@@ -628,15 +650,26 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     };
     syncEditable(editor.isEditable());
     const onNativeClick = (event: MouseEvent) => onClickPrimitiveRef.current(event);
+    const onPointerDown = () => {
+      if (element.ownerDocument.activeElement !== element) pointerFocusRef.current = true;
+    };
     element.addEventListener('click', onNativeClick);
+    element.addEventListener('pointerdown', onPointerDown, true);
+    element.addEventListener('mousedown', onPointerDown, true);
     const unregister = mergeRegister(
       () => element.removeEventListener('click', onNativeClick),
+      () => element.removeEventListener('pointerdown', onPointerDown, true),
+      () => element.removeEventListener('mousedown', onPointerDown, true),
       editor.registerEditableListener(syncEditable),
       registerPlainText(editor),
       registerHistory(editor, createEmptyHistoryState(), 300),
       editor.registerCommand(
         KEY_DOWN_COMMAND,
-        (event) => event.defaultPrevented,
+        (event) => {
+          if (event.defaultPrevented) return true;
+          domSelectionAheadRef.current = true;
+          return false;
+        },
         COMMAND_PRIORITY_CRITICAL
       ),
       editor.registerCommand(
@@ -698,6 +731,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         COMMAND_PRIORITY_CRITICAL
       ),
       editor.registerUpdateListener(({ editorState, tags }) => {
+        domSelectionAheadRef.current = false;
         const { document, selection, offsets } = editorState.read(() => ({
           document: $readComposerValue<Mention>(),
           selection: $readSelectionOffsets(),
@@ -716,7 +750,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         );
         if (tags.has(SYNC_TAG)) return;
         // The owner hears about IME text only once it is committed.
-        if (editor.isComposing()) return;
+        if (isComposingNow()) return;
         const caret = selection?.end ?? document.text.length;
         if (changed || !isPublished()) {
           publish(document, caret);
@@ -754,7 +788,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       pendingSelectionRef.current = pendingSelectionFromRoot;
       onPendingSelectionFromRootChange(null);
     }
-    if (editor.isComposing()) return;
+    if (isComposingNow()) return;
 
     const incoming: ComposerDocument = {
       text: ownerValue ?? '',
@@ -795,6 +829,16 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       writeSelection(Math.min(pending.start, max), Math.min(pending.end, max));
     }
   });
+
+  // Which triggers apply can depend on the text itself (commands only for a
+  // slash-only prompt); a menu opened under the previous set is re-checked.
+  const triggersRef = React.useRef(context.triggers);
+  React.useLayoutEffect(() => {
+    if (triggersRef.current === context.triggers) return;
+    triggersRef.current = context.triggers;
+    if (!context.open || isComposingNow()) return;
+    onMentionUpdate(documentRef.current.text, readSelection().start);
+  }, [context.open, context.triggers, editor, onMentionUpdate, readSelection]);
 
   usePlaceholderPaint(element, className, placeholder);
   useRowsChrome(element);
@@ -1075,7 +1119,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   // portal's events through its React parent instead of the editor element.
   const onClickPrimitive = React.useCallback(
     (event: MouseEvent) => {
-      if (editor.isComposing()) return;
+      if (isComposingNow()) return;
       const ctx = contextRef.current;
       const target = event.target instanceof Element ? event.target : null;
       const chipElement = target?.closest<HTMLElement>('[data-mention-start]');
@@ -1107,19 +1151,37 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   const onClickPrimitiveRef = React.useRef(onClickPrimitive);
   onClickPrimitiveRef.current = onClickPrimitive;
 
+  // A textarea keeps its selection across focus; a contenteditable puts the
+  // caret at its start. Programmatic and keyboard focus restore the caret the
+  // editor already had; a pointer press places it where it lands.
+  const pointerFocusRef = React.useRef(false);
   const onFocusPrimitive = React.useCallback(() => {
     setFocused(true);
+    const kept = selectionRef.current;
+    if (kept && !pointerFocusRef.current) {
+      writeSelection(kept.start, kept.end);
+      // Some engines collapse the DOM caret to the start once focus completes;
+      // put the kept caret back unless something chose a newer one meanwhile.
+      const writes = selectionWritesRef.current;
+      queueMicrotask(() => {
+        if (selectionWritesRef.current !== writes || !isFocused()) return;
+        writeSelection(kept.start, kept.end);
+      });
+    }
+    pointerFocusRef.current = false;
     onMentionUpdate(documentRef.current.text, readSelection().start);
-  }, [onMentionUpdate, readSelection]);
+  }, [isFocused, onMentionUpdate, readSelection, writeSelection]);
 
   const onCompositionStartPrimitive = React.useCallback(() => {
+    composingRef.current = true;
     contextRef.current.cancelMentionPreparation();
   }, []);
 
   const onCompositionEndPrimitive = React.useCallback(() => {
+    composingRef.current = false;
     // Lexical commits the composed text in its own handler, which runs before
     // this one; make sure the owner received it.
-    if (!isPublished() && !editor.isComposing()) {
+    if (!isPublished() && !isComposingNow()) {
       publish(documentRef.current, readSelection().end);
     }
   }, [editor, isPublished, publish, readSelection]);
@@ -1143,7 +1205,9 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         aria-multiline="true"
         aria-placeholder={placeholder}
         dir={context.dir}
-        tabIndex={!editable && !disabled ? 0 : undefined}
+        // Focusable like the textarea it replaced, in every engine (jsdom and some
+        // embedded views do not treat contenteditable alone as focusable).
+        tabIndex={disabled ? undefined : 0}
         {...elementProps}
         ref={composedRef}
         data-composer-editor=""
@@ -1161,7 +1225,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         onCutCapture={onCut}
         onClick={onClick}
         onFocus={composeEventHandlers(onFocus, onFocusPrimitive)}
-        onBlur={composeEventHandlers(onBlur, () => setFocused(false))}
+        onBlur={composeEventHandlers(onBlur, () => {
+          // Some engines end a composition by blurring, without compositionend.
+          composingRef.current = false;
+          setFocused(false);
+        })}
         onCompositionStart={composeEventHandlers(onCompositionStart, onCompositionStartPrimitive)}
         onCompositionEnd={composeEventHandlers(onCompositionEnd, onCompositionEndPrimitive)}
       />

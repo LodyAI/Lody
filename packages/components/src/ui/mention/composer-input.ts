@@ -9,7 +9,15 @@
  * ordinary DOM.
  */
 
-export type ComposerInputElement = HTMLDivElement;
+/** The composer's editing element: the mention editor, or the plain textarea a
+ * composer without mention sources renders. Both work with the functions below. */
+export type ComposerInputElement = HTMLDivElement | HTMLTextAreaElement;
+
+/** The mention editor's own element. */
+export type ComposerEditorElement = HTMLDivElement;
+
+const isTextarea = (element: Element | null | undefined): element is HTMLTextAreaElement =>
+  !!element && element.tagName === 'TEXTAREA';
 
 export type ComposerSelection = { start: number; end: number };
 
@@ -40,18 +48,23 @@ export function getComposerController(
   return element ? (controllers.get(element) ?? null) : null;
 }
 
-/** Whether `element` is a mounted composer editor. */
+/** Whether `element` is a mounted composer editor or a composer textarea. */
 export function isComposerInput(element: unknown): element is ComposerInputElement {
-  return element instanceof Element && controllers.has(element);
+  return element instanceof Element && (controllers.has(element) || isTextarea(element));
 }
 
-/** The composer's current text; empty when the editor is not mounted. */
+/** The composer's current text; empty when nothing is mounted. */
 export function getComposerText(element: Element | null | undefined): string {
+  if (isTextarea(element)) return element.value;
   return getComposerController(element)?.getText() ?? '';
 }
 
-/** The composer's selection; a caret at the end when it has none. */
+/** The composer's selection; a caret at the end of the text when it has none. */
 export function getComposerSelection(element: Element | null | undefined): ComposerSelection {
+  if (isTextarea(element)) {
+    const start = element.selectionStart ?? element.value.length;
+    return { start, end: element.selectionEnd ?? start };
+  }
   const controller = getComposerController(element);
   if (!controller) return { start: 0, end: 0 };
   return controller.getSelection();
@@ -63,6 +76,10 @@ export function setComposerSelection(
   start: number,
   end: number = start
 ): void {
+  if (isTextarea(element)) {
+    element.setSelectionRange(start, end);
+    return;
+  }
   getComposerController(element)?.setSelection(start, end);
 }
 

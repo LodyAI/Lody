@@ -42,6 +42,7 @@ import {
   TOUR_WORKSPACE_SLUG,
 } from '../src/components/onboarding/tour/tour-fixtures';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
+import { composerIn } from './composer-test-utils';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -308,7 +309,7 @@ it('keeps unknown-mode catalogs pending while the real local composer stays usab
   expect(JSON.parse(container.querySelector('output')!.textContent!).machines).toHaveLength(1);
   expect(JSON.parse(container.querySelector('output')!.textContent!).projects).toHaveLength(1);
   await act(async () => composer.current!.setInputText('keep this local draft'));
-  expect(container.querySelector('textarea')!.value).toBe('keep this local draft');
+  expect(composerIn(container).value).toBe('keep this local draft');
   admitted = true;
   await act(async () =>
     store.set(workspaceContentModeAtom, {
@@ -326,7 +327,7 @@ it('keeps unknown-mode catalogs pending while the real local composer stays usab
   expect(observed).toContain('localProjects:listVisibleLocalProjects');
   expect(JSON.parse(container.querySelector('output')!.textContent!).loading).toBe(false);
   expect(store.get(runtimeAtom)).toBe(runtime);
-  expect(container.querySelector('textarea')!.value).toBe('keep this local draft');
+  expect(composerIn(container).value).toBe('keep this local draft');
 });
 
 function LegacyCatalog() {

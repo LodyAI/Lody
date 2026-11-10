@@ -64,6 +64,7 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
 
 import { UserMessageEditor } from '../src/components/ai-gui/user-message-editor';
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
+import { composerIn } from './composer-test-utils';
 import { initI18n } from '../src/i18n';
 import { commands } from '../src/lib/commands';
 
@@ -130,7 +131,9 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   }
 
   function textarea() {
-    return container.querySelector('textarea');
+    return container.querySelector('[data-composer-editor], textarea')
+      ? composerIn(container)
+      : null;
   }
 
   /**
@@ -151,17 +154,9 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   async function typeInto(value: string) {
     const input = textarea();
     if (!input) throw new Error('composer textarea missing');
-    await act(async () => {
-      input.focus();
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        'value'
-      )?.set;
-      setter?.call(input, value);
-      input.selectionStart = value.length;
-      input.selectionEnd = value.length;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    input.focus();
+    input.edit(value, value.length);
+    await act(async () => {});
   }
 
   it.each(['/', '、'])(
@@ -381,7 +376,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     });
 
     expect(input.value).toBe('@session:parser');
-    expect(document.activeElement).toBe(input);
+    expect(document.activeElement).toBe(input.element);
     expect(document.body.textContent).toContain('Other parser work');
     expect(document.body.textContent).toContain('All projects');
 
@@ -455,7 +450,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
         expect(document.body.textContent).toContain(`Nothing matches “${query}”`);
         expect(document.body.textContent).not.toContain('There are no other sessions');
         expect(textarea()!.value).toBe(`@session:${query}`);
-        expect(document.activeElement).toBe(textarea());
+        expect(document.activeElement).toBe(textarea()?.element);
         await typeInto('@session:');
         expect(rows()).toEqual(initialRows);
       }
@@ -465,7 +460,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
         commands.execute('mention.toggleSessionProjectScope');
       });
       expect(textarea()!.value).toBe('@session:elsewhere');
-      expect(document.activeElement).toBe(textarea());
+      expect(document.activeElement).toBe(textarea()?.element);
       expect(rows()).toHaveLength(1);
       expect(rows()[0]).toContain('Elsewhere parser work');
       await typeInto('@session:zzzzunmatched');
