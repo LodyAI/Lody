@@ -9,7 +9,6 @@ import { Input } from '@lody/ui/input';
 import { AlertDialog } from '@/ui/dialog';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
-import { getIpcServices } from '@/lib/electron-ipc-client';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 
 /** When this device last opened the account's recovery file successfully. Display only:
@@ -34,6 +33,14 @@ function writeChecked(accountId: string | null | undefined, at: number | null) {
   }
 }
 import { CompactRow, CompactSection } from '../compact-layout';
+import {
+  useRecoveryPort,
+  type RecoveryPasskey,
+  type RecoveryPlan,
+  type RecoveryReplacementPort,
+  type RecoverySecurityEvent,
+  type RecoveryWorkspaceStatus,
+} from './recovery-port';
 
 const styles = stylex.create({
   body: {
@@ -67,18 +74,6 @@ const styles = stylex.create({
   },
 });
 
-type WorkspaceStatus =
-  | { kind: 'notSet' }
-  | { kind: 'saved' }
-  | { kind: 'verified'; update: number }
-  | { kind: 'unknown' };
-type Plan = {
-  hasVault: boolean;
-  replaceable: boolean;
-  replacing: boolean;
-  covered: readonly { id: string; name: string; status: WorkspaceStatus }[];
-  uncovered: readonly { id: string; name: string }[];
-};
 type Result =
   | {
       kind: 'notice';
@@ -105,13 +100,13 @@ export function useWorkspaceRecoveryReady(
   accountId?: string | null
 ) {
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
-  const [e2ee] = useState(() => getIpcServices()?.e2ee);
+  const port = useRecoveryPort();
   const [ready, setReady] = useState<{ scope: string; value: boolean | undefined }>();
   const scope = `${accountId ?? ''}:${workspaceId ?? ''}`;
   useEffect(() => {
-    if (!enabled || !e2ee || !workspaceId) return;
+    if (!enabled || !port || !workspaceId) return;
     let live = true;
-    void e2ee.recoveryReplacementPlan().then(
+    void port.plan().then(
       (plan) => {
         if (!live) return;
         const status = plan.covered.find((workspace) => workspace.id === workspaceId)?.status;
@@ -131,11 +126,11 @@ export function useWorkspaceRecoveryReady(
     return () => {
       live = false;
     };
-  }, [enabled, e2ee, workspaceId, scope]);
+  }, [enabled, port, workspaceId, scope]);
   return enabled && ready?.scope === scope ? ready.value : undefined;
 }
 
-const statusBadge: Record<WorkspaceStatus['kind'], { key: string; tone: BadgeTone }> = {
+const statusBadge: Record<RecoveryWorkspaceStatus['kind'], { key: string; tone: BadgeTone }> = {
   verified: { key: 'e2ee.recovery.workspace.verified', tone: 'success' },
   saved: { key: 'e2ee.recovery.workspace.saved', tone: 'neutral' },
   notSet: { key: 'e2ee.recovery.workspace.notSet', tone: 'warning' },
@@ -144,8 +139,9 @@ const statusBadge: Record<WorkspaceStatus['kind'], { key: string; tone: BadgeTon
 
 /**
  * Post-MVP recovery file controls, hidden unless Developer mode and the beta
- * switch are on; main additionally refuses unless started with the env gate.
- * Main owns the file dialogs and bytes; this view receives only outcomes.
+ * switch are on; the desktop main process additionally refuses unless started with
+ * the env gate. The host's recovery port owns the unlock, file and bytes; this view
+ * receives only outcomes, and offers only the actions the port supports.
  */
 export function RecoveryVaultSection({ accountId }: { accountId?: string | null } = {}) {
   const { t, i18n } = useTranslation();
@@ -155,26 +151,23 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     setCheckedAt(at);
   };
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
-  // The proxy is new on every call; keep one so the loading effect runs once.
-  const [e2ee] = useState(() => getIpcServices()?.e2ee);
+  const port = useRecoveryPort();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>();
-  const [plan, setPlan] = useState<Plan>();
+  const [plan, setPlan] = useState<RecoveryPlan>();
   const [planFailed, setPlanFailed] = useState(false);
   const [reload, setReload] = useState(0);
   const [dialog, setDialog] = useState<'begin' | 'continue'>();
   const [passkey, setPasskey] = useState(false);
-  const [events, setEvents] = useState<readonly { id: string; kind: string; occurredAt: number }[]>(
-    []
-  );
+  const [events, setEvents] = useState<readonly RecoverySecurityEvent[]>([]);
   const [naming, setNaming] = useState<string>();
-  const [passkeys, setPasskeys] = useState<readonly { entryId: string; label: string }[]>();
-  const [pending, setPending] = useState<readonly { entryId: string; label: string }[]>([]);
-  const [removing, setRemoving] = useState<{ entryId: string; label: string }>();
+  const [passkeys, setPasskeys] = useState<readonly RecoveryPasskey[]>();
+  const [pending, setPending] = useState<readonly RecoveryPasskey[]>([]);
+  const [removing, setRemoving] = useState<RecoveryPasskey>();
   useEffect(() => {
-    if (!enabled || !e2ee) return;
+    if (!enabled || !port) return;
     let live = true;
-    void e2ee.recoveryReplacementPlan().then(
+    void port.plan().then(
       (next) => {
         if (!live) return;
         setPlan(next);
@@ -186,13 +179,13 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
         setPlanFailed(true);
       }
     );
-    void e2ee.recentAccountSecurityEvents().then(
+    void port.securityEvents().then(
       (next) => {
         if (live) setEvents(next);
       },
       () => undefined
     );
-    void e2ee.recoveryPasskeyAvailable().then(
+    void port.passkeyAvailable().then(
       (next) => {
         if (live) setPasskey(next);
       },
@@ -201,8 +194,11 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     return () => {
       live = false;
     };
-  }, [enabled, e2ee, result, reload]);
-  if (!enabled || !e2ee) return null;
+  }, [enabled, port, result, reload]);
+  if (!enabled || !port) return null;
+  // A host that cannot replace the file has no replacement of its own to continue.
+  const { checkFile, replacement } = port;
+  const replacing = !!plan?.replacing && !!replacement;
   // One state decides which actions exist, so only one primary action shows at a time.
   // When the state cannot be read, retry leads and the actions that change nothing stay;
   // creating stays too because main and the service refuse a second vault.
@@ -210,7 +206,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     ? planFailed
       ? 'failed'
       : 'unknown'
-    : plan.replacing
+    : replacing
       ? 'replacing'
       : plan.hasVault
         ? 'ready'
@@ -232,8 +228,11 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       setBusy(false);
     }
   };
-  const finishReplacement = async (compromised: boolean): Promise<Result | undefined> => {
-    const finished = await e2ee.continueRecoveryReplacement({ compromised });
+  const finishReplacement = async (
+    replace: RecoveryReplacementPort,
+    compromised: boolean
+  ): Promise<Result | undefined> => {
+    const finished = await replace.finish({ compromised });
     if (finished.outcome === 'Committed') {
       // The old file stopped working; its check says nothing about the new one.
       markChecked(null);
@@ -254,7 +253,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       : [];
   const setupAll = (method: 'file' | 'passkey') =>
     void run(async () => {
-      const settled = await e2ee.setupRecoveryForWorkspaces(
+      const settled = await port.setupWorkspaces(
         unfinished.map((row) => row.id),
         method
       );
@@ -279,7 +278,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       disabled={busy}
       onClick={() =>
         void run(async () => {
-          const restored = await e2ee.restoreFromRecoveryFile(method);
+          const restored = await port.restore(method);
           return restored.outcome === 'restored'
             ? { kind: 'restored', results: restored.results }
             : undefined;
@@ -360,7 +359,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
-                    const created = await e2ee.createRecoveryVault();
+                    const created = await port.create();
                     if (created.outcome !== 'created') return undefined;
                     // Creation saves and reads the file back, so it counts as a check.
                     markChecked(Date.now());
@@ -371,7 +370,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 {t('e2ee.recovery.create')}
               </Button>
             )}
-            {(mode === 'ready' || mode === 'failed') && (
+            {checkFile && (mode === 'ready' || mode === 'failed') && (
               <Button
                 size="small"
                 // One primary action at a time: setting up uncovered workspaces leads when
@@ -380,7 +379,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
-                    const opened = await e2ee.inspectRecoveryFile();
+                    const opened = await checkFile();
                     if (opened.outcome !== 'opened') return undefined;
                     markChecked(Date.now());
                     return { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces };
@@ -390,7 +389,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 {t('e2ee.recovery.check')}
               </Button>
             )}
-            {mode === 'ready' && (
+            {replacement && mode === 'ready' && (
               <Button
                 size="small"
                 variant="secondary"
@@ -416,7 +415,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                   variant="secondary"
                   disabled={busy}
                   onClick={() =>
-                    void e2ee.recoveryPasskeyDefaultLabel().then(
+                    void port.passkeyDefaultLabel().then(
                       (label) => setNaming(label),
                       () => setNaming('')
                     )
@@ -432,7 +431,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                   disabled={busy}
                   onClick={() =>
                     void run(async () => {
-                      const listed = await e2ee.listRecoveryPasskeys();
+                      const listed = await port.listPasskeys();
                       if (listed.outcome === 'listed') {
                         setPasskeys(listed.passkeys);
                         setPending(listed.pending);
@@ -461,7 +460,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                   disabled={busy}
                   onClick={() =>
                     void run(async () => {
-                      const removed = await e2ee.removeRecoveryPasskey(row.entryId);
+                      const removed = await port.removePasskey(row.entryId);
                       if (removed.outcome === 'cancelled') return undefined;
                       setPasskeys(removed.passkeys);
                       setPending(removed.pending);
@@ -520,7 +519,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                       disabled={busy}
                       onClick={() =>
                         void run(async () => {
-                          const done = await e2ee.setupWorkspaceRecovery(workspace.id);
+                          const done = await port.setupWorkspace(workspace.id);
                           if (done.outcome === 'cancelled') return undefined;
                           return {
                             kind: 'notice',
@@ -576,7 +575,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
           </Alert.Description>
         </Alert.Root>
       )}
-      {plan?.replacing && (
+      {replacing && replacement && (
         <Alert.Root tone="warning">
           <Alert.Description aria-live="polite">{t('e2ee.recovery.replacing')}</Alert.Description>
           <Alert.Actions>
@@ -588,7 +587,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
               disabled={busy}
               onClick={() =>
                 void run(async () => {
-                  const abandoned = await e2ee.abandonRecoveryReplacement();
+                  const abandoned = await replacement.abandon();
                   return {
                     kind: 'notice',
                     key:
@@ -619,7 +618,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
               )}
             />
           ))}
-          {mode === 'ready' && (
+          {replacement && mode === 'ready' && (
             <CompactRow label={t('e2ee.recovery.eventNotMeHelp')}>
               <Button
                 size="small"
@@ -686,7 +685,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 const entryId = removing?.entryId ?? '';
                 setRemoving(undefined);
                 void run(async () => {
-                  const removed = await e2ee.removeRecoveryPasskey(entryId);
+                  const removed = await port.removePasskey(entryId);
                   if (removed.outcome === 'cancelled') return undefined;
                   setPasskeys(removed.passkeys);
                   setPending(removed.pending);
@@ -730,7 +729,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 const label = naming ?? '';
                 setNaming(undefined);
                 void run(async () => {
-                  const added = await e2ee.addRecoveryPasskey(label);
+                  const added = await port.addPasskey(label);
                   return added.outcome === 'added'
                     ? { kind: 'notice', key: 'e2ee.recovery.passkeyAdded' }
                     : undefined;
@@ -787,7 +786,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 disabled={busy}
                 onClick={() => {
                   setDialog(undefined);
-                  void run(() => finishReplacement(true));
+                  if (replacement) void run(() => finishReplacement(replacement, true));
                 }}
               >
                 {t('e2ee.recovery.replaceRevokeFirst')}
@@ -799,9 +798,10 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
               onClick={() => {
                 const step = dialog;
                 setDialog(undefined);
+                if (!replacement) return;
                 void run(async () => {
-                  if (step === 'continue') return finishReplacement(false);
-                  const begun = await e2ee.beginRecoveryReplacement();
+                  if (step === 'continue') return finishReplacement(replacement, false);
+                  const begun = await replacement.begin();
                   return begun.outcome === 'begun'
                     ? { kind: 'notice', key: 'e2ee.recovery.replaceBegun' }
                     : undefined;
