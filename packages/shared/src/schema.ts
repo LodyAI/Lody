@@ -714,6 +714,9 @@ export const sessionHistorySchema = schema.LoroMap({
   /** Encrypted only: this machine wrote the row by promoting a queue item. The row's
    * signer is then not its author, so the start needs the input's own evidence. */
   queuedInput: schema.Boolean({ required: false }),
+  /** Encrypted only: the signed execution intent record, written in the same commit
+   * as the content it covers. See `e2ee-execution-intent.ts`. */
+  e2eeIntent: schema.String({ required: false }),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**
@@ -1345,6 +1348,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   // killed tab). See `popMessageQueue` in `apps/cli/src/lib/loro/doc.ts`.
   editingStartedAt: schema.Number({ required: false }),
   acpSessionConfig: acpSessionConfigSchema,
+  /** Encrypted only: the author's signed execution intent; promotion copies it. */
+  e2eeIntent: schema.String({ required: false }),
 });
 
 export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'project'> & {
@@ -1443,11 +1448,6 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
-  /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
-  rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
-  /** Exact purpose-8 originals of queued input, written before the queue row. Separate from
-   * `rpcDispatchOriginals` because promotion adds `resume` to the input it signed. */
-  queueDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1552,13 +1552,7 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<
-  SessionDoc,
-  '$cid' | 'history' | 'rpcDispatchOriginals' | 'queueDispatchOriginals'
-> & {
-  /** Omitted by control-only readers; execution reads the selected original from the document. */
-  rpcDispatchOriginals?: Record<string, string>;
-  queueDispatchOriginals?: Record<string, string>;
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];
