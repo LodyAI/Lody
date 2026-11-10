@@ -5,7 +5,7 @@ description: Model-check Session Inbox multi-client delivery, Stop, submission, 
 
 # Verify Session Inbox availability and execution
 
-Use for the covered delivery, dispatch recovery, Inbox service, SQLite, execution owner and reply-ordering gate. This is one subsystem with scheduling, delivery and output slices, not a proof of their entire composition. Follow [coverage.json](coverage.json), [expanded-coverage.json](expanded-coverage.json) and [requirements.md](requirements.md). Source mapping pins the verified product commit and exact source hashes. The separate verification commit follows that product commit.
+Use for the covered delivery, dispatch recovery, Inbox service, SQLite, execution owner and reply-ordering gate. This is one subsystem with scheduling, delivery, output and shared-writer retry slices, not a proof of their entire composition. Follow [coverage.json](coverage.json), [expanded-coverage.json](expanded-coverage.json) and [requirements.md](requirements.md). Source mapping pins the verified product commit and exact source hashes. The separate verification commit follows that product commit.
 
 ## Run
 
@@ -21,6 +21,8 @@ Exit 0 means all requested current-source properties passed. Exit 1 is a propert
 
 The current corrected baseline checks:
 
+- Shared SQLite BUSY: one native blocking attempt per scan, retained work, scoped retry cancellation and recovery after unlock. `BusyScan.tla` abstracts the delay; native SQLite plus TestClock checks the real implementation. The original driver's single-call five-second wait remains.
+
 - Scheduling safety, Stop/final start, fixed membership, unknown non-replay, retained receipts and independent-session progress under a persistent local fault.
 - Two-client history/RPC/receipt/activation delivery, permanent first-input partition, per-ID negative acknowledgements, and eventual explicit outcome under the declared fairness assumptions.
 - Output waiting with a hung pre-open callback: the original deadline or disposal releases waiters, and cooperative late callbacks do not issue stale writes. Progress does not assume the user eventually presses Stop.
@@ -31,7 +33,7 @@ The current corrected baseline checks:
 
 ## Preserve the boundary
 
-A local failure affects its dependent action. Retry every independent receipt, retain failed entries and return the full combined Cause to an explicit recovery caller. Background scanning reports that failure and continues. Prepare each candidate independently. Diagnostics and synchronous adapter exceptions cannot kill the scanner or strand `running`. Stop vetoes the affected old input; it is not a workspace readiness gate. A completely unwritable database cannot authorize unrecorded input, and an unknown submitted request must never replay.
+A local failure affects its dependent action. Retry every independent receipt, retain failed entries and return the full combined Cause to an explicit recovery caller. Background scanning reports that failure and continues. Prepare each candidate independently. A shared `OrchestrationStorageFailure.kind=busy` stops that connection's current pass and arms one scope-owned retry (250 ms doubling to 2 s); coalesce scan wakes until it fires. Publishing its flag and fiber is uninterruptible, but its delay is interruptible. Explicit admission remains available, and scope closure cancels the retry. Do not treat row-local errors or `SQLITE_FULL` as a shared lock. Diagnostics and synchronous adapter exceptions cannot kill the scanner or strand `running`. Stop vetoes the affected old input; it is not a workspace readiness gate. A completely unwritable database cannot authorize unrecorded input, and an unknown submitted request must never replay.
 
 `missingHistoryUserMsgIds` is host-owned, append-only identity evidence, with legacy scalar compatibility. Only the serialized host watcher appends it. Producers never clear acknowledgements to publish a new activation. Old timeouts cannot accuse newer activation. Every input eligibility path and the renderer use the shared predicate. Test fresh-ID progress as well as old-ID exclusion.
 

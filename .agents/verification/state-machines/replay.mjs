@@ -17,6 +17,7 @@ for (const [name, version] of Object.entries({effect:'4.0.2',zod:'4.3.6','better
 const { build } = require('esbuild');
 const Database = require('better-sqlite3');
 const { Effect, Layer, ManagedRuntime, Deferred, Exit } = await import(pathToFileURL(require.resolve('effect')).href);
+const { TestClock } = await import(pathToFileURL(require.resolve('effect/testing')).href);
 const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-inbox-replay-'));
 const outfile = path.join(scratch,'subject.mjs');
 const mutations = [];
@@ -35,7 +36,8 @@ await build({
     builder.onLoad({filter:/\/inbox\/(service|sqlite)\.ts$/},async args=>{
       let text=await fs.readFile(args.path,'utf8');
       if(args.path.endsWith('/service.ts')) {
-        if(variant==='blocked-scan')text=replaceOnce(text,'          yield* retrySettlements().pipe(Effect.catchCause(report));','          yield* retrySettlements();','restore scan-wide retry failure');
+        if(variant==='blocked-scan')text=replaceOnce(text,'          yield* retrySettlements().pipe(Effect.catchCause(reportIndependentFailure));','          yield* retrySettlements();','restore scan-wide retry failure');
+        if(variant==='busy-amplification')text=replaceOnce(text,'Cause.hasInterrupts(cause) || storageBusy(cause)','Cause.hasInterrupts(cause)','restore repeated native BUSY waits');
         if(variant==='drop-retry')text=replaceOnce(text,'            settlements.set(batch.batchId, receipt);','            // Deliberately broken: forget the unconfirmed receipt.','drop unconfirmed settlement');
         if(variant==='unsafe-submit') {
           const start=text.indexOf('                  if (\n                    quiesced ||');
@@ -55,8 +57,11 @@ await build({
 });
 const m=await import(pathToFileURL(outfile).href);
 const observed=[];
-function fixture() {
-  const db=new Database(':memory:');
+let fixtureId=0;
+function fixture(disk=false) {
+  const filename=disk?path.join(scratch,'fixture-'+String(fixtureId++)+'.sqlite'):':memory:';
+  const db=new Database(filename);
+  if(disk){db.pragma('journal_mode = WAL');db.pragma('busy_timeout = 0');}
   m.InboxSqlite.migrate(db);
   db.exec("CREATE TABLE orchestration_meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO orchestration_meta VALUES('inbox_sequence','0');");
   const sql=new m.InboxSqlite(db,()=> '2026-11-09T00:00:00.000Z');
@@ -64,16 +69,18 @@ function fixture() {
   const input=(sessionId,id='human-'+sessionId)=>({workspaceId:'w',sessionId,userId:'u',inputId:id,kind:'human',config:{}});
   const add=(sessionId,id='result-'+sessionId)=>db.transaction(()=>sql.indexCompletion({workspaceId:'w',requesterSessionId:sessionId,requesterUserId:'u',operationId:id,kind:'session_chat',frozenContinuationConfig:{inputConfig:{}},initiatorChainDepth:0,createdAt:'2026-11-09T00:00:00.000Z',finishedAt:'2026-11-09T00:00:00.000Z',completion:{type:'result',value:{items:[]}}})).immediate();
   let runtime;
-  const startRuntime=async ports=>{
+  const startRuntime=async (ports,clockLayer)=>{
     const deps=Layer.mergeAll(m.inboxRepositoryLayer(sql),Layer.succeed(m.ExecutionMembers,{members:b=>Effect.try(()=>sql.members(b))}),Layer.succeed(m.InboxExecution,{ready:()=>false,admit:()=>true,launch:()=>Effect.void,report:()=>Effect.void,...ports}));
-    runtime=ManagedRuntime.make(m.OperationInbox.layer('w','owner').pipe(Layer.provideMerge(deps)));
+    let layer=m.OperationInbox.layer('w','owner').pipe(Layer.provideMerge(deps));
+    if(clockLayer)layer=layer.pipe(Layer.provideMerge(clockLayer));
+    runtime=ManagedRuntime.make(layer);
     const service=await runtime.runPromise(m.OperationInbox);
     return {runtime,service,run:e=>runtime.runPromise(e)};
   };
-  return {db,sql,input,add,startRuntime,close:async()=>{try {if(runtime)await runtime.dispose();} finally {db.close();}}};
+  return {filename,db,sql,input,add,startRuntime,close:async()=>{try {if(runtime)await runtime.dispose();} finally {db.close();}}};
 }
-async function safety(name,body) {
-  const f=fixture();
+async function safety(name,body,disk=false) {
+  const f=fixture(disk);
   let failure,failed=false;
   try {await body(f);observed.push({name,result:'PASS'});} catch(error) {failure=error;failed=true;}
   try {await f.close();} catch(cleanup) {
@@ -83,6 +90,30 @@ async function safety(name,body) {
   if(failed)throw failure;
 }
 try {
+  if(variant==='current'||variant==='busy-amplification')await safety('Native BUSY waits are bounded per scan, back off, and recover without new external events',async f=>{
+    for(const s of ['A','B','C'])f.add(s);
+    const blocker=new Database(f.filename);blocker.exec('BEGIN IMMEDIATE');
+    let locked=true,run;const attempts=[],starts=[];const busy=Deferred.makeUnsafe(),done=Deferred.makeUnsafe();
+    const prepare=f.sql.prepare.bind(f.sql);f.sql.prepare=(...args)=>{if(locked)attempts.push(args[0].sessionId);return prepare(...args);};
+    try{
+      const runtime=await f.startRuntime({ready:()=>true,report:()=>Effect.sync(()=>Deferred.doneUnsafe(busy,Effect.void)),launch:batch=>Effect.tryPromise(async()=>{
+        const owner=await run(m.makeExecutionOwner(batch,'exec-'+batch.sessionId,batch));
+        await run(owner.submit(()=>{starts.push(batch.sessionId);return Promise.resolve();}));await run(owner.finish('normal'));
+        if(starts.filter(x=>x!=='D').length===3)Deferred.doneUnsafe(done,Effect.void);
+      })},TestClock.layer());run=runtime.run;
+      await run(Deferred.await(busy));await run(TestClock.adjust(0));
+      assert.deepEqual(attempts,['A'],'NativeBusyWaitBound: one shared lock must not multiply blocking attempts');
+      for(let i=0;i<5;i++)await run(runtime.service.wake);
+      await run(TestClock.adjust(249));assert.deepEqual(attempts,['A']);
+      await run(TestClock.adjust(1));assert.deepEqual(attempts,['A','A']);
+      assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM inbox_results WHERE consumed=0').get().n,3);
+      locked=false;blocker.exec('ROLLBACK');
+      const fresh=f.input('D','fresh-after-unlock');assert.equal(await run(runtime.service.accept(fresh)),true);
+      const owner=await run(m.makeExecutionOwner(fresh,'exec-D'));await run(owner.submit(()=>{starts.push('D');return Promise.resolve();}));await run(owner.finish('normal'));
+      await run(TestClock.adjust(500));await run(Deferred.await(done));assert.deepEqual(starts.toSorted(),['A','B','C','D']);
+      assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM inbox_results WHERE consumed=0').get().n,0);
+    }finally{locked=false;if(blocker.inTransaction)blocker.exec('ROLLBACK');blocker.close();}
+  },true);
   await safety('Stop before actual transport start preserves unconsumed results',async f=>{
     const input=f.input('B');f.sql.accept(input);f.add('B');const {run,service}=await f.startRuntime();
     const owner=await run(m.makeExecutionOwner(input,'exec-B'));

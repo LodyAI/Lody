@@ -1,10 +1,10 @@
 {
   "system": "Session Inbox admission, submission and continuation scheduling",
-  "syncCommit": "3e5bead3df94f96fca0de3b683f2e34a64b2a657",
+  "syncCommit": "55c88e70277942af8b3ebdaf0a0f8897413c7889",
   "sources": [
     {
       "path": "apps/cli/src/orchestration/inbox/service.ts",
-      "sha256": "cd60c7c8bd61cf125277ee1f51c0ce0ad323f41b82b312083872a7e1140ca51a"
+      "sha256": "8eec4a37522b81a05c56cab7560112c87404f8ab5d0fbff9b99c232514a3aef3"
     },
     {
       "path": "apps/cli/src/orchestration/inbox/sqlite.ts",
@@ -45,6 +45,10 @@
     {
       "path": "pnpm-lock.yaml",
       "sha256": "492cd8b9dfc5c4a22c9dd458ebc11d332399f7d2e54970754495108302792a53"
+    },
+    {
+      "path": "apps/cli/src/orchestration/platform/database.ts",
+      "sha256": "716870d42c7ea9c4f532c114849c508e06fd3dc883734786d87a3dd7a8d14165"
     }
   ],
   "bounds": "Two sessions in one workspace/account; one already-submitted A batch with a retained settlement; one B automatic batch/result; one Stop of B; at most two B starts to detect replay. One scanner fiber, a coalesced wake bit, a running-worker latch and per-session admission. No quiesce, host owner handoff, fresh-input replacement or native Agent process.",
@@ -88,8 +92,8 @@
     "Delivery.tla": "1d7b5cc557c0956f975fad958d4dd5cc8fabf37cf039df046e3eb6b2e5d7b771",
     "OutputGate.tla": "149ce681a6388c562da657d58ba09f5ac3f60f26c183bac9cd7bbbb6bc22967e",
     "expanded-view.mjs": "1636533193d8f7cd3d248436995f47bfe3e8d373662b73bcb3e9f11ab2f62476",
-    "expanded-coverage.json": "16fcd29463df473d983259323fdbfbed20985913240183d96bf470e23e33d25a",
-    "requirements.md": "1cb6f1436522bc8a96d3346f90aa47484fe375f624d0f0c595aa6c6e8b72e2c5",
+    "expanded-coverage.json": "03c6617f7155fb99748fafac2247c22aafc9cd8a09cf63a463a3c4451bc835c6",
+    "requirements.md": "cb141cea039822b8ee3b673e690e4d8f7bbaf99067860ca26f2ea91f8b9983ad",
     "delivery-negative-ack.cfg": "3cc93494a78ee68c97ad92f0962da8699940d57066c608c494ff76ef6e851c6f",
     "gate-deadlock.cfg": "ea3a8742f47f2a76bf530fda9106a024b8dad34e9d4b64a11e2bd1109c9be70f",
     "delivery-progress.cfg": "3049bf9974dca919fe862a1d27f97279620b5f2c933003051c8942b9e2325cc7",
@@ -99,20 +103,25 @@
     "gate-completing.cfg": "37478f1521cee9506e2b29bbfbf01680d0a2fe74cbfff8d0bb9ec92933b138dc",
     "delivery-safety.cfg": "34c12f2ae9f6da1b4134a069b9797e6e1188f6d24119f99045ad51b6cf8643ee",
     "delivery-partition.cfg": "456560ab47b99b3badc12a02abf08963930d326cdc7dff9a11fea6e84494cf41",
-    "SKILL.md": "2a1287cab10a3bd26ed0be4e553e17f2893c07461111749b3768c1062e77d956",
+    "SKILL.md": "92e38aab82df95524dc9ef5e40365f34c53d9dfb2a4dfef753dbffc02e71df7f",
     "gate-view.mjs": "76f0f278163f288c23415a81b46cf90c4c23315440227cb5fb2c8b2e1119de20",
     "gate-chart.mmd": "0a41e4913af739ab4b0aac878213f67125545902f6e799027119899d96618379",
     "delivery-legacy-negative-ack.cfg": "d9e1b1f75ff7e259c6e1687c08ce0d1faaa3dda38fca498f5bb215a43266dca7",
     "legacy-progress.cfg": "238da307766c40081928b4d89dd0affb68b6ca628e6464ed9bceea6a2c152e07",
     "gate-late-write-mutant.cfg": "4eedc24304182724f7e627f2f613ac7eda3c763b6d59d901019201d28ab4ea99",
     "gate-legacy.cfg": "51477e3a4b8a920243e949b67b539b59c1d681a455a4b1dc79c6a314016853c5",
-    "gate-timeout-abort-mutant.cfg": "b52deb8e95c9cadf39b60691aa1a07aecad5be322478cee7d2b884b86277d9a8"
+    "gate-timeout-abort-mutant.cfg": "b52deb8e95c9cadf39b60691aa1a07aecad5be322478cee7d2b884b86277d9a8",
+    "BusyScan.tla": "82d6c2e18921f4f28e353f29eb2f3973b34939c804ce0587cf399a743eed30ac",
+    "busy-scan.cfg": "81b804c73945436b6285ee05197b05b8ba480cd4392a352aa3db922493425525",
+    "busy-scan-mutant.cfg": "ce5321c0706f7e06211f41db01550d08922d54398cc90bf07b76a1eea4a4ea3b",
+    "busy-view.mjs": "92f741731f853e81b2f93022ec9018386cceac756b6397099bfc57c72b43cb00",
+    "busy-chart.mmd": "54e6dba09e42830226b02a8b0899782b92ae17146bc51ad23e6936b487a1b84c"
   },
   "verifierHashes": {
-    ".agents/verification/state-machines/check.py": "aa67959ee6307d660cccdc4ad280412a34cee66825e868facb1da80fb17f0503",
+    ".agents/verification/state-machines/check.py": "8f26ecf4892cfa1b88c0b0bf37fcf3cedc1a9c8e7b515ec7541a1e85816d2ac0",
     ".agents/verification/state-machines/history.py": "01a58e7f846c2f394217f86772ea7f766c51c81b5437d34dd7b81e4bb5b1ac5e",
-    ".agents/verification/state-machines/replay.mjs": "a2e4f2ac86114b33554bdddcd7053cc60e8e593cc217d5bc94162920cf771461",
-    ".agents/verification/state-machines/expanded.py": "c826e940fe7e52d58507ccc9f47181782c99a1d26ee0101a454eb969b0eab9da",
+    ".agents/verification/state-machines/replay.mjs": "964a425db2ef5f98f35aa5fb44cce44180c55a30006271704433bce112fd1e57",
+    ".agents/verification/state-machines/expanded.py": "57f8c0c1da84982c1ed38c3bf75e5fbf63e2a48d9a8f756408dcf60806ec0262",
     ".agents/verification/state-machines/sync-replay.mjs": "cc3b142b099ffd5366dc8975d41ded7f66aa89c1aeb203f04217ffcbb8c4efbc",
     ".agents/verification/state-machines/decision-replay.mjs": "007aae393de985ba157c9d6782d7cd5a6a63e715ebc76ec6c8aa7f3cb5f13a48"
   },

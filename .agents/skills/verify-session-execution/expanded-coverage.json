@@ -1,6 +1,6 @@
 {
   "system": "Session Inbox delivery, admission, submission and continuation scheduling",
-  "syncCommit": "3e5bead3df94f96fca0de3b683f2e34a64b2a657",
+  "syncCommit": "55c88e70277942af8b3ebdaf0a0f8897413c7889",
   "sources": [
     {
       "path": "apps/cli/src/session/session-dispatch-logic.ts",
@@ -97,12 +97,25 @@
     {
       "path": "packages/shared/src/agent-brand.ts",
       "sha256": "8e3ff6f4f4f7adb8c7e5c5944b54eab1fc0257f2a6b8612959eb61cecfc65e23"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/service.ts",
+      "sha256": "8eec4a37522b81a05c56cab7560112c87404f8ab5d0fbff9b99c232514a3aef3"
+    },
+    {
+      "path": "apps/cli/src/orchestration/storage-error.ts",
+      "sha256": "a0b1dc72d96a2530f67b25d3baaac670f5642a59a7fdc263940a2ebe5da6cbe8"
+    },
+    {
+      "path": "apps/cli/src/orchestration/platform/database.ts",
+      "sha256": "716870d42c7ea9c4f532c114849c508e06fd3dc883734786d87a3dd7a8d14165"
     }
   ],
   "bounds": {
     "delivery": "Two concurrent clients each publish one immutable input ID. Body, RPC offer, user receipt and activation reach one authorized execution host in arbitrary order. Latest activation has a fixed LWW winner (ID 2); reversing both IDs is symmetric. Each arrival is represented once; duplicate packet idempotence is an abstraction, not a network implementation proof. At most two missing-history timeouts; no host migration of storage.",
     "sqlite": "All 336 orders of accept A < begin A < submit A < settle A < release A, interleaved with accept B, exact-target Stop, lease-safe epoch change. SQL transactions are real; the provider-start critical section is represented by consecutive synchronous canSubmit/fence. One preexisting result and one future result. Future new-ID input is admitted after each timeline.",
-    "outputGate": "One RPC turn with waiting/opening/open phases, original deadline retained during callback, disposal, callback completion/hang, output, abort and stale-write attempt. Signal guard prevents late writes; raw already-issued work is not modeled as canceled. No global Wait. Metadata creation remains eligible after timeout while the turn is live."
+    "outputGate": "One RPC turn with waiting/opening/open phases, original deadline retained during callback, disposal, callback completion/hang, output, abort and stale-write attempt. Signal guard prevents late writes; raw already-issued work is not modeled as canceled. No global Wait. Metadata creation remains eligible after timeout while the turn is live.",
+    "busyScan": "Two pending records, one shared writer lock, native attempts per scan, deferred retry, eventual unlock, explicit admission and scope closure; no numeric duration in TLA. TestClock/native SQLite checks real delay/cancellation. The original single-call busy_timeout remains 5000 ms."
   },
   "assumptions": [
     "Execution host handoff occurs only after the prior physical host lease/process-exit barrier. This barrier is assumed, not produced by tests.",
@@ -122,7 +135,8 @@
     "OutputEventuallyUnblocked": "Under the configured callback/disposal fairness, output gate waiters eventually release.",
     "NoLateWrites": "Only disposal aborts later assistant-entry writes, including disposal after deadline already released waiters. Already-issued work is not canceled.",
     "DeadlineUnblocks": "The original deadline releases output even if the pre-open callback remains pending; no disposal fairness is assumed.",
-    "LiveCallbackKeepsMetadata": "A completing callback on a still-live turn retains author/model metadata after the wait deadline."
+    "LiveCallbackKeepsMetadata": "A completing callback on a still-live turn retains author/model metadata after the wait deadline.",
+    "NativeBusyWaitBound": "A shared SQLite writer lock incurs at most one native BUSY wait per scan pass. Explicit recovery also stops at its first shared BUSY, retaining untouched receipts."
   },
   "actions": {
     "Body/Rpc/Receipt/Activation": "session-send-delivery.ts separate history/control/meta writes and dispatch-turn RPC; delivery order is abstracted, not real transport.",
@@ -131,7 +145,8 @@
     "ObserveHistory/Deadline": "turn-history-gate.ts scheduleCheck/openGate synchronous prefix through hook await.",
     "HookCompletes": "Callback resolution/caught rejection releases only its own gate; the writer checks its abort signal after asynchronous reads and before openAssistantTurn.",
     "Dispose": "Aborts later callback steps even on an already-open gate, then releases waiters. Deadline only releases waiters.",
-    "sqlitePermutations": "InboxSqlite accept, begin, prepare, canSubmit, fence, settle, release, pause and activate; no handwritten SQL implementation of those transitions."
+    "sqlitePermutations": "InboxSqlite accept, begin, prepare, canSubmit, fence, settle, release, pause and activate; no handwritten SQL implementation of those transitions.",
+    "BUSY/Retry": "service.ts typed storage failure propagation, coalesced scope-owned deferBusyScan and scan wake guard. No replay of transport and no admission fence."
   },
   "syncWorkingTree": false
 }

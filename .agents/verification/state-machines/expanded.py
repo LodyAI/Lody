@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Check the delivery/output slices of the single Session Inbox verification skill."""
+"""Check the delivery/output/shared-writer slices of the single Session Inbox verification skill."""
 from pathlib import Path
 import argparse,hashlib,importlib.util,json,os,re,subprocess,sys,tempfile
-PROFILES=[('Delivery','delivery-safety'),('Delivery','delivery-progress'),('Delivery','delivery-partition'),('Delivery','delivery-negative-ack'),('Delivery','delivery-durable-control'),('OutputGate','gate-current'),('OutputGate','gate-completing'),('OutputGate','gate-cancel-control'),('OutputGate','gate-deadlock')]
+PROFILES=[('BusyScan','busy-scan'),('Delivery','delivery-safety'),('Delivery','delivery-progress'),('Delivery','delivery-partition'),('Delivery','delivery-negative-ack'),('Delivery','delivery-durable-control'),('OutputGate','gate-current'),('OutputGate','gate-completing'),('OutputGate','gate-cancel-control'),('OutputGate','gate-deadlock')]
 def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[3])
@@ -44,7 +44,7 @@ def main():
    if status=='BLOCKED':blocked.append(name)
    print(name,{k:results[name][k] for k in ('result','distinctStates','exit','temporalChecked')},flush=True)
  if not args.source_only and not args.safety_only:
-  for module,name,exit_code in [('Delivery','delivery-legacy-negative-ack',12),('OutputGate','gate-legacy',11),('OutputGate','gate-late-write-mutant',12),('OutputGate','gate-timeout-abort-mutant',12)]:
+  for module,name,exit_code in [('Delivery','delivery-legacy-negative-ack',12),('OutputGate','gate-legacy',11),('OutputGate','gate-late-write-mutant',12),('OutputGate','gate-timeout-abort-mutant',12),('BusyScan','busy-scan-mutant',12)]:
    source=(skill/(module+'.tla')).read_text().replace('---- MODULE '+module+' ----','---- MODULE Model ----',1)
    result=base.run_tlc(java,jar,source,(skill/(name+'.cfg')).read_text(),out/name)
    assert result['exit']==exit_code,'Broken model behavior was not caught: '+name

@@ -87,7 +87,7 @@ def main():
   require(result['exit']==12 and f'Invariant {prop} is violated' in result['output'],f'Model mutation missed {prop}')
   mutations.append({'property':prop,'result':'CAUGHT'})
  results['modelMutations']=mutations
- cases=[('current','trigger'),('blocked-scan','trigger'),('current','sqlite-full'),('blocked-scan','sqlite-full'),('unsafe-submit','trigger'),('stale-release','trigger'),('drop-retry','trigger')]
+ cases=[('busy-amplification','trigger'),('current','trigger'),('blocked-scan','trigger'),('current','sqlite-full'),('blocked-scan','sqlite-full'),('unsafe-submit','trigger'),('stale-release','trigger'),('drop-retry','trigger')]
  for variant,fault_mode in cases:
   key=variant+('-sqlite-full' if fault_mode=='sqlite-full' else '')
   result=subprocess.run(['node',str(HERE/'replay.mjs'),str(ROOT),str(tools),variant,fault_mode],capture_output=True,text=True,timeout=60)
@@ -99,7 +99,7 @@ def main():
    require((result.returncode==0)==(data['progress']['result']=='PASS'),'Source result/exit mismatch.')
    print('source-'+key,data['progress'],flush=True)
   else:
-   property_name={'unsafe-submit':'NoStartAfterStop','stale-release':'OldReleaseCannotFreeSuccessor','drop-retry':'RetryEvidenceRetained'}[variant]
+   property_name={'unsafe-submit':'NoStartAfterStop','stale-release':'OldReleaseCannotFreeSuccessor','drop-retry':'RetryEvidenceRetained','busy-amplification':'NativeBusyWaitBound'}[variant]
    require(result.returncode==1 and 'AssertionError' in result.stderr and property_name+':' in result.stderr,f'Source mutation not behaviorally caught: {variant}')
    results['source-'+key]={'result':'CAUGHT','property':property_name}
  require(results['source-current']['progress']['result']=='PASS','Current code must preserve independent progress.')
