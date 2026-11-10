@@ -16,6 +16,7 @@ import {
   E2eeMemberRemovedError
 } from '../../services/e2ee-cloud-errors.mjs'
 import { Effect, Exit } from 'effect'
+import { z } from 'zod'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import type { E2eeWorkspaceRuntime } from '@lody/platform'
 import type { RecoveryVaultStore } from '@lody/e2ee-core/services'
@@ -83,6 +84,22 @@ import type {
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
 import { MemberOfferSchema, decodeMemberKeyPackage } from '../../services/e2ee-member-join.mjs'
+
+const irohTargetSchema = z.object({
+  workspaceId: z.string().min(1).max(256),
+  targetMachineId: z.string().min(1).max(256)
+})
+const irohCallSchema = irohTargetSchema.extend({
+  envelope: z.object({
+    id: z.string().regex(/^[0-9a-f]{32}$/),
+    frame: z
+      .string()
+      .min(286)
+      .max(2 * 1024 * 1024)
+      .regex(/^(?:[0-9a-f]{2})+$/)
+  }),
+  timeoutMs: z.number().int().min(1).max(60_000)
+})
 
 /** Only the typed, credential-authenticated cloud results are terminal access loss. */
 type AccessLoss = 'member_removed' | 'device_revoked'
@@ -2851,6 +2868,45 @@ export class E2eeIpc extends IpcService {
           ? owner.host.acceptFeatureRpcResponse(workspaceId, input, frame)
           : refuseUnopened(owner, workspaceId),
       workspaceId,
+      false
+    )
+  }
+  /** Whether an iroh connection to the machine is live; starts one when not. */
+  @IpcMethod()
+  async irohReady(workspaceId: string, targetMachineId: string) {
+    const id = sender()
+    const target = irohTargetSchema.parse({ workspaceId, targetMachineId })
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(target.workspaceId)?.has(id)
+          ? owner.host.irohReady(target.workspaceId, target.targetMachineId)
+          : refuseUnopened(owner, target.workspaceId),
+      target.workspaceId,
+      false
+    )
+  }
+  /** Carries one prepared `{id, frame}` envelope; returns reply frames for the
+   * renderer to verify with the existing accept methods. Never prepares or signs. */
+  @IpcMethod()
+  async irohCall(
+    workspaceId: string,
+    targetMachineId: string,
+    envelope: { id: string; frame: string },
+    timeoutMs: number
+  ) {
+    const id = sender()
+    const input = irohCallSchema.parse({ workspaceId, targetMachineId, envelope, timeoutMs })
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(input.workspaceId)?.has(id)
+          ? owner.host.irohCall(
+              input.workspaceId,
+              input.targetMachineId,
+              input.envelope,
+              input.timeoutMs
+            )
+          : refuseUnopened(owner, input.workspaceId),
+      input.workspaceId,
       false
     )
   }

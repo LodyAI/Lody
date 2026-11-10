@@ -361,6 +361,9 @@ export function CloudPlatformProvider({
                 native.prepareDispatch(workspaceId, machineId, input),
               acceptDispatchResponse: (workspaceId, machineId, input, frame) =>
                 native.acceptDispatchResponse(workspaceId, machineId, input, frame),
+              irohReady: (workspaceId, machineId) => native.irohReady(workspaceId, machineId),
+              irohCall: (workspaceId, machineId, envelope, timeoutMs) =>
+                native.irohCall(workspaceId, machineId, envelope, timeoutMs),
               seal: (workspaceId, input) => native.seal(workspaceId, input),
               openContent: (workspaceId, input) => native.openContent(workspaceId, input),
               account: (options) => native.account(options),

@@ -51,9 +51,22 @@ export interface CloudSessionSharingPort {
  * so. Call sites must never construct cloud clients or probe reachability to
  * invent a fallback.
  */
+/**
+ * Lody-operated iroh relays for encrypted-workspace RPC. Supplied only by the
+ * official build composition; never fetched from the control plane. Every dial
+ * names all of them, so no address is published anywhere.
+ */
+export interface E2eeIrohRelays {
+  readonly urls: readonly string[];
+  /** Shared relay access token, sent as a bearer token. */
+  readonly token?: string;
+}
+
 /** Device-scoped cloud transport; local opens and custody stay with its host. */
 export interface CloudE2eePort {
   readonly machineSharing?: import('./e2ee-machine-sharing').E2eeMachineSharingTransport;
+  /** Absent: no iroh route; the host keeps Streams RPC and durable dispatch. */
+  readonly irohRelays?: E2eeIrohRelays;
 
   /** Raw retained update messages, never a snapshot or an attribution verdict. */
   readExecutionOriginPage?(

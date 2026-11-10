@@ -12,6 +12,9 @@ import { encryptedRpcFixture } from '../../../../../packages/loro-streams-rpc/te
 import { RealtimeJournal } from './realtime-journal';
 import { makeEncryptedAgentExecution } from './agent-execution';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { runMachineIrohListener } from './iroh-listener';
+import { randomBytes } from 'node:crypto';
+import { developmentNativePath, loadIrohNative } from '@lody/iroh-native';
 
 const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
 afterEach(() => {
@@ -129,6 +132,66 @@ describe('encrypted dispatch receiver and the shared actual-start journal', () =
     expect(f.offers()).toBe(1);
     expect(f.published[1]).toEqual(ack);
   });
+
+  // Built by `pnpm --filter @lody/iroh-native build`; skipped where no module exists.
+  const iroh = loadIrohNative(developmentNativePath());
+  it.skipIf(!iroh)(
+    'serves one original over iroh and Streams with a single offer and the same verified ACK',
+    async () => {
+      const f = fixture();
+      const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
+      const receive = f.receiver();
+      const opened = await Effect.runPromise(Deferred.make<{ id: string; addrs: string[] }>());
+      const listener = Effect.runFork(
+        Effect.scoped(
+          runMachineIrohListener({
+            native: iroh!,
+            relays: { urls: [] },
+            withSeed: (open) => Effect.promise(() => open(randomBytes(32))),
+            handle: (envelope, sink) =>
+              receive(envelope, sink).pipe(Effect.ensuring(Effect.promise(() => sink.end()))),
+            onOpen: (endpoint) =>
+              Deferred.doneUnsafe(
+                opened,
+                Effect.succeed({ id: endpoint.endpointId, addrs: endpoint.directAddrs() })
+              ),
+          })
+        )
+      );
+      const machine = await Effect.runPromise(Deferred.await(opened));
+      const dialer = await iroh!.openEndpoint(randomBytes(32), { relayUrls: [], accept: false });
+      try {
+        const call = await dialer.call(
+          { endpointId: machine.id, directAddrs: machine.addrs },
+          Buffer.from(JSON.stringify({ id: original.requestId, frame: original.frameHex })),
+          10_000
+        );
+        const replies: { id: string; frame: string }[] = [];
+        for (let reply = await call.nextReply(); reply; reply = await call.nextReply())
+          replies.push(JSON.parse(reply.toString('utf8')));
+        expect(replies).toHaveLength(1);
+        expect(replies[0]!.id).toBe(original.requestId);
+        expect(
+          await Effect.runPromise(f.sender.acceptResponse(f.machineId, f.input, replies[0]!.frame))
+        ).toEqual(f.ack);
+        // The same original over Streams replays the retained ACK without a second offer.
+        await Effect.runPromise(receive({ id: original.requestId, frame: original.frameHex }));
+        expect(f.offers()).toBe(1);
+        expect(f.published).toEqual([replies[0]]);
+        // A malformed request ends its stream without replies or an offer.
+        const bad = await dialer.call(
+          { endpointId: machine.id, directAddrs: machine.addrs },
+          Buffer.from('not an envelope'),
+          10_000
+        );
+        expect(await bad.nextReply()).toBeNull();
+        expect(f.offers()).toBe(1);
+      } finally {
+        await dialer.close();
+        await Effect.runPromise(Fiber.interrupt(listener));
+      }
+    }
+  );
 
   it('lets simultaneous durable/realtime execution paths claim the same business turn once, including after restart', async () => {
     const f = fixture();

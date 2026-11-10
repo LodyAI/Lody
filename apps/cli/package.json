@@ -52,6 +52,7 @@
     "@lody/code-review-helper": "workspace:*",
     "@lody/e2ee-core": "workspace:*",
     "@lody/e2ee-machine-sharing": "workspace:*",
+    "@lody/iroh-native": "workspace:*",
     "@lody/loro-streams-rpc": "workspace:*",
     "@lody/platform": "workspace:*",
     "@lody/shared": "workspace:*",

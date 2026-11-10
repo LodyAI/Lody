@@ -265,10 +265,29 @@ export function withDesktopE2eeAccount<A>(
                 )
                 const bootstrap = yield* makeDesktopE2eeBootstrap({ directory, accountId, custody })
                 const runtime = yield* Effect.promise(() => import('./e2ee-runtime.mjs'))
+                // Only cloud builds that carry relays load the iroh route at all.
+                const irohConfigModule =
+                  import.meta.env.VITE_LODY_PLATFORM === 'cloud' && import.meta.env.VITE_IROH_RELAYS
+                    ? yield* Effect.promise(() => import('./e2ee-iroh-config'))
+                    : undefined
+                const irohConfig = irohConfigModule?.desktopIrohConfig({
+                  packaged: app.isPackaged,
+                  resourcesPath: process.resourcesPath,
+                  appPath: app.getAppPath(),
+                  env: import.meta.env
+                })
+                const irohNative = irohConfig
+                  ? (yield* Effect.promise(() => import('./e2ee-iroh.mjs'))).loadIrohNative(
+                      irohConfig.file
+                    )
+                  : undefined
                 const host = yield* runtime.makeDesktopE2eeRuntimeHost({
                   directory,
                   custody,
-                  bootstrap
+                  bootstrap,
+                  ...(irohConfig && irohNative
+                    ? { iroh: { native: irohNative, relays: irohConfig.relays } }
+                    : {})
                 })
                 const owned: Account = {
                   accountId,
