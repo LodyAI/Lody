@@ -120,15 +120,13 @@
 
 - The shared runtime snapshot includes upstream session read/retry/stall/resume trace events (7028f2bf) and Zod 4 schema generation compatibility (fc9bb555). Native iOS page ownership/reveal fixes do not replace Android's Compose lifecycle or transcript implementation; retain the existing Android session owner boundaries.
 
-- Team conversation lists show a compact circular owner avatar after the trailing time/status (including children), resolved from the workspace member cache with a name-initial fallback. My tasks omit this avatar; special status stays trailing.
+- Team conversation lists show a compact circular owner avatar after the trailing time/status (including children), resolved from the workspace member cache with a name-initial fallback. My tasks omit this avatar; special status stays trailing. Titles and project details share the leading edge.
 
 - Current-working-directory conversations open from the trailing conversations button only when open child Tabs exist. Its status summarizes other open conversations with local read watermarks. More owns “新建当前目录对话” and closed-conversation recovery even when the button is hidden. Keep close/restore semantics unchanged. The tappable secondary machine subtitle below the title shows presence before the name and opens owner/visibility details; do not duplicate it in the bottom action bar.
 
 - Every Home grouping (time/project/status) starts with a separate Pinned group when nonempty, within the current owner/project scope. Partition whole visible families before bucketing, so pinned families appear once and retain child folding. Project conversation lists use the same projection; archived chats and hidden Tabs never enter Pinned.
 
 - The repository context popover leads with repository name and a small one-line branch plus trailing copy button. Its aligned action columns show View PR / #number (never localized digit grouping) and All changes / coloured ±counts. Compact capsules omit diff counts without substituting an unexplained dot; short PR labels use intrinsic width.
-
-- Team list owner avatars sit after the first-line time/status at the trailing edge, including child rows; titles and project details share the leading edge. My tasks still omit owner avatars.
 
 - PR marks use shared `LodyPullRequestIcon` from the design system in lists, composer context and its PR action. Match Web SessionPrIcon: four Lucide status shapes, PR colour independent of CI, s check / f,e cross / p solid dot / x circle-dot, including merged/closed when CI is provided. Keep the 14/16 base, 10/16 verdict and transparent circular cutout; do not replace the whole mark with a CI tint.
 
