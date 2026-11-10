@@ -1,7 +1,7 @@
 import UIKit
 
 @MainActor
-final class LodyNavigationSearch: NSObject, UISearchBarDelegate {
+final class LodyNavigationSearch: NSObject, UISearchBarDelegate, UISearchResultsUpdating, UISearchControllerDelegate {
   struct Config: Decodable, Equatable {
     var placeholder: String?
     var placement: String?
@@ -21,10 +21,16 @@ final class LodyNavigationSearch: NSObject, UISearchBarDelegate {
   var emit: ((String, String) -> Void)?
   private(set) var config = Config()
   private var lastCommand = 0
+  /// The text last reported through `change`. UIKit clears the field without calling
+  /// `textDidChange` when it dismisses the controller (e.g. the iOS 26 integrated button
+  /// collapsing, or a pushed page), so every path re-syncs against the bar instead.
+  private(set) var reportedText = ""
 
   override init() {
     super.init()
     controller.searchBar.delegate = self
+    controller.searchResultsUpdater = self
+    controller.delegate = self
   }
 
   var placement: UINavigationItem.SearchBarPlacement {
@@ -60,7 +66,9 @@ final class LodyNavigationSearch: NSObject, UISearchBarDelegate {
     switch command.action {
     case "focus": bar.becomeFirstResponder()
     case "blur": bar.resignFirstResponder()
-    case "clearText": bar.text = ""
+    case "clearText":
+      bar.text = ""
+      reportChange()
     case "cancelSearch":
       searchBarCancelButtonClicked(bar)
       controller.isActive = false
@@ -77,7 +85,7 @@ final class LodyNavigationSearch: NSObject, UISearchBarDelegate {
   }
 
   func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-    emit?("change", searchBar.text ?? "")
+    reportChange()
   }
 
   func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
@@ -88,6 +96,23 @@ final class LodyNavigationSearch: NSObject, UISearchBarDelegate {
     searchBar.text = ""
     searchBar.resignFirstResponder()
     emit?("cancel", "")
-    emit?("change", "")
+    reportChange()
+  }
+
+  func updateSearchResults(for searchController: UISearchController) {
+    reportChange()
+  }
+
+  func didDismissSearchController(_ searchController: UISearchController) {
+    reportChange()
+    if reportedText.isEmpty { emit?("cancel", "") }
+  }
+
+  /// Reports the bar's current text once per distinct value, whichever UIKit path changed it.
+  private func reportChange() {
+    let text = controller.searchBar.text ?? ""
+    guard text != reportedText else { return }
+    reportedText = text
+    emit?("change", text)
   }
 }
