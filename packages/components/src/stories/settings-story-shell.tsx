@@ -111,19 +111,69 @@ const storyStableSessionValue = {
  */
 export function SettingsStoryProviders({
   capabilities = [],
+  multiMember = false,
   children,
 }: {
   capabilities?: readonly PlatformCapability[];
+  multiMember?: boolean;
   children: ReactNode;
 }) {
+  const [organization] = useState(() =>
+    multiMember
+      ? {
+          ...settingsStoryOrganization,
+          members: [
+            ...settingsStoryOrganization.members,
+            {
+              id: 'settings-story-teammate-membership',
+              userId: 'settings-story-teammate',
+              organizationId: settingsStoryOrganization.id,
+              role: 'member' as const,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ],
+        }
+      : settingsStoryOrganization
+  );
+  const [authClient] = useState(() =>
+    multiMember
+      ? ({
+          ...storyAuthClient,
+          useActiveOrganization: () => ({
+            data: organization,
+            isPending: false,
+            error: null,
+            refetch: async () => ({ data: organization, error: null }),
+          }),
+          useListOrganizations: () => ({
+            data: [organization],
+            isPending: false,
+            error: null,
+            refetch: async () => ({ data: [organization], error: null }),
+          }),
+        } as unknown as LodyAuthClient)
+      : storyAuthClient
+  );
   const [platform] = useState(() => ({
     ...localStoryPlatform,
+    ...(multiMember
+      ? {
+          workspaces: {
+            ...localStoryPlatform.workspaces,
+            state: createStaticStore({
+              status: 'ready' as const,
+              workspaces: [organization],
+              activeWorkspaceId: organization.id,
+            }),
+          },
+        }
+      : {}),
     capabilities: createCapabilitySet([...localStoryPlatform.capabilities.list(), ...capabilities]),
   }));
 
   return (
     <PlatformContext.Provider value={platform}>
-      <AuthProvider authClient={storyAuthClient}>
+      <AuthProvider authClient={authClient}>
         <StableSessionContext.Provider value={storyStableSessionValue}>
           {children}
         </StableSessionContext.Provider>

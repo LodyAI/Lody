@@ -52,6 +52,10 @@ existing authorization and execution boundaries; the default ceiling had no room
 
 ## Turn execution
 
+- Machine identity recovery seals actual Turn admission before restart. Recheck after
+  pre-owner awaits; sealed requests retain pending history and Inbox inputs without
+  marking them handled, failed or canceled. Registered Turns block recovery even
+  before presence publication.
 - Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), including pre-open
   writes, never status/meta. Timeout preserves live metadata creation; disposal aborts it and releases waiters.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).

@@ -397,7 +397,12 @@ export type AcpAuthMethodSummary = {
   args?: string[];
 };
 
-export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
+export type AcpCapabilityAuthority =
+  | 'unavailable'
+  | 'provisional'
+  | 'authoritative'
+  /** Probe succeeded but advertised a model selector with zero choices. */
+  | 'degraded';
 
 export type AcpCapabilityCacheEntry = {
   cliType: AgentConfigCliType;
@@ -564,13 +569,41 @@ export const getAcpCapabilityCacheEntryAuthority = (
   if (!readableEntry) {
     return 'unavailable';
   }
-  return readableEntry.provenance === 'runtime' ? 'authoritative' : 'provisional';
+  if (readableEntry.provenance !== 'runtime') {
+    return 'provisional';
+  }
+  // A runtime-probed entry that advertises a model select with zero choices was
+  // read while the agent's catalog was unavailable — the picker the user sees
+  // renders that select directly, so the entry is verified-but-degraded rather
+  // than authoritative.
+  if (hasEmptyModelSelectOption(readableEntry.configOptions)) {
+    return 'degraded';
+  }
+  return 'authoritative';
 };
+
+/**
+ * Whether a normalized (or persisted) config-option list advertises a model
+ * selector with no choices. The agent clearly intends to expose model
+ * selection — it emitted the option — but produced an empty catalog, which is
+ * a probe-time degradation (cold upstream cache, startup race, auth lag), not
+ * an agent that legitimately has no values. Selectors render this select
+ * directly (they do not fall back to `models`), so an entry in this state must
+ * never answer a capability refresh or be presented as fully verified.
+ */
+export const hasEmptyModelSelectOption = (
+  configOptions: AcpConfigOptionSummary[] | undefined
+): boolean =>
+  (configOptions ?? []).some(
+    (option) =>
+      option.type === 'select' && option.category === 'model' && option.options.length === 0
+  );
 
 export type AcpCapabilityCacheStaleReason =
   | 'missing'
   | 'cache-version-mismatch'
-  | 'source-version-mismatch';
+  | 'source-version-mismatch'
+  | 'empty-model-catalog';
 
 export const getAcpCapabilityCacheStaleReason = (
   entry: AcpCapabilityCacheEntry | undefined,
@@ -584,6 +617,9 @@ export const getAcpCapabilityCacheStaleReason = (
   }
   if (entry.sourceVersion !== expectedSourceVersion) {
     return 'source-version-mismatch';
+  }
+  if (hasEmptyModelSelectOption(entry.configOptions)) {
+    return 'empty-model-catalog';
   }
   return undefined;
 };

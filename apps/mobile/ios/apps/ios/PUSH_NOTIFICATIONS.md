@@ -34,7 +34,8 @@ its native login credential to the process-owned registration lifecycle.
 false uses OneSignal. Missing/malformed responses and network errors do not select
 a default; a previously confirmed provider is retained and the next foreground or
 permission refresh retries. OneSignal initializes lazily and logs in with
-`lody-push-v2:<userId>`. Native account IDs and notification recipients stay raw.
+the original verified `userId`, unchanged. Native account IDs and notification
+recipients use that same ID.
 
 Direct APNs registration sends platform `ios`, purpose `notification`, the token,
 language, a persistent random installation ID, and the running app's actual Bundle

@@ -15,6 +15,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   rebuild it behind the invalid marker; offline and ordinary operations retain the error.
   [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-catalog-recovery.md).
 
+- `machine-identity-restore.ts` — retained daemon restart intent and credential
+  backup/publication. Only the next supervised daemon worker commits the accepted
+  cloud operation, before opening runtimes. Unknown results retain their original
+  request and credentials. This remains in the existing Promise-based startup and
+  lifecycle boundary; it does not migrate Fleet or restart ownership to Effect.
+
 ## Resource discovery
 
 - `workspace-command-manager.ts` — overlapping standalone commands borrow one

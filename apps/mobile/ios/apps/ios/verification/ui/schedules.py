@@ -80,11 +80,32 @@ def swipe_action(identifier, action):
 
 
 ui.element('home-chat-list')
-ui.axe('tap', '--id', 'home-tab-schedules', '--post-delay', '.8')
+# Seed the real disk adapter before the first Schedules page exists. Distinct
+# account/workspace snapshots must remain independent; the fixture reports ready
+# only after reading each back through the production service.
+ui.open_case('schedule-fixture-seed-cache')
+fixture_state('cache', 'ready')
+fixture('hold', 'list')
+ui.axe('tap', '--id', 'home-tab-schedules')
 ui.element('home-schedules-list')
+fixture_state('list', 'pending')
+wait_row('schedule:daily-review', 'Cached daily review')
+assert not any('Other account review' in str(i) or 'Other workspace review' in str(i) for i in ui.state())
+ui.capture('schedule-cached-list-pending')
+fixture('fail', 'list')
+wait_row('schedule:daily-review', 'Cached daily review')
+ui.capture('schedule-cached-list-failed')
+# Returning to the tab retries the live read and replaces the disk projection.
+ui.axe('tap', '--id', 'home-tab-chats')
+ui.element('home-chat-list')
+ui.axe('tap', '--id', 'home-tab-schedules')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'schedule:daily-review'
+                         and 'Daily review' in str(i.get('AXLabel'))
+                         and 'Cached daily review' not in str(i.get('AXLabel')) for i in items),
+        'Fresh list did not replace the cached row')
 ui.element('workspace-menu')
-ui.element('schedules-section:tasks')
-list_element('schedules-section:messages')
+ui.element('schedules-section:attention')
+list_element('schedules-section:running')
 list_element('schedule:nightly-build')
 # Status in words; only the blocked task is tinted and names its reason.
 assert text('state.blocked') in row_text('schedule:nightly-build')
@@ -236,4 +257,4 @@ ui.capture('schedule-delete-confirm')
 ui.axe('tap', '--label', text('delete'), '--post-delay', '1')
 ui.element('home-schedules-list')
 ui.wait(lambda items: not any(i.get('AXUniqueId') == 'schedule:launch-once' for i in items), 'Deleted schedule stayed listed')
-print('PASS: Schedules tab lists sections with worded states, optimistic pause/resume rollback before reconciliation, cached detail through pending/failed refresh, swipe pause, read-only and unsupported rules, create and confirmed delete. Offline fixture; visual review required.')
+print('PASS: Schedules tab lists sections with worded states, optimistic pause/resume rollback before reconciliation, account/workspace-isolated SQLite list on first open through pending/failed refresh and live replacement, cached detail through pending/failed refresh, swipe pause, read-only and unsupported rules, create and confirmed delete. Offline fixture; visual review required.')

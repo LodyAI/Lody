@@ -152,7 +152,6 @@ type AuthorizedWorkspaceList = Extract<CloudAccessSnapshot, { status: 'authorize
 type WorkspaceRuntimeState = {
   workspace: WorkspaceListItem;
   lody: Lody;
-  unsubscribeTerminalCleanup: () => void;
   prPollerWorkspace: PrPollerWorkspaceHandle | null;
   schedules: ScheduleWorkspaceHandle;
   automations?: AutomationWorkspaceHandle;
@@ -210,6 +209,7 @@ export class LodyFleet {
   private unsubscribeWorkspaces: (() => void) | null = null;
   private stopped = false;
   private shutdownReceipt: Promise<void> | undefined;
+  private identityRestorePending = false;
   private shutdownRecovery: Promise<void> | undefined;
   private localServiceReleaseFailure: unknown;
   private globalShutdownReceipt: Promise<void> | undefined;
@@ -946,11 +946,21 @@ export class LodyFleet {
     this.reconcileRetryDelayMs = 0;
   }
 
+  private isIdentityRestoreIdle(): boolean {
+    return (
+      !this.identityRestorePending &&
+      !this.stopped &&
+      this.startInFlight.size === 0 &&
+      [...this.runtimes.values()].every(({ lody }) => lody.isMachineIdentityRestoreIdle())
+    );
+  }
+
   /** A start may proceed only for a desired workspace that is not waiting for a
    * fresh identity; re-checked after every await in startWorkspace. */
   private mayStart(workspaceId: string): boolean {
     return (
       !this.stopped &&
+      !this.identityRestorePending &&
       !this.e2eeResets.has(workspaceId) &&
       this.desiredWorkspaces.has(workspaceId) &&
       !this.waitingForPairing.has(workspaceId)
@@ -1009,7 +1019,6 @@ export class LodyFleet {
       let stopSchedules: (() => Promise<void>) | undefined;
       let stopAutomations: (() => Promise<void>) | undefined;
       let partialPoller: PrPollerWorkspaceHandle | undefined;
-      let detachTerminals: (() => void) | undefined;
       const workspaceStartAt = Date.now();
       try {
         lody = await Lody.create({
@@ -1116,6 +1125,13 @@ export class LodyFleet {
             this.cleanupLocalProjectWorktreeSetupIfUnreferenced(localProjectId),
           onFatalAuthFailure: this.onFatalAuthFailure,
           onProcessLifecycleAction: this.onProcessLifecycleAction,
+          isMachineIdentityRestoreIdle: () => this.isIdentityRestoreIdle(),
+          sealMachineIdentityRestore: () => {
+            if (!this.isIdentityRestoreIdle()) return false;
+            this.identityRestorePending = true;
+            for (const { lody } of this.runtimes.values()) lody.stopNewIdentityRestoreDispatch();
+            return true;
+          },
           workspaceWatchCoordinator: this.workspaceWatchCoordinator,
         });
 
@@ -1132,10 +1148,6 @@ export class LodyFleet {
         }
 
         const startedLody = lody;
-        const unsubscribeTerminalCleanup = startedLody.onSessionTerminated((sessionId) => {
-          this.terminalPtyService.closeSession(sessionId);
-        });
-        detachTerminals = unsubscribeTerminalCleanup;
         // The poller reads decrypted repo/branch metadata and has independent
         // hosted credential/association ports. Do not construct it for E2EE:
         // sanitizing Lody's own cloud port does not fence this Fleet owner.
@@ -1233,7 +1245,6 @@ export class LodyFleet {
         const runtime: WorkspaceRuntimeState = {
           workspace,
           lody: startedLody,
-          unsubscribeTerminalCleanup,
           prPollerWorkspace,
           schedules,
           automations,
@@ -1277,7 +1288,6 @@ export class LodyFleet {
             () => retained.cleanup(),
             async () => {
               await partialPoller?.dispose();
-              detachTerminals?.();
             },
             async () => {
               this.startupCleanupOwners.delete(workspace.id);
@@ -1421,7 +1431,6 @@ export class LodyFleet {
       () => state.schedules.dispose(),
       async () => {
         await state.lody.cleanup();
-        state.unsubscribeTerminalCleanup();
       },
       async () => {
         await state.prPollerWorkspace?.dispose();

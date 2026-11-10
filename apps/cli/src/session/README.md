@@ -15,6 +15,18 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Machine identity recovery admission
+
+Fleet checks both active presence and registered execution owners before accepting
+identity recovery. It then synchronously seals every execution service. A queued
+request or preparation that resumes after the seal returns without starting a
+Turn, consuming its Inbox input or advancing history/dispatch status. The final
+check and Turn registration have no intervening await: registration makes Fleet
+refuse recovery, while a preceding seal prevents registration. Ordinary Stop and
+cleanup retain their existing cancellation/release behavior. The session rule
+budget allows 50 extra words for this cross-entry safety contract so existing
+binding rules remain complete.
+
 ## Automation ownership
 
 [Session authority](session-automation-authority.ts) admits actions requested by

@@ -61,6 +61,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   private var tabViewsKey = ""
   private var tabViewsLoad = 0
   private var browsingVisible = false
+  private var navigationVisit = UUID()
   private var renderedEntries: String?
   private var memberScope = ""
   private var memberTask: Task<Void, Never>?
@@ -176,6 +177,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     #endif
     browsingVisible = false
+    navigationVisit = UUID()
     PushNotifications.shared.visibleRoute = ""
     if SettingsPage.leaving(self) {
       permissionPage?.update(nil, ready: true)
@@ -570,7 +572,21 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   }
 
   func perform(_ action: String) {
-    actions.perform(action, row: sessionId, from: self)
+    let scope = source.state.key
+    let visit = navigationVisit
+    actions.perform(action, row: sessionId, from: self) { [weak self] in
+      guard let self, self.source.state.key == scope, self.navigationVisit == visit,
+        self.browsingVisible, self.viewIfLoaded?.window != nil,
+        let navigation = self.navigationController,
+        navigation.topViewController === (self.parent ?? self),
+        navigation.transitionCoordinator == nil,
+        (self.parent ?? self).presentedViewController == nil else { return }
+      if let home = HomeController.current, home.contains(self) {
+        home.returnToList(from: self)
+      } else {
+        LodyShell.shared.popToRoot()
+      }
+    }
   }
 
   func find(query: String, keyboard: Bool) {

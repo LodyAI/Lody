@@ -7,6 +7,26 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+Owner assignment uses `SessionMeta.userId`; it does not share machines, projects or
+individual sessions. Both owner menus and `transferSessionOwner` require the target
+member's existing machine access and, for local sessions, project access. The machine
+owner can reclaim any session on that machine. My scope includes assigned sessions
+and sessions on machines owned by the current user, across desktop/mobile lists,
+archive, home summaries and badges. Machine ownership also preserves history and
+management when a local project is removed, without granting execution availability.
+
+Machine ownership for these checks and My summaries comes from the visible machine
+index's `accessByMachineId`, using the workspace-local account identity. An existing
+authoritative access row overrides the Loro owner claim; only the index's existing
+missing-row compatibility fallback uses Loro ownership. No consumer reconstructs
+ownership directly from raw machine metadata. Home and badge atoms receive this
+resolved scope from their React host instead of keeping another access cache.
+
+Legacy metadata has no immutable creator field. The existing `userId` history fallback
+is retained so a creator can still read their work after machine sharing is revoked;
+old transferred owners cannot be distinguished. E2EE workspace-history admission is
+unchanged. These client checks do not replace hosted metadata/body authorization.
+
 - `session-chat-interface.tsx` — conversation surface (draft variant:
   `draft-session-chat-interface.tsx`).
   **Read receipts are gated on VISIBILITY, not on being mounted.** A child tab

@@ -59,11 +59,10 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     updateCreate(destination)
   }
 
-  /// On Schedules the create action adds a schedule ("+"); elsewhere it starts a chat.
+  /// The create action keeps the compose glyph; on Schedules it adds a schedule, elsewhere it starts a chat.
   private func updateCreate(_ destination: HomeTab) {
     guard let create = tab(forIdentifier: Self.createID) else { return }
     let schedules = destination == .schedules
-    create.image = schedules ? LodyIcon.plus.uiImage : LodyIcon.compose.uiImage
     create.title = String(localized: String.LocalizationValue(schedules ? "schedules.new" : "tabs.newSession"), bundle: .lody)
   }
 

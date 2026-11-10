@@ -440,7 +440,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     val prefs = remember { appContext.getSharedPreferences("lody.chat", android.content.Context.MODE_PRIVATE) }
     val writeTexts = WriteTexts(
         stringResource(R.string.bar_merge_pending), stringResource(R.string.bar_merge_done), stringResource(R.string.bar_merge_error),
-        stringResource(R.string.bar_ready_pending), stringResource(R.string.bar_ready_done), stringResource(R.string.bar_ready_error),
+        stringResource(R.string.bar_ready_error),
         WriteErrors.associateWith { code -> stringResource(writeErrorText(code)) },
     )
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -449,8 +449,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         if (writing != null) return@write
         prUpdates.begin(pr, merged = method != null)
         writing = if (method != null) SessionInfoBar.Action.Merge else SessionInfoBar.Action.ReadyForReview
-        coroutines.launch {
-            snackbar.showSnackbar(if (method != null) writeTexts.mergePending else writeTexts.readyPending)
+        if (method != null) coroutines.launch {
+            snackbar.showSnackbar(writeTexts.mergePending)
         }
         coroutines.launch {
             val message = try {
@@ -458,7 +458,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 else repository.markReady(scope, pr.repository, pr.number)
                 prUpdates.finish(success = true)
                 haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm)
-                if (method != null) writeTexts.mergeDone else writeTexts.readyDone
+                if (method != null) writeTexts.mergeDone else null
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Reject)
@@ -468,8 +468,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 prUpdates.finish(success = false)
                 writing = null
             }
-            snackbar.currentSnackbarData?.dismiss()
-            snackbar.showSnackbar(message)
+            if (message != null) {
+                snackbar.currentSnackbarData?.dismiss()
+                snackbar.showSnackbar(message)
+            }
         }
     }
     if (merging && bar?.pullRequest != null) {
@@ -1422,7 +1424,7 @@ private fun actionIcon(action: SessionInfoBar.Action): ImageVector = when (actio
 
 private class WriteTexts(
     val mergePending: String, val mergeDone: String, val mergeError: String,
-    val readyPending: String, val readyDone: String, val readyError: String,
+    val readyError: String,
     val errors: Map<String, String>,
 )
 

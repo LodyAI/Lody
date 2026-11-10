@@ -1,0 +1,164 @@
+name: Build release inputs
+run-name: release-inputs-${{ inputs.request-id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request-id:
+        description: Candidate-bound build identity
+        required: true
+        type: string
+      kind:
+        description: Product to compile
+        required: true
+        type: choice
+        options: [desktop, cli]
+      build-config:
+        description: Explicit non-secret versions, profile, URLs and renderer origins
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  configuration:
+    runs-on: ubuntu-latest
+    outputs:
+      source-sha: ${{ steps.config.outputs.source-sha }}
+      matrix: ${{ steps.config.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: config
+        env:
+          BUILD_CONFIG: ${{ inputs.build-config }}
+          REQUEST_ID: ${{ inputs.request-id }}
+          BUILD_KIND: ${{ inputs.kind }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          printf '%s\n' "$BUILD_CONFIG" > build-config.json
+          jq -e --arg id "$REQUEST_ID" '
+            .requestId == $id and ($id | test("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")) and
+            (.sourceSha | test("^[a-f0-9]{40}$")) and .profile.ossSha == .sourceSha and
+            .profile.channel == "nightly" and .profile.version == .cliVersion and
+            (.cliVersion | test("^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$")) and
+            (.embeddedCliVersion | test("^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$"))
+          ' build-config.json
+          source=$(jq -r .sourceSha build-config.json)
+          git fetch --no-tags origin "$source"
+          git merge-base --is-ancestor "$source" origin/main
+          case "$BUILD_KIND" in
+            desktop) matrix='{"include":[{"target":"mac","os":"macos-15"},{"target":"win","os":"windows-2022"},{"target":"linux","os":"ubuntu-latest"},{"target":"linux-arm64","os":"ubuntu-24.04-arm"}]}' ;;
+            cli) matrix='{"include":[{"target":"cli","os":"ubuntu-latest"}]}' ;;
+            *) exit 1 ;;
+          esac
+          echo "source-sha=$source" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-config
+          path: build-config.json
+          if-no-files-found: error
+
+  build:
+    needs: configuration
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.configuration.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      NODE_USE_ENV_PROXY: '1'
+      LODY_RELEASE_CONFIG: ${{ github.workspace }}/build-config.json
+      LODY_RELEASE_TARGET: ${{ matrix.target }}
+      LODY_RELEASE_VERSION: ${{ matrix.target == 'cli' && fromJSON(inputs.build-config).cliVersion || fromJSON(inputs.build-config).embeddedCliVersion }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.configuration.outputs.source-sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: '24.22.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-config
+      - run: test "$(git rev-parse HEAD)" = "$(jq -r .sourceSha build-config.json)"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir apps/cli prepare:acp-adapters
+      - run: pnpm --dir packages/code-review-viewer build
+      - name: Compile CLI and adapters
+        env:
+          NODE_OPTIONS: --max-old-space-size=2048
+        run: |
+          rm -rf apps/cli/dist
+          pnpm --dir apps/cli exec vite build --config release.vite.config.mjs --mode cli-runtime
+          pnpm --dir apps/cli exec vite build --config release.vite.config.mjs --mode acp-adapters
+          pnpm --dir apps/cli copy:dsh-presets
+          pnpm --dir apps/cli check:published-bundle-imports
+          pnpm --dir apps/cli copy:wasm
+      - name: Compile Electron
+        if: matrix.target != 'cli'
+        run: pnpm --dir apps/electron exec electron-vite build --config release.vite.config.mjs
+      - name: Stage native dependencies and package without release credentials
+        if: matrix.target != 'cli'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          pnpm --dir apps/electron sync:cli
+          case "$LODY_RELEASE_TARGET" in
+            mac)
+              pnpm --dir apps/electron exec electron-sparkle-updater rebuild --arch universal
+              pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --mac --arm64 --x64 --dir --publish never
+              tar -cf unsigned-mac.tar -C apps/electron/dist mac mac-arm64
+              ;;
+            win) pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --win --x64 --publish never ;;
+            linux)
+              pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --linux snap --x64 --publish never
+              pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --linux AppImage deb --x64 --publish never
+              ;;
+            linux-arm64) pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --linux AppImage deb --arm64 --publish never ;;
+          esac
+      - name: Record build identity
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          test -f apps/cli/dist/index.js
+          test -f packages/code-review-viewer/standalone.html
+          if [ "$TARGET" != cli ]; then
+            test -f apps/electron/out/main/index.js
+            test -f apps/electron/out/preload/index.js
+            test -f apps/electron/out/renderer/index.html
+          fi
+          jq -n --arg source "$(git rev-parse HEAD)" --arg workflow "$GITHUB_WORKFLOW_SHA" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg target "$TARGET" \
+            '{sourceSha:$source,workflowSha:$workflow,runId:$run,runAttempt:($attempt|tonumber),target:$target}' > build-run.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-inputs-${{ inputs.request-id }}-${{ matrix.target }}
+          path: |
+            build-config.json
+            build-run.json
+            apps/cli/dist/
+            packages/code-review-viewer/dist/
+            packages/code-review-viewer/standalone.html
+            apps/electron/out/
+            unsigned-mac.tar
+            apps/electron/dist/*.exe
+            apps/electron/dist/*.blockmap
+            apps/electron/dist/*.AppImage
+            apps/electron/dist/*.deb
+            apps/electron/dist/*.snap
+            apps/electron/dist/nightly*.yml
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

@@ -1,14 +1,10 @@
-// The Schedules tab (web `schedule-list.tsx` on mobile): Scheduled tasks and Scheduled messages
-// sections; rows are name, frequency · computer, and the status in words.
+// The Schedules tab (web `schedule-list.tsx` on mobile) in the Chats list's design language: flat
+// rows grouped by state (needs attention, active, paused, ended) under Chats-style titles. Line 1 is
+// the name and the status in words; line 2 is a kind glyph, the frequency and computer · project.
 package app.lody.android.schedules
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
-import androidx.compose.runtime.LaunchedEffect
-import app.lody.android.designsystem.LodyRadius
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,7 +39,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -51,7 +46,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import app.lody.android.R
 import app.lody.android.designsystem.LodyButton
-import app.lody.android.designsystem.LodyIconButton
 import app.lody.android.designsystem.LodyIconSize
 import app.lody.android.designsystem.LodyIcons
 import app.lody.android.designsystem.LodyLayout
@@ -79,24 +73,73 @@ class SchedulesState(private val service: ScheduleService, val scope: RuntimeSco
     var failure by mutableStateOf<String?>(null)
         private set
 
+    private val cache = service.displayCache
+    private val cacheGeneration = cache?.generation
+    private var revision = 0L
+    private var pending by mutableStateOf(setOf<String>())
+    fun isPending(id: String) = id in pending
+    private fun current() = cache == null || cache.generation == cacheGeneration
+
     suspend fun refresh(pull: Boolean = false) {
-        if (loading) return
+        if (pending.isNotEmpty() || !current()) return
+        val ticket = ++revision
         loading = true; pulling = pull
         try {
-            list = service.list(scope)
+            if (list == null) {
+                try {
+                    val saved = cache?.read(scope, cacheGeneration!!)
+                    if (ticket == revision && current() && list == null) list = saved
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Disk failure must not block live reads. */ }
+            }
+            val received = service.list(scope)
+            if (ticket != revision || !current()) return
+            list = received
             failure = null
+            if (pending.isEmpty()) try { cache?.write(scope, cacheGeneration!!, received) { ticket == revision && pending.isEmpty() } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Live display survives disk failure. */ }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: ScheduleFailure) { failure = error.code }
-        catch (_: Exception) { failure = "runtime_failed" }
-        finally { loading = false; pulling = false }
+        catch (error: Exception) {
+            if (ticket == revision && current()) failure = (error as? ScheduleFailure)?.code ?: "runtime_failed"
+        } finally {
+            if (ticket == revision) { loading = false; pulling = false }
+        }
     }
 
     suspend fun detail(scheduleId: String) = service.detail(scope, scheduleId)
 
-    /** One write; any failure comes back as a [ScheduleFailure]. Refreshes afterwards either way. */
-    suspend fun command(request: app.lody.android.runtime.ScheduleCommandRequest): String = try {
-        service.command(scope, request)
-    } finally { refresh() }
+    suspend fun command(request: app.lody.android.runtime.ScheduleCommandRequest): String {
+        if (!current()) throw ScheduleFailure("workspace_changed")
+        if (request.scheduleId in pending) throw ScheduleFailure("schedule_conflict")
+        val original = list?.items?.find { it.scheduleId == request.scheduleId }
+        val optimistic = original?.takeIf { request.action in rowActions(it) }?.let {
+            when (request.action) {
+                "pause" -> it.copy(enabled = false, state = app.lody.android.runtime.ScheduleState("paused", "paused"))
+                "resume" -> it.copy(enabled = true, state = app.lody.android.runtime.ScheduleState("running", "notScheduled"))
+                else -> null
+            }
+        }
+        ++revision
+        loading = false; pulling = false
+        pending = pending + request.scheduleId
+        if (optimistic != null) replace(optimistic)
+        try {
+            return service.command(scope, request)
+        } catch (error: Exception) {
+            if (optimistic != null && current()) replace(original)
+            throw error
+        } finally {
+            pending = pending - request.scheduleId
+            ++revision
+            if (current()) refresh()
+        }
+    }
+
+    private fun replace(item: ScheduleItem) {
+        list = list?.let { value -> value.copy(items = value.items.map { if (it.scheduleId == item.scheduleId) item else it }) }
+    }
+
 }
 
 @Composable
@@ -129,7 +172,6 @@ fun SchedulesList(
     }
     val list = state.list
     val failure = state.failure
-    var selectedGroup by remember(state) { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf<ScheduleItem?>(null) }
     val runStarted = stringResource(R.string.schedules_run_started)
     val untitled = stringResource(R.string.schedules_untitled)
@@ -167,18 +209,11 @@ fun SchedulesList(
             else -> {
                 val needle = query.trim()
                 val searched = list.items.filter { needle.isEmpty() || it.title.contains(needle, ignoreCase = true) }
-                val counts = searched.groupingBy { it.state.group }.eachCount()
-                val activeGroup = selectedGroup?.takeIf { (counts[it] ?: 0) > 0 }
-                LaunchedEffect(activeGroup) { selectedGroup = activeGroup }
-                val shown = searched.filter { activeGroup == null || it.state.group == activeGroup }
-                    .sortedBy { scheduleGroupOrder.indexOf(it.state.group) }
-                val taskRows = shown.filterNot { it.scheduledMessage }
-                val messageRows = shown.filter { it.scheduledMessage }
-                if (shown.isEmpty()) Message(stringResource(R.string.schedules_search_empty, needle), bottom)
+                val groups = scheduleGroupOrder.mapNotNull { group ->
+                    searched.filter { it.state.group == group }.takeIf { it.isNotEmpty() }?.let { group to it }
+                }
+                if (groups.isEmpty()) Message(stringResource(R.string.schedules_search_empty, needle), bottom)
                 else LazyColumn(Modifier.fillMaxSize(), contentPadding = bottom) {
-                    item(key = "overview") {
-                        ScheduleOverview(counts, activeGroup) { selectedGroup = it.takeUnless { it == activeGroup } }
-                    }
                     if (failure != null) item(key = "failure") {
                         Text(
                             failures(failure),
@@ -186,16 +221,10 @@ fun SchedulesList(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = LodyLayout.screenPaddingX, vertical = LodySpacing.xs),
                         )
                     }
-                    if (taskRows.isNotEmpty()) {
-                        item(key = "tasks") { SectionHeader(stringResource(R.string.schedules_section_tasks), taskRows.size) }
-                        items(taskRows, key = { it.scheduleId }) { item ->
-                            ScheduleRow(item, onOpen = { onOpen(item) }, onAction = { run(item, it) }, onDelete = { deleting = item }, onOpenSession = onOpenSession)
-                        }
-                    }
-                    if (messageRows.isNotEmpty()) {
-                        item(key = "messages") { SectionHeader(stringResource(R.string.schedules_section_messages), messageRows.size) }
-                        items(messageRows, key = { it.scheduleId }) { item ->
-                            ScheduleRow(item, onOpen = { onOpen(item) }, onAction = { run(item, it) }, onDelete = { deleting = item }, onOpenSession = onOpenSession)
+                    for ((group, rows) in groups) {
+                        item(key = "group:$group") { SectionTitle(stringResource(groupTitle(group))) }
+                        items(rows, key = { it.scheduleId }) { item ->
+                            ScheduleRow(item, pending = state.isPending(item.scheduleId), onOpen = { onOpen(item) }, onAction = { run(item, it) }, onDelete = { deleting = item }, onOpenSession = onOpenSession)
                         }
                     }
                 }
@@ -238,23 +267,38 @@ internal fun rowActions(item: ScheduleItem): List<String> {
     }
 }
 
+private fun groupTitle(group: String) = when (group) {
+    "attention" -> R.string.schedules_overview_attention
+    "paused" -> R.string.schedules_overview_paused
+    "ended" -> R.string.schedules_overview_ended
+    else -> R.string.schedules_overview_active
+}
+
+/** The Chats tab's group title. */
 @Composable
-private fun SectionHeader(title: String, count: Int) {
-    val colors = LodyTheme.colors
-    Row(
-        Modifier.fillMaxWidth().semantics(mergeDescendants = true) { heading() }
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        style = LodyTheme.typography.subhead,
+        color = LodyTheme.colors.textSecondary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { heading() }
             .padding(start = LodyLayout.screenPaddingX, end = LodyLayout.screenPaddingX, top = LodySpacing.lg, bottom = LodySpacing.xs),
-        horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
-    ) {
-        Text(title, style = LodyTheme.typography.subhead, color = colors.textTertiary)
-        Text(count.toString(), style = LodyTheme.typography.subhead.copy(fontFeatureSettings = "tnum"), color = colors.textTertiary)
-    }
+    )
+}
+
+private fun kindIcon(item: ScheduleItem) = when {
+    item.scheduledMessage -> LodyIcons.Session
+    item.rule.kind == "manual" -> LodyIcons.Hand
+    else -> LodyIcons.Clock
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ScheduleRow(
     item: ScheduleItem,
+    pending: Boolean,
     onOpen: () -> Unit,
     onAction: (String) -> Unit,
     onDelete: () -> Unit,
@@ -268,51 +312,48 @@ private fun ScheduleRow(
     val status = statusText(item.state)
     val separator = stringResource(R.string.schedules_detail_separator)
     val summary = listOfNotNull(item.machineName ?: item.machineId, item.projectName).filter { it.isNotBlank() }.joinToString(separator)
-    val actions = rowActions(item)
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = LodyLayout.screenPaddingX, vertical = LodySpacing.xxs)
-            .clip(RoundedCornerShape(LodyRadius.lg)).background(colors.bgRaised).heightIn(min = LodySize.listRow)
-            .combinedClickable(onClick = onOpen, onLongClick = { menu = true })
-            .padding(start = LodyLayout.screenPaddingX, top = LodySpacing.sm, bottom = LodySpacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
-    ) {
-        ScheduleMark(item)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(LodySpacing.xxs)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm), verticalAlignment = Alignment.Top) {
+    val actions = if (pending) emptyList() else rowActions(item)
+    val detail = listOf(ruleSummary(item.rule), summary).filter { it.isNotBlank() }.joinToString(separator)
+    // A Chats row: flat, `listRow` tall, title and trailing status, then a footnote detail line.
+    // Long press opens the row's actions where Chats opens its menu.
+    Box {
+        Column(
+            Modifier.fillMaxWidth().heightIn(min = LodySize.listRow)
+                .combinedClickable(onClick = onOpen, onLongClick = { if (actions.isNotEmpty() || item.lastSessionId != null) menu = true })
+                .padding(horizontal = LodyLayout.screenPaddingX, vertical = LodySpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(LodySpacing.xxs, Alignment.CenterVertically),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    item.title.ifBlank { stringResource(R.string.schedules_untitled) }, style = type.headline,
+                    item.title.ifBlank { stringResource(R.string.schedules_untitled) }, style = type.body,
                     color = if (ended) colors.textTertiary else colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Text(status.label, style = type.footnote, color = if (attention) colors.warningDefault else colors.textSecondary,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = LodyLayout.trailingMetaMaxWidth))
+                Text(status.label, style = type.footnote, color = if (attention) colors.warningDefault else colors.textTertiary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End,
+                    modifier = Modifier.padding(start = LodySpacing.sm).widthIn(max = LodyLayout.trailingMetaMaxWidth))
             }
-            Text(ruleSummary(item.rule), style = type.footnote, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(summary, style = type.caption, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
+                Glyph(kindIcon(item), colors.iconTertiary, LodyIconSize.sm)
+                Text(detail, style = type.footnote, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             if ((attention || item.state.kind == "blocked") && !status.detail.isNullOrBlank()) {
-                Text(status.detail, style = type.caption, color = colors.warningDefault, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(status.detail, style = type.footnote, color = colors.warningDefault, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
-        Box {
-            val more = stringResource(R.string.schedules_more)
-            LodyIconButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = more }) {
-                Glyph(LodyIcons.More, colors.iconSecondary)
-            }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = colors.bgOverlay) {
-                for (action in actions.filter { it != "delete" }) {
-                    val (label, icon) = when (action) {
-                        "run" -> R.string.schedules_run to LodyIcons.Play
-                        "pause" -> R.string.schedules_pause to LodyIcons.Pause
-                        else -> R.string.schedules_resume to LodyIcons.Undo
-                    }
-                    MenuItem(stringResource(label), icon) { menu = false; onAction(action) }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = colors.bgOverlay) {
+            for (action in actions.filter { it != "delete" }) {
+                val (label, icon) = when (action) {
+                    "run" -> R.string.schedules_run to LodyIcons.Play
+                    "pause" -> R.string.schedules_pause to LodyIcons.Pause
+                    else -> R.string.schedules_resume to LodyIcons.Undo
                 }
-                item.lastSessionId?.let { session ->
-                    MenuItem(stringResource(R.string.schedules_open_last_chat), LodyIcons.Session) { menu = false; onOpenSession(session) }
-                }
-                if ("delete" in actions) MenuItem(stringResource(R.string.schedules_delete), LodyIcons.Trash, colors.dangerDefault) { menu = false; onDelete() }
+                MenuItem(stringResource(label), icon) { menu = false; onAction(action) }
             }
+            item.lastSessionId?.let { session ->
+                MenuItem(stringResource(R.string.schedules_open_last_chat), LodyIcons.Session) { menu = false; onOpenSession(session) }
+            }
+            if ("delete" in actions) MenuItem(stringResource(R.string.schedules_delete), LodyIcons.Trash, colors.dangerDefault) { menu = false; onDelete() }
         }
     }
 }

@@ -83,6 +83,8 @@ const MachineLifecycleVerifyResponseSchema = z
   .object({
     valid: z.literal(true),
     requesterUserId: z.string().trim().min(1),
+    requestId: z.string().trim().min(1).optional(),
+    restoreMachineId: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -129,6 +131,7 @@ export const verifyMachineLifecycleRequest = async (args: {
   requestId: string;
   requestToken: string;
   targetVersion?: string;
+  restoreMachineId?: string;
   fetchImpl?: typeof fetch;
 }): Promise<{ ok: true } | { ok: false; error: string; status?: number; retriable?: boolean }> => {
   const siteUrl = resolveConvexSiteUrl();
@@ -150,6 +153,7 @@ export const verifyMachineLifecycleRequest = async (args: {
         requesterUserId: args.requesterUserId,
         requestId: args.requestId,
         requestToken: args.requestToken,
+        ...(args.restoreMachineId ? { restoreMachineId: args.restoreMachineId } : {}),
         ...(args.action === 'upgrade'
           ? { targetVersion: normalizeMachineUpgradeTargetVersion(args.targetVersion) }
           : {}),
@@ -172,6 +176,13 @@ export const verifyMachineLifecycleRequest = async (args: {
     }
     if (parsed.data.requesterUserId !== args.requesterUserId) {
       return { ok: false, error: 'Machine lifecycle verification requester mismatch.' };
+    }
+    if (
+      args.restoreMachineId &&
+      (parsed.data.requestId !== args.requestId ||
+        parsed.data.restoreMachineId !== args.restoreMachineId)
+    ) {
+      return { ok: false, error: 'The server did not confirm this identity restore reservation.' };
     }
     return { ok: true };
   } catch (error) {

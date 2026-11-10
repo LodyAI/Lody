@@ -67,7 +67,8 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
             entry.meta as SessionMeta,
             access.machines.visibleMachineIds,
             access.projects.visibleLocalProjectKeys,
-            runtime.accountId
+            runtime.accountId,
+            access.machines.ownedMachineIds
           )
         )
           deny();

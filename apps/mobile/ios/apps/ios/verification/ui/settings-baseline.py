@@ -119,7 +119,8 @@ for index, scenario in enumerate(scenarios):
         for identifier in ('remote-machine', 'remote-agent', 'project-history', 'archived'):
             reveal(identifier)
         state = scenario if scenario in ('live', 'syncing') else 'offline'
-        assert has_text(f'settings.connection.{state}'), f'Missing {state} workspace footer'
+        # Only an offline workspace has a footer; connected and syncing stay quiet.
+        assert has_text('settings.connection.offline') == (state == 'offline'), f'Unexpected {state} workspace footer'
         visible = identifiers(ui.state())
         assert ('connection' in visible) == (state == 'offline')
         if scenario == 'cached':
@@ -130,7 +131,7 @@ for index, scenario in enumerate(scenarios):
                                      and item.get('AXLabel') == 'syncing:refreshes=1'
                                      for item in items), 'Resync missed refresh boundary')
             assert 'connection' not in identifiers(ui.state())
-            assert has_text('settings.connection.syncing')
+            assert not has_text('settings.connection.offline')
             ui.capture('cached-retry-syncing')
     elif signed_in:
         reveal('workspace-unavailable')

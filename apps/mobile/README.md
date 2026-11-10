@@ -122,9 +122,8 @@ See the [Android README](android/README.md) for device setup and runtime ownersh
 Both native clients select their push provider from the authenticated backend's
 `pushSubscriptions:configuration` response. `selfHostedEnabled: true` selects
 APNs on iOS or FCM on Android; `false` selects OneSignal. A failed configuration
-read is not permission to switch providers. OneSignal uses the external identity
-`lody-push-v2:<userId>`; notification recipients and local account checks still
-use the raw user ID.
+read is not permission to switch providers. OneSignal uses the original verified user ID as its external identity, unchanged;
+notification recipients and local account checks use that same user ID.
 
 Provider configuration does not enroll offline devices. Open the updated app and
 sign in to register with the selected provider. Direct push registration is bound

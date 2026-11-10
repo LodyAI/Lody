@@ -86,6 +86,8 @@ interface LodyOptions {
     reason: 'member-removed' | 'device-revoked'
   ) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  isMachineIdentityRestoreIdle?: () => boolean;
+  sealMachineIdentityRestore?: () => boolean;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
@@ -360,6 +362,8 @@ export class Lody {
         onInboxAvailabilityChange: options.onInboxAvailabilityChange,
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
+        isMachineIdentityRestoreIdle: options.isMachineIdentityRestoreIdle,
+        sealMachineIdentityRestore: options.sealMachineIdentityRestore,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
         readWorkspaceAccess: options.readWorkspaceAccess,
         remoteAutomation: options.remoteAutomation,
@@ -568,6 +572,7 @@ export class Lody {
   }
 
   prepareForShutdown = () => this.runtime.prepareForShutdown();
+  stopNewIdentityRestoreDispatch = () => this.runtime.stopNewIdentityRestoreDispatch();
 
   cleanup = async () => {
     this.cleanedUp = true;
@@ -619,6 +624,10 @@ export class Lody {
 
   getActiveSessionCount(): number {
     return this.runtime.getActiveSessionCount();
+  }
+
+  isMachineIdentityRestoreIdle(): boolean {
+    return this.runtime.isMachineIdentityRestoreIdle();
   }
 
   async authorizeScheduleExecution(request: ScheduleAuthorizationRequest): Promise<boolean> {
@@ -714,10 +723,6 @@ export class Lody {
   async resolveAutomationWorkdir(sessionId: SessionId): Promise<string | null> {
     const manager = this.runtime.getSessionManager();
     return manager ? await manager.resolveSessionWorkdir(sessionId) : null;
-  }
-
-  onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {
-    return this.runtime.onSessionTerminated(handler);
   }
 
   getConnectedRoomCount(): number {

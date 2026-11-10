@@ -414,7 +414,8 @@ export const daemonRunnerCommand = new Command('daemon-runner')
         if (result.code === EXIT_CODE_AUTH_FAILURE) {
           return {
             action: 'fatal',
-            message: 'Worker authentication failed; run `lody login` before restarting the daemon',
+            message:
+              'Worker authentication or identity recovery was rejected; inspect daemon logs before restarting. Run `lody login` only if credentials were rejected.',
           };
         }
         if (result.code === EXIT_CODE_SUPERVISOR_CONTRACT_MISMATCH) {

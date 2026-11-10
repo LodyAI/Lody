@@ -33,6 +33,11 @@ import {
 } from '@/lib/cli-platform';
 import { normalizeCurrentProcessResourceProfile } from '@/utils/process-resource-profile';
 import { startEventLoopLagMonitor } from '@/utils/event-loop-lag-monitor';
+import {
+  installWasmFaultMonitor,
+  resolveLoroWasmMemory,
+  startWasmHeapMonitor,
+} from '@/lib/loro/wasm-runtime-health';
 import { startEventLoopStallProfiler } from '@/utils/event-loop-stall-profiler';
 import { registerProcessExitTrace } from '@/utils/process-exit-trace';
 import { LODY_LOG_DIR } from '@/utils/log-retention';
@@ -150,6 +155,19 @@ export const startCommand = new Command('start')
     }
     const supervisorIdentity =
       identityResolution.status === 'supervised' ? identityResolution.identity : null;
+    if (supervisorIdentity?.launchMode === 'daemon' && getCliPlatformKind() === 'cloud') {
+      const { applyPendingMachineIdentityRestore, machineIdentityRestoreStartupExitCode } =
+        await import('@/lib/machine-identity-restore');
+      try {
+        await applyPendingMachineIdentityRestore();
+      } catch (error) {
+        logger.error(
+          'Machine identity restore could not finish. Its intent and available recovery files are retained; inspect this error before changing credentials.',
+          error
+        );
+        process.exit(machineIdentityRestoreStartupExitCode(error));
+      }
+    }
     const machineLifecycleCapability = resolveMachineLifecycleCapability(
       supervisorIdentity?.launchMode
     );
@@ -655,6 +673,10 @@ async function startAgentService(
     throw error;
   }
   const eventLoopLagMonitor = startEventLoopLagMonitor(logger, { label: 'lody start' });
+  await resolveLoroWasmMemory().catch((error: unknown) => {
+    logger.debug(`[wasm-heap] Loro WebAssembly memory unavailable: ${formatErrorMessage(error)}`);
+  });
+  const wasmHeapMonitor = startWasmHeapMonitor(logger);
   const closeForegroundHostLease = async () => {
     const lease = foregroundHostLease;
     foregroundHostLease = null;
@@ -681,6 +703,7 @@ async function startAgentService(
   };
   registerProcessCleanup(async () => {
     eventLoopLagMonitor.stop();
+    wasmHeapMonitor.stop();
     await stopDaemonAndApplication();
     await closeForegroundHostLease();
   });
@@ -698,6 +721,7 @@ async function startAgentService(
       unregisterProcessCleanup();
       stopActivePing();
       eventLoopLagMonitor.stop();
+      wasmHeapMonitor.stop();
       await stopDaemonAndApplication();
       await closeForegroundHostLease();
     },
@@ -711,6 +735,15 @@ async function startAgentService(
     exit: (code) => process.exit(code),
   });
   shutdownController.register();
+  // A trapped WebAssembly instance stays broken for every later call, so restart
+  // through the ordinary shutdown (agent processes stopped first) instead of
+  // limping on until an unguarded caller throws.
+  const uninstallWasmFaultMonitor = installWasmFaultMonitor((fault) => {
+    logger.error(
+      `WebAssembly runtime fault (${fault.source}); shutting down for restart: ${fault.detail}`
+    );
+    void shutdownController.shutdown({ exitCode: 1, reason: 'WebAssembly runtime fault' });
+  });
   unregisterSupervisorControl = registerLocalSupervisorControl({
     identity: supervisorIdentity,
     logger,
@@ -809,9 +842,11 @@ async function startAgentService(
       message: formatErrorMessage(error),
     });
     shutdownController.unregister();
+    uninstallWasmFaultMonitor();
     unregisterProcessCleanup();
     stopActivePing();
     eventLoopLagMonitor.stop();
+    wasmHeapMonitor.stop();
     try {
       await stopDaemonAndApplication();
     } catch (cleanupError) {

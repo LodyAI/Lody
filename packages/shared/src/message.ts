@@ -305,6 +305,8 @@ export type MachineLifecycleDisposition =
 
 export interface MachineRestartRequest {
   type: 'machine/restart';
+  /** Restore an owned, retired installation identity before the next worker starts. */
+  restoreMachineId?: MachineId;
   machineId: MachineId;
   workspaceId: WorkspaceId;
   requesterUserId: string;
