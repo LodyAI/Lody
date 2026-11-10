@@ -1,4 +1,10 @@
 {
+  "schedules.filter.owner": "归属",
+  "schedules.filter.allOwners": "全部",
+  "schedules.filter.mine": "我的",
+  "schedules.filter.others": "其他成员",
+  "schedules.owner.you": "我",
+  "schedules.owner.label": "归属：{{name}}",
   "settings.identityRestore.advanced": "高级设置",
   "settings.identityRestore.title": "恢复旧机器身份",
   "settings.identityRestore.help": "本地配置丢失后，将此 daemon 重新关联到旧会话。此操作无法恢复已删除的文件和 Agent 状态。",

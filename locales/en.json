@@ -1,4 +1,10 @@
 {
+  "schedules.filter.owner": "Owner",
+  "schedules.filter.allOwners": "Everyone",
+  "schedules.filter.mine": "Mine",
+  "schedules.filter.others": "Other members",
+  "schedules.owner.you": "You",
+  "schedules.owner.label": "Owner: {{name}}",
   "settings.identityRestore.advanced": "Advanced settings",
   "settings.identityRestore.title": "Restore old machine identity",
   "settings.identityRestore.help": "Reconnect this daemon to its old conversations after losing local configuration. Deleted files and agent state are not restored.",
