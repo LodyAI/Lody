@@ -943,6 +943,136 @@ describe('encrypted shared machine visibility', () => {
     expect(result?.automaticReaders).toEqual(['own-machine']);
   });
 
+  it.each(
+    ['own-machine', 'shared-machine'].flatMap((machineId) =>
+      ['draft:new-tab', 'empty', 'session:root', 'session:child'].map((urlTab) => ({
+        machineId,
+        urlTab,
+      }))
+    )
+  )(
+    'keeps the composer available on $machineId through the $urlTab route',
+    async ({ machineId, urlTab }) => {
+      const parent = {
+        ...createCachedSession(owner),
+        id: 'root' as SessionId,
+        machineId: machineId as MachineId,
+      };
+      views.set(
+        machineId,
+        view(machineId, { sessions: [{ sessionId: parent.id, audience: 'team', level: 'read' }] })
+      );
+      const child = { ...parent, id: 'child' as SessionId, parentSessionId: parent.id };
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(parent.id)]: parent,
+        [getSessionRoomId(child.id)]: child,
+      });
+      await renderTree(
+        <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={urlTab}>
+          <input aria-label="Execution composer" />
+        </SessionHistoryAccessBoundary>
+      );
+      expect(container.querySelector('input')).not.toBeNull();
+      expect(container.querySelector('article')).toBeNull();
+    }
+  );
+
+  it.each(['draft:new-tab', 'empty', undefined])(
+    'never grants a composer to a read-only viewer through %s',
+    async (urlTab) => {
+      const parent = {
+        ...createCachedSession(owner),
+        id: 'root' as SessionId,
+        machineId: 'private-machine' as MachineId,
+      };
+      store.set(sessionMetaCacheAtom, { [getSessionRoomId(parent.id)]: parent });
+      views.set(
+        parent.machineId,
+        view(parent.machineId, {
+          sharedWithTeam: false,
+          sessions: [{ sessionId: parent.id, audience: 'team', level: 'read' }],
+        })
+      );
+      await renderTree(
+        <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={urlTab}>
+          <input aria-label="Execution composer" />
+        </SessionHistoryAccessBoundary>
+      );
+      expect(container.querySelector('input')).toBeNull();
+      expect(container.querySelector('article')?.textContent).toBe(parent.id);
+    }
+  );
+
+  it('leaves new sessions without persisted metadata to the draft composer', async () => {
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={'new-draft' as SessionId}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('opens a newly created contained Side Chat for an editor', async () => {
+    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+    const child = {
+      ...parent,
+      id: 'side-chat' as SessionId,
+      parentSessionId: parent.id,
+      childSessionPlacement: 'side-panel' as const,
+    };
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(parent.id)]: parent,
+      [getSessionRoomId(child.id)]: child,
+    });
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={child.id}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('waits for the root machine binding instead of denying partially hydrated metadata', async () => {
+    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(parent.id)]: { ...parent, machineId: '' as MachineId },
+    });
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={parent.id} urlTab="draft:new-tab">
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.textContent).toBe('common.loading');
+    expect(container.querySelector('input')).toBeNull();
+    await act(async () =>
+      store.set(sessionMetaCacheAtom, { [getSessionRoomId(parent.id)]: parent })
+    );
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('keeps a newly persisted child pending while its metadata is hydrating', async () => {
+    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+    store.set(sessionMetaCacheAtom, { [getSessionRoomId(parent.id)]: parent });
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={parent.id} urlTab="session:hydrating">
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.textContent).toBe('common.loading');
+    await act(async () =>
+      store.set(sessionMetaCacheAtom, (cache) => ({
+        ...cache,
+        [getSessionRoomId('hydrating' as SessionId)]: {
+          ...parent,
+          id: 'hydrating' as SessionId,
+          parentSessionId: parent.id,
+        },
+      }))
+    );
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
   it('never mounts execution/probe controls for unshared history, including the author’s own session', async () => {
     const history = { ...createCachedSession(member), machineId: 'private-machine' as MachineId };
     store.set(sessionMetaCacheAtom, { [getSessionRoomId(history.id)]: history });
@@ -1009,7 +1139,7 @@ describe('encrypted shared machine visibility', () => {
       await renderTree(
         <SessionHistoryAccessBoundary
           sessionId={route === 'direct' ? child.id : parent.id}
-          urlTab={route === 'tab' ? child.id : undefined}
+          urlTab={route === 'tab' ? `session:${child.id}` : undefined}
         >
           <input aria-label="Execution composer" />
         </SessionHistoryAccessBoundary>
@@ -1051,7 +1181,7 @@ describe('encrypted shared machine visibility', () => {
         })
       );
       await renderTree(
-        <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={child.id}>
+        <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={`session:${child.id}`}>
           <input aria-label="Execution composer" />
         </SessionHistoryAccessBoundary>
       );

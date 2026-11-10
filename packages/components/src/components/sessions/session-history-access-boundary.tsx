@@ -18,6 +18,7 @@ import {
 } from '@/lib/session-visibility';
 import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { jsonValueEqual } from '@/lib/json-value-equal';
+import { parseSessionTabSearch } from '@/lib/session-tab-url';
 import { SessionHistoryReader } from './session-history-reader';
 
 function useSessionTarget(sessionId: SessionId) {
@@ -66,7 +67,9 @@ export function SessionHistoryAccessBoundary({
   const parent = useSessionTarget((routed?.parentSessionId ?? sessionId) as SessionId);
   const root = isContainedSession(routed, parent) ? parent : routed;
   const rootId = root?.id ?? sessionId;
-  const selectedId = (urlTab || sessionId) as SessionId;
+  // Draft/empty tabs belong to the editable root; they have no persisted Meta.
+  const tab = parseSessionTabSearch(urlTab);
+  const selectedId = (tab.kind === 'session' ? tab.sessionId : sessionId) as SessionId;
   const selected = useSessionTarget(selectedId);
   const access = useSessionAccess();
   const {
@@ -108,7 +111,14 @@ export function SessionHistoryAccessBoundary({
     };
   }, [root?.machineId, access.store, editable, checkKey]);
   if (editable || localOnly) return children;
-  if (machinesLoading || projectsLoading || access.loading || checked !== checkKey)
+  if (
+    machinesLoading ||
+    projectsLoading ||
+    access.loading ||
+    (!!root && !root.machineId) ||
+    checked !== checkKey ||
+    (selectedId !== rootId && !selected)
+  )
     return <p role="status">{t('common.loading')}</p>;
   // The detail subtree handles absent metadata, workspace transitions and local-only sessions.
   if (!root) return children;
