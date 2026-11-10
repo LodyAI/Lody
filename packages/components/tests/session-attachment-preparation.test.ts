@@ -25,6 +25,7 @@ import type { WorkspaceId } from '@lody/shared';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
 import type { PendingSessionSend, PendingSessionSends } from '../src/lib/session-pending-sends';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
+import { encryptedDispatchSigner } from './helpers/encrypted-dispatch-signer';
 
 const upload = vi.hoisted(() => ({
   run: undefined as undefined | ((file: File, signal: AbortSignal) => Promise<unknown>),
@@ -451,8 +452,14 @@ it('admits an already prepared local file in an encrypted workspace without uplo
     timestamp: '2026-10-27T00:00:00Z',
     items: [{ type: 'text', text: 'local file' }],
     fileDiff: [],
-    inputConfig: { inputBlocks: [{ type: 'text', text: 'local file' }] },
+    // The composer always names its agent; a member host signs only such an input.
+    inputConfig: {
+      inputBlocks: [{ type: 'text', text: 'local file' }],
+      cliType: 'builtin',
+      agentType: 'codex',
+    },
   };
+  const signer = encryptedDispatchSigner();
   const file = {
     type: 'file',
     transport: 'local',
@@ -466,7 +473,12 @@ it('admits an already prepared local file in an encrypted workspace without uplo
     machineId: MACHINE,
   };
   const result = await acceptSessionUserTurn(
-    { ...f.runtime, workspaceId: 'workspace', contentMode: 'e2ee' } as unknown as WorkspaceRuntime,
+    {
+      ...f.runtime,
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+      prepareEncryptedDispatch: signer.prepareEncryptedDispatch,
+    } as unknown as WorkspaceRuntime,
     SESSION,
     entry as SessionHistory,
     { kind: 'dispatch' },
@@ -478,6 +490,12 @@ it('admits an already prepared local file in an encrypted workspace without uplo
   expect(f.turns()[0]?.items).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ type: 'file', transport: 'local', fileId: '/local/private.txt' }),
+    ])
+  );
+  // The signed input carries the prepared file, so the machine runs what was signed.
+  expect(signer.signed[0]?.inputConfig.inputBlocks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'file', fileId: '/local/private.txt' }),
     ])
   );
 });

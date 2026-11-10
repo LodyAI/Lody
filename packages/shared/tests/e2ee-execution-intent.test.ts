@@ -7,6 +7,7 @@ import {
   decodeE2eeIntentRecord,
   E2EE_INTENT_KIND,
   encodeE2eeIntentRecord,
+  isMemberSignableInput,
   scheduleDeclarationMessageId,
   sessionDocSchema,
   turnExecutionContent,
@@ -110,6 +111,47 @@ describe('encrypted execution intent', () => {
     } finally {
       mirror.dispose();
     }
+  });
+
+  it('lets a member sign every composer input, including attachment- or reference-only ones', () => {
+    const composer = (inputBlocks: unknown[]) =>
+      buildSessionTurnInputConfig({
+        inputBlocks: inputBlocks as never,
+        cliType: 'builtin',
+        agentType: 'codex',
+      });
+    const image = {
+      type: 'image',
+      imageId: 'synthetic-image',
+      mimeType: 'image/png',
+      sizeBytes: 9,
+    };
+    const file = {
+      type: 'file',
+      transport: 'local',
+      fileId: '/synthetic/notes.txt',
+      fileName: 'notes.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 7,
+      sha256: 'a'.repeat(64),
+      textPreview: false,
+      uploadedAt: 1,
+      machineId: 'synthetic-machine',
+    };
+    const reference = {
+      type: 'comment_reference',
+      source: 'lody',
+      path: 'src/synthetic.ts',
+      lineNumber: 3,
+      side: 'additions',
+      commentBody: 'Synthetic comment',
+      authorName: 'Synthetic',
+    };
+    for (const blocks of [[{ type: 'text', text: 'hi' }], [image], [file], [reference]])
+      expect(isMemberSignableInput(composer(blocks)), JSON.stringify(blocks)).toBe(true);
+    // An input that names no agent is machine-authored; one with nothing to run is no input.
+    expect(isMemberSignableInput({ prompt: 'synthetic' })).toBe(false);
+    expect(isMemberSignableInput(composer([]))).toBe(false);
   });
 
   it('names schedule declarations by definition or manual run', () => {
