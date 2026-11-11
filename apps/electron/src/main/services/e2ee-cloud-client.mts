@@ -592,7 +592,13 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         z.object({
           invitations: z.array(MemberOfferSchema).max(100),
           items: z
-            .array(memberRequest.extend({ applicantName: z.string(), applicantEmail: z.string() }))
+            .array(
+              memberRequest.extend({
+                applicantName: z.string(),
+                applicantEmail: z.string(),
+                memberLimitReached: z.boolean().optional()
+              })
+            )
             .max(100),
           hasMore: z.boolean(),
           seatPreview
