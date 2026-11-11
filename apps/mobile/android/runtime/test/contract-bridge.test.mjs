@@ -148,3 +148,22 @@ test('preview controls forward to the shared runtime with their long deadlines',
  assert.equal(sent.at(-1).method,'iosSimulatorControl');
  delete globalThis.androidRuntimeMessage;
 });
+
+test('session writes satisfy the shared runtime contract, which rejects a missing billing entitlement',async()=>{
+ const {build}=await import('esbuild');
+ const compiled=await build({entryPoints:[new URL('../vendor/cloud-runtime/src/contract/methods.ts',import.meta.url).pathname],bundle:true,platform:'node',format:'esm',write:false});
+ const {runtimeCalls}=await import('data:text/javascript;base64,'+Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+ // Answer as the shared channel does: params that fail the method's schema are `invalid_params`.
+ const runtime={receive(text){const e=JSON.parse(text);if(e.kind!=='request')return;
+  const spec=runtimeCalls[e.method], valid=!spec || spec.params.safeParse(e.payload).success;
+  globalThis.androidRuntimeMessage({type:'envelope',envelope:JSON.stringify(valid?{...e,kind:'result',payload:{state:'created'}}:{...e,kind:'error',payload:undefined,error:{code:'invalid_params',retryable:false}})});}};
+ const bridge=contractBridge(runtime,()=>{});
+ await bridge.start('workspace','user',true);
+ // The new-chat adapter's payload for a plain chat (absent fields do not cross the JSON envelope).
+ assert.equal((await bridge.createSession({workspaceId:'workspace',userId:'user',preferRoost:false,sessionId:'11111111-1111-4111-8111-111111111111',machineId:'m',agentConfigId:'a',projectId:undefined,branch:undefined,useWorktree:false,title:'hi'})).state,'created');
+ // The message action adapter's payloads for an edit and a fork.
+ for(const action of ['read','send'])
+  assert.equal((await bridge.editSession({action,sessionId:'s',expectedUserTurnId:'t',...(action==='send'?{id:'u',text:'edited',retainedIds:[]}:{}),workspaceId:'workspace',userId:'user'})).state,'created');
+ assert.equal((await bridge.forkSession({action:'send',sourceSessionId:'s',sourceTurnId:'t',targetSessionId:'11111111-1111-4111-8111-111111111112',workspaceId:'workspace',userId:'user'})).state,'created');
+ delete globalThis.androidRuntimeMessage;
+});
