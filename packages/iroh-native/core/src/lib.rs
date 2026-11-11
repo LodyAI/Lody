@@ -24,7 +24,9 @@ use std::{
 
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMap, RelayMode, RelayUrl, SecretKey,
-    endpoint::{Connection, PortmapperConfig, RecvStream, SendStream, VarInt, presets},
+    endpoint::{
+        Connection, PortmapperConfig, QuicTransportConfig, RecvStream, SendStream, VarInt, presets,
+    },
 };
 use tokio::sync::{Mutex, mpsc, watch};
 use zeroize::Zeroizing;
@@ -222,6 +224,17 @@ impl LodyEndpoint {
         let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(secret)
             .clear_address_lookup()
+            // UDP segmentation offload stays off. When a NIC refuses a segmented send,
+            // noq-udp lowers the socket's limit, but iroh 1.4.1 caches the limit at
+            // sender creation, so open connections keep sending batches that fail
+            // (iroh #4555; seen as EIO on the Android emulator, and #4647 reports
+            // dropped batches on Android cellular). RPC frames are small, so batching
+            // saves nothing here.
+            .transport_config(
+                QuicTransportConfig::builder()
+                    .enable_segmentation_offload(false)
+                    .build(),
+            )
             .alpns(if config.accept {
                 vec![ALPN.to_vec()]
             } else {
