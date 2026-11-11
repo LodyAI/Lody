@@ -267,8 +267,11 @@ GitHub (`GitHubSettingsScreen`) mirrors iOS Settings › GitHub: personal identi
 and admins (the App's install page in the browser; the page re-reads on return), then the
 workspace repositories with owner logos, Material switches and a search field. `GitHubSettingsCloud`
 ports iOS `WorkspaceSettingsCloud.github` over Convex with the verified account: writes check the
-row first, are never retried, and count only after a read back. A flipped switch shows at once;
-a failed or unknown write rolls it back and locks writes until a fresh read (`GitHubSettingsTest`).
+row first, are never retried, and count only after a read back. The last complete read shows at
+once from process memory while a quiet refresh runs; because the list rarely changes its switches
+work straight away (each write re-reads the role and repositories), and a write supersedes that
+refresh. A flipped switch shows at once; a failed or unknown write rolls it back and locks writes
+until a fresh read (`GitHubSettingsTest`).
 
 Agent settings select one machine above its provider list (online and own machines
 first); the top bar's "+" adds a provider to it, and the last list shows from process

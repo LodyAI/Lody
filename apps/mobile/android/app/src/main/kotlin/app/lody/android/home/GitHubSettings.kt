@@ -193,7 +193,8 @@ internal object GitHubSettingsModel {
  * fresh read, since the outcome is unknown and is never replayed.
  */
 internal class GitHubSettingsState(private val service: GitHubSettingsService, val scope: RuntimeScope) {
-    var data by mutableStateOf<GitHubSettingsData?>(null); private set
+    /** The last complete read for this scope shows at once (process memory, as Roles and shortcuts). */
+    var data by mutableStateOf(remembered?.takeIf { it.first == scope }?.second); private set
     var loading by mutableStateOf(false); private set
     var failed by mutableStateOf(false); private set
     var unconfirmed by mutableStateOf(false); private set
@@ -203,7 +204,11 @@ internal class GitHubSettingsState(private val service: GitHubSettingsService, v
     private var version = 0
 
     val blocked: Boolean get() = failed || unconfirmed || data?.errors?.isNotEmpty() == true
-    val editable: Boolean get() = !loading && !writing && !blocked
+    /**
+     * The list rarely changes, so switches work from the remembered read and during a background
+     * refresh: every write re-reads the role and repositories natively and reads back.
+     */
+    val editable: Boolean get() = !writing && !blocked
 
     /** The last read value with the in-flight switch applied. */
     val shown: GitHubSettingsData? get() {
@@ -220,7 +225,7 @@ internal class GitHubSettingsState(private val service: GitHubSettingsService, v
         failed = false
         try {
             val next = service.perform(scope, GitHubSettingsAction.List)
-            if (id == version) { data = next; unconfirmed = false }
+            if (id == version) { accept(next); unconfirmed = false }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { if (id == version) failed = true }
         finally { if (id == version) loading = false }
@@ -240,18 +245,30 @@ internal class GitHubSettingsState(private val service: GitHubSettingsService, v
         write(PERSONAL to enabled, GitHubSettingsAction.Personal(enabled))
     }
 
+    /** A write supersedes an in-flight refresh: that read is dropped and the write's read back wins. */
     private suspend fun write(shown: Pair<String, Boolean>, action: GitHubSettingsAction) {
         if (!editable) return
         val id = ++version
         writing = true
+        loading = false
         pending = shown
         try {
             val next = service.perform(scope, action)
-            if (id == version) data = next
+            if (id == version) accept(next)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { if (id == version) unconfirmed = true }
         finally { writing = false; pending = null }
     }
 
-    companion object { const val PERSONAL = "personal" }
+    /** Only a complete read is remembered; a partial one would lock the page on reopen. */
+    private fun accept(next: GitHubSettingsData) {
+        data = next
+        if (next.errors.isEmpty()) remembered = scope to next
+    }
+
+    companion object {
+        const val PERSONAL = "personal"
+        /** Process memory only (one scope). */
+        @Volatile private var remembered: Pair<RuntimeScope, GitHubSettingsData>? = null
+    }
 }
