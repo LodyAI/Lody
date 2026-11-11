@@ -284,12 +284,18 @@ final class InboxChrome {
         ) { _ in HomeScope.store(scope) }
       })
     }
+    // UIKit caps a menu's height and gives no API to raise it, so the single-choice sections lay
+    // their options side by side (.medium) to keep every row on screen without scrolling.
+    let scopeMenu = UIMenu(title: String(localized: "home.view.scope", bundle: .lody), options: [.displayInline, .singleSelection], children: [scopes])
+    scopeMenu.preferredElementSize = .medium
+    let groupingMenu = UIMenu(title: String(localized: "home.view.grouping", bundle: .lody), options: [.displayInline, .singleSelection], children: [groupings])
+    groupingMenu.preferredElementSize = .medium
     return UIMenu(
       children: [
-        Self.archiveToggle(),
-        UIMenu(title: String(localized: "home.view.scope", bundle: .lody), options: [.displayInline, .singleSelection], children: [scopes]),
-        UIMenu(title: String(localized: "home.view.grouping", bundle: .lody), options: [.displayInline, .singleSelection], children: [groupings]),
+        scopeMenu,
+        groupingMenu,
         UIMenu(title: String(localized: "home.view.details", bundle: .lody), options: .displayInline, children: toggles),
+        Self.archiveToggle(),
       ]
     )
   }
@@ -355,7 +361,7 @@ final class InboxChrome {
         state: sort == item.sort ? .on : .off
       ) { [weak self] _ in self?.setSort?(item.sort) }
     }
-    return UIMenu(children: [Self.archiveToggle()] + views + [UIMenu(options: .displayInline, children: sorts)])
+    return UIMenu(children: views + [UIMenu(options: .displayInline, children: sorts), Self.archiveToggle()])
   }
 
   /// The Archived switch: on, the list shows only archived chats on a darker, greyer page.
