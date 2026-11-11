@@ -11,6 +11,11 @@ import { QUEUE_LINE, queueSurface } from './surface';
 import { IconAction, TextAction } from './message-queue-row';
 
 const MAX_INLINE_ATTACHMENTS = 3;
+/**
+ * A retry whose cause persists fails again within milliseconds. The row keeps
+ * its loading state at least this long so the click visibly registers.
+ */
+const RETRY_FEEDBACK_MS = 600;
 
 /** Same first-line box as a queued row's index and actions. */
 const FIRST_LINE_BOX_CLASS = 'flex shrink-0 items-center';
@@ -69,16 +74,22 @@ export function PendingQueueRow({
 }) {
   const { t } = useTranslation();
   const status = deriveSessionSendProgress(record);
-  const failed = status.state === 'failed';
+  const [retrying, setRetrying] = useState(false);
+  useEffect(() => {
+    if (!retrying) return undefined;
+    const timer = setTimeout(() => setRetrying(false), RETRY_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [retrying]);
+  const failed = status.state === 'failed' && !retrying;
   // Nothing to upload: it reads as queued, not as sending.
   const attachments = record.attachments;
-  const instant = !failed && attachments.length === 0;
+  const instant = !failed && !retrying && attachments.length === 0;
   const inline = attachments.slice(0, MAX_INLINE_ATTACHMENTS);
   const overflow = attachments.length - inline.length;
-  const statusLabel =
-    status.totalBytes > 0
-      ? t('sessions.attachmentUploading', { progress: status.progress })
-      : t('sessions.sendStatus.sendingWithoutSize');
+  const showProgress = status.state === 'sending' && status.totalBytes > 0;
+  const statusLabel = showProgress
+    ? t('sessions.attachmentUploading', { progress: status.progress })
+    : t('sessions.sendStatus.sendingWithoutSize');
 
   return (
     <div
@@ -109,15 +120,23 @@ export function PendingQueueRow({
             ) : null}
           </div>
         ) : null}
-        {/* Muted until it is a real queue item, like an unsent conversation's title. */}
-        <div
-          className={cn(
-            'min-w-0 flex-1 overflow-hidden',
-            stylex.props(queueSurface.text, !instant && queueSurface.preparingText).className
-          )}
-          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
-        >
-          {queuedText(record)}
+        <div className="min-w-0 flex-1">
+          {/* Muted until it is a real queue item, like an unsent conversation's title. */}
+          <div
+            className={cn(
+              'overflow-hidden',
+              stylex.props(queueSurface.text, !instant && queueSurface.preparingText).className
+            )}
+            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+          >
+            {queuedText(record)}
+          </div>
+          {/* The sender must see what failed and what to do before continuing. */}
+          {failed ? (
+            <div role="alert" {...stylex.props(queueSurface.failureReason)}>
+              {record.error}
+            </div>
+          ) : null}
         </div>
       </div>
       <div
@@ -134,7 +153,9 @@ export function PendingQueueRow({
               text={t('sessions.retryPendingSend')}
               ariaLabel={t('sessions.retryPendingSend')}
               onClick={() => {
-                if (!busy) onRetry();
+                if (busy) return;
+                setRetrying(true);
+                onRetry();
               }}
             />
           </>
@@ -143,9 +164,7 @@ export function PendingQueueRow({
             role="status"
             className="flex items-center gap-1 text-[11px] text-muted-foreground tabular-nums"
           >
-            <SessionSendProgressRing
-              progress={status.totalBytes > 0 ? status.progress : undefined}
-            />
+            <SessionSendProgressRing progress={showProgress ? status.progress : undefined} />
             {statusLabel}
           </span>
         )}

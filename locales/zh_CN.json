@@ -5464,6 +5464,7 @@
   "sessions.pendingMessageUploading": "正在等待发送 · 正在上传附件",
   "sessions.pendingMessageWaiting": "正在等待发送",
   "sessions.pendingMessageUploadFailed": "未发送",
+  "sessions.localAttachmentPrepareFailed": "这台电脑上的 Lody 没能准备这个附件（{{reason}}）。请确认本地代理正在运行且已更新，然后继续发送。",
   "sessions.prompts.createPrOrigin": "（此消息由 Lody 的「**创建 PR**」按钮发送）",
   "sessions.prompts.createDraftPrOrigin": "（此消息由 Lody 的「**创建草稿 PR**」按钮发送）",
   "settings.mcp.tools.failed": "连接失败，请检查配置后重试。",

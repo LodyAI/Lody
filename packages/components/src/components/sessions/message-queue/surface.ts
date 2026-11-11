@@ -72,6 +72,14 @@ export const queueSurface = stylex.create({
     opacity: 0.86,
   },
   preparingText: { opacity: 0.55 },
+  // Why a local row was not sent, under its text; the actions stay on the message line.
+  failureReason: {
+    overflowWrap: 'anywhere',
+    fontSize: '0.75rem',
+    lineHeight: 1.4,
+    color: colors.destructive,
+    marginTop: 2,
+  },
   editorText: { fontSize: '0.875rem', lineHeight: QUEUE_LINE, fontWeight: 400 },
   actions: {
     display: 'flex',

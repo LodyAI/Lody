@@ -5464,6 +5464,7 @@
   "sessions.pendingMessageUploading": "Waiting to send · Uploading attachments",
   "sessions.pendingMessageWaiting": "Waiting to send",
   "sessions.pendingMessageUploadFailed": "Not sent",
+  "sessions.localAttachmentPrepareFailed": "Lody on this computer couldn't prepare this attachment ({{reason}}). Make sure the local agent is running and up to date, then continue sending.",
   "sessions.prompts.createPrOrigin": "(Sent by the **Create PR** button in Lody.)",
   "sessions.prompts.createDraftPrOrigin": "(Sent by the **Create Draft PR** button in Lody.)",
   "settings.mcp.tools.failed": "Connection failed. Check the configuration and try again.",
