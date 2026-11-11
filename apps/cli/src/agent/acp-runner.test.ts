@@ -2,10 +2,12 @@ import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclient
 import {
   initializeAndReadAcpRateLimits,
   initializeAndRunSorbetCredentials,
+  queryLocalAcpRateLimits,
   runLocalSorbetCredentials,
 } from './acp-runner';
 import { spawn } from 'node:child_process';
 import * as loginShell from './login-shell-env';
+import * as setting from './setting';
 import { getLodyNpmCacheDir } from './npx-cache';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
@@ -300,6 +302,251 @@ describe('read-only quota ACP handshake', () => {
         terminal: false,
         fs: { readTextFile: false, writeTextFile: false },
       });
+    }
+  );
+});
+
+describe('Antigravity quota ACP compatibility', () => {
+  // Synthetic data matching the official 1.4.5 /usage layout, not a user transcript.
+  const usage = `### Session Usage
+- **Session total:** data not available yet
+
+### Quota Limits
+- **Gemini Models**
+  *(Models within this group: Gemini Flash, Gemini Pro)*
+  - **Weekly Limit Remaining:** 25% remaining (resets Jan 8, 2030, 16:11 UTC)
+  - **Five Hour Limit Remaining:** 0% remaining (resets Jan 2, 2030, 21:11 UTC)
+- **Claude and GPT models**
+  - **Weekly Limit Remaining:** 100% remaining (resets Jan 8, 2030, 16:46 UTC)
+  - **Five Hour Limit Remaining:** 81.5% remaining (resets Jan 2, 2030, 21:46 UTC)`;
+
+  async function query(
+    options: {
+      text?: string;
+      commands?: string[];
+      cliType?: 'registry' | 'custom';
+      serverName?: string;
+      stopReason?: 'end_turn' | 'cancelled';
+      beforeNewResponse?: boolean;
+    } = {}
+  ) {
+    const outbound = new TransformStream();
+    const inbound = new TransformStream();
+    const prompts: unknown[] = [];
+    const sessions: unknown[] = [];
+    const advertise = async () =>
+      server.sessionUpdate({
+        sessionId: 'quota-session',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: (options.commands ?? ['usage']).map((name) => ({
+            name,
+            description: name,
+          })),
+        },
+      });
+    const server = new AgentSideConnection(
+      () => ({
+        initialize: async () => ({
+          protocolVersion: PROTOCOL_VERSION,
+          agentInfo: { name: options.serverName ?? 'antigravity-acp', version: '1.4.5' },
+        }),
+        newSession: async (params) => {
+          sessions.push(params);
+          if (options.beforeNewResponse) await advertise();
+          else
+            queueMicrotask(() => {
+              void advertise();
+            });
+          return { sessionId: 'quota-session' };
+        },
+        authenticate: async () => {
+          throw new Error('Must not log in');
+        },
+        prompt: async (params) => {
+          prompts.push(params);
+          // Other sessions and token-usage notifications must not enter quota parsing.
+          await server.sessionUpdate({
+            sessionId: 'other',
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: 'unrelated' },
+            },
+          });
+          const text = options.text ?? usage;
+          for (const part of [text.slice(0, 77), text.slice(77)]) {
+            await server.sessionUpdate({
+              sessionId: params.sessionId,
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: part },
+              },
+            });
+          }
+          return { stopReason: options.stopReason ?? 'end_turn' };
+        },
+        cancel: async () => {},
+      }),
+      { readable: outbound.readable, writable: inbound.writable } as Stream
+    );
+    const outcome = initializeAndReadAcpRateLimits(
+      {
+        readable: inbound.readable,
+        writable: outbound.writable,
+      } as Stream,
+      {
+        cliType: options.cliType ?? 'registry',
+        agentType: 'antigravity-acp',
+        workdir: '/quota-scratch',
+      }
+    );
+    return { outcome, prompts, sessions };
+  }
+
+  it.each([false, true])(
+    'reads separate weekly and 5h windows (early commands: %s)',
+    async (beforeNewResponse) => {
+      const { outcome, prompts, sessions } = await query({ beforeNewResponse });
+      const snapshot = await outcome;
+      expect(snapshot.rateLimits).toEqual([
+        {
+          limitId: 'antigravity-acp',
+          scope: { providerId: 'antigravity' },
+          windows: [
+            {
+              label: 'Gemini Models',
+              usedPercent: 75,
+              windowDurationSeconds: 604800,
+              resetsAtEpochSeconds: Date.parse('2030-01-08T16:11:00Z') / 1000,
+            },
+            {
+              label: 'Gemini Models',
+              usedPercent: 100,
+              windowDurationSeconds: 18000,
+              resetsAtEpochSeconds: Date.parse('2030-01-02T21:11:00Z') / 1000,
+            },
+            {
+              label: 'Claude and GPT models',
+              usedPercent: 0,
+              windowDurationSeconds: 604800,
+              resetsAtEpochSeconds: Date.parse('2030-01-08T16:46:00Z') / 1000,
+            },
+            {
+              label: 'Claude and GPT models',
+              usedPercent: 18.5,
+              windowDurationSeconds: 18000,
+              resetsAtEpochSeconds: Date.parse('2030-01-02T21:46:00Z') / 1000,
+            },
+          ],
+        },
+      ]);
+      expect(sessions).toEqual([{ cwd: '/quota-scratch', mcpServers: [] }]);
+      expect(prompts).toEqual([
+        { sessionId: 'quota-session', prompt: [{ type: 'text', text: '/usage' }] },
+      ]);
+    }
+  );
+
+  it.each([
+    { cliType: 'custom' as const },
+    { serverName: 'another-agent' },
+    { commands: [] },
+    { text: 'Quota is unavailable' },
+    { text: usage.replace('25%', '125%') },
+    { text: 'x'.repeat(65537) },
+    { stopReason: 'cancelled' as const },
+  ])(
+    'rejects unsupported or invalid quota without manufacturing values: case %#',
+    async (options) => {
+      const { outcome, prompts } = await query(options);
+      await expect(outcome).rejects.toThrow();
+      if (options.cliType || options.serverName || options.commands) expect(prompts).toEqual([]);
+    }
+  );
+
+  it('keeps missing and unzoned resets unknown without inventing weekly quota', async () => {
+    const { outcome } = await query({
+      text: `### Quota Limits
+- **Gemini Models**
+  - **Five Hour Limit Remaining:** 10% remaining (resets Jan 2, 2030, 21:11)
+- **Claude and GPT models**
+  - **Five Hour Limit Remaining:** 20% remaining`,
+    });
+    expect((await outcome).rateLimits[0]?.windows).toEqual([
+      {
+        label: 'Gemini Models',
+        usedPercent: 90,
+        windowDurationSeconds: 18000,
+        resetsAtEpochSeconds: null,
+      },
+      {
+        label: 'Claude and GPT models',
+        usedPercent: 80,
+        windowDurationSeconds: 18000,
+        resetsAtEpochSeconds: null,
+      },
+    ]);
+  });
+
+  it.each(['commands', 'reply'] as const)(
+    'cancels while waiting for %s and removes scratch after the child exits',
+    async (phase) => {
+      vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
+      vi.spyOn(setting, 'resolveACPProcessLaunchAsync').mockResolvedValue({
+        command: 'synthetic-antigravity',
+        args: [],
+      });
+      const controller = new AbortController();
+      let ready = () => {};
+      const waiting = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      let child: ChildProcess | undefined;
+      let scratch = '';
+      const script = `
+      const readline = require('node:readline');
+      const send = value => console.log(JSON.stringify(value));
+      readline.createInterface({ input: process.stdin }).on('line', line => {
+        const r = JSON.parse(line);
+        if (r.method === 'initialize') send({ jsonrpc: '2.0', id: r.id, result: { protocolVersion: 1, agentInfo: { name: 'antigravity-acp', version: '1.4.5' } } });
+        if (r.method === 'session/new') {
+          send({ jsonrpc: '2.0', id: r.id, result: { sessionId: 'quota' } });
+          if (${JSON.stringify(phase)} === 'commands') console.error('waiting');
+          else send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'quota', update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'usage', description: 'Quota' }] } } });
+        }
+        if (r.method === 'session/prompt') console.error('waiting');
+      });`;
+      try {
+        const outcome = queryLocalAcpRateLimits({
+          cliType: 'registry',
+          agentType: 'antigravity-acp',
+          workdir: process.cwd(),
+          env: {},
+          logger: createSilentLogger(),
+          signal: controller.signal,
+          terminalManager: {} as never,
+          onUpdateMessage: () => {},
+          onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+          spawnImpl: ((_command, _args, options) => {
+            scratch = String(options.cwd);
+            child = spawn(process.execPath, ['-e', script], options);
+            child.stderr?.on('data', (data) => {
+              if (String(data).includes('waiting')) ready();
+            });
+            return child;
+          }) as NonNullable<Parameters<typeof queryLocalAcpRateLimits>[0]['spawnImpl']>,
+        });
+        const rejected = expect(outcome).rejects.toThrow('cancelled');
+        await waiting;
+        expect(fs.existsSync(scratch)).toBe(true);
+        expect(scratch).not.toBe(process.cwd());
+        controller.abort();
+        await rejected;
+        expect(child?.exitCode !== null || child?.signalCode !== null).toBe(true);
+        expect(fs.existsSync(scratch)).toBe(false);
+      } finally {
+        vi.restoreAllMocks();
+      }
     }
   );
 });

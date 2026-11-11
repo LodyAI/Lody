@@ -15,6 +15,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { probeBuiltinAuthentication } from '@/agent/acp-authentication';
+import { isAntigravityRegistryAgent } from './antigravity-quota';
 import {
   normalizeAcpSessionCapabilities,
   type AcpCapabilitiesResult,
@@ -192,7 +193,11 @@ export async function fetchAcpCapabilities(
         ...normalizeAcpSessionCapabilities(sessionResponse, {
           sessionFork: client.supportsSessionFork?.() === true,
           sessionTitle: client.supportsSessionTitleGeneration(),
-          rateLimits: client.getRateLimitsCapability(),
+          rateLimits:
+            client.getRateLimitsCapability() ??
+            (isAntigravityRegistryAgent({ cliType, agentType })
+              ? { version: 1, query: true }
+              : undefined),
           acknowledgedSteer: client.supportsAcknowledgedSteer(),
           goalActions: client.getGoalCapability()?.actions.slice(),
           agent: { cliType, agentType },
