@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo } from 'react';
-import type { E2eeAutomaticPairingReview, E2eeWorkspaceRuntime } from '@lody/platform';
+import type { E2eeAutomaticPairingState, E2eeWorkspaceRuntime } from '@lody/platform';
 import {
   E2eeAutomaticPairingInbox,
   E2eeAutomaticPairingPage,
@@ -17,7 +17,7 @@ function Preview({
   backup?: boolean;
 }) {
   const runtime = useMemo(() => {
-    const state: E2eeAutomaticPairingReview = {
+    const state: E2eeAutomaticPairingState & { requestId: string } = {
       id: 'synthetic-only',
       workspaceId: 'preview',
       workspaceName: 'Lody Design',
@@ -28,6 +28,7 @@ function Preview({
       expiresAt: Date.now() + 600_000,
     };
     let terminal = false;
+    let wrongCodes = 0;
     let previous = mode === 'previous';
     return {
       automaticPairingState: async () => {
@@ -55,8 +56,27 @@ function Preview({
         terminal = true;
         state.phase = 'cancelled';
       },
-      pendingAutomaticPairing: async () => (terminal ? [] : [{ ...state }]),
-      approveAutomaticPairing: async () => {
+      pendingAutomaticPairing: async () => {
+        if (terminal) return [];
+        const { comparisonCode: _approverNeverShowsIt, ...review } = state;
+        return [review];
+      },
+      // Type 528193 (the code the new device shows) to authorize; the third wrong code
+      // ends the request, as the real host does.
+      approveAutomaticPairing: async (_id: string, code: string) => {
+        if (code !== state.comparisonCode) {
+          wrongCodes += 1;
+          if (wrongCodes >= 3) {
+            terminal = true;
+            throw Object.assign(new Error('e2ee_pairing-code-locked'), {
+              code: 'pairing-code-locked',
+            });
+          }
+          throw Object.assign(new Error('e2ee_pairing-code-mismatch'), {
+            code: 'pairing-code-mismatch',
+            attemptsLeft: 3 - wrongCodes,
+          });
+        }
         terminal = true;
       },
       declineAutomaticPairing: async () => {
