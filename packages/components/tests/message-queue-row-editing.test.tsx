@@ -505,6 +505,66 @@ describe('queued message images', () => {
     expect(container!.querySelector('[aria-label="Continue sending"]')).toBeTruthy();
   });
 
+  it('shows why a queued send failed and leaves the failure once it is retried', async () => {
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);
+    const reason = "Lody on this computer couldn't prepare this attachment (request_timeout).";
+    let records = [
+      {
+        id: 'held',
+        error: reason,
+        sessionId: 'session-test',
+        workspaceId: 'workspace-test',
+        sequence: 1,
+        attachments: [],
+        delivery: { kind: 'queue' },
+        queue: { task: 'Remove these three metrics' },
+        entry: { id: 'held', role: 'user', items: [] },
+      } as unknown as PendingSessionSend,
+    ];
+    const listeners = new Set<() => void>();
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-test',
+      pendingSends: {
+        getSnapshot: () => records,
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        retry: (id: string) => {
+          records = records.map((send) => (send.id === id ? { ...send, error: undefined } : send));
+          listeners.forEach((listener) => listener());
+        },
+      },
+    } as unknown as WorkspaceRuntime);
+    await act(async () =>
+      root?.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [],
+            onRemove: () => undefined,
+            onReorder: () => undefined,
+            onEditStart: () => undefined,
+            onEditCancel: () => undefined,
+            onEditSave: () => undefined,
+            onSteer: () => undefined,
+          })
+        )
+      )
+    );
+    const row = () => container!.querySelector<HTMLElement>('[data-pending-queue-row="held"]')!;
+    expect(row().querySelector('[role="alert"]')?.textContent).toBe(reason);
+
+    await act(async () =>
+      row().querySelector<HTMLButtonElement>('[aria-label="Continue sending"]')!.click()
+    );
+    expect(row().getAttribute('data-pending-queue-state')).toBe('sending');
+    expect(row().textContent).not.toContain(reason);
+  });
+
   it('opens the full-size image in the viewer without editing the row', async () => {
     const store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);

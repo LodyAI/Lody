@@ -26,6 +26,7 @@ import { createWorkspacePendingSends } from '../src/providers/workspace-pending-
 import type { PendingSessionSend, PendingSessionSends } from '../src/lib/session-pending-sends';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
 import { encryptedDispatchSigner } from './helpers/encrypted-dispatch-signer';
+import { initI18n } from '../src/i18n';
 
 const upload = vi.hoisted(() => ({
   run: undefined as undefined | ((file: File, signal: AbortSignal) => Promise<unknown>),
@@ -424,9 +425,14 @@ it('retains a failed same-machine image without attempting cloud fallback', asyn
   const f = fixture(false, null);
   upload.run = async (file) => ready(file);
   f.pending.enqueue(send('blocked', ['image.png']));
+  await initI18n('en');
   const held = await failed(f.pending, 'blocked');
   expect(f.turns()).toEqual([]);
-  expect(held.error).toBe('Local handoff failed');
+  // The row tells the sender which step failed and what to do, with the host's reason.
+  expect(held.error).toBe(
+    "Lody on this computer couldn't prepare this attachment (Local handoff failed). Make sure the local agent is running and up to date, then continue sending."
+  );
+  expect(held.attachments[0]?.error).toBe(held.error);
   expect(await held.attachments[0]?.source?.text()).toBe('image.png');
 });
 it('uses transfer for a different or unknown desktop local identity', async () => {

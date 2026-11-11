@@ -109,15 +109,23 @@ export function PendingQueueRow({
             ) : null}
           </div>
         ) : null}
-        {/* Muted until it is a real queue item, like an unsent conversation's title. */}
-        <div
-          className={cn(
-            'min-w-0 flex-1 overflow-hidden',
-            stylex.props(queueSurface.text, !instant && queueSurface.preparingText).className
-          )}
-          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
-        >
-          {queuedText(record)}
+        <div className="min-w-0 flex-1">
+          {/* Muted until it is a real queue item, like an unsent conversation's title. */}
+          <div
+            className={cn(
+              'overflow-hidden',
+              stylex.props(queueSurface.text, !instant && queueSurface.preparingText).className
+            )}
+            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+          >
+            {queuedText(record)}
+          </div>
+          {/* The sender must see what failed and what to do before continuing. */}
+          {failed ? (
+            <div role="alert" {...stylex.props(queueSurface.failureReason)}>
+              {record.error}
+            </div>
+          ) : null}
         </div>
       </div>
       <div
