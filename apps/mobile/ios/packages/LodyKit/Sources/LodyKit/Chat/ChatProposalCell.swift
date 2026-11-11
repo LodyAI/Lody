@@ -202,8 +202,13 @@ final class ChatProposalCell: UICollectionViewCell {
   private static func button(_ title: String, primary: Bool, traits: UITraitCollection) -> UIButton.Configuration {
     var configuration: UIButton.Configuration = primary ? .prominentGlass() : .glass()
     configuration.title = title
-    configuration.baseForegroundColor = primary ? .systemBackground : .label
-    if primary { configuration.baseBackgroundColor = .label }
+    // Resolve against the cell's appearance: a prominent glass button re-resolves dynamic
+    // colors for its own tint, so `.systemBackground` on a light fill came out white in dark mode.
+    let ink = UIColor.label.resolvedColor(with: traits)
+    let paper = UIColor.systemBackground.resolvedColor(with: traits)
+    let foreground = primary ? paper : ink
+    configuration.baseForegroundColor = foreground
+    if primary { configuration.baseBackgroundColor = ink }
     configuration.cornerStyle = .capsule
     configuration.background.backgroundInsets = NSDirectionalEdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0)
     configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
@@ -211,6 +216,7 @@ final class ChatProposalCell: UICollectionViewCell {
     configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
       var next = attributes
       next.font = font
+      next.foregroundColor = foreground
       return next
     }
     return configuration
