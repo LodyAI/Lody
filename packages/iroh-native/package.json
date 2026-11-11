@@ -21,8 +21,10 @@
     "build": "node scripts/build.mjs",
     "build:debug": "node scripts/build.mjs --debug",
     "test": "vitest run",
-    "test:rust": "cargo test --locked -p lody-iroh",
-    "typecheck": "tsgo --noEmit"
+    "test:rust": "cargo test --locked -p lody-iroh -p lody-iroh-uniffi",
+    "typecheck": "tsgo --noEmit",
+    "build:ios": "node scripts/build-mobile.mjs ios",
+    "build:android": "node scripts/build-mobile.mjs android"
   },
   "devDependencies": {
     "@types/node": "catalog:",

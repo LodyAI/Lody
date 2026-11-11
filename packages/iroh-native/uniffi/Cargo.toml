@@ -1,0 +1,23 @@
+[package]
+name = "lody-iroh-uniffi"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "UniFFI binding of lody-iroh for the native mobile shells (Swift/Kotlin). Dial-only, port mapping off."
+
+[lib]
+crate-type = ["cdylib", "staticlib", "lib"]
+name = "lody_iroh_uniffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+lody-iroh = { path = "../core" }
+uniffi = { version = "0.32", features = ["tokio", "cli"] }
+tokio.workspace = true
+zeroize.workspace = true
+hex.workspace = true
