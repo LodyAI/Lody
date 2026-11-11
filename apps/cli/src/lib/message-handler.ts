@@ -274,6 +274,7 @@ import {
   type MachineProcessLifecycleAction,
   normalizeMachineUpgradeTargetVersion,
   verifyMachineLifecycleRequest,
+  withMachineEncryption,
 } from './machine-lifecycle';
 import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
@@ -694,6 +695,8 @@ export interface MessageHandlerConfig {
   machineName: string;
   cliVersion: string;
   machineLifecycleCapability?: MachineLifecycleCapability;
+  /** Machine-wide: whether this daemon also hosts any encrypted workspace. */
+  hostsEncryptedWorkspace?: () => boolean;
   prepareManagedUpgrade?: (
     requestId: string,
     target: string,
@@ -812,7 +815,14 @@ export class MessageHandler {
   private onFatalAuthFailure?: (error: Error) => void;
   private onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
-  private readonly machineLifecycleCapability: MachineLifecycleCapability;
+  private readonly baseMachineLifecycleCapability: MachineLifecycleCapability;
+  private readonly hostsEncryptedWorkspace?: () => boolean;
+  private get machineLifecycleCapability(): MachineLifecycleCapability {
+    return withMachineEncryption(
+      this.baseMachineLifecycleCapability,
+      this.hostsEncryptedWorkspace?.() ?? false
+    );
+  }
   private readonly prepareManagedUpgrade?: (
     requestId: string,
     target: string,
@@ -3276,7 +3286,8 @@ export class MessageHandler {
     this.sealMachineIdentityRestore = config.sealMachineIdentityRestore;
     this.readWorkspaceAccess = config.readWorkspaceAccess;
     this.prepareManagedUpgrade = config.prepareManagedUpgrade;
-    this.machineLifecycleCapability = config.encryptedWorkspace
+    this.hostsEncryptedWorkspace = config.hostsEncryptedWorkspace;
+    this.baseMachineLifecycleCapability = config.encryptedWorkspace
       ? {
           launchMode: config.machineLifecycleCapability?.launchMode ?? 'unknown',
           canRemoteRestart: false,

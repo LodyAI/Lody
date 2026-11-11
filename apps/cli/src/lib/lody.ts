@@ -75,6 +75,7 @@ interface LodyOptions {
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
   memoryPressure: MemoryPressureSnapshotSource;
   machineLifecycleCapability: MachineLifecycleCapability;
+  hostsEncryptedWorkspace?: () => boolean;
   prepareManagedUpgrade?: (
     requestId: string,
     target: string,
@@ -372,6 +373,7 @@ export class Lody {
         machineName: this.machineName,
         cliVersion: pkg.version,
         machineLifecycleCapability: options.machineLifecycleCapability,
+        hostsEncryptedWorkspace: options.hostsEncryptedWorkspace,
         prepareManagedUpgrade: options.prepareManagedUpgrade,
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         ...(options.localWorkspaceCatalog

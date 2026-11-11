@@ -80,6 +80,24 @@ export const resolveMachineLifecycleCapability = (
   };
 };
 
+/**
+ * Lifecycle actions stop the whole daemon process, so they also interrupt every
+ * encrypted workspace it hosts. Encrypted lifecycle authorization is not
+ * implemented; any hosted encrypted workspace disables them machine-wide.
+ */
+export const withMachineEncryption = (
+  capability: MachineLifecycleCapability,
+  hostsEncryptedWorkspace: boolean
+): MachineLifecycleCapability =>
+  hostsEncryptedWorkspace
+    ? {
+        launchMode: capability.launchMode,
+        canRemoteRestart: false,
+        canRemoteUpgrade: false,
+        reason: 'unsupported_install',
+      }
+    : capability;
+
 const MachineLifecycleVerifyResponseSchema = z
   .object({
     valid: z.literal(true),

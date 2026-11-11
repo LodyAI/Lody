@@ -4,6 +4,7 @@ import type { MachineId, WorkspaceId } from '@lody/shared';
 import {
   normalizeMachineUpgradeTargetVersion,
   resolveMachineLifecycleCapability,
+  withMachineEncryption,
   verifyMachineLifecycleRequest,
 } from './machine-lifecycle';
 
@@ -70,6 +71,20 @@ describe('managed lifecycle capability', () => {
       resolveMachineLifecycleCapability('daemon', { managed: true, platform: 'win32' })
         .canRemoteUpgrade
     ).toBe(false);
+  });
+
+  it('a daemon that also hosts an encrypted workspace refuses remote restart and update from every workspace', () => {
+    const plaintext = resolveMachineLifecycleCapability('daemon', {
+      managed: true,
+      platform: 'linux',
+    });
+    expect(withMachineEncryption(plaintext, false)).toEqual(plaintext);
+    expect(withMachineEncryption(plaintext, true)).toEqual({
+      launchMode: 'daemon',
+      canRemoteRestart: false,
+      canRemoteUpgrade: false,
+      reason: 'unsupported_install',
+    });
   });
 });
 
