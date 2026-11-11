@@ -478,6 +478,111 @@ it.each(['chromium', 'webkit'] as const)(
   }
 );
 
+/** An admitted, key-holding owner device whose runtime has just approved one applicant
+ * while the mailbox refuses every envelope. */
+async function approvedWhileMailboxRefuses(directory: string, hold: boolean) {
+  const output = await build({
+    entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    globalName: 'HostFixture',
+    target: 'safari16.4',
+    write: false,
+    logLevel: 'silent',
+  });
+  const file = join(directory, 'index.html');
+  await writeFile(
+    file,
+    '<!doctype html><script>' +
+      output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+      '</script>'
+  );
+  const context = await chromium.launchPersistentContext(join(directory, 'profile'), {
+    headless: true,
+  });
+  const page = await context.newPage();
+  await page.goto(pathToFileURL(file).href);
+  await page.evaluate(async () => {
+    await (globalThis as Surface).HostFixture.boot();
+    await (globalThis as Surface).HostFixture.bootRuntime();
+  });
+  await good(page, 'prepare');
+  expect((await raw(page, 'approve')).ok).toBe(true);
+  expect(await good(page, 'claim')).toMatchObject({ ready: true });
+  await good(page, 'open');
+  expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true });
+  expect(await good(page, 'memberInvite')).toBe('link');
+  const requestId = await good(page, 'memberApplicant');
+  // Approval signs only a package this session listed.
+  expect(await good(page, 'memberList')).toEqual([requestId]);
+  if (hold) await good(page, 'memberHoldRetry');
+  await good(page, 'memberRefuseKeys');
+  expect(await good(page, 'memberApprove')).toMatchObject({
+    admitted: true,
+    keyPending: true,
+    keyDelivery: 'delivering',
+  });
+  return { context, page, requestId };
+}
+type Deliveries = {
+  items: { requestId: string; state: string; code?: string }[];
+  sleeps: number[];
+  envelopes: boolean[];
+};
+
+// The approval's first key round ends with the applicant's slot still NeedsEnvelope. The
+// runtime retries on its own after the injected backoff, without the approver pressing
+// retry, and the applicant's envelope is stored.
+it('a member key delivery that fails its first round is retried and delivered without user action', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-retry-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, false);
+    context = opened.context;
+    await expect
+      .poll(async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items)
+      .toEqual([{ requestId: opened.requestId, state: 'delivered' }]);
+    const settled = (await good(opened.page, 'memberDeliveries')) as Deliveries;
+    // One bounded backoff, the first step of the desktop schedule, then the stored envelope.
+    expect(settled.sleeps).toEqual([10_000]);
+    expect(settled.envelopes[0]).toBe(false);
+    expect(settled.envelopes.at(-1)).toBe(true);
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// Not only the approval page delivers: the undelivered task is durable in the core
+// distribution journal, so any later key round on this device sends it, here an
+// ordinary key-installing refresh while the approval's own retry never fires.
+it('a later key round on the approving device delivers to a member its approval did not reach', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-round-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    // The approval's own round has ended with the applicant's slot still empty.
+    await expect
+      .poll(
+        async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items[0]?.code
+      )
+      .toBe('e2ee_key_not_sent');
+    expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes).not.toContain(
+      true
+    );
+    await good(opened.page, 'memberAcceptKeys');
+    await good(opened.page, 'receive');
+    expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes.at(-1)).toBe(
+      true
+    );
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 it.each(['chromium', 'webkit'] as const)(
   'a failed approval-reader close keeps the release retryable in %s',
   async (engine) => {
