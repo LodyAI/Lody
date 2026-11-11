@@ -8,7 +8,12 @@ class SessionPullRequestUpdates {
     private val confirmed = mutableMapOf<Pair<String, Int>, String>()
     /** Merge states read straight from GitHub after Ready for review, until the catalog has one. */
     private val merges = mutableMapOf<Pair<String, Int>, String>()
+    /**
+     * The write in flight. Its PR keeps the catalog's status until GitHub acknowledges it; the
+     * action bar shows progress meanwhile instead of claiming a merge that may still fail.
+     */
     private var pending: Pair<CatalogPullRequest, Boolean>? = null
+    fun writes(pr: CatalogPullRequest): Boolean = pending?.let { key(it.first) == key(pr) } == true
     fun begin(pr: CatalogPullRequest, merged: Boolean) { pending = pr to merged }
     fun finish(success: Boolean) {
         if (success) pending?.let { (pr, merged) -> confirm(pr, merged) }
@@ -42,10 +47,6 @@ class SessionPullRequestUpdates {
             merges.remove(id)
             pr
         } else pr.copy(merge = merge)
-    }.map { pr ->
-        val (target, merged) = pending ?: return@map pr
-        if (key(pr) == key(target) && (merged || pr.status == "draft")) pr.copy(status = if (merged) "merged" else "open")
-        else pr
     })
 }
 
