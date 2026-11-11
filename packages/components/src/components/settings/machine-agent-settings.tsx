@@ -1181,6 +1181,28 @@ export function MachineAgentSettings({
   );
 
   const [batchUpdateOpen, setBatchUpdateOpen] = useState(false);
+  // Each machine updates within its own channel, so the dialog needs every
+  // channel's latest release, not only the initiating client's.
+  const [latestByChannel, setLatestByChannel] = useState<Partial<
+    Record<'stable' | 'next' | 'nightly', string>
+  > | null>(null);
+  useEffect(() => {
+    if (!batchUpdateOpen) return undefined;
+    setLatestByChannel(null);
+    let cancelled = false;
+    void Promise.all(
+      (['stable', 'next', 'nightly'] as const).map(async (channel) => {
+        const result = await fetchLatestDaemonVersion(channel);
+        return [channel, result.ok ? result.latestVersion : undefined] as const;
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      setLatestByChannel(Object.fromEntries(entries.filter((entry) => entry[1] !== undefined)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [batchUpdateOpen]);
   const batchUpdateMachines = useMemo((): BatchUpdateMachine[] => {
     const running = new Map<string, number>();
     for (const meta of Object.values(sessionMetaCache)) {
@@ -1227,10 +1249,12 @@ export function MachineAgentSettings({
     [batchUpdateMachines, runtime, workspaceId]
   );
   const requestBatchUpgrade = useCallback(
-    async (machineId: string, target: string, policy: 'when-idle' | 'immediate') => {
-      const releaseChannel = collectClientBuildInfo().releaseChannel;
-      const channel =
-        releaseChannel === 'nightly' ? 'nightly' : releaseChannel === 'staging' ? 'next' : 'stable';
+    async (
+      machineId: string,
+      target: string,
+      policy: 'when-idle' | 'immediate',
+      channel: 'stable' | 'next' | 'nightly'
+    ) => {
       await requestMachineLifecycle({
         machineId: machineId as MachineId,
         action: 'upgrade',
@@ -1676,7 +1700,7 @@ export function MachineAgentSettings({
         open={batchUpdateOpen}
         onOpenChange={setBatchUpdateOpen}
         machines={batchUpdateMachines}
-        latestVersion={latestCliVersion}
+        latestByChannel={latestByChannel}
         probe={probeBatchMachine}
         requestUpgrade={requestBatchUpgrade}
       />

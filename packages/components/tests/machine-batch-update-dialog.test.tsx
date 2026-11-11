@@ -64,7 +64,7 @@ describe('update-all dialog keeps per-machine progress for the whole run', () =>
       root.render(
         createElement(MachineBatchUpdateDialog, {
           onOpenChange: () => {},
-          latestVersion: '1.1.0',
+          latestByChannel: { stable: '1.1.0' },
           requestUpgrade: async () => {},
           ...props,
         })
@@ -127,5 +127,16 @@ describe('update-all dialog keeps per-machine progress for the whole run', () =>
       vi.advanceTimersByTime(5 * 60_000 + 3_000);
     });
     expect(document.body.textContent).toContain('Not back online after 5 minutes');
+  });
+  it('closing and reopening the dialog during a run keeps each machine’s progress', async () => {
+    const probe = async () => ({ lifecycle: daemon });
+    await render({ open: true, machines: [studio(true)], probe });
+    await act(async () => button('Update 1 machines')?.click());
+    await flush();
+    expect(document.body.textContent).toContain('Waiting until no conversation is running');
+    await render({ open: false, machines: [studio(true)], probe });
+    await render({ open: true, machines: [studio(true)], probe });
+    expect(document.body.textContent).toContain('Waiting until no conversation is running');
+    expect(button('Update 1 machines')).toBeUndefined();
   });
 });

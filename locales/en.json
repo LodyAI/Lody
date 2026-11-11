@@ -6610,7 +6610,7 @@
   "settings.machines.batchUpdate.unsupported.install": "This installation cannot update remotely (Windows, an encrypted workspace, or an older npm install). Run on that machine:",
   "settings.machines.batchUpdate.unsupported.unknown": "Could not read whether this machine can update remotely",
   "settings.machines.batchUpdate.title": "Update all my machines",
-  "settings.machines.batchUpdate.description": "Each machine switches to v{{version}} on its own and rolls back automatically if the new version does not start.",
+  "settings.machines.batchUpdate.description": "Each machine updates to the latest release of its own channel and rolls back automatically if the new version does not start.",
   "settings.machines.batchUpdate.running": "{{count}} conversations running",
   "settings.machines.batchUpdate.whenIdle": "Update when idle",
   "settings.machines.batchUpdate.immediate": "Update now (interrupt conversations)",

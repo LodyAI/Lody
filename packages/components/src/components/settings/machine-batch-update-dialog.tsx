@@ -12,6 +12,7 @@ import {
   deriveBatchRowStatus,
   planMachineBatchUpdate,
   type BatchMachineInput,
+  type DaemonChannel,
   type BatchPlanRow,
   type BatchRowStatus,
 } from '@/lib/machine-batch-update';
@@ -76,16 +77,22 @@ export function MachineBatchUpdateDialog({
   open,
   onOpenChange,
   machines,
-  latestVersion,
+  latestByChannel,
   probe,
   requestUpgrade,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   machines: readonly BatchUpdateMachine[];
-  latestVersion: string;
+  /** Latest release per channel; each machine targets only its own channel. */
+  latestByChannel: Partial<Record<DaemonChannel, string>> | null;
   probe: (machineId: string) => Promise<BatchUpdateProbe>;
-  requestUpgrade: (machineId: string, target: string, policy: SwitchPolicy) => Promise<void>;
+  requestUpgrade: (
+    machineId: string,
+    target: string,
+    policy: SwitchPolicy,
+    channel: DaemonChannel
+  ) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [lifecycleById, setLifecycleById] = useState<
@@ -103,10 +110,12 @@ export function MachineBatchUpdateDialog({
   const probeRef = useRef(probe);
   probeRef.current = probe;
   const probesInFlight = useRef(new Set<string>());
+  // A run with unfinished machines survives closing and reopening the dialog.
+  const runActiveRef = useRef(false);
 
   // Probe each owned online machine's lifecycle capability when the dialog opens.
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || runActiveRef.current) return undefined;
     setStep('review');
     setRequests(new Map());
     setPolicy('when-idle');
@@ -135,9 +144,9 @@ export function MachineBatchUpdateDialog({
           ...machine,
           lifecycle: lifecycleById.get(machine.id) ?? null,
         })),
-        latestVersion
+        latestByChannel ?? {}
       ),
-    [machines, lifecycleById, latestVersion]
+    [machines, lifecycleById, latestByChannel]
   );
   const updatable = plan.filter((row) => row.kind === 'update');
   const runningTotal = updatable.reduce((sum, row) => sum + row.runningSessionCount, 0);
@@ -171,7 +180,7 @@ export function MachineBatchUpdateDialog({
       return deriveBatchRowStatus({
         request: state.request,
         error: state.error,
-        target: row.targetVersion,
+        target: row.targetVersion ?? '',
         isOnline: machine?.isOnline ?? false,
         cliVersion: machine?.cliVersion,
         updatePhase: state.updatePhase,
@@ -189,6 +198,7 @@ export function MachineBatchUpdateDialog({
     return status !== null && !TERMINAL.has(status.kind);
   });
   const pendingKey = pending.join(',');
+  runActiveRef.current = step === 'running' && pending.length > 0;
   useEffect(() => {
     if (!open || step !== 'running' || pendingKey === '') return undefined;
     const timer = setInterval(() => {
@@ -221,7 +231,7 @@ export function MachineBatchUpdateDialog({
       new Map(updatable.map((row) => [row.machineId, { request: 'requesting' } as RequestState]))
     );
     for (const row of updatable) {
-      void requestUpgrade(row.machineId, row.targetVersion, policy).then(
+      void requestUpgrade(row.machineId, row.targetVersion ?? '', policy, row.channel).then(
         () => {
           // A machine already offline at acceptance has started its switch.
           const offline = !machinesRef.current.find((entry) => entry.id === row.machineId)
@@ -292,7 +302,7 @@ export function MachineBatchUpdateDialog({
       case 'update':
         return t('settings.machines.batchUpdate.willUpdate', 'v{{current}} → v{{target}}', {
           current: row.currentVersion ?? '?',
-          target: row.targetVersion,
+          target: row.targetVersion ?? '?',
         });
       default:
         return {
@@ -328,12 +338,11 @@ export function MachineBatchUpdateDialog({
           <Dialog.Description>
             {t(
               'settings.machines.batchUpdate.description',
-              'Each machine switches to v{{version}} on its own and rolls back automatically if the new version does not start.',
-              { version: latestVersion }
+              'Each machine updates to the latest release of its own channel and rolls back automatically if the new version does not start.'
             )}
           </Dialog.Description>
         </Dialog.Header>
-        {probing ? (
+        {probing || !latestByChannel ? (
           <Spinner size="small" />
         ) : (
           <div {...stylex.props(styles.list)}>
@@ -417,7 +426,7 @@ export function MachineBatchUpdateDialog({
           {step !== 'running' ? (
             <Button
               variant={step === 'confirm-immediate' ? 'destructive' : 'primary'}
-              disabled={probing || updatable.length === 0}
+              disabled={probing || !latestByChannel || updatable.length === 0}
               onClick={confirm}
             >
               {step === 'confirm-immediate'

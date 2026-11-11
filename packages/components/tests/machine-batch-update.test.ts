@@ -58,7 +58,7 @@ describe('one-click update plan covers only the requester’s own machines', () 
         machine({ id: 'old-protocol', supportsManagedUpdates: false }),
         machine({ id: 'unprobed', lifecycle: null }),
       ],
-      '1.1.0'
+      { stable: '1.1.0' }
     );
     expect(plan.map((row) => [row.machineId, row.kind, row.reason])).toEqual([
       ['a', 'update', undefined],
@@ -78,9 +78,29 @@ describe('one-click update plan covers only the requester’s own machines', () 
   });
 
   it('never offers a downgrade', () => {
-    expect(planMachineBatchUpdate([machine({ cliVersion: '1.2.0' })], '1.1.0')[0]?.kind).toBe(
-      'up-to-date'
+    expect(
+      planMachineBatchUpdate([machine({ cliVersion: '1.2.0' })], { stable: '1.1.0' })[0]?.kind
+    ).toBe('up-to-date');
+  });
+});
+
+describe('each machine updates within its own channel', () => {
+  it('targets the latest release of the machine’s own channel, whatever the initiating client runs', () => {
+    const plan = planMachineBatchUpdate(
+      [
+        machine({ id: 'stable-box', cliVersion: '1.0.0' }),
+        machine({ id: 'nightly-box', cliVersion: '1.1.0-nightly.20261101' }),
+        machine({ id: 'next-box', cliVersion: '1.1.0-next.1' }),
+      ],
+      { stable: '1.1.0', nightly: '1.2.0-nightly.20261111' }
     );
+    expect(plan.map((row) => [row.machineId, row.kind, row.channel, row.targetVersion])).toEqual([
+      ['stable-box', 'update', 'stable', '1.1.0'],
+      ['nightly-box', 'update', 'nightly', '1.2.0-nightly.20261111'],
+      // No known release for its channel: never fall back to another channel.
+      ['next-box', 'unsupported', 'next', undefined],
+    ]);
+    expect(plan[2]?.reason).toBe('unknown');
   });
 });
 

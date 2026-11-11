@@ -26,6 +26,15 @@ export type BatchMachineInput = {
   runningSessionCount: number;
 };
 
+export type DaemonChannel = ManagedDaemonUpgradeOptions['channel'];
+
+/** A daemon's channel from its version's prerelease tag (`-next.*`, `-nightly.*`). */
+export function daemonChannelOfVersion(version: string | undefined): DaemonChannel {
+  const prerelease = /^\d+\.\d+\.\d+-([0-9A-Za-z.-]+)/.exec(version ?? '')?.[1];
+  if (!prerelease) return 'stable';
+  return prerelease.startsWith('nightly') ? 'nightly' : 'next';
+}
+
 export type BatchUnsupportedReason = 'desktop' | 'foreground' | 'install' | 'unknown';
 
 export type BatchPlanRow = {
@@ -34,7 +43,10 @@ export type BatchPlanRow = {
   kind: 'update' | 'up-to-date' | 'offline' | 'unsupported';
   reason?: BatchUnsupportedReason;
   currentVersion?: string;
-  targetVersion: string;
+  /** The machine's own channel; the batch never moves a machine across channels. */
+  channel: DaemonChannel;
+  /** Latest release of that channel; absent when it is unknown. */
+  targetVersion?: string;
   runningSessionCount: number;
 };
 
@@ -47,19 +59,23 @@ const unsupportedReason = (machine: BatchMachineInput): BatchUnsupportedReason =
 
 export function planMachineBatchUpdate(
   machines: readonly BatchMachineInput[],
-  latestVersion: string
+  latestByChannel: Partial<Record<DaemonChannel, string>>
 ): BatchPlanRow[] {
   return machines
     .filter((machine) => machine.isOwn)
     .map((machine): BatchPlanRow => {
+      const channel = daemonChannelOfVersion(machine.cliVersion);
+      const latestVersion = latestByChannel[channel];
       const row = {
         machineId: machine.id,
         name: machine.name,
         currentVersion: machine.cliVersion,
+        channel,
         targetVersion: latestVersion,
         runningSessionCount: machine.runningSessionCount,
       };
       if (!machine.isOnline) return { ...row, kind: 'offline' };
+      if (!latestVersion) return { ...row, kind: 'unsupported', reason: 'unknown' };
       if (!isCliVersionOutdated(machine.cliVersion, latestVersion))
         return { ...row, kind: 'up-to-date' };
       if (machine.supportsManagedUpdates && machine.lifecycle?.canRemoteUpgrade === true)

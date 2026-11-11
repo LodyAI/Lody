@@ -43,7 +43,7 @@ const meta = {
   args: {
     open: true,
     onOpenChange: () => {},
-    latestVersion: '1.5.0',
+    latestByChannel: { stable: '1.5.0' },
     machines: [
       machine('studio-mac', 'Studio Mac', { running: 2 }),
       machine('build-box', 'Build box'),

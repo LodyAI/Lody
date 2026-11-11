@@ -6582,7 +6582,7 @@
   "sessions.resendUndelivered.continue": "继续",
   "settings.machines.batchUpdate.open": "全部更新我的机器",
   "settings.machines.batchUpdate.title": "全部更新我的机器",
-  "settings.machines.batchUpdate.description": "每台机器各自切换到 v{{version}}；新版本起不来会自动回滚。",
+  "settings.machines.batchUpdate.description": "每台机器更新到它自己渠道的最新版本；新版本起不来会自动回滚。",
   "settings.machines.batchUpdate.status.requesting": "正在发送请求…",
   "settings.machines.batchUpdate.status.requestFailed": "请求失败",
   "settings.machines.batchUpdate.status.waitingIdle": "等待没有对话在运行",
