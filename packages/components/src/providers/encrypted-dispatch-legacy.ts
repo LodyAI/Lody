@@ -171,13 +171,22 @@ export function createEncryptedDispatchLegacy(options: {
       }),
     ]).finally(() => clearTimeout(budget));
     if (!ready) return fallback('not-ready');
-    const frames = await iroh
-      .call(
-        original.targetMachineId,
-        { id: original.requestId, frame: original.frames?.[0] ?? original.frameHex },
-        timeoutMs
-      )
-      .catch(() => undefined);
+    // The renderer owns the deadline: the host may first wait for its account lock,
+    // and that wait must not hold the same original back from Streams. A late iroh
+    // delivery is deduplicated by the receiver.
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const frames = await Promise.race([
+      iroh
+        .call(
+          original.targetMachineId,
+          { id: original.requestId, frame: original.frames?.[0] ?? original.frameHex },
+          timeoutMs
+        )
+        .catch(() => undefined),
+      new Promise<undefined>((resolve) => {
+        deadline = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+    ]).finally(() => clearTimeout(deadline));
     // A late reply or a broken connection; the same original continues on Streams.
     if (!frames) return closed ? undefined : fallback('call-failed');
     if (call.kind === 'dispatch') {
