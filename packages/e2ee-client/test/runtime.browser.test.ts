@@ -396,6 +396,10 @@ it.each(['chromium', 'webkit'] as const)(
       // Unattended admission requires an email invitation this device verifies against its
       // own ledger; a relay-written `source: 'email'` label grants nothing.
       expect(await good(page, 'memberEmailInvite')).toBe('email');
+      // Inviting the same email again re-sends the pending invitation; that is not a conflict.
+      expect(await good(page, 'memberEmailReinvite')).toBe(
+        await good(page, 'memberInvitationToken')
+      );
       const emailApplicant = await good(page, 'memberEmailApplicant');
       expect(await good(page, 'memberList')).toContain(emailApplicant);
       const beforeEmail = (await good(page, 'memberRecordCount')) as number;

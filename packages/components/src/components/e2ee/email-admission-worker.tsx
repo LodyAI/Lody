@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
-import { admissionFailureCode, recordAutomaticAdmission } from '@/lib/e2ee-admission-refusals';
+import {
+  automaticAdmissionRefusal,
+  keepAutomaticAdmissions,
+  recordAutomaticAdmission,
+} from '@/lib/e2ee-admission-refusals';
 
 type Runtime = Pick<E2eeWorkspaceRuntime, 'status' | 'memberJoinRequests' | 'approveMemberJoin'> &
   Partial<Pick<E2eeWorkspaceRuntime, 'open' | 'close' | 'refresh'>>;
@@ -51,6 +55,10 @@ export function startEmailAdmissionWorker(
       )
         return;
       const requests = await runtime.memberJoinRequests(workspaceId);
+      keepAutomaticAdmissions(
+        workspaceId,
+        requests.items.map((request) => request.requestId)
+      );
       for (const request of requests.items) {
         if (stopped) break;
         // `source` only skips link requests early. The host signs only an invitation it
@@ -60,9 +68,11 @@ export function startEmailAdmissionWorker(
           await runtime.approveMemberJoin(workspaceId, request.requestId, 'automatic');
           recordAutomaticAdmission(workspaceId, request.requestId, null);
         } catch (error) {
-          // The host retains original bytes and another applicant can continue. The original
-          // code is shown on the request so an administrator knows to approve it explicitly.
-          recordAutomaticAdmission(workspaceId, request.requestId, admissionFailureCode(error));
+          // The host retains original bytes and another applicant can continue. A verified
+          // refusal is shown on the request, with its original code, so an administrator
+          // approves it explicitly; offline and other transient failures change nothing.
+          const refusal = automaticAdmissionRefusal(error);
+          if (refusal) recordAutomaticAdmission(workspaceId, request.requestId, refusal);
         }
       }
     } catch {

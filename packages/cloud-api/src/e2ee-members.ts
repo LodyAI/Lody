@@ -70,11 +70,11 @@ export type E2eeMemberReplies = {
   retire: { state: E2eeMemberRequest['state'] };
   pending: {
     /** Signature-free so clients that predate signed offers can still read the list.
-     * Clients set `needsReissue` from `unsignedInvitations`. */
-    invitations: (E2eeMemberOffer & { needsReissue?: true })[];
-    /** Tokens of listed invitations created before offers were signed. Re-sending one
-     * issues a signed replacement; they never qualify for automatic admission. */
-    unsignedInvitations?: string[];
+     * Clients set `needsReissue` and `email` from `unsignedInvitations`. */
+    invitations: (E2eeMemberOffer & { needsReissue?: true; email?: string })[];
+    /** Email invitations created before offers were signed, with their address. Re-sending
+     * one issues a signed replacement; they never qualify for automatic admission. */
+    unsignedInvitations?: { token: string; email: string }[];
     items: (E2eeMemberRequest & { applicantName: string; applicantEmail: string })[];
     hasMore: boolean;
     seatPreview: import('./index').SeatInvitePreview;

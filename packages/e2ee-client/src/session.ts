@@ -780,10 +780,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               offer,
               ...(email === undefined ? {} : { email }),
             });
+            // Inviting an email that already has a pending invitation re-sends that one, so
+            // the relay answers with it instead of this new offer. Accept it only with this
+            // workspace's own genesis pins; it never grants anything by itself.
+            const resent =
+              mode === 'email' &&
+              result.offer.mode === 'email' &&
+              result.offer.genesisRecordHex === offer.genesisRecordHex;
             if (
               result.offer.workspaceId !== offer.workspaceId ||
               result.offer.genesisHash !== offer.genesisHash ||
-              result.offer.token !== offer.token
+              (result.offer.token !== offer.token && !resent)
             )
               return yield* fail('conflict');
             return result.offer;

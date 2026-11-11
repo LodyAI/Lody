@@ -1053,7 +1053,13 @@ export class E2eeIpc extends IpcService {
         offer,
         ...(input.email === undefined ? {} : { email: input.email })
       })
-    )
+    ).catch((error: unknown) => {
+      // An applicant of this email's earlier invitation is still waiting: the renderer tells
+      // the administrator to settle that request first. Only this mapped code crosses.
+      if ((error as { code?: unknown })?.code === 'e2ee_member_invitation_request_pending')
+        throw new Error('e2ee_member_invitation_request_pending')
+      throw error
+    })
     if (
       result.offer.workspaceId !== offer.workspaceId ||
       result.offer.genesisHash !== offer.genesisHash

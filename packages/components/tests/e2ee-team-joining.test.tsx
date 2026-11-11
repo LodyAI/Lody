@@ -294,42 +294,58 @@ describe('encrypted team joining', () => {
     expect(cost?.textContent).toBe('e2ee.team.approveCost');
   });
   it('shows why an email request needs a manual approval after the host refuses automatic admission', async () => {
-    const items = [
+    let items = [
       application('demoted', 'email'),
       application('expired', 'email'),
+      application('offline', 'email'),
       application('fresh', 'email'),
     ];
     const attempts: string[] = [];
-    const stop = startEmailAdmissionWorker(
-      {
-        status: async () => status,
-        memberJoinRequests: async () => ({ ...empty, items }),
-        approveMemberJoin: async (_workspace, id) => {
-          attempts.push(id);
-          // Portable hosts fail with a typed code, desktop hosts with an `e2ee_*` message.
-          if (id === 'demoted')
-            throw Object.assign(new Error('refused'), {
-              _tag: 'PersonalHostError',
-              code: 'invitation-endorser-ineligible',
-            });
-          throw new Error('e2ee_member_invitation_expired');
-        },
+    const runtime = {
+      status: async () => status,
+      memberJoinRequests: async () => ({ ...empty, items }),
+      approveMemberJoin: async (_workspace: string, id: string) => {
+        attempts.push(id);
+        // Portable hosts fail with a typed code; desktop rejections arrive through IPC.
+        if (id === 'demoted')
+          throw Object.assign(new Error('refused'), {
+            _tag: 'PersonalHostError',
+            code: 'invitation-endorser-ineligible',
+          });
+        if (id === 'expired')
+          throw new Error(
+            "Error invoking remote method 'e2ee:approveMemberJoin': Error: e2ee_member_invitation_expired"
+          );
+        // A transient failure is not a refusal.
+        throw new Error(
+          "Error invoking remote method 'e2ee:approveMemberJoin': Error: e2ee_network"
+        );
       },
-      'refused-team'
-    );
+    };
+    const stop = startEmailAdmissionWorker(runtime, 'refused-team');
     await settle();
     stop();
     // Each request was tried once in this round; recording a refusal adds no retry.
-    expect(attempts).toEqual(['demoted', 'expired', 'fresh']);
+    expect(attempts).toEqual(['demoted', 'expired', 'offline', 'fresh']);
+    let created: Promise<unknown> = Promise.resolve();
     await render(
       <E2eeTeamSettings
         workspaceId="refused-team"
         runtime={{
-          createMemberInvitation: async () => offer,
+          createMemberInvitation: async () => {
+            created = Promise.reject(
+              new Error(
+                "Error invoking remote method 'e2ee:createMemberInvitation': Error: e2ee_member_invitation_request_pending"
+              )
+            );
+            return created as never;
+          },
           memberJoinRequests: async () => ({
             ...empty,
             items: [...items, application('waiting', 'email')],
-            invitations: [{ ...offer, needsReissue: true }],
+            invitations: [
+              { ...offer, mode: 'email', needsReissue: true, email: 'legacy@synthetic.test' },
+            ],
           }),
           approveMemberJoin: async () => ({ admitted: true, keyPending: true }),
           rejectMemberJoin: async () => ({ state: 'rejected' }),
@@ -342,16 +358,43 @@ describe('encrypted team joining', () => {
         ?.textContent;
     expect(mode('demoted')).toBe('e2ee.team.automaticRefused:invitation-endorser-ineligible');
     expect(mode('expired')).toBe('e2ee.team.automaticRefused:e2ee_member_invitation_expired');
-    // Not yet attempted: still shown as automatic.
+    // Offline and not yet attempted requests are still shown as automatic.
+    expect(mode('offline')).toBe('e2ee.team.automatic');
     expect(mode('waiting')).toBe('e2ee.team.automatic');
     const action = (id: string) =>
       container.querySelector(`[data-testid="e2ee-join-approve"][data-request-id="${id}"]`)
         ?.textContent;
     expect(action('demoted')).toBe('e2ee.team.approve');
     expect(action('waiting')).toBe('e2ee.team.continueAdmission');
-    // An invitation created before signed offers stays listed and revocable, marked for re-sending.
+    // An unsigned email invitation shows its address, is marked for re-sending and stays
+    // revocable.
+    expect(container.textContent).toContain('legacy@synthetic.test');
     expect(container.textContent).toContain('e2ee.team.invitationNeedsReissue');
     expect(button('e2ee.team.revoke')).toBeTruthy();
+    // Inviting while that email's earlier applicant is still waiting says what to do.
+    const input = container.querySelector('input[type="email"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        'legacy@synthetic.test'
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => button('e2ee.team.invite').click());
+    await settle();
+    await created.catch(() => {});
+    expect(container.textContent).toContain('e2ee.team.invitationRequestPending');
+    // A request that is no longer listed loses its refusal.
+    items = items.filter((item) => item.requestId !== 'demoted');
+    const prune = startEmailAdmissionWorker(runtime, 'refused-team');
+    await settle();
+    prune();
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await settle();
+    items = [...items, application('demoted', 'email')];
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await settle();
+    expect(mode('demoted')).toBe('e2ee.team.automatic');
   });
   it('keeps a link request pending until the administrator approves the displayed request', async () => {
     const request = application('applicant', 'link');

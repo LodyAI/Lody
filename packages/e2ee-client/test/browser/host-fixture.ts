@@ -202,6 +202,7 @@ let memberRelay: {
   rejected?: Set<string>;
   /** The latest invitation this device endorsed, as the relay stored it. */
   invitation?: E2eeMemberOffer;
+  invitedEmail?: string;
 } = { calls: [], others: [] };
 let loseNextAppendReply = false;
 /** The relay authenticates the admitted device's own credential, as the real one does. */
@@ -427,7 +428,12 @@ export async function boot(
             Effect.gen(function* () {
               memberRelayAccess(access);
               memberRelay.calls.push('invite:' + input.offer.mode);
+              // Like the relay: inviting an email that already has a pending invitation
+              // re-sends that one and answers with it.
+              if (input.email !== undefined && input.email === memberRelay.invitedEmail)
+                return { offer: memberRelay.invitation! };
               memberRelay.invitation = input.offer;
+              memberRelay.invitedEmail = input.email;
               return { offer: input.offer };
             }),
           pending: (access) =>
@@ -2171,6 +2177,18 @@ export async function runtimeInvoke(action: string) {
             email: 'r@example.test',
           })
         ).mode;
+        break;
+      case 'memberEmailReinvite':
+        value = (
+          await runtime.createMemberInvitation!({
+            workspaceId: offer.workspaceId,
+            mode: 'email',
+            email: 'r@example.test',
+          })
+        ).token;
+        break;
+      case 'memberInvitationToken':
+        value = memberRelay.invitation!.token;
         break;
       case 'memberEmailApplicant':
         memberRelay.item = await Effect.runPromise(memberApplicant(91, 0, memberRelay.invitation!));

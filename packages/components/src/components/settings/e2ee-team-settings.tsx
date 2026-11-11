@@ -1,6 +1,6 @@
 import { seatBillingErrorKey } from './billing-errors';
 import { hostLedgerHistory, bytesToHex } from '@/lib/e2ee-ledger-history';
-import { useAutomaticAdmissionRefusal } from '@/lib/e2ee-admission-refusals';
+import { e2eeErrorCode, useAutomaticAdmissionRefusal } from '@/lib/e2ee-admission-refusals';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -146,7 +146,16 @@ function TeamSession({
     try {
       await action();
     } catch (error) {
-      if (current()) setMessage(t(seatBillingErrorKey(error) ?? 'e2ee.team.retryOriginal'));
+      if (current())
+        setMessage(
+          t(
+            seatBillingErrorKey(error) ??
+              // An applicant of the unsigned invitation for this email is still waiting.
+              (e2eeErrorCode(error) === 'e2ee_member_invitation_request_pending'
+                ? 'e2ee.team.invitationRequestPending'
+                : 'e2ee.team.retryOriginal')
+          )
+        );
     } finally {
       working.current = false;
       if (current()) setBusy(false);
@@ -460,7 +469,11 @@ function TeamSession({
             <span {...stylex.props(styles.identity, styles.label)}>
               {t(offer.mode === 'email' ? 'e2ee.team.emailInvitation' : 'e2ee.team.linkInvitation')}{' '}
               · {formatExpiry(offer.expiresAt)}
-              {offer.needsReissue && <> · {t('e2ee.team.invitationNeedsReissue')}</>}
+              {offer.needsReissue && (
+                <>
+                  {offer.email && <> · {offer.email}</>} · {t('e2ee.team.invitationNeedsReissue')}
+                </>
+              )}
             </span>
             <Button
               variant="secondary"

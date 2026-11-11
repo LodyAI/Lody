@@ -708,7 +708,7 @@ void test('the member list stays usable when it holds an unsigned or unreadable 
         build(async () =>
           response({
             invitations: [offer, legacy, { token: 'not-an-offer' }],
-            unsignedInvitations: [legacy.token],
+            unsignedInvitations: [{ token: legacy.token, email: 'legacy@synthetic.test' }],
             items: [item],
             hasMore: false,
             seatPreview: { status: 'not_billed', reason: 'free' }
@@ -724,7 +724,40 @@ void test('the member list stays usable when it holds an unsigned or unreadable 
     pending.items.map((row) => row.requestId),
     [item.requestId]
   )
-  assert.deepEqual(pending.invitations, [offer, { ...legacy, needsReissue: true }])
+  assert.deepEqual(pending.invitations, [
+    offer,
+    { ...legacy, needsReissue: true, email: 'legacy@synthetic.test' }
+  ])
+})
+
+void test('an invitation refused for a still-waiting applicant keeps its code for the administrator', async () => {
+  const result = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () =>
+          Response.json(
+            {
+              status: 'error',
+              errorMessage: 'synthetic-private-cause',
+              errorData: { code: 'e2ee_member_invitation_request_pending' }
+            },
+            { status: 560 }
+          )
+        ),
+        (client) =>
+          Effect.result(
+            client.memberCreateInvitation({
+              ...access,
+              offer: { version: 1 },
+              email: 'legacy@synthetic.test'
+            })
+          )
+      )
+    )
+  )
+  assert.equal(result._tag, 'Failure')
+  assert.equal(result.failure.code, 'e2ee_member_invitation_request_pending')
+  assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
 })
 
 void test('only exact authenticated member removal or device revocation carries a terminal signal', async () => {
