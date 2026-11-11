@@ -6589,5 +6589,8 @@
   "sessions.access.removeMember": "Remove {{name}}",
   "sessions.access.sharedMembers": "Shared with {{count}} people",
   "sessions.access.sharedMembers_one": "Shared with {{count}} person",
-  "sessions.access.sharedMembers_other": "Shared with {{count}} people"
+  "sessions.access.sharedMembers_other": "Shared with {{count}} people",
+  "sessions.messageStatus.interruptedByUpdate": "Interrupted by update",
+  "sessions.resendUndelivered.updateDescription": "A machine update interrupted this message. Work it already did is kept. Continue sends the same content as a new message.",
+  "sessions.resendUndelivered.continue": "Continue"
 }

@@ -6576,5 +6576,8 @@
   "sessions.access.memberRead": "只读",
   "sessions.access.addMember": "添加成员",
   "sessions.access.removeMember": "移除 {{name}}",
-  "sessions.access.sharedMembers": "已分享给 {{count}} 人"
+  "sessions.access.sharedMembers": "已分享给 {{count}} 人",
+  "sessions.messageStatus.interruptedByUpdate": "因更新中断",
+  "sessions.resendUndelivered.updateDescription": "机器更新中断了这条消息，已完成的工作会保留。点“继续”会把相同内容作为新消息发送。",
+  "sessions.resendUndelivered.continue": "继续"
 }
