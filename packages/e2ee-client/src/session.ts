@@ -84,7 +84,7 @@ import {
 } from '@lody/shared/e2ee-execution-intent';
 import type { ScheduleDocument } from '@lody/shared';
 import { encodePersonalInvitation } from './pairing';
-import { decodeMemberKeyPackage } from './member';
+import { decodeMemberKeyPackage, signMemberOffer, verifyAutomaticMemberAdmission } from './member';
 import { irohTargetDevice, makePersonalIrohRoute } from './iroh-route';
 import type { PersonalIrohEndpoint } from './platform';
 
@@ -761,24 +761,36 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             if (own?.kind !== 'personal' || (role !== 'owner' && role !== 'admin'))
               return yield* fail('unauthorized');
             const token = globalThis.crypto.getRandomValues(new Uint8Array(32));
-            const offer = {
-              version: 1 as const,
-              workspaceId: prepared.binding.workspaceId,
-              genesisHash: toHex(prepared.binding.genesis.toBytes()),
-              genesisRecordHex: prepared.offer.genesisRecordHex,
-              endorser: toHex(device.publicKey.toBytes()),
-              token: toHex(token),
-              mode,
-              expiresAt: (yield* Clock.currentTimeMillis) + 48 * 60 * 60 * 1000,
-            };
+            // The endorsement signature is what lets another approver recognise this
+            // invitation; a relay-written label never can.
+            const offer = yield* signMemberOffer(
+              {
+                version: 1 as const,
+                workspaceId: prepared.binding.workspaceId,
+                genesisHash: toHex(prepared.binding.genesis.toBytes()),
+                genesisRecordHex: prepared.offer.genesisRecordHex,
+                endorser: toHex(device.publicKey.toBytes()),
+                token: toHex(token),
+                mode,
+                expiresAt: (yield* Clock.currentTimeMillis) + 48 * 60 * 60 * 1000,
+              },
+              device
+            );
             const result = yield* port.createInvitation(memberAccess(), {
               offer,
               ...(email === undefined ? {} : { email }),
             });
+            // Inviting an email that already has a pending invitation re-sends that one, so
+            // the relay answers with it instead of this new offer. Accept it only with this
+            // workspace's own genesis pins; it never grants anything by itself.
+            const resent =
+              mode === 'email' &&
+              result.offer.mode === 'email' &&
+              result.offer.genesisRecordHex === offer.genesisRecordHex;
             if (
               result.offer.workspaceId !== offer.workspaceId ||
               result.offer.genesisHash !== offer.genesisHash ||
-              result.offer.token !== offer.token
+              (result.offer.token !== offer.token && !resent)
             )
               return yield* fail('conflict');
             return result.offer;
@@ -823,7 +835,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           })
         ),
       /** The ledger command admitting this listed request, or null when the verified ledger
-       * already admits exactly this device. Automatic mode is for accepted email invitations. */
+       * already admits exactly this device. Automatic mode admits only an applicant whose
+       * signed email invitation this client verifies (`verifyAutomaticMemberAdmission`). */
       admission: (requestId: string, mode: 'automatic' | 'explicit') =>
         run(
           Effect.gen(function* () {
@@ -831,17 +844,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             const material = yield* port.read(memberAccess(), requestId);
             if (
               material.workspaceId !== prepared.binding.workspaceId ||
-              material.requestId !== requestId ||
-              (mode === 'automatic' && material.source !== 'email')
+              material.requestId !== requestId
             )
               return yield* fail('conflict');
             const proof = yield* memberProof(material.keyPackageHex);
-            // Only the package this session listed and showed for this very request may be
-            // signed: the signed request's id is the approved id, and its pin must match.
-            if (
-              toHex(proof.request.requestId.toBytes()) !== requestId ||
-              memberPreviews.get(requestId) !== material.keyPackageHex
-            )
+            // The signed request's own id must be the approved id.
+            if (toHex(proof.request.requestId.toBytes()) !== requestId)
               return yield* fail('conflict');
             const state = (yield* admitted()).inspectState();
             const existing = state.devices.get(toHex(proof.request.signingPublicKey.toBytes()));
@@ -854,6 +862,25 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                 return yield* fail('conflict');
               return null;
             }
+            // Unattended admission only for an invitation this client can verify: signed by a
+            // currently eligible endorser, email-mode, unexpired and not used before. Anything
+            // else stays pending for an explicit approval.
+            if (mode === 'automatic') {
+              const checked = verifyAutomaticMemberAdmission({
+                view: yield* admitted(),
+                workspaceId: prepared.binding.workspaceId,
+                approver: device.publicKey,
+                offer: material.offer,
+                request: proof.request,
+                now: yield* Clock.currentTimeMillis,
+              });
+              // The precise refusal is the product code, so the request shows why it needs
+              // an explicit approval; nothing is signed and nothing is retried here.
+              if (Result.isFailure(checked)) return yield* fail(checked.failure);
+            }
+            // Only the package this session listed and showed for this very request may be signed.
+            if (memberPreviews.get(requestId) !== material.keyPackageHex)
+              return yield* fail('conflict');
             return admitMember(proof.request);
           })
         ),

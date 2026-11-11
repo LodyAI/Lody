@@ -393,6 +393,33 @@ it.each(['chromium', 'webkit'] as const)(
       expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
       expect(await good(page, 'memberRecordCount')).toBe(beforeAdmission + 1);
       expect(await good(page, 'memberSecondAdmitted')).toBe(false);
+      // Unattended admission requires an email invitation this device verifies against its
+      // own ledger; a relay-written `source: 'email'` label grants nothing.
+      expect(await good(page, 'memberEmailInvite')).toBe('email');
+      // Inviting the same email again re-sends the pending invitation; that is not a conflict.
+      expect(await good(page, 'memberEmailReinvite')).toBe(
+        await good(page, 'memberInvitationToken')
+      );
+      const emailApplicant = await good(page, 'memberEmailApplicant');
+      expect(await good(page, 'memberList')).toContain(emailApplicant);
+      const beforeEmail = (await good(page, 'memberRecordCount')) as number;
+      // A relay-signed offer verifies under the relay's own key, which the ledger never
+      // admitted; an altered offer fails its genuine endorser's signature.
+      for (const [forged, reason] of [
+        ['memberRelaySignedInvitation', 'invitation-endorser-ineligible'],
+        ['memberAlteredInvitation', 'invitation-invalid'],
+      ] as const) {
+        await good(page, forged);
+        expect((await call(page, 'memberAutomatic')).reason).toBe(reason);
+      }
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail);
+      await good(page, 'memberGenuineInvitation');
+      expect(await good(page, 'memberAutomatic')).toMatchObject({ admitted: true });
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail + 1);
+      // The invitation admits one membership: a second device presenting it is told so.
+      expect(await good(page, 'memberReplayInvitation')).toBe(emailApplicant);
+      expect((await call(page, 'memberAutomatic')).reason).toBe('invitation-used');
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail + 1);
       // A key delivery's approval sessions never leak a reader: the last release
       // closes the workspace the approval opened.
       expect(await good(page, 'approvalRelease')).toEqual({

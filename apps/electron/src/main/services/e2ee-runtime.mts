@@ -123,6 +123,11 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
+    | 'member_invitation_invalid'
+    | 'member_invitation_endorser_ineligible'
+    | 'member_invitation_expired'
+    | 'member_invitation_mismatch'
+    | 'member_invitation_used'
     | 'device_revoked'
     | 'missing-binding'
     | 'conflict'
@@ -192,6 +197,15 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
       if (reason === 'key-update-required') return fail('key-update-required')
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
+      // Automatic-admission refusals keep their precise code for the administrator.
+      if (
+        reason === 'member_invitation_invalid' ||
+        reason === 'member_invitation_endorser_ineligible' ||
+        reason === 'member_invitation_expired' ||
+        reason === 'member_invitation_mismatch' ||
+        reason === 'member_invitation_used'
+      )
+        return fail(reason)
       if (reason === 'invalid-input') return fail('invalid-input')
       return fail(
         reason === 'local-evidence-conflict' || reason === 'rollback'
@@ -1891,10 +1905,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.memberApprovals.offer(mode, expiresAt)
           )
         ),
-      prepareMemberAdmission: (workspaceId: string, keyPackageHex: string) =>
+      prepareMemberAdmission: (
+        workspaceId: string,
+        keyPackageHex: string,
+        automatic?: { offer: unknown; now: number }
+      ) =>
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>
-            entry.memberApprovals.prepare(keyPackageHex)
+            entry.memberApprovals.prepare(keyPackageHex, automatic)
           )
         ),
       inspectMemberAdmission: (workspaceId: string, keyPackageHex: string) =>

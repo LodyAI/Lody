@@ -1,5 +1,6 @@
 import { seatBillingErrorKey } from './billing-errors';
 import { hostLedgerHistory, bytesToHex } from '@/lib/e2ee-ledger-history';
+import { e2eeErrorCode, useAutomaticAdmissionRefusal } from '@/lib/e2ee-admission-refusals';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -153,7 +154,11 @@ function TeamSession({
           t(
             error instanceof MemberLimitReached
               ? 'e2ee.team.memberLimit'
-              : (seatBillingErrorKey(error) ?? 'e2ee.team.retryOriginal')
+              : (seatBillingErrorKey(error) ??
+                  // An applicant of the unsigned invitation for this email is still waiting.
+                  (e2eeErrorCode(error) === 'e2ee_member_invitation_request_pending'
+                    ? 'e2ee.team.invitationRequestPending'
+                    : 'e2ee.team.retryOriginal'))
           )
         );
     } finally {
@@ -312,11 +317,7 @@ function TeamSession({
               <span {...stylex.props(styles.identity)}>
                 {request.applicantName || request.applicantEmail || t('e2ee.team.applicant')}
               </span>
-              <span {...stylex.props(styles.label)}>
-                {t(
-                  request.source === 'email' ? 'e2ee.team.automatic' : 'e2ee.team.approvalRequired'
-                )}
-              </span>
+              <AdmissionMode workspaceId={workspaceId} request={request} />
             </div>
             {request.applicantEmail && (
               <span {...stylex.props(styles.label)}>{request.applicantEmail}</span>
@@ -398,9 +399,7 @@ function TeamSession({
                     {t('e2ee.team.submitting')}
                   </span>
                 ) : (
-                  t(
-                    request.source === 'email' ? 'e2ee.team.continueAdmission' : 'e2ee.team.approve'
-                  )
+                  <AdmissionAction workspaceId={workspaceId} request={request} />
                 )}
               </Button>
               {request.state === 'pending' && (
@@ -504,6 +503,11 @@ function TeamSession({
             <span {...stylex.props(styles.identity, styles.label)}>
               {t(offer.mode === 'email' ? 'e2ee.team.emailInvitation' : 'e2ee.team.linkInvitation')}{' '}
               · {formatExpiry(offer.expiresAt)}
+              {offer.needsReissue && (
+                <>
+                  {offer.email && <> · {offer.email}</>} · {t('e2ee.team.invitationNeedsReissue')}
+                </>
+              )}
             </span>
             <Button
               variant="secondary"
@@ -530,6 +534,32 @@ function TeamSession({
         ))}
       </div>
     </Card.Root>
+  );
+}
+
+type JoinRequestRow = Pick<E2eeMemberReplies['pending']['items'][number], 'requestId' | 'source'>;
+/** Email requests are admitted automatically only until the host refuses one; then the row
+ * says it needs an explicit approval and keeps the refusal's original code. */
+function AdmissionMode(props: { workspaceId: string; request: JoinRequestRow }) {
+  const { t } = useTranslation();
+  const refused = useAutomaticAdmissionRefusal(props.workspaceId, props.request.requestId);
+  return (
+    <span data-testid="e2ee-join-admission-mode" {...stylex.props(styles.label)}>
+      {props.request.source !== 'email'
+        ? t('e2ee.team.approvalRequired')
+        : refused
+          ? t('e2ee.team.automaticRefused', { code: refused })
+          : t('e2ee.team.automatic')}
+    </span>
+  );
+}
+function AdmissionAction(props: { workspaceId: string; request: JoinRequestRow }) {
+  const { t } = useTranslation();
+  const refused = useAutomaticAdmissionRefusal(props.workspaceId, props.request.requestId);
+  return t(
+    props.request.source === 'email' && !refused
+      ? 'e2ee.team.continueAdmission'
+      : 'e2ee.team.approve'
   );
 }
 

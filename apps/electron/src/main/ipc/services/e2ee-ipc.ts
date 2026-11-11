@@ -1053,7 +1053,13 @@ export class E2eeIpc extends IpcService {
         offer,
         ...(input.email === undefined ? {} : { email: input.email })
       })
-    )
+    ).catch((error: unknown) => {
+      // An applicant of this email's earlier invitation is still waiting: the renderer tells
+      // the administrator to settle that request first. Only this mapped code crosses.
+      if ((error as { code?: unknown })?.code === 'e2ee_member_invitation_request_pending')
+        throw new Error('e2ee_member_invitation_request_pending')
+      throw error
+    })
     if (
       result.offer.workspaceId !== offer.workspaceId ||
       result.offer.genesisHash !== offer.genesisHash
@@ -1220,15 +1226,17 @@ export class E2eeIpc extends IpcService {
       access,
       cloud.client.memberRead({ ...access, requestId })
     )
-    if (
-      material.workspaceId !== workspaceId ||
-      material.requestId !== requestId ||
-      (mode === 'automatic' && material.source !== 'email')
-    )
+    if (material.workspaceId !== workspaceId || material.requestId !== requestId)
       throw new Error('e2ee_conflict')
+    // `source` is a relay label: automatic admission is decided by the host, which verifies
+    // the invitation's endorsement against its own ledger before signing.
     const pending = await scope((owner) =>
       owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.prepareMemberAdmission(workspaceId, material.keyPackageHex)
+        ? owner.host.prepareMemberAdmission(
+            workspaceId,
+            material.keyPackageHex,
+            mode === 'automatic' ? { offer: material.offer, now: Date.now() } : undefined
+          )
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
     let primary: unknown

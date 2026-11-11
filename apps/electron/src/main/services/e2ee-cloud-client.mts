@@ -17,6 +17,7 @@ import type {
   E2eeAccountPairingRequests,
   E2eeDeviceAccess,
   E2eeJoinRequests,
+  E2eeMemberOffer,
   E2eeMemberRequests,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
@@ -161,7 +162,10 @@ const memberRequest = z.object({
   requestId: z.string().regex(/^[0-9a-f]{32}$/),
   source: z.enum(['email', 'link']),
   state: z.enum(['pending', 'admitting', 'committed', 'rejected', 'cancelled']),
-  expiresAt: nonnegative
+  expiresAt: nonnegative,
+  // Passed through unparsed: the host verifies the endorsement itself, and a malformed
+  // relay copy must only cost automatic admission, never explicit approval.
+  offer: z.custom<E2eeMemberOffer>(() => true)
 })
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 const raw = (value: string) => new Uint8Array(Buffer.from(value, 'hex'))
@@ -210,6 +214,14 @@ export class E2eeAccountPairingRefusedError extends BackendError {
   }
 }
 
+/** Member-invitation refusals an administrator acts on; only the mapped code leaves. */
+const memberInvitationRefusals = new Set(['e2ee_member_invitation_request_pending'])
+export class E2eeMemberInvitationRefusedError extends BackendError {
+  constructor(readonly code: string) {
+    super({ service: 'E2eeCloud', reason: 'unavailable' })
+  }
+}
+
 function requestFailure(error: unknown): BackendError {
   // Terminal types from authentication, transport or decoding are not authority.
   if (error instanceof E2eeMemberRemovedError || error instanceof E2eeDeviceRevokedError)
@@ -233,6 +245,7 @@ function requestFailure(error: unknown): BackendError {
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
   const refusal = accountPairingRefusals.get(code)
   if (refusal) return new E2eeAccountPairingRefusedError(refusal)
+  if (memberInvitationRefusals.has(code)) return new E2eeMemberInvitationRefusedError(code)
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'
@@ -589,20 +602,45 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       const original = { ...memberDeviceAccess(args) }
       return request(
         (client) => client.query(api.e2eeMembers.pending, original),
-        z.object({
-          invitations: z.array(MemberOfferSchema).max(100),
-          items: z
-            .array(
-              memberRequest.extend({
-                applicantName: z.string(),
-                applicantEmail: z.string(),
-                memberLimitReached: z.boolean().optional()
-              })
-            )
-            .max(100),
-          hasMore: z.boolean(),
-          seatPreview
-        }),
+        z
+          .object({
+            // Each invitation stands alone: one the relay lists in an unexpected shape is
+            // left out instead of failing approval, rejection and revocation of the rest.
+            invitations: z.array(z.unknown()).max(100),
+            unsignedInvitations: z
+              .array(z.object({ token: z.string(), email: z.string().max(320) }))
+              .max(100)
+              .optional(),
+            items: z
+              .array(
+                memberRequest.extend({
+                  applicantName: z.string(),
+                  applicantEmail: z.string(),
+                  memberLimitReached: z.boolean().optional()
+                })
+              )
+              .max(100),
+            hasMore: z.boolean(),
+            seatPreview
+          })
+          .transform(({ unsignedInvitations, ...value }) => ({
+            ...value,
+            invitations: value.invitations.flatMap((item) => {
+              const parsed = MemberOfferSchema.safeParse(item)
+              if (!parsed.success) return []
+              // Unsigned email invitation (created before signed offers): still revocable
+              // by token; re-sending to its address issues a signed replacement. It never
+              // admits automatically.
+              const unsigned = unsignedInvitations?.find(
+                (entry) => entry.token === parsed.data.token
+              )
+              return [
+                unsigned
+                  ? { ...parsed.data, needsReissue: true as const, email: unsigned.email }
+                  : parsed.data
+              ]
+            })
+          })),
         undefined,
         true
       )

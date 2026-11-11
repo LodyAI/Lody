@@ -64,6 +64,13 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   the session's own credential. A listed key package is pinned per session; approval
   signs only that pinned package through the session's ledger journal, never re-signs on
   a lost reply, and key delivery afterwards never holds or undoes the admission.
+  Automatic approval never trusts the relay's `source`: it signs only after
+  `verifyAutomaticMemberAdmission` accepts the endorser-signed email offer against the
+  verified ledger (eligible endorser now, unexpired, token-derived request id, unused).
+  Desktop uses the same verifier; a refusal keeps its precise code and leaves the
+  request for explicit approval. Only that verifier requires the signature: retained
+  joins, links and lists read offers without it, and a retained join keeps its signed
+  request id rather than re-deriving one.
 - Joining a team on the portable runtime prepares this workspace's identity for
   `memberPairingOffer`, whose request id is the admitted membership and the pairing
   session of the credential binding. The key package is retained before submission and
