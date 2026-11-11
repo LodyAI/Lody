@@ -752,3 +752,58 @@ bodies rather than archived identities.
 ## Automatic current-workspace pairing (draft increment, 2026-11-10)
 
 The approved UI removes manual code transfer: a native device opening a workspace automatically requests access; the person compares six-digit codes and approves once on an existing personal device. Approval grants only that workspace. A committed ephemeral key exchange derives the secret for the existing authenticated pairing protocol; the relay receives public messages only. Both clients bind account, workspace, genesis and the original ten-minute expiry, and retain exact originals on retry. The comparison is mandatory: six decimal digits provide approximately 20 bits of substitution detection, rather than the manual protocol’s 128-bit out-of-band authentication. This protocol increment is draft and has no independent cryptographic approval. The existing approved manual protocol remains unchanged. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10) records ordering, lifetime and validation limits.
+
+## Whitepaper technical appendix
+
+The two sections below were moved verbatim from the [Security Whitepaper](e2ee/whitepaper.md) on 2026-11-11; the whitepaper body keeps only the properties. Their approval status follows the whitepaper's original approval records and does not change with the move.
+
+### Content frame and API details
+
+Former whitepaper §4.2:
+
+Updates use experimental v0 at batch granularity, without wrapping individual CRDT operations. A packet is `version(1B, value 0) | orgEpoch(u32be) | docEpoch(u16be, value 0) | signerPublicKey(32B) | nonce(24B) | sealed | signature(64B)`. `sealed` includes the single XChaCha20-Poly1305 16B tag, giving 143B fixed overhead before SDK wrapping. Document generation appears once per batch/snapshot; omitted API values normalize to 0 and nonzero/invalid values fail. API `epoch` retains its organization meaning. Genesis, resource, purpose and claimed authors are not repeated on wire.
+
+Both parties supply independently trusted organization genesis, stable logical document ID and purpose; URLs route content only. Canonical document context is `D = genesis(raw32) || epoch(u32be) || docEpoch(u16be) || resourceLength(u16be) || resource(1..1024 printable non-whitespace ASCII bytes)`, with full authentication context `C = D || purposeCode(u8)`. Codes 1..9 distinguish Loro update/snapshot, Flock update/snapshot, blob, epoch-history, reserved encrypted presence and RPC request/response. Purpose 7 is unused by the MVP minimal-plaintext presence channel. Document HKDF-SHA-256 uses salt `lody-content-hkdf/v0\0`, info `lody-document-key/v0\0 || D`, and length 32B; other resources use info `lody-content-key/v0\0 || C`. AEAD AAD is `lody-content-aad/v0\0 || C || fixed packet prefix`, and signing input is `lody-content-signature/v0\0 || C || complete unsigned packet`. Integers are big-endian; domains include the trailing zero byte. Purpose substitution fails signatures; re-signing unchanged ciphertext cannot bypass AEAD binding.
+
+`ContentCipher.deriveDocumentKey` returns an immutable scoped document key. `exportDocumentKey` / `importDocumentKey` copy leaf bytes; `sealDocument` / `openDocument` use the leaf directly without a second HKDF or organization root. The same policy and strict signature checks apply; key possession does not admit an unregistered external signer. Providers require exactly one local source, `readKey(epoch)` or `readDocumentKey(epoch, docEpoch)`, without hidden network fetches. Resolved leaf scope must match the fixed organization/resource and generations. The current Streams provider supplies epoch keys through `readKey`; a provider holding only document leaf keys (`readDocumentKey`) is not yet integrated.
+
+Exact SDK AAD stays external to ciphertext. For nonempty `B = u16be(additionalData.length) || additionalData` (at most 1024B), AEAD uses `lody-content-aad-bound/v0\0 || C || B || fixed packet prefix`, and signing uses `lody-content-signature-bound/v0\0 || C || B || complete unsigned packet`. SDK outer version and its `loro-streams-crdt-payload-protection/v2\0` domain stay unchanged. The 51B AAD is reconstructed by hosts from the envelope. Provider headers remain 3/4, rejecting old 1/2. Snapshot continuationOffset stays authenticated and encrypted. An update POST body is the length-framed batch plus 158B, only 2B above optimized v2's 156B for the reserved generation; single/five-update samples measure 244→246B and 600→602B, excluding HTTP/TLS. The reader accepts only the current v0 format. Earlier experimental formats are unsupported; no old reader, fallback or migration is shipped.
+
+### Realtime route and presence approval record
+
+Former whitepaper §7:
+
+The [M5 realtime review draft](#realtime-rpc-and-presence-m5-review-draft)
+sets the concrete bytes and route order: iroh where the host supports it, then
+encrypted Streams RPC, then encrypted history/Meta durable dispatch as the final
+fallback. The owner deferred iroh from the MVP on 2026-10-28 and made it the
+preferred route on 2026-11-10.
+All routes share current authorization and one durable actual-start claim;
+realtime retries retain the exact original ciphertext and ID. The merged ledger
+binds machineId in admission and possession; old developer ledgers are recreated
+current-only, without a compatibility path. `rotationRequired` only advises key
+rotation and alone blocks neither sealing, sending nor execution. Machine-obtained
+execution freshness is memory-only, at most 15 minutes from before its own
+authenticated latest read (longer for the machine's own member during a
+[backend outage](e2ee/execution-freshness-outage.md)), and requires online revalidation
+after restart; the
+journal's persistent workspace expiry floor is not that grant. Execution evidence
+is not automatically collected. The send-to-actual-start target is ≤1 second,
+with no measurement claimed here. The owner approved whole-frame 1 MiB RPC sizing
+(including 143 bytes) and canonical unpadded-base64url machine resources on
+2026-10-28. Iroh reuses the ledger device key; the reported domain-separation
+review found no signing-protocol confusion, and the key signs only TLS and relay
+handshakes. Native key lifetime and product acceptance remain separate work. The full Spec revision `e4351fda` was approved on
+2026-10-28 through the owner-authorized coordinator review recorded in the [whitepaper revision history](e2ee/whitepaper.md#revision-history).
+
+**Presence option A — owner approved (2026-10-28):** encrypted workspaces use the
+existing plaintext presence channel with its 90-second TTL. Publish only actual
+machineId/instanceId/sessionId/userId, fixed kind/status enums and timestamps,
+according to the [closed field allowlist](#mvp-presence-minimal-plaintext-owner-approved-2026-10-28).
+Strip all free-text details and unknown nested fields before any publication,
+including `status.detail`, names, paths, prompts and content snippets. The service
+can infer these metadata from connections, traffic and accounts; encryption adds
+little privacy but increases complexity and availability risk. Encrypted presence
+is outside the MVP; #1990's merged purpose-7 presence body codec and its ≤60-second
+TTL are reserved/unused, not the MVP's 90-second channel contract. This exception
+does not change RPC encryption, bytes or authorization.
