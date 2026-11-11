@@ -381,9 +381,14 @@ it.each(['chromium', 'webkit'] as const)(
       const emailApplicant = await good(page, 'memberEmailApplicant');
       expect(await good(page, 'memberList')).toContain(emailApplicant);
       const beforeEmail = (await good(page, 'memberRecordCount')) as number;
-      for (const forged of ['memberRelaySignedInvitation', 'memberAlteredInvitation']) {
+      // A relay-signed offer verifies under the relay's own key, which the ledger never
+      // admitted; an altered offer fails its genuine endorser's signature.
+      for (const [forged, reason] of [
+        ['memberRelaySignedInvitation', 'invitation-endorser-ineligible'],
+        ['memberAlteredInvitation', 'invitation-invalid'],
+      ] as const) {
         await good(page, forged);
-        expect((await call(page, 'memberAutomatic')).reason).toBe('conflict');
+        expect((await call(page, 'memberAutomatic')).reason).toBe(reason);
       }
       expect(await good(page, 'memberRecordCount')).toBe(beforeEmail);
       await good(page, 'memberGenuineInvitation');

@@ -5351,6 +5351,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
     ownerApi: owner.api,
     memberApi: member.api,
     memberIdentity: member.identity,
+    memberDirectory: member.directory,
     setMemberLocked: member.setLocked,
     relay,
     logs,
@@ -5437,15 +5438,16 @@ void test(
     const before = f.records.length
     // `source: 'email'` alone, an invitation signed by the relay's own key, and a genuine
     // signature over different pins: none is an invitation this approver can verify.
-    for (const forged of [
-      undefined,
-      relaySignedOffer(genuine),
-      { ...genuine, expiresAt: genuine.expiresAt - 1 }
+    for (const [forged, refusal] of [
+      [undefined, /e2ee_member_invitation_invalid/],
+      // Verifies under the relay's own key, which the ledger never admitted.
+      [relaySignedOffer(genuine), /e2ee_member_invitation_endorser_ineligible/],
+      [{ ...genuine, expiresAt: genuine.expiresAt - 1 }, /e2ee_member_invitation_invalid/]
     ]) {
       stored.offer = forged
       await assert.rejects(
         f.approver.approveMemberJoin('team', submitted.requestId, 'automatic'),
-        /e2ee_conflict/
+        refusal
       )
       assert.equal(f.records.length, before)
     }
@@ -5526,7 +5528,7 @@ void test(
     const before = f.records.length
     await assert.rejects(
       f.approver.approveMemberJoin('team', waiting.submitted.requestId, 'automatic'),
-      /e2ee_conflict/
+      /e2ee_member_invitation_endorser_ineligible/
     )
     assert.equal(f.records.length, before)
   }
@@ -5959,6 +5961,50 @@ void test(
     )
     // The removal receipt fences this identity: reopening reports the removal.
     await assert.rejects(f.joiner.open('team'), /e2ee_member_removed/)
+  }
+)
+void test(
+  'a member whose retained join predates signed invitations still reopens its workspace',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const submitted = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    // The join was retained by a build that wrote invitations without an endorsement.
+    const find = async (directory) => {
+      for (const entry of await readdir(directory, { withFileTypes: true, recursive: true }))
+        if (entry.isFile() && entry.name === 'creations.sqlite')
+          return join(entry.parentPath, entry.name)
+      return null
+    }
+    const path = await find(f.memberDirectory)
+    assert.ok(path)
+    const db = new DatabaseSync(path)
+    try {
+      const row = db
+        .prepare('SELECT offer,history FROM member_joins WHERE workspace_id=?')
+        .get('team')
+      assert.ok(row.history)
+      const { signature, ...unsigned } = JSON.parse(row.offer)
+      assert.ok(signature)
+      db.prepare('UPDATE member_joins SET offer=? WHERE workspace_id=?').run(
+        JSON.stringify(unsigned),
+        'team'
+      )
+    } finally {
+      db.close()
+    }
+    const creation = await f.memberApi.withDesktopE2eeAccount(
+      (account) => account.bootstrap.creationFor('team'),
+      'team',
+      false
+    )
+    assert.equal(creation.genesisHash, f.offer.genesisHash)
   }
 )
 void test(

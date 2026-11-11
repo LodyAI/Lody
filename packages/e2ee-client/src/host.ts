@@ -13,7 +13,13 @@ import {
 import { VerifiedLedger, makeWorkspaceRecovery, memoryRecoveryEpochKeys } from '@lody/e2ee-core';
 import { wipeRecoveryPackage, accountUserId, prepareJoinRequest } from '@lody/e2ee-core/protocol';
 import type { E2eeMemberOffer } from '@lody/cloud-api';
-import { encodeMemberKeyPackage, memberPairingOffer, MemberOfferSchema } from './member';
+import {
+  decodeMemberKeyPackage,
+  encodeMemberKeyPackage,
+  memberPairingOffer,
+  memberPairingOfferFor,
+  MemberOfferSchema,
+} from './member';
 import { prepareVaultRestore, type PersonalHostRecoveryInput } from './recovery-restore';
 import { Bytes, requireLedgerContinuation } from '@lody/e2ee-core/protocol';
 import {
@@ -838,8 +844,15 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       const p = yield* prepareRetained(pairingOffer);
       const saved = yield* memberOriginal(p);
       if (!saved) return null;
+      // Compare with the request id this join was signed for, not a fresh derivation: a join
+      // retained before email ids became token-derived, or before offers were signed, keeps
+      // its original request and stays claimable.
       const derived = yield* Effect.try({
-        try: () => memberPairingOffer(platform.scope.accountId, saved.offer),
+        try: () =>
+          memberPairingOfferFor(
+            MemberOfferSchema.parse(saved.offer),
+            toHex(decodeMemberKeyPackage(saved.keyPackageHex).request.requestId.toBytes())
+          ),
         catch: (cause) => fail('corrupt', cause),
       });
       if (JSON.stringify(derived) !== JSON.stringify(p.offer)) return yield* fail('conflict');

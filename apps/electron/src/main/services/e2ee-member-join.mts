@@ -4,6 +4,7 @@ import {
   decodeMemberKeyPackage,
   emailMemberRequestId,
   encodeMemberKeyPackage,
+  MemberOfferPinsSchema,
   MemberOfferSchema,
   signMemberOffer,
   verifyAutomaticMemberAdmission
@@ -34,6 +35,10 @@ const ok = Result.getOrThrow
 const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code })
 // One public format for desktop and the portable runtime.
 export { decodeMemberKeyPackage, MemberOfferSchema }
+/** Desktop error code of an automatic-admission refusal, e.g. `member_invitation_used`. */
+export const desktopAdmissionRefusal = (
+  refusal: import('@lody/e2ee-client/member').AutomaticAdmissionRefusal
+) => `member_${refusal.replaceAll('-', '_')}` as const
 function sql<A>(work: () => A): Effect.Effect<A, unknown> {
   return Effect.try({
     try: work,
@@ -75,7 +80,9 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
   const origin = Effect.fnUntraced(function* (workspaceId: string) {
     const row = yield* sql(() => rowFor(workspaceId))
     if (!row?.history || !row.key_package) return yield* Effect.fail(fail('missing-binding'))
-    const offer = yield* sql(() => MemberOfferSchema.parse(JSON.parse(row.offer)))
+    // Reopening depends only on the retained genesis pins, so a join retained before
+    // invitations were signed (or with fields this version does not know) still opens.
+    const offer = yield* sql(() => MemberOfferPinsSchema.parse(JSON.parse(row.offer)))
     const historyPages = yield* sql(() => JSON.parse(row.history!) as E2eeWorkspaceHistoryPage[])
     const view = yield* verifyMemberHistory(offer, historyPages)
     const proof = yield* sql(() => decodeMemberKeyPackage(row.key_package!))
@@ -196,7 +203,7 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
       const row = yield* sql(() => rowFor(workspaceId))
       if (!row?.key_package) return yield* Effect.fail(fail('missing-binding'))
       // Store only a fully verified, self-admitting endpoint. Existing originals remain immutable.
-      const offer = yield* sql(() => MemberOfferSchema.parse(JSON.parse(row.offer)))
+      const offer = yield* sql(() => MemberOfferPinsSchema.parse(JSON.parse(row.offer)))
       const view = yield* verifyMemberHistory(offer, pages)
       const proof = yield* sql(() => decodeMemberKeyPackage(row.key_package!))
       const own = view.inspectState().devices.get(hex(proof.request.signingPublicKey.toBytes()))
@@ -335,10 +342,9 @@ export function makeDesktopMemberApprovals(input: {
           request: proof.request,
           now: automatic.now
         })
+        // The precise refusal is the public code; nothing is signed and nothing is retried.
         if (Result.isFailure(checked))
-          return yield* Effect.fail(
-            fail(checked.failure === 'invitation-used' ? 'member_invitation_used' : 'conflict')
-          )
+          return yield* Effect.fail(fail(desktopAdmissionRefusal(checked.failure)))
       }
       // Only the package this approver listed and showed for this request may be signed.
       yield* sql(() => {

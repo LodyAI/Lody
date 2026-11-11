@@ -593,14 +593,34 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       const original = { ...memberDeviceAccess(args) }
       return request(
         (client) => client.query(api.e2eeMembers.pending, original),
-        z.object({
-          invitations: z.array(MemberOfferSchema).max(100),
-          items: z
-            .array(memberRequest.extend({ applicantName: z.string(), applicantEmail: z.string() }))
-            .max(100),
-          hasMore: z.boolean(),
-          seatPreview
-        }),
+        z
+          .object({
+            // Each invitation stands alone: one the relay lists in an unexpected shape is
+            // left out instead of failing approval, rejection and revocation of the rest.
+            invitations: z.array(z.unknown()).max(100),
+            unsignedInvitations: z.array(z.string()).max(100).optional(),
+            items: z
+              .array(
+                memberRequest.extend({ applicantName: z.string(), applicantEmail: z.string() })
+              )
+              .max(100),
+            hasMore: z.boolean(),
+            seatPreview
+          })
+          .transform(({ unsignedInvitations, ...value }) => ({
+            ...value,
+            invitations: value.invitations.flatMap((item) => {
+              const parsed = MemberOfferSchema.safeParse(item)
+              if (!parsed.success) return []
+              // Unsigned (created before signed offers): still revocable by token, and
+              // re-sending issues a signed replacement. It never admits automatically.
+              return [
+                unsignedInvitations?.includes(parsed.data.token)
+                  ? { ...parsed.data, needsReissue: true as const }
+                  : parsed.data
+              ]
+            })
+          })),
         undefined,
         true
       )

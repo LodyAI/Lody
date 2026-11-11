@@ -71,7 +71,6 @@ describe('WorkspaceJoinRequestRoute', () => {
         token: '33'.repeat(32),
         mode: 'link',
         expiresAt: 9000000000000,
-        signature: '66'.repeat(64),
       };
       const next = { ...offer, workspaceId: 'team-b', token: '44'.repeat(32) };
       const props = (value: typeof offer) => ({

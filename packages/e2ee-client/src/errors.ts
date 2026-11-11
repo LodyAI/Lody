@@ -18,7 +18,11 @@ export class PersonalHostError extends Data.TaggedError('PersonalHostError')<{
     | 'network'
     | 'restart-required'
     | 'unauthorized'
-    /** An email invitation's single membership is already admitted for another applicant. */
+    /** Automatic admission refused; see `AutomaticAdmissionRefusal`. Explicit approval remains. */
+    | 'invitation-invalid'
+    | 'invitation-endorser-ineligible'
+    | 'invitation-expired'
+    | 'invitation-mismatch'
     | 'invitation-used';
   readonly cause?: unknown;
 }> {}

@@ -676,6 +676,57 @@ void test('the relay copy of a member invitation reaches the approving host inta
   assert.deepEqual(read.offer, offer)
 })
 
+void test('the member list stays usable when it holds an unsigned or unreadable invitation', async () => {
+  const offer = {
+    version: 1,
+    workspaceId: access.workspaceId,
+    genesisHash: '11'.repeat(32),
+    genesisRecordHex: 'abcd',
+    endorser: '22'.repeat(32),
+    token: '33'.repeat(32),
+    mode: 'email',
+    expiresAt: 9_000_000_000_000
+  }
+  const legacy = { ...offer, token: '34'.repeat(32) }
+  const item = {
+    id: 'synthetic-request',
+    workspaceId: access.workspaceId,
+    accountId: 'synthetic-account',
+    keyPackageHex: 'abcd',
+    signingPublicKey: '55'.repeat(32),
+    requestId: '66'.repeat(16),
+    source: 'email',
+    state: 'pending',
+    expiresAt: 9_000_000_000_000,
+    offer: { ...offer, signature: '44'.repeat(64) },
+    applicantName: 'Riley',
+    applicantEmail: 'r@example.test'
+  }
+  const pending = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () =>
+          response({
+            invitations: [offer, legacy, { token: 'not-an-offer' }],
+            unsignedInvitations: [legacy.token],
+            items: [item],
+            hasMore: false,
+            seatPreview: { status: 'not_billed', reason: 'free' }
+          })
+        ),
+        (client) => client.memberPending(access)
+      )
+    )
+  )
+  // The applicant stays approvable, the unsigned invitation stays revocable by token and is
+  // marked for re-sending, and only the unreadable entry is left out.
+  assert.deepEqual(
+    pending.items.map((row) => row.requestId),
+    [item.requestId]
+  )
+  assert.deepEqual(pending.invitations, [offer, { ...legacy, needsReissue: true }])
+})
+
 void test('only exact authenticated member removal or device revocation carries a terminal signal', async () => {
   for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
     await Effect.runPromise(

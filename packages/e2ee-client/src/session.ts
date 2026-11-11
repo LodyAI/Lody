@@ -840,10 +840,9 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                 request: proof.request,
                 now: yield* Clock.currentTimeMillis,
               });
-              if (Result.isFailure(checked))
-                return yield* fail(
-                  checked.failure === 'invitation-used' ? 'invitation-used' : 'conflict'
-                );
+              // The precise refusal is the product code, so the request shows why it needs
+              // an explicit approval; nothing is signed and nothing is retried here.
+              if (Result.isFailure(checked)) return yield* fail(checked.failure);
             }
             // Only the package this session listed and showed for this very request may be signed.
             if (memberPreviews.get(requestId) !== material.keyPackageHex)

@@ -122,6 +122,10 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
+    | 'member_invitation_invalid'
+    | 'member_invitation_endorser_ineligible'
+    | 'member_invitation_expired'
+    | 'member_invitation_mismatch'
     | 'member_invitation_used'
     | 'device_revoked'
     | 'missing-binding'
@@ -192,7 +196,15 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
       if (reason === 'key-update-required') return fail('key-update-required')
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
-      if (reason === 'member_invitation_used') return fail('member_invitation_used')
+      // Automatic-admission refusals keep their precise code for the administrator.
+      if (
+        reason === 'member_invitation_invalid' ||
+        reason === 'member_invitation_endorser_ineligible' ||
+        reason === 'member_invitation_expired' ||
+        reason === 'member_invitation_mismatch' ||
+        reason === 'member_invitation_used'
+      )
+        return fail(reason)
       if (reason === 'invalid-input') return fail('invalid-input')
       return fail(
         reason === 'local-evidence-conflict' || reason === 'rollback'

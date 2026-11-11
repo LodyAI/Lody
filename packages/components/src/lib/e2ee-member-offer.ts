@@ -18,9 +18,7 @@ export function parseMemberOffer(input: string, token?: string): E2eeMemberOffer
       !/^(?:[0-9a-f]{2})+$/.test(value.genesisRecordHex) ||
       !['email', 'link'].includes(value.mode) ||
       !Number.isSafeInteger(value.expiresAt) ||
-      value.expiresAt < 0 ||
-      typeof value.signature !== 'string' ||
-      !/^[0-9a-f]{128}$/.test(value.signature)
+      value.expiresAt < 0
     )
       return null;
     return {
@@ -32,7 +30,8 @@ export function parseMemberOffer(input: string, token?: string): E2eeMemberOffer
       token: value.token,
       mode: value.mode,
       expiresAt: value.expiresAt,
-      signature: value.signature,
+      // No endorsement: joining never relies on it, and desktop builds that predate signed
+      // offers parse deep-link offers strictly. Approvers read it from the relay's request.
     };
   } catch {
     return null;

@@ -1672,21 +1672,18 @@ let joinInvite: import('@lody/cloud-api').E2eeMemberOffer;
 let retainedJoin: PersonalPairingOffer;
 export async function bootJoiner(accountId: string) {
   memberRelay = { calls: [], others: [] };
-  joinInvite = await Effect.runPromise(
-    signMemberOffer(
-      {
-        version: 1,
-        workspaceId: offer.workspaceId,
-        genesisHash: offer.genesisHash,
-        genesisRecordHex: offer.genesisRecordHex,
-        endorser: toHex(owner.publicKey.toBytes()),
-        token: 'cd'.repeat(32),
-        mode: 'link',
-        expiresAt: FIXED_NOW + 3_600_000,
-      },
-      owner
-    )
-  );
+  // Retained without an endorsement, as builds before signed invitations wrote it: joining
+  // never relies on the signature, so such a join stays preparable and claimable.
+  joinInvite = {
+    version: 1,
+    workspaceId: offer.workspaceId,
+    genesisHash: offer.genesisHash,
+    genesisRecordHex: offer.genesisRecordHex,
+    endorser: toHex(owner.publicKey.toBytes()),
+    token: 'cd'.repeat(32),
+    mode: 'link',
+    expiresAt: FIXED_NOW + 3_600_000,
+  };
   // The application retains the derived identity offer before preparing the join.
   retainedJoin = memberPairingOffer(accountId, joinInvite);
   joiner = await Effect.runPromise(

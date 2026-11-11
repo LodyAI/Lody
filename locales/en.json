@@ -110,6 +110,8 @@
   "e2ee.team.automatic": "Email · automatic admission",
   "e2ee.team.approvalRequired": "Link · approval required",
   "e2ee.team.continueAdmission": "Continue admission",
+  "e2ee.team.automaticRefused": "Email · approval required (automatic admission refused: {{code}})",
+  "e2ee.team.invitationNeedsReissue": "Created before invitations were signed · send it again",
   "e2ee.team.approve": "Approve member",
   "e2ee.team.reject": "Reject",
   "e2ee.team.admitted": "Member admitted. Key delivery continues in the background.",

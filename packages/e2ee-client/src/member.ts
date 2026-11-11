@@ -25,19 +25,32 @@ const bytes = z.string().regex(/^(?:[0-9a-f]{2})+$/);
 const ok = Result.getOrThrow;
 const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code });
 
+const offerFields = {
+  version: z.literal(1),
+  workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+  genesisHash: hash,
+  genesisRecordHex: bytes.max(16384),
+  endorser: hash,
+  token: hash,
+  mode: z.enum(['email', 'link']),
+  expiresAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+};
+const signature = z.string().regex(/^[0-9a-f]{128}$/);
+/** An invitation as transported, joined or retained. The endorsement is optional here:
+ * invitations and joins retained before offers were signed stay readable, and joining
+ * never relies on it. Only `verifyAutomaticMemberAdmission` requires it. */
 export const MemberOfferSchema = z
-  .object({
-    version: z.literal(1),
-    workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
-    genesisHash: hash,
-    genesisRecordHex: bytes.max(16384),
-    endorser: hash,
-    token: hash,
-    mode: z.enum(['email', 'link']),
-    expiresAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-    signature: z.string().regex(/^[0-9a-f]{128}$/),
-  })
+  .object({ ...offerFields, signature: signature.optional() })
   .strict();
+/** An endorsed invitation; the only form automatic admission accepts. */
+export const SignedMemberOfferSchema = z.object({ ...offerFields, signature }).strict();
+/** The independently transferred genesis pins of a retained join. Reopening an accepted
+ * workspace depends on these alone, never on the invitation's other fields. */
+export const MemberOfferPinsSchema = z.object({
+  workspaceId: offerFields.workspaceId,
+  genesisHash: hash,
+  genesisRecordHex: offerFields.genesisRecordHex,
+});
 
 const offerDomain = new TextEncoder().encode('lody-e2ee/member-offer/v1\0');
 /** Exact bytes the endorsing device signs for an invitation: every pin an approver relies
@@ -71,12 +84,17 @@ export const signMemberOffer = Effect.fnUntraced(function* (
   return { ...offer, signature: toHex(signature.toBytes()) } satisfies E2eeMemberOffer;
 });
 
-/** Why an applicant cannot be admitted without an explicit approval. */
+/** Why an applicant cannot be admitted without an explicit approval. Each is surfaced as
+ * its own error code so an administrator can see why a manual approval is needed. */
 export type AutomaticAdmissionRefusal =
-  | 'invalid-offer'
-  | 'endorser-ineligible'
-  | 'expired'
-  | 'request-mismatch'
+  /** Unsigned, malformed, not email-mode, another workspace, or a bad signature. */
+  | 'invitation-invalid'
+  /** The endorser is no longer an Owner/Admin personal device in the verified ledger. */
+  | 'invitation-endorser-ineligible'
+  | 'invitation-expired'
+  /** The signed request is not the one this invitation derives (e.g. an older join). */
+  | 'invitation-mismatch'
+  /** The invitation's single membership is already admitted. */
   | 'invitation-used';
 
 /**
@@ -96,8 +114,8 @@ export function verifyAutomaticMemberAdmission(input: {
   request: JoinRequest;
   now: number;
 }): Result.Result<void, AutomaticAdmissionRefusal> {
-  const parsed = MemberOfferSchema.safeParse(input.offer);
-  if (!parsed.success) return Result.fail('invalid-offer');
+  const parsed = SignedMemberOfferSchema.safeParse(input.offer);
+  if (!parsed.success) return Result.fail('invitation-invalid');
   const offer = parsed.data;
   const state = input.view.inspectState();
   if (
@@ -112,28 +130,30 @@ export function verifyAutomaticMemberAdmission(input: {
       )
     )
   )
-    return Result.fail('invalid-offer');
+    return Result.fail('invitation-invalid');
   const endorser = state.devices.get(offer.endorser);
   const role = endorser && state.members.get(toHex(endorser.membershipId.toBytes()))?.role;
   if (endorser?.kind !== 'personal' || (role !== 'owner' && role !== 'admin'))
-    return Result.fail('endorser-ineligible');
+    return Result.fail('invitation-endorser-ineligible');
   const requestId = toHex(input.request.requestId.toBytes());
   if (
     requestId !== emailMemberRequestId(offer.workspaceId, offer.token) ||
     input.request.expiresAt === null ||
     input.request.expiresAt > offer.expiresAt
   )
-    return Result.fail('request-mismatch');
+    return Result.fail('invitation-mismatch');
   // One token derives one membership id; the ledger never admits a membership id twice.
   if (state.members.has(requestId)) return Result.fail('invitation-used');
-  if (offer.expiresAt <= input.now) return Result.fail('expired');
+  if (offer.expiresAt <= input.now) return Result.fail('invitation-expired');
   const prepared = prepareLedgerCommand(input.view, input.approver, {
     _tag: 'AdmitMember',
     membershipId: ok(Bytes.membershipId(input.request.requestId.toBytes())),
     request: input.request,
   });
   if (Result.isFailure(prepared))
-    return Result.fail(prepared.failure.code === 'replay' ? 'invitation-used' : 'request-mismatch');
+    return Result.fail(
+      prepared.failure.code === 'replay' ? 'invitation-used' : 'invitation-mismatch'
+    );
   return Result.succeed(undefined);
 }
 
@@ -227,6 +247,17 @@ export function memberPairingOffer(
             )
           )
         ).slice(0, 32);
+  return memberPairingOfferFor(parsed, requestId);
+}
+
+/** The identity offer of a join already prepared under `requestId`. A retained join keeps
+ * the request id it was signed for, so one prepared before email ids became token-derived
+ * stays pending and claimable instead of being re-derived away. */
+export function memberPairingOfferFor(
+  offer: Pick<E2eeMemberOffer, 'workspaceId' | 'genesisHash' | 'genesisRecordHex' | 'endorser'>,
+  requestId: string
+): PersonalPairingOffer {
+  const parsed = offer;
   return {
     version: 1,
     workspaceId: parsed.workspaceId,

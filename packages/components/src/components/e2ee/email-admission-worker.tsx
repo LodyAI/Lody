@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import { admissionFailureCode, recordAutomaticAdmission } from '@/lib/e2ee-admission-refusals';
 
 type Runtime = Pick<E2eeWorkspaceRuntime, 'status' | 'memberJoinRequests' | 'approveMemberJoin'> &
   Partial<Pick<E2eeWorkspaceRuntime, 'open' | 'close' | 'refresh'>>;
@@ -57,8 +58,11 @@ export function startEmailAdmissionWorker(
         if (request.source !== 'email') continue;
         try {
           await runtime.approveMemberJoin(workspaceId, request.requestId, 'automatic');
-        } catch {
-          /* The host retains original bytes; another applicant can continue. */
+          recordAutomaticAdmission(workspaceId, request.requestId, null);
+        } catch (error) {
+          // The host retains original bytes and another applicant can continue. The original
+          // code is shown on the request so an administrator knows to approve it explicitly.
+          recordAutomaticAdmission(workspaceId, request.requestId, admissionFailureCode(error));
         }
       }
     } catch {

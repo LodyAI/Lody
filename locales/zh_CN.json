@@ -110,6 +110,8 @@
   "e2ee.team.automatic": "邮箱邀请 · 自动签入",
   "e2ee.team.approvalRequired": "链接申请 · 需批准",
   "e2ee.team.continueAdmission": "继续签入",
+  "e2ee.team.automaticRefused": "邮箱邀请 · 需手动批准（自动签入被拒：{{code}}）",
+  "e2ee.team.invitationNeedsReissue": "创建于邀请签名上线之前 · 请重新发送",
   "e2ee.team.approve": "批准加入",
   "e2ee.team.reject": "拒绝",
   "e2ee.team.admitted": "成员已签入，密钥将在后台继续发送。",
