@@ -204,6 +204,8 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
 }
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+const ROW_INSET_X = '10px';
+const ROW_GAP = '6px';
 
 /** The next view arrives from the side it lives on, and the way back reverses it. */
 const enterFromRight = stylex.keyframes({
@@ -253,7 +255,7 @@ const accessPanel = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
-    paddingInline: space[1],
+    paddingInline: ROW_INSET_X,
   },
   title: {
     margin: 0,
@@ -268,12 +270,25 @@ const accessPanel = stylex.create({
     lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
-  ownerReason: { paddingInline: space[1], marginTop: space[1.5] },
+  ownerReason: { paddingInline: ROW_INSET_X, marginTop: space[1.5] },
   stops: { position: 'relative', marginTop: space[1.5] },
   /** The one rule: who can open it above, what to do with it below. */
-  rule: { position: 'relative', marginBlock: space[1.5], marginInline: space[1] },
+  rule: { position: 'relative', marginBlock: space[1.5], marginInline: ROW_INSET_X },
   /** Plain rows in the density of the app's menus: ghost, left-aligned, one per action. */
   actions: { position: 'relative', display: 'flex', flexDirection: 'column' },
+  /**
+   * Every row button uses `Button` `size="small"` (`paddingInline: 10px`,
+   * `gap: 6px`), and wraps its leading glyph in a 16px box so icons and 16px
+   * (`mini`) member avatars sit on the exact same vertical axis.
+   */
+  actionIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '16px',
+    height: '16px',
+  },
 });
 
 /** Static publication offered by the header control, when this build has a cloud. */
@@ -347,6 +362,8 @@ function SessionAccessMembers({
   const ids = [
     ...new Set([...(state.ownerUserId ? [state.ownerUserId] : []), ...(state.memberUserIds ?? [])]),
   ];
+  const hasRemovableMembers =
+    !!state.canManage && ids.some((userId) => userId !== state.ownerUserId);
   const change = async (userId: string, shared: boolean) => {
     if (!state.canManage || !state.setMemberReadAccess || busy || userId === state.ownerUserId)
       return;
@@ -378,7 +395,7 @@ function SessionAccessMembers({
       )}
       {ids.map((userId) => (
         <div key={userId} {...stylex.props(memberStyles.row)}>
-          <UserAvatar user={{ id: userId, ...directory.get(userId) }} size="small" />
+          <UserAvatar user={{ id: userId, ...directory.get(userId) }} size="mini" />
           <span
             {...stylex.props(memberStyles.name)}
             aria-busy={!!state.membersLoading && !directory.has(userId)}
@@ -390,30 +407,32 @@ function SessionAccessMembers({
               userId === state.ownerUserId ? 'sessions.access.owner' : 'sessions.access.memberRead'
             )}
           </span>
-          {state.canManage &&
+          {hasRemovableMembers &&
             userId === state.ownerUserId && (
-              // Holds the remove button's width so every role label lines up.
+              // Holds the remove button's width so every role label lines up when removable rows exist.
               <span aria-hidden="true" {...stylex.props(memberStyles.placeholder)}>
-                <Button variant="ghost" icon size="small" disabled tabIndex={-1}>
+                <Button variant="ghost" icon size="mini" disabled tabIndex={-1}>
                   <X {...stylex.props(shareSurface.glyphSmall)} />
                 </Button>
               </span>
             )}
           {state.canManage && userId !== state.ownerUserId && (
-            <Button
-              variant="ghost"
-              icon
-              size="small"
-              disabled={busy}
-              aria-label={t('sessions.access.removeMember', {
-                name: memberName(userId),
-              })}
-              onClick={() => {
-                void change(userId, false);
-              }}
-            >
-              <X {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
-            </Button>
+            <span {...stylex.props(memberStyles.removeSlot)}>
+              <Button
+                variant="ghost"
+                icon
+                size="mini"
+                disabled={busy}
+                aria-label={t('sessions.access.removeMember', {
+                  name: memberName(userId),
+                })}
+                onClick={() => {
+                  void change(userId, false);
+                }}
+              >
+                <X {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+              </Button>
+            </span>
           )}
         </div>
       ))}
@@ -427,7 +446,9 @@ function SessionAccessMembers({
                 className="justify-start"
                 disabled={busy || !state.setMemberReadAccess || !available.length}
               >
-                <UserPlus {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
+                  <UserPlus {...stylex.props(shareSurface.glyphSmall)} />
+                </span>
                 {t('sessions.access.addMember')}
               </Button>
             }
@@ -454,14 +475,14 @@ const memberStyles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    paddingInline: space[1],
+    paddingInline: ROW_INSET_X,
     fontSize: text.captionSize,
     color: colors.secondaryLabel,
   },
   section: { display: 'flex', flexDirection: 'column', gap: '2px' },
   heading: {
     margin: 0,
-    paddingInline: space[1],
+    paddingInline: ROW_INSET_X,
     fontSize: text.captionSize,
     lineHeight: text.captionLeading,
     color: colors.secondaryLabel,
@@ -469,14 +490,23 @@ const memberStyles = stylex.create({
   row: {
     display: 'flex',
     alignItems: 'center',
-    gap: space[2],
+    gap: ROW_GAP,
     minWidth: 0,
     minHeight: control.small,
-    paddingInline: space[1],
+    paddingInline: ROW_INSET_X,
     fontSize: text.subheadlineSize,
     lineHeight: text.subheadlineLeading,
   },
-  placeholder: { visibility: 'hidden', pointerEvents: 'none' },
+  placeholder: {
+    display: 'inline-flex',
+    visibility: 'hidden',
+    pointerEvents: 'none',
+    marginInlineEnd: `calc(-1 * ${space[1]})`,
+  },
+  removeSlot: {
+    display: 'inline-flex',
+    marginInlineEnd: `calc(-1 * ${space[1]})`,
+  },
   name: {
     flexGrow: 1,
     minWidth: 0,
@@ -484,7 +514,7 @@ const memberStyles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  role: { fontSize: text.captionSize, color: colors.secondaryLabel },
+  role: { fontSize: text.captionSize, color: colors.secondaryLabel, flexShrink: 0 },
 });
 
 export function SessionAccessControl({
@@ -619,7 +649,9 @@ export function SessionAccessControl({
                   className="justify-start"
                   onClick={() => act(() => state.openMachineSettings?.())}
                 >
-                  <Settings {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                  <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
+                    <Settings {...stylex.props(shareSurface.glyphSmall)} />
+                  </span>
                   {t('sessions.access.machineSettings')}
                 </Button>
               </div>
@@ -681,7 +713,9 @@ export function SessionAccessControl({
                       title={row.title}
                       onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
                     >
-                      <row.icon {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                      <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
+                        <row.icon {...stylex.props(shareSurface.glyphSmall)} />
+                      </span>
                       {row.label}
                     </Button>
                   ))}
