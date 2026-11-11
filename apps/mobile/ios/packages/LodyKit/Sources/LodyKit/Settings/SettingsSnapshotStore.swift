@@ -1,7 +1,8 @@
 import Foundation
 
 /// The last accepted list of a settings page, scoped to one account and workspace.
-/// Pages show it at once and refresh behind it; a cached list never authorizes a write,
+/// Pages show it at once and refresh behind it; a cached list never authorizes a write
+/// (except Settings › GitHub, whose native writes re-read role and repositories and read back),
 /// and logout's LocalStore generation fences a late write.
 struct SettingsSnapshotStore<Value: Codable & Sendable>: Sendable {
   let key: String

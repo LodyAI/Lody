@@ -116,6 +116,28 @@ class GitHubSettingsTest {
         assertTrue("an expired identity can still be turned off", GitHubSettingsModel.personalEditable(state.data!!.personal))
     }
 
+    @Test fun reopeningShowsTheLastReadAndAWriteSupersedesTheRefresh() = runTest {
+        val backend = Backend()
+        val service = Service(backend)
+        GitHubSettingsState(service, scope).refresh()
+        val reopened = GitHubSettingsState(service, scope)
+        assertTrue("the last read shows before any request", reopened.data!!.repositories!!.any { it.fullName == "zeta/tools" })
+        assertNull("another workspace starts empty", GitHubSettingsState(service, RuntimeScope("account", "other")).data)
+        service.gate = CompletableDeferred()
+        val refresh = async { reopened.refresh() }
+        testScheduler.runCurrent()
+        assertTrue(reopened.loading)
+        assertTrue("switches work during a background refresh", reopened.editable)
+        val write = async { reopened.setRepository("zeta/tools", true) }
+        testScheduler.runCurrent()
+        assertTrue(reopened.shown!!.repositories!!.first { it.fullName == "zeta/tools" }.enabled)
+        service.gate!!.complete(Unit)
+        refresh.await(); write.await()
+        assertEquals(listOf("repo:zeta/tools=true"), backend.writes)
+        assertTrue("the superseded refresh never overwrote the write's read back", reopened.data!!.repositories!!.first { it.fullName == "zeta/tools" }.enabled)
+        assertFalse(reopened.loading)
+    }
+
     @Test fun searchMatchesFullNamesAndAvatarsNeedAPlainLogin() {
         val data = GitHubSettingsData(true, true, listOf(
             GitHubSettingsRepo("zeta/tools", "tools", true, false),

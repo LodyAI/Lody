@@ -73,7 +73,7 @@ internal fun GitHubSettingsScreen(service: GitHubSettingsService?, scope: Runtim
             val data = state?.shown
             val editable = state?.editable == true
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + LodySpacing.xxl)) {
-                if (state?.loading == true && !pulling) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                if (state?.loading == true && state.data == null && !pulling) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                 state?.let { current ->
                     val notice = when {
                         current.unconfirmed -> R.string.github_settings_unconfirmed
