@@ -18,8 +18,8 @@ preedit and chips. Its external model is unchanged: a string plus UTF-16 ranges,
 the same wire format, the same drafts. The owner's requirement was that users
 notice nothing, so the editor reproduces the textarea's look and editing
 semantics. Composers without mention sources keep a plain textarea. It is
-verified in Chromium and WebKit, and with system IMEs in an iOS simulator;
-Chinese input through Gboard and the Electron app itself are not yet checked.
+verified in Chromium, WebKit, the Electron app, and with system Chinese IMEs in
+iOS and Android simulators.
 
 ## Problem
 
@@ -50,8 +50,11 @@ there" pins this; it fails on the textarea and passes on the editor.
   owner value that differs from the document rebuilds it. As when a textarea's
   value is assigned, the caret then goes to the end, unless the primitive asked
   for a specific caret, and the editor's own undo history is cleared, so undo
-  cannot bring back a draft the owner cleared after sending. No owner write lands mid-composition, and the owner hears
-  IME text only once committed.
+  cannot bring back a draft the owner cleared after sending. The written value
+  becomes the base the next edit undoes to: Lexical's clear also forgets the
+  current state, which left text typed after a committed chip impossible to undo.
+  No owner write lands mid-composition, and the owner hears IME text only once
+  committed.
 - **Editing logic kept.** Arrows over chips, Backspace and Delete rules, menu
   keys, triggers, history snapshots and every insert route are today's string
   algebra, unchanged.
@@ -118,7 +121,7 @@ there" pins this; it fails on the textarea and passes on the editor.
   and offset/DOM mapping.
 - **Behaviour:** `tests/e2e/composer-editor.spec.ts` covers typing, newlines,
   chips, arrows, Backspace/Delete, chip clicks, undo/redo (including after an
-  owner clear), paste, CDP IME
+  owner clear, and after a committed chip in the editor's own history), paste, CDP IME
   (including next to a chip), accessibility, and caret on glyph under overflow.
   It passes on the textarea build except the caret-on-glyph case, and fully on
   the editor.
@@ -129,12 +132,17 @@ there" pins this; it fails on the textarea and passes on the editor.
 - **WebKit:** the same spec runs under Playwright WebKit (`LODY_E2E_BROWSER=webkit`)
   except its clipboard and CDP IME cases, which are Chromium-only. Its placeholder
   case failed there when the colour was copied from a `::placeholder` query.
-- **Simulators (2026-11-11):**
+- **Devices (2026-11-11):**
   - iOS Safari with the system pinyin keyboard passed mixed-script input, owner
     silence during composition, composition beside a chip, chip arrows and
-    deletion, undo (including after a clear), paste and newline.
-  - Android Chrome with Gboard passed click placement, the mention menu, chip
-    deletion, newline and paste.
-- **Not verified:** Chinese input through Gboard (its language pack would not
-  download in the emulator), long-press selection across chips, and the Electron
-  app itself. The plain-text composers are unchanged.
+    deletion, undo (including after a clear), paste, newline, the placeholder
+    colour, click placement at two widths and a handle selection across a chip.
+  - Android Chrome with Gboard passed pinyin input, click placement, the mention
+    menu, chip deletion, newline, paste and long-press selection across a chip.
+  - The Electron app's chat composer passed pinyin composition beside a chip,
+    chip arrows and deletion, click placement under overflow, the mention menu,
+    no undo after sending, and the sent message with its mention.
+- **Not verified:** macOS's built-in pinyin in Electron (automation typed Latin
+  letters; a third-party pinyin IME passed), a selection started by long-press
+  alone on iOS, iPhone landscape, and undo after a committed chip in the Electron
+  app itself (the spec above covers the same code path). The plain-text composers are unchanged.

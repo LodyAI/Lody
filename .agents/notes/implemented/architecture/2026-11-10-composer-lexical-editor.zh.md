@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-共享 composer 原来是一个透明 `<textarea>` 叠在显示层 `<div>` 上：textarea 负责编辑和光标，显示层负责画文字和 mention chip。两者排版只要不同，光标就会落在和正在编辑的字不同的行上。2026-11-10 的报告里，经典滚动条只让 textarea 变窄，于是光标和输入法候选框掉到了文字下面一行。现在所有带 mention 的 composer 都在同一个 Lexical contenteditable 里编辑，文字、光标、选区、输入法预编辑和 chip 都由它自己画。对外模型不变：字符串加 UTF-16 区间，消息格式和草稿也不变。owner 要求用户完全无感知，所以编辑器复刻了 textarea 的外观和编辑语义。没有 mention 来源的 composer 仍保留普通 textarea。已在 Chromium 和 WebKit 上验证，并在 iOS 模拟器上用系统输入法验证过；Gboard 中文输入和 Electron 应用本身还没有检查。
+共享 composer 原来是一个透明 `<textarea>` 叠在显示层 `<div>` 上：textarea 负责编辑和光标，显示层负责画文字和 mention chip。两者排版只要不同，光标就会落在和正在编辑的字不同的行上。2026-11-10 的报告里，经典滚动条只让 textarea 变窄，于是光标和输入法候选框掉到了文字下面一行。现在所有带 mention 的 composer 都在同一个 Lexical contenteditable 里编辑，文字、光标、选区、输入法预编辑和 chip 都由它自己画。对外模型不变：字符串加 UTF-16 区间，消息格式和草稿也不变。owner 要求用户完全无感知，所以编辑器复刻了 textarea 的外观和编辑语义。没有 mention 来源的 composer 仍保留普通 textarea。已在 Chromium、WebKit、Electron 应用，以及 iOS 和 Android 模拟器的系统中文输入法上验证。
 
 ## 问题
 
@@ -19,7 +19,7 @@ Translation: current
 
 - **编辑器**：Lexical core、`@lexical/plain-text`、`@lexical/history`，精确锁定 0.53.0，不用 `@lexical/react`。chip 通过 portal 渲染进各自装饰节点的 DOM。
 - **文档结构**：一个段落，由文本节点、换行节点和 `MentionDecoratorNode` 组成。mention 节点的文本内容正好是它的区间所覆盖的文字。`ui/mention/composer-document.ts` 是唯一计算偏移量的地方，负责 `{text, mentions}` 与 Lexical 位置（包括实时 DOM 位置）之间的换算。
-- **对外模型不变**：调用方仍持有字符串和区间。调用方的值与文档不同时就重建文档；就像给 textarea 赋值一样，光标随后到末尾，除非组件自身要求了特定光标；编辑器自带的撤销历史也随之清空，所以发送后被清空的草稿不能被撤销找回。组字期间不写入调用方的值；调用方只在组字提交后才收到文字。
+- **对外模型不变**：调用方仍持有字符串和区间。调用方的值与文档不同时就重建文档；就像给 textarea 赋值一样，光标随后到末尾，除非组件自身要求了特定光标；编辑器自带的撤销历史也随之清空，所以发送后被清空的草稿不能被撤销找回。写入的值成为下一次编辑撤销回去的基准：Lexical 清空历史时也会丢掉当前状态，曾导致提交 chip 之后输入的文字无法撤销。组字期间不写入调用方的值；调用方只在组字提交后才收到文字。
 - **编辑逻辑保留**：方向键跨 chip、Backspace/Delete 规则、菜单按键、触发符、历史快照和所有插入路径，都还是原来的字符串运算，没有改动。
 - **事件处理顺序**：调用方的 `onKeyDown`、`onPaste`、`onCopy`、`onCut`、`onBeforeInput` 先于 Lexical 执行；它们调用 `preventDefault` 时，跳过 Lexical 的默认处理。脚本派发的输入事件不会改动内容，和 textarea 一样。
 - **元素与接口**：ref 仍是一个 DOM 元素，即编辑器的 `div`。文字、光标和几何信息通过 `ui/mention/composer-input.ts` 读写，它同时支持编辑器和普通 textarea；因此 focus、`closest`、floating-ui 锚定和 `activeElement` 判断都还是普通 DOM 操作。
@@ -54,10 +54,11 @@ Translation: current
 ## 验证
 
 - **转换层**：`tests/composer-document.test.ts` 覆盖往返转换、区间清理和偏移量/DOM 映射。
-- **行为**：`tests/e2e/composer-editor.spec.ts` 覆盖打字、换行、chip、方向键、Backspace/Delete、点击 chip、撤销重做（包括调用方清空之后）、粘贴、CDP 模拟输入法（包括紧贴 chip 组字）、无障碍，以及内容溢出时光标落在字上。它在 textarea 版本上除光标落字那条外全部通过，在编辑器上全部通过。
+- **行为**：`tests/e2e/composer-editor.spec.ts` 覆盖打字、换行、chip、方向键、Backspace/Delete、点击 chip、撤销重做（包括调用方清空之后，以及编辑器自带撤销下提交 chip 之后）、粘贴、CDP 模拟输入法（包括紧贴 chip 组字）、无障碍，以及内容溢出时光标落在字上。它在 textarea 版本上除光标落字那条外全部通过，在编辑器上全部通过。
 - **现有测试套件**：composer 相关的 vitest 套件，以及 `composer-mention-placement`、`message-quotes`、`composer-submission-focus`、`interface-typography`，除了同一环境下在 textarea 版本上也失败的用例，没有新增失败。
 - **WebKit**：同一套测试可在 Playwright WebKit 下运行（`LODY_E2E_BROWSER=webkit`），剪贴板和 CDP 输入法几条只适用于 Chromium。占位符那条在“从 `::placeholder` 查询复制颜色”的版本上会在 WebKit 失败。
-- **模拟器（2026-11-11）**：
-  - iOS Safari 配系统拼音键盘：中英混排、组字期间不写入调用方、紧贴 chip 组字、方向键跨 chip 和删除 chip、撤销（包括清空之后）、粘贴、换行均通过。
-  - Android Chrome 配 Gboard：点击落光标、mention 菜单、删除 chip、换行、粘贴均通过。
-- **尚未验证**：Gboard 中文输入（模拟器里语言包下载不下来）、长按跨 chip 选择，以及 Electron 应用本身。纯文本 composer 没有改动。
+- **设备（2026-11-11）**：
+  - iOS Safari 配系统拼音键盘：中英混排、组字期间不写入调用方、紧贴 chip 组字、方向键跨 chip 和删除 chip、撤销（包括清空之后）、粘贴、换行、占位符颜色、两个宽度下的点击落光标、用选择手柄跨 chip 选择均通过。
+  - Android Chrome 配 Gboard：拼音输入、点击落光标、mention 菜单、删除 chip、换行、粘贴、长按跨 chip 选择均通过。
+  - Electron 应用的聊天输入框：紧贴 chip 拼音组字、方向键跨 chip 和删除 chip、溢出时点击落光标、mention 菜单、发送后不能撤销找回、发出的消息及其 mention 显示均通过。
+- **尚未验证**：Electron 里 macOS 自带拼音（自动化输入落成拉丁字母；第三方拼音输入法通过）、iOS 上仅靠长按开始的选择、iPhone 横屏，以及在 Electron 应用里复测提交 chip 之后的撤销（上面的测试覆盖同一代码路径）。纯文本 composer 没有改动。

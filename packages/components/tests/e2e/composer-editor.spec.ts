@@ -16,6 +16,8 @@ type EditorState = {
 
 const BEHAVIOUR = '/iframe.html?id=mentions-mentiontwolevelmenu--editor-behaviour&viewMode=story';
 const OVERFLOW = '/iframe.html?id=mentions-mentiontwolevelmenu--editor-overflow&viewMode=story';
+const EDITOR_UNDO =
+  '/iframe.html?id=mentions-mentiontwolevelmenu--editor-behaviour-editor-undo&viewMode=story';
 const SKILL_TEXT = '$kill-ai-slop';
 
 const editor = (page: Page) => page.getByRole('combobox', { name: 'composer' });
@@ -138,10 +140,7 @@ test('undo restores the text and the chip together', async ({ page }) => {
 });
 
 test('undo does not bring back a draft its owner cleared', async ({ page }) => {
-  await open(
-    page,
-    '/iframe.html?id=mentions-mentiontwolevelmenu--editor-behaviour-editor-undo&viewMode=story'
-  );
+  await open(page, EDITOR_UNDO);
   await page.keyboard.type('sent draft');
   await expect.poll(async () => (await state(page)).value).toBe('sent draft');
   await page.getByRole('button', { name: 'Clear draft' }).click();
@@ -151,6 +150,21 @@ test('undo does not bring back a draft its owner cleared', async ({ page }) => {
   // A textarea forgets its undo history when its value is assigned; so does the editor.
   await expect.poll(async () => (await state(page)).value).toBe('');
   await expect(page.getByTestId('editor-frame')).not.toContainText('sent draft');
+});
+
+test("undo after a committed chip takes back the text typed since, in the editor's own history", async ({
+  page,
+}) => {
+  await open(page, EDITOR_UNDO);
+  await page.keyboard.type('a ');
+  await insertSkill(page);
+  const withChip = await state(page);
+  await page.keyboard.type('tail');
+  await expect.poll(async () => (await state(page)).value).toBe(`${withChip.value}tail`);
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+  // The chip's commit is an owner write, which a textarea cannot undo past; the
+  // text typed after it is still the user's own edit.
+  await expect.poll(async () => await state(page)).toEqual(withChip);
 });
 
 test('pasted plain text keeps its line breaks', async ({ page, context, browserName }) => {

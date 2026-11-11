@@ -372,6 +372,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   onBeforeInputRef.current = onBeforeInput;
   const [element, setElement] = React.useState<InputElement | null>(null);
 
+  const [history] = React.useState(createEmptyHistoryState);
   const [editor] = React.useState(() =>
     createEditor({
       namespace: 'lody-composer',
@@ -710,7 +711,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       () => element.removeEventListener('mousedown', onPointerDown, true),
       editor.registerEditableListener(syncEditable),
       registerPlainText(editor),
-      registerHistory(editor, createEmptyHistoryState(), 300),
+      registerHistory(editor, history, 300),
       editor.registerCommand(
         KEY_DOWN_COMMAND,
         (event) => {
@@ -833,6 +834,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     deleteMentionCharacter,
     editor,
     element,
+    history,
     isPublished,
     mountRoot,
     onMentionUpdate,
@@ -894,7 +896,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       );
       // Assigning a textarea's value drops its native undo history; an owner's
       // write (clearing a sent draft, a committed chip) is not undoable here either.
+      // Clearing also forgets the current state, so the written value becomes the
+      // base the next edit undoes to; without it that edit could not be undone.
       editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
+      history.current = { editor, editorState: editor.getEditorState() };
       if (pendingApplies) pendingSelectionRef.current = null;
       return;
     }
