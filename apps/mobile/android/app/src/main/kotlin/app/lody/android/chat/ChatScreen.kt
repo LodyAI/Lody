@@ -1901,7 +1901,9 @@ private fun MergeSheet(title: String, preferred: String, onDismiss: () -> Unit, 
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
                 ) {
-                    Icon(LodyIcons.Merge, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+                    // Each method its own glyph, as iOS #2556: merge commit, squash, rebase.
+                    val glyph = when (method) { "squash" -> LodyIcons.Squash; "rebase" -> LodyIcons.Rebase; else -> LodyIcons.Merge }
+                    Icon(glyph, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(label), style = type.body, color = colors.textPrimary)
                         Text(stringResource(description), style = type.footnote, color = colors.textSecondary)
