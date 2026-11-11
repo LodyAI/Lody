@@ -217,7 +217,9 @@ that read lands.
 Conversation More offers Project files for a live conversation in a local project
 (`ProjectFiles.browsable`; iOS `openProjectFiles`). `ProjectFilesSheet` is a near
 full-screen sheet like the turn's files sheet: folders come from runtime `listDir`
-(rooted at the local project, folders first), and a Markdown file (`.md`,
+(the conversation's own folder, its worktree when it has one, through the machine's
+`file/list-dir`; machines without `sessionDirectoryListing` list the local project's
+folder; folders first), and a Markdown file (`.md`,
 `.markdown`, `.mdx`) is read through `readFile` and rendered block by block with the
 transcript's `MarkdownBlock`, with a Source toggle. Relative Markdown links open in
 the sheet; web links go to the browser. Other files are listed but not opened in this
