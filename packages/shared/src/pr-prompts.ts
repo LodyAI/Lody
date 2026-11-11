@@ -14,6 +14,19 @@ export const CREATE_PR_BASE_PROMPT = `Create a PR (not a draft) for the current 
 export const CREATE_DRAFT_PR_BASE_PROMPT = `Create a draft PR for the current worktree. ${GH_AUTH_FACT}`;
 
 /**
+ * Standing instruction appended to the PR-creation prompts. Turn finalization does
+ * not commit on the session's behalf, so this keeps the PR head current; the Info
+ * Bar's `Commit & Push` action is the visible fallback. Exported separately so the
+ * UI composes it from its own i18n key.
+ */
+export const PR_BRANCH_UPKEEP_PROMPT =
+  'After the PR exists, commit and push your changes to the PR branch at the end of every turn in this conversation.';
+
+/** Joins a PR-creation prompt to the standing upkeep instruction. */
+export const withPrBranchUpkeep = (basePrompt: string, upkeep: string): string =>
+  `${basePrompt}\n\n${upkeep}`;
+
+/**
  * Lead lines the Info Bar puts before its PR prompts, so a user scrolling back
  * sees that the message came from the button they clicked. Kept separate so the UI can
  * compose localized prompts with the same origin line.

@@ -8,16 +8,14 @@ Translation: current
 ## Abstract
 
 Lody's own prompts told agents how to work: every delegated-result batch opened with
-"Review the completed results…", Create PR added a standing order to commit and push
-at the end of every turn, and Fix CI fetched the failed checks in the client and
-prescribed a log-reading, root-cause and local-check routine. A user reported more
+"Review the completed results…", and Fix CI fetched the failed checks in the client
+and prescribed a log-reading, root-cause and local-check routine. A user reported more
 than five times the spend of another tool, with automatic chains eight levels deep;
 each review instruction started another delegated pass. Lody now provides tools, and
 its prompts carry only the user's request and facts the agent cannot discover. The
-trade-off is that the agent no longer keeps a PR head current on its own; the
-`Commit & Push` Info Bar ranking from the
-[upkeep decision](../architecture/2026-09-12-pr-branch-upkeep-without-auto-commit.md)
-is now the only signal of unpublished work.
+one standing instruction kept is the Create PR branch upkeep, because turn
+finalization does not commit and the user asked for a PR that tracks the work
+([upkeep decision](../architecture/2026-09-12-pr-branch-upkeep-without-auto-commit.md)).
 
 ## Decision
 
@@ -27,7 +25,8 @@ is now the only signal of unpublished work.
 - Create PR and Create Draft PR state the request plus one fact: `gh` uses the login
   saved on the machine, which sandboxed commands usually cannot read. Without it,
   sandboxed agents fail to authenticate and ask the user to log in again.
-- The per-turn branch upkeep paragraph is removed. Commit & Push states the request.
+- The per-turn branch upkeep stays, shortened to one sentence. Commit & Push states
+  the request.
 - Fix CI and Resolve Conflicts name the repository and PR. The CI verdict already
   comes from Session metadata, so the client no longer fetches check runs first.
 - A Project group adds only its facts: the group directory is not a Git repository
@@ -37,6 +36,8 @@ is now the only signal of unpublished work.
 
 ## Alternatives
 
+- Removing the per-turn upkeep was rejected: without it a PR head lags the work
+  until the user presses `Commit & Push`.
 - Replacing "review" with "do not re-review" was rejected: a negated instruction
   still steers every batch.
 - Keeping the failed-check list in the Fix CI prompt was rejected: the agent reads
@@ -44,9 +45,9 @@ is now the only signal of unpublished work.
 
 ## Consequences
 
-A PR head can lag the agent's latest work until the user presses `Commit & Push`.
-Native iOS and Android clients keep their own copies of these strings and need a
-matching change.
+`lody_session_create` guidance states facts about delegated prompts (history is not
+copied) instead of prescribing their content. Native iOS and Android clients keep
+their own longer copies of the quick-action strings; they are out of scope here.
 
 ## Verification
 

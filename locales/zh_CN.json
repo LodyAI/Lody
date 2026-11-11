@@ -3114,6 +3114,7 @@
   "sessions.prompts.createDraftPr": "为当前 worktree 创建草稿 PR。`gh` 使用本机保存的 GitHub 登录，沙箱内的命令通常读不到。",
   "sessions.prompts.createPr": "为当前 worktree 创建 PR（非草稿）。`gh` 使用本机保存的 GitHub 登录，沙箱内的命令通常读不到。",
   "sessions.prompts.fixCiErrors": "修复 {{repoFullName}} PR {{prLabel}} 失败的 CI 检查：{{prUrl}}",
+  "sessions.prompts.prBranchUpkeep": "PR 创建后，在本对话的每轮结束时把改动提交并推送到 PR 分支。",
   "sessions.prompts.resolveConflicts": "解决 {{repoFullName}} PR {{prLabel}} 的合并冲突：{{prUrl}}",
   "sessions.proposedPlanDecision.continue": "继续讨论",
   "sessions.proposedPlanDecision.execute": "实施计划",

@@ -305,6 +305,8 @@ import {
   CREATE_DRAFT_PR_ORIGIN_PROMPT,
   CREATE_PR_BASE_PROMPT,
   CREATE_PR_ORIGIN_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT,
+  withPrBranchUpkeep,
   withProjectGroupPrScope,
   withQuickActionOrigin,
 } from './create-pr-prompt';
@@ -5464,13 +5466,21 @@ export const SessionChatInterface = memo(
     // same actions carry the group facts.
     const scopeToProjectGroup = (prompt: string) =>
       session.projectRun ? withProjectGroupPrScope(prompt) : prompt;
+    const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
     const createPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
-      scopeToProjectGroup(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT))
+      scopeToProjectGroup(
+        withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
+      )
     );
     const createDraftPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createDraftPrOrigin', CREATE_DRAFT_PR_ORIGIN_PROMPT),
-      scopeToProjectGroup(t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT))
+      scopeToProjectGroup(
+        withPrBranchUpkeep(
+          t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+          prBranchUpkeep
+        )
+      )
     );
     const commitAndPushPrompt = scopeToProjectGroup(
       t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT)

@@ -3114,6 +3114,7 @@
   "sessions.prompts.createDraftPr": "Create a draft PR for the current worktree. `gh` uses the GitHub login saved on this machine, which sandboxed commands usually cannot read.",
   "sessions.prompts.createPr": "Create a PR (not a draft) for the current worktree. `gh` uses the GitHub login saved on this machine, which sandboxed commands usually cannot read.",
   "sessions.prompts.fixCiErrors": "Fix the failing CI checks of {{repoFullName}} pull request {{prLabel}}: {{prUrl}}",
+  "sessions.prompts.prBranchUpkeep": "After the PR exists, commit and push your changes to the PR branch at the end of every turn in this conversation.",
   "sessions.prompts.resolveConflicts": "Resolve the merge conflicts of {{repoFullName}} pull request {{prLabel}}: {{prUrl}}",
   "sessions.proposedPlanDecision.continue": "Continue discussing",
   "sessions.proposedPlanDecision.execute": "Implement plan",

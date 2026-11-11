@@ -132,7 +132,8 @@ labelClassName`) so the stage diffstat never clips. Wired from
   `Fix CI Errors` (an immediate agent prompt naming only the PR; the agent reads the
   failing checks itself). Quick-action prompts carry only the request and facts
   ([decision](../notes/implemented/simplification/2026-11-11-agent-prompts-without-workflow.md));
-  the Commit & Push ranking is the only upkeep signal
+  Create PR keeps a one-sentence per-turn upkeep instruction, with the Commit & Push
+  ranking as its fallback
   ([why](../notes/implemented/architecture/2026-09-12-pr-branch-upkeep-without-auto-commit.md)), and any merge state GitHub would accept (clean, or unstable:
   checks still running or failing but not required) shows the shared Merge
   split-button, so it appears while CI runs; blocked, behind, conflicting or unknown

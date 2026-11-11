@@ -5,6 +5,8 @@ export {
   CREATE_DRAFT_PR_ORIGIN_PROMPT,
   CREATE_PR_BASE_PROMPT,
   CREATE_PR_ORIGIN_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT,
+  withPrBranchUpkeep,
   withProjectGroupPrScope,
   withQuickActionOrigin,
 } from '@lody/shared';
