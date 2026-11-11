@@ -198,6 +198,8 @@
     <string name="bar_error_not_open">This pull request is no longer open.</string>
     <string name="bar_error_forbidden">You do not have permission to change this pull request.</string>
     <string name="bar_open_github">Open on GitHub</string>
+    <string name="pr_loading">Loading pull request…</string>
+    <string name="pr_load_failed">Couldn\'t load this pull request.</string>
     <string name="pr_merge">Merge</string>
     <string name="pr_delete_branch">Delete branch</string>
     <string name="pr_deleting_branch">Deleting branch…</string>

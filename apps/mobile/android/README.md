@@ -289,7 +289,7 @@ shared session usage meters and reset-time controls. Absent usage stays hidden.
 The native adapter uses canonical `agentProviders`, `agentProviderDetail`,
 `agentProviderProbe`, `agentProviderAuth` and `agentProviderOperation` with verified
 native identity. The reviewed runtime snapshot is fixed at
-`7f74298641f35b714c68752f3976e9b0ffaf6c52` with matching provenance and hashes.
+`041760cfd7982cf3b7298b37cf0e668b180a216f` with matching provenance and hashes.
 Native compilation and synthetic acceptance do not establish cloud integration.
 
 `ANDROID_SERIAL=<disposable-emulator> python3 verification/agent-settings.py` runs

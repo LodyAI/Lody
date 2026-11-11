@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "7f74298641f35b714c68752f3976e9b0ffaf6c52",
+  "commit": "041760cfd7982cf3b7298b37cf0e668b180a216f",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 7f74298641f35b714c68752f3976e9b0ffaf6c52 apps/mobile/ios/packages/cloud-runtime",
-  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to eff22abf, the composer's `cmd` mention listing gates prompt shortcuts by their saved project, computer and agent scope instead of dropping every scoped or referencing shortcut, answers from the runtime's last listing while reading a fresh one, and an owner index that fails or has not landed marks the listing incomplete instead of emptying it (the `promptShortcuts` list action likewise lists what is readable). Dependencies and licenses unchanged."
+  "export": "git archive 041760cfd7982cf3b7298b37cf0e668b180a216f apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 7f742986, catalog multi-repository projects carry `repositories` (their `projectRun` GitHub members, so a conversation can open its members' PR links in the native PR panel), the `promptShortcuts` list action accepts an optional `fresh` and the runtime caches the access directory, grants and bodies (forgotten on scope change), and the unused `publishedShares` call is removed. Dependencies and licenses unchanged."
 }

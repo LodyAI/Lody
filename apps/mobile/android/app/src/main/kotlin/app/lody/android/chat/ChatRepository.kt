@@ -14,6 +14,11 @@ fun interface PullRequestMergeReader {
     suspend fun read(scope: RuntimeScope, repository: String, number: Int): String?
 }
 
+/** A PR's state, branch and ±lines from GitHub with the scope's verified account; a read. */
+fun interface PullRequestDetailsReader {
+    suspend fun read(scope: RuntimeScope, repository: String, number: Int): PullRequestDetails
+}
+
 /** A merged PR's own head branch, with the scope's verified account: probed (a read) and deleted (a write, never retried). */
 interface PullRequestBranches {
     /** Null when it does not apply (not merged, a fork's head) or GitHub gave no answer. */
@@ -33,6 +38,7 @@ class ChatRepository(
     private val attachments: AttachmentUploader = AttachmentUploader { _, _, _ -> throw AttachmentFailure("unavailable") },
     private val mergeStates: PullRequestMergeReader = PullRequestMergeReader { _, _, _ -> throw GitHubWriteFailure("unavailable") },
     private val branches: PullRequestBranches = UnavailableBranches,
+    private val details: PullRequestDetailsReader = PullRequestDetailsReader { _, _, _ -> throw GitHubWriteFailure("unavailable") },
 ) {
     /** Uploads a turn's attachments natively; only the returned references reach the runtime. */
     suspend fun upload(scope: RuntimeScope, sessionId: String, items: List<PendingAttachment>): List<org.json.JSONObject> =
@@ -70,6 +76,10 @@ class ChatRepository(
     /** A direct GitHub write from the PR panel; never retried. */
     suspend fun deleteBranch(scope: RuntimeScope, repository: String, number: Int) =
         branches.delete(scope, repository, number)
+
+    /** A read, safe to repeat: the PR panel's state for a PR opened from a link. */
+    suspend fun pullRequestDetails(scope: RuntimeScope, repository: String, number: Int): PullRequestDetails =
+        details.read(scope, repository, number)
 
     /** A read, safe to repeat: used to settle the merge state after Ready for review. */
     suspend fun mergeState(scope: RuntimeScope, repository: String, number: Int): String? =
