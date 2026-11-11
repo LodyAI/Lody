@@ -435,9 +435,12 @@ it('lets only the owner transfer ownership, after a confirmation that states the
     (document.querySelector('[data-testid="e2ee-member-transfer"]') as HTMLElement).click()
   );
   expect(workspace.owner).toBe('self');
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-    'e2ee.members.transferEffectYou'
-  );
+  const confirmation = document.querySelector('[role="dialog"]')?.textContent ?? '';
+  // The confirmation describes the transfer, not a removal.
+  expect(confirmation).toContain('e2ee.members.transferLead');
+  expect(confirmation).not.toContain('e2ee.members.removeLead');
+  expect(confirmation).toContain('e2ee.members.transferEffectOwner');
+  expect(confirmation).toContain('e2ee.members.transferEffectYou');
   await act(async () =>
     (
       document.querySelector('[data-testid="e2ee-member-transfer-confirm"]') as HTMLButtonElement
