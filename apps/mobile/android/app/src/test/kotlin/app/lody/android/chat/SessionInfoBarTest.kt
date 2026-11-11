@@ -127,11 +127,14 @@ class SessionInfoBarTest {
         assertEquals(listOf(Action.FixCi), actions(session(pr = pr(ci = "e"))))
     }
 
-    @Test fun aCleanPassingPrOffersMergeEvenBehindPublishing() {
+    @Test fun mergeIsOfferedWheneverGitHubWouldAcceptItEvenBehindPublishing() {
         assertEquals(listOf(Action.Merge), actions(session(pr = pr(merge = "c"))))
         assertEquals(listOf(Action.CommitAndPush, Action.Merge), actions(session(unpushed = true, pr = pr(ci = "s", merge = "c"))))
-        assertEquals(emptyList<Action>(), actions(session(pr = pr(ci = "p", merge = "c"))))
-        assertEquals(emptyList<Action>(), actions(session(pr = pr(merge = "b"))))
+        // Checks still running or failing but not required: GitHub reports unstable and merges.
+        assertEquals(listOf(Action.Merge), actions(session(pr = pr(ci = "p", merge = "u"))))
+        assertEquals(listOf(Action.FixCi, Action.Merge), actions(session(pr = pr(ci = "f", merge = "u"))))
+        for (blocked in listOf("b", "h")) assertEquals(emptyList<Action>(), actions(session(pr = pr(ci = "p", merge = blocked))))
+        assertEquals(emptyList<Action>(), actions(session(pr = pr(ci = "p"))))
     }
 
     @Test fun draftAndFinishedPrsOfferPublishingAndReadiness() {
