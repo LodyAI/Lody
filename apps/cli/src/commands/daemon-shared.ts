@@ -2,6 +2,7 @@ import {
   getSeaContext,
   getCliNodeExecutable,
   managedDaemonRoot,
+  resolvePublishedManagedService,
 } from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
@@ -312,6 +313,10 @@ export async function spawnDaemonRunnerAndAwaitReady(
   options: {
     timeoutMs?: number;
     installation?: { bin: string; version: string };
+    /** Start this fixed managed service entry instead of the current installation. */
+    service?: string;
+    /** The managed service must report exactly this version to count as ready. */
+    expectedVersion?: string;
     /** Test seams: the OS process table and the daemon PID record location. */
     nodeProcess?: NodeProcessApi;
     pidFilePath?: string;
@@ -319,9 +324,15 @@ export async function spawnDaemonRunnerAndAwaitReady(
 ): Promise<SpawnDaemonRunnerResult> {
   const bin = options.installation?.bin ?? resolveLodyBin();
   const sea = options.installation ? null : getSeaContext();
-  const fixedService = sea
-    ? path.join(managedDaemonRoot(), process.platform === 'win32' ? 'service.exe' : 'service')
-    : null;
+  // An npm launcher forwards to a published managed service: after a relay
+  // migration, the user's own autostart keeps starting the managed daemon.
+  const fixedService =
+    options.service ??
+    (options.installation
+      ? null
+      : sea
+        ? path.join(managedDaemonRoot(), process.platform === 'win32' ? 'service.exe' : 'service')
+        : resolvePublishedManagedService());
   if (fixedService && !fs.existsSync(fixedService))
     throw new Error('Run daemon install before starting the managed service.');
   const env: NodeJS.ProcessEnv = {
@@ -342,7 +353,7 @@ export async function spawnDaemonRunnerAndAwaitReady(
     {
       command: fixedService ?? getCliNodeExecutable(),
       args: [
-        ...(sea
+        ...(fixedService
           ? [`--node-options=--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`]
           : [`--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`, bin]),
         'daemon-runner',
@@ -411,7 +422,7 @@ export async function spawnDaemonRunnerAndAwaitReady(
       const interpreted = interpretDaemonRunnerLaunchOutcome(
         outcome.data,
         runnerPid,
-        options.installation?.version
+        options.expectedVersion ?? options.installation?.version
       );
       finish(interpreted.outcome, interpreted.cancelRunner);
     });

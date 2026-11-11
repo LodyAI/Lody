@@ -5,7 +5,10 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import {
+  installFixedServiceEntry,
   npmMigrationTrust,
+  publishManagedInstallation,
+  resolvePublishedManagedService,
   prepareManagedRelease,
   readManagedOperation,
   readSelectedInstallation,
@@ -128,6 +131,20 @@ describe('checksummed managed daemon installation', () => {
     expect(urls[0]).toContain(`/api/runtimes/lody-cloud-next-daemon/1.2.3/${release.platform}/`);
     served = { ...cloudNext, distribution: 'lody-cloud-daemon' };
     await expect(prepareManagedRelease(trust, '1.2.3')).rejects.toThrow(/mismatch/);
+  });
+  it('an npm launcher starts the managed service only after its installation is published', async () => {
+    const { dir } = await fixture();
+    const capsule = path.join(dir, 'downloaded-capsule');
+    await fs.writeFile(capsule, bytes);
+    expect(resolvePublishedManagedService()).toBeNull();
+    const service = await installFixedServiceEntry(capsule);
+    expect(await fs.readFile(service)).toEqual(bytes);
+    // Installed but unpublished: a failed relay must leave `daemon start` on npm.
+    expect(resolvePublishedManagedService()).toBeNull();
+    await publishManagedInstallation('lody-oss', service);
+    expect(resolvePublishedManagedService()).toBe(service);
+    await fs.rm(service);
+    expect(resolvePublishedManagedService()).toBeNull();
   });
   it.each(['compressed', 'extracted'] as const)(
     'a bad %s SHA never publishes an executable or a successful update record',

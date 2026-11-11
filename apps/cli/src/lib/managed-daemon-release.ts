@@ -4,6 +4,7 @@ import {
   type DaemonRelease,
 } from '@lody/shared';
 import fs from 'node:fs/promises';
+import { constants, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
@@ -47,6 +48,75 @@ export function getCliNodeExecutable(): string {
 }
 export function managedDaemonRoot(): string {
   return path.join(getLodyDataDir(), 'daemon-managed');
+}
+const InstallationRecordSchema = z
+  .object({
+    format: z.literal(1),
+    product: z.enum(['lody-oss', 'lody-cloud']),
+    serviceProtocol: z.literal(1),
+    service: z.string().min(1),
+  })
+  .strict();
+function fixedServicePath(): string {
+  return path.join(managedDaemonRoot(), process.platform === 'win32' ? 'service.exe' : 'service');
+}
+/**
+ * Copy a verified capsule to the fixed service entry atomically. This does NOT
+ * publish the installation: until `publishManagedInstallation`, launchers keep
+ * starting whatever installation they already own.
+ */
+export async function installFixedServiceEntry(capsulePath: string): Promise<string> {
+  const root = managedDaemonRoot();
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  const lockPath = path.join(root, 'install.lock');
+  const lock = await fs.open(lockPath, 'wx', 0o600);
+  const tmp = path.join(root, `.service-${randomUUID()}.installing`);
+  try {
+    const service = fixedServicePath();
+    // The fixed service itself is upgraded only through an explicit install.
+    await fs.copyFile(capsulePath, tmp, constants.COPYFILE_EXCL);
+    await fs.chmod(tmp, 0o700);
+    const fd = await fs.open(tmp, 'r+');
+    try {
+      await fd.sync();
+    } finally {
+      await fd.close();
+    }
+    await fs.rename(tmp, service);
+    return service;
+  } finally {
+    try {
+      await fs.rm(tmp, { force: true });
+    } finally {
+      try {
+        await lock.close();
+      } finally {
+        await fs.rm(lockPath);
+      }
+    }
+  }
+}
+export async function publishManagedInstallation(
+  product: SeaContext['metadata']['product'],
+  service: string
+): Promise<void> {
+  await writeManagedRecord(path.join(managedDaemonRoot(), 'installation.json'), {
+    format: 1,
+    product,
+    serviceProtocol: 1,
+    service,
+  });
+}
+/** The published fixed service entry, or null when this profile has none. */
+export function resolvePublishedManagedService(): string | null {
+  try {
+    const record = InstallationRecordSchema.parse(
+      JSON.parse(readFileSync(path.join(managedDaemonRoot(), 'installation.json'), 'utf8'))
+    );
+    return existsSync(record.service) ? record.service : null;
+  } catch {
+    return null;
+  }
 }
 export function verifyDaemonRelease(
   raw: string,
