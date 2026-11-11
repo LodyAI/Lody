@@ -76,15 +76,9 @@ export function HomeDashboardHost({
   onBoardChange?: (board: HomeBoard | null) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const { currentUserId, ownedMachineIds } = useMySessionScope();
-  const weekAtom = useMemo(
-    () => createHomeWeekInputAtom(currentUserId, ownedMachineIds),
-    [currentUserId, ownedMachineIds]
-  );
-  const nowAtom = useMemo(
-    () => createHomeNowInputAtom(currentUserId, ownedMachineIds),
-    [currentUserId, ownedMachineIds]
-  );
+  const { currentUserId } = useMySessionScope();
+  const weekAtom = useMemo(() => createHomeWeekInputAtom(currentUserId), [currentUserId]);
+  const nowAtom = useMemo(() => createHomeNowInputAtom(currentUserId), [currentUserId]);
   const weekInput = useAtomValue(weekAtom);
   const nowInput = useAtomValue(nowAtom);
   const clock = useStableNow(NOW_INTERVAL_MS);

@@ -1,4 +1,3 @@
-import type { MachineId } from '@lody/shared';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { atom } from 'jotai';
 import {
@@ -57,10 +56,7 @@ function latestPr(session: SessionMeta): HomeNowPr | null {
  * keeps its previous reference until a row the page shows changes, so the tiles re-render only
  * then.
  */
-export const createHomeNowInputAtom = (
-  userId: string | null,
-  ownedMachineIds: ReadonlySet<MachineId>
-) =>
+export const createHomeNowInputAtom = (userId: string | null) =>
   atom((get) => {
     if (!userId || !get(docMetaCacheReadyAtom)) return EMPTY_HOME_NOW_INPUT;
 
@@ -82,8 +78,7 @@ export const createHomeNowInputAtom = (
     const horizon = nowMs - ROW_HORIZON_MS;
     const rows: HomeNowRow[] = [];
     for (const session of sessions) {
-      if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds))
-        continue;
+      if (session.parentSessionId || !isSessionInMyScope(session, userId)) continue;
       if (session.isArchived || session.isTabClosed) continue;
       const activity = getEffectiveSessionActivitySummary(session, children, live);
       const lastAt = activity.latestMessageAt || toMs(session.createdAt) || 0;

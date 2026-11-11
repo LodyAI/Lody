@@ -2017,7 +2017,7 @@ export function LoroAppSidebar({
 
   // Shared by the task lists and the Workspace groups, which also render a
   // Local Project Session as a task row when it moves under its opener.
-  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
+  const { currentUserId: myAccountId } = useMySessionScope();
   const buildSidebarTaskRows = useCallback(
     (sourceSessions: SessionMeta[]) =>
       buildSessionListRows(
@@ -2025,7 +2025,6 @@ export function LoroAppSidebar({
         {
           scope,
           currentUserId: myAccountId,
-          ownedMachineIds,
           defaultTitle: defaultSessionTitle,
           onlineMachineIds,
           members: activeOrganization?.members,
@@ -2043,7 +2042,6 @@ export function LoroAppSidebar({
       })),
     [
       activeOrganization?.members,
-      ownedMachineIds,
       myAccountId,
       allActiveSessions,
       onlineMachineIds,
@@ -2268,7 +2266,7 @@ export function LoroAppSidebar({
       // its legacy `project` projection names the first member's folder.
       if (session.projectRun) continue;
       if (scope === 'my') {
-        if (!isSessionInMyScope(session, myAccountId, ownedMachineIds)) continue;
+        if (!isSessionInMyScope(session, myAccountId)) continue;
       }
 
       const key = `${session.machineId}:${project.localProjectId}`;
@@ -2289,7 +2287,7 @@ export function LoroAppSidebar({
     }
 
     return map;
-  }, [childSessionsByParent, scope, sessions, sessionsListLoading, myAccountId, ownedMachineIds]);
+  }, [childSessionsByParent, scope, sessions, sessionsListLoading, myAccountId]);
   // The ONE session-navigation callback for every sidebar surface (rows,
   // Updated items, keyboard nav). `tabSessionId` restores the precise child Tab
   // that "Go to Opener Session" points at.

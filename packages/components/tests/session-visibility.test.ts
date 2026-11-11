@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   filterSessionsByVisibility,
+  isSessionInMyScope,
   isSessionVisibleToUser,
   isSessionEditableToUser,
   getSessionOwnerAccessReason,
@@ -15,6 +16,38 @@ const m2 = 'machine-2' as MachineId;
 const p1 = 'project-1' as LocalProjectId;
 
 describe('session visibility', () => {
+  it('filters My Tasks by assignment without removing machine-owner access to teammates tasks', () => {
+    const sessions = [
+      { id: 'mine-remote', machineId: m2, userId: 'me' },
+      { id: 'mine-local', machineId: m1, userId: 'me' },
+      { id: 'teammate-on-my-machine', machineId: m1, userId: 'teammate' },
+      { id: 'teammate-remote', machineId: m2, userId: 'teammate' },
+    ];
+    const visible = filterSessionsByVisibility(
+      sessions,
+      new Set(),
+      new Set(),
+      false,
+      'me',
+      false,
+      new Set([m1])
+    );
+    expect(visible.map((session) => session.id)).toEqual([
+      'mine-remote',
+      'mine-local',
+      'teammate-on-my-machine',
+    ]);
+    expect(
+      visible.filter((session) => isSessionInMyScope(session, 'me')).map((session) => session.id)
+    ).toEqual(['mine-remote', 'mine-local']);
+    expect(isSessionEditableToUser(sessions[2]!, new Set(), new Set(), 'me', new Set([m1]))).toBe(
+      true
+    );
+    for (const userId of [null, undefined, '']) {
+      expect(visible.filter((session) => isSessionInMyScope(session, userId))).toEqual([]);
+    }
+  });
+
   it('keeps the assigned conversation owner visible without granting machine access', () => {
     expect(
       isSessionVisibleToUser(
