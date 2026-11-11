@@ -8507,6 +8507,23 @@
         }
       }
     },
+    "native.chat.mermaid.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View full screen"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全屏查看"
+          }
+        }
+      }
+    },
     "native.chat.copied": {
       "extractionState": "manual",
       "localizations": {
