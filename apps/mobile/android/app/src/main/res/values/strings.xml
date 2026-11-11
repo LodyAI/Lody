@@ -744,6 +744,7 @@
     <string name="settings_agent_scan_extensions">Scan Pi extensions</string>
     <string name="settings_agent_api_key_short">API key</string>
     <string name="settings_agent_sorbet_unavailable">Sorbet connection management requires encrypted feature transport that this native client does not yet support.</string>
+    <string name="preferences_general">General</string>
     <string name="preferences_language">Language</string>
     <string name="preferences_notifications">Notifications</string>
     <string name="preferences_chat">Chat Behavior</string>
