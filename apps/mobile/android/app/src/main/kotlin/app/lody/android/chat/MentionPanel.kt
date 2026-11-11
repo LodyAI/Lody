@@ -354,7 +354,8 @@ class MentionState {
         return result
     }
 
-    internal fun presentation(color: androidx.compose.ui.graphics.Color) = MentionPresentation(catalogs.values.flatMap { it.items }, color)
+    internal fun presentation(color: androidx.compose.ui.graphics.Color, background: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified) =
+        MentionPresentation(catalogs.values.flatMap { it.items }, color, background, labels.keys)
 
     /** Reads every category in parallel; a category that fails stays empty. */
     suspend fun load(fetch: suspend (String) -> MentionCatalogPage) = coroutineScope {

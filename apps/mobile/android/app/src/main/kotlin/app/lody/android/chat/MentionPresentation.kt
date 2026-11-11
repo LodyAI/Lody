@@ -3,17 +3,29 @@ package app.lody.android.chat
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import app.lody.android.runtime.MentionCandidate
 
-/** Keep wire tokens in drafts; only their visual representation changes. */
-internal class MentionPresentation(items: List<MentionCandidate>, private val color: Color) : VisualTransformation {
+/**
+ * Keep wire tokens in drafts; only their visual representation changes. Each reference reads as
+ * a tinted chip ([color] on [background]) so it stands apart from the typed text, including the
+ * Agent Role labels a prompt shortcut writes as plain text ([roleLabels], resolved at send).
+ */
+internal class MentionPresentation(
+    items: List<MentionCandidate>,
+    private val color: Color,
+    private val background: Color = Color.Unspecified,
+    private val roleLabels: Collection<String> = emptyList(),
+) : VisualTransformation {
     private val labels = items.associate { Mentions.token(it) to Mentions.shown(it) }
+    private val chip = SpanStyle(color = color, background = background, fontWeight = FontWeight.Medium)
     override fun filter(text: AnnotatedString): TransformedText {
         val code = Regex("```[\\s\\S]*?(?:```|$)|`+[^`\\n]*`+").findAll(text.text).map { it.range }.toList()
-        val replacements = referenceTokens.findAll(text.text).filter { match -> code.none { match.range.first <= it.last && match.range.last >= it.first } }.map { match ->
+        fun literal(range: IntRange) = code.none { range.first <= it.last && range.last >= it.first }
+        val tokens = referenceTokens.findAll(text.text).filter { literal(it.range) }.map { match ->
             val token = match.value
             Triple(match.range.first, match.range.last + 1, labels[token] ?: when {
                 token.startsWith("@session:") -> "@Session"
@@ -21,13 +33,22 @@ internal class MentionPresentation(items: List<MentionCandidate>, private val co
                 else -> token
             })
         }.toList()
+        // Shortcut Role labels are already their shown text: styled in place, never remapped.
+        val shown = roleLabels.filter { it.isNotEmpty() }.flatMap { label ->
+            generateSequence(text.text.indexOf(label).takeIf { it >= 0 }) { at -> text.text.indexOf(label, at + label.length).takeIf { it >= 0 } }
+                .map { Triple(it, it + label.length, label) }.toList()
+        }.filter { (start, end) -> literal(start until end) && tokens.none { start < it.second && end > it.first } }
+        val replacements = (tokens + shown).sortedBy { it.first }.fold(mutableListOf<Triple<Int, Int, String>>()) { kept, next ->
+            if (kept.lastOrNull()?.let { next.first < it.second } != true) kept += next
+            kept
+        }
         val output = AnnotatedString.Builder()
         val ranges = mutableListOf<IntArray>()
         var cursor = 0
         replacements.forEach { (start, end, label) ->
             output.append(text.subSequence(cursor, start))
             val shownStart = output.length
-            output.pushStyle(SpanStyle(color = color)); output.append(label); output.pop()
+            output.pushStyle(chip); output.append(label); output.pop()
             ranges += intArrayOf(start, end, shownStart, output.length)
             cursor = end
         }
