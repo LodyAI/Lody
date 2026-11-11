@@ -139,7 +139,7 @@ class HomeActivity : ComponentActivity() {
                         app.notifications.consumeClick()
                     }
                 }
-                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments, app.mergeStates, app.branches) }
+                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments, app.mergeStates, app.branches, app.pullRequestDetails) }
                 val selectedSession = catalog.snapshot?.sessions?.firstOrNull { it.id == selectedId }
                 LaunchedEffect(selectedSession, activeScope, resumed) {
                     if (resumed && activeScope != null && selectedSession != null) {
@@ -194,6 +194,7 @@ class HomeActivity : ComponentActivity() {
                                 agentProviders = remember { RuntimeAgentProviderService(app.runtimeOwner) },
                                 roleSettings = remember { RuntimeRoleSettingsService(app.runtimeOwner) },
                                 shortcutSettings = remember { RuntimeShortcutSettingsService(app.runtimeOwner) },
+                                githubSettings = remember { LiveGitHubSettingsService(app.account) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },
                             )
@@ -213,7 +214,7 @@ private fun uiState(auth: AuthState, catalog: CatalogState): ChatListUiState {
     // Only actionable connection state reaches the sync pill; a live list shows none.
     val sync = when (catalog.phase) {
         ConnectionPhase.CONNECTING, ConnectionPhase.SYNCING -> HomeSyncState.Syncing
-        ConnectionPhase.UNAVAILABLE, ConnectionPhase.PAUSED -> HomeSyncState.Offline
+        ConnectionPhase.UNAVAILABLE, ConnectionPhase.PAUSED -> HomeSyncState.Connecting
         else -> HomeSyncState.Live
     }
     val placeholder = when {
@@ -255,7 +256,10 @@ private fun chatContext(catalog: CatalogState, id: String, title: String, user: 
         closedTabs = session?.let { app.lody.android.chat.DirectoryTabs.closed(it, snapshot.sessions) }.orEmpty(),
         tabs = session?.let { app.lody.android.chat.DirectoryTabs.sessions(it, snapshot.sessions) }.orEmpty(),
         repository = repository.orEmpty(),
+        repositories = (listOfNotNull(repository?.takeIf { it.isNotEmpty() }) + project?.repositories.orEmpty()).distinctBy { it.lowercase() },
         machineName = session?.let { snapshot?.machineNames?.get(it.machineId) }.orEmpty(),
+        machineSimulator = session?.let { snapshot?.machineSimulators?.get(it.machineId) },
+        machineEmulator = session?.let { snapshot?.machineEmulators?.get(it.machineId) } == "available",
         machineKind = snapshot?.let { app.lody.android.create.CreateSessionModel.machineKind(it, session?.machineId) }
             ?: app.lody.android.create.CreateSessionModel.MachineKind.Laptop,
     )

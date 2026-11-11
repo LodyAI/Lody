@@ -22,24 +22,16 @@ def menu(identifier):
     ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('session.delete.title') for i in items), 'Missing confirmation')
 
 
-def reveal(identifier):
-    for _ in range(5):
-        items = ui.state()
-        screen = items[0]['frame']
-        match = next((i for i in items if i.get('AXUniqueId') == identifier), None)
-        if match and match['frame']['y'] + match['frame']['height'] < screen['height'] - 16:
-            return match
-        x = str(int(screen['width'] / 2))
-        ui.axe('swipe', '--start-x', x, '--start-y', str(int(screen['height'] * .7)),
-               '--end-x', x, '--end-y', str(int(screen['height'] * .4)), '--duration', '.4', '--post-delay', '.5')
-    raise AssertionError(f'Could not reach {identifier}')
+def toggle_archived():
+    tap_label(catalog.text('inbox.settings.section.view'))
+    tap_label(catalog.text('home.view.archived'))
 
 
 if pad:
     pad_layout.show_list(ui)
-tap_label(catalog.text('tabs.settings'))
-reveal('archived')
-ui.axe('tap', '--id', 'archived', '--post-delay', '.6')
+# Archived chats live behind the Chats view menu's Archived switch.
+toggle_archived()
+ui.element('ui-search')
 menu('ui-search')
 ui.capture('archived-confirmation')
 tap_label(catalog.text('common.cancel'))
@@ -51,10 +43,9 @@ ui.element('ui-search')
 ui.capture('failed-keeps-session')
 menu('ui-search')
 tap_label(delete)
-ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('settings.archived.empty') for i in items), 'Archived deletion did not empty list')
+ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('home.archived.empty') for i in items), 'Archived deletion did not empty list')
 ui.capture('archived-deleted')
-ui.axe('tap', '--id', 'BackButton', '--post-delay', '.5')
-tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('tabs.settings')))
+toggle_archived()
 
 ui.axe('tap', '--id', 'ui-design', '--post-delay', '.8')
 tap_label(catalog.text('common.more'))

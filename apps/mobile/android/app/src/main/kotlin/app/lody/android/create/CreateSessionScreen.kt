@@ -128,6 +128,9 @@ import app.lody.android.designsystem.LodyTheme
 import app.lody.android.runtime.CatalogProject
 import app.lody.android.runtime.CatalogSnapshot
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -206,6 +209,13 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
     // composer only while it is still what will run (`CreateSessionModel.roleApplied`).
     var roles by remember(runtimeScope) { mutableStateOf<List<AgentRole>?>(null) }
     var roleId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Device-local: the last selection per computer and recently used configurations.
+    var runPrefs by remember(runtimeScope) { mutableStateOf<RunConfigPrefs?>(null) }
+    LaunchedEffect(runtimeScope) {
+        runPrefs = try { repository.runConfigs(runtimeScope) ?: RunConfigPrefs() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { RunConfigPrefs() }
+    }
     LaunchedEffect(runtimeScope) {
         roles = try { repository.roles(runtimeScope) }
         catch (cancelled: CancellationException) { throw cancelled }
@@ -242,6 +252,15 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
     LaunchedEffect(runtimeScope, target.machineId) {
         // A Role binds one machine's agent exactly, so another computer clears it (web).
         agentId = null; modelId = null; modeId = null; effort = null; roleId = null
+        // Then the computer's last selection, once its agents are listed, unless one was picked meanwhile.
+        val machine = target.machineId ?: return@LaunchedEffect
+        val (prefs, loaded) = snapshotFlow { runPrefs to options }
+            .first { (prefs, loaded) -> prefs != null && loaded?.agents?.any { it.machineId == machine } == true }
+        if (agentId != null) return@LaunchedEffect
+        val saved = prefs?.machines?.get(machine) ?: return@LaunchedEffect
+        val chosen = loaded?.agents?.firstOrNull { it.machineId == machine && it.id == saved.agentId } ?: return@LaunchedEffect
+        val applied = CreateSessionModel.applicable(saved, loaded?.capability(chosen))
+        agentId = applied.agentId; modelId = applied.modelId; modeId = applied.modeId; effort = applied.effort
     }
     LaunchedEffect(runtimeScope) {
         optionsFresh = false
@@ -296,6 +315,17 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
             )
             dismissKeyboard()
             val picked = attachments
+            // Recorded when a chat is started, never when a value changes (web).
+            val started = CreateSessionModel.started(
+                runPrefs ?: RunConfigPrefs(), chosen.machineId, RunSelection(chosen.id, modelId, modeId, effort),
+                activeRole?.role?.id, System.currentTimeMillis(),
+            )
+            runPrefs = started
+            // Outlives the page, which closes as the chat opens.
+            scope.launch(NonCancellable) {
+                try { repository.saveRunConfigs(runtimeScope, started) }
+                catch (_: Exception) { /* A failed write only loses the default. */ }
+            }
             scope.launch {
                 val blocks = try {
                     if (picked.isEmpty()) emptyList() else application.attachments.upload(runtimeScope, sessionId, picked)
@@ -383,7 +413,7 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     field,
                     onPromptChange = { if (!attempted && it.text.length <= 32000) { field = app.lody.android.chat.MentionPresentation.edit(field, it); prompt = field.text } },
                     onFocusChange = { composerFocused = it },
-                referencePresentation = mentions.presentation(LodyTheme.colors.accentDefault),
+                referencePresentation = mentions.presentation(LodyTheme.colors.accentOnSubtle, LodyTheme.colors.accentSubtle),
                     attachments = attachments,
                     onRemoveAttachment = { id -> if (!busy) attachments = attachments.filterNot { it.id == id } },
                     busy = busy,
@@ -433,7 +463,49 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     modifier = Modifier.padding(LodyLayout.screenPaddingX),
                 )
             }
+            val pickRole: (String) -> Unit = { id ->
+                roleItems.firstOrNull { it.role.id == id && it.unavailable == null }?.let { item ->
+                    val choice = CreateSessionModel.roleChoice(item.target)
+                    agentId = item.target.agentConfigId; modelId = choice.modelId; modeId = choice.modeId; effort = choice.effort
+                    roleId = item.role.id
+                }
+            }
+            val currentKey = agent?.let { CreateSessionModel.recentKey(it.machineId, RunSelection(it.id, modelId, modeId, effort), activeRole?.role?.id) }
+            val recents = CreateSessionModel.recentItems(runPrefs?.recents.orEmpty(), target.machineId, agents, roleItems, currentKey)
             RunConfigSheet(
+                // Web's "Recently used": whole configurations, read like the chip; a pick applies all of it.
+                recents = recents.mapNotNull { record ->
+                    val recentAgent = agents.firstOrNull { it.id == record.selection.agentId } ?: return@mapNotNull null
+                    val recentCapability = options?.capability(recentAgent)
+                    val role = record.agentRoleId?.let { id -> roleItems.firstOrNull { it.role.id == id } }
+                    val selection = record.selection
+                    PickerOption(
+                        CreateSessionModel.recentKey(record), role?.role?.name ?: recentAgent.name, selected = false,
+                        subtitle = listOfNotNull(
+                            selection.modelId?.let { id -> recentCapability?.models?.firstOrNull { it.id == id }?.name ?: id },
+                            selection.effort,
+                            selection.modeId?.let { id -> recentCapability?.modes?.firstOrNull { it.id == id }?.name ?: id },
+                        ).joinToString(" · "),
+                        agent = (recentAgent.cliType to recentAgent.agentType).takeIf { role == null },
+                        emoji = role?.role?.emoji,
+                    )
+                },
+                onRecent = { key ->
+                    recents.firstOrNull { CreateSessionModel.recentKey(it) == key }?.let { record ->
+                        // Recorded as a Role: re-apply the Role, whose instruction rides with it.
+                        val recordedRole = record.agentRoleId
+                        if (recordedRole != null) pickRole(recordedRole)
+                        else {
+                            val recentAgent = agents.firstOrNull { it.id == record.selection.agentId }
+                            if (recentAgent != null) {
+                                val applied = CreateSessionModel.applicable(record.selection, options?.capability(recentAgent))
+                                agentId = applied.agentId; modelId = applied.modelId; modeId = applied.modeId; effort = applied.effort
+                                roleId = null
+                            }
+                        }
+                    }
+                    runConfig = false
+                },
                 rows = buildList {
                     // Role sits above Agent because a Role answers every row under it (web). Shown
                     // once Roles are listed, even with none to pick: then it reads None.
@@ -468,11 +540,7 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                 when (row) {
                     // None clears the name, not the values it seeded; picking a Role sets its
                     // agent and exactly what it pins.
-                    ROLE -> if (id == ROLE_NONE) roleId = null else roleItems.firstOrNull { it.role.id == id && it.unavailable == null }?.let { item ->
-                        val choice = CreateSessionModel.roleChoice(item.target)
-                        agentId = item.target.agentConfigId; modelId = choice.modelId; modeId = choice.modeId; effort = choice.effort
-                        roleId = item.role.id
-                    }
+                    ROLE -> if (id == ROLE_NONE) roleId = null else pickRole(id)
                     AGENT -> { agentId = id; modelId = null; modeId = null; effort = null }
                     MODEL -> { modelId = id; effort = null }
                     EFFORT -> effort = id
@@ -843,7 +911,13 @@ internal const val RUN_CONFIG_OFF = "off"
 
 /** Web's run-config sheet as iOS draws it: label + value rows whose options expand in place. */
 @Composable
-internal fun RunConfigSheet(rows: List<RunConfigRow>, defaultLabel: String, onPick: (String, String) -> Unit) {
+internal fun RunConfigSheet(
+    rows: List<RunConfigRow>,
+    defaultLabel: String,
+    recents: List<PickerOption> = emptyList(),
+    onRecent: (String) -> Unit = {},
+    onPick: (String, String) -> Unit,
+) {
     val colors = LodyTheme.colors
     var open by remember { mutableStateOf<String?>(null) }
     Column(
@@ -856,6 +930,16 @@ internal fun RunConfigSheet(rows: List<RunConfigRow>, defaultLabel: String, onPi
             color = colors.textPrimary,
             modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = LodySpacing.sm),
         )
+        if (recents.isNotEmpty()) {
+            Text(
+                stringResource(R.string.create_run_config_recent),
+                style = LodyTheme.typography.footnote,
+                color = colors.textTertiary,
+                modifier = Modifier.padding(horizontal = LodySpacing.xs),
+            )
+            OptionList(recents, null, "", onRecent, null, expandsToContent = true)
+            HorizontalDivider(color = colors.borderSubtle, modifier = Modifier.padding(vertical = LodySpacing.xs))
+        }
         rows.forEach { row ->
             val current = row.options.firstOrNull { it.selected }
             if (row.toggle != null) {

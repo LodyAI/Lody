@@ -62,6 +62,8 @@ struct CreatePanel: Equatable {
   var branch: CreatePicker?
   var note = ""
   var noteWarning = false
+  /// The note reads "Tap to retry": tapping it reads the creation options again.
+  var noteRetry = false
 }
 
 enum CreateSessionContext {
@@ -119,8 +121,10 @@ enum CreateSessionContext {
     } else if !form.deferUnresolved, let message = page.unavailableMessage {
       panel.note = message
       panel.noteWarning = true
+      panel.noteRetry = page.retriesOptions
     } else if page.failed {
       panel.note = text("create.machineConfig.retry")
+      panel.noteRetry = true
     }
     return panel
   }
@@ -273,6 +277,30 @@ enum CreateSessionContext {
     return rows
   }
 
+  /// Web's "Recently used" group atop the run-config menu: whole configurations a chat was
+  /// started with on this computer, read like the chip (agent or Role · model · effort · mode).
+  /// Picking one applies all of it.
+  static func recents(_ form: CreateSessionForm) -> [CreateOption] {
+    let page = form.current
+    let roles = Dictionary(form.roleItems.map { ($0.role.id, $0) }, uniquingKeysWith: { first, _ in first })
+    return form.recentRunConfigs.compactMap { item in
+      let record = item.record
+      guard let agent = page.agents.first(where: { $0.key == record.agentKey }) else { return nil }
+      let capability = CreateLogic.capabilityFor(page.options, agent)
+      let choice = record.choice
+      let model = choice.modelId.map { id in capability?.models.first { $0.id == id }?.name ?? id }
+      let mode = CreateLogic.permissionMode(capability, choice).flatMap { permission in
+        permission.options.first { $0.id == permission.value }?.name
+      }
+      let role = record.agentRoleId.flatMap { roles[$0] }
+      return CreateOption(
+        id: item.key, title: role?.role.name ?? agent.name,
+        subtitle: [model, choice.effort, mode].compactMap { $0 }.joined(separator: " · "),
+        glyph: role.map { CreateGlyph.emoji($0.glyph) } ?? agentGlyph(agent.cliType, agent.agentType))
+    }
+  }
+
+  static let recentRow = "recent"
   static let roleNoneOption = "__none__"
   static let toggleOn = "on"
   static let toggleOff = "off"
@@ -302,11 +330,14 @@ enum CreateSessionContext {
 final class CreatePanelState: ObservableObject {
   @Published var panel = CreatePanel()
   @Published var runConfig: [CreatePicker] = []
+  /// Recently used configurations atop the run-config sheet; empty hides the group.
+  @Published var recents: [CreateOption] = []
   /// The one expanded list on the page, and separately in the sheet.
   @Published var open: String?
   @Published var openInSheet: String?
   var onPick: (String, String) -> Void = { _, _ in }
   var onWorktree: (Bool) -> Void = { _ in }
+  var onRetry: () -> Void = {}
 }
 
 // MARK: - Page panel
@@ -327,10 +358,14 @@ struct CreateContextPanel: View {
           }
           if state.panel.worktree != nil || state.panel.branch != nil { branchLine }
           if !state.panel.note.isEmpty {
-            Text(state.panel.note)
-              .lodyTextStyle(.footnote)
-              .foregroundStyle(state.panel.noteWarning ? LodyColor.warningDefault : LodyColor.textTertiary)
-              .padding(.horizontal, LodySpacing.xs)
+            if state.panel.noteRetry {
+              Button { state.onRetry() } label: {
+                note.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+              }
+              .buttonStyle(.plain)
+            } else {
+              note
+            }
           }
         }
         .padding(.horizontal, LodyLayout.screenPaddingX)
@@ -343,6 +378,13 @@ struct CreateContextPanel: View {
       .scrollBounceBehavior(.basedOnSize)
       .defaultScrollAnchor(.bottom)
     }
+  }
+
+  private var note: some View {
+    Text(state.panel.note)
+      .lodyTextStyle(.footnote)
+      .foregroundStyle(state.panel.noteWarning ? LodyColor.warningDefault : LodyColor.textTertiary)
+      .padding(.horizontal, LodySpacing.xs)
   }
 
   private var branchLine: some View {
@@ -558,6 +600,7 @@ struct CreateRunConfigSheet: View {
           .foregroundStyle(LodyColor.textPrimary)
           .padding(.top, LodySpacing.xl)
         VStack(spacing: LodySpacing.sm) {
+          if !state.recents.isEmpty { recentGroup }
           ForEach(state.runConfig) { row in
             VStack(spacing: LodySpacing.xs) {
               rowFace(row)
@@ -582,6 +625,26 @@ struct CreateRunConfigSheet: View {
       }
     }
     .background(LodyColor.bgBase)
+  }
+
+  /// Terminal "run it like this" rows: a pick applies the whole configuration and closes nothing
+  /// else open, like web's group above Agent / Model / Reasoning.
+  private var recentGroup: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Text(String(localized: "create.runConfig.recent", bundle: .lody))
+        .lodyTextStyle(.footnote)
+        .foregroundStyle(LodyColor.textTertiary)
+        .padding(.bottom, LodySpacing.xs)
+      OptionList(
+        picker: CreatePicker(id: CreateSessionContext.recentRow, glyph: .symbol("clock"), title: "", options: state.recents),
+        expandsToContent: true
+      ) { id in
+        state.openInSheet = nil
+        state.onPick(CreateSessionContext.recentRow, id)
+      }
+      Divider().padding(.top, LodySpacing.xs)
+    }
+    .accessibilityIdentifier("run-config-recent")
   }
 
   @ViewBuilder

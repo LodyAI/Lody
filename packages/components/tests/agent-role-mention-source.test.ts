@@ -255,7 +255,7 @@ describe('agent role before-send expansion', () => {
   const text = 'please @Code-Reviewer this diff';
   const mention = { start: 7, end: 21, kind: 'agent_role', value: 'role-1' };
 
-  it('rewrites the range into an id-bearing instruction and keeps the chip label', () => {
+  it('rewrites the range into an id-bearing reference and keeps the chip label', () => {
     const expanded = applyTextRewrites(
       text,
       buildAgentRoleMentionRewrites(text, [mention], items(role()))
@@ -334,7 +334,7 @@ describe('a role on several machines', () => {
     ]);
   });
 
-  it('names the picked machine in the instruction and on the frozen span', () => {
+  it('names the picked machine in the reference and on the frozen span', () => {
     const text = 'ask @Reviewer-Linux';
     const rewrites = buildAgentRoleMentionRewrites(
       text,
@@ -342,7 +342,7 @@ describe('a role on several machines', () => {
       targetItems()
     );
     expect(rewrites[0]?.replacement).toBe(
-      'use lody mcp to create a session with agent role[id: role-1, agentRoleMachineId: machine-2, name: Code Reviewer]'
+      '[Agent Role: Code Reviewer (agentRoleId: role-1, agentRoleMachineId: machine-2)]'
     );
     expect(rewrites[0]?.span?.target).toBe('role-1@machine-2');
     // A bare id from an older draft names no machine: it stays plain text.

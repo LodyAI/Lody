@@ -63,7 +63,11 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
   `LODY_IROH_NATIVE_PATH` 和中继设置传给内嵌 CLI。公开桌面版和独立 npm CLI 不带
   该模块。
 - **原生代码。** `packages/iroh-native` 包含与平台无关的 `lody-iroh` crate 和一个
-  napi-rs 绑定。移动端以后为同一 crate 增加 UniFFI 绑定，并关闭端口映射。
+  napi-rs 绑定。移动端使用同一 crate 的 UniFFI 绑定（`uniffi/`），只拨号，关闭端口映射。
+- **移动端种子交接。** 移动 App 在 WebView 里运行 portable host，它本来就持有设备种子。
+  `BrowserDevice.withTransportSeed` 每个会话把一份副本交给一个原生插件一次（打开、
+  状态、发送、接收），插件从不回传种子。Capacitor 会序列化参数，因此会留下一份无法
+  擦除的 JavaScript 种子字符串，直到被垃圾回收；owner 接受这一代价（2026-11-10）。
 
 ## 依据
 
@@ -98,6 +102,9 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
 - **官方 iroh-ffi 移动绑定。** 默认 feature 开启端口映射（iOS 本地网络弹窗）和
   `fast-apple-datapath`（苹果私有 API），且没有暴露开关。
 - **浏览器版 iroh。** 只能走中继且没有官方包，owner 决定不做。
+- **在移动端 WebView 里运行编译成 WebAssembly 的 iroh。** 试验（iroh 1.4.1、`tls-ring`、
+  gzip 后 0.97 MB）在 WebKit（355 ms）和 Chromium（319 ms）里跑通了只走中继的往返，
+  种子也不经过 bridge，但只能走中继、没有直连。owner 为了直连选择了原生插件。
 
 ## 影响
 

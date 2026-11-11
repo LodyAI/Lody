@@ -75,8 +75,11 @@ enum SessionRows {
     row.action = true
     row.navigates = true
     row.actions = trailingActions(session)
-    row.leadingActions = [pin(session.pinned)]
-    row.menuActions = [rename(), pin(session.pinned), archive(session.archived), share(), delete()]
+    // Archived chats only offer unarchive on the swipe; pinning waits until they return.
+    row.leadingActions = session.archived ? [] : [pin(session.pinned)]
+    row.menuActions = session.archived
+      ? [archive(true), share(), delete()]
+      : [rename(), pin(session.pinned), archive(false), share(), delete()]
     row.preview = "session"
     row.branch = session.branchName ?? ""
     row.prStatus = session.pullRequests.last?.status ?? ""
@@ -246,8 +249,9 @@ enum SessionRows {
   static func newChat() -> LodyListAction { action("newChat", "session.action.newChat", "square.and.pencil") }
 
   private static func trailingActions(_ session: SessionItem) -> [LodyListAction] {
+    if session.archived { return [archive(true)] }
     let read = action("read", "session.action.read", "envelope.open")
-    return needsEmphasis(session) ? [read, archive(session.archived)] : [archive(session.archived)]
+    return needsEmphasis(session) ? [read, archive(false)] : [archive(false)]
   }
 
   private static func rename() -> LodyListAction { action("rename", "session.action.rename", "pencil") }

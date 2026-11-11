@@ -1329,6 +1329,92 @@ describe('SessionFileContentView', () => {
     installCredentiallessIframeSupportForTest();
   });
 
+  it('runs WebKit HTML scripts only after an explicit opt-in and resets it on hide', async () => {
+    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+      .credentialless;
+    const userAgent = vi
+      .spyOn(navigator, 'userAgent', 'get')
+      .mockReturnValue(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+      );
+    try {
+      const text = '<h1>Preview</h1><script>window.executed = true</script>';
+      const provider = createFakeSessionFileProvider({
+        files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
+        snapshots: { 'result.html': { kind: 'text', text } },
+      });
+      const view = await render(
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'result.html',
+          fileProvider: provider,
+          fileProviderPending: false,
+          defaultHtmlPreview: true,
+          active: true,
+        })
+      );
+      await flushMicrotasks();
+      expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+      expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
+
+      const runScripts = view.querySelector<HTMLButtonElement>('button[aria-label="Run scripts"]');
+      expect(runScripts?.getAttribute('aria-pressed')).toBe('false');
+      await act(async () => runScripts?.click());
+      await flushMicrotasks();
+      expect(view.querySelector('[data-testid="managed-html-preview"]')).not.toBeNull();
+      expect(
+        view.querySelector('button[aria-label="Stop scripts"]')?.getAttribute('aria-pressed')
+      ).toBe('true');
+
+      await act(async () =>
+        view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click()
+      );
+      await act(async () =>
+        view.querySelector<HTMLButtonElement>('button[aria-label="Preview"]')?.click()
+      );
+      await flushMicrotasks();
+      expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
+      expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+    } finally {
+      userAgent.mockRestore();
+      installCredentiallessIframeSupportForTest();
+    }
+  });
+
+  it('keeps Gecko HTML read-only without a script opt-in', async () => {
+    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+      .credentialless;
+    const userAgent = vi
+      .spyOn(navigator, 'userAgent', 'get')
+      .mockReturnValue(
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.0; rv:131.0) Gecko/20100101 Firefox/131.0'
+      );
+    try {
+      const provider = createFakeSessionFileProvider({
+        files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
+        snapshots: { 'result.html': { kind: 'text', text: '<script>1</script><p>x</p>' } },
+      });
+      const view = await render(
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'result.html',
+          fileProvider: provider,
+          fileProviderPending: false,
+          defaultHtmlPreview: true,
+          active: true,
+        })
+      );
+      await flushMicrotasks();
+      expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+      expect(view.querySelector('button[aria-label="Run scripts"]')).toBeNull();
+    } finally {
+      userAgent.mockRestore();
+      installCredentiallessIframeSupportForTest();
+    }
+  });
+
   it('does not preview a truncated HTML snapshot even with mobile default preview', async () => {
     Object.defineProperty(window, '__LODY_ELECTRON__', {
       configurable: true,

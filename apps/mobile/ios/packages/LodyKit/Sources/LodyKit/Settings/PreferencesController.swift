@@ -54,19 +54,17 @@ final class PreferencesController: UIViewController {
     )
     queued.options = ["queue", "guide"].map { option($0, text("queuedMessageBehavior.\($0)"), selected: $0 == current) }
     list.setSections([
-      .group("language-section", [
+      .group("general", header: text("preferences.general"), [
         .item(
           "language", text("preferences.language"), value: language, image: "globe", disclosure: true,
           accessibilityValue: language
         ),
-      ]),
-      .group("notifications-section", [
         .item("notifications", text("notifications.title"), image: "bell", disclosure: true, navigates: true),
       ]),
       .group("chat", header: text("preferences.chat"), [
         queued,
       ]),
-      .group("app-icon-section", [appIconRow()]),
+      .group("appearance", header: text("preferences.appearance"), [appIconRow()]),
     ])
   }
 

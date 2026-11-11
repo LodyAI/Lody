@@ -387,6 +387,13 @@ export function CloudPlatformProvider({
           ? { runtime: portableRuntime }
           : {}),
       remote: {
+        subscribeLedgerHead: (request, changed, failed) =>
+          cloudClient.subscribeValue(
+            cloudOperations.e2eeWorkspaces.ledgerHead,
+            request,
+            changed,
+            failed
+          ),
         memberProfiles: (request) =>
           cloudClient.query(cloudOperations.e2eeWorkspaces.memberProfiles, request),
         create: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.create, request),

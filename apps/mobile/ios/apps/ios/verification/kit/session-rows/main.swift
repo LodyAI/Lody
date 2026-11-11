@@ -76,9 +76,11 @@ let row = SessionRows.row(root, projectName: "Lody", now: now)
 precondition(row.subtitle == "Lody · main" && row.subtitleMono && row.modelName == "gpt-5")
 precondition(row.value == "time.compact.minutes" && row.accessibilityValue == "time.minutesAgo", "Rows draw a compact time and speak the full one")
 precondition(row.unread && row.badge == "inbox.badge.archived" && row.imageTint.isEmpty)
-precondition(row.actions.map(\.id) == ["read", "archive"] && row.actions[1].title == "session.action.unarchive")
-precondition(row.leadingActions.map(\.id) == ["pin"] && row.leadingActions[0].tint == "yellow")
-precondition(row.menuActions.map(\.id) == ["rename", "pin", "archive", "share", "delete"] && row.menuActions[4].destructive)
+precondition(row.actions.map(\.id) == ["archive"] && row.actions[0].title == "session.action.unarchive", "Archived rows swipe only to unarchive")
+precondition(row.leadingActions.isEmpty && row.menuActions.map(\.id) == ["archive", "share", "delete"] && row.menuActions[2].destructive)
+let openRow = SessionRows.row(chat, now: now)
+precondition(openRow.leadingActions.map(\.id) == ["pin"] && openRow.leadingActions[0].tint == "yellow")
+precondition(openRow.menuActions.map(\.id) == ["rename", "pin", "archive", "share", "delete"] && openRow.menuActions[4].destructive)
 precondition(row.preview == "session" && row.navigates && row.action && row.diff == ["add": 3, "del": 1])
 precondition(SessionRows.row(child).modelName == "session.notRun")
 var viewed = root
@@ -237,8 +239,10 @@ precondition(!envelope.accepted(generation: 1, after: (1, 4)) && envelope.accept
 precondition(!SessionEnvelope(version: 2, revision: 9).accepted(generation: 5, after: (1, 1)), "Unknown envelope versions drop")
 print("PASS: session rows, inbox sections and session envelopes match the catalog projections")
 
-let toolsCatalog = SessionCatalog.decode(saved: Data(#"{"catalog":{"projects":[],"machineIds":["mac"],"machineSimulators":{"mac":"available"},"sessions":[{"id":"with-tools","pullRequests":[{"repository":"Innei/lody-ios","number":31,"status":"open","ci":"f"}],"iosSimulatorPreviewRequestId":"preview-request"}]}}"#.utf8))!
+let toolsCatalog = SessionCatalog.decode(saved: Data(#"{"catalog":{"projects":[],"machineIds":["mac"],"machineSimulators":{"mac":"available"},"machineEmulators":{"mac":"available","linux":"available"},"sessions":[{"id":"with-tools","pullRequests":[{"repository":"Innei/lody-ios","number":31,"status":"open","ci":"f"}],"iosSimulatorPreviewRequestId":"preview-request","androidEmulatorPreviewRequestId":"emulator-request"}]}}"#.utf8))!
 precondition(toolsCatalog.machineSimulators["mac"] == "available")
+precondition(toolsCatalog.machineEmulators["linux"] == "available" && toolsCatalog.machineSimulators["linux"] == nil)
+precondition(toolsCatalog.session("with-tools")?.androidEmulatorPreviewRequestId == "emulator-request")
 precondition(toolsCatalog.session("with-tools")?.pullRequests.first?.number == 31)
 precondition(toolsCatalog.session("with-tools")?.iosSimulatorPreviewRequestId == "preview-request")
 

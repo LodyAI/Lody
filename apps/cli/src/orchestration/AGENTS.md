@@ -57,6 +57,10 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - Receipts coalesce into one intent when idle, unpaused and released; busy Sessions wait
   for normal release. Claim requires a wakeable result and freezes all available members.
   Later arrivals wait; pause, empty queues and duplicates cannot wake.
+- The Inbox continuation prompt and `batchPreview` header only describe the delegated
+  results: what they are, that they are reference data, and where omitted ones are read.
+  They must not tell the agent to review, verify or re-dispatch them, nor to skip doing
+  so: any such instruction steers every batch, and a review request starts another pass.
 - `inbox/service.ts` is native Effect v4. Scope owns its signal/fibers and repository connection;
   one per-Session admission covers Stop, fresh input acceptance and actual transport start.
   Core imports no platform/consumers; registered bridges execute. Submit/settle through execution owners.

@@ -3,7 +3,6 @@ import type {
   PromptShortcutIndexEntry,
   ShortcutRequest,
 } from '../../models/prompt-shortcuts.ts';
-import type { PublishedSharePage } from '../../models/session-sharing.ts';
 import { promptShortcuts } from '../prompt-shortcuts';
 import { roleSettings } from '../role-settings';
 import { remoteSettings } from '../settings';
@@ -19,29 +18,6 @@ import { scopedShortcutCloud, type RuntimeContext } from './context.ts';
 
 export function registerSettings(ctx: RuntimeContext) {
   const { channel, state, getGrant } = ctx;
-  channel.handle('publishedShares', async (args) => {
-    const current = state.workspace,
-      user = state.userId;
-    const check = () => {
-      if (
-        current !== state.workspace ||
-        args.workspaceId !== state.workspace ||
-        user !== state.userId ||
-        args.userId !== user
-      )
-        throw new Error('shares_scope_changed');
-    };
-    check();
-    const result = await ctx.broker(
-      'management',
-      args.action === 'list' ? { ...args, cursor: args.cursor ?? null } : args,
-    );
-    check();
-    const failure = (result as { error?: unknown } | null)?.error;
-    if (typeof failure === 'string')
-      return { outcome: 'failed', error: failure };
-    return { outcome: 'page', ...(result as PublishedSharePage) };
-  });
   channel.handle('promptShortcuts', async (args) => {
     if (args.workspaceId !== state.workspace || args.userId !== state.userId)
       throw new Error('workspace_changed');

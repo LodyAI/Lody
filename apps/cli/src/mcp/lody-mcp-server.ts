@@ -8,11 +8,7 @@ import { turnNotificationAudience } from '@/lib/notifications/turn-notification-
 import { registerAgentRoleTools } from './agent-role-tools';
 import { proposeAgentRole } from '@/lib/agent-role-proposal';
 import { batchPage } from '@/orchestration/inbox/batch-page';
-import {
-  buildSessionGroupRenamePatch,
-  buildSessionTabRenamePatch,
-  isSessionCollaborationStopped,
-} from '@lody/shared';
+import { isSessionCollaborationStopped } from '@lody/shared';
 import {
   assertMachineFlockCacheSufficient,
   MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -352,10 +348,10 @@ const SESSION_CREATE_WORK_CONTEXT_DESCRIPTION =
 const SESSION_CREATE_EFFECTS_GUIDANCE = [
   'Inspect lody_session_create_options.current: workContext local worktree:true = project/session marked as worktree; absent = neither marks it. github = repository worktree; chat = no project. local rootPath = original directory, not session worktree; git.branchName = recorded session branch. Discovery is not auto-injected into prompts.',
   'useCurrentSessionAsParent: explicitly false for sidebar conversations (recommended); true only for user-requested Tabs sharing actual directory/worktree + uncommitted files. Tabs require same machine, forbid workContext and nesting.',
-  'Independent workContext (target machine):\n- chat: separate directory, no project.\n- local + projectId, worktree:false/omitted: original directory, shared files/uncommitted changes if caller already there; does not select caller session worktree. branch omitted keeps checkout; explicit branch can switch it.\n- local + worktree:true: new isolated worktree; base = branch, else original current branch/default fallback.\n- github + repo: separate worktree; branch = preferred base, not new branch name. Omitted prefers main/default fallback; unavailable explicit bases can also fall back: verify exact-version tasks.\nNew worktrees do not copy uncommitted files. Same-machine/project non-worktree callers need no Tab to share their original directory.',
+  'Independent workContext (target machine):\n- chat: separate directory, no project.\n- local + projectId, worktree:false/omitted: original directory, shared files/uncommitted changes if caller already there; does not select caller session worktree. branch omitted keeps checkout; explicit branch can switch it.\n- local + worktree:true: new isolated worktree; base = branch, else original current branch/default fallback.\n- github + repo: separate worktree; branch = preferred base, not new branch name. Omitted prefers main/default fallback; unavailable explicit bases can also fall back.\nNew worktrees do not copy uncommitted files. Same-machine/project non-worktree callers need no Tab to share their original directory.',
   'workContext omitted: non-Role independent = chat. Role + GitHub caller = caller repo/project base. Role + same-machine Local Project = shared Tab only if parent selector also omitted; false yields chat. Role + remote Local Project = workspace-enabled linked GitHub repo (main/default base), else chat; no local branch/file transfer.',
   'Non-Role: default caller machine/config if applicable, else unique matching/sole target config; ambiguity needs agentConfigId. Omitted compatible mode/model/options inherit matching-provider caller history, else provider defaults. Role: overrides manual machineId/agentConfigId/all run selectors with frozen target/prompt/config; multiple machines need agentRoleMachineId. workContext/mcpServerIds still apply. Omitted MCPs = target-project/workspace defaults, not caller selection; [] = none. Permissions grant access, not directory/file transfer; stay within user authorization.',
-  'History is never copied, even for Tabs. prompt must carry task/context/constraints/code version/completion criteria. Agent-origin input names source Session for authorized lody_session_history reads. Single attachments transfer selected caller-workspace files, not mount/sync.',
+  'History is never copied, even for Tabs; the target sees only prompt and attachments. Agent-origin input names source Session for authorized lody_session_history reads. Single attachments transfer selected caller-workspace files, not mount/sync.',
 ].join('\n\n');
 
 const SessionWorkContextInputSchema = z.discriminatedUnion('kind', [
@@ -985,13 +981,6 @@ const SessionTitleToolInputSchema = z
   .max(MAX_MCP_SESSION_TITLE_CHARS)
   .describe(`New session title, up to ${MAX_MCP_SESSION_TITLE_CHARS} characters.`);
 
-const SessionRenameScopeSchema = z
-  .enum(['tab', 'group'])
-  .optional()
-  .describe(
-    "tab (default) renames this conversation tab only. group renames the sidebar title of a root Session's conversation group; its tabs keep their own titles."
-  );
-
 const SessionRenameToolInputSchema = z
   .object({
     sessionId: z
@@ -1001,7 +990,6 @@ const SessionRenameToolInputSchema = z
       .optional()
       .describe('Target session id, or current. Defaults to current.'),
     title: SessionTitleToolInputSchema,
-    scope: SessionRenameScopeSchema,
   })
   .strict();
 
@@ -1009,7 +997,6 @@ const SessionRenameManyItemSchema = z
   .object({
     sessionId: z.string().trim().min(1).describe('Target session id, or current.'),
     title: SessionTitleToolInputSchema,
-    scope: SessionRenameScopeSchema,
   })
   .strict();
 
@@ -1997,7 +1984,6 @@ const sessionSummaryForMcp = (
 ) => ({
   id: session.id,
   ...(session.title ? { title: session.title } : {}),
-  ...(session.groupTitle?.trim() ? { groupTitle: session.groupTitle.trim() } : {}),
   createdAt: isoTimestamp(session.createdAt),
   lastActivityAt: isoTimestamp(session.lastMessageAt ?? session.createdAt),
   archived: session.isArchived === true,
@@ -3798,11 +3784,7 @@ const mapWithConcurrency = async <T, R>(
   return output;
 };
 
-type ResolvedSessionRenameItem = {
-  sessionId: SessionId;
-  title: string;
-  scope: 'tab' | 'group';
-};
+type ResolvedSessionRenameItem = { sessionId: SessionId; title: string };
 
 const resolveSessionRenameItems = (
   items: readonly z.infer<typeof SessionRenameManyItemSchema>[],
@@ -3812,7 +3794,6 @@ const resolveSessionRenameItems = (
   const resolved = items.map((item) => ({
     sessionId: resolveMcpSessionId(item.sessionId, ctx) as SessionId,
     title: item.title,
-    scope: item.scope ?? 'tab',
   }));
   if (new Set(resolved.map((item) => item.sessionId)).size !== resolved.length) {
     throw new LodyOperationStoreError(
@@ -3831,12 +3812,7 @@ const applySessionRenameItems = async (
   await mapWithConcurrency(items, 5, async (item) => {
     try {
       await rename(item);
-      return {
-        sessionId: item.sessionId,
-        ok: true as const,
-        title: item.title,
-        scope: item.scope,
-      };
+      return { sessionId: item.sessionId, ok: true as const, title: item.title };
     } catch (error) {
       return {
         sessionId: item.sessionId,
@@ -3862,19 +3838,10 @@ const persistSessionRenameItems = async (
       );
     }
     session = await assertCanManage(item.sessionId);
-    if (item.scope === 'group' && session.parentSessionId) {
-      throw new LodyOperationStoreError(
-        'COMMAND_REJECTED',
-        `Session ${item.sessionId} is a child tab; only a root Session has a group title.`,
-        false
-      );
-    }
-    await manager.repo.upsertDocMeta(
-      getSessionRoomId(item.sessionId),
-      item.scope === 'group'
-        ? buildSessionGroupRenamePatch(item.title)
-        : buildSessionTabRenamePatch(session, item.title)
-    );
+    await manager.repo.upsertDocMeta(getSessionRoomId(item.sessionId), {
+      title: item.title,
+      titleSource: 'user',
+    } satisfies Partial<SessionMeta>);
   });
   if (results.some((item) => item.ok)) {
     await ensureWorkspaceMetaSynced(manager, syncReason);
@@ -4745,6 +4712,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         'Session mentions use [@Title](lody://session/<sessionId>?workspace=<workspaceId>); old transcripts may use session://<sessionId>.',
         'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',
+        'Agent Role mentions use [Agent Role: <name> (agentRoleId: <id>)], plus agentRoleMachineId for a Role on several machines; lody_session_create accepts these ids to run a Session with that Role.',
         LODY_HELP_INSTRUCTIONS,
         SESSION_COLLABORATION_GUIDANCE,
         LODY_SKILL_INSTRUCTIONS,
@@ -5643,16 +5611,16 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_RENAME_TOOL_NAME,
     {
-      summary: 'Set a conversation Tab title or its sidebar group title.',
+      summary: 'Set the title of one Session.',
       title: 'Rename a Lody session',
       description:
-        "Set the title of one Session. Omit sessionId (or pass current) to rename the current Session. scope tab (default) renames that conversation tab; scope group renames the sidebar title of a root Session's tab group. The two titles are independent. The durable rename is treated as a user-directed title and is not replaced by later automatic title generation.",
+        'Set the title of one Session. Omit sessionId (or pass current) to rename the current Session. The durable rename is treated as a user-directed title and is not replaced by later automatic title generation.',
       inputSchema: SessionRenameToolInputSchema,
     },
     async (args: SessionRenameToolInput) => {
       try {
         const [item] = await renameSessionItems({
-          items: [{ sessionId: args.sessionId ?? 'current', title: args.title, scope: args.scope }],
+          items: [{ sessionId: args.sessionId ?? 'current', title: args.title }],
         });
         if (!item) {
           throw new Error('Session rename returned no result.');
@@ -5667,10 +5635,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_RENAME_MANY_TOOL_NAME,
     {
-      summary: 'Rename multiple conversation Tab/group titles with isolated per-item failures.',
+      summary: 'Rename multiple Sessions with isolated per-item failures.',
       title: 'Rename multiple Lody sessions',
       description:
-        "Set titles for 1-20 Sessions; each item's scope chooses the tab title (default) or a root Session's group title. Session ids must be unique. Results preserve input order and failures are isolated per item; successful renames remain applied when another item fails.",
+        'Set titles for 1-20 Sessions. Session ids must be unique. Results preserve input order and failures are isolated per item; successful renames remain applied when another item fails.',
       inputSchema: SessionRenameManyToolInputSchema,
     },
     async (args: SessionRenameManyToolInput) => {

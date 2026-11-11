@@ -7,6 +7,7 @@ import type {
   E2eeWorkspaceMemberProfilesRequest,
   E2eeWorkspaceMemberProfiles,
   WorkspaceAdmissionDescriptor,
+  E2eeWorkspaceLedgerHead,
 } from '@lody/cloud-api';
 
 import type {
@@ -57,6 +58,15 @@ export interface E2eeWorkspacePrepared extends E2eeWorkspacePrepareInput {
  */
 export interface PlatformE2eeWorkspaces {
   readonly runtime?: E2eeWorkspaceRuntime;
+  /** Observe an untrusted ledger change hint while a control surface is open.
+   * The caller owns unsubscribe; notifications never grant authority. Errors leave
+   * verified local reads usable. An absent port retains manual refresh.
+   */
+  readonly subscribeLedgerHead?: (
+    input: { workspaceId: string },
+    changed: (head: E2eeWorkspaceLedgerHead) => void,
+    failed: (error: unknown) => void
+  ) => () => void;
   /** Optional display directory. Names/images never establish permission, keys or identity pins. */
   readonly memberProfiles?: (
     input: E2eeWorkspaceMemberProfilesRequest
@@ -207,9 +217,14 @@ export interface E2eeWorkspaceRuntime
   prepareMemberJoin?(
     offer: import('@lody/cloud-api').E2eeMemberOffer
   ): Promise<import('@lody/cloud-api').E2eeMemberRequest>;
-  pendingMemberJoin?(
-    workspaceId: string
-  ): Promise<{ offer: import('@lody/cloud-api').E2eeMemberOffer; requestId: string | null } | null>;
+  /** The retained team join for this workspace. `joined` says this device's admission was
+   * already accepted, so a reopened join page can show it joined at once; the page still
+   * claims to confirm. Hosts that omit it keep the ordinary resume. */
+  pendingMemberJoin?(workspaceId: string): Promise<{
+    offer: import('@lody/cloud-api').E2eeMemberOffer;
+    requestId: string | null;
+    joined?: boolean;
+  } | null>;
   memberJoinRequests?(
     workspaceId: string
   ): Promise<import('@lody/cloud-api').E2eeMemberReplies['pending']>;

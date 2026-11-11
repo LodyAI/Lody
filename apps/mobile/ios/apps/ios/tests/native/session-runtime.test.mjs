@@ -905,6 +905,7 @@ test('MCP files retain their download target and update when local upload comple
     type: 'file',
     fileId: 'clip',
     fileName: 'clip.mp4',
+    mimeType: 'video/mp4',
     storageSessionId: 'source',
     transport: 'local',
     sizeBytes: 1024,
@@ -921,6 +922,7 @@ test('MCP files retain their download target and update when local upload comple
   assert.deepEqual(uploaded.file, {
     id: 'clip',
     fileName: 'clip.mp4',
+    mimeType: 'video/mp4',
     storageSessionId: 'source',
     transport: 'r2',
     sizeBytes: 1024,

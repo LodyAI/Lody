@@ -205,3 +205,9 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 2026-11-10，owner Zixuan Chen（zxch3n）在[来源会话](lody://session/f30b51f2-390b-43b6-852d-76f4305015a4?workspace=jh72yg4msgbn3rzzfbtxxeb1rn84zhhm)批准 [PR #2517](https://github.com/LodyAI/Lody/pull/2517) 在确切 head `4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9` 的 iroh 修订。Lody 历史确认人类消息 `9dad904b-6ef4-4e56-bd63-63e1f896cee8`（`2026-11-10T14:25:58.868Z`），全文为“批准 spec 修订”；此前会话已说明该修订内容以及 `specs/e2ee-foundations.md` 处于 draft。该 head 上获批的 blob：`specs/e2ee-foundations.md` `bc7fb0d4644296e1b43f4d08e97bc5581415803c`、`specs/e2ee-foundations.zh.md` `52a657f085c0bcf3c50c08f7ad9d0418df5dbbb0`、`specs/e2ee/whitepaper.md` `b16c90a918f2c642a9eb9446a42b336e3a90fc2d`、`specs/e2ee/whitepaper.zh.md` `c8ca5e5062e112f30597f716671bf4302badb819`。
 
 范围：路径顺序 iroh → 加密 Streams RPC → 持久派发，沿用相同原件、授权和实际启动 claim；EndpointId 等于工作区账本设备密钥，只交给原生宿主，只签 TLS 与中继握手；拨号时写入全部已配置中继、不发布地址、Convex 不变；过渡期使用 n0 公共中继，接受 n0 能看到设备公钥、IP 地址和通信关系、有限流且无可用性保证；在所有支持的平台迁移前保留 Streams RPC，浏览器版 iroh 不在范围内。本提交只改批准元数据；实现验收、中继部署和下线 Streams 均不由本记录批准。
+
+## 移动端种子交接
+
+2026-11-10，owner Zixuan Chen（zxch3n）在[来源会话](lody://session/f30b51f2-390b-43b6-852d-76f4305015a4?workspace=jh72yg4msgbn3rzzfbtxxeb1rn84zhhm)批准 [PR #2528](https://github.com/LodyAI/Lody/pull/2528) 在确切 head `122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1` 的移动端修订，时间约为 `2026-11-10T16:52Z`。答复经该会话的提问对话框给出，不作为单独的 Lody 历史消息保存：owner 选择了“批准 (Recommended)”；问题写明了原先“种子不进 WebView”的表述、方案 B 的交接方式及其代价。该 head 上获批的 blob：`specs/e2ee-foundations.md` `5aa7066c4ae3fe8c1b2161a506664c693d5985ae`、`specs/e2ee-foundations.zh.md` `4e9f09ef3cb4c9c70395ac41a5c19cf049980cfa`。
+
+范围：移动端由 WebView 中的 portable host 每个会话把设备种子交给一个用途受限的原生插件一次（打开、连接状态、发送、接收），插件从不回传种子，bridge 日志关闭；接受的代价是一份无法擦除的 JavaScript 种子字符串，直到被垃圾回收；移动端只拨号、关闭端口映射。本提交只改批准元数据；原生插件、模拟器和真机验收均不由本记录批准。

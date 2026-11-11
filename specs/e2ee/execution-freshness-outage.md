@@ -77,7 +77,8 @@ These passages keep the 15-minute behavior for ordinary operation and link here:
 - [Whitepaper](whitepaper.md) and its Chinese version:
   - "worst-case 15-minute revocation bound" and "failure to refresh by expiry blocks
     new execution";
-  - "at most 15 minutes from before its own authenticated latest read".
+  - "at most 15 minutes from before its own authenticated latest read" (moved with the
+    former §7 paragraph to the [foundations technical appendix](../e2ee-foundations.md#realtime-route-and-presence-approval-record) on 2026-11-11).
 
 [Machine sharing](machine-sharing.md) needs no change.
 

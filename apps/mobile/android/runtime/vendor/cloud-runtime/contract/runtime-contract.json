@@ -31,6 +31,11 @@
       "result": "AgentRoleSnapshot",
       "timeoutMs": 45000
     },
+    "androidEmulatorControl": {
+      "params": "AndroidEmulatorControlParams",
+      "result": "AndroidEmulatorControlResult",
+      "timeoutMs": 100000
+    },
     "archiveSession": {
       "params": "ArchiveSessionParams",
       "result": "Empty",
@@ -70,6 +75,11 @@
       "params": "CreationOptionsParams",
       "result": "CreationOptions",
       "timeoutMs": 45000
+    },
+    "decideProposal": {
+      "params": "DecideProposalParams",
+      "result": "DecideProposalResult",
+      "timeoutMs": 75000
     },
     "deleteSession": {
       "params": "DeleteSessionParams",
@@ -156,11 +166,6 @@
       "params": "PromptShortcutsParams",
       "result": "PromptShortcutsResult",
       "timeoutMs": 130000
-    },
-    "publishedShares": {
-      "params": "PublishedSharesParams",
-      "result": "PublishedSharesResult",
-      "timeoutMs": 70000
     },
     "readFile": {
       "params": "ReadFileParams",
@@ -1068,6 +1073,129 @@
         }
       ]
     },
+    "AndroidEmulatorControlParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string" },
+        "command": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": { "action": { "type": "string", "const": "list" } },
+              "required": ["action"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "start" },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_.-]{1,200}$"
+                },
+                "quality": {
+                  "type": "string",
+                  "enum": ["saver", "balanced", "clear"]
+                }
+              },
+              "required": ["action", "id"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "status" },
+                "operationId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["action"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "stop" },
+                "operationId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["action", "operationId"]
+            }
+          ]
+        }
+      },
+      "required": ["workspaceId", "sessionId", "userId", "command"]
+    },
+    "AndroidEmulatorControlResult": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "success": { "type": "boolean" },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "name": { "type": "string" },
+              "runtime": { "type": "string" },
+              "deviceType": { "type": "string" },
+              "state": { "type": "string" },
+              "available": { "type": "boolean" },
+              "unavailableReason": { "type": "string" },
+              "occupancy": {
+                "type": "string",
+                "enum": ["available", "this-session", "other-session"]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "runtime",
+              "deviceType",
+              "state",
+              "available",
+              "occupancy"
+            ]
+          }
+        },
+        "preview": {
+          "type": "object",
+          "properties": {
+            "operationId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "preparing",
+                "booting",
+                "connecting",
+                "ready",
+                "closed",
+                "failed"
+              ]
+            },
+            "transport": { "type": "string", "enum": ["local", "remote"] },
+            "viewerUrl": { "type": "string", "minLength": 1 },
+            "message": { "type": "string" }
+          },
+          "required": ["operationId", "id", "phase", "transport"]
+        },
+        "error": { "type": "string" },
+        "status": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "message": { "type": "string" },
+        "capabilities": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
     "ArchiveSessionParams": {
       "type": "object",
       "properties": {
@@ -1465,6 +1593,28 @@
         "agentConfigId": { "type": "string", "minLength": 1 }
       },
       "required": ["workspaceId"]
+    },
+    "DecideProposalParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "entryId": { "type": "string", "minLength": 1 },
+        "itemId": { "type": "string", "minLength": 1 },
+        "decision": { "type": "string", "enum": ["accept", "dismiss"] }
+      },
+      "required": ["workspaceId", "sessionId", "entryId", "itemId", "decision"]
+    },
+    "DecideProposalResult": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["saved", "created", "dismissed"]
+        },
+        "scheduleId": { "type": "string" }
+      },
+      "required": ["outcome"]
     },
     "DeleteSessionParams": {
       "type": "object",
@@ -2292,7 +2442,8 @@
         "machineId": { "type": "string" },
         "name": { "type": "string" },
         "rootPath": { "type": "string" },
-        "repoFullName": { "type": "string" }
+        "repoFullName": { "type": "string" },
+        "repositories": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["id", "machineId", "name", "rootPath"]
     },
@@ -2301,6 +2452,7 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string" },
+        "ownerUserId": { "type": "string" },
         "machineId": { "type": ["string", "null"] },
         "conflict": { "type": "boolean" },
         "members": {
@@ -2321,7 +2473,14 @@
           }
         }
       },
-      "required": ["id", "name", "machineId", "conflict", "members"]
+      "required": [
+        "id",
+        "name",
+        "ownerUserId",
+        "machineId",
+        "conflict",
+        "members"
+      ]
     },
     "ProjectGroupsParams": {
       "type": "object",
@@ -2487,7 +2646,8 @@
           "properties": {
             "workspaceId": { "type": "string", "minLength": 1 },
             "userId": { "type": "string" },
-            "action": { "type": "string", "const": "list" }
+            "action": { "type": "string", "const": "list" },
+            "fresh": { "type": "boolean" }
           },
           "required": ["workspaceId", "userId", "action"]
         },
@@ -2888,198 +3048,6 @@
         }
       },
       "required": ["configOptionValues"]
-    },
-    "PublishedSharesParams": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "list" },
-            "cursor": { "type": "string" }
-          },
-          "required": ["workspaceId", "userId", "action"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "shareId": { "type": "string", "minLength": 1 },
-            "rootSessionId": { "type": "string", "minLength": 1 },
-            "expectedRevision": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "detail" }
-          },
-          "required": [
-            "workspaceId",
-            "shareId",
-            "rootSessionId",
-            "userId",
-            "action"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "shareId": { "type": "string", "minLength": 1 },
-            "rootSessionId": { "type": "string", "minLength": 1 },
-            "expectedRevision": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "copy" }
-          },
-          "required": [
-            "workspaceId",
-            "shareId",
-            "rootSessionId",
-            "userId",
-            "action"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "shareId": { "type": "string", "minLength": 1 },
-            "rootSessionId": { "type": "string", "minLength": 1 },
-            "expectedRevision": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "open" }
-          },
-          "required": [
-            "workspaceId",
-            "shareId",
-            "rootSessionId",
-            "userId",
-            "action"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "shareId": { "type": "string", "minLength": 1 },
-            "rootSessionId": { "type": "string", "minLength": 1 },
-            "expectedRevision": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "revoke" }
-          },
-          "required": [
-            "workspaceId",
-            "shareId",
-            "rootSessionId",
-            "userId",
-            "action"
-          ]
-        }
-      ]
-    },
-    "PublishedSharesResult": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "outcome": { "type": "string", "const": "page" },
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "userId": { "type": "string", "minLength": 1 },
-            "page": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "shareId": { "type": "string", "minLength": 1 },
-                  "rootSessionId": { "type": "string", "minLength": 1 },
-                  "publisherUserId": { "type": "string", "minLength": 1 },
-                  "status": { "type": "string", "enum": ["active", "revoked"] },
-                  "title": { "type": "string" },
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "credentialVersion": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "createdAt": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "updatedAt": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "totalBytes": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "conversationCount": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "canManage": { "type": "boolean" },
-                  "canRevoke": { "type": "boolean" },
-                  "hasLocalLink": { "type": "boolean" }
-                },
-                "required": [
-                  "shareId",
-                  "rootSessionId",
-                  "publisherUserId",
-                  "status",
-                  "title",
-                  "revision",
-                  "credentialVersion",
-                  "createdAt",
-                  "updatedAt",
-                  "canManage",
-                  "canRevoke",
-                  "hasLocalLink"
-                ]
-              }
-            },
-            "isDone": { "type": "boolean" },
-            "continueCursor": { "type": "string" }
-          },
-          "required": [
-            "outcome",
-            "workspaceId",
-            "userId",
-            "page",
-            "isDone",
-            "continueCursor"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "outcome": { "type": "string", "const": "failed" },
-            "error": { "type": "string", "minLength": 1 }
-          },
-          "required": ["outcome", "error"]
-        }
-      ]
     },
     "QuotaReason": {
       "type": "string",
@@ -3994,107 +3962,6 @@
                 }
               },
               "required": ["intent"]
-            }
-          },
-          "required": ["workspaceId", "operation", "args"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "operation": { "type": "string", "const": "management" },
-            "args": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "action": { "type": "string", "const": "list" },
-                    "cursor": { "type": ["string", "null"] }
-                  },
-                  "required": ["workspaceId", "action", "cursor"]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "shareId": { "type": "string", "minLength": 1 },
-                    "rootSessionId": { "type": "string", "minLength": 1 },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "action": { "type": "string", "const": "detail" }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "shareId",
-                    "rootSessionId",
-                    "action"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "shareId": { "type": "string", "minLength": 1 },
-                    "rootSessionId": { "type": "string", "minLength": 1 },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "action": { "type": "string", "const": "copy" }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "shareId",
-                    "rootSessionId",
-                    "action"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "shareId": { "type": "string", "minLength": 1 },
-                    "rootSessionId": { "type": "string", "minLength": 1 },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "action": { "type": "string", "const": "open" }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "shareId",
-                    "rootSessionId",
-                    "action"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "shareId": { "type": "string", "minLength": 1 },
-                    "rootSessionId": { "type": "string", "minLength": 1 },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "action": { "type": "string", "const": "revoke" }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "shareId",
-                    "rootSessionId",
-                    "action"
-                  ]
-                }
-              ]
             }
           },
           "required": ["workspaceId", "operation", "args"]

@@ -26,8 +26,6 @@ import {
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
-  buildSessionGroupRenamePatch,
-  buildSessionTabRenamePatch,
   getSessionCancelRequestMarker,
   machineFlockKeys,
   SessionStatusFactory,
@@ -275,10 +273,7 @@ export type SessionActions = {
   ) => Promise<SessionGoalResponse | null>;
   touchSessionActivity: (sessionId: SessionId) => Promise<void>;
   updateSessionStatus: (sessionId: SessionId, status: SessionStatus) => Promise<void>;
-  /** Renames one tab; never changes its group's sidebar title. */
   updateSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
-  /** Renames a root Session's conversation group in the sidebar; tabs keep their titles. */
-  updateSessionGroupTitle: (sessionId: SessionId, title: string) => Promise<void>;
   updateSessionMetadata: (sessionId: SessionId, patch: Record<string, unknown>) => Promise<void>;
   /** Reassign `SessionMeta.userId` to another workspace member. */
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
@@ -663,27 +658,10 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
-      await updateSessionMetadata(
-        sessionId,
-        buildSessionTabRenamePatch(existing?.meta as SessionMeta | undefined, nextTitle)
-      );
-    },
-    [runtime, updateSessionMetadata]
-  );
-
-  const updateSessionGroupTitle = useCallback(
-    async (sessionId: SessionId, title: string) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      const nextTitle = title.trim();
-      if (!nextTitle) {
-        return;
-      }
-      const roomId = getSessionRoomId(sessionId);
-      const existing = await runtime.repo.getDocMeta(roomId);
-      if (isLoroRepoDocDeleted(existing)) return;
-      await updateSessionMetadata(sessionId, buildSessionGroupRenamePatch(nextTitle));
+      await updateSessionMetadata(sessionId, {
+        title: nextTitle,
+        titleSource: 'user',
+      } as Partial<SessionMeta>);
     },
     [runtime, updateSessionMetadata]
   );
@@ -1050,7 +1028,6 @@ export function useSessionActions(): SessionActions {
     touchSessionActivity,
     updateSessionStatus,
     updateSessionTitle,
-    updateSessionGroupTitle,
     updateSessionMetadata,
     setSessionTabClosed,
     transferSessionOwner,

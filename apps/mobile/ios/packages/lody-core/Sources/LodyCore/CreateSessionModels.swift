@@ -178,12 +178,36 @@ public struct ProjectPrefs: Codable, Equatable, Sendable {
   }
 }
 
+/// One whole run configuration a new chat was started with (web `RecentRunConfigRecord`): the
+/// agent, its full choice and the Role it ran as. Device-local; recorded on Send only.
+public struct RecentRunConfig: Codable, Equatable, Sendable {
+  public var machineId: String
+  public var agentKey: String
+  public var choice: ModelChoice
+  /// A Role is not interchangeable with the values it set, so it is part of the identity.
+  public var agentRoleId: String?
+  public var usedAt: Double
+
+  public init(machineId: String, agentKey: String, choice: ModelChoice, agentRoleId: String? = nil, usedAt: Double) {
+    self.machineId = machineId
+    self.agentKey = agentKey
+    self.choice = choice
+    self.agentRoleId = agentRoleId
+    self.usedAt = usedAt
+  }
+}
+
 public struct CreatePrefs: Codable, Equatable, Sendable {
   public var branches: [String: String]?
   public var projectId: String?
   public var context: String?
   public var projects: [String: ProjectPrefs]?
   public var modelChoices: [String: ModelChoice]?
+  /// The last agent and choice used on each computer, by machine id: picking a computer again
+  /// restores them instead of its first agent.
+  public var machines: [String: ProjectPrefs]?
+  /// Most recent first, capped at `CreateLogic.maxStoredRecents`.
+  public var recents: [RecentRunConfig]?
 
   public init(projectId: String? = nil, context: String? = nil, projects: [String: ProjectPrefs]? = nil, modelChoices: [String: ModelChoice]? = nil) {
     self.projectId = projectId

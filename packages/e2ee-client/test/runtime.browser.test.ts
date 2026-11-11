@@ -298,6 +298,7 @@ it.each(['chromium', 'webkit'] as const)(
       });
       expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 0 });
       expect(await good(page, 'capabilities')).toEqual({
+        iroh: true,
         rpc: true,
         sharing: false,
         manager: true,
@@ -326,6 +327,23 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'refresh');
       const rpc = await good(page, 'rpc');
       expect(await good(page, 'rpc')).toEqual(rpc);
+      // Native iroh port: no connection yet, so this request uses Streams and a
+      // background dial starts; the next request uses iroh.
+      expect(await good(page, 'irohReady')).toBe(false);
+      expect(await good(page, 'irohReady')).toBe(true);
+      expect(await good(page, 'irohCall')).toEqual(['cd'.repeat(150)]);
+      const iroh = (await good(page, 'irohEvidence')) as {
+        opener: string;
+        device: string;
+        seedWiped: boolean;
+        targets: string[];
+        machine: string;
+      };
+      // The endpoint key is this device's ledger key; the dialed target is the
+      // ledger-admitted machine device, resolved from the verified ledger.
+      expect(iroh.opener).toBe(iroh.device);
+      expect(iroh.seedWiped).toBe(true);
+      expect(iroh.targets).toEqual([iroh.machine]);
       await savesSignedSchedule(page);
       expect((await raw(page, 'rotateRemote')).ok).toBe(true);
       expect(await good(page, 'refresh')).toMatchObject({
@@ -375,6 +393,33 @@ it.each(['chromium', 'webkit'] as const)(
       expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
       expect(await good(page, 'memberRecordCount')).toBe(beforeAdmission + 1);
       expect(await good(page, 'memberSecondAdmitted')).toBe(false);
+      // Unattended admission requires an email invitation this device verifies against its
+      // own ledger; a relay-written `source: 'email'` label grants nothing.
+      expect(await good(page, 'memberEmailInvite')).toBe('email');
+      // Inviting the same email again re-sends the pending invitation; that is not a conflict.
+      expect(await good(page, 'memberEmailReinvite')).toBe(
+        await good(page, 'memberInvitationToken')
+      );
+      const emailApplicant = await good(page, 'memberEmailApplicant');
+      expect(await good(page, 'memberList')).toContain(emailApplicant);
+      const beforeEmail = (await good(page, 'memberRecordCount')) as number;
+      // A relay-signed offer verifies under the relay's own key, which the ledger never
+      // admitted; an altered offer fails its genuine endorser's signature.
+      for (const [forged, reason] of [
+        ['memberRelaySignedInvitation', 'invitation-endorser-ineligible'],
+        ['memberAlteredInvitation', 'invitation-invalid'],
+      ] as const) {
+        await good(page, forged);
+        expect((await call(page, 'memberAutomatic')).reason).toBe(reason);
+      }
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail);
+      await good(page, 'memberGenuineInvitation');
+      expect(await good(page, 'memberAutomatic')).toMatchObject({ admitted: true });
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail + 1);
+      // The invitation admits one membership: a second device presenting it is told so.
+      expect(await good(page, 'memberReplayInvitation')).toBe(emailApplicant);
+      expect((await call(page, 'memberAutomatic')).reason).toBe('invitation-used');
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail + 1);
       // A key delivery's approval sessions never leak a reader: the last release
       // closes the workspace the approval opened.
       expect(await good(page, 'approvalRelease')).toEqual({
@@ -383,6 +428,14 @@ it.each(['chromium', 'webkit'] as const)(
         afterAll: false,
       });
       await good(page, 'close');
+      await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
+      await good(page, 'open');
+      // Closing while the first native open is in flight waits for it, and the late
+      // endpoint is still closed instead of keeping the device key's endpoint alive.
+      expect(await good(page, 'irohCloseDuringOpen')).toEqual({
+        beforeRelease: { closeSettled: false, closed: 0 },
+        closed: 1,
+      });
       await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
       await good(page, 'open');
       expect(await good(page, 'capabilities')).toMatchObject({ sharing: true });
@@ -424,6 +477,111 @@ it.each(['chromium', 'webkit'] as const)(
     }
   }
 );
+
+/** An admitted, key-holding owner device whose runtime has just approved one applicant
+ * while the mailbox refuses every envelope. */
+async function approvedWhileMailboxRefuses(directory: string, hold: boolean) {
+  const output = await build({
+    entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    globalName: 'HostFixture',
+    target: 'safari16.4',
+    write: false,
+    logLevel: 'silent',
+  });
+  const file = join(directory, 'index.html');
+  await writeFile(
+    file,
+    '<!doctype html><script>' +
+      output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+      '</script>'
+  );
+  const context = await chromium.launchPersistentContext(join(directory, 'profile'), {
+    headless: true,
+  });
+  const page = await context.newPage();
+  await page.goto(pathToFileURL(file).href);
+  await page.evaluate(async () => {
+    await (globalThis as Surface).HostFixture.boot();
+    await (globalThis as Surface).HostFixture.bootRuntime();
+  });
+  await good(page, 'prepare');
+  expect((await raw(page, 'approve')).ok).toBe(true);
+  expect(await good(page, 'claim')).toMatchObject({ ready: true });
+  await good(page, 'open');
+  expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true });
+  expect(await good(page, 'memberInvite')).toBe('link');
+  const requestId = await good(page, 'memberApplicant');
+  // Approval signs only a package this session listed.
+  expect(await good(page, 'memberList')).toEqual([requestId]);
+  if (hold) await good(page, 'memberHoldRetry');
+  await good(page, 'memberRefuseKeys');
+  expect(await good(page, 'memberApprove')).toMatchObject({
+    admitted: true,
+    keyPending: true,
+    keyDelivery: 'delivering',
+  });
+  return { context, page, requestId };
+}
+type Deliveries = {
+  items: { requestId: string; state: string; code?: string }[];
+  sleeps: number[];
+  envelopes: boolean[];
+};
+
+// The approval's first key round ends with the applicant's slot still NeedsEnvelope. The
+// runtime retries on its own after the injected backoff, without the approver pressing
+// retry, and the applicant's envelope is stored.
+it('a member key delivery that fails its first round is retried and delivered without user action', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-retry-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, false);
+    context = opened.context;
+    await expect
+      .poll(async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items)
+      .toEqual([{ requestId: opened.requestId, state: 'delivered' }]);
+    const settled = (await good(opened.page, 'memberDeliveries')) as Deliveries;
+    // One bounded backoff, the first step of the desktop schedule, then the stored envelope.
+    expect(settled.sleeps).toEqual([10_000]);
+    expect(settled.envelopes[0]).toBe(false);
+    expect(settled.envelopes.at(-1)).toBe(true);
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// Not only the approval page delivers: the undelivered task is durable in the core
+// distribution journal, so any later key round on this device sends it, here an
+// ordinary key-installing refresh while the approval's own retry never fires.
+it('a later key round on the approving device delivers to a member its approval did not reach', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-round-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    // The approval's own round has ended with the applicant's slot still empty.
+    await expect
+      .poll(
+        async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items[0]?.code
+      )
+      .toBe('e2ee_key_not_sent');
+    expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes).not.toContain(
+      true
+    );
+    await good(opened.page, 'memberAcceptKeys');
+    await good(opened.page, 'receive');
+    expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes.at(-1)).toBe(
+      true
+    );
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 it.each(['chromium', 'webkit'] as const)(
   'a failed approval-reader close keeps the release retryable in %s',
@@ -1357,10 +1515,13 @@ it.each(['chromium', 'webkit'] as const)(
       // A retry resubmits the retained original; nothing is signed again.
       expect(await ok('prepare')).toMatchObject({ keyPackageHex: request.keyPackageHex });
       expect(await ok('submitted')).toEqual([request.keyPackageHex, request.keyPackageHex]);
-      expect(await ok('pending')).toMatchObject({
+      const waiting = await ok('pending');
+      expect(waiting).toMatchObject({
         requestId: request.requestId,
         offer: { mode: 'link', token: 'cd'.repeat(32) },
       });
+      // Not admitted yet: a reopened page resumes waiting, not as joined.
+      expect(waiting).not.toHaveProperty('joined');
       expect(await ok('claim')).toEqual({ ready: false, state: 'pending' });
       // The relay's word is not admission: only the signed history can admit this device.
       await ok('relayClaimsEarly');
@@ -1384,6 +1545,8 @@ it.each(['chromium', 'webkit'] as const)(
       });
       // Accepted once; a later claim reuses the retained approval.
       expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });
+      // A reopened join page learns this device is already joined before it claims.
+      expect(await ok('pending')).toMatchObject({ requestId: request.requestId, joined: true });
     } finally {
       await context?.close();
       await rm(directory, { recursive: true, force: true });

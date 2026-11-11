@@ -5086,6 +5086,58 @@ describe('remote machine command', () => {
     }
   });
 
+  it.each(['earlier claim by another machine', 'command cancelled after a second claim'] as const)(
+    'stops without activating when the pairing command shows an %s',
+    async (scenario) => {
+      const directory = await mkdtemp(join(tmpdir(), 'remote-machine-claimed-elsewhere-'));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      const legacy = await import('../src/lib/e2ee/workspace-legacy');
+      const { pairRemoteMachineLegacy } = await import('../src/lib/e2ee/remote-pairing');
+      const activation = vi
+        .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
+        .mockResolvedValue(undefined as never);
+      try {
+        const { offer, encoded } = await admittedBeforeKey(directory);
+        await expect(
+          pairRemoteMachineLegacy({
+            encodedOffer: encoded,
+            machineId: 'machine',
+            cloud: {} as CloudE2eePort,
+            signal: new AbortController().signal,
+            keyring: noKeyring,
+            claim: async (body) => {
+              const { material } = JSON.parse(body);
+              return scenario === 'earlier claim by another machine'
+                ? {
+                    pairingSessionId: offer.pairingSessionId,
+                    status: 'admitted',
+                    expiresAt: offer.expiresAt,
+                    material: { ...material, machineId: 'other-machine' },
+                    location: null,
+                  }
+                : {
+                    pairingSessionId: offer.pairingSessionId,
+                    status: 'conflict',
+                    expiresAt: offer.expiresAt,
+                    material: null,
+                    noAdmissionReserved: true,
+                    location: null,
+                  };
+            },
+            show: () => {},
+            wait: async () => {},
+            now: () => 0,
+          })
+        ).rejects.toThrow('e2ee_pairing_claimed_by_another_machine');
+        expect(activation).not.toHaveBeenCalled();
+      } finally {
+        activation.mockRestore();
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('re-pairs a revoked machine with a fresh identity instead of offering its revoked key', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remote-machine-revoked-'));
     vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));

@@ -1,5 +1,6 @@
 import { seatBillingErrorKey } from './billing-errors';
 import { hostLedgerHistory, bytesToHex } from '@/lib/e2ee-ledger-history';
+import { e2eeErrorCode, useAutomaticAdmissionRefusal } from '@/lib/e2ee-admission-refusals';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -25,6 +26,9 @@ type Runtime = Pick<
   | 'setMemberRole'
 > &
   Partial<Pick<E2eeWorkspaceRuntime, 'memberKeyDeliveries' | 'retryMemberKeyDelivery'>>;
+/** Approval refused because the free workspace is full, as the refreshed list reports. */
+class MemberLimitReached extends Error {}
+
 const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
   row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
@@ -69,6 +73,7 @@ export function E2eeTeamSettings(props: {
   members?: Member[];
   onOpenBilling?: () => void;
   onRefreshBilling?: () => Promise<unknown>;
+  onMembersChanged?: () => Promise<void>;
 }) {
   return <TeamSession key={props.workspaceId} {...props} />;
 }
@@ -79,6 +84,7 @@ function TeamSession({
   members,
   onOpenBilling,
   onRefreshBilling,
+  onMembersChanged,
 }: {
   runtime: Runtime;
   workspaceId: string;
@@ -86,6 +92,7 @@ function TeamSession({
   members?: Member[];
   onOpenBilling?: () => void;
   onRefreshBilling?: () => Promise<unknown>;
+  onMembersChanged?: () => Promise<void>;
 }) {
   const { t, i18n } = useTranslation();
   // Product language, not the OS locale.
@@ -142,7 +149,18 @@ function TeamSession({
     try {
       await action();
     } catch (error) {
-      if (current()) setMessage(t(seatBillingErrorKey(error) ?? 'e2ee.team.retryOriginal'));
+      if (current())
+        setMessage(
+          t(
+            error instanceof MemberLimitReached
+              ? 'e2ee.team.memberLimit'
+              : (seatBillingErrorKey(error) ??
+                  // An applicant of the unsigned invitation for this email is still waiting.
+                  (e2eeErrorCode(error) === 'e2ee_member_invitation_request_pending'
+                    ? 'e2ee.team.invitationRequestPending'
+                    : 'e2ee.team.retryOriginal'))
+          )
+        );
     } finally {
       working.current = false;
       if (current()) setBusy(false);
@@ -299,11 +317,7 @@ function TeamSession({
               <span {...stylex.props(styles.identity)}>
                 {request.applicantName || request.applicantEmail || t('e2ee.team.applicant')}
               </span>
-              <span {...stylex.props(styles.label)}>
-                {t(
-                  request.source === 'email' ? 'e2ee.team.automatic' : 'e2ee.team.approvalRequired'
-                )}
-              </span>
+              <AdmissionMode workspaceId={workspaceId} request={request} />
             </div>
             {request.applicantEmail && (
               <span {...stylex.props(styles.label)}>{request.applicantEmail}</span>
@@ -314,22 +328,34 @@ function TeamSession({
                 {deviceFingerprint(request.signingPublicKey)}
               </code>
             </span>
-            {request.state === 'pending' && approvalCost && (
-              <span data-testid="e2ee-join-approve-cost" {...stylex.props(styles.approveCost)}>
-                {approvalCost}
+            {request.state === 'pending' && request.memberLimitReached ? (
+              <span data-testid="e2ee-join-member-limit" {...stylex.props(styles.approveCost)}>
+                {t('e2ee.team.memberLimit')}
               </span>
+            ) : (
+              request.state === 'pending' &&
+              approvalCost && (
+                <span data-testid="e2ee-join-approve-cost" {...stylex.props(styles.approveCost)}>
+                  {approvalCost}
+                </span>
+              )
             )}
             <div {...stylex.props(styles.row)}>
               <Button
                 data-testid="e2ee-join-approve"
                 data-request-id={request.requestId}
                 disabled={
-                  busy || (request.state === 'pending' && !isSeatAdmissionReady(data?.seatPreview))
+                  busy ||
+                  (request.state === 'pending' &&
+                    (!!request.memberLimitReached || !isSeatAdmissionReady(data?.seatPreview)))
                 }
                 aria-busy={approving === request.requestId || undefined}
                 onClick={() =>
                   void perform(async () => {
-                    if (request.state === 'pending' && !isSeatAdmissionReady(data?.seatPreview))
+                    if (
+                      request.state === 'pending' &&
+                      (request.memberLimitReached || !isSeatAdmissionReady(data?.seatPreview))
+                    )
                       return;
                     setApproving(request.requestId);
                     try {
@@ -342,6 +368,24 @@ function TeamSession({
                         setMessage(
                           t(result.admitted ? 'e2ee.team.admitted' : 'e2ee.team.reconciling')
                         );
+                      if (result.admitted && current()) await onMembersChanged?.();
+                    } catch (error) {
+                      // The workspace may have filled since the list was read: the relay
+                      // then refuses the signed admission, and the fresh list says why.
+                      const fresh = await runtime.memberJoinRequests!(workspaceId).catch(
+                        () => null
+                      );
+                      if (fresh) {
+                        remember(fresh);
+                        if (current()) setData(fresh);
+                      }
+                      if (
+                        fresh?.items.some(
+                          (item) => item.requestId === request.requestId && item.memberLimitReached
+                        )
+                      )
+                        throw new MemberLimitReached();
+                      throw error;
                     } finally {
                       if (current()) setApproving(null);
                     }
@@ -355,9 +399,7 @@ function TeamSession({
                     {t('e2ee.team.submitting')}
                   </span>
                 ) : (
-                  t(
-                    request.source === 'email' ? 'e2ee.team.continueAdmission' : 'e2ee.team.approve'
-                  )
+                  <AdmissionAction workspaceId={workspaceId} request={request} />
                 )}
               </Button>
               {request.state === 'pending' && (
@@ -461,6 +503,11 @@ function TeamSession({
             <span {...stylex.props(styles.identity, styles.label)}>
               {t(offer.mode === 'email' ? 'e2ee.team.emailInvitation' : 'e2ee.team.linkInvitation')}{' '}
               · {formatExpiry(offer.expiresAt)}
+              {offer.needsReissue && (
+                <>
+                  {offer.email && <> · {offer.email}</>} · {t('e2ee.team.invitationNeedsReissue')}
+                </>
+              )}
             </span>
             <Button
               variant="secondary"
@@ -490,6 +537,32 @@ function TeamSession({
   );
 }
 
+type JoinRequestRow = Pick<E2eeMemberReplies['pending']['items'][number], 'requestId' | 'source'>;
+/** Email requests are admitted automatically only until the host refuses one; then the row
+ * says it needs an explicit approval and keeps the refusal's original code. */
+function AdmissionMode(props: { workspaceId: string; request: JoinRequestRow }) {
+  const { t } = useTranslation();
+  const refused = useAutomaticAdmissionRefusal(props.workspaceId, props.request.requestId);
+  return (
+    <span data-testid="e2ee-join-admission-mode" {...stylex.props(styles.label)}>
+      {props.request.source !== 'email'
+        ? t('e2ee.team.approvalRequired')
+        : refused
+          ? t('e2ee.team.automaticRefused', { code: refused })
+          : t('e2ee.team.automatic')}
+    </span>
+  );
+}
+function AdmissionAction(props: { workspaceId: string; request: JoinRequestRow }) {
+  const { t } = useTranslation();
+  const refused = useAutomaticAdmissionRefusal(props.workspaceId, props.request.requestId);
+  return t(
+    props.request.source === 'email' && !refused
+      ? 'e2ee.team.continueAdmission'
+      : 'e2ee.team.approve'
+  );
+}
+
 /** Hide management until the native host verifies this personal device's current role. */
 export function E2eeTeamSettingsHost(props: {
   runtime: E2eeWorkspaceRuntime;
@@ -499,6 +572,9 @@ export function E2eeTeamSettingsHost(props: {
   onRefreshBilling?: () => Promise<unknown>;
   labels?: ReadonlyMap<string, string>;
   profiles?: ReadonlyMap<string, { name: string | null }>;
+  onMembersChanged?: () => Promise<void>;
+  /** Supplied by a live verified ledger owner; replaces this host's ledger polling. */
+  ledgerVersion?: string;
 }) {
   return <TeamHostSession key={`${props.accountId}:${props.workspaceId}`} {...props} />;
 }
@@ -509,6 +585,8 @@ function TeamHostSession({
   profiles,
   onOpenBilling,
   onRefreshBilling,
+  onMembersChanged,
+  ledgerVersion,
 }: {
   runtime: E2eeWorkspaceRuntime;
   workspaceId: string;
@@ -516,8 +594,11 @@ function TeamHostSession({
   profiles?: ReadonlyMap<string, { name: string | null }>;
   onOpenBilling?: () => void;
   onRefreshBilling?: () => Promise<unknown>;
+  onMembersChanged?: () => Promise<void>;
+  ledgerVersion?: string;
 }) {
   const { t } = useTranslation();
+  const [revision, setRevision] = useState(0);
   const [state, setState] = useState<{
     runtime: E2eeWorkspaceRuntime;
     role: string;
@@ -557,7 +638,7 @@ function TeamHostSession({
       } catch {
         if (!stopped) setState(null);
       } finally {
-        if (!stopped) timer = setTimeout(() => void read(), 10_000);
+        if (!stopped && ledgerVersion === undefined) timer = setTimeout(() => void read(), 10_000);
       }
     };
     void read();
@@ -565,7 +646,7 @@ function TeamHostSession({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [runtime, workspaceId, labels, profiles, t]);
+  }, [runtime, workspaceId, labels, profiles, t, revision, ledgerVersion]);
   return state?.runtime === runtime ? (
     <E2eeTeamSettings
       runtime={runtime}
@@ -574,6 +655,10 @@ function TeamHostSession({
       members={state.members}
       onOpenBilling={onOpenBilling}
       onRefreshBilling={onRefreshBilling}
+      onMembersChanged={async () => {
+        setRevision((value) => value + 1);
+        await onMembersChanged?.();
+      }}
     />
   ) : null;
 }

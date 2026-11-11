@@ -110,6 +110,20 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
             .put("repo", repo).put("names", JSONArray())
         save(file, data.put("selected", name), 1024 * 1024)
     }
+    private fun runConfigsFile(scope: RuntimeScope) = File(directory, "runconfig-" + catalogFile(scope).name)
+    override suspend fun readRunConfigs(scope: RuntimeScope): RunConfigPrefs? = io {
+        if (!owns(scope)) return@io null
+        val data = load(runConfigsFile(scope), 1024 * 1024) ?: return@io null
+        try {
+            require(data.getString("account") == scope.accountId && data.getString("workspace") == scope.workspaceId)
+            CreationJson.runConfigs(data.getJSONObject("runConfigs"))
+        } catch (_: Exception) { AtomicFile(runConfigsFile(scope)).delete(); null }
+    }
+    override suspend fun writeRunConfigs(scope: RuntimeScope, value: RunConfigPrefs) = io {
+        require(owns(scope)) { "cache_scope_changed" }
+        save(runConfigsFile(scope), JSONObject().put("account", scope.accountId).put("workspace", scope.workspaceId)
+            .put("runConfigs", CreationJson.encodeRunConfigs(value)), 1024 * 1024)
+    }
     private fun schedulesFile(scope: RuntimeScope) = File(directory, "schedules-" + catalogFile(scope).name)
     override suspend fun readSchedules(scope: RuntimeScope): ScheduleList? = io {
         if (!owns(scope)) return@io null
@@ -149,7 +163,7 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
         previous?.account?.workspaces?.filter { old -> account.id != previous.account.id || account.workspaces.none { it.id == old.id } }?.forEach {
             AtomicFile(catalogFile(RuntimeScope(previous.account.id, it.id))).delete()
         }
-        directory.listFiles()?.filter { (it.name.startsWith("options-") || it.name.startsWith("branches-") || it.name.startsWith("members-") || it.name.startsWith("schedules-")) && it.name.endsWith(".json") }?.forEach { file ->
+        directory.listFiles()?.filter { (it.name.startsWith("options-") || it.name.startsWith("branches-") || it.name.startsWith("members-") || it.name.startsWith("schedules-") || it.name.startsWith("runconfig-")) && it.name.endsWith(".json") }?.forEach { file ->
             val cached = load(file)
             if (cached == null || cached.optString("account") != account.id || account.workspaces.none { it.id == cached.optString("workspace") }) AtomicFile(file).delete()
         }
@@ -169,7 +183,8 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
                 data.getJSONArray("projects").objects().map { CatalogJson.project(CatalogProject(it.getString("id"), it.getString("machineId"), it.getString("name"), it.getString("rootPath")), it) },
                 data.getJSONArray("sessions").objects().map { CatalogJson.session(CatalogSession(it.getString("id"), it.getString("machineId"), it.getString("projectId"), it.getString("title"), it.getString("status"), it.getBoolean("archived"), it.getBoolean("pinned"), it.getString("createdAt")), it) },
                 data.getJSONArray("machines").let { array -> (0 until array.length()).map { array.getString(it) } },
-                CatalogJson.machineNames(data), CatalogJson.machineOs(data)), data.getLong("syncedAt"))
+                CatalogJson.machineNames(data), CatalogJson.machineOs(data),
+                machineSimulators = CatalogJson.machineSimulators(data), machineEmulators = CatalogJson.machineEmulators(data)), data.getLong("syncedAt"))
         } catch (_: Exception) { AtomicFile(file).delete(); null }
     }
     override suspend fun write(scope: RuntimeScope, catalog: SavedCatalog) = io {
@@ -179,6 +194,8 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
             .put("revision", snapshot.revision).put("syncedAt", catalog.syncedAt).put("machines", JSONArray(snapshot.machineIds))
             .put("machineNames", JSONObject(snapshot.machineNames))
             .put("machineOs", JSONObject(snapshot.machineOs))
+            .put("machineSimulators", JSONObject(snapshot.machineSimulators))
+            .put("machineEmulators", JSONObject(snapshot.machineEmulators))
             .put("projects", JSONArray(snapshot.projects.map { CatalogJson.putProject(JSONObject().put("id", it.id).put("machineId", it.machineId).put("name", it.name).put("rootPath", it.rootPath), it) }))
             .put("sessions", JSONArray(snapshot.sessions.map { CatalogJson.putSession(JSONObject().put("id", it.id).put("machineId", it.machineId).put("projectId", it.projectId).put("title", it.title).put("status", it.status).put("archived", it.archived).put("pinned", it.pinned).put("createdAt", it.createdAt), it) }))
         val target = catalogFile(scope)

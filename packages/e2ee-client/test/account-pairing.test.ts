@@ -484,6 +484,13 @@ describe('portable account pairing workflow', () => {
     ['an automatic cancellation', null, 'history:w1', true, 'cancel'],
     ['an expired automatic approval', null, 'history:w1', true, 'expire'],
     [
+      'an automatic request ended after three wrong codes on the approver',
+      null,
+      'history:w1',
+      true,
+      'wrong-code',
+    ],
+    [
       'a background device notification followed by foreground approval',
       null,
       'history:w1',
@@ -578,26 +585,38 @@ describe('portable account pairing workflow', () => {
       });
       if (automatic) {
         const contexts = new Map<string, E2eeAutomaticPairingRecord>();
+        let relayOutage = false;
+        // A hosted client queues mutations while offline: a held terminal write never settles.
+        let releaseTerminal: (() => void) | undefined;
+        let terminalHold: Promise<void> | undefined;
+        let terminalWrites = 0;
         const discovery: AutomaticPairingRelay = {
           pending: () =>
             Effect.sync(() =>
               structuredClone([...contexts.values()].filter((row) => row.state === 'pending'))
             ),
           read: (id) => Effect.sync(() => structuredClone(contexts.get(id) ?? null)),
-          exchange: (command) =>
-            Effect.sync(() => {
-              let row = contexts.get(command.id);
-              if (!row) {
-                if (!command.context) throw new Error('missing discovery original');
-                row = { context: structuredClone(command.context), state: 'pending' };
-                contexts.set(command.id, row);
-              }
-              if (command.commitment) row.commitment ??= structuredClone(command.commitment);
-              if (command.requesterKey) row.requesterKey ??= command.requesterKey;
-              if (command.reveal) row.reveal ??= structuredClone(command.reveal);
-              if (command.terminal) row.state = command.terminal;
-              return structuredClone(row);
-            }),
+          exchange: (command) => {
+            if (command.terminal) terminalWrites += 1;
+            const held = command.terminal ? terminalHold : undefined;
+            const write = () =>
+              relayOutage
+                ? Effect.fail(new Error('synthetic relay outage'))
+                : Effect.sync(() => {
+                    let row = contexts.get(command.id);
+                    if (!row) {
+                      if (!command.context) throw new Error('missing discovery original');
+                      row = { context: structuredClone(command.context), state: 'pending' };
+                      contexts.set(command.id, row);
+                    }
+                    if (command.commitment) row.commitment ??= structuredClone(command.commitment);
+                    if (command.requesterKey) row.requesterKey ??= command.requesterKey;
+                    if (command.reveal) row.reveal ??= structuredClone(command.reveal);
+                    if (command.terminal) row.state = command.terminal;
+                    return structuredClone(row);
+                  });
+            return held ? Effect.promise(() => held).pipe(Effect.flatMap(write)) : write();
+          },
         };
         let lostReply = true;
         const requestingRuntime = {
@@ -622,6 +641,7 @@ describe('portable account pairing workflow', () => {
           }),
         } as unknown as E2eeWorkspaceRuntime;
         let lostApprovalReply = true;
+        let nativeDeclines = 0;
         const approvingRuntime = {
           inspectAccountPairing: (value: string) =>
             Effect.runPromise(approver.inspectAccountPairing(value)),
@@ -635,8 +655,10 @@ describe('portable account pairing workflow', () => {
             }
             return result;
           },
-          declineAccountPairing: (input: Parameters<typeof approver.declineAccountPairing>[0]) =>
-            Effect.runPromise(approver.declineAccountPairing(input)),
+          declineAccountPairing: (input: Parameters<typeof approver.declineAccountPairing>[0]) => {
+            nativeDeclines += 1;
+            return Effect.runPromise(approver.declineAccountPairing(input));
+          },
           readIdentity: async () => ({ workspaceId: 'w1', genesisHash: '11'.repeat(32) }),
         } as unknown as E2eeWorkspaceRuntime;
         const common = {
@@ -684,8 +706,44 @@ describe('portable account pairing workflow', () => {
           expect([...requests.values()][0]!.expiresAt).toBe(600_000);
           const reviews = await desktop.pendingAutomaticPairing();
           expect(reviews).toHaveLength(1);
-          expect(reviews[0]!.comparisonCode).toBe(waiting!.comparisonCode);
+          // The approver never displays its code: the person must type the new device's.
+          expect(reviews[0]).not.toHaveProperty('comparisonCode');
           expect(reviews[0]!.workspaceId).toBe('w1');
+          const shown = waiting!.comparisonCode!;
+          const wrong = String((Number(shown) + 1) % 1_000_000).padStart(6, '0');
+          if (action === 'wrong-code') {
+            for (const attemptsLeft of [2, 1])
+              await expect(
+                desktop.approveAutomaticPairing(reviews[0]!.id, wrong)
+              ).rejects.toMatchObject({ code: 'pairing-code-mismatch', attemptsLeft });
+            // Offline: the relay holds the `declined` write. Lockout still returns at once,
+            // the native decline runs exactly once, and discovery is not blocked or flooded.
+            terminalHold = new Promise((resolve) => (releaseTerminal = resolve));
+            const writesBefore = terminalWrites;
+            await expect(desktop.approveAutomaticPairing(reviews[0]!.id, wrong)).rejects.toThrow(
+              'e2ee_pairing-code-locked'
+            );
+            expect(nativeDeclines).toBe(1);
+            expect(await desktop.pendingAutomaticPairing()).toEqual([]);
+            expect(await desktop.pendingAutomaticPairing()).toEqual([]);
+            expect(terminalWrites - writesBefore).toBe(1);
+            terminalHold = undefined;
+            expect((await phone.automaticPairingState('w1'))?.phase).toBe('waiting');
+            // The held write finally fails; the next discovery round resends it.
+            relayOutage = true;
+            releaseTerminal!();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            relayOutage = false;
+            expect((await phone.automaticPairingState('w1'))?.phase).toBe('waiting');
+            // The request is void: even the right code can no longer admit the device.
+            await expect(desktop.approveAutomaticPairing(reviews[0]!.id, shown)).rejects.toThrow();
+            // The next discovery round delivers the undelivered decline to the new device.
+            expect(await desktop.pendingAutomaticPairing()).toEqual([]);
+            expect((await phone.automaticPairingState('w1'))?.phase).toBe('declined');
+            expect(approvals.size).toBe(0);
+            expect(installed).toEqual([]);
+            return;
+          }
           if (action === 'decline') {
             await desktop.declineAutomaticPairing(reviews[0]!.id);
             expect((await phone.automaticPairingState('w1'))?.phase).toBe('declined');
@@ -700,14 +758,18 @@ describe('portable account pairing workflow', () => {
           }
           if (action === 'expire') {
             time = 600_001;
-            await expect(desktop.approveAutomaticPairing(reviews[0]!.id)).rejects.toThrow(
+            await expect(desktop.approveAutomaticPairing(reviews[0]!.id, shown)).rejects.toThrow(
               'e2ee_pairing-expired'
             );
             expect((await phone.automaticPairingState('w1'))?.phase).toBe('expired');
             expect(installed).toEqual([]);
             return;
           }
-          await expect(desktop.approveAutomaticPairing(reviews[0]!.id)).rejects.toThrow(
+          await expect(
+            desktop.approveAutomaticPairing(reviews[0]!.id, wrong)
+          ).rejects.toMatchObject({ code: 'pairing-code-mismatch' });
+          expect(approvals.size).toBe(0);
+          await expect(desktop.approveAutomaticPairing(reviews[0]!.id, shown)).rejects.toThrow(
             'synthetic lost approval reply'
           );
           expect(await desktop.pendingAutomaticPairing()).toEqual([]);

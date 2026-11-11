@@ -27,7 +27,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        buildConfigField("String", "ONESIGNAL_APP_ID", "\"${providers.gradleProperty("LODY_ONESIGNAL_APP_ID").getOrElse("e383bf31-7c8e-4641-b3f6-3486e77b9a82")}\"")
+        buildConfigField("String", "ONESIGNAL_APP_ID", "\"${providers.gradleProperty("LODY_ONESIGNAL_APP_ID").getOrElse("930dcd5c-3534-46aa-805d-f279f008f80b")}\"")
         // Public Firebase client options, never a service-account key.
         for (key in listOf("APP_ID", "API_KEY", "PROJECT_ID", "SENDER_ID")) {
             buildConfigField("String", "FIREBASE_$key", "\"${providers.gradleProperty("LODY_FIREBASE_$key").getOrElse("")}\"")

@@ -8,6 +8,7 @@ final class SessionPreviewController: SessionController {
   private let probe = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
 
   init(scenario: String) {
+    precondition(!scenario.hasPrefix("cards-") || _isDebugAssertConfiguration())
     self.scenario = scenario
     let fixture = SessionPreviewFixture(offline: scenario == "offline", tools: LodyUIVerify.has("--ui-verify-process-tools"), bar: scenario)
     self.fixture = fixture
@@ -27,13 +28,13 @@ final class SessionPreviewController: SessionController {
           "type": .string("terminal_output"), "output": .string("Native session tool detail"),
         ])], truncated: false)
       }, observe: { _ in {} }),
-      simulator: .init(call: { command in
+      simulator: .ios { command in
         if case .stop = command { return .init(success: true) }
         if case .list = command {
           return .init(success: true, devices: [.init(udid: "native-fixture-phone", name: "Fixture Phone", runtime: "iOS 27", deviceType: "iPhone", state: "Booted", available: true, occupancy: .available)])
         }
         return .init(success: true, preview: .init(operationId: "native-fixture", udid: "native-fixture-phone", phase: .ready, transport: .remote, viewerUrl: "lody-simulator-fixture://stream"))
-      }),
+      },
       pullRequest: { reference, _ in PullRequestPreviewController(params: scenario.hasPrefix("bar-") ? ["state": reference.status, "reference": reference] : [:]) },
       browser: { _, _ in .init(url: "https://native-fixture.trycloudflare.com") }
     )
@@ -87,6 +88,7 @@ final class SessionPreviewController: SessionController {
   override func viewDidLoad() {
     probe.isAccessibilityElement = true
     probe.accessibilityIdentifier = "session-preview-probe"
+    probe.accessibilityLabel = scenario.hasPrefix("cards-") ? "Offline card review: " + scenario : "Native session preview"
     copyService = Self.copyFixture
     super.viewDidLoad()
     // Two members make Change owner available, as in a team workspace.
@@ -95,6 +97,22 @@ final class SessionPreviewController: SessionController {
       "preview-teammate": WorkspaceMember(id: "preview-teammate", name: "Ada Lovelace", image: nil),
     ]
     render()
+    if scenario.hasPrefix("cards-") {
+      chat.onProposalDecision = { [weak self] row, accept in
+        self?.fixture.decideCard(itemId: row.itemID, accept: accept)
+        self?.chat.setProposalState(entryId: row.entryID, itemId: row.itemID, nil)
+      }
+      chat.onProposalOpenSchedule = { [weak self] _ in
+        guard let self else { return }
+        LodyShell.shared.presentNative(
+          SchedulesController(source: source, service: ScheduleFixture.shared.service),
+          title: String(localized: "native.chat.proposal.schedules", bundle: .lody), detents: [1])
+      }
+      if scenario == "cards-states" {
+        chat.setProposalState(entryId: "preview-answer", itemId: "error", .init(message: String(localized: "native.chat.proposal.error.failed", bundle: .lody)))
+        chat.setProposalState(entryId: "preview-answer", itemId: "pending", .init(pending: true))
+      }
+    }
     if scenario.hasPrefix("bar-") {
       let action = chat.onPreview
       chat.onPreview = { [weak self] body in
@@ -162,6 +180,7 @@ private final class SessionPreviewFixture {
   private var catalog: SessionCatalog
   private var receive: (@MainActor (SessionRuntimeEvent) -> Void)?
   private var revision = 1
+  private var cardOutcomes: [String: String] = [:]
 
   init(offline: Bool, tools: Bool = false, bar: String = "", now: Double = LodyRelativeTime.now()) {
     self.bar = bar
@@ -245,6 +264,12 @@ private final class SessionPreviewFixture {
     NotificationCenter.default.post(name: Self.change, object: nil)
   }
 
+  func decideCard(itemId: String, accept: Bool) {
+    cardOutcomes[itemId] = accept ? (bar == "cards-schedules" ? "created" : "saved") : "dismissed"
+    revision += 1
+    emit()
+  }
+
   private func emit(forceLive: Bool = false) {
     let status = offline && !forceLive ? "offline" : "live"
     var session = Self.envelope(status: status, revision: revision, reply: "Live reply with a needle", tools: tools)
@@ -277,6 +302,9 @@ private final class SessionPreviewFixture {
       object["entries"] = entries
       session = SessionController.json(object)
     }
+    if bar.hasPrefix("cards-") {
+      session = Self.cardsEnvelope(scenario: bar, revision: revision, outcomes: cardOutcomes)
+    }
     // Deliver after the cached frame, the way the runtime answers an open.
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
       MainActor.assumeIsolated {
@@ -294,6 +322,57 @@ private final class SessionPreviewFixture {
   private func record(_ entry: String) {
     log.append(entry)
     changed?()
+  }
+
+  /// Synthetic summaries in the same JSON shape delivered by the cloud runtime.
+  /// Keep taller cards separate so each launch is a useful phone screenshot.
+  nonisolated static func cardsEnvelope(scenario: String, revision: Int, outcomes: [String: String]) -> String {
+    func role(_ id: String, fields: [String: String], before: [String: String]? = nil,
+              owner: String = "preview-user", outcome: String? = nil) -> [String: Any] {
+      var proposal: [String: Any] = ["kind": "agent_role", "action": before == nil ? "create" : "update",
+        "roleId": "fixture-" + id, "requesterUserId": owner, "fields": fields]
+      proposal["before"] = before
+      proposal["outcome"] = outcomes[id] ?? outcome
+      return ["itemId": id, "type": "system_notice", "name": "agent_role_proposal", "proposal": proposal]
+    }
+    func schedule(_ id: String, created: Bool) -> [String: Any] {
+      var proposal: [String: Any] = ["kind": "schedule", "proposalId": id, "title": "Daily review",
+        "prompt": "Summarize open tasks.", "destination": "new_session",
+        "rule": ["kind": "daily", "hour": 9, "minute": 0, "timeZone": "UTC"]]
+      let outcome = outcomes[id] ?? (created ? "created" : nil)
+      proposal["outcome"] = outcome
+      if outcome == "created" { proposal["scheduleId"] = "daily-review" }
+      return ["itemId": id, "type": "system_notice", "name": "schedule_proposal", "proposal": proposal]
+    }
+    let items: [[String: Any]]
+    switch scenario {
+    case "cards-role-create":
+      items = [role("create", fields: ["name": "Reviewer", "description": "Reviews proposed changes.",
+        "promptPrefix": "Focus on correctness and clear feedback."])]
+    case "cards-role-update":
+      items = [role("update", fields: ["name": "Release reviewer", "description": "Reviews release readiness.",
+        "promptPrefix": "Check compatibility."], before: ["name": "Reviewer", "description": "Reviews changes.", "promptPrefix": "Check correctness."])]
+    case "cards-owner-only":
+      items = [role("owner", fields: ["name": "Team reviewer", "description": "Reviews team changes."], owner: "preview-teammate")]
+    case "cards-receipts":
+      items = [role("saved", fields: ["name": "Reviewer", "description": "Reviews changes."], outcome: "saved"),
+        role("dismissed", fields: ["name": "Release helper"], outcome: "dismissed")]
+    case "cards-schedules":
+      items = [schedule("schedule-pending", created: false), schedule("schedule-created", created: true)]
+    case "cards-states":
+      items = [role("error", fields: ["name": "Reviewer"]), role("pending", fields: ["name": "Release helper"])]
+    case "cards-files":
+      items = [
+        ["itemId": "report", "type": "file", "file": ["id": "fixture-report", "fileName": "report.pdf", "mimeType": "application/pdf", "sizeBytes": 240_000]],
+        ["itemId": "notes", "type": "file", "file": ["id": "fixture-notes", "fileName": "notes.md", "mimeType": "text/markdown", "sizeBytes": 3_000]],
+      ]
+    default: preconditionFailure("Unknown card review scenario: \(scenario)")
+    }
+    let object: [String: Any] = ["v": 1, "status": "live", "revision": revision, "entries": [
+      ["id": "preview-answer", "role": "assistant", "status": "completed", "finished": true,
+       "endedAt": 1_793_268_064_000, "items": items],
+    ]]
+    return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
   }
 
   nonisolated static func envelope(status: String, revision: Int, reply: String, tools: Bool = false) -> String? {

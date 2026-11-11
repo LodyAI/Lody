@@ -1003,6 +1003,42 @@ describe('encrypted shared machine visibility', () => {
     }
   );
 
+  it('says a failed sharing check failed, not that the session is unshared, and retries it', async () => {
+    const shared = {
+      ...createCachedSession(owner),
+      id: 'shared-on-failing-machine' as SessionId,
+      machineId: 'failing-machine' as MachineId,
+    };
+    store.set(sessionMetaCacheAtom, { [getSessionRoomId(shared.id)]: shared });
+    // The machine's policy cannot be read right now (the harness rejects it).
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={shared.id}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'sessions.access.readFailed'
+    );
+    expect(container.textContent).not.toContain('sessions.access.unavailable');
+    expect(container.querySelector('article')).toBeNull();
+    // Once the policy reads, retry shows the shared conversation read-only.
+    views.set(
+      'failing-machine',
+      view('failing-machine', {
+        sharedWithTeam: false,
+        sessions: [{ sessionId: shared.id, audience: 'team', level: 'read' }],
+      })
+    );
+    const retry = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'common.retry'
+    )!;
+    await act(async () => retry.click());
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('article')?.textContent).toBe(shared.id);
+    expect(container.querySelector('input')).toBeNull();
+  });
+
   it('leaves new sessions without persisted metadata to the draft composer', async () => {
     await renderTree(
       <SessionHistoryAccessBoundary sessionId={'new-draft' as SessionId}>

@@ -62,6 +62,8 @@ object TurnLayout {
         }
         val blocks = mutableListOf<Block>()
         var pending = mutableListOf<TurnItem>()
+        // The image stack later images may still join: only activity blocks may follow it.
+        var stack: Int? = null
         fun flush() {
             val first = pending.firstOrNull() ?: return
             blocks += Activity("$turnId:activity:${first.id}", pending, summarize(pending))
@@ -72,8 +74,22 @@ object TurnLayout {
                 val previous = pending.firstOrNull()
                 if (showThoughts && previous != null && (previous is TurnItem.Thought) != (item is TurnItem.Thought)) flush()
                 pending += item
+            } else if (item is TurnItem.Images) {
+                // Images that only tool work separates (repeated upload calls) fan into the first
+                // one's stack; the work between them follows the stack.
+                flush()
+                val at = stack
+                val joined = at?.let { blocks[it] as Content }
+                if (at != null && joined != null) {
+                    val previous = joined.item as TurnItem.Images
+                    blocks[at] = joined.copy(item = previous.copy(images = previous.images + item.images))
+                } else {
+                    stack = blocks.size
+                    blocks += Content("$turnId:content:${item.id}", item)
+                }
             } else {
                 flush()
+                stack = null
                 blocks += Content("$turnId:content:${item.id}", item)
             }
         }
@@ -97,7 +113,7 @@ object TurnLayout {
         item is TurnItem.Thought || (item is TurnItem.Tool && item.kind != "switch_mode")
 
     private fun neverFolded(item: TurnItem): Boolean =
-        item is TurnItem.ProposedPlan || item is TurnItem.Checklist || item is TurnItem.Notice ||
+        item is TurnItem.ProposedPlan || item is TurnItem.Checklist || item is TurnItem.Notice || item is TurnItem.Images || item is TurnItem.File ||
             (item is TurnItem.Tool && item.kind == "switch_mode")
 
     /** Web `getFinalTextRunStart`: skip the never-folded tail, then walk back over adjacent text. */

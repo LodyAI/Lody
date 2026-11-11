@@ -14,6 +14,11 @@ fun interface PullRequestMergeReader {
     suspend fun read(scope: RuntimeScope, repository: String, number: Int): String?
 }
 
+/** A PR's state, branch and ±lines from GitHub with the scope's verified account; a read. */
+fun interface PullRequestDetailsReader {
+    suspend fun read(scope: RuntimeScope, repository: String, number: Int): PullRequestDetails
+}
+
 /** A merged PR's own head branch, with the scope's verified account: probed (a read) and deleted (a write, never retried). */
 interface PullRequestBranches {
     /** Null when it does not apply (not merged, a fork's head) or GitHub gave no answer. */
@@ -33,6 +38,7 @@ class ChatRepository(
     private val attachments: AttachmentUploader = AttachmentUploader { _, _, _ -> throw AttachmentFailure("unavailable") },
     private val mergeStates: PullRequestMergeReader = PullRequestMergeReader { _, _, _ -> throw GitHubWriteFailure("unavailable") },
     private val branches: PullRequestBranches = UnavailableBranches,
+    private val details: PullRequestDetailsReader = PullRequestDetailsReader { _, _, _ -> throw GitHubWriteFailure("unavailable") },
 ) {
     /** Uploads a turn's attachments natively; only the returned references reach the runtime. */
     suspend fun upload(scope: RuntimeScope, sessionId: String, items: List<PendingAttachment>): List<org.json.JSONObject> =
@@ -56,6 +62,14 @@ class ChatRepository(
     suspend fun turnDiff(scope: RuntimeScope, sessionId: String, entryId: String, path: String): FileDiff =
         owner.use(scope) { (it.execute(RuntimeCommand.TurnDiff(sessionId, entryId, path)) as RuntimeResult.Diff).value }
 
+    /** One folder of the session's local project ("" is the project root); a read, safe to retry. */
+    suspend fun listDir(scope: RuntimeScope, sessionId: String, relativePath: String): DirectoryListing =
+        owner.use(scope) { (it.execute(RuntimeCommand.ListDir(sessionId, relativePath)) as RuntimeResult.Directory).value }
+
+    /** One file's contents from the session's computer; a read, safe to retry. */
+    suspend fun readFile(scope: RuntimeScope, sessionId: String, path: String): FileContent =
+        owner.use(scope) { (it.execute(RuntimeCommand.ReadFile(sessionId, path)) as RuntimeResult.File).value }
+
     /** A direct GitHub write from the action bar; never retried (see [GitHubPullRequestWrites]). */
     suspend fun mergePullRequest(scope: RuntimeScope, repository: String, number: Int, method: String) =
         pullRequests.write(scope, repository, number, method)
@@ -70,6 +84,10 @@ class ChatRepository(
     /** A direct GitHub write from the PR panel; never retried. */
     suspend fun deleteBranch(scope: RuntimeScope, repository: String, number: Int) =
         branches.delete(scope, repository, number)
+
+    /** A read, safe to repeat: the PR panel's state for a PR opened from a link. */
+    suspend fun pullRequestDetails(scope: RuntimeScope, repository: String, number: Int): PullRequestDetails =
+        details.read(scope, repository, number)
 
     /** A read, safe to repeat: used to settle the merge state after Ready for review. */
     suspend fun mergeState(scope: RuntimeScope, repository: String, number: Int): String? =
@@ -94,9 +112,22 @@ class ChatRepository(
     suspend fun shortcut(scope: RuntimeScope, id: String): org.json.JSONObject =
         owner.use(scope) { (it.execute(RuntimeCommand.ShortcutBody(id)) as RuntimeResult.Shortcut).value }
 
+    /** The watched session's managed web preview: create (or reuse) its link, or revoke it. Never retried. */
+    suspend fun browserPreview(scope: RuntimeScope, sessionId: String, revoke: Boolean): BrowserPreviewReply =
+        owner.use(scope) { (it.execute(RuntimeCommand.SessionPreview(sessionId, revoke)) as RuntimeResult.Preview).value }
+
+    /** One iOS Simulator / Android Emulator lifecycle call for the session; start and stop are never retried. */
+    suspend fun deviceControl(scope: RuntimeScope, platform: DevicePlatform, sessionId: String, command: DeviceCommand): DeviceControlReply =
+        owner.use(scope) { (it.execute(RuntimeCommand.DeviceControl(platform, sessionId, command)) as RuntimeResult.Device).value }
+
     /** Stops the running turn; never retried (a lost reply is reported, not replayed). */
     suspend fun stop(scope: RuntimeScope, sessionId: String, machineId: String, turnId: String) {
         owner.use(scope) { it.execute(RuntimeCommand.StopTurn(sessionId, machineId, turnId)) }
+    }
+
+    /** Saves / creates or dismisses an Agent's proposal; a write, never retried (failures throw their code). */
+    suspend fun decideProposal(scope: RuntimeScope, sessionId: String, entryId: String, itemId: String, accept: Boolean) {
+        owner.use(scope) { it.execute(RuntimeCommand.DecideProposal(sessionId, entryId, itemId, accept)) }
     }
 
     /** Sends one text turn on the scope's lease. Never retried: an uncertain write is `unknown`. */

@@ -1,7 +1,7 @@
 # Native push integration
 
 The iOS-only app keeps bundle ID `ai.lody.mobile` and uses the public OneSignal App
-ID `e383bf31-7c8e-4641-b3f6-3486e77b9a82`. `LODY_ONESIGNAL_APP_ID` can override it at
+ID `930dcd5c-3534-46aa-805d-f279f008f80b`. `LODY_ONESIGNAL_APP_ID` can override it at
 prebuild time (an empty value disables initialization). No REST API key or APNs
 private key is shipped in the app.
 

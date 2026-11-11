@@ -57,6 +57,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
 
 ## Invariants
 
+- My Tasks and personal summaries filter by session assignment (`userId`) only.
+  Machine ownership preserves access and management independently of that filter.
+
 - A landing selection follows the machine the user chose, not presence. Liveness may
   replace a restored selection only once per landing mount, when a synced room first
   reports its machine offline; that fallback stays out of stored defaults and returns

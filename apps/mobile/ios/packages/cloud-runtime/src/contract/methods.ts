@@ -22,6 +22,8 @@ import { ProbeSchemaParams, ProbeSchemaReport } from './debug.ts';
 import { GitHubMentionsParams, GitHubMentionsResult } from './github.ts';
 import { MentionCatalog, MentionCatalogParams } from './mentions.ts';
 import {
+  AndroidEmulatorControlParams,
+  AndroidEmulatorControlResult,
   IosSimulatorControlParams,
   IosSimulatorControlResult,
   SessionPreviewParams,
@@ -59,8 +61,6 @@ import {
   RemoteSettingsResult,
 } from './settings.ts';
 import {
-  PublishedSharesParams,
-  PublishedSharesResult,
   SessionSharingParams,
   SessionSharingResult,
   ShareProgressEvent,
@@ -122,6 +122,8 @@ import {
   ConversationMarkdownParams,
   ConversationMarkdownResult,
   RespondPermissionParams,
+  DecideProposalParams,
+  DecideProposalResult,
   RespondPermissionResult,
   SendTurnParams,
   SendTurnResult,
@@ -212,11 +214,6 @@ export const runtimeCalls = {
     result: AgentRoleSnapshot,
     timeoutMs: 45_000,
   },
-  publishedShares: {
-    params: PublishedSharesParams,
-    result: PublishedSharesResult,
-    timeoutMs: 70_000,
-  },
   mentionCatalog: {
     params: MentionCatalogParams,
     result: MentionCatalog,
@@ -265,6 +262,11 @@ export const runtimeCalls = {
   iosSimulatorControl: {
     params: IosSimulatorControlParams,
     result: IosSimulatorControlResult,
+    timeoutMs: 100_000,
+  },
+  androidEmulatorControl: {
+    params: AndroidEmulatorControlParams,
+    result: AndroidEmulatorControlResult,
     timeoutMs: 100_000,
   },
   itemDetail: {
@@ -365,6 +367,11 @@ export const runtimeCalls = {
     params: RespondPermissionParams,
     result: RespondPermissionResult,
     timeoutMs: 45_000,
+  },
+  decideProposal: {
+    params: DecideProposalParams,
+    result: DecideProposalResult,
+    timeoutMs: 75_000,
   },
   probeSchema: {
     params: ProbeSchemaParams,

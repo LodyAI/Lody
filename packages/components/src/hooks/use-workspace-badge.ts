@@ -1,4 +1,3 @@
-import type { MachineId } from '@lody/shared';
 import { useMySessionScope } from './use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -19,10 +18,7 @@ const RECONCILE_MS = 30_000;
 const ZERO: WindowBadge = { unread: 0, waiting: 0 };
 
 /** Absolute count of owned sidebar rows, including their child conversations. */
-export const createWorkspaceBadgeAtom = (
-  userId: string | null,
-  ownedMachineIds: ReadonlySet<MachineId>
-) =>
+export const createWorkspaceBadgeAtom = (userId: string | null) =>
   atom<WindowBadge>((get) => {
     if (!userId) return ZERO;
     const sessions = get(allActiveSessionsAtom);
@@ -36,8 +32,7 @@ export const createWorkspaceBadgeAtom = (
     let unread = 0;
     let waiting = 0;
     for (const session of sessions) {
-      if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds))
-        continue;
+      if (session.parentSessionId || !isSessionInMyScope(session, userId)) continue;
       const activity = getEffectiveSessionActivitySummary(session, children, statuses);
       if (activity.isWaitingPermission) waiting += 1;
       else if (activity.hasUnreadMessages) unread += 1;
@@ -70,10 +65,10 @@ function publishBadge(badge: WindowBadge): void {
  */
 export function useWorkspaceBadge(): void {
   const store = useStore();
-  const { currentUserId, ownedMachineIds } = useMySessionScope();
+  const { currentUserId } = useMySessionScope();
   const workspaceBadgeAtom = useMemo(
-    () => createWorkspaceBadgeAtom(currentUserId, ownedMachineIds),
-    [currentUserId, ownedMachineIds]
+    () => createWorkspaceBadgeAtom(currentUserId),
+    [currentUserId]
   );
   const { unread, waiting } = useAtomValue(workspaceBadgeAtom);
   const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();

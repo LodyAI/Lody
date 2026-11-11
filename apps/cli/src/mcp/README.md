@@ -158,7 +158,13 @@ records the measurements and why subprocess/request isolation remains necessary.
   `@lody/shared/proxy-env` `withLoopbackNoProxy` is applied last when assembling agent env
   (`session.ts` `buildShellEnv`, `acp-runner.ts`) and writes BOTH `NO_PROXY` and
   `no_proxy`: clients disagree about a present-but-empty value, and Rust `reqwest` reads
-  the uppercase spelling first and treats an empty one as "bypass nothing".
+  the uppercase spelling first and treats an empty one as "bypass nothing". It does so
+  even when no proxy variable is present, because the agent can apply a proxy Lody never
+  sees (its own settings file or the OS proxy); such a proxy answers loopback requests
+  with an empty `HTTP 503` and the agent reports the built-in MCP as failed to start.
+- The host logs one line per request to `mcp-http-<date>.log` (method, status, duration,
+  session id; failures at warn, successes at debug). A status the agent reports that this
+  log never recorded came from something between them.
 
 ## Operation identity
 

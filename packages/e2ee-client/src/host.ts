@@ -13,7 +13,13 @@ import {
 import { VerifiedLedger, makeWorkspaceRecovery, memoryRecoveryEpochKeys } from '@lody/e2ee-core';
 import { wipeRecoveryPackage, accountUserId, prepareJoinRequest } from '@lody/e2ee-core/protocol';
 import type { E2eeMemberOffer } from '@lody/cloud-api';
-import { encodeMemberKeyPackage, memberPairingOffer, MemberOfferSchema } from './member';
+import {
+  decodeMemberKeyPackage,
+  encodeMemberKeyPackage,
+  memberPairingOffer,
+  memberPairingOfferFor,
+  MemberOfferSchema,
+} from './member';
 import { prepareVaultRestore, type PersonalHostRecoveryInput } from './recovery-restore';
 import { Bytes, requireLedgerContinuation } from '@lody/e2ee-core/protocol';
 import {
@@ -838,8 +844,15 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       const p = yield* prepareRetained(pairingOffer);
       const saved = yield* memberOriginal(p);
       if (!saved) return null;
+      // Compare with the request id this join was signed for, not a fresh derivation: a join
+      // retained before email ids became token-derived, or before offers were signed, keeps
+      // its original request and stays claimable.
       const derived = yield* Effect.try({
-        try: () => memberPairingOffer(platform.scope.accountId, saved.offer),
+        try: () =>
+          memberPairingOfferFor(
+            MemberOfferSchema.parse(saved.offer),
+            toHex(decodeMemberKeyPackage(saved.keyPackageHex).request.requestId.toBytes())
+          ),
         catch: (cause) => fail('corrupt', cause),
       });
       if (JSON.stringify(derived) !== JSON.stringify(p.offer)) return yield* fail('conflict');
@@ -893,9 +906,19 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     /** The retained invitation behind an identity offer, or null for a personal pairing. */
     memberJoin: (pairingOffer: PersonalPairingOffer) =>
       run(
-        Effect.map(retainedMember(pairingOffer), (found) =>
-          found ? { offer: found.saved.offer, requestId: found.p.offer.pairingSessionId } : null
-        )
+        Effect.gen(function* () {
+          const found = yield* retainedMember(pairingOffer);
+          if (!found) return null;
+          // This device's retained approval original exists only after its admission was
+          // accepted from the verified history. It is a display hint for a reopened page,
+          // which still claims once; it grants nothing.
+          const joined = !!(yield* pairings.load(key(found.p, 'approval')));
+          return {
+            offer: found.saved.offer,
+            requestId: found.p.offer.pairingSessionId,
+            ...(joined ? { joined: true as const } : {}),
+          };
+        })
       ),
     /** Recover this pinned workspace from an authenticated vault; no private key escapes. */
     restoreRecovery: (input: PersonalHostRecoveryInput) => run(restoreRecovery(input)),
@@ -930,6 +953,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     scope: platform.scope,
     capabilities: Object.freeze({
       rpc: !!platform.rpc,
+      iroh: !!(platform.rpc && platform.iroh),
       contentToken: !!platform.contentToken,
       machineSharing: !!platform.machineSharing,
       members: !!platform.members,

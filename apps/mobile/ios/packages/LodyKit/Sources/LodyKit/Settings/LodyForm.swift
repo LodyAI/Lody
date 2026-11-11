@@ -318,6 +318,11 @@ final class LodyFormTextView: UITextView, UITextViewDelegate {
   }
 
   var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+  /// Replaces the text programmatically, keeping the field's typography.
+  func replaceText(_ value: String) {
+    attributedText = NSAttributedString(string: value, attributes: typingAttributes)
+  }
 }
 
 final class LodyFormToggle: UIView {

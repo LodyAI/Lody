@@ -20,4 +20,16 @@ class HomeBarScrollStateTest {
         state.update(0f, false, 24f)
         assertFalse(state.collapsed)
     }
+
+    @Test fun tapExpandsTheCompactBarUntilTheNextScroll() {
+        val state = HomeBarScrollState()
+        state.update(100f, true, 24f)
+        assertTrue(state.collapsed)
+        state.expand()
+        assertFalse(state.collapsed)
+        state.update(100f, false, 24f)
+        assertFalse(state.collapsed)
+        state.update(140f, true, 24f)
+        assertTrue(state.collapsed)
+    }
 }

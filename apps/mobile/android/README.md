@@ -38,7 +38,7 @@ reports `unavailable` and preserves the last provider selection; it never silent
 falls back. Build properties never override that choice. The OneSignal external
 identity is the original verified user ID, unchanged.
 
-OneSignal uses public app ID `e383bf31-7c8e-4641-b3f6-3486e77b9a82`; override with
+OneSignal uses public app ID `930dcd5c-3534-46aa-805d-f279f008f80b`; override with
 Gradle property `LODY_ONESIGNAL_APP_ID` for a separately provisioned app. Its
 OneSignal dashboard must have Android/FCM credentials configured for this client.
 For direct FCM, supply these **public client options** as Gradle properties from
@@ -146,6 +146,13 @@ unavailable targets. A separate View full reply action opens the complete saved
 Markdown in a scrollable, selectable bottom sheet, even when its target is gone.
 Reply text stays separate from failure detail; upstream truncation is identified
 in both the preview and sheet. Lists over five entries can expand.
+Agent Role and schedule proposals in system entries (`ProposalEvents`) render as
+`ProposalCards` after the entry's receipts: the proposed fields, then Dismiss and
+Save / Create through the `decideProposal` bridge command. Only the requesting member
+decides a Role proposal; decided proposals read as receipts, and failures stay on the
+card for an explicit retry. See the [decision](../../../.agents/notes/implemented/feature/2026-11-11-mobile-proposal-cards.md). Files the Agent shares (`TurnItem.File`) show as
+never-folded `AgentFileCard`s with name, type and size; Android has no session-file
+download yet, so they do not open.
 The relation sheet groups each root and its contained Tabs on one horizontal row.
 Overflow scrolls horizontally without a scrollbar; edge fades appear only in
 directions with more content. Only opened-by conversations increase hierarchy
@@ -200,6 +207,32 @@ TalkBack can activate named landmarks or adjust the index range one section at
 a time, including omitted sections; its state description names the current section. Other grouping/search views retain
 their ordinary list behavior.
 
+### PR links
+
+The PR panel (`PullRequestSheet`) describes any PR through `PullRequestView`, not
+only the action bar's. The transcript's `LocalUriHandler` matches links with
+`PullRequestLink` (case-insensitive) against `ChatContext.repositories`: the
+project's repository, or a multi-repository project's GitHub members from catalog
+`Project.repositories`. Matching links open the panel; other links go to the
+browser. The bar's own PR opens with the bar's data. Another PR starts from the
+session's catalog entry, then fills state, merge state, branch and ±lines from a
+GitHub read grant (`PullRequestDetails`); Merge and Delete branch appear only once
+that read lands.
+
+### Project files
+
+Conversation More offers Project files for a live conversation in a local project
+(`ProjectFiles.browsable`; iOS `openProjectFiles`). `ProjectFilesSheet` is a near
+full-screen sheet like the turn's files sheet: folders come from runtime `listDir`
+(the conversation's own folder, its worktree when it has one, through the machine's
+`file/list-dir`; machines without `sessionDirectoryListing` list the local project's
+folder; folders first), and a Markdown file (`.md`,
+`.markdown`, `.mdx`) is read through `readFile` and rendered block by block with the
+transcript's `MarkdownBlock`, with a Source toggle. Relative Markdown links open in
+the sheet; web links go to the browser. Other files are listed but not opened in this
+first version. Both commands are reads, routed through the existing contract bridge,
+and never retried automatically. `ProjectFilesTest` covers the path rules.
+
 ## Schedules
 
 The native Schedules tab shows flat rows grouped by Attention, Active, Paused and
@@ -224,8 +257,23 @@ write retry identity handling are unchanged. Open last chat uses Home navigation
 ## Settings
 
 Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
-Agent settings, Agent Roles, prompt shortcuts and sign-out. There is no Machines or Agent conversation
-sync destination. Other unfinished settings destinations show an explicit placeholder.
+Agent settings, Agent Roles, prompt shortcuts, GitHub, Projects and sign-out. There is no Machines, Published shares or
+Agent conversation sync destination. Other unfinished settings destinations show an explicit placeholder.
+
+### Project groups
+
+Project groups are desktop's multi-repository projects. Android shows them as iOS does
+but does not create or edit them yet.
+
+- Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups from a fresh
+  `projectGroups` read and opens a read-only page with the group's computer, creator and
+  members. Local project visibility is not on Android yet.
+- Catalog sessions carry the group run's members (`CatalogProjectRun`, cached with the
+  catalog). In a group conversation the context capsule summarises repositories, PRs and
+  the group-wide diff, and opens a sheet listing every member with its branch, ±diff and
+  PR. A member's PR opens the PR panel, whose Merge and Delete branch then act on that PR.
+- The bar's own actions stay Create PR / Draft and Commit & Push, sent with web's
+  Project group scope (`SessionInfoBarTest`).
 
 Preferences follows iOS: language and notifications open the system pages for this
 app, then the queued-message behaviour (`AppPreferences`). Steer applies only when
@@ -249,6 +297,17 @@ the same payload so the only next step is retrying that save. The runtime's
 `activateDocument`) reach `PromptShortcutCloud`, which calls `promptShortcuts:*` on Convex
 with the verified account and the native workspace; mutations use a one-shot client.
 This also lets the composer's `/` shortcuts load their bodies.
+
+GitHub (`GitHubSettingsScreen`) mirrors iOS Settings › GitHub: personal identity with an
+"Act as you" switch (turning it on needs a live authorization), Manage GitHub App for owners
+and admins (the App's install page in the browser; the page re-reads on return), then the
+workspace repositories with owner logos, Material switches and a search field. `GitHubSettingsCloud`
+ports iOS `WorkspaceSettingsCloud.github` over Convex with the verified account: writes check the
+row first, are never retried, and count only after a read back. The last complete read shows at
+once from process memory while a quiet refresh runs; because the list rarely changes its switches
+work straight away (each write re-reads the role and repositories), and a write supersedes that
+refresh. A flipped switch shows at once; a failed or unknown write rolls it back and locks writes
+until a fresh read (`GitHubSettingsTest`).
 
 Agent settings select one machine above its provider list (online and own machines
 first); the top bar's "+" adds a provider to it, and the last list shows from process
@@ -281,7 +340,7 @@ shared session usage meters and reset-time controls. Absent usage stays hidden.
 The native adapter uses canonical `agentProviders`, `agentProviderDetail`,
 `agentProviderProbe`, `agentProviderAuth` and `agentProviderOperation` with verified
 native identity. The reviewed runtime snapshot is fixed at
-`7f74298641f35b714c68752f3976e9b0ffaf6c52` with matching provenance and hashes.
+`041760cfd7982cf3b7298b37cf0e668b180a216f` with matching provenance and hashes.
 Native compilation and synthetic acceptance do not establish cloud integration.
 
 `ANDROID_SERIAL=<disposable-emulator> python3 verification/agent-settings.py` runs

@@ -14,6 +14,30 @@ import kotlin.coroutines.resumeWithException
 /** A failed GitHub write; [code] maps to copy (`not_mergeable`, `head_changed`, `merge_unknown`, …). */
 class GitHubWriteFailure(val code: String) : Exception(code)
 
+/** A PR as GitHub reports it, in the catalog's terms (`status` open / draft / merged / closed, `merge` codes). */
+data class PullRequestDetails(val status: String, val merge: String?, val branch: String, val added: Int, val removed: Int) {
+    companion object {
+        fun of(pr: JSONObject): PullRequestDetails {
+            val draft = pr.optBoolean("draft")
+            val status = when {
+                pr.optBoolean("merged") -> "merged"
+                pr.optString("state") == "closed" -> "closed"
+                draft -> "draft"
+                else -> "open"
+            }
+            val mergeable = if (pr.has("mergeable") && !pr.isNull("mergeable")) pr.optBoolean("mergeable") else null
+            val state = if (pr.isNull("mergeable_state")) null else pr.optString("mergeable_state")
+            return PullRequestDetails(
+                status,
+                if (status == "open") PullRequestMergeSettle.code(state, mergeable, draft) else null,
+                pr.optJSONObject("head")?.optString("ref").orEmpty(),
+                pr.optInt("additions").coerceAtLeast(0),
+                pr.optInt("deletions").coerceAtLeast(0),
+            )
+        }
+    }
+}
+
 /** One HTTP exchange: status and body (bounded). A transport failure throws. */
 internal fun interface GitHubHttp {
     suspend fun request(method: String, url: String, token: String, body: JSONObject?): Pair<Int, String>
@@ -59,6 +83,15 @@ internal class GitHubPullRequestWrites(private val http: GitHubHttp = GitHubHttp
         val mergeable = if (pr.has("mergeable") && !pr.isNull("mergeable")) pr.optBoolean("mergeable") else null
         val state = if (pr.isNull("mergeable_state")) null else pr.optString("mergeable_state")
         return PullRequestMergeSettle.code(state, mergeable, pr.optBoolean("draft"))
+    }
+
+    /**
+     * What the PR panel shows for a PR the catalog does not describe (one opened from a link):
+     * its state, GitHub's merge state while open, the head branch and ±lines. A read grant.
+     */
+    suspend fun details(credential: Credential, workspace: String, repo: String, number: Int): PullRequestDetails {
+        val token = grant(credential, workspace, repo, number, operation = "read")
+        return PullRequestDetails.of(read("https://api.github.com/repos/$repo/pulls/$number", token))
     }
 
     /**

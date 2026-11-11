@@ -48,7 +48,7 @@ per batch, then launches a fresh app for each case. Run English only (`en`,
 | `core-home` / `core-send`               | The corresponding halves of core                                                                                                                        |
 | `pages` batch                           | Home/workspaces, creation/model memory, project/branch/history/directory, activity, notifications, diagnostics and preferences (including the app icon) |
 | `send` batch                            | Text send, queued/guide/interrupt turns, rounds, scroll behavior, session tools, permissions, editing, sharing, agent errors and native diffs/files     |
-| `settings-workspace` / `settings` batch | Agents, prompt shortcuts, project visibility, GitHub, usage, published shares, agent roles and archived sessions                                        |
+| `settings-workspace` / `settings` batch | Agents, prompt shortcuts, project visibility, GitHub, usage and agent roles                                                                             |
 | Individual iPad cases                   | Adaptive split, creation, chrome, sidebar, devices, search, deletion and wide panels                                                                    |
 | `toast`                                 | Archive/restore completion, archive failure, warning and copy notifications: localized accessibility labels, rendered glyph colors and dismissal        |
 
@@ -89,6 +89,18 @@ No desktop credentials, real turns or private user data belong in fixtures.
 For visual/interaction requirement alignment only, export a finished run with
 `acceptance-round.py` and ingest its claims through the acceptance tool. Ordinary
 regression runs remain programmatic gates and are not ingested.
+
+### Conversation proposal and file cards
+
+`proposal-cards` uses Debug-only synthetic transcript scenes for Role creation,
+updates, owner-only actions, saved/dismissed receipts, schedule creation/Open,
+failed and pending decisions, and agent-shared PDF/Markdown files. The runner
+captures light/dark appearances and exercises the fixture's decision transitions
+through production card controls. It does not verify cloud persistence or file downloads.
+
+```sh
+pnpm verify:ui --case proposal-cards --require-video --app /absolute/path/to/Lody.app
+```
 
 ### Conversation usage
 

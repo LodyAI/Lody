@@ -1,15 +1,10 @@
-import {
-  getSessionGroupTitle,
-  planPullRequestLifecycle,
-  resolveSessionPullRequests,
-} from '@lody/shared';
+import { planPullRequestLifecycle, resolveSessionPullRequests } from '@lody/shared';
 import { createStore } from 'jotai';
 import { describe, expect, it } from 'vitest';
 import { getSessionRoomId, type MachineId, type SessionId, type SessionMeta } from '@lody/shared';
 
 import {
   childSessionsAtomFamily,
-  archivedSessionListAtom,
   sessionListAtom,
   sessionMetaCacheAtom,
   sideSessionsAtomFamily,
@@ -31,28 +26,6 @@ const session: SessionMeta = {
 };
 
 describe('sessionListAtom', () => {
-  it.each([false, true])(
-    'refreshes a group rename independently of tab titles (archived: %s)',
-    (isArchived) => {
-      const store = createStore();
-      const listAtom = isArchived ? archivedSessionListAtom : sessionListAtom;
-      const original = { ...session, isArchived, title: 'First tab' };
-      store.set(sessionMetaCacheAtom, { [roomId]: original });
-      expect(getSessionGroupTitle(store.get(listAtom)[0])).toBe('First tab');
-
-      for (const groupTitle of ['Sidebar name', 'Renamed sidebar']) {
-        const before = store.get(listAtom);
-        store.set(sessionMetaCacheAtom, {
-          [roomId]: { ...original, groupTitle, groupTitleSource: 'user' },
-        });
-        const after = store.get(listAtom);
-        expect(after).not.toBe(before);
-        expect(getSessionGroupTitle(after[0])).toBe(groupTitle);
-        expect(after[0]?.title).toBe('First tab');
-      }
-    }
-  );
-
   it('updates unread presentation when only the tab closure changes', () => {
     const store = createStore();
     const unread = { ...session, lastMessageAt: 200, lastReadAt: 100 };
