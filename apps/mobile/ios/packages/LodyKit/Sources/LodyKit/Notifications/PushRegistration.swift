@@ -42,8 +42,12 @@ final class PushRegistration {
     }
   }
 
-  func deviceToken(_ token: String, bundle: String?) {
+  /// Returns false for a repeated callback with the same token and Bundle ID.
+  @discardableResult
+  func deviceToken(_ token: String, bundle: String?) -> Bool {
+    guard self.token != token || self.bundle != bundle else { return false }
     self.token = token; self.bundle = bundle
+    return true
   }
 
   func refresh(authorized: Bool) {
