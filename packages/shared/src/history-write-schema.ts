@@ -47,7 +47,7 @@ export const HistoryEntryWriteSchema = z.object({
     .string()
     .regex(/^[A-Za-z0-9_-]{131}$/)
     .optional(),
-  cancellationReason: z.literal('user_stop').optional(),
+  cancellationReason: z.enum(['user_stop', 'machine_update']).optional(),
   inputConfig: z
     .preprocess(normalizeLegacyAcpSessionConfig, SessionHistoryInputConfigSchema)
     .optional(),

@@ -593,3 +593,25 @@ it('keeps manual Stop provenance on the exact user turn across peer import and s
   });
   expect(await copy.history.readTurn('other')).not.toHaveProperty('turn.cancellationReason');
 });
+
+it('keeps update-interruption provenance on the user turn so peers can offer Continue', async () => {
+  const doc = new LoroDoc();
+  const data = createLoroSessionData({ sessionId: sid, doc });
+  await data.commands.appendTurn({ ...row('interrupted', 'user'), status: 'processing' });
+  await data.commands.applyHistoryAction({
+    kind: 'user-status',
+    turnId: 'interrupted',
+    status: 'canceled',
+    cancellationReason: 'machine_update',
+  });
+  const peer = new LoroDoc();
+  peer.import(doc.export({ mode: 'snapshot' }));
+  const copy = createLoroSessionData({ sessionId: sid, doc: peer });
+  expect((await copy.history.readTurnOutput('interrupted'))[0]).toMatchObject({
+    status: 'canceled',
+    cancellationReason: 'machine_update',
+  });
+  expect(await copy.history.readTurn('interrupted')).toMatchObject({
+    turn: { cancellationReason: 'machine_update' },
+  });
+});

@@ -506,7 +506,8 @@ export class CoordinatorWorkflow {
         cancellationReason: SessionHistoryInput['cancellationReason']
       ): LodyOperationItemResult => ({
         status: 'cancelled',
-        ...(cancellationReason ? { cancellationReason } : {}),
+        // Operation results record only a manual Stop; an update interruption is not one.
+        ...(cancellationReason === 'user_stop' ? { cancellationReason } : {}),
         ...(item.label ? { label: item.label } : {}),
         target: item.target,
       });
