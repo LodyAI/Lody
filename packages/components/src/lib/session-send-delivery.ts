@@ -49,9 +49,12 @@ export type UserTurnSend = {
 
 export type SessionSendRuntime = Pick<
   WorkspaceRuntime,
-  'repo' | 'writer' | 'sendResources' | 'requestSessionDispatchTurn' | 'requestSessionSteer'
-> &
-  Partial<
+  'writer' | 'sendResources' | 'requestSessionDispatchTurn' | 'requestSessionSteer'
+> & {
+  // Streams hosts await writes directly. A buffered Repo supplies its flush.
+  repo: Pick<WorkspaceRuntime['repo'], 'getDocMeta'> &
+    Partial<Pick<WorkspaceRuntime['repo'], 'flush'>>;
+} & Partial<
     Pick<
       WorkspaceRuntime,
       'isMachineRpcUnreachable' | 'contentMode' | 'prepareEncryptedDispatch' | 'attachmentToken'
@@ -462,7 +465,7 @@ async function promoteGuideToFollowUp(
   // A started, terminal or removed turn is not repairable.
   if (!promoted) return;
   await dispatchUserTurn(runtime, sessionId, userTurnId, options);
-  await runtime.repo.flush();
+  await runtime.repo.flush?.();
 }
 
 /**
@@ -532,15 +535,24 @@ export async function steerUserTurn(
 /** Delivery for a send that was held in memory until its attachments were ready. */
 export async function deliverUserTurn(
   runtime: SessionSendRuntime,
-  send: UserTurnSend & { targetMachineId?: MachineId | null }
+  send: UserTurnSend & { targetMachineId?: MachineId | null },
+  onGuideOutcome?: (
+    sessionId: SessionId,
+    userTurnId: string,
+    expectedTurnId: string,
+    applied: boolean | undefined
+  ) => void
 ): Promise<void> {
   if (send.delivery.kind === 'dispatch') {
     await dispatchUserTurn(runtime, send.sessionId, send.entry.id, {
       machineId: send.targetMachineId ?? null,
     });
   } else if (send.delivery.kind === 'guide') {
-    await steerUserTurn(runtime, send.sessionId, send.delivery.expectedTurnId, send.entry.id, {
+    const { expectedTurnId } = send.delivery;
+    onGuideOutcome?.(send.sessionId, send.entry.id, expectedTurnId, undefined);
+    const applied = await steerUserTurn(runtime, send.sessionId, expectedTurnId, send.entry.id, {
       machineId: send.targetMachineId ?? null,
     });
+    onGuideOutcome?.(send.sessionId, send.entry.id, expectedTurnId, applied);
   }
 }

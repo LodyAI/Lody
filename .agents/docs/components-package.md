@@ -243,6 +243,14 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 
 ## Locally accepted messages
 
+`createWorkspaceAcceptedInputs` owns ready Roost input for browser and native
+hosts through their existing document and RPC ports. `createWorkspacePendingSends`
+adds the browser's held-attachment projection over that same coordinator. Hosts
+can supply device-local attachment admission and guide-outcome presentation;
+the shared coordinator retains input identity, acceptance lookup and delivery.
+`createSessionOperationScope` owns cancellable work independently of the browser's
+session-store cache; `createSessionSendResources` adds the existing cache borrows.
+
 Loro ready messages commit to the live local history document. A ready Roost
 input instead appears from the workspace's immutable input projection and saves
 to account/workspace-scoped IndexedDB without waiting for owner RPC. Its write
