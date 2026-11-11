@@ -167,3 +167,5 @@ These rules also bind callers outside the owning directory.
 - Conversation usage beside Send is display-only: context occupancy comes from the session usage projection, never turn billing totals. Resolve subscription windows against the exact machine, agent config and selected model, requiring eligibility and the rate-limits capability. Keep unknown context hidden, compacting distinct, neutral used-percent meters and an independent relative/concrete reset-time toggle for each window.
 
 - Process summary and duration rows put their chevron right after the text, not at the row's edge.
+
+- Agent images that only tool work separates fan into one `imageStack` row; prose ends a stack. Stacked images keep their own preview ids. The preview closes by swiping down and offers Copy, Save and Share of the original, never the thumbnail. See [Conversation images](../README.md#conversation-images).

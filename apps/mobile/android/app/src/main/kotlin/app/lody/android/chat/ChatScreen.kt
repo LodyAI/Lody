@@ -114,6 +114,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     val meName = context.me?.name.orEmpty()
     // Resolved in composition: the transcript is built off the main thread.
     val application = appContext.applicationContext as app.lody.android.LodyApplication
+    // Agent images in this conversation, read with the verified account (iOS `ChatImageCell`).
+    val sessionImages = remember(scope, id) { SessionImageSource(application.sessionImages, scope, id) }
     val accountState by application.account.state.collectAsState()
     var members by remember(scope) { mutableStateOf(emptyMap<String, app.lody.android.auth.WorkspaceMember>()) }
     LaunchedEffect(scope, accountState.verified) {
@@ -598,7 +600,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     }
                 } else {
                     // The transcript scrolls under the floating header.
-                    CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides transcriptLinks) { ChatTranscript(
+                    CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides transcriptLinks, LocalSessionImages provides sessionImages) { ChatTranscript(
                         all, Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top + if (creationNotice != null) LodySize.controlLg else LodySpacing.none, bottom = LodySpacing.md), state = listState, scrollToLatest = scrollToLatest,
                         actions = messageActions,
                         relatedSessions = context.relatedSessions,

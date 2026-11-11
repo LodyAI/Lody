@@ -33,6 +33,23 @@ class TurnLayoutTest {
         assertEquals("t:activity:2", dsh.activeActivityKey(working = true))
     }
 
+    @Test fun imagesSeparatedOnlyByToolWorkFanIntoOneStack() {
+        fun image(id: String) = app.lody.android.runtime.TurnImage(id, "$id.png", null, 600, 400)
+        val items = listOf(
+            tool("1"), TurnItem.Images("2", listOf(image("a"))), tool("3"), TurnItem.Images("4", listOf(image("b"), image("c"))),
+            text("5"), TurnItem.Images("6", listOf(image("d"))),
+        )
+        val running = TurnLayout.build("t", items, finished = false, showThoughts = false)
+        assertEquals(listOf("t:activity:1", "t:content:2", "t:activity:3", "t:content:5", "t:content:6"), running.blocks.map { it.key })
+        val stack = (running.blocks[1] as TurnLayout.Content).item as TurnItem.Images
+        assertEquals(listOf("a", "b", "c"), stack.images.map { it.id })
+        // Prose ends a stack: the later image keeps its own block.
+        assertEquals(listOf("d"), ((running.blocks[4] as TurnLayout.Content).item as TurnItem.Images).images.map { it.id })
+        // A finished turn folds the work but never the images.
+        val finished = TurnLayout.build("t", items, finished = true, showThoughts = false)
+        assertEquals(listOf("t:content:2", "t:content:5", "t:content:6"), finished.visible.map { it.key })
+    }
+
     @Test fun consecutiveStepsFormOneSummarizedGroup() {
         val layout = TurnLayout.build("t", listOf(tool("1"), tool("2", "read", "a.kt"), tool("3", "read", "a.kt"), text("4")), finished = false, showThoughts = false)
         assertEquals(2, layout.blocks.size)

@@ -89,6 +89,20 @@
     <string name="chat_empty">还没有文本消息</string>
     <string name="chat_offline">无法载入消息</string>
     <string name="chat_retry">重试</string>
+    <string name="chat_image_label">图片，%1$s</string>
+    <string name="chat_image_page">%1$d / %2$d</string>
+    <string name="chat_image_open">查看图片</string>
+    <string name="chat_image_next">下一张</string>
+    <string name="chat_image_previous">上一张</string>
+    <string name="chat_image_failed">图片加载失败，轻点重试</string>
+    <string name="chat_image_close">关闭图片</string>
+    <string name="chat_image_share">分享</string>
+    <string name="chat_image_copy">复制</string>
+    <string name="chat_image_save">保存到相册</string>
+    <string name="chat_image_copied">图片已复制</string>
+    <string name="chat_image_saved">已保存到 Pictures/Lody</string>
+    <string name="chat_image_save_failed">无法保存图片</string>
+    <string name="chat_image_unavailable">图片暂不可用</string>
 
     <!-- New session -->
     <string name="create_title">新建会话</string>

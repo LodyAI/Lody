@@ -221,6 +221,15 @@ internal object RuntimeProtocol {
                     group = if (item.optString("group") == "tasks") "tasks" else "subagents",
                 )
             }
+            "image", "image_group" -> {
+                val raw = if (item.optString("type") == "image") listOfNotNull(item.optJSONObject("image"))
+                else item.optJSONArray("images")?.objects().orEmpty()
+                raw.mapNotNull { image ->
+                    val imageId = image.optString("id").ifBlank { return@mapNotNull null }
+                    fun size(key: String) = (image.opt(key) as? Number)?.toInt()?.takeIf { it > 0 }
+                    TurnImage(imageId, image.optString("fileName").ifBlank { "image" }, (image.opt("storageSessionId") as? String)?.takeIf { it.isNotBlank() }, size("width"), size("height"))
+                }.takeIf { it.isNotEmpty() }?.let { TurnItem.Images(id, it) }
+            }
             "system_notice" -> {
                 val name = item.optString("name")
                 val message = item.optJSONObject("meta")?.optString("message").orEmpty()

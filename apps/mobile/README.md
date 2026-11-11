@@ -119,6 +119,37 @@ cd ..
 
 See the [Android README](android/README.md) for device setup and runtime ownership.
 
+## Conversation images
+
+Agents can send images into a conversation (`image` / `image_group` items, for
+example through an image upload tool). Both clients render them the same way:
+
+- One image is a rounded card at its own aspect ratio. Images that only tool work
+  separates (an image group, adjacent images or repeated upload calls) fan into
+  one stack of uniform cards, placed where the first image was; the tool rows
+  between them follow it. Prose ends a stack.
+- Swiping the top card left sends it to the back and brings up the next image;
+  swiping right brings the previous one back. A counter shows the position, and
+  VoiceOver / TalkBack actions move through the stack. A tap opens the viewer at
+  the top image, and the stack keeps the image the reader ended on.
+- The full-screen viewer pages through the images, zooms with pinch and double
+  tap, and toggles its controls with a tap. Swiping down (or up) closes it. A long
+  press, or the share button, offers Copy, Save and Share. These always read the
+  original image, never the 768 px thumbnail the cards use.
+
+iOS (`ChatTranscript.stackImages`, `ChatImageStackCell`, `ChatImagePreview`)
+pages through every image in the conversation, flies the photo back into its
+card on a swipe-down close, and saves with the Photos add-only permission
+(`NSPhotoLibraryAddUsageDescription`).
+
+Android (`TurnLayout`, `chat/ImageViews`, `chat/SessionImages`) pages through the
+images of the turn. `SessionImageHttp` reads the Worker session-images endpoints
+with the verified account bearer, no redirects and a bounded body;
+`SessionImageSource` keeps decoded bitmaps in a process memory cache. Copy and
+Share hand a cache copy out through the `${applicationId}.images` FileProvider;
+Save writes to MediaStore `Pictures/Lody` without a storage permission and is
+offered on Android 10 and later.
+
 ## Push notifications
 
 Both native clients select their push provider from the authenticated backend's
