@@ -1,3 +1,4 @@
+import { isTrustedProductRendererUrl } from './product-renderer-url.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { isClientLossProbeChannel, isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
@@ -82,7 +83,13 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
       handle: (channel, handler) => handlers.set(channel, handler)
     }
   }
-  const load = async (relative, deps, env = {}) => {
+  const load = async (
+    relative,
+    deps,
+    env = {},
+    platform = 'linux',
+    mainDirectory = '/app/out/main'
+  ) => {
     const exports = {}
     runInNewContext(
       ts.transpileModule(await readFile(new URL(relative, import.meta.url), 'utf8'), {
@@ -95,8 +102,8 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
       {
         exports,
         URL,
-        __dirname: '/app/out/main',
-        process: { env },
+        __dirname: mainDirectory,
+        process: { env, platform },
         console,
         require: (id) => (Object.hasOwn(deps, id) ? deps[id] : require(id))
       }
@@ -112,7 +119,8 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
   })
   const senderGuard = await load('./assert-sender.ts', {
     electron,
-    '../window-state': { productWindows }
+    '../window-state': { productWindows },
+    './product-renderer-url': { isTrustedProductRendererUrl }
   })
   const service = await load('./product-window-ipc-service.ts', {
     'electron-ipc-decorator': decoratorExports,
@@ -216,7 +224,11 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
   await assert.rejects(handlers.get('app.reportRendererFatalError')(recovery), /untrusted renderer/)
   const devGuard = await load(
     './assert-sender.ts',
-    { electron, '../window-state': { productWindows } },
+    {
+      electron,
+      '../window-state': { productWindows },
+      './product-renderer-url': { isTrustedProductRendererUrl }
+    },
     { ELECTRON_RENDERER_URL: 'http://localhost:5173' }
   )
   const devRecovery = window()
@@ -227,6 +239,30 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     () => devGuard.assertProductWindowSender(devRecovery, 'cli.terminate'),
     /untrusted renderer/
   )
+  const windowsGuard = await load(
+    './assert-sender.ts',
+    {
+      electron,
+      '../window-state': { productWindows },
+      './product-renderer-url': { isTrustedProductRendererUrl }
+    },
+    {},
+    'win32',
+    'c:\\x\\out\\main'
+  )
+  const windowsProduct = window()
+  windowsProduct.senderFrame.url = 'file:///C:/x/out/renderer/index.html'
+  windowsGuard.assertProductWindowSender(windowsProduct)
+  assert.throws(
+    () =>
+      windowsGuard.assertProductWindowSender({
+        ...windowsProduct,
+        senderFrame: { url: windowsProduct.senderFrame.url }
+      }),
+    /untrusted renderer/
+  )
+  productWindows.delete(windows.get(windowsProduct.sender))
+  assert.throws(() => windowsGuard.assertProductWindowSender(windowsProduct), /untrusted renderer/)
 })
 
 void test('preload exposes only the filtered IPC bridge and no raw Electron process environment', async () => {
@@ -315,5 +351,50 @@ void test('preload exposes only the filtered IPC bridge and no raw Electron proc
     await assert.rejects(exposed.ipc.invoke('arbitrary.channel'), /Blocked IPC invoke/)
     assert.throws(() => exposed.ipc.send('arbitrary.channel'), /Blocked IPC send/)
     assert.deepEqual(transmitted, ['cli.getState'])
+  }
+})
+
+void test('packaged Windows renderer admission ignores path casing without admitting other directories or recovery privileges', () => {
+  const windows = { platform: 'win32', mainDirectory: 'c:\\x\\out\\main' }
+  for (const entry of ['index.html', 'devbar.html']) {
+    assert.equal(isTrustedProductRendererUrl(`file:///C:/x/out/renderer/${entry}`, windows), true)
+    assert.equal(
+      isTrustedProductRendererUrl(`file:///c:/X/OUT/RENDERER/${entry.toUpperCase()}`, windows),
+      true
+    )
+    assert.equal(
+      isTrustedProductRendererUrl(`file:///C:/elsewhere/out/renderer/${entry}`, windows),
+      false
+    )
+  }
+  const recovery = 'file:///C:/x/out/renderer/recovery.html'
+  assert.equal(isTrustedProductRendererUrl(recovery, windows), false)
+  assert.equal(
+    isTrustedProductRendererUrl(recovery, { ...windows, channel: 'cli.terminate' }),
+    false
+  )
+  for (const channel of ['app.requestRendererReload', 'app.reportRendererFatalError']) {
+    assert.equal(isTrustedProductRendererUrl(recovery, { ...windows, channel }), true)
+    assert.equal(
+      isTrustedProductRendererUrl('file:///C:/other/out/renderer/recovery.html', {
+        ...windows,
+        channel
+      }),
+      false
+    )
+  }
+  for (const sender of [
+    'https://example.com/x/out/renderer/index.html',
+    'file://remote/C:/x/out/renderer/index.html',
+    'file:///C:/x/out/renderer%2Findex.html'
+  ]) {
+    assert.equal(isTrustedProductRendererUrl(sender, windows), false)
+  }
+  for (const platform of ['linux', 'darwin']) {
+    const posix = { platform, mainDirectory: '/x/out/main' }
+    assert.equal(isTrustedProductRendererUrl('file:///x/out/renderer/index.html', posix), true)
+    assert.equal(isTrustedProductRendererUrl('file:///X/out/renderer/index.html', posix), false)
+    assert.equal(isTrustedProductRendererUrl('file:///x/out/renderer/INDEX.HTML', posix), false)
+    assert.equal(isTrustedProductRendererUrl('file:///other/out/renderer/index.html', posix), false)
   }
 })
