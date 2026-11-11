@@ -134,14 +134,18 @@ precise openers never fall back to provenance-only root IDs. Archived and side-p
 sessions are excluded; closed Tabs appear only when current. The tree does not
 change archive ownership or read additional transcripts.
 
-The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, like
-conversation More. UIKit owns presentation, width, height, scrolling and title
-truncation; there is no six-row limit or custom fade. Actions retain full names,
-circular avatars and native selected state. Selecting the current workspace is a
-no-op; catalog changes refresh the menu. The root menu title displays the account
-email in UIKit’s heading style, projected explicitly through the session source
-and chrome model. Empty email removes the heading; synthetic sources never fall
-back to the live account. Workspace management stays in Settings.
+The workspace switcher is `Chrome/WorkspaceSwitcherPanel`, a popover anchored to
+the capsule that never adapts into a sheet. A `UIMenu` wraps long titles onto
+several lines and offers no fade, so the panel draws its own menu-style rows:
+leading checkmark, circular avatar, and the name on one line that fades out at the
+trailing edge (`LodyFadingLabel`, mirrored for right-to-left) instead of wrapping or
+showing an ellipsis. Rows keep full names and the selected trait for VoiceOver; up
+to eight rows show before the list scrolls, and the width stays between 240 and
+320 pt within the window. Selecting the current workspace is a no-op; catalog
+changes refresh the open panel. The account email heads the panel, projected
+explicitly through the session source and chrome model. Empty email removes the
+heading; synthetic sources never fall back to the live account. Workspace
+management stays in Settings.
 
 Conversation Back, title/machine, Tabs and More controls belong to the page, so
 UIKit’s interactive pop moves them with its content instead of separately animating
