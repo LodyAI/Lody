@@ -53,7 +53,7 @@ internal object ProjectGroupsModel {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService?, scope: RuntimeScope?, visibilityService: ProjectVisibilityService? = null, onBack: () -> Unit) {
+internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService?, scope: RuntimeScope?, visibilityService: ProjectVisibilityService? = null, store: SettingsSnapshotStore? = null, onBack: () -> Unit) {
     val colors = LodyTheme.colors
     val tasks = rememberCoroutineScope()
     var groups by remember(scope) { mutableStateOf<List<ProjectGroup>?>(null) }
@@ -65,15 +65,21 @@ internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService
         if (service == null || scope == null) return
         loading = true
         try {
-            groups = service.projectGroups(scope)
+            val next = service.projectGroups(scope)
+            groups = next
             failed = false
+            ProjectGroupsCache.write(store, scope, next)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { failed = true } // A failed read keeps the last list.
         finally { loading = false }
     }
-    val visibility = remember(visibilityService, scope) { if (visibilityService != null && scope != null) ProjectVisibilityState(visibilityService, scope) else null }
-    LaunchedEffect(service, scope) { refresh() }
-    LaunchedEffect(visibility) { visibility?.refresh() }
+    val visibility = remember(visibilityService, scope, store) { if (visibilityService != null && scope != null) ProjectVisibilityState(visibilityService, scope, store) else null }
+    LaunchedEffect(service, scope) {
+        // The last accepted list shows at once (display only); the live read replaces it.
+        if (scope != null && groups == null) ProjectGroupsCache.read(store, scope)?.let { cached -> if (groups == null) groups = cached }
+        refresh()
+    }
+    LaunchedEffect(visibility) { visibility?.restore(); visibility?.refresh() }
     val machineNames = home.snapshot?.machineNames.orEmpty()
     val open = groups?.firstOrNull { it.id == openId }
     if (open != null) {
@@ -260,5 +266,44 @@ private fun VisibilityLine(item: ProjectVisibilityModel.Item, state: ProjectVisi
                 )
             }
         }
+    }
+}
+
+/** The Project group list as stored in the settings cache (`project-groups`); display only. */
+private object ProjectGroupsCache {
+    private const val KIND = "project-groups"
+
+    suspend fun read(store: SettingsSnapshotStore?, scope: RuntimeScope): List<ProjectGroup>? = try {
+        store?.readSettings(scope, KIND)?.getJSONArray("groups")?.let { rows ->
+            (0 until rows.length()).map { index ->
+                val row = rows.getJSONObject(index)
+                val members = row.getJSONArray("members")
+                ProjectGroup(
+                    row.getString("id"), row.optString("name"), row.optString("machineId").ifEmpty { null }, row.optBoolean("conflict"),
+                    (0 until members.length()).map { m ->
+                        val member = members.getJSONObject(m)
+                        app.lody.android.runtime.ProjectGroupMember(member.getString("id"), member.getString("kind"), member.optString("label"), member.optString("path"),
+                            member.optString("repoFullName").ifEmpty { null }, member.optString("machineId").ifEmpty { null })
+                    },
+                    row.optString("ownerUserId"),
+                )
+            }
+        }
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { null }
+
+    suspend fun write(store: SettingsSnapshotStore?, scope: RuntimeScope, groups: List<ProjectGroup>) {
+        store ?: return
+        val value = org.json.JSONObject().put("groups", org.json.JSONArray(groups.map { group ->
+            org.json.JSONObject().put("id", group.id).put("name", group.name).put("machineId", group.machineId.orEmpty()).put("conflict", group.conflict)
+                .put("ownerUserId", group.ownerUserId)
+                .put("members", org.json.JSONArray(group.members.map { member ->
+                    org.json.JSONObject().put("id", member.id).put("kind", member.kind).put("label", member.label).put("path", member.path)
+                        .put("repoFullName", member.repoFullName.orEmpty()).put("machineId", member.machineId.orEmpty())
+                }))
+        }))
+        try { store.writeSettings(scope, KIND, value) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Only the cache is lost. */ }
     }
 }

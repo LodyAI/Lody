@@ -200,10 +200,11 @@ internal class LiveProjectVisibilityService(
 
 /**
  * iOS `ProjectVisibilityController`: the last accepted read for this scope shows at once (process
- * memory), the live read replaces it, and only a live read enables changes. A failed or unknown
- * write leaves the page locked until a fresh read; it is never replayed.
+ * memory, then the `project-visibility` settings snapshot on disk), the live read replaces it, and
+ * only a live read enables changes. A failed or unknown write leaves the page locked until a fresh
+ * read; it is never replayed.
  */
-internal class ProjectVisibilityState(private val service: ProjectVisibilityService, val scope: RuntimeScope) {
+internal class ProjectVisibilityState(private val service: ProjectVisibilityService, val scope: RuntimeScope, private val store: SettingsSnapshotStore? = null) {
     var snapshot by mutableStateOf(remembered?.takeIf { it.first == scope }?.second); private set
     var live by mutableStateOf(false); private set
     var loading by mutableStateOf(false); private set
@@ -213,6 +214,14 @@ internal class ProjectVisibilityState(private val service: ProjectVisibilityServ
     private var version = 0
 
     val editable: Boolean get() = live && !loading && !writing && !failed && !unconfirmed
+
+    /** The disk cache when memory has nothing for this scope; never replaces a live read. */
+    suspend fun restore() {
+        if (store == null || snapshot != null) return
+        val cached = try { store.readSettings(scope, CACHE_KIND) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null } ?: return
+        val restored = try { ProjectVisibilityCache.decode(cached) } catch (_: Exception) { null } ?: return
+        if (snapshot == null && !live && restored.userId == scope.accountId) snapshot = restored
+    }
 
     suspend fun refresh() {
         if (writing) return
@@ -240,14 +249,32 @@ internal class ProjectVisibilityState(private val service: ProjectVisibilityServ
         finally { writing = false }
     }
 
-    private fun accept(next: VisibilitySnapshot) {
+    private suspend fun accept(next: VisibilitySnapshot) {
         snapshot = next
         live = true
         remembered = scope to next
+        try { store?.writeSettings(scope, CACHE_KIND, ProjectVisibilityCache.encode(next)) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Only the cache is lost. */ }
     }
 
     companion object {
+        private const val CACHE_KIND = "project-visibility"
         /** Process memory only (one scope). */
         @Volatile private var remembered: Pair<RuntimeScope, VisibilitySnapshot>? = null
+    }
+}
+
+/** The visibility snapshot as stored in the settings cache; display only. */
+internal object ProjectVisibilityCache {
+    fun encode(value: VisibilitySnapshot): JSONObject = JSONObject()
+        .put("userId", value.userId)
+        .put("rows", JSONArray(value.rows.map { JSONObject().put("machineId", it.machineId).put("localProjectId", it.localProjectId)
+            .put("ownerUserId", it.ownerUserId).put("sharedWithTeam", it.sharedWithTeam).put("updatedAt", it.updatedAt) }))
+        .apply { value.ownedMachineIds?.let { put("ownedMachineIds", JSONArray(it.sorted())) } }
+
+    fun decode(value: JSONObject): VisibilitySnapshot {
+        val owned = value.optJSONArray("ownedMachineIds")?.let { ids -> (0 until ids.length()).mapTo(mutableSetOf()) { ids.getString(it) } }
+        return VisibilitySnapshot(value.getString("userId").also { require(it.isNotEmpty()) }, ProjectVisibilityCloud.rows(value.getJSONArray("rows")), owned)
     }
 }

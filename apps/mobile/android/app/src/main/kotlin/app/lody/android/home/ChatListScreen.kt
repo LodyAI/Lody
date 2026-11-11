@@ -289,7 +289,7 @@ fun ChatListScreen(
         return
     }
     if (projectsOpen) {
-        ProjectGroupsScreen(state, creation, scope, projectVisibility, onBack = { projectsOpen = false })
+        ProjectGroupsScreen(state, creation, scope, projectVisibility, settingsCache, onBack = { projectsOpen = false })
         return
     }
     if (rolesOpen) {

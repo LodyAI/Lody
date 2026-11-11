@@ -265,13 +265,14 @@ Agent conversation sync destination, and archived chats live behind the Chats vi
 Project groups are desktop's multi-repository projects. Android shows them as iOS does
 but does not create or edit them yet.
 
-- Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups from a fresh
-  `projectGroups` read and opens a read-only page with the group's computer, creator and
+- Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups (the last accepted
+  list first, from the `project-groups` settings snapshot) from a fresh `projectGroups` read and opens a read-only page with the group's computer, creator and
   members.
 - Above the groups, the same page shows local project visibility per computer, as iOS
   (`ProjectVisibility.kt`, mirroring `WorkspaceSettingsCloud` / `ProjectVisibilitySections`).
   Catalog projects list at once; the `localProjects:listVisibleLocalProjects` registrations
-  (the last accepted read for the scope from process memory first) only add each project's
+  (the last accepted read for the scope first: process memory, then the `project-visibility`
+  settings snapshot in `AtomicCatalogStore`, display only) only add each project's
   Shared / Private state. Like desktop, `machines:listVisibleMachines` identifies the user's
   own computers: their unregistered projects read as Private and can be shared, those on
   other members' computers stay hidden, and if the machine read fails they read as Unknown.
