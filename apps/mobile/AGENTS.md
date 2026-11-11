@@ -2,6 +2,8 @@
 
 Native mobile clients maintained in the Lody public repository. Read
 [iOS rules](ios/AGENTS.md) or [Android rules](android/AGENTS.md) before editing.
+Rules both clients share live in [cross-platform rules](docs/rules/cross-platform.md);
+both platform indexes link them.
 
 - Keep iOS and Android builds independent of the root pnpm workspace. Run the
   platform commands in [README.md](README.md) from their documented directories.
