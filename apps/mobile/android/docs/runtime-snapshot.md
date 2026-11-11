@@ -1,6 +1,6 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` is a 118-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `4477100161b7ef8fa73b92bbe6f77d5e5d003f63` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
+`runtime/vendor/cloud-runtime` is a 118-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `6308c98c87a1fb848182035e49b55b0549385782` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
 
 For an intentional update:
 
@@ -36,6 +36,13 @@ answers `cmd` mention reads from the runtime's last shortcut listing while readi
 one, and reports a listing with an unreadable or pending owner index as incomplete rather
 than empty. The `promptShortcuts` list action (Settings and `shortcutBody`) lists what is
 readable; send-time `/shortcut:` expansion keeps the strict listing.
+
+The snapshot at `6308c98c` adds `androidEmulatorControl`: the signed `android-emulator/control`
+lifecycle call (list/start/status/stop, with `quality` sent only to hosts advertising
+`androidEmulatorQuality`), whose viewer URL arrives encrypted to a per-request key exactly as
+`iosSimulatorControl`'s does. The catalog adds `machineEmulators` (any OS whose CLI advertises
+`androidEmulator`) and each session's `androidEmulatorPreviewRequestId`. It also carries main's
+mention-expansion wording.
 
 The snapshot at `44771001` makes `listDir` (Project files) list the conversation's own
 folder, its worktree when it has one, through the machine's `file/list-dir` (capability
@@ -125,3 +132,12 @@ null → `shortcut_unavailable`, 60-second native deadline); `shortcut-commands.
 `shortcutSettings` (list / read / save). Both gates permit read, create and append of
 `shortcut-index:<workspace>:<owner>:<visibility>` and `shortcut-body:<id>`, whose
 stream-specific tokens come from `getStreamToken`.
+
+## Previews
+
+The bridge forwards `sessionPreview`, `iosSimulatorControl` and `androidEmulatorControl` to the
+snapshot unchanged, with the verified identity, and answers the runtime's `shareRequest`
+`previewToken` host call through native (`previewToken` event, `previewTokenReply`); other
+share-request operations stay unsupported. The network gates need no new streams: the preview calls
+use the existing machine RPC request and response streams. See [Remote previews](rules/previews.md).
+

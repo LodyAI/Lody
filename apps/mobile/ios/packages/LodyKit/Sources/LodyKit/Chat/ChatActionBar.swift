@@ -184,7 +184,7 @@ struct ChatActionBarContent: View {
   private var foldedEnvironment: some View {
     let items = environment
     let lead = items.first { $0.id == "machine" && $0.tint == "warning" }
-      ?? items.first { ["browser", "simulator"].contains($0.id) }
+      ?? items.first { ["browser", "simulator", "emulator"].contains($0.id) }
       ?? items[0]
     return Menu {
       ForEach(items) { item in
@@ -232,7 +232,7 @@ struct ChatActionBarContent: View {
 
   private static func identifier(_ id: String) -> String {
     switch id {
-    case "browser", "simulator": "session-preview"
+    case "browser", "simulator", "emulator": "session-preview"
     default: "session-bar:" + id
     }
   }
