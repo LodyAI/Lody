@@ -46,13 +46,14 @@ internal object ProjectGroupsModel {
 }
 
 /**
- * Settings › Projects: the workspace's Project groups (web Settings › Projects multi-repository
- * rows), each opening a read-only page with its computer, creator and members. Groups are created
- * and edited on desktop. Local project visibility stays on iOS and desktop for now.
+ * Settings › Projects: local project visibility per computer (iOS `ProjectVisibilityController`;
+ * the owner picks Shared or Private), then the workspace's Project groups (web Settings › Projects
+ * multi-repository rows), each opening a read-only page with its computer, creator and members.
+ * Groups are created and edited on desktop.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService?, scope: RuntimeScope?, onBack: () -> Unit) {
+internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService?, scope: RuntimeScope?, visibilityService: ProjectVisibilityService? = null, onBack: () -> Unit) {
     val colors = LodyTheme.colors
     val tasks = rememberCoroutineScope()
     var groups by remember(scope) { mutableStateOf<List<ProjectGroup>?>(null) }
@@ -70,7 +71,9 @@ internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService
         catch (_: Exception) { failed = true } // A failed read keeps the last list.
         finally { loading = false }
     }
+    val visibility = remember(visibilityService, scope) { if (visibilityService != null && scope != null) ProjectVisibilityState(visibilityService, scope) else null }
     LaunchedEffect(service, scope) { refresh() }
+    LaunchedEffect(visibility) { visibility?.refresh() }
     val machineNames = home.snapshot?.machineNames.orEmpty()
     val open = groups?.firstOrNull { it.id == openId }
     if (open != null) {
@@ -86,11 +89,12 @@ internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService
     }) { padding ->
         PullToRefreshBox(
             isRefreshing = pulling,
-            onRefresh = { tasks.launch { pulling = true; try { refresh() } finally { pulling = false } } },
+            onRefresh = { tasks.launch { pulling = true; try { launch { visibility?.refresh() }; refresh() } finally { pulling = false } } },
             modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         ) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + LodySpacing.xxl)) {
-                if (loading && !pulling) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                if ((loading || visibility?.loading == true || visibility?.writing == true) && !pulling) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                if (visibility != null) projectVisibility(visibility, home)
                 if (failed) item(key = "notice") {
                     Row(Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg, vertical = LodySpacing.sm), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
@@ -175,6 +179,85 @@ private fun ProjectGroupPage(group: ProjectGroup, home: ChatListUiState, machine
                     Text(stringResource(R.string.project_groups_read_only), style = LodyTheme.typography.footnote, color = colors.textSecondary,
                         modifier = Modifier.padding(horizontal = LodySpacing.lg, vertical = LodySpacing.sm))
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Local project visibility, one group per computer (iOS `ProjectVisibilitySections`): the scope
+ * hint, each project with its state, and for the owner a menu of Shared / Private. Changes need a
+ * live read; a failed read or an unknown write says so and offers a fresh read.
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.projectVisibility(state: ProjectVisibilityState, home: ChatListUiState) {
+    val machines = ProjectVisibilityModel.machines(state.snapshot, home.snapshot)
+    if (state.failed || state.unconfirmed) item(key = "visibility-notice") {
+        val tasks = rememberCoroutineScope()
+        val colors = LodyTheme.colors
+        Row(Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg, vertical = LodySpacing.sm), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
+            Icon(LodyIcons.Alert, null, Modifier.size(LodyIconSize.md), tint = colors.textSecondary)
+            Text(stringResource(if (state.unconfirmed) R.string.project_visibility_unconfirmed else R.string.project_visibility_load_failed),
+                Modifier.weight(1f), style = LodyTheme.typography.footnote, color = colors.textSecondary)
+            TextButton(onClick = { tasks.launch { state.refresh() } }) { Text(stringResource(R.string.chat_retry)) }
+        }
+    }
+    item(key = "visibility-hint") {
+        Text(stringResource(R.string.project_visibility_hint), style = LodyTheme.typography.footnote, color = LodyTheme.colors.textSecondary,
+            modifier = Modifier.padding(horizontal = LodySpacing.xxl, vertical = LodySpacing.sm))
+    }
+    if (machines.isEmpty() && state.live) item(key = "visibility-empty") {
+        Text(stringResource(R.string.project_visibility_empty), style = LodyTheme.typography.subhead, color = LodyTheme.colors.textSecondary,
+            modifier = Modifier.padding(horizontal = LodySpacing.xxl, vertical = LodySpacing.md))
+    }
+    machines.forEach { machine ->
+        item(key = "visibility-machine-${machine.machineId}") {
+            val name = home.snapshot?.machineNames?.get(machine.machineId)?.takeIf { it.isNotEmpty() } ?: machine.machineId
+            SettingsGroup(name) { machine.items.forEach { VisibilityLine(it, state) } }
+        }
+    }
+    if (machines.isNotEmpty()) item(key = "visibility-footer") {
+        Text(stringResource(R.string.project_visibility_footer), style = LodyTheme.typography.footnote, color = LodyTheme.colors.textSecondary,
+            modifier = Modifier.padding(horizontal = LodySpacing.xxl, vertical = LodySpacing.sm))
+    }
+}
+
+@Composable
+private fun VisibilityLine(item: ProjectVisibilityModel.Item, state: ProjectVisibilityState) {
+    val colors = LodyTheme.colors
+    val tasks = rememberCoroutineScope()
+    var open by remember(item.id) { mutableStateOf(false) }
+    val value = stringResource(when (item.state) {
+        ProjectVisibilityModel.State.Shared -> R.string.project_visibility_shared_short
+        ProjectVisibilityModel.State.Private -> R.string.project_visibility_private
+        ProjectVisibilityModel.State.Unknown -> R.string.project_visibility_unknown
+    })
+    val glyph = when (item.state) {
+        ProjectVisibilityModel.State.Shared -> LodyIcons.User
+        ProjectVisibilityModel.State.Private -> LodyIcons.Lock
+        ProjectVisibilityModel.State.Unknown -> LodyIcons.Info
+    }
+    val row = item.editable
+    Box {
+        SettingsLine(
+            item.title, LodyIcons.Folder,
+            item.path ?: stringResource(R.string.project_visibility_others),
+            onClick = if (row != null && state.editable) ({ open = true }) else null,
+            trailing = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
+                    Icon(glyph, null, Modifier.size(LodyIconSize.sm), tint = colors.textSecondary)
+                    Text(value, style = LodyTheme.typography.body, color = colors.textSecondary)
+                }
+            },
+        )
+        if (row != null) DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.align(Alignment.CenterEnd)) {
+            listOf(true to R.string.project_visibility_shared, false to R.string.project_visibility_private).forEach { (shared, label) ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(label)) },
+                    leadingIcon = { Icon(if (shared) LodyIcons.User else LodyIcons.Lock, null, Modifier.size(LodyIconSize.sm)) },
+                    trailingIcon = { if (row.sharedWithTeam == shared) Icon(LodyIcons.Check, null, Modifier.size(LodyIconSize.sm)) },
+                    onClick = { open = false; tasks.launch { state.set(row, shared) } },
+                )
             }
         }
     }

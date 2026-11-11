@@ -196,6 +196,7 @@ class HomeActivity : ComponentActivity() {
                                 shortcutSettings = remember { RuntimeShortcutSettingsService(app.runtimeOwner) },
                                 settingsCache = app.settingsCache,
                                 githubSettings = remember { LiveGitHubSettingsService(app.account) },
+                                projectVisibility = remember { LiveProjectVisibilityService(app.account) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },
                                 onSetArchived = workspace?.let { selected ->

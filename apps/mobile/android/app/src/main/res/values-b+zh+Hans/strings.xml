@@ -806,6 +806,16 @@
     <plurals name="project_group_members">
         <item quantity="other">%d 个仓库或文件夹</item>
     </plurals>
+    <string name="project_visibility_hint">选择工作区中谁可以看到每个项目。</string>
+    <string name="project_visibility_footer">不会删除文件或历史记录。</string>
+    <string name="project_visibility_empty">当前工作区暂无已注册的本地项目。</string>
+    <string name="project_visibility_shared">工作区可见</string>
+    <string name="project_visibility_shared_short">共享</string>
+    <string name="project_visibility_private">仅自己可见</string>
+    <string name="project_visibility_unknown">未知</string>
+    <string name="project_visibility_others">属于其他成员</string>
+    <string name="project_visibility_load_failed">无法载入项目可见性，载入前不能修改。</string>
+    <string name="project_visibility_unconfirmed">无法确认修改结果，请重新载入查看当前可见性。</string>
     <string name="project_groups_header">项目组</string>
     <string name="project_groups_empty">这个工作区还没有项目组。</string>
     <string name="project_groups_untitled">未命名项目组</string>
