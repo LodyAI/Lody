@@ -258,8 +258,10 @@ P-256 ephemeral key and nonce before the new device reveals its own key. Both
 devices derive the same six-digit SAS: the new device shows it, and the approver
 signs only after the person types a matching code (`approveAutomaticPairing(id,
 code)`; the review DTO omits it). The third wrong entry declines the request on
-that approver; a relay `declined` write that fails is resent on later discovery rounds
-until delivered or expired. A restarted approver cannot regain attempts: its new
+that approver. Lockout never waits for the relay (the hosted client queues mutations
+while offline): the native decline is bounded to five seconds, one `declined` write is
+kept outstanding, and a failed one is resent on later discovery rounds until delivered
+or expired. A restarted approver cannot regain attempts: its new
 commitment differs from the relay's frozen first responder, so the request is no
 longer approvable anywhere. Separate HKDF labels derive the
 128-bit secret used by the existing account request/approval HMAC workflow;

@@ -586,13 +586,20 @@ describe('portable account pairing workflow', () => {
       if (automatic) {
         const contexts = new Map<string, E2eeAutomaticPairingRecord>();
         let relayOutage = false;
+        // A hosted client queues mutations while offline: a held terminal write never settles.
+        let releaseTerminal: (() => void) | undefined;
+        let terminalHold: Promise<void> | undefined;
+        let terminalWrites = 0;
         const discovery: AutomaticPairingRelay = {
           pending: () =>
             Effect.sync(() =>
               structuredClone([...contexts.values()].filter((row) => row.state === 'pending'))
             ),
           read: (id) => Effect.sync(() => structuredClone(contexts.get(id) ?? null)),
-          exchange: (command) =>
+          exchange: (command) => {
+            if (command.terminal) terminalWrites += 1;
+            const held = command.terminal ? terminalHold : undefined;
+            const write = () =>
             relayOutage
               ? Effect.fail(new Error('synthetic relay outage'))
               : Effect.sync(() => {
@@ -607,7 +614,9 @@ describe('portable account pairing workflow', () => {
                   if (command.reveal) row.reveal ??= structuredClone(command.reveal);
                   if (command.terminal) row.state = command.terminal;
                   return structuredClone(row);
-                }),
+                });
+            return held ? Effect.promise(() => held).pipe(Effect.flatMap(write)) : write();
+          },
         };
         let lostReply = true;
         const requestingRuntime = {
@@ -632,6 +641,7 @@ describe('portable account pairing workflow', () => {
           }),
         } as unknown as E2eeWorkspaceRuntime;
         let lostApprovalReply = true;
+        let nativeDeclines = 0;
         const approvingRuntime = {
           inspectAccountPairing: (value: string) =>
             Effect.runPromise(approver.inspectAccountPairing(value)),
@@ -645,8 +655,10 @@ describe('portable account pairing workflow', () => {
             }
             return result;
           },
-          declineAccountPairing: (input: Parameters<typeof approver.declineAccountPairing>[0]) =>
-            Effect.runPromise(approver.declineAccountPairing(input)),
+          declineAccountPairing: (input: Parameters<typeof approver.declineAccountPairing>[0]) => {
+            nativeDeclines += 1;
+            return Effect.runPromise(approver.declineAccountPairing(input));
+          },
           readIdentity: async () => ({ workspaceId: 'w1', genesisHash: '11'.repeat(32) }),
         } as unknown as E2eeWorkspaceRuntime;
         const common = {
@@ -704,11 +716,23 @@ describe('portable account pairing workflow', () => {
               await expect(
                 desktop.approveAutomaticPairing(reviews[0]!.id, wrong)
               ).rejects.toMatchObject({ code: 'pairing-code-mismatch', attemptsLeft });
-            // The relay is unreachable when the request ends: the lockout still holds locally.
-            relayOutage = true;
+            // Offline: the relay holds the `declined` write. Lockout still returns at once,
+            // the native decline runs exactly once, and discovery is not blocked or flooded.
+            terminalHold = new Promise((resolve) => (releaseTerminal = resolve));
+            const writesBefore = terminalWrites;
             await expect(desktop.approveAutomaticPairing(reviews[0]!.id, wrong)).rejects.toThrow(
               'e2ee_pairing-code-locked'
             );
+            expect(nativeDeclines).toBe(1);
+            expect(await desktop.pendingAutomaticPairing()).toEqual([]);
+            expect(await desktop.pendingAutomaticPairing()).toEqual([]);
+            expect(terminalWrites - writesBefore).toBe(1);
+            terminalHold = undefined;
+            expect((await phone.automaticPairingState('w1'))?.phase).toBe('waiting');
+            // The held write finally fails; the next discovery round resends it.
+            relayOutage = true;
+            releaseTerminal!();
+            await new Promise((resolve) => setTimeout(resolve, 0));
             relayOutage = false;
             expect((await phone.automaticPairingState('w1'))?.phase).toBe('waiting');
             // The request is void: even the right code can no longer admit the device.

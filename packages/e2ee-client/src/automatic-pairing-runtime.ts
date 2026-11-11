@@ -50,6 +50,8 @@ type Entry = {
   codeFailures: number;
   /** Locked out locally, but the relay has not yet recorded `declined` for the new device. */
   declineUndelivered: boolean;
+  /** One relay `declined` write is outstanding; the hosted client may queue it offline. */
+  declineSending: boolean;
   phase: E2eeAutomaticPairingState['phase'];
 };
 const refuse = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code });
@@ -59,6 +61,8 @@ const id = (crypto: Crypto) =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
     b.toString(16).padStart(2, '0')
   ).join('');
+/** Bound for the native decline at lockout; the hosted client may hold calls while offline. */
+const LOCKOUT_DECLINE_TIMEOUT_MS = 5_000;
 /** Wrong codes an approving device accepts for one request before it ends that request. */
 export const AUTOMATIC_PAIRING_CODE_ATTEMPTS = 3;
 const sameCode = (entered: string, expected: string) => {
@@ -118,6 +122,7 @@ export function makeAutomaticPairingRuntime(options: {
     authorizing: false,
     codeFailures: 0,
     declineUndelivered: false,
+    declineSending: false,
     phase: 'preparing',
   });
   const dispose = (value: Entry) => {
@@ -138,6 +143,23 @@ export function makeAutomaticPairingRuntime(options: {
   const review = (value: Entry, requestId: string, deviceName = value.context.deviceName) => {
     const { comparisonCode: _hidden, ...state } = snapshot(value);
     return { ...state, deviceName, requestId } satisfies E2eeAutomaticPairingReview;
+  };
+  /** Never awaited: a hosted mutation can stay queued while offline. One write at a time;
+   * a failure leaves the entry undelivered for the next discovery round. */
+  const sendDecline = (id: string, value: Entry) => {
+    if (!value.declineUndelivered || value.declineSending) return;
+    value.declineSending = true;
+    void options
+      .run(relay.exchange({ id, terminal: 'declined' }))
+      .then(
+        () => {
+          value.declineUndelivered = false;
+        },
+        () => undefined
+      )
+      .finally(() => {
+        value.declineSending = false;
+      });
   };
   const checked = (value: Entry, row: E2eeAutomaticPairingRecord) =>
     Effect.try({
@@ -393,15 +415,7 @@ export function makeAutomaticPairingRuntime(options: {
         dispose(value);
         approving.delete(id);
       }
-    for (const [id, value] of approving)
-      if (value.declineUndelivered)
-        yield* value.gate.withPermit(
-          Effect.gen(function* () {
-            if (!value.declineUndelivered) return;
-            const told = yield* Effect.result(relay.exchange({ id, terminal: 'declined' }));
-            if (Result.isSuccess(told)) value.declineUndelivered = false;
-          })
-        );
+    for (const [id, value] of approving) sendDecline(id, value);
     for (const value of requesting.values()) yield* expires(value);
     for (const [id, expiry] of notified) if (expiry <= clock) notified.delete(id);
     const rows = (yield* relay.pending()).slice(0, 10);
@@ -590,18 +604,20 @@ export function makeAutomaticPairingRuntime(options: {
                       Object.assign(refuse('pairing-code-mismatch'), { attemptsLeft })
                     );
                   // End the request on this device first, so no later entry can sign it,
-                  // then tell the new device and the service; either may be unreachable.
+                  // then tell the service and the new device; either may be unreachable.
                   const pairingString = value.code;
                   const requestId = value.nativeRequestId;
                   value.phase = 'declined';
                   dispose(value);
-                  const told = yield* Effect.result(relay.exchange({ id, terminal: 'declined' }));
-                  // `pending()` resends until delivered or expired; the entry stays declined.
-                  value.declineUndelivered = Result.isFailure(told);
                   if (pairingString && requestId && runtime.declineAccountPairing)
                     yield* Effect.result(
-                      promise(() => runtime.declineAccountPairing!({ pairingString, requestId }))
+                      promise(() =>
+                        runtime.declineAccountPairing!({ pairingString, requestId })
+                      ).pipe(Effect.timeout(LOCKOUT_DECLINE_TIMEOUT_MS))
                     );
+                  // `pending()` resends until delivered or expired; the entry stays declined.
+                  value.declineUndelivered = true;
+                  sendDecline(id, value);
                   return yield* Effect.fail(refuse('pairing-code-locked'));
                 }
                 value.authorizing = true;

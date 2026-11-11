@@ -348,4 +348,74 @@ describe('remote encrypted machine approval', () => {
       container.remove();
     }
   });
+
+  it('after another machine used the command, a refused approval shows that reason and removes Allow', async () => {
+    const { E2eeRemoteMachinePairing } =
+      await import('../src/components/pages/e2ee-remote-machine-pairing');
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const pairingSessionId = '11'.repeat(16),
+      summary = Array(8).fill('12345678').join(' ');
+    let state: 'claimed' | 'conflict' = 'claimed';
+    const material = {
+      ok: true as const,
+      type: 'prepare' as const,
+      machineId: 'synthetic-machine',
+      pairingSessionId,
+      signingPublicKey: '22'.repeat(32),
+      encryptionPublicKey: '33'.repeat(32),
+      possessionSignature: '44'.repeat(64),
+      credentialHash: '55'.repeat(32),
+      bindingSignature: '66'.repeat(64),
+      protection: 'file' as const,
+    };
+    const view = () =>
+      state === 'claimed'
+        ? { pairingSessionId, summary, material, status: state, expiresAt: 2_000_000, location: null }
+        : {
+            pairingSessionId,
+            summary: null,
+            material,
+            status: state,
+            noAdmissionReserved: true,
+            expiresAt: 2_000_000,
+            location: null,
+          };
+    let admitted = false;
+    const runtime = {
+      beginRemoteMachinePairing: async () => ({ ...view(), command: 'lody machine pair --offer x' }),
+      inspectRemoteMachinePairing: async () => view(),
+      // The host rechecks the session before signing and refuses the cancelled command.
+      approveRemoteMachinePairing: async () => {
+        if (state !== 'claimed') throw new Error('e2ee_conflict');
+        admitted = true;
+        return { admitted: true, ready: false };
+      },
+      cancelRemoteMachinePairing: async () => ({ ...view(), status: 'cancelled' as const }),
+    };
+    const button = (key: string) =>
+      Array.from(container.querySelectorAll('button')).find((item) => item.textContent === key);
+    try {
+      await act(async () =>
+        root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
+      );
+      await act(async () => button('e2ee.remoteMachine.create')!.click());
+      await act(async () => button('e2ee.remoteMachine.check')!.click());
+      expect(button('e2ee.remoteMachine.allow')).toBeDefined();
+      // A second machine claims the same command before the owner clicks Allow.
+      state = 'conflict';
+      await act(async () => button('e2ee.remoteMachine.allow')!.click());
+      expect(admitted).toBe(false);
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        'e2ee.remoteMachine.error'
+      );
+      expect(container.textContent).toContain('e2ee.remoteMachine.status.claimedByAnotherMachine');
+      expect(button('e2ee.remoteMachine.allow')).toBeUndefined();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
 });

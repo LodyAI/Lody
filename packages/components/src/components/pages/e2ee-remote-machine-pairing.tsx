@@ -214,7 +214,14 @@ export function E2eeRemoteMachinePairing({
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
-                    await approve(workspaceId, session.pairingSessionId, preview.summary ?? '');
+                    try {
+                      await approve(workspaceId, session.pairingSessionId, preview.summary ?? '');
+                    } catch (cause) {
+                      // Show why approval stopped (e.g. another machine used the command);
+                      // a failed refresh never replaces the original error.
+                      await refresh().catch(() => undefined);
+                      throw cause;
+                    }
                     await refresh();
                   })
                 }
