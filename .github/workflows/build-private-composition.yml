@@ -1,0 +1,133 @@
+name: Build private composition
+run-name: private-build-${{ inputs.request-id }}
+
+# Runs the private Lody composition's own build on public runners. Build steps
+# live in loro-dev/lody (`.github/actions/public-runner-build` at the requested
+# SHA); this workflow only validates the request, checks out read-only and uploads
+# the encrypted result. See ../workflow-security.md#private-composition-builds.
+
+on:
+  workflow_dispatch:
+    inputs:
+      request-id:
+        description: Caller run identity, used to find this run
+        required: true
+        type: string
+      private-sha:
+        description: Admitted loro-dev/lody commit
+        required: true
+        type: string
+      oss-sha:
+        description: Admitted LodyAI/Lody commit for the lody-oss submodule
+        required: true
+        type: string
+      targets:
+        description: 'JSON array of {"target", "os"} pairs'
+        required: true
+        type: string
+      request:
+        description: Non-secret build request passed to the private build action
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          REQUEST_ID: ${{ inputs.request-id }}
+          PRIVATE_SHA: ${{ inputs.private-sha }}
+          OSS_SHA: ${{ inputs.oss-sha }}
+          TARGETS: ${{ inputs.targets }}
+          REQUEST: ${{ inputs.request }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$REQUEST_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$ ]]
+          [[ "$PRIVATE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$OSS_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "${#REQUEST}" -le 32768
+          jq -e 'type == "object"' <<<"$REQUEST" >/dev/null
+          # Standard hosted runners only: they are free for public repositories.
+          matrix=$(jq -c '
+            if type == "array" and length >= 1 and length <= 8 and
+              all(.[]; type == "object" and (keys == ["os", "target"]) and
+                (.target | type == "string" and test("^[a-z0-9][a-z0-9-]{0,31}$")) and
+                (.os | IN("macos-15", "windows-2022", "ubuntu-latest", "ubuntu-24.04-arm"))) and
+              (map(.target) | unique | length) == length
+            then {include: .} else error("invalid targets") end
+          ' <<<"$TARGETS")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    # Deployment branch policy limits these credentials to main.
+    environment: private-build
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: source
+        with:
+          app-id: ${{ vars.PRIVATE_SOURCE_APP_ID }}
+          private-key: ${{ secrets.PRIVATE_SOURCE_APP_PRIVATE_KEY }}
+          owner: loro-dev
+          repositories: lody
+          permission-contents: read
+      - uses: actions/checkout@v4
+        with:
+          repository: loro-dev/lody
+          ref: ${{ inputs.private-sha }}
+          token: ${{ steps.source.outputs.token }}
+          persist-credentials: false
+      - run: test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+        env:
+          PRIVATE_SHA: ${{ inputs.private-sha }}
+      # Resolved from the private checkout above, at the requested SHA.
+      - uses: ./.github/actions/public-runner-build
+        with:
+          target: ${{ matrix.target }}
+          oss-sha: ${{ inputs.oss-sha }}
+          request: ${{ inputs.request }}
+          output: ${{ runner.temp }}/private-build-output
+      - uses: wibus-wee/buildgraph/upload@c3c1733b1a3412c2c640517f8f2473f7a429badd
+        id: upload
+        with:
+          path: ${{ runner.temp }}/private-build-output
+          key: ${{ secrets.BUILDGRAPH_ARTIFACT_KEY }}
+          retention-days: '7'
+      # Public pointer to the encrypted artifact; holds no build output.
+      - name: Write build index
+        env:
+          REQUEST_ID: ${{ inputs.request-id }}
+          TARGET: ${{ matrix.target }}
+          PRIVATE_SHA: ${{ inputs.private-sha }}
+          OSS_SHA: ${{ inputs.oss-sha }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/private-build-index"
+          jq -n --arg request "$REQUEST_ID" --arg target "$TARGET" --arg private "$PRIVATE_SHA" \
+            --arg oss "$OSS_SHA" --arg id "$ARTIFACT_ID" --arg digest "$ARTIFACT_DIGEST" \
+            '{schema:1,requestId:$request,target:$target,privateSha:$private,ossSha:$oss,artifactId:$id,artifactDigest:$digest}' \
+            > "$RUNNER_TEMP/private-build-index/index.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-build-index-${{ matrix.target }}
+          path: ${{ runner.temp }}/private-build-index/index.json
+          if-no-files-found: error
+          retention-days: 7
