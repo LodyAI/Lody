@@ -33,6 +33,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
@@ -924,6 +926,8 @@ private const val RUN_MODE = "mode"
 
 private val RunningStatuses = setOf("running", "initializing", "processing", "in_progress", "queued")
 
+private val HeaderFade = 24.dp
+
 /** Floating header: title over the tappable machine subtitle, with conditional Tabs and More. */
 @Composable
 internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit, machine: String = "", machineOnline: Boolean? = null, loadMachine: suspend () -> MachinePanelData = { MachinePanelData() }, onBrowseFiles: (() -> Unit)? = null, previews: PreviewMenu? = null) {
@@ -942,8 +946,17 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
         Modifier
             .align(Alignment.TopStart)
             .fillMaxWidth()
-            // The page colour fades out under the header so the transcript reads beneath it.
-            .background(Brush.verticalGradient(0f to colors.bgBase, 0.7f to colors.bgBase.copy(alpha = 0.85f), 1f to colors.bgBase.copy(alpha = 0f)))
+            // The page colour stays opaque behind the title and machine line, then fades out below the
+            // header so the transcript reads beneath it without colliding with the subtitle.
+            .drawBehind {
+                val fade = HeaderFade.toPx()
+                drawRect(Brush.verticalGradient(
+                    0f to colors.bgBase,
+                    size.height / (size.height + fade) to colors.bgBase.copy(alpha = 0.92f),
+                    1f to colors.bgBase.copy(alpha = 0f),
+                    endY = size.height + fade,
+                ), size = androidx.compose.ui.geometry.Size(size.width, size.height + fade))
+            }
             .statusBarsPadding()
             .padding(horizontal = LodySpacing.sm, vertical = LodySpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
@@ -1361,8 +1374,9 @@ internal fun ChatComposer(
  * full-width shape: the computer (menu names it), the context (PR or branch with ±diff; menu
  * opens the PR or copies the branch) and, pinned trailing, the repository action as a neutral
  * split capsule. Colour is for status only, so Send stays the one accent. It never scrolls: the
- * first stage that fits on one line wins — labels capped, then the diff hidden — and only at
- * very large text does the action move to its own row. iOS: `ChatActionBarView`.
+ * first stage that fits on one line wins — the diff hidden, then the context label narrowed step
+ * by step — and the narrowest stage clips the context instead of ever wrapping. iOS:
+ * `ChatActionBarView`.
  */
 @Composable
 internal fun ChatActionBar(
@@ -1380,39 +1394,41 @@ internal fun ChatActionBar(
     val context = bar.group != null || bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
     if (!context && !diff && bar.actions.isEmpty() && relations == null) return
-    @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
+    @Composable fun Leading(diffDot: Boolean, labelMax: Dp, modifier: Modifier = Modifier) {
         Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             relations?.invoke()
-            if (bar.group != null) GroupContextItem(bar, bar.group, diffDot, onCopied, panelFor)
-            else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel, busy = pullRequestBusy)
+            if (bar.group != null) GroupContextItem(bar, bar.group, diffDot, onCopied, panelFor, labelMax)
+            else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel, busy = pullRequestBusy, labelMax = labelMax)
         }
     }
     @Composable fun Action() {
         if (writing != null) ActionSplit(listOf(writing), onAction, pending = true)
         else if (bar.actions.isNotEmpty()) ActionSplit(bar.actions, onAction)
     }
-    @Composable fun Line(fill: Boolean, diffDot: Boolean) {
+    @Composable fun Line(fill: Boolean, diffDot: Boolean, labelMax: Dp, last: Boolean = false) {
         Row(
             if (fill) Modifier.fillMaxWidth() else Modifier,
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
         ) {
-            Leading(diffDot)
-            if (fill) Spacer(Modifier.weight(1f))
-            Action()
-        }
-    }
-    FirstThatFits(
-        Modifier.padding(horizontal = LodySpacing.md).padding(top = LodySpacing.xs).fillMaxWidth(),
-        stages = listOf({ fill -> Line(fill, diffDot = false) }, { fill -> Line(fill, diffDot = true) }),
-    ) {
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
-                Leading(diffDot = true, Modifier.weight(1f, fill = false))
+            // The last stage clips the context rather than wrapping or pushing the action off.
+            if (last) Leading(diffDot, labelMax, Modifier.weight(1f).clipToBounds())
+            else {
+                Leading(diffDot, labelMax)
+                if (fill) Spacer(Modifier.weight(1f))
             }
             Action()
         }
     }
+    // Everything stays on one line: first the diff goes, then the context label (branch / PR /
+    // group) narrows step by step; the last stage is shown even when it still does not fit.
+    val caps = listOf(160.dp, 120.dp, 96.dp, 72.dp, 56.dp, 40.dp)
+    val stages: List<@Composable (Boolean) -> Unit> = listOf<@Composable (Boolean) -> Unit>({ fill -> Line(fill, diffDot = false, caps.first()) }) +
+        caps.map { cap -> @Composable { fill: Boolean -> Line(fill, diffDot = true, cap) } }
+    FirstThatFits(
+        Modifier.padding(horizontal = LodySpacing.md).padding(top = LodySpacing.xs).fillMaxWidth(),
+        stages = stages,
+    ) { Line(fill = true, diffDot = true, caps.last(), last = true) }
 }
 
 /**
@@ -1511,6 +1527,7 @@ private fun ContextItem(
     panel: PullRequestPanel?,
     modifier: Modifier = Modifier,
     busy: Boolean = false,
+    labelMax: Dp = 160.dp,
 ) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
@@ -1541,7 +1558,7 @@ private fun ContextItem(
                 else Icon(LodyIcons.Branch, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
                 Text(label, style = type.subhead, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                     // Not weighted: the fitting probe measures unbounded, where a weight would read as zero.
-                    modifier = Modifier.widthIn(max = 160.dp))
+                    modifier = Modifier.widthIn(max = labelMax))
             }
             if (diff && (!diffDot || !showsContext)) {
                 val style = type.subhead.copy(fontFeatureSettings = "tnum")
@@ -1621,6 +1638,7 @@ private fun GroupContextItem(
     diffDot: Boolean,
     onCopied: (String) -> Unit,
     panelFor: ((CatalogPullRequest) -> PullRequestPanel)?,
+    labelMax: Dp = 160.dp,
 ) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
@@ -1650,7 +1668,7 @@ private fun GroupContextItem(
             Icon(LodyIcons.ProjectGroup, contentDescription = null,
                 tint = if (failing) colors.dangerDefault else colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
             Text(label, style = type.subhead, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 160.dp))
+                modifier = Modifier.widthIn(max = labelMax))
             if (diff && !diffDot) {
                 val style = type.subhead.copy(fontFeatureSettings = "tnum")
                 Text("+${bar.added}", style = style, color = colors.diffAddedText, maxLines = 1)
