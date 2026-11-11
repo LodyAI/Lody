@@ -100,12 +100,29 @@ import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { LedgerFeedError } from '@lody/e2ee-core';
 import { toHex, fromHex } from '../../src/bytes';
+
+// Synthetic native iroh port: records what the portable host hands it.
+const irohFixture = {
+  openedKey: undefined as string | undefined,
+  handedSeed: undefined as Uint8Array | undefined,
+  targets: [] as string[],
+  connected: false,
+  requests: [] as string[],
+  machine: undefined as string | undefined,
+  // Explicit signals for holding the native open in flight.
+  gate: undefined as Promise<void> | undefined,
+  release: undefined as (() => void) | undefined,
+  entered: undefined as (() => void) | undefined,
+  closed: 0,
+};
 import {
   decodeMemberKeyPackage,
+  emailMemberRequestId,
   encodeMemberKeyPackage,
   memberPairingOffer,
+  signMemberOffer,
 } from '../../src/member';
-import type { E2eeMemberRequest } from '@lody/cloud-api';
+import type { E2eeMemberOffer, E2eeMemberRequest } from '@lody/cloud-api';
 let runtimePorts: Layer.Layer<PersonalHostPorts, unknown>;
 let runtime: E2eeWorkspaceRuntime;
 let runtimeAccount = 'account';
@@ -142,6 +159,9 @@ let offer: PersonalPairingOffer,
   // slot keeps reporting an installed key.
   watchedRecipient: string | undefined,
   watchedFrom = 0,
+  // Backoffs the runtime's member key delivery waited; `holdDeliveryRetry` never ends one.
+  deliverySleeps: number[] = [],
+  holdDeliveryRetry = false,
   failKeys = false,
   foreign = false;
 let databasePrefix = 'personal';
@@ -183,6 +203,9 @@ let memberRelay: {
   claimLies?: boolean;
   /** Request ids an approver rejected. */
   rejected?: Set<string>;
+  /** The latest invitation this device endorsed, as the relay stored it. */
+  invitation?: E2eeMemberOffer;
+  invitedEmail?: string;
 } = { calls: [], others: [] };
 let loseNextAppendReply = false;
 /** The relay authenticates the admitted device's own credential, as the real one does. */
@@ -215,10 +238,12 @@ function memberRequestFor(keyPackageHex: string, accountId: string): E2eeMemberR
           ? 'rejected'
           : 'pending',
     expiresAt: request.expiresAt ?? 0,
+    offer: joinInvite,
   };
 }
-/** A synthetic joining device's public key package, signed by its own fresh key. */
-const memberApplicant = (seed: number, requestByte: number) =>
+/** A synthetic joining device's public key package, signed by its own fresh key. With an
+ * email invitation its request id is the one that invitation derives. */
+const memberApplicant = (seed: number, requestByte: number, email?: E2eeMemberOffer) =>
   Effect.gen(function* () {
     const genesis = Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash)));
     const applicant = yield* importBrowserDevice({
@@ -227,7 +252,13 @@ const memberApplicant = (seed: number, requestByte: number) =>
     }).pipe(Scope.provide(scope));
     const request = yield* prepareJoinRequest({
       genesis,
-      requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(requestByte))),
+      requestId: Result.getOrThrow(
+        Bytes.requestId(
+          email
+            ? fromHex(emailMemberRequestId(email.workspaceId, email.token))
+            : new Uint8Array(16).fill(requestByte)
+        )
+      ),
       userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(seed + 2))),
       encryptionPublicKey: applicant.enc,
       expiresAt: FIXED_NOW + 3_600_000,
@@ -253,10 +284,11 @@ const memberApplicant = (seed: number, requestByte: number) =>
       keyPackageHex,
       signingPublicKey: toHex(applicant.publicKey.toBytes()),
       requestId: toHex(request.requestId.toBytes()),
-      source: 'link' as const,
+      source: email ? ('email' as const) : ('link' as const),
       state: 'pending' as const,
       expiresAt: FIXED_NOW + 3_600_000,
-    };
+      offer: email ?? memberRelay.invitation!,
+    } satisfies E2eeMemberRequest;
   });
 let releasedReaders: { device: string; phase: string }[] = [];
 let loseBegin = false,
@@ -288,6 +320,8 @@ export async function boot(
   refusePuts = false;
   watchedRecipient = undefined;
   watchedFrom = 0;
+  deliverySleeps = [];
+  holdDeliveryRetry = false;
   session = undefined;
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -399,6 +433,12 @@ export async function boot(
             Effect.gen(function* () {
               memberRelayAccess(access);
               memberRelay.calls.push('invite:' + input.offer.mode);
+              // Like the relay: inviting an email that already has a pending invitation
+              // re-sends that one and answers with it.
+              if (input.email !== undefined && input.email === memberRelay.invitedEmail)
+                return { offer: memberRelay.invitation! };
+              memberRelay.invitation = input.offer;
+              memberRelay.invitedEmail = input.email;
               return { offer: input.offer };
             }),
           pending: (access) =>
@@ -701,6 +741,50 @@ export async function boot(
           }),
         rpc: (binding) =>
           indexedDbClientRpcOriginals({ databaseName: `${databasePrefix}-custody`, binding, mode }),
+        iroh: {
+          open: async (seed) => {
+            irohFixture.entered?.();
+            if (irohFixture.gate) await irohFixture.gate;
+            // Derive the public key the native endpoint would use from this exact seed.
+            irohFixture.openedKey = await Effect.runPromise(
+              Effect.scoped(
+                Effect.map(
+                  importBrowserDevice({
+                    signingPrivate: new Uint8Array(seed),
+                    encryptionPrivate: new Uint8Array(32).fill(7),
+                  }),
+                  (derived) => toHex(derived.publicKey.toBytes())
+                )
+              )
+            );
+            irohFixture.handedSeed = seed;
+            return {
+              hasConnection: async (id) => {
+                irohFixture.targets.push(id);
+                return irohFixture.connected;
+              },
+              warm: async () => {
+                irohFixture.connected = true;
+              },
+              call: async (_id, request) => {
+                irohFixture.requests.push(new TextDecoder().decode(request));
+                const envelope = JSON.parse(new TextDecoder().decode(request)) as { id: string };
+                const replies = [
+                  new TextEncoder().encode(
+                    JSON.stringify({ id: envelope.id, frame: 'cd'.repeat(150) })
+                  ),
+                ];
+                return {
+                  nextReply: async () => replies.shift() ?? null,
+                  cancel: () => {},
+                };
+              },
+              close: async () => {
+                irohFixture.closed++;
+              },
+            };
+          },
+        },
         drainOld: () => (session ? session.close() : Effect.void),
       });
       const remote = PersonalHostRemote.of({
@@ -1303,6 +1387,8 @@ export async function invoke(action: string) {
             );
             records.push(yield* signLedgerRecord(proposal, owner));
             retain();
+            if (machineId === 'fixture-machine')
+              irohFixture.machine = toHex(machine.publicKey.toBytes());
             return true;
           }
           case 'rpc':
@@ -1612,6 +1698,18 @@ export async function bootRuntime(withSharing = false) {
                 .slice(checked.historyStart, checked.length)
                 .map((record, index) => ({ position: checked.historyStart + index, record }))
         ),
+      // Only the injected backoff moves: the mailbox recovers while the retry waits.
+      keyDeliveryRetry: {
+        sleep: (ms) =>
+          Effect.suspend(() => {
+            deliverySleeps.push(ms);
+            return holdDeliveryRetry
+              ? Effect.never
+              : Effect.sync(() => {
+                  refusePuts = false;
+                });
+          }),
+      },
       run: async (program) => {
         if (executorOverride) return await executorOverride(program);
         const exit = await Effect.runPromiseExit(
@@ -1658,6 +1756,8 @@ let joinInvite: import('@lody/cloud-api').E2eeMemberOffer;
 let retainedJoin: PersonalPairingOffer;
 export async function bootJoiner(accountId: string) {
   memberRelay = { calls: [], others: [] };
+  // Retained without an endorsement, as builds before signed invitations wrote it: joining
+  // never relies on the signature, so such a join stays preparable and claimable.
   joinInvite = {
     version: 1,
     workspaceId: offer.workspaceId,
@@ -1892,8 +1992,53 @@ export async function runtimeInvoke(action: string) {
       case 'ledger':
         value = await runtime.ledgerView(offer.workspaceId);
         break;
+      case 'irohReady':
+        value = await runtime.irohReady!(offer.workspaceId, 'fixture-machine');
+        break;
+      case 'irohCall':
+        value = await runtime.irohCall!(
+          offer.workspaceId,
+          'fixture-machine',
+          { id: '11'.repeat(16), frame: 'ab'.repeat(200) },
+          1000
+        );
+        break;
+      case 'irohCloseDuringOpen': {
+        // Session closes while the first native open is still in flight.
+        irohFixture.closed = 0;
+        irohFixture.gate = new Promise((resolve) => (irohFixture.release = resolve));
+        const entered = new Promise<void>((resolve) => (irohFixture.entered = resolve));
+        const ready = runtime.irohReady!(offer.workspaceId, 'fixture-machine').then(
+          () => 'ready',
+          () => 'failed'
+        );
+        await entered;
+        let closeSettled = false;
+        const closing = runtime
+          .close(offer.workspaceId, 'account', runtimeLease)
+          .finally(() => (closeSettled = true));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const beforeRelease = { closeSettled, closed: irohFixture.closed };
+        irohFixture.release!();
+        await closing;
+        await ready;
+        irohFixture.gate = undefined;
+        irohFixture.entered = undefined;
+        value = { beforeRelease, closed: irohFixture.closed };
+        break;
+      }
+      case 'irohEvidence':
+        value = {
+          opener: irohFixture.openedKey,
+          device: (await runtime.status(offer.workspaceId)).signingPublicKey,
+          seedWiped: !!irohFixture.handedSeed?.every((byte) => byte === 0),
+          targets: [...new Set(irohFixture.targets)],
+          machine: irohFixture.machine,
+        };
+        break;
       case 'capabilities':
         value = {
+          iroh: !!runtime.irohReady && !!runtime.irohCall,
           rpc: !!runtime.prepareDispatch,
           sharing: !!runtime.readMachineSharing,
           manager: !!runtime.managementState,
@@ -2041,6 +2186,66 @@ export async function runtimeInvoke(action: string) {
           'automatic'
         );
         break;
+      case 'memberEmailInvite':
+        value = (
+          await runtime.createMemberInvitation!({
+            workspaceId: offer.workspaceId,
+            mode: 'email',
+            email: 'r@example.test',
+          })
+        ).mode;
+        break;
+      case 'memberEmailReinvite':
+        value = (
+          await runtime.createMemberInvitation!({
+            workspaceId: offer.workspaceId,
+            mode: 'email',
+            email: 'r@example.test',
+          })
+        ).token;
+        break;
+      case 'memberInvitationToken':
+        value = memberRelay.invitation!.token;
+        break;
+      case 'memberEmailApplicant':
+        memberRelay.item = await Effect.runPromise(memberApplicant(91, 0, memberRelay.invitation!));
+        value = memberRelay.item.requestId;
+        break;
+      case 'memberRelaySignedInvitation': {
+        // The relay endorses the same pins with a key of its own.
+        const relayKey = await Effect.runPromise(
+          importBrowserDevice({
+            signingPrivate: new Uint8Array(32).fill(97),
+            encryptionPrivate: new Uint8Array(32).fill(98),
+          }).pipe(Scope.provide(scope))
+        );
+        const { signature: _genuine, ...pins } = memberRelay.invitation!;
+        memberRelay.item = {
+          ...memberRelay.item!,
+          offer: await Effect.runPromise(
+            signMemberOffer({ ...pins, endorser: toHex(relayKey.publicKey.toBytes()) }, relayKey)
+          ),
+        };
+        value = true;
+        break;
+      }
+      case 'memberAlteredInvitation':
+        // A genuine signature over different pins (here, a later expiry).
+        memberRelay.item = {
+          ...memberRelay.item!,
+          offer: { ...memberRelay.invitation!, expiresAt: memberRelay.invitation!.expiresAt + 1 },
+        };
+        value = true;
+        break;
+      case 'memberGenuineInvitation':
+        memberRelay.item = { ...memberRelay.item!, offer: memberRelay.invitation! };
+        value = true;
+        break;
+      case 'memberReplayInvitation':
+        // Another device presents the same, already admitted email invitation.
+        memberRelay.item = await Effect.runPromise(memberApplicant(93, 0, memberRelay.invitation!));
+        value = memberRelay.item.requestId;
+        break;
       case 'memberSecondApplicant':
         memberRelay.others = [await Effect.runPromise(memberApplicant(71, 0x52))];
         value = memberRelay.others[0]!.requestId;
@@ -2068,6 +2273,28 @@ export async function runtimeInvoke(action: string) {
         break;
       case 'memberAdmitted':
         value = view().inspectState().devices.has(memberRelay.item!.signingPublicKey);
+        break;
+      // The mailbox refuses every envelope; only the applicant's slot reports its stores.
+      case 'memberRefuseKeys':
+        refusePuts = true;
+        watchedRecipient = memberRelay.item!.signingPublicKey;
+        watchedFrom = putAttempts.length;
+        value = true;
+        break;
+      case 'memberHoldRetry':
+        holdDeliveryRetry = true;
+        value = true;
+        break;
+      case 'memberAcceptKeys':
+        refusePuts = false;
+        value = true;
+        break;
+      case 'memberDeliveries':
+        value = {
+          items: (await runtime.memberKeyDeliveries!(offer.workspaceId)).items,
+          sleeps: deliverySleeps,
+          envelopes: putAttempts.slice(watchedFrom).map((item) => item.stored),
+        };
         break;
       case 'memberRecordCount':
         value = view().length;

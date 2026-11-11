@@ -61,7 +61,14 @@ open class WebViewRuntime internal constructor(
                     group.getString("id"), group.optString("name"),
                     group.optString("machineId").takeIf { !group.isNull("machineId") && it.isNotEmpty() },
                     group.optBoolean("conflict"),
-                    (0 until members.length()).map { members.getJSONObject(it).optString("label") },
+                    (0 until members.length()).map { members.getJSONObject(it) }.map { member ->
+                        ProjectGroupMember(
+                            member.optString("id"), member.optString("kind"), member.optString("label"), member.optString("path"),
+                            member.optString("repoFullName").takeIf { it.isNotEmpty() },
+                            member.optString("machineId").takeIf { it.isNotEmpty() },
+                        )
+                    },
+                    group.optString("ownerUserId"),
                 )
             })
         }
@@ -71,6 +78,13 @@ open class WebViewRuntime internal constructor(
         is RuntimeCommand.ScheduleCommand -> {
             val value = ScheduleJson.checked(call("scheduleCommand", JSONArray().put(ScheduleJson.command(command.request)), CommandDeadline.WRITE))
             RuntimeResult.ScheduleWritten(value.optString("scheduleId").ifEmpty { command.request.scheduleId })
+        }
+        is RuntimeCommand.DecideProposal -> {
+            val request = JSONObject().put("sessionId", command.sessionId).put("entryId", command.entryId)
+                .put("itemId", command.itemId).put("decision", if (command.accept) "accept" else "dismiss")
+            // Failures arrive in-band as `{error}` with the runtime's code, like schedule writes.
+            val value = ScheduleJson.checked(call("decideProposal", JSONArray().put(request), CommandDeadline.WRITE))
+            RuntimeResult.ProposalDecided(value.optString("outcome"), value.optString("scheduleId").ifEmpty { null })
         }
         is RuntimeCommand.ShortcutBody -> RuntimeResult.Shortcut(call("shortcutBody", JSONArray().put(command.id), CommandDeadline.QUERY) as JSONObject)
         is RuntimeCommand.LocalProjects -> {
@@ -142,9 +156,28 @@ open class WebViewRuntime internal constructor(
             val value = call("turnDiff", JSONArray().put(command.sessionId).put(command.entryId).put(command.path), CommandDeadline.QUERY)
             RuntimeResult.Diff(RuntimeProtocol.diff(value as JSONObject))
         }
+        is RuntimeCommand.ListDir -> {
+            val value = call("listDir", JSONArray().put(command.sessionId).put(command.relativePath), CommandDeadline.FILE_READ)
+            try { RuntimeResult.Directory(RuntimeProtocol.directory(value as JSONObject)) }
+            catch (_: Exception) { throw RuntimeException(runtimeFault("invalid_directory")) }
+        }
+        is RuntimeCommand.ReadFile -> {
+            val value = call("readFile", JSONArray().put(command.sessionId).put(command.path), CommandDeadline.FILE_READ)
+            RuntimeResult.File(RuntimeProtocol.file(value as? JSONObject ?: JSONObject(), command.path))
+        }
         is RuntimeCommand.StopTurn -> {
             call("controlTurn", JSONArray().put(command.sessionId).put(command.machineId).put(command.turnId), CommandDeadline.WRITE)
             RuntimeResult.Accepted
+        }
+        // The runtime's own 330 s / 100 s budgets end first; these deadlines only fence a lost reply.
+        is RuntimeCommand.SessionPreview -> {
+            val value = call("sessionPreview", JSONArray().put(command.sessionId).put(if (command.revoke) "revoke" else "create"), CommandDeadline.PREVIEW)
+            RuntimeResult.Preview(PreviewJson.browser(value as? JSONObject ?: JSONObject()))
+        }
+        is RuntimeCommand.DeviceControl -> {
+            val args = JSONArray().put(command.sessionId).put(PreviewJson.command(command.platform, command.command))
+            val value = call(command.platform.method, args, CommandDeadline.DEVICE_CONTROL)
+            RuntimeResult.Device(PreviewJson.reply(command.platform, value as? JSONObject ?: JSONObject()))
         }
         RuntimeCommand.Ping -> RuntimeResult.Pong(call("ping") as? Boolean ?: throw RuntimeException(runtimeFault("invalid_ping_reply")))
         RuntimeCommand.InspectSchema -> {

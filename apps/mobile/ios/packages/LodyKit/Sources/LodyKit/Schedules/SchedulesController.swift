@@ -232,7 +232,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   }
 
   private static func connection(_ state: SessionListState) -> HomeSyncState {
-    if !state.connected { return .offline }
+    if !state.connected { return .connecting }
     return state.loading ? .syncing : .live
   }
 

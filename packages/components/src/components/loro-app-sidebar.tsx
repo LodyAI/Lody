@@ -35,7 +35,6 @@ import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   findFreshSessionPresenceState,
-  getSessionGroupTitle,
   machineSupportsLocalProjectRemovalProtocol,
   resolveProjectGitHubRepo,
   resolveSessionHistoryBackendKind,
@@ -454,7 +453,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
 }: LocalProjectSessionItemProps) {
   const { t } = useTranslation();
   const moreActionsLabel = t('sessions.moreActions', 'More actions');
-  const title = getSessionGroupTitle(session) || defaultSessionTitle;
+  const title = (session.title ?? '').trim() || defaultSessionTitle;
   // Self-ticking on the shared sidebar timer: a tick re-renders only this row's
   // time label, not every row in the project section.
   const now = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
@@ -1814,7 +1813,7 @@ export function LoroAppSidebar({
     [postHog, setShowBranchNames]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
-  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionGroupTitle } =
+  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
     useSessionActions();
   const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
@@ -1927,7 +1926,7 @@ export function LoroAppSidebar({
       }
       setPendingSessionShare({
         sessionId: sessionId,
-        title: getSessionGroupTitle(session) || defaultSessionTitle,
+        title: session?.title?.trim() || defaultSessionTitle,
         sharing,
       });
     },
@@ -2017,7 +2016,7 @@ export function LoroAppSidebar({
 
   // Shared by the task lists and the Workspace groups, which also render a
   // Local Project Session as a task row when it moves under its opener.
-  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
+  const { currentUserId: myAccountId } = useMySessionScope();
   const buildSidebarTaskRows = useCallback(
     (sourceSessions: SessionMeta[]) =>
       buildSessionListRows(
@@ -2025,7 +2024,6 @@ export function LoroAppSidebar({
         {
           scope,
           currentUserId: myAccountId,
-          ownedMachineIds,
           defaultTitle: defaultSessionTitle,
           onlineMachineIds,
           members: activeOrganization?.members,
@@ -2043,7 +2041,6 @@ export function LoroAppSidebar({
       })),
     [
       activeOrganization?.members,
-      ownedMachineIds,
       myAccountId,
       allActiveSessions,
       onlineMachineIds,
@@ -2085,9 +2082,9 @@ export function LoroAppSidebar({
   const handleRenameSession = useCallback(
     (sessionId: string, nextTitle: string) => {
       if (rejectHistoryWrite([sessionId])) return Promise.resolve();
-      return updateSessionGroupTitle(sessionId as SessionId, nextTitle);
+      return updateSessionTitle(sessionId as SessionId, nextTitle);
     },
-    [rejectHistoryWrite, updateSessionGroupTitle]
+    [rejectHistoryWrite, updateSessionTitle]
   );
   const [repoCollapseState, setRepoCollapseState] = useAtom(repoCollapseStateAtom);
   const [repoOrder, setRepoOrder] = useAtom(repoOrderAtom);
@@ -2268,7 +2265,7 @@ export function LoroAppSidebar({
       // its legacy `project` projection names the first member's folder.
       if (session.projectRun) continue;
       if (scope === 'my') {
-        if (!isSessionInMyScope(session, myAccountId, ownedMachineIds)) continue;
+        if (!isSessionInMyScope(session, myAccountId)) continue;
       }
 
       const key = `${session.machineId}:${project.localProjectId}`;
@@ -2289,7 +2286,7 @@ export function LoroAppSidebar({
     }
 
     return map;
-  }, [childSessionsByParent, scope, sessions, sessionsListLoading, myAccountId, ownedMachineIds]);
+  }, [childSessionsByParent, scope, sessions, sessionsListLoading, myAccountId]);
   // The ONE session-navigation callback for every sidebar surface (rows,
   // Updated items, keyboard nav). `tabSessionId` restores the precise child Tab
   // that "Go to Opener Session" points at.
@@ -2622,7 +2619,7 @@ export function LoroAppSidebar({
         const sessionsForProject = localProjectSessionsByKey.get(projectKey) ?? [];
         const sectionLabel = `${localSectionLabel} · ${project.name}`;
         for (const session of sessionsForProject) {
-          const title = getSessionGroupTitle(session) || defaultSessionTitle;
+          const title = (session.title ?? '').trim() || defaultSessionTitle;
           const activity = getEffectiveSessionActivitySummary(
             session,
             childSessionsByParent,

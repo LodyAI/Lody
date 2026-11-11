@@ -58,7 +58,6 @@ import { MobileArchiveScreen } from '@/components/mobile/mobile-archive-screen';
 import { WebArchiveScreen } from './web-archive-screen';
 import {
   getMachineFlockLocalProjects,
-  getSessionGroupTitle,
   getSessionLaunchConfigLegacyFields,
   type MachineId,
   type PrStatus,
@@ -606,7 +605,7 @@ function sessionActivityTime(session: SessionMeta): number {
 }
 
 function sessionTitle(session: SessionMeta): string {
-  return getSessionGroupTitle(session) || 'Untitled session';
+  return session.title?.trim() || 'Untitled session';
 }
 
 function sortArchivedSessions(
@@ -1787,9 +1786,7 @@ export function ArchiveView() {
     const base =
       archiveScope === 'my'
         ? userId
-          ? archivedSessions.filter((session) =>
-              isSessionInMyScope(session, userId, ownedMachineIds)
-            )
+          ? archivedSessions.filter((session) => isSessionInMyScope(session, userId))
           : []
         : archivedSessions;
 
@@ -1810,8 +1807,7 @@ export function ArchiveView() {
       if (ownedMachineIds.has(session.machineId)) return true;
 
       // My scope is already filtered by userId; keep local sessions visible even if owner meta hasn't updated yet.
-      if (archiveScope === 'my' && isSessionInMyScope(session, userId, ownedMachineIds))
-        return true;
+      if (archiveScope === 'my' && isSessionInMyScope(session, userId)) return true;
 
       return false;
     });

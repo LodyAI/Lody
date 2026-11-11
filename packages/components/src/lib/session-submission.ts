@@ -308,14 +308,15 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    await ports.assertSessionEditable?.(sessionId);
-
-    // A held send is written and dispatched by the pending queue.
+    // A held send is written and dispatched by the pending queue. Check this
+    // before the management guard: a new conversation held for attachment
+    // preparation has no session metadata yet, so the guard would refuse it.
     if (
       runtime.pendingSends?.has(userTurnId) ||
       runtime.pendingSends?.ownsDelivery?.(userTurnId, 'dispatch')
     )
       return;
+    await ports.assertSessionEditable?.(sessionId);
     await dispatchUserTurn(runtime, sessionId, userTurnId, {
       ...options,
       onAccepted: () => onRpcDelivered(sessionId, userTurnId),
@@ -331,14 +332,13 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    await ports.assertSessionEditable?.(sessionId);
-
     // A held guide is offered by the pending queue once it is written.
     if (
       runtime.pendingSends?.has(userTurnId) ||
       runtime.pendingSends?.ownsDelivery?.(userTurnId, 'guide')
     )
       return false;
+    await ports.assertSessionEditable?.(sessionId);
     return steerUserTurn(runtime, sessionId, expectedTurnId, userTurnId, {
       machineId: options?.machineId,
       onApplied: () => onRpcDelivered(sessionId, userTurnId),

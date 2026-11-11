@@ -505,6 +505,86 @@ describe('queued message images', () => {
     expect(container!.querySelector('[aria-label="Continue sending"]')).toBeTruthy();
   });
 
+  it('shows why a queued send failed and gives visible feedback while it is retried', async () => {
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);
+    const reason = "Lody on this computer couldn't prepare this attachment (request_timeout).";
+    let records = [
+      {
+        id: 'held',
+        error: reason,
+        sessionId: 'session-test',
+        workspaceId: 'workspace-test',
+        sequence: 1,
+        attachments: [],
+        delivery: { kind: 'queue' },
+        queue: { task: 'Remove these three metrics' },
+        entry: { id: 'held', role: 'user', items: [] },
+      } as unknown as PendingSessionSend,
+    ];
+    const listeners = new Set<() => void>();
+    const publish = (error: string | undefined) => {
+      records = records.map((send) => ({ ...send, error }));
+      listeners.forEach((listener) => listener());
+    };
+    let attempts = 0;
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-test',
+      pendingSends: {
+        getSnapshot: () => records,
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        // The cause persists: the retried attempt fails again at once.
+        retry: () => {
+          attempts += 1;
+          publish(undefined);
+          publish(reason);
+        },
+      },
+    } as unknown as WorkspaceRuntime);
+    vi.useFakeTimers();
+    try {
+      await act(async () =>
+        root?.render(
+          createElement(
+            Provider,
+            { store },
+            createElement(MessageQueueDisplay, {
+              sessionId: 'session-test' as SessionId,
+              items: [],
+              onRemove: () => undefined,
+              onReorder: () => undefined,
+              onEditStart: () => undefined,
+              onEditCancel: () => undefined,
+              onEditSave: () => undefined,
+              onSteer: () => undefined,
+            })
+          )
+        )
+      );
+      const row = () => container!.querySelector<HTMLElement>('[data-pending-queue-row="held"]')!;
+      const retryButton = () =>
+        row().querySelector<HTMLButtonElement>('[aria-label="Continue sending"]');
+      expect(row().querySelector('[role="alert"]')?.textContent).toBe(reason);
+
+      await act(async () => retryButton()!.click());
+      expect(attempts).toBe(1);
+      // The click is acknowledged even though the attempt already failed again.
+      expect(retryButton()).toBeNull();
+      expect(row().querySelector('[role="alert"]')).toBeNull();
+      expect(row().querySelector('[role="status"]')?.textContent).toBe('Sending');
+
+      await act(async () => vi.advanceTimersByTime(600));
+      expect(row().querySelector('[role="alert"]')?.textContent).toBe(reason);
+      await act(async () => retryButton()!.click());
+      expect(attempts).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('opens the full-size image in the viewer without editing the row', async () => {
     const store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);

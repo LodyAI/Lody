@@ -45,7 +45,6 @@ checks = {
     'session-sharing': ['Cloud/SessionSharing.swift'],
     'settings': ['Cloud/WorkspaceSettingsCloud.swift', 'Cloud/WorkspaceUsage.swift'],
     'workspace-settings-pages': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/SettingsWorkspace.swift', 'Settings/ProjectVisibilitySections.swift', 'Settings/GitHubSettingsSections.swift'],
-    'settings-runtime-pages': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/PublishedSharesSections.swift'],
     'remote-settings': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/SettingsWorkspace.swift', 'Settings/RemoteSettingsSections.swift', 'Settings/AgentProviderSections.swift', 'Sessions/SessionUsageSelection.swift', 'Chat/LodyAgentIcon.swift'],
     'session-rows': ['Sessions/SessionRelations.swift', 'LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionRows.swift', 'Sessions/SessionTabSelection.swift', 'Sessions/HomeGrouping.swift', 'Sessions/InboxSections.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
     'ai-usage': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/AIUsageModels.swift', 'Settings/AIUsageSections.swift'],
@@ -204,10 +203,10 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             subprocess.run(['swift', 'run', '--package-path', str(package), '--scratch-path', str(root / '.artifacts/native-local-store')], check=True, timeout=600)
             continue
         binary = str(Path(output) / name)
-        simulator = name in ['share', 'auth-session', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'file-link']
+        simulator = name in ['share', 'auth-session', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'file-link']
         command = ['xcrun', '--sdk', 'iphonesimulator', 'swiftc'] if simulator else ['xcrun', 'swiftc']
         command += ['-swift-version', '6']
-        if name in ['share', 'message-details', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows']:
+        if name in ['share', 'message-details', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'remote-settings', 'session-rows']:
             command += ['-D', 'LODY_SHARE_EXTENSION']
         if name == 'simulator-transport':
             subprocess.run(['/bin/bash', str(kit / 'DataChannel/build.sh')], check=True)

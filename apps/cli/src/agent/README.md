@@ -405,6 +405,9 @@ the isolated session selects `gpt-5.6-luna`, low reasoning, and full access. Uns
 requested options fail to the existing prompt-derived fallback. The bundled adapter
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
+After startup, Codex title configuration and prompting have a five-minute deadline;
+expiry aborts the request, attempts to terminate its isolated process tree and uses the existing
+prompt-derived fallback. [Ownership and limits](../../../../.agents/notes/implemented/architecture/2026-10-10-codex-client-titles.md).
 When a Provider loses its account reference, session startup and isolated titles use
 `CodexProfileStore.isAccountBound`: the durable binding marker precedes the legacy
 profile scan. Bound titles skip with a debug message, preserving the draft without
@@ -413,11 +416,6 @@ sending task text through native default credentials.
 Other isolated title sessions retain the Provider's current model unless a title model
 was explicitly saved. Catalog order does not define a model preference; inferred safe
 mode and reasoning options remain independent of the model choice.
-
-Every generated or agent-pushed title names one tab. A root Session's sidebar title is
-the separate `groupTitle`: the first generated root title is copied into it once, and
-later titles never replace it. See the
-[group title decision](../../../../.agents/notes/implemented/architecture/2026-11-05-session-group-titles.md).
 
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;

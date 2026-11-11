@@ -3,52 +3,79 @@ import SafariServices
 import UIKit
 
 extension SessionController {
-  func prepareSimulator(_ state: SessionListState, _ session: SessionItem) {
-    guard simulator == nil, state.catalog.machineSimulators[session.machineId] != nil else { return }
-    let store = SessionSimulator(sessionId: sessionId,
-      service: simulatorService ?? .live(workspaceId: state.workspaceId, userId: state.userId, sessionId: sessionId))
-    simulator = store
-    store.watch(self) { [weak self, weak store] in
-      guard let self, let store else { return }
-      chat.setSimulatorPreview(store.previewJSON)
-      renderComposer()
-      render()
+  /// Availability of a platform on the session's computer: iOS may be `upgrade-required`.
+  func deviceAvailability(_ platform: DevicePlatform, _ catalog: SessionCatalog, _ session: SessionItem) -> String? {
+    switch platform {
+    case .ios: catalog.machineSimulators[session.machineId]
+    case .android: catalog.machineEmulators[session.machineId]
     }
-
   }
 
-  func simulatorMenu() -> [UIMenuElement] {
-    guard let session = source.state.catalog.session(sessionId),
-      let availability = source.state.catalog.machineSimulators[session.machineId] else { return [] }
-    let action = UIAction(title: String(localized: "simulator.menu", bundle: .lody), image: UIImage(systemName: "iphone")) { [weak self] _ in self?.openSimulator() }
-    if availability == "upgrade-required" { action.subtitle = String(localized: "simulator.upgradeRequired", bundle: .lody) }
-    else if let simulator, simulator.running { action.subtitle = simulator.phaseText + " · " + simulator.name }
-    return [action]
+  func prepareSimulator(_ state: SessionListState, _ session: SessionItem) {
+    for platform in DevicePlatform.allCases where devicePreviews[platform] == nil && deviceAvailability(platform, state.catalog, session) != nil {
+      let store = SessionSimulator(sessionId: sessionId, service: deviceServices[platform]
+        ?? .live(platform, workspaceId: state.workspaceId, userId: state.userId, sessionId: sessionId))
+      devicePreviews[platform] = store
+      store.watch(self) { [weak self] in
+        guard let self else { return }
+        updateFloatingPreview()
+        renderComposer()
+        render()
+      }
+    }
   }
 
-  func openSimulator() {
-    guard !openingSimulator, let session = source.state.catalog.session(sessionId), let simulator else { return }
-    if source.state.catalog.machineSimulators[session.machineId] == "upgrade-required" {
+  /// One floating preview per conversation: the most recently opened live platform.
+  private var floatingPlatform: DevicePlatform? {
+    (devicePreviewOrder + DevicePlatform.allCases).first { devicePreviews[$0]?.previewJSON.isEmpty == false }
+  }
+
+  private func updateFloatingPreview() {
+    chat.setSimulatorPreview(floatingPlatform.flatMap { devicePreviews[$0]?.previewJSON } ?? "")
+  }
+
+  private static func deviceKey(_ platform: DevicePlatform, _ suffix: String) -> String.LocalizationValue {
+    String.LocalizationValue((platform == .android ? "emulator." : "simulator.") + suffix)
+  }
+
+  /// One entry per platform the computer offers, so a machine with both lets the person choose.
+  func devicePreviewMenu() -> [UIMenuElement] {
+    guard let session = source.state.catalog.session(sessionId) else { return [] }
+    return DevicePlatform.allCases.compactMap { platform -> UIMenuElement? in
+      guard let availability = deviceAvailability(platform, source.state.catalog, session) else { return nil }
+      let action = UIAction(title: String(localized: Self.deviceKey(platform, "menu"), bundle: .lody),
+        image: UIImage(systemName: platform == .android ? "smartphone" : "iphone")) { [weak self] _ in self?.openSimulator(platform) }
+      if availability == "upgrade-required" { action.subtitle = String(localized: "simulator.upgradeRequired", bundle: .lody) }
+      else if let store = devicePreviews[platform], store.running { action.subtitle = store.phaseText + " · " + store.name }
+      return action
+    }
+  }
+
+  func openSimulator(_ platform: DevicePlatform) {
+    guard !openingSimulator, let session = source.state.catalog.session(sessionId), let simulator = devicePreviews[platform] else { return }
+    if deviceAvailability(platform, source.state.catalog, session) == "upgrade-required" {
       let alert = UIAlertController(title: String(localized: "simulator.menu", bundle: .lody), message: String(localized: "simulator.upgradeRequired", bundle: .lody), preferredStyle: .alert)
       alert.addAction(UIAlertAction(title: String(localized: "common.ok", bundle: .lody), style: .default)); present(alert, animated: true); return
     }
     openingSimulator = true
+    devicePreviewOrder.removeAll { $0 == platform }
+    devicePreviewOrder.insert(platform, at: 0)
     Task { [weak self] in
       guard let self else { return }
       defer { openingSimulator = false }
       do {
         simulator.revealPreview()
-        if simulator.running { showSimulator(); return }
-        if try await simulator.resume() { showSimulator(); return }
+        if simulator.running { showSimulator(platform); return }
+        if try await simulator.resume() { showSimulator(platform); return }
         let picker = SimulatorPickerController(store: simulator) { [weak self] device in
-          simulator.start(device); self?.showSimulator()
+          simulator.start(device); self?.showSimulator(platform)
         }
-        LodyShell.shared.presentNative(picker, title: String(localized: "simulator.choose", bundle: .lody), grabber: true)
+        LodyShell.shared.presentNative(picker, title: String(localized: Self.deviceKey(platform, "choose"), bundle: .lody), grabber: true)
       } catch { toolError(error) }
     }
   }
-  private func showSimulator() {
-    guard let simulator else { return }
+  private func showSimulator(_ platform: DevicePlatform) {
+    guard let simulator = devicePreviews[platform] else { return }
     LodyShell.shared.pushNative(SimulatorController(store: simulator), title: simulator.name, from: self)
   }
   private func toolError(_ error: Error) { LodyToastOverlay.shared.show(message: error.localizedDescription, kind: .error) }
@@ -61,6 +88,10 @@ extension SessionController {
   }
 
   func openPullRequest(_ reference: SessionPullRequest) {
+    // One tap on a transcript link can be delivered twice (as with file links); keep one
+    // page per PR until it closes, while a different PR still opens normally.
+    let key = "\(reference.repository.lowercased())#\(reference.number)"
+    guard openPullRequests.insert(key).inserted else { return }
     let state = source.state
     let page = pullRequestPage(reference, state)
     page.investigate = { [weak self] text in
@@ -68,7 +99,24 @@ extension SessionController {
       chat.composer.appendDraft(Self.json(["id": UUID().uuidString, "text": text]))
     }
     // A panel over the conversation (sheet with detents; the inspector on iPad), not a push.
-    LodyShell.shared.presentDetail(page, title: "PR #\(reference.number)", from: self)
+    LodyShell.shared.presentDetail(page, title: "PR #\(reference.number)", from: self) { [weak self] in
+      self?.openPullRequests.remove(key)
+    }
+  }
+
+  /// A PR link in the conversation opens the native PR page when it belongs to the session's
+  /// project (a multi-repository project's members included); others stay in the browser.
+  func openPullRequestLink(_ link: ChatPullRequestLink) -> Bool {
+    let catalog = source.state.catalog
+    guard let session = catalog.session(sessionId) else { return false }
+    let repositories = catalog.projects.first { $0.id == session.projectId }?.githubRepositories
+      ?? (session.projectId.hasPrefix("github:") ? [String(session.projectId.dropFirst(7))] : [])
+    guard let repository = repositories.first(where: { $0.caseInsensitiveCompare(link.repository) == .orderedSame }) else { return false }
+    let known = session.pullRequests.last {
+      $0.number == link.number && $0.repository.caseInsensitiveCompare(repository) == .orderedSame
+    }
+    openPullRequest(known ?? SessionPullRequest(repository: repository, number: link.number, status: "", ci: nil, url: link.url))
+    return true
   }
 
   func updateDetails(_ json: String) { subagentPage?.update(json) }
@@ -85,12 +133,17 @@ extension SessionController {
       "accessibilityLabel": String.localizedStringWithFormat(String(localized: "session.preview.open", bundle: .lody), String(describing: preview.label))]
   }
 
-  var simulatorItem: [String: Any]? {
+  /// Action bar ids: `simulator` (iOS) and `emulator` (Android).
+  static func deviceItemId(_ platform: DevicePlatform) -> String { platform == .android ? "emulator" : "simulator" }
+
+  func deviceItem(_ platform: DevicePlatform) -> [String: Any]? {
     guard let session = source.state.catalog.session(sessionId),
-      source.state.catalog.machineSimulators[session.machineId] == "available", let simulator,
-      session.iosSimulatorPreviewRequestId != nil || simulator.running else { return nil }
-    let name = simulator.running ? simulator.name : String(localized: "simulator.menu", bundle: .lody)
-    var item: [String: Any] = ["id": "simulator", "symbol": "iphone", "busy": simulator.connecting, "tap": true, "tint": "primary", "menuTitle": name,
+      deviceAvailability(platform, source.state.catalog, session) == "available", let simulator = devicePreviews[platform] else { return nil }
+    let requested = platform == .android ? session.androidEmulatorPreviewRequestId : session.iosSimulatorPreviewRequestId
+    guard requested != nil || simulator.running else { return nil }
+    let name = simulator.running ? simulator.name : String(localized: Self.deviceKey(platform, "menu"), bundle: .lody)
+    var item: [String: Any] = ["id": Self.deviceItemId(platform), "symbol": platform == .android ? "smartphone" : "iphone",
+      "busy": simulator.connecting, "tap": true, "tint": "primary", "menuTitle": name,
       "accessibilityLabel": String.localizedStringWithFormat(String(localized: "simulator.chip.open", bundle: .lody), String(describing: name))]
     item["actions"] = simulator.running ? [["id": "stop", "title": String(localized: "simulator.stop", bundle: .lody), "symbol": "stop.circle", "destructive": true]] : []
     return item
@@ -98,17 +151,19 @@ extension SessionController {
 
   func contextAction(_ action: String) {
     if action.hasPrefix("bar:") { infoBarAction(String(action.dropFirst(4))); return }
-    // The floating simulator preview's own actions.
-    if action == "expand" { openSimulator(); return }
-    if action == "close" { simulator?.hidePreview(); return }
-    resourceAction("simulator", action)
+    // The floating device preview's own actions apply to the platform it shows.
+    guard let platform = floatingPlatform ?? devicePreviewOrder.first else { return }
+    if action == "expand" { openSimulator(platform); return }
+    if action == "close" { devicePreviews[platform]?.hidePreview(); return }
+    resourceAction(Self.deviceItemId(platform), action)
   }
 
   func resourceAction(_ resource: String, _ action: String) {
     if resource == "browser" { browserAction(action); return }
+    let platform: DevicePlatform = resource == "emulator" ? .android : .ios
     if action == "stop" {
-      Task { do { try await simulator?.stop() } catch { toolError(error) } }
-    } else { openSimulator() }
+      Task { do { try await devicePreviews[platform]?.stop() } catch { toolError(error) } }
+    } else { openSimulator(platform) }
   }
 
   private func browserAction(_ action: String) {

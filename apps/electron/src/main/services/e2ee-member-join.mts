@@ -2,8 +2,12 @@ import { verifyPersonalHistory } from '@lody/e2ee-client/history'
 import { PersonalHostError } from '@lody/e2ee-client/errors'
 import {
   decodeMemberKeyPackage,
+  emailMemberRequestId,
   encodeMemberKeyPackage,
-  MemberOfferSchema
+  MemberOfferPinsSchema,
+  MemberOfferSchema,
+  signMemberOffer,
+  verifyAutomaticMemberAdmission
 } from '@lody/e2ee-client/member'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
@@ -31,6 +35,10 @@ const ok = Result.getOrThrow
 const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code })
 // One public format for desktop and the portable runtime.
 export { decodeMemberKeyPackage, MemberOfferSchema }
+/** Desktop error code of an automatic-admission refusal, e.g. `member_invitation_used`. */
+export const desktopAdmissionRefusal = (
+  refusal: import('@lody/e2ee-client/member').AutomaticAdmissionRefusal
+) => `member_${refusal.replaceAll('-', '_')}` as const
 function sql<A>(work: () => A): Effect.Effect<A, unknown> {
   return Effect.try({
     try: work,
@@ -72,7 +80,9 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
   const origin = Effect.fnUntraced(function* (workspaceId: string) {
     const row = yield* sql(() => rowFor(workspaceId))
     if (!row?.history || !row.key_package) return yield* Effect.fail(fail('missing-binding'))
-    const offer = yield* sql(() => MemberOfferSchema.parse(JSON.parse(row.offer)))
+    // Reopening depends only on the retained genesis pins, so a join retained before
+    // invitations were signed (or with fields this version does not know) still opens.
+    const offer = yield* sql(() => MemberOfferPinsSchema.parse(JSON.parse(row.offer)))
     const historyPages = yield* sql(() => JSON.parse(row.history!) as E2eeWorkspaceHistoryPage[])
     const view = yield* verifyMemberHistory(offer, historyPages)
     const proof = yield* sql(() => decodeMemberKeyPackage(row.key_package!))
@@ -153,7 +163,14 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
       const credential = yield* custody.prepareDeviceCredential(genesis, device.publicKey)
       const request = yield* prepareJoinRequest({
         genesis,
-        requestId: ok(Bytes.requestId(randomBytes(16))),
+        // An email invitation admits one membership: its id comes from the token alone.
+        requestId: ok(
+          Bytes.requestId(
+            offer.mode === 'email'
+              ? raw(emailMemberRequestId(offer.workspaceId, offer.token))
+              : randomBytes(16)
+          )
+        ),
         userId,
         encryptionPublicKey: device.enc,
         expiresAt: offer.expiresAt,
@@ -186,7 +203,7 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
       const row = yield* sql(() => rowFor(workspaceId))
       if (!row?.key_package) return yield* Effect.fail(fail('missing-binding'))
       // Store only a fully verified, self-admitting endpoint. Existing originals remain immutable.
-      const offer = yield* sql(() => MemberOfferSchema.parse(JSON.parse(row.offer)))
+      const offer = yield* sql(() => MemberOfferPinsSchema.parse(JSON.parse(row.offer)))
       const view = yield* verifyMemberHistory(offer, pages)
       const proof = yield* sql(() => decodeMemberKeyPackage(row.key_package!))
       const own = view.inspectState().devices.get(hex(proof.request.signingPublicKey.toBytes()))
@@ -269,27 +286,29 @@ export function makeDesktopMemberApprovals(input: {
       const member = device && view.inspectState().members.get(hex(device.membershipId.toBytes()))
       if (device?.kind !== 'personal' || !member || !['owner', 'admin'].includes(member.role))
         return yield* Effect.fail(fail('unauthorized'))
-      return {
-        version: 1 as const,
-        workspaceId: input.workspaceId,
-        genesisHash: hex(input.genesis.toBytes()),
-        genesisRecordHex: hex(input.genesisRecord),
-        endorser: hex(input.signer.publicKey.toBytes()),
-        token: randomBytes(32).toString('hex'),
-        mode,
-        expiresAt
-      }
+      return yield* signMemberOffer(
+        {
+          version: 1 as const,
+          workspaceId: input.workspaceId,
+          genesisHash: hex(input.genesis.toBytes()),
+          genesisRecordHex: hex(input.genesisRecord),
+          endorser: hex(input.signer.publicKey.toBytes()),
+          token: randomBytes(32).toString('hex'),
+          mode,
+          expiresAt
+        },
+        input.signer
+      )
     }),
-    prepare: Effect.fnUntraced(function* (keyPackageHex: string) {
+    /** `automatic` carries the relay's copy of the invitation: unattended admission signs
+     * only when this device verifies it (signed by a currently eligible endorser, email,
+     * unexpired, unused); otherwise the applicant waits for an explicit approval. */
+    prepare: Effect.fnUntraced(function* (
+      keyPackageHex: string,
+      automatic?: { offer: unknown; now: number }
+    ) {
       const proof = yield* sql(() => decodeMemberKeyPackage(keyPackageHex))
       const requestId = hex(proof.request.requestId.toBytes())
-      yield* sql(() => {
-        if (
-          db.prepare('SELECT key_package FROM member_previews WHERE request_id=?').get(requestId)
-            ?.key_package !== keyPackageHex
-        )
-          throw fail('conflict')
-      })
       yield* Effect.fromResult(
         verifyDeviceCredentialBinding(
           {
@@ -314,6 +333,27 @@ export function makeDesktopMemberApprovals(input: {
           return yield* Effect.fail(fail('conflict'))
         return null
       }
+      if (automatic) {
+        const checked = verifyAutomaticMemberAdmission({
+          view,
+          workspaceId: input.workspaceId,
+          approver: input.signer.publicKey,
+          offer: automatic.offer,
+          request: proof.request,
+          now: automatic.now
+        })
+        // The precise refusal is the public code; nothing is signed and nothing is retried.
+        if (Result.isFailure(checked))
+          return yield* Effect.fail(fail(desktopAdmissionRefusal(checked.failure)))
+      }
+      // Only the package this approver listed and showed for this request may be signed.
+      yield* sql(() => {
+        if (
+          db.prepare('SELECT key_package FROM member_previews WHERE request_id=?').get(requestId)
+            ?.key_package !== keyPackageHex
+        )
+          throw fail('conflict')
+      })
       const previous = yield* sql(() =>
         db
           .prepare('SELECT * FROM member_admissions WHERE request_id=? ORDER BY rowid DESC LIMIT 1')

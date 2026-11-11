@@ -215,6 +215,7 @@ final class ChatComposerInput: TextView {
     let config = EditorConfig(theme: theme, plugins: [ListPlugin(), LinkPlugin(), MarkdownShortcutPlugin(), history])
     let view = LexicalView(editorConfig: config, featureFlags: FeatureFlags(), textViewType: ChatComposerInput.self)
     try? view.editor.registerNode(nodeType: .lodyReference, class: ChatReferenceNode.self)
+    ChatReferenceNode.registerChipDrawing(in: view.editor)
     (view.textView as? ChatComposerInput)?.history = history
     return view
   }

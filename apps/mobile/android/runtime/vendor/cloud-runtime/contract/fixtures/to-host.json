@@ -81,22 +81,6 @@
     "v": 1,
     "gen": 3,
     "kind": "request",
-    "id": "req-share",
-    "method": "shareRequest",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "operation": "management",
-      "args": {
-        "workspaceId": "workspace-1",
-        "action": "list",
-        "cursor": null
-      }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
     "id": "req-share-revoke",
     "method": "shareRequest",
     "payload": {
@@ -375,38 +359,6 @@
     "v": 1,
     "gen": 3,
     "kind": "result",
-    "id": "req-shares",
-    "method": "publishedShares",
-    "payload": {
-      "outcome": "page",
-      "workspaceId": "workspace-1",
-      "userId": "user-1",
-      "page": [
-        {
-          "shareId": "share-1",
-          "rootSessionId": "session-1",
-          "publisherUserId": "user-1",
-          "status": "active",
-          "title": "Launch notes",
-          "revision": 2,
-          "credentialVersion": 1,
-          "createdAt": 1700000000000,
-          "updatedAt": 1700000000000,
-          "totalBytes": 2048,
-          "conversationCount": 1,
-          "canManage": true,
-          "canRevoke": true,
-          "hasLocalLink": false
-        }
-      ],
-      "isDone": false,
-      "continueCursor": "cursor-2"
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
     "id": "req-mentions",
     "method": "mentionCatalog",
     "payload": {
@@ -460,17 +412,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
-    "id": "req-shares-denied",
-    "method": "publishedShares",
-    "payload": {
-      "outcome": "failed",
-      "error": "shares_forbidden"
     }
   },
   {
@@ -765,6 +706,37 @@
     "error": {
       "code": "metadata_not_ready",
       "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-emulator",
+    "method": "androidEmulatorControl",
+    "payload": {
+      "type": "android-emulator/control_response",
+      "sessionId": "session-1",
+      "success": true,
+      "preview": {
+        "operationId": "op-2",
+        "id": "Pixel_8",
+        "phase": "booting",
+        "transport": "remote"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-emulator-old",
+    "method": "androidEmulatorControl",
+    "payload": {
+      "error": "unsupported",
+      "capabilities": {
+        "previewControl": 1
+      }
     }
   },
   {

@@ -53,6 +53,7 @@ import type { TerminalOutcome } from '@lody/shared/notifications';
 import { anyApi, type FunctionReference } from 'convex/server';
 import type {
   WorkspaceAdmissionDescriptor,
+  E2eeWorkspaceLedgerHead,
   E2eeWorkspaceCreateRequest,
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryRequest,
@@ -66,6 +67,7 @@ export type {
   E2eeWorkspaceCreateRequest,
   E2eeWorkspaceCreateResult,
   E2eeLedgerCheckpoint,
+  E2eeWorkspaceLedgerHead,
   E2eeWorkspaceMemberProfilesRequest,
   E2eeWorkspaceMemberProfiles,
   E2eeWorkspaceHistoryRequest,
@@ -534,6 +536,7 @@ export type CloudApi = {
     complete: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
   };
   e2eeWorkspaces: {
+    ledgerHead: Query<{ workspaceId: string }, E2eeWorkspaceLedgerHead>;
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;

@@ -3,14 +3,14 @@
 Status: approved
 Translation: current
 
-Approved revision: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.zh.md)
-批准：2026-11-10，owner 批准把 iroh 定为加密 RPC 首选通道（iroh → Streams RPC →
-持久派发，过渡期使用 n0 公共中继）；[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#iroh-首选通道)。
-Approval: 2026-11-10，owner 批准签名执行意图这次修订。[本次修订及批准记录](https://github.com/LodyAI/Lody/pull/2510)。
-上一版：[`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
-（2026-11-10，[PR #2487](https://github.com/LodyAI/Lody/pull/2487)）；原批准：2026-10-28，
-owner 授权总调度（会话 `b12f1597`），[PR #1894](https://github.com/LodyAI/Lody/pull/1894)，
-[版本 `e4351fda`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)。
+Approved revision: [`122dfeaf`](https://github.com/LodyAI/Lody/blob/122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1/specs/e2ee-foundations.zh.md)
+批准：2026-11-10，owner 批准移动端种子交接（WebView 中的 portable host 交给一个用途受限的
+原生 iroh 插件）；[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#移动端种子交接)。
+批准：2026-11-10，owner 批准签名执行意图这次修订；[本次修订及批准记录](https://github.com/LodyAI/Lody/pull/2510)。
+上一版：[`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.zh.md)
+（2026-11-10，iroh 首选通道）；更早 [`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+（[PR #2487](https://github.com/LodyAI/Lody/pull/2487)）；原批准 2026-10-28，
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894)。
 
 [English](e2ee-foundations.md)
 
@@ -287,9 +287,11 @@ Owner 于 2026-10-28 将 iroh 移出 MVP，又于 **2026-11-10** 将其定为首
 已验证绑定、当前权限和执行 journal 检查。执行输入按消息 ID 和内容摘要识别，不论走哪条路都没有期限；只有功能请求保留各自的新鲜度检查。传输层认证从不构成授权。
 
 - **身份。** iroh 复用工作区账本设备的 Ed25519 身份，EndpointId 等于其签名公钥。
-  只有可信原生宿主（Electron 主进程、CLI，以及以后的移动端原生壳）把种子交给原生
-  传输层，Endpoint 关闭时由其擦除。不向 renderer 或 WebView 导出，不开放任意签名
-  接口。同一进程内每把设备密钥最多一个存活的 Endpoint。该密钥只签 TLS 1.3 握手和
+  只有可信宿主把种子交给原生传输层，Endpoint 关闭时由其擦除自己的副本：Electron
+  主进程和 CLI 在进程内交接；移动端由本来就持有种子的 WebView portable host 每个
+  会话经一个用途受限的原生插件交出一次，插件只提供打开、连接状态、发送和接收。这次
+  bridge 调用会把种子序列化成无法擦除的 JavaScript 字符串，直到被垃圾回收；bridge
+  日志保持关闭。不向桌面 renderer 导出，种子不回传给 JavaScript，不开放任意签名接口。同一进程内每把设备密钥最多一个存活的 Endpoint。该密钥只签 TLS 1.3 握手和
   中继握手，两者都有域分隔；不使用地址查找记录。
 - **不经控制面的可达性。** 拨号方用全部已配置中继寻址目标，首包会到达对端选作
   主中继的那一个；不向后端发布任何地址。打洞成功后走直连。在 Lody 自营中继上线
@@ -300,7 +302,8 @@ Owner 于 2026-10-28 将 iroh 移出 MVP，又于 **2026-11-10** 将其定为首
   加密 Streams RPC 和持久派发。建立 iroh 连接从不拖住可用的后续路径：没有存活连接
   时，请求先走 Streams RPC，同时准备连接。
 - **退役 Streams RPC。** 在所有支持的平台都迁移到 iroh 并验证兼容之前，保留加密
-  Streams RPC；下掉它需要再次修订本 Spec。浏览器版 iroh 不在范围内。
+  Streams RPC；下掉它需要再次修订本 Spec。浏览器版 iroh 不在范围内；移动端 WebView
+  只经其原生插件使用 iroh。
 
 实现理由与依据：[iroh 传输决定](../.agents/notes/proposed/architecture/2026-11-10-e2ee-iroh-transport.zh.md)。
 
@@ -522,4 +525,48 @@ application/version 和固定 genesis/recipient 绑定，使用 WAL/FULL 与事�
 
 ## 当前工作区自动配对（草案增量，2026-11-10）
 
-已批准的 UI 不再手动传递配对字符串：原生设备打开工作区即申请，用户比较两端六位数字，在已有个人设备一次批准，仅授予当前工作区。带承诺的临时密钥交换为原认证配对协议导出秘密，relay 只接收公开消息。双方绑定账号、工作区、genesis 和原十分钟期限，重试保留原文。必须比较核验码：六位数字约有 20 位替换检测强度，不继承手动带外认证的 128 位强度。本协议增量仍为草案，未得到独立密码学批准；原有已批准手动协议保持不变。[决策说明](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.zh.md#当前工作区自动核验2026-11-10)记录顺序、生命周期及验证限制。
+已批准的 UI 不再手动传递配对字符串：原生设备打开工作区即申请，用户在已有个人设备上输入新设备显示的六位码并一次批准；输入与本机派生的码一致才签名，连续输错三次即作废本次请求（owner 决定，2026-11-11），仅授予当前工作区。带承诺的临时密钥交换为原认证配对协议导出秘密，relay 只接收公开消息。双方绑定账号、工作区、genesis 和原十分钟期限，重试保留原文。核验码比较无法跳过：六位数字约有 20 位替换检测强度，不继承手动带外认证的 128 位强度。本协议增量仍为草案，未得到独立密码学批准；原有已批准手动协议保持不变。[决策说明](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.zh.md#当前工作区自动核验2026-11-10)记录顺序、生命周期及验证限制。
+
+## 白皮书技术附录
+
+以下两节于 2026-11-11 从[安全白皮书](e2ee/whitepaper.zh.md)原样移入，白皮书正文只保留性质陈述。批准状态沿用白皮书原批准记录，不随移动改变。
+
+### 内容帧与 API 细节
+
+原白皮书 §4.2：
+
+更新以整个 batch 为单位使用实验 v0，不逐条包装 CRDT operation。包为 `version(1B，值0) | orgEpoch(u32be) | docEpoch(u16be，值0) | signerPublicKey(32B) | nonce(24B) | sealed | signature(64B)`；`sealed` 已含 XChaCha20-Poly1305 的唯一 16B tag，固定开销 143B，不含 SDK 外层。文档代次每个 batch/快照只带一次；当前 API 省略则补 0，非零或非法值均拒绝。API 的 `epoch` 仍表示组织代次。不重复传输 genesis、资源、用途或自报作者。
+
+双方独立提供可信组织 genesis、稳定逻辑文档 ID 与用途；URL 只负责路由。规范文档上下文 `D = genesis(raw32) || epoch(u32be) || docEpoch(u16be) || resourceLength(u16be) || resource(1..1024B可打印非空白ASCII)`，完整认证上下文 `C = D || purposeCode(u8)`。用途码 1..9 依次区分 Loro 更新/快照、Flock 更新/快照、blob、epoch-history、预留加密 presence、RPC 请求/响应。MVP 最小明文 presence 通道不使用用途 7。文档密钥 HKDF-SHA-256 使用 salt `lody-content-hkdf/v0\0`、info `lody-document-key/v0\0 || D`，长度 32B；其他资源使用 info `lody-content-key/v0\0 || C`。AEAD AAD 为 `lody-content-aad/v0\0 || C || 固定包头`，签名输入为 `lody-content-signature/v0\0 || C || 未签名完整包`。整数大端，域包含末尾零字节。用途不符时验签失败；重新签名原密文也不能绕过 AEAD 绑定。
+
+`ContentCipher.deriveDocumentKey` 返回绑定 scope 的不可变文档钥；`exportDocumentKey` / `importDocumentKey` 复制叶子钥，`sealDocument` / `openDocument` 直接使用它，不再 HKDF，也不需要组织秘密。相同 policy 和严格验签仍执行；拿到文档钥不能使未登记的外部签名者被接受。provider 二选一本地 `readKey(epoch)` 或 `readDocumentKey(epoch, docEpoch)`；不自动联网取钥，返回的文档钥必须匹配固定组织、资源与代次。当前 Streams provider 通过 `readKey` 提供 epoch 钥；只持文档叶钥的 provider（`readDocumentKey`）尚未接入。
+
+SDK 精确 AAD 仍是外部输入，不复制到密文。非空 `B = u16be(additionalData.length) || additionalData`（上限 1024B）时，AEAD 使用 `lody-content-aad-bound/v0\0 || C || B || 固定包头`，签名使用 `lody-content-signature-bound/v0\0 || C || B || 未签名完整包`。SDK 外层版本及 `loro-streams-crdt-payload-protection/v2\0` 域不变；AAD 共 51B，宿主从信封重建相同字节。provider header 3/4 保持，拒绝旧 1/2。快照 continuationOffset 保持加密认证。update POST body 为带长度 batch 加 158B，较优化后 v2 的 156B 仅增加文档代次 2B；单/五 update 实测 244→246B、600→602B，不含 HTTP/TLS。reader 只接受当前 v0 格式；不支持此前实验格式，不提供旧 reader、后备或迁移。
+
+### 实时通道与 presence 批准记录
+
+原白皮书 §7：
+
+[M5 实时评审草案](#实时-rpc-与-presencem5-评审草案)给出
+具体字节与路由顺序：宿主支持时先走 iroh，再走加密 Streams RPC，最后由加密
+history/Meta 持久派发回退。Owner 于 2026-10-28 将 iroh 移出 MVP，又于 2026-11-10
+将其定为首选通道。各路共用当前
+授权和一个持久实际启动 claim；实时重试保留原密文及 ID。已
+合入账本在接纳与 possession 中绑定 machineId；旧开发账本 current-only 重建，
+不保留兼容路径。`rotationRequired` 只提示换钥，本身不阻断封装、发送或执行。机器
+执行新鲜度仅内存保存，从自己经认证拉最新账本前开始计最多 15 分钟（[后端故障](e2ee/execution-freshness-outage.zh.md)期间机器所属成员的窗口更长），重启联网重查；
+journal 持久工作区过期下限不是该授权。执行证据不自动回收。发送到实际启动目标
+≤1 秒，本次不声称测量通过。RPC 完整帧 1 MiB 包含 143 字节开销、机器资源规范
+无填充 base64url 两点已获 owner 批准（2026-10-28）。iroh 复用账本设备钥；
+所报告的域隔离审查未发现签名协议混淆，该密钥只签 TLS 与中继握手。原生密钥生命周期和产品验收仍须单独完成。
+完整 Spec revision `e4351fda` 已于 2026-10-28 经 owner 授权总调度审核后批准，
+记录见[白皮书修订记录](e2ee/whitepaper.zh.md#修订记录)。
+
+**Presence 方案 A——owner 已批准（2026-10-28）：** 加密工作区沿用现有明文 presence
+通道和 90 秒 TTL，只发布真实 machineId／instanceId／sessionId／userId、固定 kind／
+status 枚举及时间戳，字段按[封闭白名单](#mvp-presence最小明文owner-已批准2026-10-28)。
+任何发布前去掉全部自由文本详情及未知嵌套字段，包括 status.detail、名称、路径、
+prompt 和内容片段。服务端可从连接／流量／账号推断这些元数据，加密收益小、复杂度
+和可用性风险大。加密 presence 不在 MVP；#1990 已合入的用途 7 presence 正文
+codec 与 ≤60 秒 TTL 均预留、不使用，不是 MVP 的 90 秒通道契约。这项例外不改变
+RPC 加密、字节或授权规则。

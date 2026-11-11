@@ -1,4 +1,4 @@
-"""Native Home settings entry, Debug return and nested remote/archived pages."""
+"""Native Home settings entry, Debug return and nested remote pages."""
 import sys
 import time
 from driver import UI
@@ -71,19 +71,8 @@ for kind in ('machine', 'agent', 'mcp'):
     ui.capture(f'remote-{kind}')
     tap_sheet_back()
     ui.element(f'remote-{kind}')
-row = reveal('archived')
-assert catalog.text('settings.archived.title') in (row.get('AXLabel') or '')
-ui.axe('tap', '--id', 'archived', '--post-delay', '.8')
-archived = ui.element('ui-search')
-spoken = ' '.join((i.get('AXLabel') or '') for i in [archived, *(archived.get('children') or [])])
-assert '搜索历史会话 Search' in spoken and catalog.text('inbox.badge.archived') in spoken, spoken
-assert archived['frame']['height'] >= 44
-ui.capture('archived-sessions')
-tap_sheet_back()
-ui.element('archived')
 ui.axe('tap', '--label', catalog.text('accessibility.closeSheet', title=settings_label), '--post-delay', '1')
 home_ready()
-assert not any(i.get('AXUniqueId') == 'archived' for i in ui.state())
 ui.capture('settings-closed')
 
-print('PASS: Home enters Debug and Settings, pushes remote and archived pages, and closes to the inbox.')
+print('PASS: Home enters Debug and Settings, pushes remote pages, and closes to the inbox.')

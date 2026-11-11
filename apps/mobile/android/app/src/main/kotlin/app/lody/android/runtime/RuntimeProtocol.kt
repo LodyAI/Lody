@@ -26,8 +26,9 @@ internal object RuntimeProtocol {
                 val rawItems = entry.getJSONArray("items").objects()
                 if (role == "system") {
                     val operations = rawItems.flatMap(OperationEvents::parse)
-                    return@mapNotNull if (operations.isEmpty()) null else SessionMessage(
-                        id = entry.text("id"), role = role, text = "", streaming = false, operations = operations,
+                    val proposals = rawItems.mapNotNull { ProposalEvents.parse(entry.text("id"), it) }
+                    return@mapNotNull if (operations.isEmpty() && proposals.isEmpty()) null else SessionMessage(
+                        id = entry.text("id"), role = role, text = "", streaming = false, operations = operations, proposals = proposals,
                     )
                 }
                 val text = rawItems.mapNotNull { item ->
@@ -100,7 +101,7 @@ internal object RuntimeProtocol {
                     agentRoleId = field("agentRoleId"), roleKnown = value.has("agentRoleId"),
                 )
             }
-            RuntimeEvent.SessionUpdated(SessionSnapshot(message.text("sessionId"), envelope.text("status"), entries, composer, SessionUsageJson.parse(envelope.optJSONObject("usage"))))
+            RuntimeEvent.SessionUpdated(SessionSnapshot(message.text("sessionId"), envelope.text("status"), entries, composer, SessionUsageJson.parse(envelope.optJSONObject("usage")), PreviewJson.summary(envelope.optJSONObject("preview"))))
         }
         "catalog" -> {
             val catalog = JSONObject(message.get("catalog") as String)
@@ -110,7 +111,7 @@ internal object RuntimeProtocol {
             val sessions = catalog.getJSONArray("sessions").objects().map {
                 CatalogJson.session(CatalogSession(it.text("id"), it.text("machineId"), it.text("projectId"), it.text("title"), it.text("status"), it.get("archived") as Boolean, it.get("pinned") as Boolean, it.text("createdAt")), it)
             }
-            RuntimeEvent.CatalogUpdated(CatalogSnapshot(message.nonnegative("revision"), projects, sessions, strings(catalog.getJSONArray("machineIds")), CatalogJson.machineNames(catalog), CatalogJson.machineOs(catalog), ProviderUsageJson.parse(catalog)))
+            RuntimeEvent.CatalogUpdated(CatalogSnapshot(message.nonnegative("revision"), projects, sessions, strings(catalog.getJSONArray("machineIds")), CatalogJson.machineNames(catalog), CatalogJson.machineOs(catalog), ProviderUsageJson.parse(catalog), CatalogJson.machineSimulators(catalog), CatalogJson.machineEmulators(catalog)))
         }
         "synced" -> {
             val count = message.nonnegative("streams"); require(count <= Int.MAX_VALUE)
@@ -123,6 +124,7 @@ internal object RuntimeProtocol {
         "networkStatus" -> RuntimeEvent.SyncFailed(if (message.optString("status") == "authorization_required") "grant_expired" else "network_unavailable")
         "grant" -> RuntimeEvent.GrantRequested
         "shortcutCloud" -> RuntimeEvent.ShortcutCloudRequested(message.getString("requestId"), message.getString("operation"), message.getString("args"))
+        "previewToken" -> RuntimeEvent.PreviewTokenRequested(message.getString("requestId"), message.getString("intent"))
         else -> null
     }
     fun schema(message: JSONObject): RuntimeResult.Schema {
@@ -149,6 +151,31 @@ internal object RuntimeProtocol {
             removed = (json.opt("del") as? Number)?.toInt(),
             unavailable = if (ok) null else json.optString("reason").ifBlank { "unavailable" },
         )
+    }
+
+    /** Upstream `listDir`, leniently: malformed entries are dropped, folders first, then by name. */
+    fun directory(json: JSONObject): DirectoryListing {
+        val array = json.optJSONArray("entries") ?: throw IllegalArgumentException("invalid_directory")
+        val entries = (0 until array.length()).mapNotNull { index ->
+            val entry = array.optJSONObject(index) ?: return@mapNotNull null
+            val name = entry.optString("name")
+            val type = entry.optString("type")
+            if (name.isBlank() || name == "." || name == ".." || '/' in name || type !in setOf("file", "directory")) null
+            else DirectoryEntry(name, type == "directory")
+        }.sortedWith(compareBy<DirectoryEntry> { !it.directory }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        return DirectoryListing(entries, json.optBoolean("truncated"))
+    }
+
+    /** Upstream `readFile`: text, binary (contents not kept), or the computer's error code. */
+    fun file(json: JSONObject, requested: String): FileContent {
+        val path = json.optString("path").ifBlank { requested }
+        val bytes = (json.opt("bytes") as? Number)?.toLong() ?: 0L
+        return when {
+            json.optString("status") != "ok" -> FileContent.Failed(path, json.optString("code").ifBlank { "read_failed" })
+            json.optString("kind") == "text" && json.has("text") -> FileContent.Text(path, json.optString("text"), bytes)
+            json.optString("kind") == "binary" -> FileContent.Binary(path, bytes)
+            else -> FileContent.Failed(path, "read_failed")
+        }
     }
 
     /** Upstream `itemDetail` blocks (`terminal_command` / `terminal_output` / `diff` / `text` / …), leniently. */
@@ -219,6 +246,23 @@ internal object RuntimeProtocol {
                     background = item.optBoolean("isBackgrounded"),
                     steps = steps,
                     group = if (item.optString("group") == "tasks") "tasks" else "subagents",
+                )
+            }
+            "image", "image_group" -> {
+                val raw = if (item.optString("type") == "image") listOfNotNull(item.optJSONObject("image"))
+                else item.optJSONArray("images")?.objects().orEmpty()
+                raw.mapNotNull { image ->
+                    val imageId = image.optString("id").ifBlank { return@mapNotNull null }
+                    fun size(key: String) = (image.opt(key) as? Number)?.toInt()?.takeIf { it > 0 }
+                    TurnImage(imageId, image.optString("fileName").ifBlank { "image" }, (image.opt("storageSessionId") as? String)?.takeIf { it.isNotBlank() }, size("width"), size("height"))
+                }.takeIf { it.isNotEmpty() }?.let { TurnItem.Images(id, it) }
+            }
+            "file" -> item.optJSONObject("file")?.let { file ->
+                TurnItem.File(
+                    id,
+                    fileName = file.optString("fileName").ifBlank { "file" },
+                    mimeType = (file.opt("mimeType") as? String)?.takeIf { it.isNotBlank() },
+                    sizeBytes = (file.opt("sizeBytes") as? Number)?.toLong()?.takeIf { it >= 0 },
                 )
             }
             "system_notice" -> {

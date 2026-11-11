@@ -127,6 +127,11 @@ component details.
 
 ## Seat billing
 
+- Ordinary join approval refreshes the Better Auth member cache after commitment.
+  The existing owner-state subscription carries an optional roster version for
+  cross-device refresh. Cache or marker failure preserves approval; scope the
+  panel by account/workspace and retain changes arriving during a refresh.
+
 - Reuse `SeatCostNotice` in invitation and approval entry points. Approval must show
   the current cost and deferred collection policy before committing membership.
 - Removal/leave do not cancel accrued service fees. Deleted workspace invoices stay

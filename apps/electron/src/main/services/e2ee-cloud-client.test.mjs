@@ -639,6 +639,127 @@ void test('management ledger transport preserves the original record and refuses
   )
 })
 
+void test('the relay copy of a member invitation reaches the approving host intact for verification', async () => {
+  // Automatic email admission verifies this copy itself; dropping it here would silently
+  // turn every genuine email invitation into an explicit approval.
+  const offer = {
+    version: 1,
+    workspaceId: access.workspaceId,
+    genesisHash: '11'.repeat(32),
+    genesisRecordHex: 'abcd',
+    endorser: '22'.repeat(32),
+    token: '33'.repeat(32),
+    mode: 'email',
+    expiresAt: 9_000_000_000_000,
+    signature: '44'.repeat(64)
+  }
+  const reply = {
+    id: 'synthetic-request',
+    workspaceId: access.workspaceId,
+    accountId: 'synthetic-account',
+    keyPackageHex: 'abcd',
+    signingPublicKey: '55'.repeat(32),
+    requestId: '66'.repeat(16),
+    source: 'email',
+    state: 'pending',
+    expiresAt: 9_000_000_000_000,
+    offer
+  }
+  const read = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () => response(reply)),
+        (client) => client.memberRead({ ...access, requestId: reply.requestId })
+      )
+    )
+  )
+  assert.deepEqual(read.offer, offer)
+})
+
+void test('the member list stays usable when it holds an unsigned or unreadable invitation', async () => {
+  const offer = {
+    version: 1,
+    workspaceId: access.workspaceId,
+    genesisHash: '11'.repeat(32),
+    genesisRecordHex: 'abcd',
+    endorser: '22'.repeat(32),
+    token: '33'.repeat(32),
+    mode: 'email',
+    expiresAt: 9_000_000_000_000
+  }
+  const legacy = { ...offer, token: '34'.repeat(32) }
+  const item = {
+    id: 'synthetic-request',
+    workspaceId: access.workspaceId,
+    accountId: 'synthetic-account',
+    keyPackageHex: 'abcd',
+    signingPublicKey: '55'.repeat(32),
+    requestId: '66'.repeat(16),
+    source: 'email',
+    state: 'pending',
+    expiresAt: 9_000_000_000_000,
+    offer: { ...offer, signature: '44'.repeat(64) },
+    applicantName: 'Riley',
+    applicantEmail: 'r@example.test'
+  }
+  const pending = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () =>
+          response({
+            invitations: [offer, legacy, { token: 'not-an-offer' }],
+            unsignedInvitations: [{ token: legacy.token, email: 'legacy@synthetic.test' }],
+            items: [item],
+            hasMore: false,
+            seatPreview: { status: 'not_billed', reason: 'free' }
+          })
+        ),
+        (client) => client.memberPending(access)
+      )
+    )
+  )
+  // The applicant stays approvable, the unsigned invitation stays revocable by token and is
+  // marked for re-sending, and only the unreadable entry is left out.
+  assert.deepEqual(
+    pending.items.map((row) => row.requestId),
+    [item.requestId]
+  )
+  assert.deepEqual(pending.invitations, [
+    offer,
+    { ...legacy, needsReissue: true, email: 'legacy@synthetic.test' }
+  ])
+})
+
+void test('an invitation refused for a still-waiting applicant keeps its code for the administrator', async () => {
+  const result = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () =>
+          Response.json(
+            {
+              status: 'error',
+              errorMessage: 'synthetic-private-cause',
+              errorData: { code: 'e2ee_member_invitation_request_pending' }
+            },
+            { status: 560 }
+          )
+        ),
+        (client) =>
+          Effect.result(
+            client.memberCreateInvitation({
+              ...access,
+              offer: { version: 1 },
+              email: 'legacy@synthetic.test'
+            })
+          )
+      )
+    )
+  )
+  assert.equal(result._tag, 'Failure')
+  assert.equal(result.failure.code, 'e2ee_member_invitation_request_pending')
+  assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+})
+
 void test('only exact authenticated member removal or device revocation carries a terminal signal', async () => {
   for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
     await Effect.runPromise(

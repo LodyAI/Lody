@@ -219,6 +219,9 @@ const PAIRING_REFUSALS = new Set([
   'invalid-input'
 ])
 /** Resolves an iroh route under the account lock; no network wait happens here. */
+/** How long an iroh call may wait for the account lock before Streams takes it. */
+const IROH_ROUTE_BUDGET_MS = 250
+
 async function irohRoute(
   id: ReturnType<typeof sender>,
   workspaceId: string,
@@ -1050,7 +1053,13 @@ export class E2eeIpc extends IpcService {
         offer,
         ...(input.email === undefined ? {} : { email: input.email })
       })
-    )
+    ).catch((error: unknown) => {
+      // An applicant of this email's earlier invitation is still waiting: the renderer tells
+      // the administrator to settle that request first. Only this mapped code crosses.
+      if ((error as { code?: unknown })?.code === 'e2ee_member_invitation_request_pending')
+        throw new Error('e2ee_member_invitation_request_pending')
+      throw error
+    })
     if (
       result.offer.workspaceId !== offer.workspaceId ||
       result.offer.genesisHash !== offer.genesisHash
@@ -1217,15 +1226,17 @@ export class E2eeIpc extends IpcService {
       access,
       cloud.client.memberRead({ ...access, requestId })
     )
-    if (
-      material.workspaceId !== workspaceId ||
-      material.requestId !== requestId ||
-      (mode === 'automatic' && material.source !== 'email')
-    )
+    if (material.workspaceId !== workspaceId || material.requestId !== requestId)
       throw new Error('e2ee_conflict')
+    // `source` is a relay label: automatic admission is decided by the host, which verifies
+    // the invitation's endorsement against its own ledger before signing.
     const pending = await scope((owner) =>
       owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.prepareMemberAdmission(workspaceId, material.keyPackageHex)
+        ? owner.host.prepareMemberAdmission(
+            workspaceId,
+            material.keyPackageHex,
+            mode === 'automatic' ? { offer: material.offer, now: Date.now() } : undefined
+          )
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
     let primary: unknown
@@ -2925,7 +2936,15 @@ export class E2eeIpc extends IpcService {
     timeoutMs: number
   ) {
     const input = irohCallSchema.parse({ workspaceId, targetMachineId, envelope, timeoutMs })
-    const route = await irohRoute(sender(), input.workspaceId, input.targetMachineId)
+    // A busy account lock answers "use Streams" at once instead of holding the
+    // caller's original back for its whole call budget.
+    let budget: ReturnType<typeof setTimeout> | undefined
+    const route = await Promise.race([
+      irohRoute(sender(), input.workspaceId, input.targetMachineId),
+      new Promise<undefined>((resolve) => {
+        budget = setTimeout(() => resolve(undefined), IROH_ROUTE_BUDGET_MS)
+      })
+    ]).finally(() => clearTimeout(budget))
     if (!route) throw new Error('iroh_unavailable')
     return route.call(input.envelope, input.timeoutMs)
   }

@@ -124,6 +124,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
   func reset() {
     for navigation in Set(tabNavigations.values).union([primary]) { navigation.popToRootViewController(animated: false) }
+    if compactTabsInstalled { compactNavigation.popToRootViewController(animated: false) }
     clearSession()
   }
   /// Clear only the initiating conversation when Archive optimistically returns to Home.
@@ -282,6 +283,14 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     LodyShell.shared.configureNavigation(navigation)
     tabNavigations[destination] = navigation
     return navigation
+  }
+
+  /// On iPhone, pages opened from a tab push over the whole tab controller, as conversations do.
+  /// UIKit's hide-bottom-bar return draws the Liquid Glass tab bar's items before its glass,
+  /// whereas the tab controller sliding back brings the bar in already composed.
+  func pushTarget(for navigation: UINavigationController) -> UINavigationController? {
+    guard compactTabsInstalled, tabNavigations.values.contains(where: { $0 === navigation }) else { return nil }
+    return compactNavigation
   }
 
   func selectTab(_ next: HomeTab) {

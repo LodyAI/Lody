@@ -2326,6 +2326,75 @@ describe('LoroStreamsMachineRpcServer', () => {
     }
   );
 
+  it.each(['session-parent', 'wrong-owner'])(
+    'authorizes and encrypts session folder listings (owner=%s)',
+    async (owner) => {
+      const fake = createFakeStreamClient();
+      const result = {
+        status: 'ok' as const,
+        v: 3 as const,
+        path: 'docs',
+        entries: [{ name: 'plan.md', type: 'file' as const }],
+        truncated: false,
+      };
+      const listSessionDirectory = vi.fn(async () => result);
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId: 'machine-1' as MachineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        resolveCodeCollabOwnerSessionId: async () => 'session-parent' as SessionId,
+        listSessionDirectory,
+      });
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'list-1',
+            method: 'file/list-dir',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 5000,
+            params: await encryptCodeCollabV2RpcPayload(owner, {
+              v: 3,
+              sessionId: 'child',
+              path: 'docs',
+            }),
+          },
+        ],
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      await server.start();
+      try {
+        await fake.waitForAppendedCount(1);
+        const response = fake.appended[0]?.value as {
+          result?: CodeCollabV2RpcContentEnvelope;
+          error?: { code: string };
+        };
+        if (owner === 'wrong-owner') {
+          expect(response.result).toBeUndefined();
+          expect(response.error?.code).toBe('permission_denied');
+          expect(listSessionDirectory).not.toHaveBeenCalled();
+        } else {
+          expect(response.error).toBeUndefined();
+          expect(JSON.stringify(response)).not.toContain('plan.md');
+          await expect(
+            decryptCodeCollabV2RpcPayload(response.result as CodeCollabV2RpcContentEnvelope, owner)
+          ).resolves.toEqual(result);
+        }
+      } finally {
+        server.stop();
+      }
+    }
+  );
+
   it('serves file/preview through the owner-scoped encrypted envelope', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;

@@ -48,7 +48,7 @@ final class InboxController: UIViewController {
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
     view.addSubview(list)
     wireChrome()
-    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged]).map { name in
+    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged, .lodyProjectGroupsDidChange]).map { name in
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated {
           self?.render(onlyIfContentChanged: name == .lodyCatalogDidChange || name == .lodySessionCatalogPreviewDidChange)
@@ -82,6 +82,9 @@ final class InboxController: UIViewController {
     guard isViewLoaded else { return }
     let state = source.state
     let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    if source === SessionSource.live {
+      ProjectGroupStore.shared.ensure(userId: state.userId, workspaceId: state.workspaceId, catalog: state.catalog)
+    }
     if state.userId.isEmpty {
       chrome.update(nil)
       list.setPlaceholder("")
@@ -124,18 +127,26 @@ final class InboxController: UIViewController {
     }, uniquingKeysWith: { _, new in new }) : [:]
     list.setOwners(owners)
     loadViews(state)
-    list.setProjectIndexEnabled(!state.userId.isEmpty && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    list.setProjectIndexEnabled(!state.userId.isEmpty && !HomeArchive.shown && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && traitCollection.horizontalSizeClass != .regular && HomeGrouping.stored == .project)
     guard !state.userId.isEmpty else {
       list.setSections([])
       return
     }
-    let catalog = state.catalog.viewed(views)
+    let archived = HomeArchive.shown
+    list.setArchivedStyle(archived)
+    var catalog = state.catalog.viewed(views)
+    // The Archived switch narrows every view, search included, to archived chats.
+    if archived { catalog.sessions = catalog.sessions.filter(\.archived) }
     list.setPreviewUserId(state.userId)
     list.setPreviewWorkspaceId(state.workspaceId)
     list.setPinsGroupLabels(term.isEmpty)
     guard term.isEmpty else {
       renderSearch(term, state: state, catalog: catalog)
+      return
+    }
+    if archived {
+      list.setSections(InboxSections.archived(catalog, owner: HomeScope.stored == .mine ? state.userId : nil))
       return
     }
     // iPhone Home groups by the view menu's choice (time / project / status).
@@ -146,7 +157,9 @@ final class InboxController: UIViewController {
     }
     let pinOrder = pinOrder(state, catalog: catalog)
     if mode == 0 {
-      list.setSections(InboxSections.projects(catalog, expanded: expanded, sort: sort, pinOrder: pinOrder))
+      // Project groups without conversations still list, as projects without any do.
+      let groups = source === SessionSource.live ? ProjectGroupStore.shared.merged(catalog) : catalog
+      list.setSections(InboxSections.projects(groups, expanded: expanded, sort: sort, pinOrder: pinOrder))
     } else {
       list.setSections(InboxSections.inbox(catalog, chatOnly: mode == 2, pinOrder: pinOrder))
     }
@@ -218,14 +231,15 @@ final class InboxController: UIViewController {
   }
 
   private func syncState(_ state: SessionListState) -> HomeSyncState {
-    if !state.connected { return .offline }
+    if !state.connected { return .connecting }
     return state.loading ? .syncing : .live
   }
 
   private func listPlaceholder(_ state: SessionListState) -> String {
     if state.loading { return String(localized: "sessions.placeholder.loading", bundle: .lody) }
     if !state.connected { return String(localized: "sessions.placeholder.offline", bundle: .lody) }
-    return String(localized: "sessions.placeholder.empty", bundle: .lody)
+    let empty = HomeArchive.shown ? "home.archived.empty" : "sessions.placeholder.empty"
+    return String(localized: String.LocalizationValue(empty), bundle: .lody)
   }
 
   private func pinOrder(_ state: SessionListState, catalog: SessionCatalog) -> [String] {

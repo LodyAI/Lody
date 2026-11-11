@@ -20,6 +20,16 @@ precondition(own.valueSymbol == "lock" && foreign.valueSymbol == "person.2")
 precondition(own.subtitle == "/first" && own.subtitleMono && own.image == "folder")
 let unknown = rows.first { $0.title == "Unknown" }!
 precondition(unknown.id == "unknown:m1:local:unknown" && unknown.options.isEmpty && unknown.valueSymbol == "questionmark.circle")
+// With the user's machines known, an unregistered project on an owned machine is private and
+// editable (desktop); one on another member's machine stays hidden.
+var ownedSnapshot = snapshot
+ownedSnapshot.ownedMachineIds = ["m1"]
+let ownedRows = ProjectVisibilitySections.make(ownedSnapshot, catalog: SettingsCatalog(projects: catalog.projects + [
+  SettingsProject(id: "m2:local:hidden", machineId: "m2", name: "Hidden", rootPath: "/hidden"),
+]), enabled: true).flatMap(\.rows)
+let unregistered = ownedRows.first { $0.id == "visibility:m1:unknown" }!
+precondition(unregistered.options.count == 2 && unregistered.action && unregistered.valueSymbol == "lock", "Owned unregistered projects are private")
+precondition(!ownedRows.contains { $0.title == "Hidden" || $0.id.hasPrefix("unknown:") }, "Others' unregistered projects stay hidden")
 precondition(ProjectVisibilitySections.make(snapshot, catalog: catalog, enabled: false).flatMap(\.rows).allSatisfy { !$0.action })
 precondition(VisibilityRow(machineId: "a b/é", localProjectId: "x:y", ownerUserId: "o", sharedWithTeam: true, updatedAt: 0).id
   == "visibility:a%20b%2F%C3%A9:x%3Ay", "Ids match encodeURIComponent")
@@ -59,23 +69,44 @@ let data = GitHubSettings(
 )
 let github = GitHubSettingsSections.make(data, enabled: true).flatMap(\.rows)
 precondition(github.first { $0.id == "identity" }!.title == "settings.github.expired")
-precondition(github.first { $0.id == "preference" }!.options.map(\.id) == ["disabled"], "Expired identity cannot be enabled")
-precondition(github.first { $0.id == "repo:LodyAI/Lody" }!.options.isEmpty, "Members cannot manage repositories")
+let expiredPreference = github.first { $0.id == "preference" }!
+precondition(expiredPreference.toggle == true && expiredPreference.action, "An expired identity can still be turned off")
+var expiredOff = data
+expiredOff.personal?.enabled = false
+precondition(GitHubSettingsSections.make(expiredOff, enabled: true).flatMap(\.rows).first { $0.id == "preference" }!.action == false, "Expired identity cannot be turned on")
+let memberRepo = github.first { $0.id == "repo:LodyAI/Lody" }!
+precondition(memberRepo.toggle == true && !memberRepo.action, "Members see repository state but cannot change it")
+precondition(memberRepo.repository == "LodyAI/Lody" && memberRepo.title == "Lody", "Repositories show the owner logo and short name")
 precondition(!github.contains { $0.id == "install" })
 let missing = GitHubSettingsSections.make(nil, enabled: false).flatMap(\.rows)
 precondition(missing.first { $0.id == "identity" }!.title == "settings.github.unknown")
 var admin = data
 admin.canManage = true
-let adminRows = GitHubSettingsSections.make(admin, enabled: true).flatMap(\.rows)
-precondition(adminRows.first { $0.id == "repo:LodyAI/Lody" }!.options.count == 2 && adminRows.contains { $0.id == "install" })
+admin.repositories = [
+  GitHubRepository(repoFullName: "zeta/tools", name: "tools", repositoryId: 2, private: true, enabled: false),
+  GitHubRepository(repoFullName: "LodyAI/Lody", name: "Lody", repositoryId: 1, private: false, enabled: true),
+]
+let adminSections = GitHubSettingsSections.make(admin, enabled: true)
+let adminRows = adminSections.flatMap(\.rows)
+precondition(adminRows.first { $0.id == "repo:zeta/tools" }!.action && adminRows.contains { $0.id == "install" })
+precondition(adminSections.first { $0.id == "repositories" }!.rows.map(\.id) == ["repo:LodyAI/Lody", "repo:zeta/tools"], "Repositories sort by name")
+precondition(adminSections.map(\.id) == ["personal", "installation", "repositories"], "Identity, the App, then the long repository list")
+precondition(GitHubSettingsSections.make(admin, enabled: false).flatMap(\.rows).allSatisfy { !$0.action }, "Busy pages lock every switch")
+let search = GitHubSettingsSections.make(admin, enabled: true, query: "  ZETA ")
+precondition(search.map(\.id) == ["repositories"] && search[0].rows.map(\.id) == ["repo:zeta/tools"], "Search keeps only matching repositories")
+precondition(!search[0].headerValue.isEmpty, "The enabled count stays while searching")
+let noMatch = GitHubSettingsSections.make(admin, enabled: true, query: "absent")
+precondition(noMatch[0].rows.isEmpty && !noMatch[0].footer.isEmpty, "An empty search explains itself")
 admin.repositories = nil
 precondition(GitHubSettingsSections.make(admin, enabled: true).map(\.id).contains("repositories-unavailable"))
 admin.repositories = []
-precondition(GitHubSettingsSections.make(admin, enabled: true).map(\.id).contains("no-repositories"))
+precondition(GitHubSettingsSections.make(admin, enabled: true).first { $0.id == "repositories" }!.footer.contains("settings.github.empty"))
 var authorized = data
 authorized.personal = GitHubPersonal(enabled: false, authorization: GitHubAuthorization(state: .authorized, githubAccountId: "1", profile: .init(login: "octo")))
 let authorizedRows = GitHubSettingsSections.make(authorized, enabled: true).flatMap(\.rows)
-precondition(authorizedRows[0].subtitle == "octo" && authorizedRows[1].options.map(\.id) == ["disabled", "enabled"])
+precondition(authorizedRows[0].title == "octo" && authorizedRows[0].image == "https://avatars.githubusercontent.com/octo?size=96")
+precondition(authorizedRows[1].toggle == false && authorizedRows[1].action, "An authorized identity can be turned on")
+precondition(GitHubSettingsSections.avatarURL("bad/login") == nil)
 precondition(authorized.valid && data.valid)
 authorized.personal?.authorization.githubAccountId = nil
 precondition(!authorized.valid, "Authorized identity needs an account id")

@@ -620,18 +620,21 @@ let assistantImages = """
 ]}]
 """
 var uploadedTranscript = ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].self, from: Data(assistantImages.utf8)))
-let liveImageRows = uploadedTranscript.rows().filter { $0.image != nil }
-precondition(liveImageRows.compactMap { $0.image?.id } == ["one", "two", "three"])
-precondition(liveImageRows.first?.image?.storageSessionId == "source")
+let liveImageRows = ChatImageGallery.items(from: uploadedTranscript.rows())
+precondition(liveImageRows.map(\.image.id) == ["one", "two", "three"])
+precondition(liveImageRows.map(\.id) == ["upload:photos:image:0", "upload:photos:image:1", "upload:last:image:0"],
+  "Stacked images keep their own preview ids")
+precondition(liveImageRows.first?.image.storageSessionId == "source")
 uploadedTranscript.entries[0].finished = true
-precondition(uploadedTranscript.rows().filter { $0.image != nil } == liveImageRows,
+precondition(ChatImageGallery.items(from: uploadedTranscript.rows()) == liveImageRows,
   "Completion must preserve every uploaded image and its row identity")
-precondition(uploadedTranscript.rows().map(\.kind) == ["summary", "image", "image", "text", "image", "meta"])
+precondition(uploadedTranscript.rows().map(\.kind) == ["summary", "imageStack", "text", "image", "meta"],
+  "Consecutive images fan into one stack; a lone image keeps its own row")
 precondition(uploadedTranscript.rows(processEntryID: "upload").map(\.kind) == ["tool_call"],
   "Uploaded images belong in the conversation, not the collapsed process")
-precondition(ChatTranscript.previewRows(from: assistantImages).filter { $0.image != nil } == liveImageRows)
+precondition(ChatImageGallery.items(from: ChatTranscript.previewRows(from: assistantImages)) == liveImageRows)
 uploadedTranscript.entries[0].items.removeAll { !$0.isImage }
-precondition(uploadedTranscript.rows().map(\.kind) == ["image", "image", "image", "meta"],
+precondition(uploadedTranscript.rows().map(\.kind) == ["imageStack", "meta"],
   "Standalone MCP uploads must render without a tool or final text")
 print("MCP images: multiple images, completion, standalone upload and cache restore passed")
 
@@ -833,6 +836,7 @@ print("Reading column: wide hosts keep a 768 pt column inside a full-bleed scrol
 let failureJSON = """
 [{"id":"error","role":"assistant","status":"completed","finished":true,"items":[
 {"itemId":"text","type":"text","text":"Completed answer"},
+{"itemId":"proposal","type":"system_notice","name":"agent_role_proposal","proposal":{"kind":"agent_role","action":"create","fields":{"name":"Reviewer"}}},
 {"itemId":"failure","type":"system_notice","name":"chat_failed","meta":{"reason":"future_reason","message":"raw error"}}
 ]}]
 """
@@ -840,6 +844,7 @@ let failureRows = ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].s
 precondition(failureRows.contains { $0.kind == "text" && $0.text == "Completed answer" })
 precondition(failureRows.contains { $0.kind == "chat_failed" && !$0.actionable && $0.attention })
 precondition(!failureRows.contains { $0.kind == "summary" })
+precondition(failureRows.contains { $0.kind == "proposal" && $0.proposal?.fields?.name == "Reviewer" && !$0.attention })
 
 precondition(ChatFailure.hasDetail(failureRows.first { $0.kind == "chat_failed" }?.errorMeta))
 precondition(!ChatFailure.hasDetail(nil))

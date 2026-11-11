@@ -288,6 +288,9 @@ function withLocalQueueRows(records: readonly PendingSessionSend[]) {
  * below the real queue as local rows, muted and without drag, edit or steer,
  * until their queue items sync in and take the same position.
  */
+const LOCAL_PREPARE_FAILED =
+  "Lody on this computer couldn't prepare this attachment (request_timeout). Make sure the local agent is running and up to date, then continue sending.";
+
 export const LocalUploadRows: Story = {
   args: {
     ...commonArgs,
@@ -309,7 +312,7 @@ export const LocalUploadRows: Story = {
         ],
       }),
       localRecord('local-failed', 'Summarize the attached crash log', {
-        error: 'offline',
+        error: LOCAL_PREPARE_FAILED,
         attachments: [
           {
             id: 'log',
@@ -318,7 +321,7 @@ export const LocalUploadRows: Story = {
             name: 'crash.log',
             mimeType: 'text/plain',
             lastModified: 0,
-            error: 'offline',
+            error: LOCAL_PREPARE_FAILED,
           },
         ],
       }),

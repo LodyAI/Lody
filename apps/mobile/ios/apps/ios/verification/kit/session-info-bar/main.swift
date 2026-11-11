@@ -26,17 +26,31 @@ session.pullRequests[0].status = "draft"
 check(bar(updates.apply(session)).actions == [.readyForReview], "after convergence, a later re-draft is authoritative")
 print("PASS: confirmed PR transitions and catalog convergence")
 
+// Merge is offered whenever GitHub would accept it, including while CI runs.
+var open = SessionPullRequest(repository: "owner/repo", number: 8, status: "open", ci: "p", merge: "u")
+session.pullRequests = [open]
+check(bar(session).actions == [.merge], "unstable while CI runs offers Merge")
+open.ci = "f"; session.pullRequests = [open]
+check(bar(session).actions == [.fixCi, .merge], "failing optional checks keep Merge behind Fix CI")
+for blocked in ["b", "h", "d"] {
+  open.ci = "p"; open.merge = blocked; session.pullRequests = [open]
+  check(!bar(session).actions.contains(.merge), "\(blocked) cannot be merged")
+}
+open.merge = nil; session.pullRequests = [open]
+check(bar(session).actions.isEmpty, "an unknown merge state offers no Merge")
+print("PASS: Merge follows GitHub's merge state, not CI completion")
+
 updates = SessionPullRequestUpdates()
 session.pullRequests = [draft]
 updates.begin(draft, merged: false)
-check(bar(updates.apply(session)).pullRequest?.status == "open", "ready changes immediately before response")
+check(bar(updates.apply(session)).pullRequest?.status == "draft", "ready in flight keeps the catalog status")
 updates.finish(success: false)
 check(bar(updates.apply(session)).pullRequest?.status == "draft", "failed ready restores the catalog")
 updates.begin(draft, merged: true)
-check(bar(updates.apply(session)).pullRequest?.status == "merged", "merge changes immediately before response")
+check(bar(updates.apply(session)).pullRequest?.status == "draft", "merge in flight is not shown as merged")
 updates.finish(success: true)
 check(bar(updates.apply(session)).pullRequest?.status == "merged", "success survives old catalog frames")
-print("PASS: optimistic PR transitions roll back on failure")
+print("PASS: PR status changes only after GitHub acknowledges the write")
 
 // Ready for review on a draft (no catalog merge state): Merge appears from GitHub's own read.
 updates = SessionPullRequestUpdates()

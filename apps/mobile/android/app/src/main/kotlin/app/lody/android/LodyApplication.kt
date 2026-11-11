@@ -22,7 +22,11 @@ open class LodyApplication : Application() {
     lateinit var pullRequests: app.lody.android.chat.PullRequestWriter
     lateinit var mergeStates: app.lody.android.chat.PullRequestMergeReader
     lateinit var branches: app.lody.android.chat.PullRequestBranches
+    lateinit var pullRequestDetails: app.lody.android.chat.PullRequestDetailsReader
     lateinit var attachments: app.lody.android.chat.AttachmentUploader
+        private set
+    /** Reads agent images in conversations with the verified account. */
+    lateinit var sessionImages: app.lody.android.chat.SessionImageReader
         private set
     lateinit var members: WorkspaceMembers
         private set
@@ -36,6 +40,7 @@ open class LodyApplication : Application() {
         private set
     private var prepared: Pair<RuntimeScope, ShortLivedGrant>? = null
     private val shortcutCloud by lazy { app.lody.android.cloud.PromptShortcutCloud() }
+    private val previewTokens by lazy { app.lody.android.cloud.PreviewTokens() }
     protected open fun createRuntime(scope: RuntimeScope): CloudRuntime {
         val ready = prepared?.takeIf { it.first == scope }
         if (ready != null) {
@@ -45,6 +50,8 @@ open class LodyApplication : Application() {
                 catch (error: AuthFailure) { throw app.lody.android.runtime.RuntimeException(RuntimeFault(error.code, if (error.code == "network_unavailable") RuntimeErrorCategory.NETWORK else RuntimeErrorCategory.AUTH)) }
             }, app.lody.android.runtime.ShortcutCloudProvider { key, operation, args ->
                 account.withVerifiedAccount(key) { credential -> shortcutCloud.call(credential, key.workspaceId, operation, args) }
+            }, app.lody.android.runtime.PreviewTokenProvider { key, intent ->
+                account.withVerifiedAccount(key) { credential -> previewTokens.mint(credential, key, intent) }
             })
         }
         return createOfflineRuntime(scope)
@@ -76,9 +83,16 @@ open class LodyApplication : Application() {
             override suspend fun delete(scope: RuntimeScope, repository: String, number: Int) =
                 account.withVerifiedAccount(scope) { credential -> writes.deleteBranch(credential, scope.workspaceId, repository, number) }
         }
+        pullRequestDetails = app.lody.android.chat.PullRequestDetailsReader { scope, repo, number ->
+            account.withVerifiedAccount(scope) { credential -> writes.details(credential, scope.workspaceId, repo, number) }
+        }
         val uploads = app.lody.android.chat.SessionAttachmentUploads(contentResolver)
         attachments = app.lody.android.chat.AttachmentUploader { scope, sessionId, items ->
             account.withVerifiedAccount(scope) { credential -> uploads.upload(credential.token, scope.workspaceId, sessionId, items) }
+        }
+        val imageReads = app.lody.android.chat.SessionImageHttp()
+        sessionImages = app.lody.android.chat.SessionImageReader { scope, sessionId, image, width ->
+            account.withVerifiedAccount(scope) { credential -> imageReads.read(credential.token, scope.workspaceId, image.storageSessionId ?: sessionId, image.id, width) }
         }
         account = AccountController(CloudAuthHttp(OkHttpAuthTransport()), KeystoreCredentialStore(this), applicationScope, cache) {
             if (::notifications.isInitialized) notifications.clear()

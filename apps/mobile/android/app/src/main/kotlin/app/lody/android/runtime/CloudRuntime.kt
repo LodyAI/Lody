@@ -40,6 +40,13 @@ sealed interface RuntimeCommand {
     data class ItemDetail(val sessionId: String, val entryId: String, val itemId: String) : RuntimeCommand
     /** One changed file's diff for one turn, from the session's computer. Read only. */
     data class TurnDiff(val sessionId: String, val entryId: String, val path: String) : RuntimeCommand
+    /**
+     * One folder of the session's local project ([relativePath] from the project root, "" for the
+     * root), from the session's computer (upstream `listDir`). Read only.
+     */
+    data class ListDir(val sessionId: String, val relativePath: String) : RuntimeCommand
+    /** One file's contents (upstream `readFile`, at most 2 MiB), from the session's computer. Read only. */
+    data class ReadFile(val sessionId: String, val path: String) : RuntimeCommand
     /** One mention category for the composer's @ panel (upstream `mentionCatalog`). Read only. */
     data class MentionCatalog(val category: String, val source: MentionSource) : RuntimeCommand
     /**
@@ -60,6 +67,15 @@ sealed interface RuntimeCommand {
     data class ScheduleDetail(val scheduleId: String) : RuntimeCommand
     /** An owner write (create / edit / pause / resume / run / delete); never retried here. */
     data class ScheduleCommand(val request: ScheduleCommandRequest) : RuntimeCommand
+    /** The watched session's managed web preview: open (or reuse) its link, or revoke it. Never retried. */
+    data class SessionPreview(val sessionId: String, val revoke: Boolean = false) : RuntimeCommand
+    /** One iOS Simulator / Android Emulator lifecycle call for the session (list / start / status / stop). */
+    data class DeviceControl(val platform: DevicePlatform, val sessionId: String, val command: DeviceCommand) : RuntimeCommand
+    /**
+     * Save / create ([accept]) or dismiss an Agent's proposal in the watched session (upstream
+     * `decideProposal`); the outcome is recorded in history. A write, never retried here.
+     */
+    data class DecideProposal(val sessionId: String, val entryId: String, val itemId: String, val accept: Boolean) : RuntimeCommand
     data object Ping : RuntimeCommand
     data object InspectSchema : RuntimeCommand
 }
@@ -83,20 +99,27 @@ sealed interface RuntimeResult {
     data class Schedule(val value: app.lody.android.runtime.ScheduleDetail) : RuntimeResult
     /** The schedule a command wrote. */
     data class ScheduleWritten(val scheduleId: String) : RuntimeResult
+    /** A proposal's recorded outcome (`saved` / `created` / `dismissed`). */
+    data class ProposalDecided(val outcome: String, val scheduleId: String? = null) : RuntimeResult
     data class Created(val value: CreationReceipt) : RuntimeResult
     /** Upstream send state (`sent` / `queued` / `not_sent` / `unknown`); a machine ACK is delivery only. */
     data class Sent(val state: String, val reason: String? = null) : RuntimeResult
     data object Accepted : RuntimeResult
     data class Detail(val value: StepDetail) : RuntimeResult
     data class Diff(val value: FileDiff) : RuntimeResult
+    data class Directory(val value: DirectoryListing) : RuntimeResult
+    data class File(val value: FileContent) : RuntimeResult
     data class Pong(val healthy: Boolean) : RuntimeResult
+    data class Preview(val value: BrowserPreviewReply) : RuntimeResult
+    data class Device(val value: DeviceControlReply) : RuntimeResult
     data class Schema(val machineIds: Set<String>, val creationTrials: Map<String, String>) : RuntimeResult
 }
 enum class RuntimeErrorCategory { AUTH, NETWORK, PROTOCOL, RUNTIME, BUSINESS, CANCELLED, UNSUPPORTED }
 data class RuntimeFault(val code: String, val category: RuntimeErrorCategory)
 class RuntimeException(val fault: RuntimeFault) : Exception(fault.code)
 
-data class CatalogProject(val id: String, val machineId: String, val name: String, val rootPath: String, val repoFullName: String? = null)
+/** [repositories]: a multi-repository project's GitHub members (`projectRun`), in member order. */
+data class CatalogProject(val id: String, val machineId: String, val name: String, val rootPath: String, val repoFullName: String? = null, val repositories: List<String> = emptyList())
 /** [ci] is the web CI verdict code, [merge] GitHub's merge state (`c` clean, `d` conflicts, …); [url] opens it. */
 data class CatalogPullRequest(
     val repository: String, val number: Int, val status: String, val ci: String? = null,
@@ -128,7 +151,32 @@ data class CatalogSession(
     val isTabClosed: Boolean = false,
     val workspaceDirty: Boolean = false,
     val workspaceUnpushed: Boolean = false,
+    /** Present for Project group conversations. */
+    val projectRun: CatalogProjectRun? = null,
+    /** The agent asked to show an iOS Simulator / Android Emulator preview (live catalog only, never cached). */
+    val iosSimulatorPreviewRequestId: String? = null,
+    val androidEmulatorPreviewRequestId: String? = null,
 )
+/** One repository or folder of a Project group conversation, in placement order (iOS `SessionProjectMember`). */
+data class CatalogProjectMember(
+    val id: String, val path: String, val kind: String, val depth: Int = 0, val submodule: Boolean = false,
+    /** `additional` / `link`: a local folder used in place, with no branch or PR. */
+    val access: String? = null,
+    val repoFullName: String? = null, val branch: String? = null,
+    val diffAdded: Int? = null, val diffRemoved: Int? = null,
+    val dirty: Boolean = false, val unpushed: Boolean = false,
+    /** The member repository's current PR: the last one recorded for it. */
+    val pullRequest: CatalogPullRequest? = null,
+) {
+    /** Web `repoFullName ?? path`. */
+    val identity: String get() = repoFullName ?: path
+    val inPlace: Boolean get() = access == "additional" || access == "link"
+}
+/** The frozen Project group snapshot of a conversation (session meta `projectRun`). */
+data class CatalogProjectRun(val id: String, val name: String, val members: List<CatalogProjectMember>) {
+    /** Current PRs across members, one per repository. */
+    val pullRequests: List<CatalogPullRequest> get() = members.mapNotNull { it.pullRequest }
+}
 /** Read projection, never a CRDT replica. Optional feature-specific fields come later. */
 /** [machineNames] is optional display data (computer id to name); empty from older caches. */
 data class CatalogSnapshot(
@@ -140,6 +188,10 @@ data class CatalogSnapshot(
     /** Computer id to OS (`darwin` / `win32` / `linux`), for its icon. */
     val machineOs: Map<String, String> = emptyMap(),
     val agentUsage: Map<String, ProviderUsage> = emptyMap(),
+    /** Computer id to iOS Simulator support (`available` / `upgrade-required`); darwin computers only. */
+    val machineSimulators: Map<String, String> = emptyMap(),
+    /** Computer id to Android Emulator support (`available`). */
+    val machineEmulators: Map<String, String> = emptyMap(),
 )
 /**
  * One transcript turn. [timestamp] is ISO-8601; [status] is upstream's (`seen` once the agent
@@ -168,12 +220,17 @@ data class SessionMessage(
     /** A user turn's attachments (images and files), by display name, in order. */
     val attachments: List<MessageAttachment> = emptyList(),
     val operations: List<OperationEvent> = emptyList(),
+    /** An Agent's Role or schedule proposals (system entries), decided with [RuntimeCommand.DecideProposal]. */
+    val proposals: List<ProposalCard> = emptyList(),
 )
 
 /**
  * One item of a turn, after upstream's session entry summary. Assistant turns render these as
  * prose, folded thought / tool groups and never-folded plans and notices (web `MessageContent`).
  */
+/** One session image: read with the account bearer from the Worker's session-images endpoint. */
+data class TurnImage(val id: String, val fileName: String, val storageSessionId: String?, val width: Int?, val height: Int?)
+
 sealed interface TurnItem {
     val id: String
 
@@ -200,6 +257,16 @@ sealed interface TurnItem {
     data class ProposedPlan(override val id: String, val markdown: String) : TurnItem
     /** The agent's checklist (`plan`); never folded. */
     data class Checklist(override val id: String, val entries: List<Pair<String, String>>) : TurnItem
+    /**
+     * Images the agent sent (`image` / `image_group`); never folded. Consecutive ones (only tool
+     * work between them) merge into one fanned stack in [app.lody.android.chat.TurnLayout].
+     */
+    data class Images(override val id: String, val images: List<TurnImage>) : TurnItem
+    /**
+     * A file the agent shared (`lody_upload_files`, web `SessionFileCard`): its name, type and
+     * size; never folded.
+     */
+    data class File(override val id: String, val fileName: String, val mimeType: String? = null, val sizeBytes: Long? = null) : TurnItem
     /** A failure or notice the turn ended with; never folded. */
     data class Notice(override val id: String, val text: String, val failure: Boolean) : TurnItem
     /**
@@ -270,7 +337,8 @@ data class RunChoice(
     val configOptionValues: Map<String, Any> = emptyMap(),
     val agentRoleId: String? = null, val roleKnown: Boolean = false,
 )
-data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null)
+/** [preview]: the session's managed web preview candidate, null without one. */
+data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null, val preview: BrowserPreview? = null)
 sealed interface RuntimeEvent {
     data class ProvidersChanged(val machineId: String) : RuntimeEvent
     data class ProviderProgress(val machineId: String, val id: String, val status: String, val percent: Float?) : RuntimeEvent
@@ -282,6 +350,8 @@ sealed interface RuntimeEvent {
     data object GrantRequested : RuntimeEvent
     /** The runtime asks the native host to make one prompt-shortcut Convex call (iOS `shortcutCloud`). */
     data class ShortcutCloudRequested(val requestId: String, val operation: String, val args: String) : RuntimeEvent
+    /** The runtime asks the native host to mint a preview proof's request token for [intent] (JSON). */
+    data class PreviewTokenRequested(val requestId: String, val intent: String) : RuntimeEvent
 }
 /** Stamped at source receipt, before any coroutine buffering. */
 data class RuntimeEmission(val generation: Long, val event: RuntimeEvent)
@@ -292,6 +362,11 @@ data class OwnedRuntimeState(val scope: RuntimeScope? = null, val status: Runtim
 fun interface GrantProvider { suspend fun request(scope: RuntimeScope): ShortLivedGrant }
 /** Makes one allow-listed `promptShortcuts:*` Convex call for [scope] with the verified account; throws on failure. */
 fun interface ShortcutCloudProvider { suspend fun call(scope: RuntimeScope, operation: String, args: org.json.JSONObject): Any? }
+/**
+ * Mints one preview-control request token for [scope] with the verified account: the token string,
+ * or the HTTP status (Int) the backend refused with; throws on any other failure.
+ */
+fun interface PreviewTokenProvider { suspend fun mint(scope: RuntimeScope, intent: org.json.JSONObject): Any }
 class ShortLivedGrant(val token: String, val gatewayBaseUrl: String, val expiresIn: Int, private val receivedAtNanos: Long = System.nanoTime()) {
     init { require(token.isNotBlank()); require(expiresIn in 1..3600) }
     fun remainingSeconds(nowNanos: Long = System.nanoTime()): Int =
@@ -329,6 +404,19 @@ data class FileDiff(
     val unavailable: String? = null,
 )
 
+/** One folder of a local project (upstream `DirectoryListing`): folders first, then files, by name. */
+data class DirectoryListing(val entries: List<DirectoryEntry>, val truncated: Boolean)
+data class DirectoryEntry(val name: String, val directory: Boolean)
+
+/** One file read from the session's computer (upstream `FileContent`). */
+sealed interface FileContent {
+    val path: String
+    data class Text(override val path: String, val text: String, val bytes: Long) : FileContent
+    data class Binary(override val path: String, val bytes: Long) : FileContent
+    /** The computer's refusal (`file_not_found`, `too_large`, `permission_denied`, …). */
+    data class Failed(override val path: String, val code: String) : FileContent
+}
+
 /** One mention candidate (upstream `MentionCatalog` item); [insertText] defaults to `@path`. */
 data class MentionCandidate(
     val path: String, val name: String, val kind: String, val subtitle: String = "", val insertText: String? = null,
@@ -357,5 +445,14 @@ data class MentionCatalogPage(val items: List<MentionCandidate>, val truncated: 
  * together in one conversation. [machineId] is the computer its local members pin (null: any);
  * [conflict] groups (local members on two computers) cannot start one.
  */
-data class ProjectGroup(val id: String, val name: String, val machineId: String?, val conflict: Boolean, val members: List<String>)
+/** A workspace Project group (multi-repository project); only [ownerUserId] may edit it, on desktop. */
+data class ProjectGroup(
+    val id: String, val name: String, val machineId: String?, val conflict: Boolean, val members: List<ProjectGroupMember>,
+    val ownerUserId: String = "",
+)
+/** [kind] is `github` or `local`; [label] is the repository or the local project's name. */
+data class ProjectGroupMember(
+    val id: String, val kind: String, val label: String, val path: String,
+    val repoFullName: String? = null, val machineId: String? = null,
+)
 

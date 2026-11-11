@@ -1823,6 +1823,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.10.12
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
       oxfmt:
         specifier: ^0.65.0
         version: 0.65.0

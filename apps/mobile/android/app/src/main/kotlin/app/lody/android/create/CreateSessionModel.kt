@@ -5,6 +5,10 @@ import app.lody.android.runtime.CatalogSnapshot
 import app.lody.android.runtime.AgentRole
 import app.lody.android.runtime.AgentRoleTarget
 import app.lody.android.runtime.CreationAgent
+import app.lody.android.runtime.CreationCapability
+import app.lody.android.runtime.RecentRunConfig
+import app.lody.android.runtime.RunConfigPrefs
+import app.lody.android.runtime.RunSelection
 
 /**
  * Where a new session would run; iOS counterpart: `CreateSessionForm` + `CreateSessionContext`.
@@ -117,6 +121,59 @@ object CreateSessionModel {
             "linux" -> MachineKind.Server
             else -> MachineKind.Laptop
         }
+    }
+
+    // ── Last selection per computer and recently used configurations (web `lib/recent-run-configs.ts`) ──
+
+    /** Stored deeper than shown, so one one-off run cannot evict a combination used every day. */
+    const val MAX_STORED_RECENTS = 12
+    const val MAX_VISIBLE_RECENTS = 3
+
+    /** Two runs are the same configuration only when every value matches. */
+    fun recentKey(machineId: String, selection: RunSelection, agentRoleId: String?): String =
+        listOf(machineId, selection.agentId, selection.modelId.orEmpty(), selection.modeId.orEmpty(), selection.effort.orEmpty(), agentRoleId.orEmpty())
+            .joinToString("\u0000")
+
+    fun recentKey(record: RecentRunConfig) = recentKey(record.machineId, record.selection, record.agentRoleId)
+
+    /** Records a started chat: its computer's last selection, and the newest recent entry (deduplicated, capped). */
+    fun started(prefs: RunConfigPrefs, machineId: String, selection: RunSelection, agentRoleId: String?, usedAt: Long): RunConfigPrefs {
+        val record = RecentRunConfig(machineId, selection, agentRoleId, usedAt)
+        val key = recentKey(record)
+        return RunConfigPrefs(
+            prefs.machines + (machineId to selection),
+            (listOf(record) + prefs.recents.filter { recentKey(it) != key }).take(MAX_STORED_RECENTS),
+        )
+    }
+
+    /**
+     * Recent configurations offered now (web `buildRecentRunConfigItems`): on [machineId], with the
+     * agent still online and a recorded Role still runnable, excluding the current one.
+     */
+    fun recentItems(recents: List<RecentRunConfig>, machineId: String?, onlineAgents: List<CreationAgent>, roleItems: List<RoleItem>, currentKey: String?): List<RecentRunConfig> {
+        if (machineId == null) return emptyList()
+        val runnableRoles = roleItems.filter { it.unavailable == null }.map { it.role.id }.toSet()
+        return recents.asSequence()
+            .filter { it.machineId == machineId && onlineAgents.any { agent -> agent.machineId == machineId && agent.id == it.selection.agentId } }
+            .filter { it.agentRoleId == null || it.agentRoleId in runnableRoles }
+            .filter { recentKey(it) != currentKey }
+            .distinctBy { recentKey(it) }
+            .take(MAX_VISIBLE_RECENTS)
+            .toList()
+    }
+
+    /**
+     * A remembered selection limited to what the agent offers now: a model, mode or reasoning
+     * effort it dropped is left out rather than forced back in. Without capabilities yet, kept.
+     */
+    fun applicable(selection: RunSelection, capability: CreationCapability?): RunSelection {
+        if (capability == null) return selection
+        val modelId = selection.modelId?.takeIf { id -> capability.models.any { it.id == id } }
+        return RunSelection(
+            selection.agentId, modelId,
+            selection.modeId?.takeIf { id -> capability.modes.any { it.id == id } },
+            selection.effort?.takeIf { it in capability.effortsFor(modelId) },
+        )
     }
 
     // ── Agent Roles (web chat landing, `composer-agent-roles.ts`) ──

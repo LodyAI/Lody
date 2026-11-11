@@ -144,7 +144,7 @@ export function E2eeMemberActions(props: {
         >
           <Dialog.Header>
             <Dialog.Title>{t('e2ee.members.transferTitle', { name: props.name })}</Dialog.Title>
-            <Dialog.Description>{t('e2ee.members.removeLead')}</Dialog.Description>
+            <Dialog.Description>{t('e2ee.members.transferLead')}</Dialog.Description>
           </Dialog.Header>
           <ul {...stylex.props(styles.effects)}>
             <li>{t('e2ee.members.transferEffectOwner', { name: props.name })}</li>

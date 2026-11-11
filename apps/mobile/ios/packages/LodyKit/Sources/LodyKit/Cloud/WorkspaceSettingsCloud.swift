@@ -4,14 +4,22 @@ import Foundation
 @MainActor enum WorkspaceSettingsCloud {
   typealias Call = (String, String, [String: Any]) async throws -> Any
 
-  static func run(_ payload: String) async throws -> String {
+  /// `userId` is the signed-in account the caller already holds (the catalog's verified account);
+  /// with it the call skips the session lookup. The backend still authorizes every function.
+  static func run(_ payload: String, userId: String? = nil) async throws -> String {
     guard let token = try AuthKeychain.read(), !token.isEmpty,
           let data = payload.data(using: .utf8), data.count <= 16 * 1024,
           let args = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           let workspace = args["workspaceId"] as? String, !workspace.isEmpty, workspace.count <= 200 else { throw GitHubCloud.failure() }
-    let session = try await GitHubCloud.request("\(BackendEnvironment.site)/api/auth/get-session", token: token) as? [String: Any]
-    guard try AuthKeychain.read() == token,
-          let user = (session?["user"] as? [String: Any])?["id"] as? String, !user.isEmpty else { throw GitHubCloud.failure() }
+    let user: String
+    if let userId, !userId.isEmpty {
+      user = userId
+    } else {
+      let session = try await GitHubCloud.request("\(BackendEnvironment.site)/api/auth/get-session", token: token) as? [String: Any]
+      guard try AuthKeychain.read() == token,
+            let id = (session?["user"] as? [String: Any])?["id"] as? String, !id.isEmpty else { throw GitHubCloud.failure() }
+      user = id
+    }
     var role: String?
     if args["page"] as? String == "github" {
       var url = URLComponents(string: "\(BackendEnvironment.site)/api/auth/organization/get-full-organization")!
@@ -51,19 +59,44 @@ import Foundation
     guard request["page"] as? String == "projects" else { throw GitHubCloud.failure() }
     let scope: [String: Any] = ["workspaceId": workspace]
     let rows = try projectRows(await call("query", "localProjects:listVisibleLocalProjects", scope))
+    // Like desktop, a project on the user's own machine without a registration is private and
+    // may be shared; a failed machine read only leaves those projects unknown.
+    let owned = try? ownedMachines(await call("query", "machines:listVisibleMachines", scope), user: user)
     if request["action"] as? String == "set" {
       guard let machine = request["machineId"] as? String,
             let project = request["localProjectId"] as? String,
-            let shared = request["sharedWithTeam"] as? Bool,
-            rows.contains(where: { $0["machineId"] as? String == machine && $0["localProjectId"] as? String == project && $0["ownerUserId"] as? String == user }) else { throw GitHubCloud.failure() }
+            let shared = request["sharedWithTeam"] as? Bool else { throw GitHubCloud.failure() }
+      let existing = rows.first(where: { $0["machineId"] as? String == machine && $0["localProjectId"] as? String == project })
+      if let existing {
+        guard existing["ownerUserId"] as? String == user else { throw GitHubCloud.failure() }
+      } else {
+        guard owned?.contains(machine) == true else { throw GitHubCloud.failure() }
+      }
       let result = try await call("mutation", "localProjects:setLocalProjectSharedWithTeam", ["workspaceId": workspace, "machineId": machine, "localProjectId": project, "sharedWithTeam": shared]) as? [String: Any]
       guard result?["success"] as? Bool == true, result?["sharedWithTeam"] as? Bool == shared else { throw GitHubCloud.failure() }
       let fresh = try projectRows(await call("query", "localProjects:listVisibleLocalProjects", scope))
       guard fresh.contains(where: { $0["machineId"] as? String == machine && $0["localProjectId"] as? String == project && $0["sharedWithTeam"] as? Bool == shared }) else { throw GitHubCloud.failure() }
-      return ["rows": fresh, "userId": user]
+      return snapshot(fresh, user: user, owned: owned)
     }
     guard request["action"] as? String == "list" else { throw GitHubCloud.failure() }
-    return ["rows": rows, "userId": user]
+    return snapshot(rows, user: user, owned: owned)
+  }
+
+  private static func snapshot(_ rows: [[String: Any]], user: String, owned: [String]?) -> [String: Any] {
+    var value: [String: Any] = ["rows": rows, "userId": user]
+    if let owned { value["ownedMachineIds"] = owned }
+    return value
+  }
+
+  /// The ids of the visible machines the user owns; malformed rows are skipped.
+  static func ownedMachines(_ value: Any, user: String) throws -> [String] {
+    guard let rows = value as? [[String: Any]], rows.count <= 10000 else { throw GitHubCloud.failure() }
+    var seen = Set<String>()
+    return rows.compactMap { row in
+      guard let machine = row["machineId"] as? String, !machine.isEmpty, row["ownerUserId"] as? String == user,
+            seen.insert(machine).inserted else { return nil }
+      return machine
+    }
   }
   static func github(_ request: [String: Any], workspace: String, role: String?, call: Call) async throws -> [String: Any] {
     let roles = Set((role ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })

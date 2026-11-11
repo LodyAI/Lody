@@ -44,6 +44,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   localAttachmentDownload: 'localAttachmentDownload',
   localFileResources: 'localFileResources',
   fileDownload: 'fileDownload',
+  sessionDirectoryListing: 'sessionDirectoryListing',
   markdownFileLinks: 'markdownFileLinks',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
@@ -73,6 +74,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
+export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
@@ -218,6 +220,9 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
     SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.fileDownload]: 1,
+  // `file/list-dir` lists one folder of the session's own workspace (its worktree when it has one).
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionDirectoryListing]:
+    SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,

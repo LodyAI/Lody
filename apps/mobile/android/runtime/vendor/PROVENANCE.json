@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "7f74298641f35b714c68752f3976e9b0ffaf6c52",
+  "commit": "2d1971ebe004583a86afce4ff6dcecb0377f81ce",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 7f74298641f35b714c68752f3976e9b0ffaf6c52 apps/mobile/ios/packages/cloud-runtime",
-  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to eff22abf, the composer's `cmd` mention listing gates prompt shortcuts by their saved project, computer and agent scope instead of dropping every scoped or referencing shortcut, answers from the runtime's last listing while reading a fresh one, and an owner index that fails or has not landed marks the listing incomplete instead of emptying it (the `promptShortcuts` list action likewise lists what is readable). Dependencies and licenses unchanged."
+  "export": "git archive 2d1971ebe004583a86afce4ff6dcecb0377f81ce apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 44771001, adds `androidEmulatorControl` (signed `android-emulator/control` with an encrypted viewer URL), catalog `machineEmulators` / `androidEmulatorPreviewRequestId`, and carries main's mention-expansion wording (#2559). Relative to 6308c98c, system notices also carry well-formed Agent Role and schedule proposals (`proposal`), file items carry `mimeType`, and `decideProposal` saves the Role or creates the schedule a proposal describes and records the outcome in session history. Dependencies and licenses unchanged."
 }

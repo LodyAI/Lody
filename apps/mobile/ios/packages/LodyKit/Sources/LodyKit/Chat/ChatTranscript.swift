@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LodyCore
 
 struct ChatFileDiff: Decodable, Equatable {
   let path: String
@@ -72,6 +73,7 @@ struct ChatMessageAttachment: Decodable, Equatable {
   var storageSessionId: String? = nil
   var transport: String? = nil
   var sizeBytes: Int? = nil
+  var mimeType: String? = nil
 }
 
 struct ChatTextReference: Decodable, Equatable {
@@ -178,6 +180,8 @@ struct ChatItem: Decodable {
   struct NoticeMeta: Decodable, Equatable { let reason: String?; let code: String?; let message: String? }
   var operation: ChatOperationPresentation? = nil
   var meta: NoticeMeta? = nil
+  /// An Agent's Role or schedule proposal carried by a `system_notice` (web proposal notices).
+  var proposal: ChatProposal? = nil
   var isChatFailure: Bool { type == "system_notice" && name == "chat_failed" }
   let itemId: String
   let type: String
@@ -200,7 +204,7 @@ struct ChatItem: Decodable {
   var isBackgrounded: Bool? = nil
   var skipTranscript: Bool? = nil
   var processDurationMs: Int? = nil
-  var isProcess: Bool { operation == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
+  var isProcess: Bool { operation == nil && proposal == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
   var hidesFromTranscript: Bool {
     if let operation { return operation.cards.isEmpty && operation.notices.isEmpty }
     if type == "proposed_plan" {
@@ -238,6 +242,9 @@ struct ChatRow: Equatable {
   var streaming = false
   var localImageURI: String? = nil
   var image: ChatImage? = nil
+  /// An `imageStack` row: the consecutive images it fans together, each keeping its own
+  /// single-image row id so the preview, sharing and zoom sources address it individually.
+  var stack: [ChatImagePreviewItem] = []
   var file: ChatMessageAttachment? = nil
   var fileDiff: ChatFileDiff? = nil
   var fileDiffs: [ChatFileDiff] = []
@@ -247,6 +254,10 @@ struct ChatRow: Equatable {
   var imageAsset = ""
   var subagent: ChatSubagentCard? = nil
   var operation: ChatOperationCard? = nil
+  var proposal: ChatProposal? = nil
+  /// The signed-in user may decide this proposal (a Role proposal binds its requester).
+  var proposalDecidable = false
+  var proposalState: ChatProposalState? = nil
   var operationCurrent = false
   var operationPeers: [ChatOperationPeer] = []
   var operationCLIType: String? = nil
@@ -771,6 +782,11 @@ struct ChatTranscript {
           running: entry.isRunning && item.status == "in_progress", attention: attention,
           streaming: entry.isRunning && item.itemId == entry.textTailID)
         switch item.type {
+        case "system_notice" where item.proposal != nil:
+          row.kind = "proposal"
+          row.proposal = item.proposal
+          row.text = item.proposal?.headline ?? ""
+          row.actionable = false
         case "system_notice" where item.isChatFailure:
           row.kind = "chat_failed"
           row.text = ChatFailure.title(item.meta)
@@ -834,12 +850,54 @@ struct ChatTranscript {
           result.append(ChatRow(id: entry.id + ":meta", entryID: entry.id, kind: "meta", text: finishedAt))
         }
       }
-      return result
+      return Self.stackImages(result)
     }
   }
 }
 
 extension ChatTranscript {
+  /// Images of one turn that only tool work separates (an agent uploading several images, one
+  /// image group, or repeated upload calls) become ONE fanned `imageStack` row instead of a long
+  /// column of photos. The stack sits where its first image was; the process rows between its
+  /// images follow it. Prose or any other row ends the stack. The stack's id derives from its
+  /// first image, so it stays stable while later images join; a lone image keeps its `image` row.
+  static func stackImages(_ rows: [ChatRow]) -> [ChatRow] {
+    let transparent: Set<String> = ["summary", "tool_call", "thought"]
+    var result: [ChatRow] = []
+    var run: [ChatRow] = []
+    var between: [ChatRow] = []
+    func flush() {
+      defer { run = []; between = [] }
+      guard let first = run.first else { result += between; return }
+      if run.count == 1 {
+        result.append(first)
+      } else {
+        var row = ChatRow(id: first.id + ":stack", entryID: first.entryID, kind: "imageStack", text: "", itemID: first.itemID)
+        row.stack = run.compactMap { image in
+          image.image.map { ChatImagePreviewItem(id: image.id, image: $0, localURI: image.localImageURI) }
+        }
+        result.append(row)
+      }
+      result += between
+    }
+    for row in rows {
+      let isImage = row.kind == "image" && row.image != nil
+      if isImage, let first = run.first, first.entryID == row.entryID {
+        run.append(row)
+      } else if isImage {
+        flush()
+        run.append(row)
+      } else if !run.isEmpty, transparent.contains(row.kind), row.entryID == run[0].entryID {
+        between.append(row)
+      } else {
+        flush()
+        result.append(row)
+      }
+    }
+    flush()
+    return result
+  }
+
   /// Web `getFinalTextRunStart`: the answer is the final contiguous run of text before the
   /// never-folded tail (plans, attachments, failures, sub-tasks, plan approvals), not just the
   /// last text item. Empty when the turn ends in work.
@@ -1167,4 +1225,49 @@ enum ChatOperationGrouping {
     }
     return result
   }
+}
+
+/// web `AgentRoleProposalMeta` / `ScheduleProposalMeta` as the runtime presents them.
+struct ChatProposal: Decodable, Equatable {
+  struct Fields: Decodable, Equatable {
+    var name: String? = nil
+    var description: String? = nil
+    var promptPrefix: String? = nil
+  }
+  let kind: String
+  var action: String? = nil
+  var roleId: String? = nil
+  var requesterUserId: String? = nil
+  var fields: Fields? = nil
+  var before: Fields? = nil
+  var outcome: String? = nil
+  var proposalId: String? = nil
+  var title: String? = nil
+  var prompt: String? = nil
+  var rule: RuntimeContract.ScheduleRule? = nil
+  var destination: String? = nil
+  var scheduleId: String? = nil
+
+  var isRole: Bool { kind == "agent_role" }
+  var decided: Bool { outcome != nil }
+
+  /// The card's heading: the question while open, the receipt once decided.
+  var headline: String {
+    let key: String
+    switch (kind, outcome, action) {
+    case (_, "dismissed"?, _): key = "native.chat.proposal.dismissed"
+    case ("agent_role", "saved"?, _): key = "native.chat.proposal.role.saved"
+    case ("agent_role", _, "update"?): key = "native.chat.proposal.role.update"
+    case ("agent_role", _, _): key = "native.chat.proposal.role.create"
+    case (_, "created"?, _): key = "native.chat.proposal.schedule.created"
+    default: key = "native.chat.proposal.schedule.title"
+    }
+    return String(localized: String.LocalizationValue(key), bundle: .lody)
+  }
+}
+
+/// A decision in flight or its failure, kept by the chat view per proposal row.
+struct ChatProposalState: Equatable {
+  var pending = false
+  var message = ""
 }

@@ -284,16 +284,23 @@ final class InboxChrome {
         ) { _ in HomeScope.store(scope) }
       })
     }
+    // UIKit caps a menu's height and gives no API to raise it, so the single-choice sections lay
+    // their options side by side (.medium) to keep every row on screen without scrolling.
+    let scopeMenu = UIMenu(title: String(localized: "home.view.scope", bundle: .lody), options: [.displayInline, .singleSelection], children: [scopes])
+    scopeMenu.preferredElementSize = .medium
+    let groupingMenu = UIMenu(title: String(localized: "home.view.grouping", bundle: .lody), options: [.displayInline, .singleSelection], children: [groupings])
+    groupingMenu.preferredElementSize = .medium
     return UIMenu(
       children: [
-        UIMenu(title: String(localized: "home.view.scope", bundle: .lody), options: [.displayInline, .singleSelection], children: [scopes]),
-        UIMenu(title: String(localized: "home.view.grouping", bundle: .lody), options: [.displayInline, .singleSelection], children: [groupings]),
+        scopeMenu,
+        groupingMenu,
         UIMenu(title: String(localized: "home.view.details", bundle: .lody), options: .displayInline, children: toggles),
+        Self.archiveToggle(),
       ]
     )
   }
 
-  /// Centre pill, as on the web mobile header: syncing / offline, plus a brief "connected" flash on recovery.
+  /// Centre pill, as on the web mobile header: syncing / connecting, plus a brief "connected" flash on recovery.
   private func updateSync(_ next: HomeSyncState, compact: Bool) {
     guard let host else { return }
     let previous = syncState
@@ -312,7 +319,7 @@ final class InboxChrome {
     let shown: HomeSyncPill.Shown? = switch next {
     case .live: syncShown == .recovered ? .recovered : nil
     case .syncing: .syncing
-    case .offline: .offline
+    case .connecting: .connecting
     }
     showSync(shown, in: host, compact: compact)
   }
@@ -354,7 +361,19 @@ final class InboxChrome {
         state: sort == item.sort ? .on : .off
       ) { [weak self] _ in self?.setSort?(item.sort) }
     }
-    return UIMenu(children: views + [UIMenu(options: .displayInline, children: sorts)])
+    return UIMenu(children: views + [UIMenu(options: .displayInline, children: sorts), Self.archiveToggle()])
+  }
+
+  /// The Archived switch: on, the list shows only archived chats on a darker, greyer page.
+  /// Uncached so its checkmark follows the current mode each time the menu opens.
+  private static func archiveToggle() -> UIMenuElement {
+    UIMenu(options: .displayInline, children: [UIDeferredMenuElement.uncached { completion in
+      let shown = HomeArchive.shown
+      completion([UIAction(
+        title: String(localized: "home.view.archived", bundle: .lody), image: UIImage(systemName: "archivebox"),
+        state: shown ? .on : .off
+      ) { _ in HomeArchive.set(!shown) }])
+    }])
   }
 }
 

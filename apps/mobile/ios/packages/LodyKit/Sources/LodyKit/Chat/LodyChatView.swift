@@ -70,6 +70,13 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onSteer: ([String: Any]) -> Void = { _ in }
   var onErrorRetry: ([String: Any]) -> Void = { _ in }
   var onPlanDecision: ([String: Any]) -> Void = { _ in }
+  /// Accept (`true`) or dismiss an Agent's proposal row; the owner reports back through `setProposalState`.
+  var onProposalDecision: (_ row: ChatRow, _ accept: Bool) -> Void = { _, _ in }
+  var onProposalOpenSchedule: (String) -> Void = { _ in }
+  /// Decisions in flight or failed, by `entryId/itemId`.
+  var proposalStates: [String: ChatProposalState] = [:]
+  /// The signed-in user: a Role proposal is decided only by the member who asked for it.
+  var proposalUserID = ""
   var planDecisionState: ChatPlanDecisionState?
   var errorRetryState: ChatErrorRetryState?
   var onActivityPress: ([String: Any]) -> Void = { _ in }
@@ -77,6 +84,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   weak var messageDetailsPage: MessageDetailsController?
   var turnInfoEnabled = false
   var onFilePress: ([String: Any]) -> Void = { _ in }
+  /// Opens a GitHub PR link in the native PR page; false leaves it to the browser.
+  var onPullRequestLink: (ChatPullRequestLink) -> Bool = { _ in false }
   var onTurnChangesPress: ([String: Any]) -> Void = { _ in }
   var onReconnect: ([String: Any]) -> Void = { _ in }
   var onRetrySend: ([String: Any]) -> Void = { _ in }
@@ -131,6 +140,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var imageWorkspace = ""
   var imageSession = ""
   weak var imagePreview: ChatImagePreview?
+  /// Each image stack's top image, kept across cell reuse and preview paging.
+  var imageStackTops: [String: String] = [:]
   var mentionRepository = "" {
     didSet {
       guard oldValue != mentionRepository else { return }
@@ -346,8 +357,11 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     }
     collection.register(ChatMessageAttachmentsCell.self, forCellWithReuseIdentifier: "attachments")
     collection.register(ChatImageCell.self, forCellWithReuseIdentifier: "image")
+    collection.register(ChatImageStackCell.self, forCellWithReuseIdentifier: "image-stack")
     collection.register(ChatHistoryHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "history")
     collection.register(ChatErrorCell.self, forCellWithReuseIdentifier: "error")
+    collection.register(ChatProposalCell.self, forCellWithReuseIdentifier: "proposal")
+    collection.register(ChatFileCardCell.self, forCellWithReuseIdentifier: "file-card")
     collection.register(ChatOperationCell.self, forCellWithReuseIdentifier: "operation")
     collection.register(ChatSubagentCell.self, forCellWithReuseIdentifier: "subagent")
     collection.register(ChatCell.self, forCellWithReuseIdentifier: "message")
@@ -361,6 +375,18 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         cell.configure(row)
         cell.onDetail = { [weak self] in self?.onActivityPress(["entryId": row.entryID, "itemId": row.itemID]) }
         cell.onRetry = { [weak self] in self?.onErrorRetry(["entryId": row.entryID, "itemId": row.itemID, "id": UUID().uuidString.lowercased()]) }
+        return cell
+      }
+      if row.kind == "proposal" {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "proposal", for: index) as! ChatProposalCell
+        cell.configure(row)
+        cell.onDecision = { [weak self] accept in self?.onProposalDecision(row, accept) }
+        cell.onOpenSchedule = { [weak self] id in self?.onProposalOpenSchedule(id) }
+        return cell
+      }
+      if row.kind == "file", row.file != nil {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "file-card", for: index) as! ChatFileCardCell
+        cell.configure(row)
         return cell
       }
       if row.kind.hasPrefix("operation") {
@@ -429,6 +455,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
           }
           self.openAttachment(attachment)
         }
+        return cell
+      }
+      if row.kind == "imageStack" {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "image-stack", for: index) as! ChatImageStackCell
+        cell.configure(row, topID: self.imageStackTops[row.id], workspace: self.imageWorkspace, session: self.imageSession)
+        cell.onTopChange = { [weak self] top in self?.imageStackTops[row.id] = top }
         return cell
       }
       if row.image != nil {
@@ -799,6 +831,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     pauseTracking()
     if let target = ChatFileLink(href) {
       onFilePress(["path": target.path, "line": target.line ?? 0])
+    } else if let pr = ChatPullRequestLink(href), onPullRequestLink(pr) {
+      return
     } else if let url = URL(string: href), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
       UIApplication.shared.open(url)
     }
