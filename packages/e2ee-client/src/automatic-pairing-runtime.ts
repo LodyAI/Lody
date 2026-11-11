@@ -48,6 +48,8 @@ type Entry = {
   authorizing: boolean;
   /** Approver only: wrong codes entered for this request on this device. */
   codeFailures: number;
+  /** Locked out locally, but the relay has not yet recorded `declined` for the new device. */
+  declineUndelivered: boolean;
   phase: E2eeAutomaticPairingState['phase'];
 };
 const refuse = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code });
@@ -115,6 +117,7 @@ export function makeAutomaticPairingRuntime(options: {
     submitted: false,
     authorizing: false,
     codeFailures: 0,
+    declineUndelivered: false,
     phase: 'preparing',
   });
   const dispose = (value: Entry) => {
@@ -390,6 +393,15 @@ export function makeAutomaticPairingRuntime(options: {
         dispose(value);
         approving.delete(id);
       }
+    for (const [id, value] of approving)
+      if (value.declineUndelivered)
+        yield* value.gate.withPermit(
+          Effect.gen(function* () {
+            if (!value.declineUndelivered) return;
+            const told = yield* Effect.result(relay.exchange({ id, terminal: 'declined' }));
+            if (Result.isSuccess(told)) value.declineUndelivered = false;
+          })
+        );
     for (const value of requesting.values()) yield* expires(value);
     for (const [id, expiry] of notified) if (expiry <= clock) notified.delete(id);
     const rows = (yield* relay.pending()).slice(0, 10);
@@ -583,7 +595,9 @@ export function makeAutomaticPairingRuntime(options: {
                   const requestId = value.nativeRequestId;
                   value.phase = 'declined';
                   dispose(value);
-                  yield* Effect.result(relay.exchange({ id, terminal: 'declined' }));
+                  const told = yield* Effect.result(relay.exchange({ id, terminal: 'declined' }));
+                  // `pending()` resends until delivered or expired; the entry stays declined.
+                  value.declineUndelivered = Result.isFailure(told);
                   if (pairingString && requestId && runtime.declineAccountPairing)
                     yield* Effect.result(
                       promise(() => runtime.declineAccountPairing!({ pairingString, requestId }))

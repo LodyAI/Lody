@@ -585,6 +585,7 @@ describe('portable account pairing workflow', () => {
       });
       if (automatic) {
         const contexts = new Map<string, E2eeAutomaticPairingRecord>();
+        let relayOutage = false;
         const discovery: AutomaticPairingRelay = {
           pending: () =>
             Effect.sync(() =>
@@ -592,19 +593,21 @@ describe('portable account pairing workflow', () => {
             ),
           read: (id) => Effect.sync(() => structuredClone(contexts.get(id) ?? null)),
           exchange: (command) =>
-            Effect.sync(() => {
-              let row = contexts.get(command.id);
-              if (!row) {
-                if (!command.context) throw new Error('missing discovery original');
-                row = { context: structuredClone(command.context), state: 'pending' };
-                contexts.set(command.id, row);
-              }
-              if (command.commitment) row.commitment ??= structuredClone(command.commitment);
-              if (command.requesterKey) row.requesterKey ??= command.requesterKey;
-              if (command.reveal) row.reveal ??= structuredClone(command.reveal);
-              if (command.terminal) row.state = command.terminal;
-              return structuredClone(row);
-            }),
+            relayOutage
+              ? Effect.fail(new Error('synthetic relay outage'))
+              : Effect.sync(() => {
+                  let row = contexts.get(command.id);
+                  if (!row) {
+                    if (!command.context) throw new Error('missing discovery original');
+                    row = { context: structuredClone(command.context), state: 'pending' };
+                    contexts.set(command.id, row);
+                  }
+                  if (command.commitment) row.commitment ??= structuredClone(command.commitment);
+                  if (command.requesterKey) row.requesterKey ??= command.requesterKey;
+                  if (command.reveal) row.reveal ??= structuredClone(command.reveal);
+                  if (command.terminal) row.state = command.terminal;
+                  return structuredClone(row);
+                }),
         };
         let lostReply = true;
         const requestingRuntime = {
@@ -701,11 +704,16 @@ describe('portable account pairing workflow', () => {
               await expect(
                 desktop.approveAutomaticPairing(reviews[0]!.id, wrong)
               ).rejects.toMatchObject({ code: 'pairing-code-mismatch', attemptsLeft });
+            // The relay is unreachable when the request ends: the lockout still holds locally.
+            relayOutage = true;
             await expect(desktop.approveAutomaticPairing(reviews[0]!.id, wrong)).rejects.toThrow(
               'e2ee_pairing-code-locked'
             );
+            relayOutage = false;
+            expect((await phone.automaticPairingState('w1'))?.phase).toBe('waiting');
             // The request is void: even the right code can no longer admit the device.
             await expect(desktop.approveAutomaticPairing(reviews[0]!.id, shown)).rejects.toThrow();
+            // The next discovery round delivers the undelivered decline to the new device.
             expect(await desktop.pendingAutomaticPairing()).toEqual([]);
             expect((await phone.automaticPairingState('w1'))?.phase).toBe('declined');
             expect(approvals.size).toBe(0);

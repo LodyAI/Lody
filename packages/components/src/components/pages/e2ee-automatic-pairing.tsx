@@ -503,6 +503,9 @@ export function E2eeAutomaticPairingInbox({
     { kind: 'retry' } | { kind: 'mismatch'; attemptsLeft: number } | null
   >(null);
   const [code, setCode] = useState('');
+  // The typed code belongs to one request. A poll that briefly omits it closes the dialog,
+  // but reopening the same request keeps the digits and the attempts-left notice.
+  const codeOwner = useRef<string | null>(null);
   /** A request this device ended after too many wrong codes; shown until dismissed. */
   const [ended, setEnded] = useState<E2eeAutomaticPairingReview | null>(null);
   const deferred = useRef(new Set<string>());
@@ -526,6 +529,7 @@ export function E2eeAutomaticPairingInbox({
     setBusy(null);
     setError(null);
     setCode('');
+    codeOwner.current = null;
     setEnded(null);
     setSelected(null);
     deferred.current.clear();
@@ -575,6 +579,8 @@ export function E2eeAutomaticPairingInbox({
   }, [runtime]);
   const current = requests.find((row) => row.id === selected);
   useEffect(() => {
+    if (!selected || selected === codeOwner.current) return;
+    codeOwner.current = selected;
     setCode('');
     setError(null);
   }, [selected]);
@@ -710,7 +716,8 @@ export function E2eeAutomaticPairingInbox({
                     aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
                     disabled={Boolean(busy)}
                     onChange={(event) => {
-                      setCode(event.target.value.replace(/\D/g, '').slice(0, 6));
+                      // Full-width IME digits (１２３) become ASCII before filtering.
+                      setCode(event.target.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6));
                       if (error?.kind === 'retry') setError(null);
                     }}
                   />
