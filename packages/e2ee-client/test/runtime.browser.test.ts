@@ -1778,3 +1778,46 @@ it('reopening the workspace on the approving device delivers a key its closed ap
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// Another device rotated the key before this owner device reopens the workspace: the open
+// reports no current key yet, and the background round still receives the new key, installs
+// it and sends the waiting member that epoch's envelope.
+it('reopening after another device rotated the key installs it and delivers to the waiting member', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-rotated-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    const page = opened.page;
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).items[0]?.code, {
+        timeout: 30_000,
+      })
+      .toBe('e2ee_key_not_sent');
+    // The owner's other device rotates; the new key waits in its staged group.
+    expect((await raw(page, 'rotateRemote')).ok).toBe(true);
+    expect((await raw(page, 'stageCurrent')).ok).toBe(true);
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 1, hasCurrentKey: false });
+    // The approval page closes; an earlier open's waiting round finds no reader.
+    await good(page, 'close');
+    await good(page, 'memberAcceptKeys');
+    await good(page, 'openRoundRelease');
+    await expect
+      .poll(
+        async () => ((await good(page, 'openRound')) as { diagnostics: string[] }).diagnostics,
+        { timeout: 30_000 }
+      )
+      .toEqual(['e2ee-open-key-round']);
+    // Reopening, still without the current key, installs it and sends the member's envelope.
+    expect(await good(page, 'open')).toMatchObject({ epoch: 1, hasCurrentKey: false });
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept, {
+        timeout: 30_000,
+      })
+      .toBe(1);
+    expect(await good(page, 'status')).toMatchObject({ epoch: 1, hasCurrentKey: true });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
