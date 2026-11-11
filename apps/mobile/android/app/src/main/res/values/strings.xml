@@ -15,6 +15,8 @@
     <string name="home_search_empty">No chats match “%1$s”</string>
     <string name="home_view">View</string>
     <string name="home_view_details">Display</string>
+    <string name="home_view_archived">Archived</string>
+    <string name="home_archived_empty">No archived chats</string>
     <string name="home_view_project">Project</string>
     <string name="home_view_pull_request">PR status</string>
     <string name="home_view_branch">Branch</string>
@@ -656,8 +658,6 @@
     <string name="github_settings_partial">Some GitHub settings couldn’t be verified. Changes are off until a refresh succeeds.</string>
     <string name="github_settings_unconfirmed">Couldn’t confirm the change. Refresh to check the current setting.</string>
     <string name="settings_usage">AI usage</string>
-    <string name="settings_sessions">Conversations</string>
-    <string name="settings_archived">Archived conversations</string>
     <string name="settings_additional">Additional</string>
     <string name="settings_about">About</string>
     <string name="settings_about_hint">Version, licenses and acknowledgements</string>

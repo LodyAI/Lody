@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.platform.LocalDensity
 import app.lody.android.designsystem.LodyMotion
@@ -69,6 +70,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -243,7 +245,10 @@ fun ChatListScreen(
     val selectScope = { next: HomeScope -> homeScope = next; HomeGroupings.saveScope(context, next) }
     var idleExpanded by rememberSaveable { mutableStateOf(false) }
     val owner = state.userId.takeIf { homeScope == HomeScope.Mine }
-    val sections = remember(state.snapshot, grouping, owner) { state.snapshot?.let { ChatListModel.home(it, grouping, owner) }.orEmpty() }
+    // The view menu's Archived switch (iOS `HomeArchive`): in memory, so every launch opens on open chats.
+    var archived by remember { mutableStateOf(false) }
+    val sections = remember(state.snapshot, grouping, owner, archived) { state.snapshot?.let { ChatListModel.home(it, grouping, owner, archived = archived) }.orEmpty() }
+    val archivedTimeline = remember(state.snapshot, archived) { if (archived) state.snapshot?.let { ChatListModel.timeline(it, archived = true) }.orEmpty() else emptyList() }
 
     BackHandler(enabled = searching) { closeSearch() }
 
@@ -283,9 +288,10 @@ fun ChatListScreen(
         return
     }
 
+    CompositionLocalProvider(LocalArchivedPage provides (archived && tab == HomeTab.Chats)) {
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        containerColor = colors.bgBase,
+        containerColor = homePageColor(),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -293,7 +299,7 @@ fun ChatListScreen(
                 searching -> SearchTopBar(query, onQueryChange = { query = it }, onClose = closeSearch)
                 tab == HomeTab.Chats -> Box {
                     HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {
-                        ViewMenu(homeScope, selectScope, grouping, selectGrouping, details, toggleDetail)
+                        ViewMenu(homeScope, selectScope, grouping, selectGrouping, details, toggleDetail, archived) { archived = it }
                     }
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
@@ -333,7 +339,7 @@ fun ChatListScreen(
                 onNotice = notice,
             )
             searching -> HomeList(
-                ChatListModel.searchTimeline(state.timeline, query).map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) },
+                ChatListModel.searchTimeline(if (archived && tab == HomeTab.Chats) archivedTimeline else state.timeline, query).map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) },
                 details, padding, empty = stringResource(R.string.home_search_empty, query.trim()).takeIf { query.isNotBlank() },
                 pinsLabels = false, onOpenChat = onOpenChat,
                 owners = state.members.takeIf { homeScope == HomeScope.Team },
@@ -343,9 +349,10 @@ fun ChatListScreen(
                 sections,
                 details,
                 padding,
-                empty = state.placeholder,
+                // The catalog placeholder (loading / offline) wins; a loaded catalog without archived chats says so.
+                empty = if (archived && state.snapshot != null) stringResource(R.string.home_archived_empty) else state.placeholder,
                 listState = chatsListState,
-                projectIndex = grouping == HomeGrouping.Project,
+                projectIndex = !archived && grouping == HomeGrouping.Project,
                 owners = state.members.takeIf { homeScope == HomeScope.Team },
                 idleExpanded = idleExpanded,
                 onToggleIdle = { idleExpanded = !idleExpanded },
@@ -353,6 +360,7 @@ fun ChatListScreen(
             )
             else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onGitHub = { githubOpen = true }, onProjects = { projectsOpen = true }, onDeferred = { notice(deferredMessage) })
         }
+    }
     }
     }
 }
@@ -377,7 +385,7 @@ private fun HomeTopBar(
             }
             menu()
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.bgBase, scrolledContainerColor = colors.bgBase),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = homePageColor(), scrolledContainerColor = homePageColor()),
     )
 }
 
@@ -395,7 +403,7 @@ private fun TitleTopBar(title: String, onBack: (() -> Unit)?) {
                 }
             }
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.bgBase, scrolledContainerColor = colors.bgBase),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = homePageColor(), scrolledContainerColor = homePageColor()),
     )
 }
 
@@ -462,6 +470,8 @@ private fun ViewMenu(
     onSelectGrouping: (HomeGrouping) -> Unit,
     details: Set<ChatRowDetail>,
     onToggle: (ChatRowDetail) -> Unit,
+    archived: Boolean,
+    onArchived: (Boolean) -> Unit,
 ) {
     val colors = LodyTheme.colors
     var open by remember { mutableStateOf(false) }
@@ -506,12 +516,33 @@ private fun ViewMenu(
                     Glyph(LodyIcons.Check, if (checked) colors.accentFg else Color.Transparent, LodyIconSize.sm)
                 }
             }
+            // Last, as iOS #2563: the Archived switch swaps the list for archived chats.
+            HorizontalDivider(Modifier.padding(top = LodySpacing.xs), thickness = 0.5.dp, color = colors.borderSubtle)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = LodySize.controlMd)
+                    .toggleable(value = archived, role = Role.Switch) { onArchived(it) }
+                    .padding(horizontal = LodySpacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
+            ) {
+                Glyph(LodyIcons.Inbox, colors.iconSecondary, LodyIconSize.sm)
+                Text(stringResource(R.string.home_view_archived), style = LodyTheme.typography.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                Switch(checked = archived, onCheckedChange = null)
+            }
             Spacer(Modifier.height(LodySpacing.xs))
         }
     }
 }
 
 private val MenuWidth = 280.dp
+
+/** Whether the Chats page lists archived chats; it then uses the grey archived page colour. */
+private val LocalArchivedPage = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+@Composable
+private fun homePageColor() = if (LocalArchivedPage.current) LodyTheme.colors.bgArchived else LodyTheme.colors.bgBase
 
 /**
  * A single choice as a segmented control (the iOS one's shape on design tokens): a sunken
@@ -592,7 +623,7 @@ private fun SearchTopBar(query: String, onQueryChange: (String) -> Unit, onClose
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.bgBase)
+            .background(homePageColor())
             .statusBarsPadding()
             .padding(horizontal = LodySpacing.xs, vertical = LodySpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
@@ -972,7 +1003,7 @@ private fun SectionTitle(text: String, repository: String? = null) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(LodyTheme.colors.bgBase)
+            .background(homePageColor())
             .semantics(mergeDescendants = true) { heading() }
             .padding(start = LodyLayout.screenPaddingX, end = LodyLayout.screenPaddingX, top = LodySpacing.lg, bottom = LodySpacing.xs),
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),
@@ -1035,7 +1066,8 @@ private fun ChatRow(
                             chat.unread -> type.bodyEmphasis
                             else -> type.body
                         },
-                        color = colors.textPrimary,
+                        // Archived chats read in tertiary ink on the grey page (iOS #2541).
+                        color = if (LocalArchivedPage.current) colors.textTertiary else colors.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),

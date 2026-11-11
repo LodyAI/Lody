@@ -43,11 +43,6 @@ internal fun SettingsHome(state: ChatListUiState, padding: PaddingValues, onSele
             }
         }
         item {
-            SettingsGroup(stringResource(R.string.settings_sessions)) {
-                SettingsLine(stringResource(R.string.settings_archived), LodyIcons.Inbox, onClick = onDeferred)
-            }
-        }
-        item {
             SettingsGroup(stringResource(R.string.settings_additional)) {
                 SettingsLine(stringResource(R.string.settings_about), LodyIcons.Info, stringResource(R.string.settings_about_hint), onDeferred)
                 SettingsLine(stringResource(R.string.settings_diagnostics), LodyIcons.StateRunning, onClick = onDeferred)

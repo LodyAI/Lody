@@ -258,7 +258,7 @@ write retry identity handling are unchanged. Open last chat uses Home navigation
 
 Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
 Agent settings, Agent Roles, prompt shortcuts, GitHub, Projects and sign-out. There is no Machines, Published shares or
-Agent conversation sync destination. Other unfinished settings destinations show an explicit placeholder.
+Agent conversation sync destination, and archived chats live behind the Chats view menu's Archived switch. Other unfinished settings destinations show an explicit placeholder.
 
 ### Project groups
 

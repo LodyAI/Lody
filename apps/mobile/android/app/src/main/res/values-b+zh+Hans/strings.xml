@@ -15,6 +15,8 @@
     <string name="home_search_empty">没有匹配“%1$s”的对话</string>
     <string name="home_view">视图</string>
     <string name="home_view_details">显示</string>
+    <string name="home_view_archived">已归档</string>
+    <string name="home_archived_empty">没有已归档的对话</string>
     <string name="home_view_project">项目名称</string>
     <string name="home_view_pull_request">PR 状态</string>
     <string name="home_view_branch">分支</string>
@@ -647,8 +649,6 @@
     <string name="github_settings_partial">部分 GitHub 设置无法验证，刷新成功前不可修改。</string>
     <string name="github_settings_unconfirmed">无法确认是否修改成功，请刷新查看当前设置。</string>
     <string name="settings_usage">AI 用量</string>
-    <string name="settings_sessions">对话</string>
-    <string name="settings_archived">已归档对话</string>
     <string name="settings_additional">其他</string>
     <string name="settings_about">关于</string>
     <string name="settings_about_hint">版本、许可与致谢</string>
