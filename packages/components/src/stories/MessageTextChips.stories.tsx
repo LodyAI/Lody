@@ -66,8 +66,7 @@ const SENT = applyTextRewrites(COMPOSER_TEXT, [
   },
   {
     ...at('@Code-Reviewer'),
-    replacement:
-      'use lody mcp to create a session with agent role[id: role-1, name: Code Reviewer]',
+    replacement: '[Agent Role: Code Reviewer (agentRoleId: role-1)]',
     // An Agent Role freezes its emoji into the span, so the bubble paints the
     // same mark the composer did without reading the catalog.
     span: { kind: 'agent_role', label: 'Code-Reviewer', target: 'role-1', mark: '🔍' },

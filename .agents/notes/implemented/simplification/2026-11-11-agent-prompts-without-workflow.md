@@ -29,6 +29,10 @@ finalization does not commit and the user asked for a PR that tracks the work
   the request.
 - Fix CI and Resolve Conflicts name the repository and PR. The CI verdict already
   comes from Session metadata, so the client no longer fetches check runs first.
+- An `@Role` mention becomes a reference, `[Agent Role: Name (agentRoleId: …)]`, not
+  "use lody mcp to create a session…": the user's own words say what to do with the
+  Role. Messages persist display spans, so native clients still render the chip;
+  their legacy text grammar applies only to span-less messages.
 - A Project group adds only its facts: the group directory is not a Git repository
   and the members are listed in the conversation.
 - The binding rule is in the root `AGENTS.md`; the Inbox-specific rule is in
