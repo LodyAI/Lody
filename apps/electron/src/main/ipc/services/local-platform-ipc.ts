@@ -1,7 +1,8 @@
-import { IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { ProductWindowIpcService } from '../product-window-ipc-service'
+import { IpcMethod } from 'electron-ipc-decorator'
 import { isLocalPlatform, readLocalPlatformSnapshot } from '../../platform'
 
-export class LocalPlatformIpc extends IpcService {
+export class LocalPlatformIpc extends ProductWindowIpcService {
   static override readonly groupName = 'localPlatform'
 
   @IpcMethod()

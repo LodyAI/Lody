@@ -2,6 +2,15 @@
 
 `CLAUDE.md` symlinks here. Edit `AGENTS.md` only. Parent main-process rules apply.
 
+## Renderer authority
+
+All product service classes extend `ProductWindowIpcService`. Register one-way product
+messages through `onProductWindowMessage`; both admit only a registered product
+window's trusted main frame. Public browser views and preview frames have no product
+IPC authority. Launch requests carry only a launcher id and absolute target path;
+main resolves built-ins and natively approved, main-stored custom commands. Never
+accept command specifications from a launch or probe request.
+
 ## Personal-device approval
 
 Confirm the signed admission through ledger-only refresh before publishing its

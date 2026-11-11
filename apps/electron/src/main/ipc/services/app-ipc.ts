@@ -1,3 +1,4 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { assertProductWindowSender } from '../assert-sender'
 import { parseSessionLink, INSTALLATION_LINK_SCHEMES } from '@lody/shared/session-link'
 import { desktopInstallationProfile, mainPlatformKind } from '../../platform'
@@ -9,11 +10,11 @@ import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../s
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
   IPC_PUSH_CHANNELS,
-  LaunchLocalPathInputSchema,
+  PathLauncherRequestSchema,
   PathLauncherProbeSchema,
   type NativeThemeSource,
   type RendererFatalErrorReport,
@@ -31,8 +32,14 @@ import {
   setWindowWarmupEnabled
 } from '../../window-warm-service'
 import { setMenuLanguage } from '../../menu'
+import { canOpenLocalPath } from '../../services/local-file-open-policy'
 import { localFileActionError } from '../../services/local-file-action-error'
-import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
+import {
+  approvePathLauncher,
+  resolvePathLauncher,
+  hasPathLauncher,
+  launchLocalPath
+} from '../../services/local-path-launcher-service'
 import { takePendingRendererLocalClear } from '../../services/local-reset-service'
 import {
   clearDesktopLocalResetRequest,
@@ -117,7 +124,7 @@ export function installNativeThemeWatch(): void {
   }
 }
 
-export class AppIpc extends IpcService {
+export class AppIpc extends ProductWindowIpcService {
   static override readonly groupName = 'app'
 
   @IpcMethod()
@@ -548,7 +555,8 @@ export class AppIpc extends IpcService {
       return { opened: false as const, error: 'invalid_path' }
     }
     try {
-      await access(targetPath)
+      if (!(await canOpenLocalPath(targetPath)))
+        return { opened: false as const, error: 'executable_path' }
     } catch (error) {
       return { opened: false as const, error: localFileActionError(error) }
     }
@@ -563,11 +571,20 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async launchLocalPath(payload: unknown) {
-    const parsed = LaunchLocalPathInputSchema.safeParse(payload)
+    const parsed = PathLauncherRequestSchema.safeParse(payload)
     if (!parsed.success) {
       return { launched: false as const, error: 'invalid_payload' }
     }
-    return await launchLocalPath(parsed.data)
+    const input = resolvePathLauncher(parsed.data)
+    return input
+      ? await launchLocalPath(input)
+      : { launched: false as const, error: 'unknown_launcher' }
+  }
+
+  @IpcMethod()
+  async approvePathLauncher(payload: unknown) {
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)!
+    return approvePathLauncher(payload, owner)
   }
 
   @IpcMethod()
@@ -577,10 +594,13 @@ export class AppIpc extends IpcService {
       return { availableIds: [] }
     }
     const availability = await Promise.all(
-      parsed.data.launchers.map(async ({ launcherId, input }) => ({
-        launcherId,
-        available: await hasPathLauncher(input)
-      }))
+      parsed.data.launchers.map(async (request) => {
+        const input = resolvePathLauncher(request)
+        return {
+          launcherId: request.launcherId,
+          available: input ? await hasPathLauncher(input) : false
+        }
+      })
     )
     return {
       availableIds: availability

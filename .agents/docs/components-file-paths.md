@@ -18,6 +18,21 @@ the preload policy. Deriving signatures from the service classes and constructor
 list avoids maintaining a second copy. Push events and one-way sends have a
 separate, platform-neutral owner.
 
+## Native launch authority
+
+The renderer sends a launcher id, an absolute target path and its file/directory
+kind. `shared/path-launchers` constructs the platform-specific command in main;
+launch and probe requests cannot carry commands, arguments or fallback URLs.
+Custom preferences in localStorage are proposals: their first use (or command
+change) opens a native confirmation showing the exact template. Main stores
+only approved templates in its own `path-launchers` settings. Cancelling leaves
+that store unchanged. Built-ins keep their existing editor and terminal fallbacks;
+custom options stay visible before approval so this confirmation is reachable.
+
+Default-application opening refuses executable suffixes, application bundles and
+regular files with executable bits, including symlink targets. Users can still
+reveal these files in the file manager or open them in a configured editor.
+
 ## Two path origins and two cache keys
 
 A tree or LSP target is already a machine-indexed path. A Markdown link is text

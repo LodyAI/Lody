@@ -226,6 +226,7 @@ import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
   buildPathLauncherLaunchInput,
+  executePathLauncher,
   buildPathLauncherProbes,
   getAvailablePathLauncherOptions,
   getPathLauncherId,
@@ -6899,8 +6900,9 @@ export const SessionChatInterface = memo(
     ]);
     const pathLauncherOptions = useMemo(
       () =>
-        launcherCandidates.filter((launcher) =>
-          availableLauncherIds.has(getPathLauncherId(launcher))
+        launcherCandidates.filter(
+          (launcher) =>
+            launcher.kind === 'custom' || availableLauncherIds.has(getPathLauncherId(launcher))
         ),
       [availableLauncherIds, launcherCandidates]
     );
@@ -6960,7 +6962,8 @@ export const SessionChatInterface = memo(
             return;
           }
 
-          const result = await getIpcServices()!.app.launchLocalPath(request);
+          const result = await executePathLauncher(launcher, path);
+          if (!result.launched && result.error === 'launcher_not_approved') return;
           if (!result.launched) {
             captureSessionEvent('session/open_in_ide_failed', {
               ...analyticsProperties,

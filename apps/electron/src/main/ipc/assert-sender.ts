@@ -1,7 +1,7 @@
-import { BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron'
 import { productWindows } from '../window-state'
 
-export function assertProductWindowSender(event: IpcMainInvokeEvent): void {
+export function assertProductWindowSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
   const mainWindow = BrowserWindow.fromWebContents(event.sender)
   const registered = mainWindow && productWindows.has(mainWindow)
   const senderUrl = event.senderFrame?.url

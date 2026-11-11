@@ -14,6 +14,9 @@ why they read the way they do. Coverage:
   never `mount()` or `enableZoom()`: those would take resizing and zoom away from
   the canvas and viewer below. `responsive: false` keeps the natural size those
   surfaces scale from.
+- The renderer output is sanitized with DOMPurify's SVG profiles before caching,
+  insertion, cloning or export. Scripts, event attributes, foreign HTML, links,
+  images and embedded stylesheets are excluded.
 - Links and images are disabled. An agent's diagram must not make the desktop
   fetch a remote image or carry a navigable link.
 - Diagram colors come from the app palette, never from the markup. The

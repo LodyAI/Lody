@@ -6611,5 +6611,7 @@
   "settings.machines.batchUpdate.immediate": "立即更新（中断对话）",
   "settings.machines.batchUpdate.confirmImmediate": "{{count}} 个正在运行的对话会被中断，更新后可以在每个对话里点“继续”。",
   "settings.machines.batchUpdate.confirmInterrupt": "中断并更新",
-  "settings.machines.batchUpdate.start": "更新 {{count}} 台机器"
+  "settings.machines.batchUpdate.start": "更新 {{count}} 台机器",
+  "desktop.pathLauncher.approve": "允许此自定义启动器运行命令吗？",
+  "desktop.pathLauncher.allow": "允许启动器"
 }

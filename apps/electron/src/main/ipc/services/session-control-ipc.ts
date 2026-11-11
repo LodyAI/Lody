@@ -1,4 +1,5 @@
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { ProductWindowIpcService } from '../product-window-ipc-service'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import { z } from 'zod'
 import { automationSettingsSchema } from '@lody/shared/automations'
 import { assertProductWindowSender } from '../assert-sender'
@@ -31,7 +32,7 @@ const publicWait = z.object({
   continuation: z.object({ state: z.string(), reason: z.string().optional() }).optional()
 })
 
-export class SessionControlIpc extends IpcService {
+export class SessionControlIpc extends ProductWindowIpcService {
   static override readonly groupName = 'sessionControl'
 
   @IpcMethod()

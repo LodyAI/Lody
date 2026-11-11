@@ -606,9 +606,6 @@ importers:
       '@devframes/plugin-terminals--assets':
         specifier: 'catalog:'
         version: 1.0.0
-      '@electron-toolkit/preload':
-        specifier: ^3.0.2
-        version: 3.0.2(electron@44.9.3)
       '@electron-toolkit/utils':
         specifier: ^4.0.0
         version: 4.0.0(electron@44.9.3)
@@ -1335,6 +1332,9 @@ importers:
       debug:
         specifier: ^4.4.3
         version: 4.4.3(supports-color@11.0.0)
+      dompurify:
+        specifier: 3.3.3
+        version: 3.3.3
       effect:
         specifier: 'catalog:'
         version: 4.0.2
@@ -3160,11 +3160,6 @@ packages:
   '@electron-internal/extract-zip@1.0.5':
     resolution: {integrity: sha512-+bqFCP98pLI0Tt0XQo1TmlXtwjWchISndDOxCkEcIuUgXWpBnLyRI+2DU+mesvnMMX6L1XDqYNA0lXNDHd/yiA==}
     engines: {node: '>=22.12.0'}
-
-  '@electron-toolkit/preload@3.0.2':
-    resolution: {integrity: sha512-TWWPToXd8qPRfSXwzf5KVhpXMfONaUuRAZJHsKthKgZR/+LqX1dZVSSClQ8OTAEduvLGdecljCsoT2jSshfoUg==}
-    peerDependencies:
-      electron: '>=13.0.0'
 
   '@electron-toolkit/tsconfig@2.0.0':
     resolution: {integrity: sha512-AdPsP770WhW7b260h13SHMdmjEEHJL6xFtgi3jwgdsSQbJOkJLeNnnpZW9qxTPCvmRI6vmdzWz5K3gibFS6SNg==}
@@ -15176,10 +15171,6 @@ snapshots:
     optional: true
 
   '@electron-internal/extract-zip@1.0.5': {}
-
-  '@electron-toolkit/preload@3.0.2(electron@44.9.3)':
-    dependencies:
-      electron: 44.9.3
 
   '@electron-toolkit/tsconfig@2.0.0(@types/node@24.10.12)':
     dependencies:

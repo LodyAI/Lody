@@ -80,6 +80,7 @@
       "types": "./src/visual-annotation-inspector-global.ts",
       "import": "./src/visual-annotation-inspector-global.ts"
     },
+    "./path-launchers": "./src/path-launchers.ts",
     "./electron-ipc": {
       "types": "./src/electron-ipc.ts",
       "import": "./src/electron-ipc.ts",

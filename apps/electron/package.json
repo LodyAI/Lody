@@ -46,7 +46,6 @@
     "@devframes/plugin-inspect--assets": "catalog:",
     "@devframes/plugin-terminals": "catalog:",
     "@devframes/plugin-terminals--assets": "catalog:",
-    "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@lody/cli-supervisor": "workspace:*",
     "@lody/platform": "workspace:*",

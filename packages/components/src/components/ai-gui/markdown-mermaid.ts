@@ -1,4 +1,5 @@
 import type { RenderOptions } from 'pele';
+import DOMPurify from 'dompurify';
 
 const MERMAID_FONT_FAMILY =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -145,7 +146,10 @@ export const renderMarkdownMermaidSvg = async (source: string): Promise<string> 
     return renderMermaidLoadFallback(source);
   }
   try {
-    return runtime.render(source, RENDER_OPTIONS).svg;
+    return DOMPurify.sanitize(runtime.render(source, RENDER_OPTIONS).svg, {
+      USE_PROFILES: { svg: true, svgFilters: true },
+      FORBID_TAGS: ['a', 'image', 'style', 'foreignObject'],
+    });
   } catch (error) {
     console.warn('[Lody] Mermaid render failed; using fallback.', error);
     return renderMermaidLoadFallback(source);

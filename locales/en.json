@@ -6624,5 +6624,7 @@
   "settings.machines.batchUpdate.confirmImmediate": "{{count}} running conversations will be interrupted. You can continue each one after the update.",
   "settings.machines.batchUpdate.confirmInterrupt": "Interrupt and update",
   "settings.machines.batchUpdate.start": "Update {{count}} machines",
-  "settings.machines.batchUpdate.open": "Update all my machines"
+  "settings.machines.batchUpdate.open": "Update all my machines",
+  "desktop.pathLauncher.approve": "Allow this custom launcher to run commands?",
+  "desktop.pathLauncher.allow": "Allow launcher"
 }
