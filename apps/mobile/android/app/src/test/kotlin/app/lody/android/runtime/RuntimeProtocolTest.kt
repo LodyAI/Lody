@@ -146,4 +146,23 @@ class RuntimeProtocolTest {
   assertEquals(FileContent.Failed("big.md", "too_large"), RuntimeProtocol.file(JSONObject("""{"status":"error","path":"big.md","code":"too_large"}"""), "big.md"))
   assertEquals(FileContent.Failed("odd.md", "read_failed"), RuntimeProtocol.file(JSONObject("""{"status":"ok","kind":"text"}"""), "odd.md"))
  }
+ @Test fun previewsCrossTheNativeBoundary() {
+  val token = RuntimeProtocol.event(JSONObject().put("type", "previewToken").put("requestId", "r").put("intent", "{\"workspaceId\":\"w\"}"))
+  assertEquals(RuntimeEvent.PreviewTokenRequested("r", "{\"workspaceId\":\"w\"}"), token)
+  val session = RuntimeProtocol.event(JSONObject().put("type", "session").put("sessionId", "s")
+   .put("session", """{"v":1,"status":"live","entries":[],"preview":{"label":"localhost:5173","active":true}}""")) as RuntimeEvent.SessionUpdated
+  assertEquals(BrowserPreview("localhost:5173", true), session.snapshot.preview)
+  val catalog = RuntimeProtocol.event(JSONObject().put("type", "catalog").put("revision", 1).put("catalog",
+   """{"projects":[],"sessions":[{"id":"s","machineId":"m","projectId":"p","title":"t","status":"idle","archived":false,"pinned":false,"createdAt":"2026-01-01T00:00:00Z","androidEmulatorPreviewRequestId":"req"}],"machineIds":["m","n"],"machineSimulators":{"m":"upgrade-required","n":"bogus"},"machineEmulators":{"n":"available"}}""")) as RuntimeEvent.CatalogUpdated
+  assertEquals(mapOf("m" to "upgrade-required"), catalog.snapshot.machineSimulators)
+  assertEquals(mapOf("n" to "available"), catalog.snapshot.machineEmulators)
+  assertEquals("req", catalog.snapshot.sessions.single().androidEmulatorPreviewRequestId)
+  val reply = PreviewJson.reply(DevicePlatform.ANDROID, JSONObject("""{"success":true,"devices":[{"id":"Pixel_8","name":"Pixel 8","runtime":"API 35","deviceType":"phone","state":"Shutdown","available":true,"occupancy":"other-session"},{"udid":"ios-only"}],
+   "preview":{"operationId":"op","id":"Pixel_8","phase":"ready","transport":"remote","viewerUrl":"https://a-b.trycloudflare.com/v"}}"""))
+  assertEquals(listOf("Pixel_8"), reply.devices?.map { it.id })
+  assertEquals("other-session", reply.devices?.single()?.occupancy)
+  assertEquals("ready", reply.preview?.phase)
+  assertEquals(JSONObject().put("action", "start").put("udid", "U").toString(), PreviewJson.command(DevicePlatform.IOS, DeviceCommand.Start("U", "clear")).toString())
+  assertEquals("saver", PreviewJson.command(DevicePlatform.ANDROID, DeviceCommand.Start("Pixel_8", "saver")).getString("quality"))
+ }
 }

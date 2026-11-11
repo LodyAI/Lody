@@ -712,6 +712,37 @@
     "v": 1,
     "gen": 3,
     "kind": "result",
+    "id": "req-emulator",
+    "method": "androidEmulatorControl",
+    "payload": {
+      "type": "android-emulator/control_response",
+      "sessionId": "session-1",
+      "success": true,
+      "preview": {
+        "operationId": "op-2",
+        "id": "Pixel_8",
+        "phase": "booting",
+        "transport": "remote"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-emulator-old",
+    "method": "androidEmulatorControl",
+    "payload": {
+      "error": "unsupported",
+      "capabilities": {
+        "previewControl": 1
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
     "id": "req-item-detail",
     "method": "itemDetail",
     "payload": {

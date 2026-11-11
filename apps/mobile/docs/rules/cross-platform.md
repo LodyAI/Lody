@@ -6,6 +6,8 @@ Read before changing repository identity, PR marks, the new-chat permission face
 
 - PR marks use shared `LodyPullRequestIcon` from the design system in lists, composer context and its PR action. Match Web SessionPrIcon: four Lucide status shapes, PR colour independent of CI, s check / f,e cross / p solid dot / x circle-dot, including merged/closed when CI is provided. Keep the 14/16 base, 10/16 verdict and transparent circular cutout; do not replace the whole mark with a CI tint.
 
+- While a Merge or Ready for review write to GitHub is in flight, the composer context capsule replaces the PR mark with a spinner and keeps the catalog's PR status. The status changes only after GitHub acknowledges the write (then held across stale catalog frames until the catalog catches up); a failed or unknown write leaves the mark unchanged. Never show a PR as merged or ready before that acknowledgement.
+
 - The compact new-chat permission face uses a neutral shield for agent/default (a mobile override of web); unknown modes are hidden, read-only/edit/plan use icons, full-access modes use the warning shield, and auto uses the short `Auto` label. Full permission names stay in the picker and accessibility label.
 
 - On the creation page, tapping outside the composer or opening/selecting a context option dismisses the keyboard. Picker search fields must still accept focus, and a dismissal tap must not swallow the option action. Opening run configuration also clears composer focus. A blank-area tap also closes the expanded context picker; controls and search fields retain their own tap handling.

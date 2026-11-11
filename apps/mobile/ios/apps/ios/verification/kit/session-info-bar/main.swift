@@ -43,14 +43,14 @@ print("PASS: Merge follows GitHub's merge state, not CI completion")
 updates = SessionPullRequestUpdates()
 session.pullRequests = [draft]
 updates.begin(draft, merged: false)
-check(bar(updates.apply(session)).pullRequest?.status == "open", "ready changes immediately before response")
+check(bar(updates.apply(session)).pullRequest?.status == "draft", "ready in flight keeps the catalog status")
 updates.finish(success: false)
 check(bar(updates.apply(session)).pullRequest?.status == "draft", "failed ready restores the catalog")
 updates.begin(draft, merged: true)
-check(bar(updates.apply(session)).pullRequest?.status == "merged", "merge changes immediately before response")
+check(bar(updates.apply(session)).pullRequest?.status == "draft", "merge in flight is not shown as merged")
 updates.finish(success: true)
 check(bar(updates.apply(session)).pullRequest?.status == "merged", "success survives old catalog frames")
-print("PASS: optimistic PR transitions roll back on failure")
+print("PASS: PR status changes only after GitHub acknowledges the write")
 
 // Ready for review on a draft (no catalog merge state): Merge appears from GitHub's own read.
 updates = SessionPullRequestUpdates()

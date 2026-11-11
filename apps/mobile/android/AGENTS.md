@@ -13,6 +13,7 @@ its rules. These triggers bind callers outside the owning directory as well.
 - Home, the Chats list, grouping, families, the project index, the bottom bar or the hidden Projects tab: read [Home](docs/rules/home.md).
 - The new-chat page, creation options, submissions or project groups: read [Create session](docs/rules/create-session.md).
 - The conversation transcript, turns, composer, action bar, attachments, images, Tabs, message actions, members, PRs or usage: read [Conversation](docs/rules/conversation.md).
+- The web preview, iOS Simulator or Android Emulator preview, their runtime commands, the preview-token broker or the viewer host WebView: read [Remote previews](docs/rules/previews.md).
 - Markdown repair, splitting or rendering in the transcript: read [Transcript Markdown](docs/rules/transcript-markdown.md).
 - @ references, `/` commands or prompt shortcuts in any composer: read [Mentions and prompt shortcuts](docs/rules/mentions.md).
 - The Schedules tab, its editor or its cache: read [Schedules](docs/rules/schedules.md).

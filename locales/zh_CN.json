@@ -305,6 +305,7 @@
   "e2ee.members.rotateFailed": "成员已移除，但密钥还没换好。工作区可以照常使用，请稍后在加密控制台里完成密钥更新。",
   "e2ee.members.transfer": "转移所有权",
   "e2ee.members.transferTitle": "把所有权转给 {{name}}？",
+  "e2ee.members.transferLead": "转移后：",
   "e2ee.members.transferEffectOwner": "{{name}} 成为所有者，可以转移所有权、调整管理员。",
   "e2ee.members.transferEffectYou": "你会变成管理员，仍然可以邀请和移除成员。",
   "e2ee.members.transferEffectRecord": "这次转移会写进变更记录，所有成员都能看到。",
