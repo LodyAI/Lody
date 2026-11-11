@@ -29,6 +29,8 @@ const connect=cloud.connect;cloud.connect=(workspaceId,gateway,userId)=>{const r
 // A tool step's detail (command, output, diff) reads the watched session's local replica only.
 const detail={
  setTabClosed:(sessionId,closed)=>{if(!identity)throw Error("not_connected");return runtime.setTabClosed({workspaceId:identity.workspaceId,sessionId,closed});},
+ // Archive or unarchive a conversation (iOS `SessionWrite.archive`); a write, never retried.
+ archiveSession:(sessionId,archived)=>{if(!identity)throw Error("not_connected");if(typeof archived!=='boolean')throw Error('invalid_action');return runtime.archiveSession({workspaceId:identity.workspaceId,sessionId,archived});},
  messageAction: (kind, input) => {
   if (!identity || !input || !['edit','fork'].includes(kind) || !['read','send'].includes(input.action)) throw Error('invalid_action');
   const args={...input,workspaceId:identity.workspaceId,userId:identity.userId};
@@ -59,4 +61,4 @@ const sendWithReferences = args => sendTurn(args, async text => {
  return {text:expanded,spans:referenceSpans(expanded,items)};
 });
 globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...proposalCommands(runtime,()=>identity),...providerCommands(runtime,()=>identity),...roleCommands(runtime,()=>identity),...shortcutCommands(runtime,()=>identity),...detail});
-emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand','decideProposal','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings','sessionPreview','iosSimulatorControl','androidEmulatorControl','previewTokenReply']});
+emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','archiveSession','schedules','scheduleDetail','scheduleCommand','decideProposal','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings','sessionPreview','iosSimulatorControl','androidEmulatorControl','previewTokenReply']});

@@ -47,6 +47,11 @@ class ChatRepository(
     suspend fun messageAction(scope: RuntimeScope, kind: String, payload: org.json.JSONObject): org.json.JSONObject =
         owner.use(scope) { (it.execute(RuntimeCommand.MessageAction(kind, payload)) as RuntimeResult.MessageAction).value }
 
+    /** Archives or unarchives a conversation; a write, never retried. */
+    suspend fun setArchived(scope: RuntimeScope, id: String, archived: Boolean) {
+        owner.use(scope) { it.execute(RuntimeCommand.ArchiveSession(id, archived)) }
+    }
+
     suspend fun setTabClosed(scope: RuntimeScope, id: String, closed: Boolean) {
         owner.use(scope) { it.execute(RuntimeCommand.SetTabClosed(id, closed)) }
     }
