@@ -941,4 +941,7 @@
     <string name="chat_proposal_error_schedule_owner">Only the computer’s owner can schedule tasks on it.</string>
     <string name="chat_proposal_error_schedule_unsupported">Update Lody on this computer to use scheduled tasks.</string>
     <string name="chat_proposal_error_schedule_trigger">Check the time rule and time zone.</string>
+    <string name="github_settings_authorization_required">Personal GitHub authorization required</string>
+    <string name="github_settings_authorization_hint">Sign in to Lody web with the same Lody account and authorize or renew your personal GitHub access. Then return here and retry connecting the GitHub App. Your “Act as you” preference does not need to be enabled.</string>
+    <string name="github_settings_authorize_in_web">Open Lody web</string>
 </resources>

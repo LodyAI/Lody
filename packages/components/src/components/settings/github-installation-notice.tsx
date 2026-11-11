@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useRouter } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -28,29 +29,46 @@ export function GitHubInstallationNotice({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const [location, setLocation] = useState(() => ({
-    search: window.location.search,
-    hash: window.location.hash,
-  }));
+  const router = useRouter({ warn: false });
+  const readRouterLocation = () => ({
+    search: router.state.location.searchStr,
+    hash: `#${router.state.location.hash}`,
+  });
+  const [location, setLocation] = useState(() =>
+    router
+      ? readRouterLocation()
+      : {
+          search: window.location.search,
+          hash: window.location.hash,
+        }
+  );
   useEffect(() => {
-    const update = () =>
+    // Router replace navigation does not dispatch browser popstate/hashchange.
+    const unsubscribe = router?.subscribe('onResolved', () => setLocation(readRouterLocation()));
+    const updateWindow = () =>
       setLocation({ search: window.location.search, hash: window.location.hash });
-    window.addEventListener('hashchange', update);
-    window.addEventListener('popstate', update);
+    window.addEventListener('hashchange', updateWindow);
+    window.addEventListener('popstate', updateWindow);
     return () => {
-      window.removeEventListener('hashchange', update);
-      window.removeEventListener('popstate', update);
+      unsubscribe?.();
+      window.removeEventListener('hashchange', updateWindow);
+      window.removeEventListener('popstate', updateWindow);
     };
-  }, []);
+  }, [router]);
   const code = needsAuthorization
     ? 'authorization_required'
     : readGitHubInstallError(location.search);
   if (!code) return null;
   const messages = {
-    authorization_required: t(
-      'settings.integrations.github.installErrors.authorizationRequired',
-      'Authorize your personal GitHub account first, then connect the GitHub App. This does not change your “Act as you” preference.'
-    ),
+    authorization_required: authorized
+      ? t(
+          'settings.integrations.github.installErrors.managementRequired',
+          'Reauthorize with the installation owner’s GitHub account or an active organization administrator, then retry.'
+        )
+      : t(
+          'settings.integrations.github.installErrors.authorizationRequired',
+          'Authorize your personal GitHub account first, then connect the GitHub App. This does not change your “Act as you” preference.'
+        ),
     temporarily_unavailable: t(
       'settings.integrations.github.installErrors.temporarilyUnavailable',
       'GitHub could not be reached. Try the same installation again.'

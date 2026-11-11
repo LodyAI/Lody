@@ -137,7 +137,7 @@ export function GitHubPersonalIdentitySettingsCard({
   /* Mobile only: the parent renders the toggle row with `MobileSettingsRowGroup`,
      so this is just the "act-as-you" details panel. Desktop draws the identity
      row itself (`GitHubSettingsView`). */
-  if (!enabled) return null;
+  if (!enabled && authorizationReady) return null;
   return (
     <div {...stylex.props(styles.personalIdentityCard)}>
       <div {...stylex.props(styles.identityDetails)}>

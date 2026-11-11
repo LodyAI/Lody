@@ -304,7 +304,7 @@ function IdentityRow({
       label={t('settings.integrations.github.personalIdentityRowLabel', 'Act as you')}
       helper={helper}
     >
-      {enabled && !authorized && canAuthorize ? (
+      {!authorized && canAuthorize ? (
         <Button
           variant="secondary"
           size="small"

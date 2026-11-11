@@ -12,6 +12,7 @@ import app.lody.android.runtime.RuntimeScope
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URI
 import java.net.URLEncoder
 
 data class GitHubSettingsRepo(val fullName: String, val name: String, val private: Boolean, val enabled: Boolean) {
@@ -67,10 +68,7 @@ internal object GitHubSettingsCloud {
         when (action) {
             GitHubSettingsAction.Install -> {
                 if (!manage) throw GitHubSettingsFailure("forbidden")
-                val result = call("action", "github:createGitHubInstallState", scope().put("returnTarget", "web")) as? JSONObject
-                val state = result?.optString("state").orEmpty()
-                if (state.isEmpty() || state.length > 4096) throw GitHubSettingsFailure("install_failed")
-                return "https://github.com/apps/lodyai/installations/new?state=" + URLEncoder.encode(state, "UTF-8")
+                return installationUrl(workspace, call)
             }
             is GitHubSettingsAction.Repository -> {
                 if (!manage || !validRepository(action.fullName)) throw GitHubSettingsFailure("forbidden")
@@ -119,6 +117,25 @@ internal object GitHubSettingsCloud {
         catch (_: Exception) { errors += "personal"; null }
         return GitHubSettingsData(manage, role != null, repositories, personal, errors)
     }
+
+    /** Shared by Settings and Add Project; use a fresh grant, independently of Act as you. */
+    suspend fun installationUrl(workspace: String, call: GitHubSettingsCall): String {
+        val scope = JSONObject().put("workspaceId", workspace)
+        val personal = call("query", "github:getPersonalOperationSettings", scope) as? JSONObject
+            ?: throw GitHubSettingsFailure("invalid")
+        val authorization = personal.optJSONObject("authorization") ?: throw GitHubSettingsFailure("invalid")
+        val state = authorization.optString("state")
+        if (personal.opt("enabled") !is Boolean || state !in setOf("missing", "expired", "authorized")) throw GitHubSettingsFailure("invalid")
+        if (state != "authorized") throw GitHubSettingsFailure("authorization_required")
+        if ((authorization.opt("githubAccountId") as? String).isNullOrEmpty()) throw GitHubSettingsFailure("invalid")
+        val result = call("action", "github:createGitHubInstallState", scope.put("returnTarget", "web")) as? JSONObject
+        val installState = result?.optString("state").orEmpty()
+        if (installState.isEmpty() || installState.length > 4096) throw GitHubSettingsFailure("install_failed")
+        return "https://github.com/apps/lodyai/installations/new?state=" + URLEncoder.encode(installState, "UTF-8")
+    }
+
+    /** Existing neutral callback resolves the configured Web origin, with no credentials. */
+    fun authorizationUrl(): String = URI(BackendEnvironment.site).resolve("/api/github/callback?setup_action=request").toString()
 
     private fun rows(array: JSONArray) = (0 until array.length()).mapNotNull { array.optJSONObject(it) }
 

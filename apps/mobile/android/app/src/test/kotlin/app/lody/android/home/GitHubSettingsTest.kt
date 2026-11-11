@@ -17,6 +17,7 @@ class GitHubSettingsTest {
         val repos = linkedMapOf("zeta/tools" to false, "LodyAI/Lody" to true)
         var dropRepoWrite = false
         val writes = mutableListOf<String>()
+        var installationStates = 0
         suspend fun call(kind: String, path: String, args: JSONObject): Any? {
             assertEquals("workspace", args.getString("workspaceId"))
             return when (path) {
@@ -31,7 +32,7 @@ class GitHubSettingsTest {
                     JSONObject().put("updated", true)
                 }
                 "github:setPersonalOperationPreference" -> { writes += "personal=${args.getBoolean("enabled")}"; personal = args.getBoolean("enabled"); null }
-                "github:createGitHubInstallState" -> { assertEquals("action", kind); JSONObject().put("state", "s t") }
+                "github:createGitHubInstallState" -> { installationStates++; assertEquals("action", kind); JSONObject().put("state", "s t") }
                 else -> error("unexpected $path")
             }
         }
@@ -64,6 +65,44 @@ class GitHubSettingsTest {
             .onSuccess { fail("member install accepted") }
         assertTrue(backend.writes.isEmpty())
         assertEquals("https://github.com/apps/lodyai/installations/new?state=s+t", Service(backend).installUrl(scope))
+    }
+
+    @Test fun missingOrExpiredPersonalGrantCannotCreateAnInstallationStateInSettingsOrProjectAdding() = runTest {
+        val backend = Backend(personal = false)
+        for (authorization in listOf("missing", "expired")) {
+            backend.authorization = authorization
+            // Both native producers use this fresh-check boundary after their own live role check.
+            for (begin in listOf<suspend () -> Any>(
+                { GitHubSettingsCloud.run(GitHubSettingsAction.Install, "workspace", "owner", backend::call) },
+                { GitHubSettingsCloud.installationUrl("workspace", backend::call) },
+            )) {
+                try { begin(); fail("missing grant began installation") }
+                catch (failure: GitHubSettingsFailure) { assertEquals("authorization_required", failure.code) }
+            }
+        }
+        assertEquals(0, backend.installationStates)
+        backend.authorization = "authorized"
+        assertTrue(GitHubSettingsCloud.installationUrl("workspace", backend::call).startsWith("https://github.com/apps/"))
+        assertEquals("Act as you is independent of installation authorization", false, backend.personal)
+        assertEquals(1, backend.installationStates)
+    }
+
+    @Test fun failedOrMalformedPersonalGrantReadsNeverStartInstallationOrPretendAuthorizationIsMissing() = runTest {
+        val backend = Backend()
+        val unavailable = IllegalStateException("network unavailable")
+        try {
+            GitHubSettingsCloud.installationUrl("workspace") { _, _, _ -> throw unavailable }
+            fail("failed read began installation")
+        } catch (failure: IllegalStateException) { assertSame(unavailable, failure) }
+        for (malformed in listOf(JSONObject(), JSONObject().put("enabled", false).put("authorization", JSONObject().put("state", "authorized")))) {
+            try {
+                GitHubSettingsCloud.installationUrl("workspace") { _, path, _ ->
+                    if (path == "github:getPersonalOperationSettings") malformed else backend.call("action", path, JSONObject().put("workspaceId", "workspace"))
+                }
+                fail("malformed grant began installation")
+            } catch (failure: GitHubSettingsFailure) { assertEquals("invalid", failure.code) }
+        }
+        assertEquals(0, backend.installationStates)
     }
 
     @Test fun switchShowsAtOnceAndKeepsTheReadValueOnlyAfterReadback() = runTest {

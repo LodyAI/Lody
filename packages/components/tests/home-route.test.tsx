@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useEffect, useRef } from 'react';
+import { Provider, createStore } from 'jotai';
+import { settingsActiveTabAtom, settingsDialogOpenAtom } from '../src/atoms/settings';
+import { Route as WorkspaceSettingsRoute } from '../src/routes/$workspaceName/_auth/settings';
+import { navigateToResolvedPath } from '../src/lib/deep-link-path';
+import { resolveDesktopGitHubInstallDeepLinkPath } from '../src/lib/desktop-github-install-deep-link';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   createMemoryHistory,
@@ -349,6 +354,180 @@ describe('workspace-independent GitHub settings landing', () => {
       expect(container.textContent).not.toContain('GitHub settings');
     }
   );
+});
+
+describe('desktop installation recovery enters the already-open settings modal', () => {
+  async function desktop(initial = '/team/chat') {
+    const store = createStore();
+    store.set(settingsDialogOpenAtom, true);
+    let mounts = 0;
+    function PersistedModal() {
+      const mounted = useRef(false);
+      useEffect(() => {
+        if (!mounted.current) {
+          mounts++;
+          mounted.current = true;
+        }
+      }, []);
+      return <GitHubInstallationNotice authorized onAuthorize={() => {}} />;
+    }
+    const rootRoute = createRootRoute({
+      component: () => (
+        <Provider store={store}>
+          <PersistedModal />
+          <Outlet />
+        </Provider>
+      ),
+    });
+    const workspace = createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/$workspaceName',
+      component: Outlet,
+    });
+    const auth = createRoute({ getParentRoute: () => workspace, id: '_auth', component: Outlet });
+    const settings = WorkspaceSettingsRoute.update({
+      getParentRoute: () => auth,
+      id: '/settings',
+      path: '/settings',
+    } as never);
+    const github = createRoute({
+      getParentRoute: () => settings,
+      path: '/github',
+      component: () => null,
+    });
+    const chat = createRoute({
+      getParentRoute: () => auth,
+      path: '/chat',
+      component: () => <div>Workspace chat</div>,
+    });
+    const onboarding = createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/onboarding',
+      component: () => <div>Onboarding projects</div>,
+    });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([
+        workspace.addChildren([auth.addChildren([settings.addChildren([github]), chat])]),
+        onboarding,
+      ]),
+      history: createMemoryHistory({ initialEntries: [initial] }),
+      defaultPendingMs: Infinity,
+      defaultPendingMinMs: 0,
+    });
+    await router.load();
+    const container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<RouterProvider router={router} />));
+    return { router, store, container, mounts: () => mounts };
+  }
+
+  it('keeps the retry capability in the fragment across actual navigation and the settings-to-modal handoff', async () => {
+    vi.stubEnv('VITE_CONVEX_SITE_URL', 'https://synthetic.convex.site');
+    const { router, store, container, mounts } = await desktop();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    const callback =
+      'https://synthetic.convex.site/api/github/callback?installation_id=42&setup_action=update&state=NAVIGATION_CAPABILITY_SECRET';
+    const fragment = `github-install-retry=${encodeURIComponent(callback)}`;
+    const path = resolveDesktopGitHubInstallDeepLinkPath(
+      `lody://github-install?workspaceSlug=team&github_install_error=temporarily_unavailable#${fragment}`,
+      router.state.location.pathname
+    )!;
+    await act(async () => {
+      navigateToResolvedPath(router.navigate, path);
+      await router.load();
+    });
+    expect(router.state.location.pathname).toBe('/team/chat');
+    expect(router.state.location.search).toEqual({
+      github_install_error: 'temporarily_unavailable',
+    });
+    expect(router.state.location.searchStr).not.toContain('NAVIGATION_CAPABILITY_SECRET');
+    expect(router.state.location.searchStr).not.toContain('state');
+    expect(router.state.location.hash).toBe(fragment);
+    expect(store.get(settingsDialogOpenAtom)).toBe(true);
+    expect(store.get(settingsActiveTabAtom)).toBe('github');
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'settings.integrations.github.installErrors.temporarilyUnavailable'
+    );
+    expect(mounts()).toBe(1);
+    await act(async () => {
+      await router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: 'team' },
+        search: { github_install_error: 'installation_not_visible' },
+        hash: fragment,
+        replace: true,
+      });
+    });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'settings.integrations.github.installErrors.installationNotVisible'
+    );
+    await act(async () => {
+      await router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: 'team' },
+        search: {},
+        hash: '',
+        replace: true,
+      });
+    });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(mounts()).toBe(1);
+  });
+
+  it('removes legacy capability query fields during settings handoff while retaining ordinary context and the retry fragment', async () => {
+    vi.stubEnv('VITE_CONVEX_SITE_URL', 'https://synthetic.convex.site');
+    const { router } = await desktop();
+    const retry =
+      'https://synthetic.convex.site/api/github/callback?installation_id=42&setup_action=update&state=FRAGMENT_SECRET';
+    const hash = `github-install-retry=${encodeURIComponent(retry)}`;
+    await act(async () => {
+      await router.navigate({
+        to: '/$workspaceName/settings/github',
+        params: { workspaceName: 'team' },
+        search: {
+          github_install_error: 'temporarily_unavailable',
+          context: 'github',
+          state: 'LEGACY_QUERY_SECRET',
+          'github-install-retry': 'LEGACY_QUERY_SECRET',
+          github_install_retry: 'LEGACY_QUERY_SECRET',
+        } as never,
+        hash,
+      });
+      await router.load();
+    });
+    expect(router.state.location.pathname).toBe('/team/chat');
+    expect(router.state.location.search).toEqual({
+      github_install_error: 'temporarily_unavailable',
+      context: 'github',
+    });
+    expect(router.state.location.searchStr).not.toContain('LEGACY_QUERY_SECRET');
+    expect(router.state.location.hash).toBe(hash);
+  });
+
+  it('leaves successful onboarding returns alone but takes a failed installation to recovery settings', async () => {
+    const { router, container, store } = await desktop('/onboarding');
+    expect(
+      resolveDesktopGitHubInstallDeepLinkPath(
+        'lody://github-install?workspaceSlug=team&installed=true',
+        '/onboarding'
+      )
+    ).toBeNull();
+    const failure = resolveDesktopGitHubInstallDeepLinkPath(
+      'lody://github-install?workspaceSlug=team&github_install_error=authorization_required',
+      '/onboarding'
+    );
+    expect(failure).toBe('/team/settings/github?github_install_error=authorization_required');
+    await act(async () => {
+      navigateToResolvedPath(router.navigate, failure!);
+      await router.load();
+    });
+    expect(router.state.location.pathname).toBe('/team/chat');
+    expect(store.get(settingsActiveTabAtom)).toBe('github');
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'settings.integrations.github.installErrors.managementRequired'
+    );
+  });
 });
 
 it('recovers the same local provider after validation errors with capped retries and manual retry', async () => {

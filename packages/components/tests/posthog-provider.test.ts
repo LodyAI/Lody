@@ -6,6 +6,7 @@ import { POSTHOG_OPTIONS } from '../src/providers/posthog-options';
 
 import {
   postHogPrivacy,
+  createPostHogPrivacy,
   holdPrivateTelemetrySurface,
   installWorkspaceTelemetryScope,
   setTelemetryRouteTarget,
@@ -150,14 +151,117 @@ it('keeps GitHub installation retry capabilities out of the locked SDK replay UR
     join(sdkRoot, 'lib/src/extensions/replay/external/lazy-loaded-session-recorder.js')
   );
   const recorder = Object.assign(Object.create(LazyLoadedSessionRecording.prototype), {
-    _instance: { config: { ...POSTHOG_OPTIONS } },
+    _instance: {
+      config: { ...POSTHOG_OPTIONS, session_recording: { ...POSTHOG_OPTIONS.session_recording } },
+    },
   }) as {
-    _instance: { config: { disable_capture_url_hashes?: boolean } };
+    _instance: {
+      config: {
+        disable_capture_url_hashes?: boolean;
+        session_recording: { maskCapturedNetworkRequestFn?: unknown };
+      };
+    };
     _maskReplayUrl: (url: string) => string;
   };
   const capability =
     'https://lody.example/team/settings/github#github-install-retry=SIGNED_INSTALL_STATE_SECRET';
   expect(recorder._maskReplayUrl(capability)).toBe('https://lody.example/team/settings/github');
   recorder._instance.config.disable_capture_url_hashes = false;
+  delete recorder._instance.config.session_recording.maskCapturedNetworkRequestFn;
   expect(recorder._maskReplayUrl(capability)).toContain('SIGNED_INSTALL_STATE_SECRET');
+});
+
+it.each([
+  '?state=QUERY_CAPABILITY_SECRET&theme=dark',
+  '?github-install-retry=https%3A%2F%2Fcallback.example%2F%3Fstate%3DQUERY_CAPABILITY_SECRET&theme=dark',
+  '?github_install_error=temporarily_unavailable%23github-install-retry%3Dhttps%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark',
+  '?next=https%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark',
+])('keeps accidental query capabilities out of real SDK replay metadata: %s', (query) => {
+  const require = createRequire(import.meta.url);
+  const sdkRoot = dirname(require.resolve('posthog-js/package.json'));
+  const { LazyLoadedSessionRecording } = require(
+    join(sdkRoot, 'lib/src/extensions/replay/external/lazy-loaded-session-recorder.js')
+  );
+  const recorder = Object.assign(Object.create(LazyLoadedSessionRecording.prototype), {
+    _instance: {
+      config: { ...POSTHOG_OPTIONS, session_recording: { ...POSTHOG_OPTIONS.session_recording } },
+    },
+  }) as {
+    _maskReplayUrl: (url: string) => string;
+    _instance: { config: { session_recording: { maskCapturedNetworkRequestFn?: unknown } } };
+  };
+  const source = `https://lody.example/team/chat${query}`;
+  const masked = recorder._maskReplayUrl(source);
+  expect(masked).not.toContain('QUERY_CAPABILITY_SECRET');
+  expect(new URL(masked).searchParams.get('theme')).toBe('dark');
+  delete recorder._instance.config.session_recording.maskCapturedNetworkRequestFn;
+  expect(recorder._maskReplayUrl(source)).toContain('QUERY_CAPABILITY_SECRET');
+});
+
+it('scrubs nested replay and exception query contamination while keeping neutral diagnostics', () => {
+  const uninstall = installWorkspaceTelemetryScope(() => 'ordinary');
+  setTelemetryRouteTarget('ordinary', true);
+  const contaminated =
+    'https://lody.example/team/chat?github_install_error=temporarily_unavailable%23github-install-retry%3Dhttps%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark';
+  try {
+    for (const event of ['$snapshot', '$exception', 'navigation/failed']) {
+      const result = runBeforeSend({
+        event,
+        properties: {
+          state: 'loading',
+          error_code: 'temporarily_unavailable',
+          nested: [
+            {
+              data: {
+                href: contaminated,
+                detail: encodeURIComponent(contaminated),
+                neutral: 'https://lody.example/team/chat?theme=dark&tab=github',
+              },
+            },
+          ],
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain('QUERY_CAPABILITY_SECRET');
+      expect(result?.properties?.state).toBe('loading');
+      expect(result?.properties?.error_code).toBe('temporarily_unavailable');
+      expect(result?.properties?.nested).toEqual([
+        {
+          data: {
+            href: 'https://lody.example/team/chat?theme=dark',
+            detail: '[redacted_installation_capability]',
+            neutral: 'https://lody.example/team/chat?theme=dark&tab=github',
+          },
+        },
+      ]);
+    }
+  } finally {
+    uninstall();
+  }
+});
+
+it('scrubs a queued replay URL contaminated after capture before it reaches the transport encoder', () => {
+  const bodies: string[] = [];
+  const client = {
+    __loaded: false,
+    _send_request: (options: { data: unknown }) => {
+      bodies.push(JSON.stringify(options.data));
+    },
+  };
+  const privacy = createPostHogPrivacy(() => 'ordinary');
+  privacy.attach(client as never);
+  const frame = {
+    event: '$snapshot',
+    properties: {
+      token: 'synthetic-project-key',
+      $snapshot_data: [{ data: { href: 'https://lody.example/team/chat?theme=dark' } }],
+    },
+  };
+  privacy.beforeSend(frame);
+  frame.properties.$snapshot_data[0]!.data.href =
+    'https://lody.example/team/chat?state=QUEUED_CAPABILITY_SECRET&theme=dark';
+  client._send_request({ data: [frame] });
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).not.toContain('QUEUED_CAPABILITY_SECRET');
+  expect(bodies[0]).toContain('theme=dark');
+  expect(bodies[0]).toContain('synthetic-project-key');
 });

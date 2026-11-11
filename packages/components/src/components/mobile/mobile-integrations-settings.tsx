@@ -385,9 +385,8 @@ function MobileCloudIntegrationsSettings() {
 
             {/* Personal identity. The toggle row owns the on/off state and
            the row's helper text mirrors the desktop card's lead line.
-           When enabled, the authorization status panel is appended
-           below the row inside the same card so the card visually
-           groups "the preference + its consequence". */}
+           Authorization also remains available with the operation preference
+           off, because connecting the App needs the independent personal grant. */}
             <MobileSettingsSection
               title={t('settings.integrations.github.personalIdentitySection', 'Personal Identity')}
             >
@@ -421,7 +420,7 @@ function MobileCloudIntegrationsSettings() {
                   )}
                 </MobileSettingsRow>
               </MobileSettingsRowGroup>
-              {personalIdentityEnabled ? (
+              {personalIdentityEnabled || personalAuthorizationState !== 'authorized' ? (
                 <div className="border-t border-border px-3 py-3">
                   <GitHubPersonalIdentitySettingsCard
                     enabled={personalIdentityEnabled}

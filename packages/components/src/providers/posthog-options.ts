@@ -5,7 +5,7 @@ import { readNativeAppInfo } from '@/lib/native-app-info';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { POSTHOG_INIT_PROPERTY_DENYLIST } from '@/lib/posthog-analytics';
 import { isResizeObserverLoopError } from '@/lib/resize-observer';
-import { postHogPrivacy } from '@/lib/posthog-privacy';
+import { postHogPrivacy, sanitizePostHogCapabilityUrl } from '@/lib/posthog-privacy';
 
 type PostHogOptions = NonNullable<Parameters<typeof posthog.init>[1]>;
 
@@ -159,6 +159,10 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
   // private code/chat/repo data. Mask raw content before rrweb emits events.
   disable_session_recording: true,
   session_recording: {
+    maskCapturedNetworkRequestFn: (request) => ({
+      ...request,
+      name: sanitizePostHogCapabilityUrl(request.name),
+    }),
     maskAllInputs: true,
     maskTextSelector: '*',
     maskTextFn: maskPostHogRecordingText,

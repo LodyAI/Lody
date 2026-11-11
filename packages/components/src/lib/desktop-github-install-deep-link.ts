@@ -39,6 +39,8 @@ export function resolveDesktopGitHubInstallDeepLinkPath(
   }
 
   const error = readGitHubInstallError(parsed.search);
+  // Success leaves the projects step open; failures must expose settings recovery.
+  if (fallbackPathname === '/onboarding' && !error) return null;
   const target = error ? 'settings' : (options?.target ?? 'settings');
   const subpath = target === 'home' ? '/chat' : '/settings/github';
 

@@ -20,6 +20,8 @@ const authState = vi.hoisted(() => ({
   mobile: false,
   available: true,
   authorization: 'missing',
+  preferenceEnabled: true,
+  preferenceWrites: [] as Array<{ name: string; args: unknown }>,
   canManage: false,
   openedUrls: [] as string[],
   openResult: true,
@@ -82,9 +84,14 @@ vi.mock('../src/components/settings/settings-data-cache', () => ({
 }));
 vi.mock('@lody/platform/react', async (original) => ({
   ...(await original<typeof import('@lody/platform/react')>()),
-  useCloudQuery: () => ({ enabled: true, authorization: { state: authState.authorization } }),
+  useCloudQuery: () => ({
+    enabled: authState.preferenceEnabled,
+    authorization: { state: authState.authorization },
+  }),
   useCloudAction: () => async () => ({ state: 'synthetic-signed-install-state' }),
-  useCloudMutation: () => async () => {},
+  useCloudMutation: (operation: { name: string }) => async (args: unknown) => {
+    authState.preferenceWrites.push({ name: operation.name, args });
+  },
 }));
 
 import { GitHubInstallationNotice } from '../src/components/settings/github-installation-notice';
@@ -151,6 +158,8 @@ describe('GitHubSettingsView', () => {
       mobile: false,
       available: true,
       authorization: 'missing',
+      preferenceEnabled: true,
+      preferenceWrites: [],
       canManage: false,
       openedUrls: [],
       openResult: true,
@@ -360,4 +369,20 @@ describe('GitHubSettingsView', () => {
     window.history.replaceState(null, '', '/');
     vi.unstubAllEnvs();
   });
+  it.each([false, true])(
+    'personal authorization for App installation remains available with Act-as-you off and never enables that preference (mobile: %s)',
+    async (mobile) => {
+      authState.mobile = mobile;
+      authState.preferenceEnabled = false;
+      authState.repos = [];
+      await renderSettings();
+      const identitySwitch = container.querySelector('[role="switch"]');
+      expect(identitySwitch?.getAttribute('aria-checked')).toBe('false');
+      expect(authorizeButton()).toBeDefined();
+      await act(async () => authorizeButton()!.click());
+      expect(authState.linkedCallback).toBe('operation-only');
+      expect(identitySwitch?.getAttribute('aria-checked')).toBe('false');
+      expect(authState.preferenceWrites).toEqual([]);
+    }
+  );
 });

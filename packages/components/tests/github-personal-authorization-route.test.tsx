@@ -19,7 +19,12 @@ vi.mock('@tanstack/react-router', () => ({
     ...options,
     useParams: () => ({ workspaceName: 'team' }),
   }),
-  useLocation: () => ({ pathname: '/team/settings/github', search: {} }),
+  useLocation: () => ({
+    pathname: '/team/settings/github',
+    search: {},
+    searchStr: window.location.search,
+    hash: window.location.hash.slice(1),
+  }),
   useNavigate: () => state.navigate,
   Outlet: () => null,
 }));

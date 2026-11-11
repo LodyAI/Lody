@@ -929,4 +929,7 @@
     <string name="chat_proposal_error_schedule_owner">只有这台电脑的所有者可以在上面创建定时任务。</string>
     <string name="chat_proposal_error_schedule_unsupported">请先更新这台电脑上的 Lody 才能使用定时任务。</string>
     <string name="chat_proposal_error_schedule_trigger">请检查时间规则和时区。</string>
+    <string name="github_settings_authorization_required">需要个人 GitHub 授权</string>
+    <string name="github_settings_authorization_hint">请在 Lody 网页端登录同一个 Lody 账号，授权或续期个人 GitHub 访问权限，然后返回此处重试连接 GitHub App。无需开启“以你的身份操作”偏好。</string>
+    <string name="github_settings_authorize_in_web">打开 Lody 网页端</string>
 </resources>

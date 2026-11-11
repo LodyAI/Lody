@@ -6637,5 +6637,6 @@
   "settings.integrations.github.installErrors.deletionInProgress": "This account or workspace is being deleted. The installation cannot be connected.",
   "settings.integrations.github.installErrors.unknown": "The installation could not be connected. Start a new connection or contact support.",
   "settings.integrations.github.retryInstallation": "Retry installation",
-  "desktopGithubInstall.failedDescription": "The installation was not connected. Open Lody Desktop to review the error and retry."
+  "desktopGithubInstall.failedDescription": "The installation was not connected. Open Lody Desktop to review the error and retry.",
+  "settings.integrations.github.installErrors.managementRequired": "Reauthorize with the installation owner’s GitHub account or an active organization administrator, then retry."
 }
