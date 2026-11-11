@@ -9,7 +9,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 ## `agent-client.ts`
 
 - Consume Core extensions via `agentCapabilities._meta.lody`, session `_meta.lody`, and
-  `_lody/...`. Provider/pre-Core readers stay in `lody-acp-extension.ts`; consumers stay neutral.
+  `_lody/...`. Provider compatibility stays in `lody-acp-extension.ts` and `antigravity-quota.ts`; consumers stay neutral.
 - Grok Always Approve uses `allow_once`, never lasting grants; pending calls drain through
   the durable permission flow on accepted config changes. Questions remain interactive.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
