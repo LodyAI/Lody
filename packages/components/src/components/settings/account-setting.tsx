@@ -848,8 +848,10 @@ function CloudAccountSettings({
             />
           ) : role === 'owner' && !encrypted ? (
             <WorkspaceJoinRequestsSettings
+              key={`${currentUserId}:${activeOrganization.id}`}
               workspaceId={activeOrganization.id}
               onOpenBilling={openAdmissionBilling}
+              onMembersChanged={refetchActiveOrganization}
             />
           ) : undefined
         }

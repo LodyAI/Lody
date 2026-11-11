@@ -226,11 +226,36 @@ older reads; account/workspace changes discard snapshots and late responses.
 The runtime still re-reads current data before mutations. A workspace without a
 saved list shows the loading state until its first successful read.
 
+### Project groups
+
+Project groups are desktop's multi-repository projects: one project whose members are
+GitHub repositories or local folders. Mobile shows them but does not create or edit
+them yet.
+
+- The runtime catalog carries a group conversation's members (`protocol/project-run.ts`,
+  web `buildSessionProjectMemberRows`): placement order with submodules under their
+  parent, and each member's branch, diff, publish state and current PR (the last PR
+  recorded for its repository).
+- `Catalog/ProjectGroupStore` keeps the workspace's groups. It reads them when the
+  workspace changes, when the catalog names an unknown `group:` id and when Settings ›
+  Projects opens, restoring the last accepted list first. The iPad project list adds
+  runnable groups that have no conversations yet ("N repositories or folders").
+  Settings › Projects lists every group after the folders and opens a read-only page
+  with the group's computer, creator and members.
+- In a group conversation the action bar's context capsule summarises repositories,
+  PRs and the group-wide diff. Its popover lists every member (identity, path · branch,
+  ±diff, PR) instead of web's hidden selected member, so every PR stays visible. A PR
+  row opens that PR's page, which carries merge and the other PR actions. The bar's
+  own actions stay Create PR / Draft and Commit & Push, sent with web's
+  `withProjectGroupPrScope` text so the agent publishes every changed member.
+- A single-repository conversation shows only the latest PR of its own repository.
+
 ### Code Diffs & Workspace File Browsing
 
 - **Turn Changes Overview**: Automatically summarizes file changes for each conversation turn, with one-tap access to all modified files.
 - **Word-Level Diff Highlighting**: File, workspace and tool-detail diffs render natively in LodyKit.
 - **Remote Workspace File Tree**: Browse project directories and files on remote Macs or servers at any time, with previews via native code view `LodyCodeView` or system Quick Look.
+- **Project Files from More**: a live conversation in a local project offers Project Files in its More menu (`SessionController.openProjectFiles`). `FilesController` lists folders through runtime `listDir`, which lists the conversation's own folder (its worktree when it has one) with the machine's `file/list-dir`, or the local project's folder on machines without the `sessionDirectoryListing` capability; a file opens in `FileContentController` through `readFile`, which renders Markdown with a Source toggle and opens relative Markdown links in place. Android mirrors this in `chat/ProjectFiles.kt` ([Android README](../android/README.md#project-files)).
 
 ### Live Preview & Simulator Streaming
 

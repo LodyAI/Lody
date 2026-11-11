@@ -359,11 +359,19 @@ enum InboxSections {
     var row = LodyListRow()
     row.id = sessions.isEmpty ? "project:\(project.id)" : "toggle:\(project.id)"
     row.parent = true
-    row.monogram = String(project.name.prefix(1))
-    row.image = ownerAvatar(project.repoFullName ?? "")
     row.title = project.name
-    row.subtitle = project.rootPath.replacingOccurrences(of: #"^/(Users|home)/[^/]+"#, with: "~", options: .regularExpression)
-    row.subtitleMono = true
+    if project.isGroup {
+      // A Project group has no single path: name how many repositories or folders it holds.
+      row.imageAsset = "lody.icon.projectGroup"
+      row.subtitle = project.memberCount.map {
+        String.localizedStringWithFormat(String(localized: "project.group.members", bundle: .lody), $0)
+      } ?? ""
+    } else {
+      row.monogram = String(project.name.prefix(1))
+      row.image = ownerAvatar(project.repoFullName ?? "")
+      row.subtitle = project.rootPath.replacingOccurrences(of: #"^/(Users|home)/[^/]+"#, with: "~", options: .regularExpression)
+      row.subtitleMono = true
+    }
     row.action = true
     row.menuActions = SessionRows.projectMenu(project)
     trailing(&row, sessions: sessions, open: open)

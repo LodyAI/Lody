@@ -1,20 +1,16 @@
-import { createContext, useContext, useState, type ComponentType } from 'react';
-import { getIpcServices } from '@/lib/electron-ipc-client';
+import { useContext, type ComponentType } from 'react';
 import { RecoveryVaultSection } from './recovery-vault-section';
+import { E2eeRecoveryHostContext, useRecoveryPort } from './recovery-port';
 
-/** Account recovery controls a host composes into the encryption console's Recovery
- * tab. Desktop uses its main-process vault; a browser-shaped host (Web, the mobile
- * webview) provides its own section here. The section owns its account scope. */
-export type E2eeRecoveryHost = {
-  readonly Section: ComponentType<{ accountId?: string | null }>;
-};
+export { E2eeRecoveryHostContext, type E2eeRecoveryHost } from './recovery-port';
 
-export const E2eeRecoveryHostContext = createContext<E2eeRecoveryHost | null>(null);
-
-/** The Recovery tab's content for this host, or undefined when the host has none, so
- * the console shows where recovery can be set up instead of an empty tab. */
-export function useE2eeRecoverySection(): E2eeRecoveryHost['Section'] | undefined {
+/** The Recovery tab's content for this host: the shared section over the host's
+ * recovery port (desktop's is its main-process vault), a host-owned section, or
+ * undefined when the host has neither, so the console shows where recovery can be
+ * set up instead of an empty tab. */
+export function useE2eeRecoverySection(): ComponentType<{ accountId?: string | null }> | undefined {
   const host = useContext(E2eeRecoveryHostContext);
-  const [desktop] = useState(() => !!getIpcServices()?.e2ee);
-  return host?.Section ?? (desktop ? RecoveryVaultSection : undefined);
+  const port = useRecoveryPort();
+  if (host && 'Section' in host) return host.Section;
+  return port ? RecoveryVaultSection : undefined;
 }

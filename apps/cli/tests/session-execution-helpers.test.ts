@@ -95,7 +95,7 @@ describe('session execution prompt helpers', () => {
     expect(prompt).toContain(
       'Fix the checkout observer\n\n\n- issue#42: Checkout observer (https://github.com/owner/repo/issues/42)\n'
     );
-    expect(prompt).toContain('The postId is feedback-1.');
+    expect(prompt).toContain('The feedback postId is feedback-1.');
     expect(prompt).toContain('git branch -m lody/12345678-abc-2 <name>');
     expect(prompt).not.toContain('inspect');
     expect(prompt).toContain(

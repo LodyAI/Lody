@@ -94,3 +94,14 @@ test('shortcut settings use the verified scope and report an uncertain save as u
  assert.deepEqual(await adapter.shortcutSettings({action:'delete'}),{error:'invalid_shortcut'});
  assert.deepEqual(await shortcutCommands({},()=>null).shortcutSettings({action:'list'}),{error:'not_connected'});
 });
+test('browse files forwards listDir and readFile to the shared runtime unchanged',async()=>{
+ const sent=[];
+ const runtime={receive(text){const e=JSON.parse(text);sent.push(e);if(e.kind==='request')globalThis.androidRuntimeMessage({type:'envelope',envelope:JSON.stringify({...e,kind:'result',payload:e.method==='listDir'?{entries:[],truncated:false}:{status:'error',path:'a.md',code:'file_not_found'}})});}};
+ const bridge=contractBridge(runtime,()=>{});
+ await bridge.start('workspace','user',true);
+ assert.deepEqual(await bridge.listDir({workspaceId:'workspace',sessionId:'s',relativePath:'docs',userId:'user'}),{entries:[],truncated:false});
+ assert.deepEqual(sent.at(-1).payload,{workspaceId:'workspace',sessionId:'s',relativePath:'docs',userId:'user'});
+ assert.equal((await bridge.readFile({sessionId:'s',path:'a.md'})).code,'file_not_found');
+ assert.deepEqual([sent.at(-1).method,sent.at(-1).payload],['readFile',{sessionId:'s',path:'a.md'}]);
+ delete globalThis.androidRuntimeMessage;
+});

@@ -1,0 +1,15 @@
+# Cloud runtime (iOS)
+
+Read before changing login, the data runtime, the offscreen WebView and watchdog, the host↔runtime contract, Streams grants or local persistence. These rules bind every caller of the area, not only files in its directory.
+
+- Login is native, with each provider following [its native protocol](../native-auth.md#public-protocol) (GitHub/Discord through a one-use PKCE backend handoff). Never restore device-code polling or a Web login screen. `AuthSession` alone installs Keychain credentials, after account validation and cancellation checks after every suspension. Credential HTTP requests refuse all redirects and cookies; persist only the raw JSON `token`, never the signed `set-auth-token` cookie header, because Streams authorization looks up the raw session token. Never substitute desktop credentials for app authorization. Keep the sign-in page in step with web `/login` ([details](../native-auth.md#sign-in-page)).
+
+- `data-runtime` in LodyKit owns the POC's catalog replicas, Streams reads, cursors and retry. Native sessions observe projected catalog events; do not add a second live replica. The old offline decoder is retained only as a comparison path.
+
+- Swift owns the offscreen WebView and watchdog. Keep startup/heartbeat deadlines outside JS, ignore callbacks from replaced views, and bound automatic restarts. Background suspension is not a watchdog failure: retain the WebView and reset its heartbeat deadline on foreground; recreate only a missing or failed runtime. User-started sends use only a short UIApplication background allowance through reply synchronization; never request BGContinuedProcessingTask, which displays a system Live Activity, or use idle connection keepalive.
+
+- The host↔runtime boundary is the versioned contract in `packages/cloud-runtime/src/contract`, with generated Swift in `packages/lody-core` (`pnpm contract`). Add methods there: the runtime exposes only `dataRuntime.receive` and posts only `ready` / `envelope`; do not add `callAsyncJavaScript` commands.
+
+- Only short-lived workspace Streams grants enter the bundled WebView; long-lived Better Auth credentials stay in Keychain. Never load remote scripts or expose tokens in diagnostics. Logout and unsubscribe must stop the owned runtime.
+
+- This POC reads catalogs and session history, and sends text turns. CRDT replicas restore from server bootstrap. App account/workspace context and complete catalog display projections restore from SQLite in LodyKit before background authentication and sync; credentials remain in Keychain. Loro/Flock updates use uint32 big-endian length frames; never append raw WASM exports. Persist the user history before the durable dispatch pointer and Machine RPC. A machine ACK is delivery, not completion. Never automatically replay writes across runtime recovery. Catalogs have an explicit 16 MiB per-replica input ceiling; do not label an incomplete or failed sync as live.

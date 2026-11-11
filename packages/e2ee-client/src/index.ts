@@ -41,4 +41,4 @@ export {
   type PersonalRuntimeRecovery,
   type PersonalRuntimeOptions,
 } from './runtime';
-export { PersonalMachineSharing } from './platform';
+export { PersonalMachineSharing, type PersonalIrohEndpoint } from './platform';

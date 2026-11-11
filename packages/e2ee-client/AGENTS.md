@@ -37,6 +37,9 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - RPC exposes the existing closed product methods and exact original retries,
   never private keys, credentials or generic signing to product callers. Real
   injected implementations are required; no empty handler substitutes for support.
+- The optional `iroh` platform port receives the device seed once per session via
+  `withTransportSeed`; targets come from the admitted ledger, and route network
+  waits run outside session locks ([transport rules](../iroh-native/AGENTS.md)).
 
 - Product/runtime assembly uses `makeOwnedPersonalDeviceHost` with resource-owning
   port Layers. Its bounded close retains the actual drain and all dependencies;

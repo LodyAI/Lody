@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.border
@@ -113,6 +114,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     val meName = context.me?.name.orEmpty()
     // Resolved in composition: the transcript is built off the main thread.
     val application = appContext.applicationContext as app.lody.android.LodyApplication
+    // Agent images in this conversation, read with the verified account (iOS `ChatImageCell`).
+    val sessionImages = remember(scope, id) { SessionImageSource(application.sessionImages, scope, id) }
     val accountState by application.account.state.collectAsState()
     var members by remember(scope) { mutableStateOf(emptyMap<String, app.lody.android.auth.WorkspaceMember>()) }
     LaunchedEffect(scope, accountState.verified) {
@@ -558,6 +561,13 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             }
         }
     }
+    var browsingFiles by remember(id) { mutableStateOf(false) }
+    if (browsingFiles) ProjectFilesSheet(
+        listDir = { path -> repository.listDir(scope, id, path) },
+        readFile = { path -> repository.readFile(scope, id, path) },
+        openExternal = { uri -> runCatching { browser.openUri(uri) } },
+        onDismiss = { browsingFiles = false },
+    )
     linkedPullRequest?.let { link ->
         val own = bar?.pullRequest?.takeIf { it.number == link.number && it.repository.equals(link.repository, ignoreCase = true) }
         if (bar != null && own != null) {
@@ -597,7 +607,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     }
                 } else {
                     // The transcript scrolls under the floating header.
-                    CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides transcriptLinks) { ChatTranscript(
+                    CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides transcriptLinks, LocalSessionImages provides sessionImages) { ChatTranscript(
                         all, Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top + if (creationNotice != null) LodySize.controlLg else LodySpacing.none, bottom = LodySpacing.md), state = listState, scrollToLatest = scrollToLatest,
                         actions = messageActions,
                         relatedSessions = context.relatedSessions,
@@ -606,7 +616,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
                     ) }
                 }
-                ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine)
+                ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine,
+                    onBrowseFiles = if (ProjectFiles.browsable(context.session, creationUnconfirmed)) ({ browsingFiles = true }) else null)
                 if (creationNotice != null) {
                     Text(creationNotice,
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = top).padding(horizontal = TranscriptMargin),
@@ -635,6 +646,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     bar,
                     writing = writing,
                     pullRequestPanel = pullRequestPanel,
+                    panelFor = panelFor,
                     relations = if (hasRelations) ({ SessionRelationsChip(id, context.relatedSessions, onSelectTab) }) else null,
                     onAction = { action ->
                         // Only while still offered, so a menu left open cannot act for a state that moved on.
@@ -757,7 +769,7 @@ private val RunningStatuses = setOf("running", "initializing", "processing", "in
 
 /** Floating header: title over the tappable machine subtitle, with conditional Tabs and More. */
 @Composable
-internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit, machine: String = "", machineOnline: Boolean? = null, loadMachine: suspend () -> MachinePanelData = { MachinePanelData() }) {
+internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit, machine: String = "", machineOnline: Boolean? = null, loadMachine: suspend () -> MachinePanelData = { MachinePanelData() }, onBrowseFiles: (() -> Unit)? = null) {
     var expanded by remember(currentId) { mutableStateOf(false) }
     var history by remember(currentId) { mutableStateOf(false) }
     var restoringId by remember(currentId) { mutableStateOf<String?>(null) }
@@ -809,6 +821,8 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
                     Icon(LodyIcons.More, stringResource(R.string.bar_more), tint = colors.iconPrimary, modifier = Modifier.size(LodyIconSize.md))
                 }
                 DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                    if (onBrowseFiles != null) DropdownMenuItem(text = { Text(stringResource(R.string.files_title)) },
+                        leadingIcon = { Icon(LodyIcons.Folder, null) }, onClick = { more = false; onBrowseFiles() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_tab)) }, enabled = !creating && busy == null,
                         leadingIcon = { Icon(LodyIcons.Plus, null) }, onClick = { more = false; onNewTab() })
                     if (closedTabs.isNotEmpty()) DropdownMenuItem(text = { Text(stringResource(R.string.chat_closed_tabs)) },
@@ -1188,14 +1202,17 @@ internal fun ChatActionBar(
     writing: SessionInfoBar.Action? = null,
     relations: (@Composable () -> Unit)? = null,
     pullRequestPanel: PullRequestPanel? = null,
+    /** The PR panel for any PR; a Project group member's PR opens with its own. */
+    panelFor: ((CatalogPullRequest) -> PullRequestPanel)? = null,
 ) {
-    val context = bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
+    val context = bar.group != null || bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
     if (!context && !diff && bar.actions.isEmpty() && relations == null) return
     @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
         Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             relations?.invoke()
-            if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel)
+            if (bar.group != null) GroupContextItem(bar, bar.group, diffDot, onCopied, panelFor)
+            else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel)
         }
     }
     @Composable fun Action() {
@@ -1405,6 +1422,144 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
                     onClick = { open = false },
                     enabled = false,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * A Project group's context: the repository and PR counts with the group-wide ±diff; tapping opens
+ * a sheet listing every member with its branch, ±diff and current PR (web `SessionProjectMembersChip`,
+ * without a hidden selected member). A member's PR opens the PR panel, where Merge acts on that PR.
+ * iOS: `GroupMembersPopover`.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GroupContextItem(
+    bar: SessionInfoBar,
+    run: CatalogProjectRun,
+    diffDot: Boolean,
+    onCopied: (String) -> Unit,
+    panelFor: ((CatalogPullRequest) -> PullRequestPanel)?,
+) {
+    val colors = LodyTheme.colors
+    val type = LodyTheme.typography
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val copied = stringResource(R.string.bar_branch_copied)
+    var open by remember { mutableStateOf(false) }
+    var memberId by remember { mutableStateOf<String?>(null) }
+    val prs = run.pullRequests
+    val repositories = androidx.compose.ui.res.pluralStringResource(R.plurals.bar_group_repositories, run.members.size, run.members.size)
+    val prCount = androidx.compose.ui.res.pluralStringResource(R.plurals.bar_group_pull_requests, prs.size, prs.size)
+    val label = if (prs.isEmpty()) repositories else "$repositories · $prCount"
+    // A failing check anywhere is the one thing worth colour on the capsule.
+    val failing = prs.any { (it.status == "open" || it.status == "draft") && (it.ci == "f" || it.ci == "e") }
+    val diff = bar.added + bar.removed > 0
+    val description = listOf(run.name, label, if (diff) "+${bar.added} −${bar.removed}" else "").filter { it.isNotEmpty() }.joinToString(", ")
+    val member = run.members.firstOrNull { it.id == memberId }
+    val memberPr = member?.pullRequest
+    if (member != null && memberPr != null) {
+        val view = PullRequestView(
+            memberPr, member.branch.orEmpty(), member.diffAdded ?: 0, member.diffRemoved ?: 0,
+            memberPr.url ?: "https://github.com/${memberPr.repository}/pull/${memberPr.number}",
+        )
+        PullRequestSheet(view, ciVerdict(memberPr.ci), onCopied, panelFor?.invoke(memberPr)) { memberId = null }
+    }
+    Box(Modifier.barCapsule(colors)) {
+        BarCell(description, onClick = { open = true }, Modifier.padding(horizontal = LodySpacing.xs)) {
+            Icon(LodyIcons.ProjectGroup, contentDescription = null,
+                tint = if (failing) colors.dangerDefault else colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
+            Text(label, style = type.subhead, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp))
+            if (diff && !diffDot) {
+                val style = type.subhead.copy(fontFeatureSettings = "tnum")
+                Text("+${bar.added}", style = style, color = colors.diffAddedText, maxLines = 1)
+                Text("−${bar.removed}", style = style, color = colors.diffRemovedText, maxLines = 1)
+            }
+            Icon(LodyIcons.Expand, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
+        }
+    }
+    if (open) ModalBottomSheet(onDismissRequest = { open = false }, containerColor = colors.bgBase) {
+        Column(Modifier.padding(bottom = LodySpacing.xl)) {
+            Column(Modifier.padding(horizontal = LodySpacing.lg).padding(bottom = LodySpacing.sm)) {
+                Text(run.name, style = type.headline, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val members = androidx.compose.ui.res.pluralStringResource(R.plurals.create_group_members, run.members.size, run.members.size)
+                Text(if (prs.isEmpty()) members else "$members · $prCount", style = type.footnote, color = colors.textSecondary)
+            }
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(run.members, key = { it.id }) { item ->
+                    GroupMemberRow(
+                        item,
+                        onOpen = { open = false; memberId = item.id },
+                        onCopyBranch = { branch ->
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(branch))
+                            onCopied(copied)
+                        },
+                    )
+                }
+            }
+            if (diff) {
+                // Display only until Android has a workspace changes page, as the single-repository menu.
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg, vertical = LodySpacing.sm),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
+                ) {
+                    Icon(LodyIcons.Diff, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+                    Text(stringResource(R.string.bar_group_all_changes), style = type.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                    val style = type.body.copy(fontFeatureSettings = "tnum")
+                    Text("+${bar.added}", style = style, color = colors.diffAddedText)
+                    Text("−${bar.removed}", style = style, color = colors.diffRemovedText)
+                }
+            }
+        }
+    }
+}
+
+/** One member: identity, path · branch (or the in-place note) and ±diff, then its PR or a copy-branch button. */
+@Composable
+private fun GroupMemberRow(member: CatalogProjectMember, onOpen: () -> Unit, onCopyBranch: (String) -> Unit) {
+    val colors = LodyTheme.colors
+    val type = LodyTheme.typography
+    val pr = member.pullRequest
+    val detail = listOfNotNull(
+        member.path.takeIf { it != member.identity },
+        if (member.inPlace) stringResource(R.string.bar_group_in_place) else member.branch,
+    ).joinToString(" · ")
+    Row(
+        Modifier.fillMaxWidth()
+            .then(if (pr != null) Modifier.clickable(role = Role.Button, onClickLabel = stringResource(R.string.bar_view_pr), onClick = onOpen) else Modifier)
+            .heightIn(min = 56.dp)
+            .padding(start = LodySpacing.lg + (member.depth * 14).dp, end = LodySpacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
+    ) {
+        when {
+            member.submodule -> Icon(LodyIcons.Branch, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+            member.kind == "github" && member.repoFullName != null -> app.lody.android.home.RepositoryIcon(member.repoFullName, LodyIconSize.md)
+            else -> Icon(LodyIcons.Folder, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(member.identity, style = type.subhead.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+            Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs), verticalAlignment = Alignment.CenterVertically) {
+                if (detail.isNotEmpty()) {
+                    Text(detail, style = type.footnote, color = colors.textSecondary, maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f, fill = false))
+                }
+                if (member.diffAdded != null && member.diffRemoved != null) {
+                    val style = type.footnote.copy(fontFeatureSettings = "tnum")
+                    Text("+${member.diffAdded}", style = style, color = colors.diffAddedText)
+                    Text("−${member.diffRemoved}", style = style, color = colors.diffRemovedText)
+                }
+            }
+        }
+        if (pr != null) {
+            app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci)
+            Text("#${pr.number}", style = type.subhead.copy(fontFeatureSettings = "tnum"), color = colors.textSecondary)
+        } else if (member.branch != null && !member.inPlace) {
+            IconButton(onClick = { onCopyBranch(member.branch) }) {
+                Icon(LodyIcons.Copy, contentDescription = stringResource(R.string.bar_copy_branch),
+                    tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
             }
         }
     }

@@ -40,6 +40,13 @@ sealed interface RuntimeCommand {
     data class ItemDetail(val sessionId: String, val entryId: String, val itemId: String) : RuntimeCommand
     /** One changed file's diff for one turn, from the session's computer. Read only. */
     data class TurnDiff(val sessionId: String, val entryId: String, val path: String) : RuntimeCommand
+    /**
+     * One folder of the session's local project ([relativePath] from the project root, "" for the
+     * root), from the session's computer (upstream `listDir`). Read only.
+     */
+    data class ListDir(val sessionId: String, val relativePath: String) : RuntimeCommand
+    /** One file's contents (upstream `readFile`, at most 2 MiB), from the session's computer. Read only. */
+    data class ReadFile(val sessionId: String, val path: String) : RuntimeCommand
     /** One mention category for the composer's @ panel (upstream `mentionCatalog`). Read only. */
     data class MentionCatalog(val category: String, val source: MentionSource) : RuntimeCommand
     /**
@@ -89,6 +96,8 @@ sealed interface RuntimeResult {
     data object Accepted : RuntimeResult
     data class Detail(val value: StepDetail) : RuntimeResult
     data class Diff(val value: FileDiff) : RuntimeResult
+    data class Directory(val value: DirectoryListing) : RuntimeResult
+    data class File(val value: FileContent) : RuntimeResult
     data class Pong(val healthy: Boolean) : RuntimeResult
     data class Schema(val machineIds: Set<String>, val creationTrials: Map<String, String>) : RuntimeResult
 }
@@ -129,7 +138,29 @@ data class CatalogSession(
     val isTabClosed: Boolean = false,
     val workspaceDirty: Boolean = false,
     val workspaceUnpushed: Boolean = false,
+    /** Present for Project group conversations. */
+    val projectRun: CatalogProjectRun? = null,
 )
+/** One repository or folder of a Project group conversation, in placement order (iOS `SessionProjectMember`). */
+data class CatalogProjectMember(
+    val id: String, val path: String, val kind: String, val depth: Int = 0, val submodule: Boolean = false,
+    /** `additional` / `link`: a local folder used in place, with no branch or PR. */
+    val access: String? = null,
+    val repoFullName: String? = null, val branch: String? = null,
+    val diffAdded: Int? = null, val diffRemoved: Int? = null,
+    val dirty: Boolean = false, val unpushed: Boolean = false,
+    /** The member repository's current PR: the last one recorded for it. */
+    val pullRequest: CatalogPullRequest? = null,
+) {
+    /** Web `repoFullName ?? path`. */
+    val identity: String get() = repoFullName ?: path
+    val inPlace: Boolean get() = access == "additional" || access == "link"
+}
+/** The frozen Project group snapshot of a conversation (session meta `projectRun`). */
+data class CatalogProjectRun(val id: String, val name: String, val members: List<CatalogProjectMember>) {
+    /** Current PRs across members, one per repository. */
+    val pullRequests: List<CatalogPullRequest> get() = members.mapNotNull { it.pullRequest }
+}
 /** Read projection, never a CRDT replica. Optional feature-specific fields come later. */
 /** [machineNames] is optional display data (computer id to name); empty from older caches. */
 data class CatalogSnapshot(
@@ -175,6 +206,9 @@ data class SessionMessage(
  * One item of a turn, after upstream's session entry summary. Assistant turns render these as
  * prose, folded thought / tool groups and never-folded plans and notices (web `MessageContent`).
  */
+/** One session image: read with the account bearer from the Worker's session-images endpoint. */
+data class TurnImage(val id: String, val fileName: String, val storageSessionId: String?, val width: Int?, val height: Int?)
+
 sealed interface TurnItem {
     val id: String
 
@@ -201,6 +235,11 @@ sealed interface TurnItem {
     data class ProposedPlan(override val id: String, val markdown: String) : TurnItem
     /** The agent's checklist (`plan`); never folded. */
     data class Checklist(override val id: String, val entries: List<Pair<String, String>>) : TurnItem
+    /**
+     * Images the agent sent (`image` / `image_group`); never folded. Consecutive ones (only tool
+     * work between them) merge into one fanned stack in [app.lody.android.chat.TurnLayout].
+     */
+    data class Images(override val id: String, val images: List<TurnImage>) : TurnItem
     /** A failure or notice the turn ended with; never folded. */
     data class Notice(override val id: String, val text: String, val failure: Boolean) : TurnItem
     /**
@@ -330,6 +369,19 @@ data class FileDiff(
     val unavailable: String? = null,
 )
 
+/** One folder of a local project (upstream `DirectoryListing`): folders first, then files, by name. */
+data class DirectoryListing(val entries: List<DirectoryEntry>, val truncated: Boolean)
+data class DirectoryEntry(val name: String, val directory: Boolean)
+
+/** One file read from the session's computer (upstream `FileContent`). */
+sealed interface FileContent {
+    val path: String
+    data class Text(override val path: String, val text: String, val bytes: Long) : FileContent
+    data class Binary(override val path: String, val bytes: Long) : FileContent
+    /** The computer's refusal (`file_not_found`, `too_large`, `permission_denied`, …). */
+    data class Failed(override val path: String, val code: String) : FileContent
+}
+
 /** One mention candidate (upstream `MentionCatalog` item); [insertText] defaults to `@path`. */
 data class MentionCandidate(
     val path: String, val name: String, val kind: String, val subtitle: String = "", val insertText: String? = null,
@@ -358,5 +410,14 @@ data class MentionCatalogPage(val items: List<MentionCandidate>, val truncated: 
  * together in one conversation. [machineId] is the computer its local members pin (null: any);
  * [conflict] groups (local members on two computers) cannot start one.
  */
-data class ProjectGroup(val id: String, val name: String, val machineId: String?, val conflict: Boolean, val members: List<String>)
+/** A workspace Project group (multi-repository project); only [ownerUserId] may edit it, on desktop. */
+data class ProjectGroup(
+    val id: String, val name: String, val machineId: String?, val conflict: Boolean, val members: List<ProjectGroupMember>,
+    val ownerUserId: String = "",
+)
+/** [kind] is `github` or `local`; [label] is the repository or the local project's name. */
+data class ProjectGroupMember(
+    val id: String, val kind: String, val label: String, val path: String,
+    val repoFullName: String? = null, val machineId: String? = null,
+)
 

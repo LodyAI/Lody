@@ -119,8 +119,8 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 
 - An Agent Role mention has the session mention's shape (plain `@<token>`; the
   RANGE carries `formatAgentRoleMentionValue`: Role id, plus machine for a
-  multi-machine Role), but its rewrite asks the agent to CREATE a Session and
-  names only that id/machine (root `AGENTS.md` owns MCP create/freeze). An
+  multi-machine Role), but its rewrite is a reference naming only that id/machine,
+  never an instruction to create a Session (root `AGENTS.md` owns MCP create/freeze). An
   unavailable or bare multi-machine Role stays plain text. Tokens derive from
   the name or alias; uniqueness uses them.
 - A Role candidate's emoji REPLACES the category glyph

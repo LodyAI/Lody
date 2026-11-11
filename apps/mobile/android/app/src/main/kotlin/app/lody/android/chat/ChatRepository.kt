@@ -62,6 +62,14 @@ class ChatRepository(
     suspend fun turnDiff(scope: RuntimeScope, sessionId: String, entryId: String, path: String): FileDiff =
         owner.use(scope) { (it.execute(RuntimeCommand.TurnDiff(sessionId, entryId, path)) as RuntimeResult.Diff).value }
 
+    /** One folder of the session's local project ("" is the project root); a read, safe to retry. */
+    suspend fun listDir(scope: RuntimeScope, sessionId: String, relativePath: String): DirectoryListing =
+        owner.use(scope) { (it.execute(RuntimeCommand.ListDir(sessionId, relativePath)) as RuntimeResult.Directory).value }
+
+    /** One file's contents from the session's computer; a read, safe to retry. */
+    suspend fun readFile(scope: RuntimeScope, sessionId: String, path: String): FileContent =
+        owner.use(scope) { (it.execute(RuntimeCommand.ReadFile(sessionId, path)) as RuntimeResult.File).value }
+
     /** A direct GitHub write from the action bar; never retried (see [GitHubPullRequestWrites]). */
     suspend fun mergePullRequest(scope: RuntimeScope, repository: String, number: Int, method: String) =
         pullRequests.write(scope, repository, number, method)

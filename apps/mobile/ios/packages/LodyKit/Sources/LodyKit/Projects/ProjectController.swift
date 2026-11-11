@@ -41,7 +41,7 @@ class ProjectController: UIViewController {
     list.setContentStyle(true)
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
     view.addSubview(list)
-    observers = (source.changes + [UIApplication.didBecomeActiveNotification]).map { name in
+    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyProjectGroupsDidChange]).map { name in
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.render() }
       }
@@ -58,7 +58,9 @@ class ProjectController: UIViewController {
     let state = source.state
     loadViews(state)
     let catalog = state.catalog.viewed(views)
-    let project = catalog.projects.first { $0.id == projectId }
+    // A Project group without conversations is known only from the workspace's group list.
+    let named = source === SessionSource.live ? ProjectGroupStore.shared.merged(catalog) : catalog
+    let project = named.projects.first { $0.id == projectId }
     let page = parent ?? self
     page.title = project?.name ?? String(localized: "project.title", bundle: .lody)
     page.navigationItem.title = page.title

@@ -267,6 +267,7 @@ describe('MessageHandler machine registration', () => {
         messageQuotes: 1,
         sessionInputAttachments: 1,
         sessionCollaborationControl: 1,
+        sessionDirectoryListing: 1,
         bugReportClientLog: 1,
         sessionLiveActivity: 1,
       });

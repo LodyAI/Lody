@@ -71,6 +71,7 @@
     <string name="home_empty">还没有对话</string>
     <string name="home_projects_empty">还没有项目</string>
     <string name="home_offline">离线</string>
+    <string name="home_connecting">正在连接…</string>
     <string name="home_syncing">正在同步…</string>
     <string name="home_connected">已连接</string>
     <string name="home_no_workspaces">没有可访问的工作区</string>
@@ -89,6 +90,20 @@
     <string name="chat_empty">还没有文本消息</string>
     <string name="chat_offline">无法载入消息</string>
     <string name="chat_retry">重试</string>
+    <string name="chat_image_label">图片，%1$s</string>
+    <string name="chat_image_page">%1$d / %2$d</string>
+    <string name="chat_image_open">查看图片</string>
+    <string name="chat_image_next">下一张</string>
+    <string name="chat_image_previous">上一张</string>
+    <string name="chat_image_failed">图片加载失败，轻点重试</string>
+    <string name="chat_image_close">关闭图片</string>
+    <string name="chat_image_share">分享</string>
+    <string name="chat_image_copy">复制</string>
+    <string name="chat_image_save">保存到相册</string>
+    <string name="chat_image_copied">图片已复制</string>
+    <string name="chat_image_saved">已保存到 Pictures/Lody</string>
+    <string name="chat_image_save_failed">无法保存图片</string>
+    <string name="chat_image_unavailable">图片暂不可用</string>
 
     <!-- New session -->
     <string name="create_title">新建会话</string>
@@ -290,6 +305,21 @@
         <item quantity="one">%d 个文件</item>
         <item quantity="other">%d 个文件</item>
     </plurals>
+    <string name="files_title">项目文件</string>
+    <string name="files_retry">重试</string>
+    <string name="files_error_folder">无法读取此文件夹，电脑可能已离线。</string>
+    <string name="files_empty_folder">此文件夹为空。</string>
+    <string name="files_truncated">仅显示前 2000 项。</string>
+    <string name="files_markdown_only">目前仅支持预览 Markdown 文件。</string>
+    <string name="files_error_too_large">文件太大，无法预览。</string>
+    <string name="files_error_not_found">此文件已不存在。</string>
+    <string name="files_error_permission">电脑不允许读取此文件。</string>
+    <string name="files_error_path">此文件不在项目内。</string>
+    <string name="files_error_binary">此文件不是文本，无法预览。</string>
+    <string name="files_error_read">无法读取此文件，电脑可能已离线。</string>
+    <string name="files_preview">预览</string>
+    <string name="files_source">源码</string>
+    <string name="files_empty_file">此文件为空。</string>
     <string name="chat_files_back">返回文件列表</string>
     <string name="chat_diff_binary">这个文件不是文本，没有行级 diff。</string>
     <string name="chat_diff_too_large">改动太大，无法在手机上显示。</string>
@@ -745,4 +775,27 @@
     <string name="shortcuts_retry">重试本次保存</string>
     <string name="shortcuts_save_unknown">暂时无法确认保存结果。已固定本次内容以便安全重试；关闭并刷新后可再次编辑。</string>
     <string name="shortcuts_save_failed">无法保存模板，请检查命令名称后重试。</string>
+    <plurals name="bar_group_repositories">
+        <item quantity="other">%d 个仓库</item>
+    </plurals>
+    <plurals name="bar_group_pull_requests">
+        <item quantity="other">%d 个 PR</item>
+    </plurals>
+    <string name="bar_group_in_place">原目录 · 未隔离</string>
+    <string name="bar_group_all_changes">全部改动</string>
+    <plurals name="project_group_members">
+        <item quantity="other">%d 个仓库或文件夹</item>
+    </plurals>
+    <string name="project_groups_header">项目组</string>
+    <string name="project_groups_empty">这个工作区还没有项目组。</string>
+    <string name="project_groups_untitled">未命名项目组</string>
+    <string name="project_groups_computer">电脑</string>
+    <string name="project_groups_owner">创建者</string>
+    <string name="project_groups_owner_you">你</string>
+    <string name="project_groups_owner_member">工作区成员</string>
+    <string name="project_groups_any_computer">任意电脑</string>
+    <string name="project_groups_conflict">文件夹分属不同电脑</string>
+    <string name="project_groups_read_only">请在电脑上的 Lody 中创建和编辑项目组。</string>
+    <string name="project_groups_load_failed">无法加载项目组。</string>
+    <string name="project_groups_stale">正在显示上次的列表，刷新失败。</string>
 </resources>

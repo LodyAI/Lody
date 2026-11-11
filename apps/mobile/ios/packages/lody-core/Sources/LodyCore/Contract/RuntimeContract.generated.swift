@@ -4536,12 +4536,14 @@ extension RuntimeContract {
   public struct ProjectGroupItem: Codable, Sendable, Equatable {
     public var id: String
     public var name: String
+    public var ownerUserId: String
     public var machineId: String?
     public var conflict: Bool
     public var members: [ProjectGroupItemMembersItem]
-    public init(id: String, name: String, machineId: String?, conflict: Bool, members: [ProjectGroupItemMembersItem]) {
+    public init(id: String, name: String, ownerUserId: String, machineId: String?, conflict: Bool, members: [ProjectGroupItemMembersItem]) {
       self.id = id
       self.name = name
+      self.ownerUserId = ownerUserId
       self.machineId = machineId
       self.conflict = conflict
       self.members = members
@@ -4550,6 +4552,7 @@ extension RuntimeContract {
       let c = try decoder.container(keyedBy: Key.self)
       self.id = try c.decode(String.self, forKey: Key("id"))
       self.name = try c.decode(String.self, forKey: Key("name"))
+      self.ownerUserId = try c.decode(String.self, forKey: Key("ownerUserId"))
       self.machineId = try c.decode(String?.self, forKey: Key("machineId"))
       self.conflict = try c.decode(Bool.self, forKey: Key("conflict"))
       self.members = try c.decode([ProjectGroupItemMembersItem].self, forKey: Key("members"))
@@ -4558,6 +4561,7 @@ extension RuntimeContract {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.id, forKey: Key("id"))
       try c.encode(self.name, forKey: Key("name"))
+      try c.encode(self.ownerUserId, forKey: Key("ownerUserId"))
       try c.encode(self.machineId, forKey: Key("machineId"))
       try c.encode(self.conflict, forKey: Key("conflict"))
       try c.encode(self.members, forKey: Key("members"))

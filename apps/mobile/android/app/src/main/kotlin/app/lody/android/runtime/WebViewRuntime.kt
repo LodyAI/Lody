@@ -61,7 +61,14 @@ open class WebViewRuntime internal constructor(
                     group.getString("id"), group.optString("name"),
                     group.optString("machineId").takeIf { !group.isNull("machineId") && it.isNotEmpty() },
                     group.optBoolean("conflict"),
-                    (0 until members.length()).map { members.getJSONObject(it).optString("label") },
+                    (0 until members.length()).map { members.getJSONObject(it) }.map { member ->
+                        ProjectGroupMember(
+                            member.optString("id"), member.optString("kind"), member.optString("label"), member.optString("path"),
+                            member.optString("repoFullName").takeIf { it.isNotEmpty() },
+                            member.optString("machineId").takeIf { it.isNotEmpty() },
+                        )
+                    },
+                    group.optString("ownerUserId"),
                 )
             })
         }
@@ -141,6 +148,15 @@ open class WebViewRuntime internal constructor(
         is RuntimeCommand.TurnDiff -> {
             val value = call("turnDiff", JSONArray().put(command.sessionId).put(command.entryId).put(command.path), CommandDeadline.QUERY)
             RuntimeResult.Diff(RuntimeProtocol.diff(value as JSONObject))
+        }
+        is RuntimeCommand.ListDir -> {
+            val value = call("listDir", JSONArray().put(command.sessionId).put(command.relativePath), CommandDeadline.FILE_READ)
+            try { RuntimeResult.Directory(RuntimeProtocol.directory(value as JSONObject)) }
+            catch (_: Exception) { throw RuntimeException(runtimeFault("invalid_directory")) }
+        }
+        is RuntimeCommand.ReadFile -> {
+            val value = call("readFile", JSONArray().put(command.sessionId).put(command.path), CommandDeadline.FILE_READ)
+            RuntimeResult.File(RuntimeProtocol.file(value as? JSONObject ?: JSONObject(), command.path))
         }
         is RuntimeCommand.StopTurn -> {
             call("controlTurn", JSONArray().put(command.sessionId).put(command.machineId).put(command.turnId), CommandDeadline.WRITE)
