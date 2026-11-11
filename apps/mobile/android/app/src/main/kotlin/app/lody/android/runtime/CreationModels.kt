@@ -65,4 +65,13 @@ data class RoleRunConfig(val modelId: String? = null, val modeId: String? = null
 data class AgentRoleTarget(val machineId: String, val agentConfigId: String, val state: String, val runConfig: RoleRunConfig = RoleRunConfig())
 /** A workspace Agent Role readable by this user (web `AgentRole`); [emoji] defaults like web's. */
 data class AgentRole(val id: String, val name: String, val emoji: String, val revision: Int, val targets: List<AgentRoleTarget>)
+/** A new chat's run configuration on one computer: its agent and model / mode / reasoning. */
+data class RunSelection(val agentId: String, val modelId: String? = null, val modeId: String? = null, val effort: String? = null)
+/**
+ * One whole configuration a chat was started with (web `RecentRunConfigRecord`). A Role is not
+ * interchangeable with the values it set, so [agentRoleId] is part of its identity.
+ */
+data class RecentRunConfig(val machineId: String, val selection: RunSelection, val agentRoleId: String? = null, val usedAt: Long = 0)
+/** Device-local, per account + workspace: the last selection on each computer and recent configurations, newest first. */
+data class RunConfigPrefs(val machines: Map<String, RunSelection> = emptyMap(), val recents: List<RecentRunConfig> = emptyList())
 data class CreationReceipt(val sessionId: String, val state: String)

@@ -122,6 +122,7 @@
     <string name="create_send">Send</string>
     <string name="create_search_projects">Search projects</string>
     <string name="create_run_config">Run configuration</string>
+    <string name="create_run_config_recent">Recently used</string>
     <string name="create_run_config_unavailable">Assistant unavailable</string>
     <string name="create_result_unknown">Delivery is unconfirmed. Check the conversation before starting another one.</string>
     <string name="create_result_rejected">Creation was rejected. Return and check your selection before trying again.</string>
