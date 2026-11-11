@@ -12,6 +12,7 @@ import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/mach
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
 import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-vault-section';
 import { E2eeRecoveryHostContext } from '../src/components/settings/e2ee/recovery-host';
+import type { RecoveryPlan, RecoveryPort } from '../src/components/settings/e2ee/recovery-port';
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '../src/atoms/settings';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
@@ -89,27 +90,56 @@ describe('recovery vault settings', () => {
   });
 });
 
+/** A browser-shaped host's port that answers `plan` and nothing else unless overridden. */
+const fakeRecoveryPort = (
+  plan: RecoveryPlan,
+  overrides: Partial<RecoveryPort> = {}
+): RecoveryPort => {
+  const refuse = async (): Promise<never> => {
+    throw new Error('e2ee_recovery_failed');
+  };
+  return {
+    plan: async () => plan,
+    securityEvents: async () => [],
+    passkeyAvailable: async () => false,
+    create: refuse,
+    restore: refuse,
+    setupWorkspace: refuse,
+    setupWorkspaces: refuse,
+    passkeyDefaultLabel: refuse,
+    addPasskey: refuse,
+    listPasskeys: refuse,
+    removePasskey: refuse,
+    checkFile: null,
+    replacement: null,
+    ...overrides,
+  };
+};
+
 describe('recovery vault settings actions', () => {
   // A plan given as a function is asked again on every load, so it can fail and then recover.
+  // Without a host port the section runs over the desktop IPC adapter.
   const mount = async (
     plan: unknown,
-    handlers: Record<string, (...args: unknown[]) => unknown> = {}
+    handlers: Record<string, (...args: unknown[]) => unknown> = {},
+    port?: RecoveryPort
   ) => {
     const answers: Record<string, unknown> = {
       'e2ee.recentAccountSecurityEvents': [],
       'e2ee.recoveryPasskeyAvailable': true,
     };
-    vi.stubGlobal('ipc', {
-      invoke: async (channel: string, ...args: unknown[]) =>
-        channel === 'e2ee.recoveryReplacementPlan'
-          ? typeof plan === 'function'
-            ? plan()
-            : plan
-          : handlers[channel]
-            ? handlers[channel](...args)
-            : answers[channel],
-      on: () => () => {},
-    });
+    if (!port)
+      vi.stubGlobal('ipc', {
+        invoke: async (channel: string, ...args: unknown[]) =>
+          channel === 'e2ee.recoveryReplacementPlan'
+            ? typeof plan === 'function'
+              ? plan()
+              : plan
+            : handlers[channel]
+              ? handlers[channel](...args)
+              : answers[channel],
+        on: () => () => {},
+      });
     const store = createStore();
     store.set(developerModeEnabledAtom, true);
     store.set(e2eeRecoveryVaultEnabledAtom, true);
@@ -119,7 +149,9 @@ describe('recovery vault settings actions', () => {
     await act(async () => {
       root.render(
         <Provider store={store}>
-          <RecoveryVaultSection />
+          <E2eeRecoveryHostContext.Provider value={port ? { port } : null}>
+            <RecoveryVaultSection />
+          </E2eeRecoveryHostContext.Provider>
         </Provider>
       );
     });
@@ -366,6 +398,98 @@ describe('recovery vault settings actions', () => {
       view.done();
     }
   });
+
+  it('never offers a file check, replacement or creation the host cannot perform', async () => {
+    const requests: unknown[][] = [];
+    const port = fakeRecoveryPort(
+      {
+        hasVault: true,
+        replacing: false,
+        covered: [
+          workspace('a', { kind: 'notSet' }),
+          workspace('b', { kind: 'verified', update: 1 }),
+        ],
+        uncovered: [],
+      } as RecoveryPlan,
+      {
+        create: null,
+        securityEvents: async () => [
+          { id: 'event', kind: 'personal_device_recovered', occurredAt: 1 },
+        ],
+        setupWorkspaces: async (...args) => {
+          requests.push(args);
+          return {
+            outcome: 'settled',
+            results: [{ workspaceId: 'a', outcome: 'Committed', recoverable: true }],
+          };
+        },
+      }
+    );
+    const view = await mount(undefined, {}, port);
+    try {
+      expect(view.text).toContain('e2ee.recovery.eventRecovered');
+      for (const label of [
+        'e2ee.recovery.check',
+        'e2ee.recovery.replace',
+        'e2ee.recovery.eventNotMe',
+      ])
+        expect(view.labels).not.toContain(label);
+      expect(view.primary).toEqual(['e2ee.recovery.setupAll']);
+      await view.click('e2ee.recovery.setupAll');
+      expect(requests).toEqual([[['a'], 'file']]);
+      expect(view.text).toContain('e2ee.recovery.setupAllDone');
+    } finally {
+      view.done();
+    }
+  });
+
+  it('says where to create the file when the host cannot save one', async () => {
+    const port = fakeRecoveryPort(
+      { hasVault: false, replacing: false, covered: [], uncovered: [] },
+      { create: null }
+    );
+    const view = await mount(undefined, {}, port);
+    try {
+      expect(view.text).toContain('e2ee.recovery.noneTitle');
+      expect(view.text).toContain('e2ee.recovery.createElsewhere');
+      expect(view.labels).toEqual([]);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('sends a replacement it cannot continue back to the device that started it and still restores', async () => {
+    const port = fakeRecoveryPort(
+      {
+        hasVault: true,
+        replacing: true,
+        covered: [workspace('a', { kind: 'verified', update: 1 })],
+        uncovered: [workspace('b', { kind: 'notSet' }), workspace('c', { kind: 'notSet' })],
+      } as RecoveryPlan,
+      {
+        restore: async () => ({
+          outcome: 'restored',
+          results: [
+            { name: 'Workspace b', outcome: 'Unconfirmed' },
+            { name: 'Workspace c', outcome: 'not-backed-up' },
+          ],
+        }),
+      }
+    );
+    const view = await mount(undefined, {}, port);
+    try {
+      expect(view.text).toContain('e2ee.recovery.replacingOtherDevice');
+      for (const label of ['e2ee.recovery.replaceContinue', 'e2ee.recovery.replaceAbandon'])
+        expect(view.labels).not.toContain(label);
+      await view.click('e2ee.recovery.restore');
+      // A wait that timed out is still waiting, and an uncovered workspace is not a failure.
+      expect(view.text).toContain('e2ee.recovery.restoreWaiting');
+      expect(view.text).toContain('e2ee.recovery.restoreNotBackedUp');
+      expect(view.text).not.toContain('e2ee.recovery.restoreFailed');
+    } finally {
+      view.done();
+    }
+  });
 });
 
 describe('encrypted workspace settings entry failures', () => {
@@ -599,6 +723,33 @@ describe('encrypted workspace settings', () => {
     );
     await openConsole('recovery');
     expect(page()).toContain('host recovery for account');
+    expect(page()).not.toContain('e2ee.console.recoveryElsewhere');
+  });
+
+  it("renders the shared recovery section over a browser-shaped host's port", async () => {
+    store.set(developerModeEnabledAtom, true);
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    const port = fakeRecoveryPort({
+      hasVault: true,
+      replacing: false,
+      covered: [{ id: 'workspace', name: 'Host workspace', status: { kind: 'notSet' } }],
+      uncovered: [],
+    });
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <PlatformContext.Provider value={platform}>
+            <E2eeRecoveryHostContext.Provider value={{ port }}>
+              <WorkspaceSettings />
+            </E2eeRecoveryHostContext.Provider>
+          </PlatformContext.Provider>
+        </Provider>
+      )
+    );
+    await openConsole('recovery');
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(page()).toContain('Host workspace');
+    expect(page()).toContain('e2ee.recovery.setupAll');
     expect(page()).not.toContain('e2ee.console.recoveryElsewhere');
   });
 

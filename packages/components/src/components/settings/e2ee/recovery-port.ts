@@ -20,10 +20,11 @@ export type RecoveryPort = {
   readonly securityEvents: () => Promise<readonly RecoverySecurityEvent[]>;
   /** Whether this host can attempt a passkey ceremony right now. */
   readonly passkeyAvailable: () => Promise<boolean>;
-  /** Create the account's vault and save its recovery file; refused when one exists. */
-  readonly create: () => Promise<
-    RecoveryCancelled | { readonly outcome: 'created'; readonly vaultId: string }
-  >;
+  /** Create the account's vault and save its recovery file; refused when one exists.
+   * Null when this host cannot save a file: the section then says where to create one. */
+  readonly create:
+    | (() => Promise<RecoveryCancelled | { readonly outcome: 'created'; readonly vaultId: string }>)
+    | null;
   /** Restore every workspace the unlock covers onto this host, each reported separately. */
   readonly restore: (
     method: RecoveryUnlockMethod
@@ -70,7 +71,8 @@ export type RecoveryPort = {
       >)
     | null;
   /** Replacing the recovery file. Null when this host cannot replace it: the section
-   * then offers no replace action and treats the plan as not replacing. */
+   * then offers no replace action, and a replacement in progress is shown as one to
+   * finish on the device that started it. */
   readonly replacement: RecoveryReplacementPort | null;
 };
 
@@ -88,8 +90,9 @@ export type RecoveryReplacementPort = {
 
 export type RecoveryUnlockMethod = 'file' | 'passkey';
 export type RecoveryCancelled = { readonly outcome: 'cancelled' };
-/** `Committed` and `Pending` are the outcomes the section distinguishes; any other
- * value (conflict, failure, unconfirmed) counts as not finished. */
+/** `Committed` is the only finished outcome. `Pending` (and, for a restore,
+ * `Unconfirmed`) is shown as still waiting; a restore's `not-backed-up` says the file
+ * does not cover that workspace yet; any other value (conflict, failure) is a failure. */
 export type RecoveryCommitOutcome = string;
 /** Only `Committed` with `recoverable` counts as a finished, verified setup. */
 export type RecoverySetupResult = {
@@ -107,6 +110,7 @@ export type RecoveryPasskeys = {
   readonly pending: readonly RecoveryPasskey[];
 };
 export type RecoverySecurityEvent = {
+  /** A key unique within the returned list; it need not be a server id. */
   readonly id: string;
   /** `personal_device_recovered`, `vault_replacement_finished`, or a replacement start. */
   readonly kind: string;
@@ -119,7 +123,7 @@ export type RecoveryWorkspaceStatus =
   | { readonly kind: 'unknown' };
 export type RecoveryPlan = {
   readonly hasVault: boolean;
-  /** A replacement this host started is unfinished. Ignored without `replacement`. */
+  /** A replacement of this account's recovery file is unfinished. */
   readonly replacing: boolean;
   /** Workspaces this host can set up or holds recovery for, with their status. */
   readonly covered: readonly {

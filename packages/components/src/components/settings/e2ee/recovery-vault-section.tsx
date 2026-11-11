@@ -196,9 +196,8 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     };
   }, [enabled, port, result, reload]);
   if (!enabled || !port) return null;
-  // A host that cannot replace the file has no replacement of its own to continue.
-  const { checkFile, replacement } = port;
-  const replacing = !!plan?.replacing && !!replacement;
+  // Actions the host cannot perform are not offered at all.
+  const { create, checkFile, replacement } = port;
   // One state decides which actions exist, so only one primary action shows at a time.
   // When the state cannot be read, retry leads and the actions that change nothing stay;
   // creating stays too because main and the service refuse a second vault.
@@ -206,7 +205,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     ? planFailed
       ? 'failed'
       : 'unknown'
-    : replacing
+    : plan.replacing
       ? 'replacing'
       : plan.hasVault
         ? 'ready'
@@ -346,20 +345,20 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                     })
                   : t('e2ee.recovery.fileSaved')
               : mode === 'none'
-                ? t('e2ee.recovery.fileNone')
+                ? t(create ? 'e2ee.recovery.fileNone' : 'e2ee.recovery.createElsewhere')
                 : t('e2ee.recovery.offlineHint')
           }
           alignTop
         >
           <div {...stylex.props(styles.rowActions)}>
-            {(mode === 'none' || mode === 'failed') && (
+            {create && (mode === 'none' || mode === 'failed') && (
               <Button
                 size="small"
                 variant={mode === 'none' ? 'primary' : 'secondary'}
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
-                    const created = await port.create();
+                    const created = await create();
                     if (created.outcome !== 'created') return undefined;
                     // Creation saves and reads the file back, so it counts as a check.
                     markChecked(Date.now());
@@ -554,9 +553,11 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 {t(
                   row.outcome === 'Committed'
                     ? 'e2ee.recovery.restoreDone'
-                    : row.outcome === 'Pending'
+                    : row.outcome === 'Pending' || row.outcome === 'Unconfirmed'
                       ? 'e2ee.recovery.restoreWaiting'
-                      : 'e2ee.recovery.restoreFailed',
+                      : row.outcome === 'not-backed-up'
+                        ? 'e2ee.recovery.restoreNotBackedUp'
+                        : 'e2ee.recovery.restoreFailed',
                   { name: row.name }
                 )}
               </li>
@@ -575,7 +576,16 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
           </Alert.Description>
         </Alert.Root>
       )}
-      {replacing && replacement && (
+      {plan?.replacing &&
+        !replacement && (
+          // This host cannot continue it; the device that started it finishes or abandons it.
+          <Alert.Root tone="warning">
+            <Alert.Description aria-live="polite">
+              {t('e2ee.recovery.replacingOtherDevice')}
+            </Alert.Description>
+          </Alert.Root>
+        )}
+      {plan?.replacing && replacement && (
         <Alert.Root tone="warning">
           <Alert.Description aria-live="polite">{t('e2ee.recovery.replacing')}</Alert.Description>
           <Alert.Actions>
