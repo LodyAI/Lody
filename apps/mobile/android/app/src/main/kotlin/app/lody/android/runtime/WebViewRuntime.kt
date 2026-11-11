@@ -47,6 +47,10 @@ open class WebViewRuntime internal constructor(
             call("setTabClosed", JSONArray().put(command.id).put(command.closed), CommandDeadline.WRITE)
             RuntimeResult.Accepted
         }
+        is RuntimeCommand.ArchiveSession -> {
+            call("archiveSession", JSONArray().put(command.id).put(command.archived), CommandDeadline.WRITE)
+            RuntimeResult.Accepted
+        }
         is RuntimeCommand.CreateTab -> {
             val value = call("createTab", JSONArray().put(command.parentId).put(command.id).put(command.title).put(backend.preferRoost), CommandDeadline.WRITE) as JSONObject
             RuntimeResult.Created(CreationReceipt(command.id, value.getString("state")))

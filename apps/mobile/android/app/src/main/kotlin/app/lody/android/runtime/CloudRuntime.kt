@@ -28,6 +28,8 @@ sealed interface RuntimeCommand {
     /** Prompt shortcut settings: list, read one body, or save (never replayed). */
     data class ShortcutSettings(val action: ShortcutSettingsAction) : RuntimeCommand
     data class SetTabClosed(val id: String, val closed: Boolean) : RuntimeCommand
+    /** Archives or unarchives a conversation (upstream `archiveSession`); a write, never replayed. */
+    data class ArchiveSession(val id: String, val archived: Boolean) : RuntimeCommand
     data class CreateTab(val parentId: String, val id: String, val title: String) : RuntimeCommand
     data class GetCreationOptions(val projectId: String?, val agentConfigId: String? = null) : RuntimeCommand
     /** The workspace's Agent Roles readable by this user. Read only. */
