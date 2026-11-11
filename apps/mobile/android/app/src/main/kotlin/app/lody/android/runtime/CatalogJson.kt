@@ -40,6 +40,8 @@ object CatalogJson {
         workspaceDirty = json.opt("workspaceDirty") == true,
         workspaceUnpushed = json.opt("workspaceUnpushed") == true,
         projectRun = json.optJSONObject("projectRun")?.let(::projectRun),
+        iosSimulatorPreviewRequestId = json.optText("iosSimulatorPreviewRequestId"),
+        androidEmulatorPreviewRequestId = json.optText("androidEmulatorPreviewRequestId"),
     )
 
     /** A Project group snapshot; a member without an id or path is skipped, never the session. */
@@ -82,6 +84,13 @@ object CatalogJson {
 
     /** Optional `machineOs` object (computer id to OS). */
     fun machineOs(json: JSONObject): Map<String, String> = stringMap(json, "machineOs")
+
+    /** Optional `machineSimulators` object (computer id to `available` / `upgrade-required`). */
+    fun machineSimulators(json: JSONObject): Map<String, String> =
+        stringMap(json, "machineSimulators").filterValues { it == "available" || it == "upgrade-required" }
+
+    /** Optional `machineEmulators` object (computer id to `available`). */
+    fun machineEmulators(json: JSONObject): Map<String, String> = stringMap(json, "machineEmulators").filterValues { it == "available" }
 
     private fun stringMap(json: JSONObject, key: String): Map<String, String> {
         val names = json.optJSONObject(key) ?: return emptyMap()

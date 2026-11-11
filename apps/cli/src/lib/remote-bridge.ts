@@ -50,6 +50,9 @@ export class RemoteBridge {
 
   async reconcileOnline(input: {
     workspaces: RemoteBridgeWorkspace[];
+    /** Listed but contradicted by local encrypted evidence: still authorized (never
+     * revoked), while their cached rows stay untouched. */
+    heldWorkspaceIds?: ReadonlySet<string>;
     runningWorkspaceIds: Iterable<string>;
   }): Promise<RemoteBridgeReconcileResult> {
     const scope = this.args.e2eeMachineScope;
@@ -78,6 +81,7 @@ export class RemoteBridge {
               machineName: this.args.machineName,
             },
             workspaces: input.workspaces,
+            ...(input.heldWorkspaceIds ? { heldWorkspaceIds: input.heldWorkspaceIds } : {}),
           })
         );
 

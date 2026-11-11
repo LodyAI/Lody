@@ -86,9 +86,14 @@ class CreateSessionHostController: UIViewController {
     wire()
     if service.persistShare {
       optionsObservers.add(NotificationCenter.default.addObserver(forName: .lodyDataRuntimeEvent, object: nil, queue: .main) { [weak self] note in
-        guard note.userInfo?["creationOptionsChanged"] as? Bool == true else { return }
+        let optionsChanged = note.userInfo?["creationOptionsChanged"] as? Bool == true
+        let live = note.userInfo?["state"] as? String == "live"
+        guard optionsChanged || live else { return }
         MainActor.assumeIsolated {
           guard let self, DataRuntime.current?.workspace == self.params.workspaceId else { return }
+          // A read that failed before the runtime was ready (or while it was offline) is read
+          // again once it is live, so the page does not stay on "Tap to retry".
+          guard optionsChanged || self.controller.optionsFailed else { return }
           self.optionsRefresh?.cancel()
           self.optionsRefresh = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }

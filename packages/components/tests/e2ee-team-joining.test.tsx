@@ -291,6 +291,69 @@ describe('encrypted team joining', () => {
     const cost = container.querySelector('[data-testid="e2ee-join-approve-cost"]');
     expect(cost?.textContent).toBe('e2ee.team.approveCost');
   });
+  it('says a full free workspace cannot admit more members instead of signing a refused approval', async () => {
+    const approved: string[] = [];
+    // The list knew: approve stays off and the row says why.
+    let full = true;
+    const runtime = {
+      createMemberInvitation: async () => offer,
+      memberJoinRequests: async () => ({
+        ...empty,
+        items: [{ ...application('applicant', 'link'), memberLimitReached: full }],
+      }),
+      approveMemberJoin: async (_workspace: string, id: string) => {
+        approved.push(id);
+        // The workspace filled after the list was read: the relay refuses the admission.
+        full = true;
+        throw new Error('e2ee_runtime_failed');
+      },
+      memberKeyDeliveries: async () => ({ items: [] }),
+      retryMemberKeyDelivery: async () => ({ requestId: 'applicant', state: 'pending' as const }),
+      rejectMemberJoin: async () => ({ state: 'rejected' as const }),
+      revokeMemberInvitation: async () => ({ revoked: true as const }),
+    };
+    await render(<E2eeTeamSettings workspaceId="team" runtime={runtime} />);
+    await settle();
+    expect(container.querySelector('[data-testid="e2ee-join-member-limit"]')?.textContent).toBe(
+      'e2ee.team.memberLimit'
+    );
+    const approve = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-join-approve"]'
+    )!;
+    expect(approve.disabled).toBe(true);
+    // A full workspace never signs an admission automatically either.
+    const stop = startEmailAdmissionWorker(
+      {
+        status: async () => status,
+        memberJoinRequests: async () => ({
+          ...empty,
+          items: [{ ...application('emailed', 'email'), memberLimitReached: true }],
+        }),
+        approveMemberJoin: async (_workspace, id) => {
+          approved.push(id);
+          return { admitted: true, keyPending: true };
+        },
+      },
+      'team'
+    );
+    await settle();
+    stop();
+    expect(approved).toEqual([]);
+
+    full = false;
+    await render(<E2eeTeamSettings key="later" workspaceId="team" runtime={runtime} />);
+    await settle();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')!.click()
+    );
+    await settle();
+    await settle();
+    expect(approved).toEqual(['applicant']);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('e2ee.team.memberLimit');
+    expect(
+      container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')!.disabled
+    ).toBe(true);
+  });
   it('keeps a link request pending until the administrator approves the displayed request', async () => {
     const request = application('applicant', 'link');
     let state = 'pending';

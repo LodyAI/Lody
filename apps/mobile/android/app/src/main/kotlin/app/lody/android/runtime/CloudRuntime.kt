@@ -67,6 +67,15 @@ sealed interface RuntimeCommand {
     data class ScheduleDetail(val scheduleId: String) : RuntimeCommand
     /** An owner write (create / edit / pause / resume / run / delete); never retried here. */
     data class ScheduleCommand(val request: ScheduleCommandRequest) : RuntimeCommand
+    /** The watched session's managed web preview: open (or reuse) its link, or revoke it. Never retried. */
+    data class SessionPreview(val sessionId: String, val revoke: Boolean = false) : RuntimeCommand
+    /** One iOS Simulator / Android Emulator lifecycle call for the session (list / start / status / stop). */
+    data class DeviceControl(val platform: DevicePlatform, val sessionId: String, val command: DeviceCommand) : RuntimeCommand
+    /**
+     * Save / create ([accept]) or dismiss an Agent's proposal in the watched session (upstream
+     * `decideProposal`); the outcome is recorded in history. A write, never retried here.
+     */
+    data class DecideProposal(val sessionId: String, val entryId: String, val itemId: String, val accept: Boolean) : RuntimeCommand
     data object Ping : RuntimeCommand
     data object InspectSchema : RuntimeCommand
 }
@@ -90,6 +99,8 @@ sealed interface RuntimeResult {
     data class Schedule(val value: app.lody.android.runtime.ScheduleDetail) : RuntimeResult
     /** The schedule a command wrote. */
     data class ScheduleWritten(val scheduleId: String) : RuntimeResult
+    /** A proposal's recorded outcome (`saved` / `created` / `dismissed`). */
+    data class ProposalDecided(val outcome: String, val scheduleId: String? = null) : RuntimeResult
     data class Created(val value: CreationReceipt) : RuntimeResult
     /** Upstream send state (`sent` / `queued` / `not_sent` / `unknown`); a machine ACK is delivery only. */
     data class Sent(val state: String, val reason: String? = null) : RuntimeResult
@@ -99,6 +110,8 @@ sealed interface RuntimeResult {
     data class Directory(val value: DirectoryListing) : RuntimeResult
     data class File(val value: FileContent) : RuntimeResult
     data class Pong(val healthy: Boolean) : RuntimeResult
+    data class Preview(val value: BrowserPreviewReply) : RuntimeResult
+    data class Device(val value: DeviceControlReply) : RuntimeResult
     data class Schema(val machineIds: Set<String>, val creationTrials: Map<String, String>) : RuntimeResult
 }
 enum class RuntimeErrorCategory { AUTH, NETWORK, PROTOCOL, RUNTIME, BUSINESS, CANCELLED, UNSUPPORTED }
@@ -140,6 +153,9 @@ data class CatalogSession(
     val workspaceUnpushed: Boolean = false,
     /** Present for Project group conversations. */
     val projectRun: CatalogProjectRun? = null,
+    /** The agent asked to show an iOS Simulator / Android Emulator preview (live catalog only, never cached). */
+    val iosSimulatorPreviewRequestId: String? = null,
+    val androidEmulatorPreviewRequestId: String? = null,
 )
 /** One repository or folder of a Project group conversation, in placement order (iOS `SessionProjectMember`). */
 data class CatalogProjectMember(
@@ -172,6 +188,10 @@ data class CatalogSnapshot(
     /** Computer id to OS (`darwin` / `win32` / `linux`), for its icon. */
     val machineOs: Map<String, String> = emptyMap(),
     val agentUsage: Map<String, ProviderUsage> = emptyMap(),
+    /** Computer id to iOS Simulator support (`available` / `upgrade-required`); darwin computers only. */
+    val machineSimulators: Map<String, String> = emptyMap(),
+    /** Computer id to Android Emulator support (`available`). */
+    val machineEmulators: Map<String, String> = emptyMap(),
 )
 /**
  * One transcript turn. [timestamp] is ISO-8601; [status] is upstream's (`seen` once the agent
@@ -200,6 +220,8 @@ data class SessionMessage(
     /** A user turn's attachments (images and files), by display name, in order. */
     val attachments: List<MessageAttachment> = emptyList(),
     val operations: List<OperationEvent> = emptyList(),
+    /** An Agent's Role or schedule proposals (system entries), decided with [RuntimeCommand.DecideProposal]. */
+    val proposals: List<ProposalCard> = emptyList(),
 )
 
 /**
@@ -240,6 +262,11 @@ sealed interface TurnItem {
      * work between them) merge into one fanned stack in [app.lody.android.chat.TurnLayout].
      */
     data class Images(override val id: String, val images: List<TurnImage>) : TurnItem
+    /**
+     * A file the agent shared (`lody_upload_files`, web `SessionFileCard`): its name, type and
+     * size; never folded.
+     */
+    data class File(override val id: String, val fileName: String, val mimeType: String? = null, val sizeBytes: Long? = null) : TurnItem
     /** A failure or notice the turn ended with; never folded. */
     data class Notice(override val id: String, val text: String, val failure: Boolean) : TurnItem
     /**
@@ -310,7 +337,8 @@ data class RunChoice(
     val configOptionValues: Map<String, Any> = emptyMap(),
     val agentRoleId: String? = null, val roleKnown: Boolean = false,
 )
-data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null)
+/** [preview]: the session's managed web preview candidate, null without one. */
+data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null, val preview: BrowserPreview? = null)
 sealed interface RuntimeEvent {
     data class ProvidersChanged(val machineId: String) : RuntimeEvent
     data class ProviderProgress(val machineId: String, val id: String, val status: String, val percent: Float?) : RuntimeEvent
@@ -322,6 +350,8 @@ sealed interface RuntimeEvent {
     data object GrantRequested : RuntimeEvent
     /** The runtime asks the native host to make one prompt-shortcut Convex call (iOS `shortcutCloud`). */
     data class ShortcutCloudRequested(val requestId: String, val operation: String, val args: String) : RuntimeEvent
+    /** The runtime asks the native host to mint a preview proof's request token for [intent] (JSON). */
+    data class PreviewTokenRequested(val requestId: String, val intent: String) : RuntimeEvent
 }
 /** Stamped at source receipt, before any coroutine buffering. */
 data class RuntimeEmission(val generation: Long, val event: RuntimeEvent)
@@ -332,6 +362,11 @@ data class OwnedRuntimeState(val scope: RuntimeScope? = null, val status: Runtim
 fun interface GrantProvider { suspend fun request(scope: RuntimeScope): ShortLivedGrant }
 /** Makes one allow-listed `promptShortcuts:*` Convex call for [scope] with the verified account; throws on failure. */
 fun interface ShortcutCloudProvider { suspend fun call(scope: RuntimeScope, operation: String, args: org.json.JSONObject): Any? }
+/**
+ * Mints one preview-control request token for [scope] with the verified account: the token string,
+ * or the HTTP status (Int) the backend refused with; throws on any other failure.
+ */
+fun interface PreviewTokenProvider { suspend fun mint(scope: RuntimeScope, intent: org.json.JSONObject): Any }
 class ShortLivedGrant(val token: String, val gatewayBaseUrl: String, val expiresIn: Int, private val receivedAtNanos: Long = System.nanoTime()) {
     init { require(token.isNotBlank()); require(expiresIn in 1..3600) }
     fun remainingSeconds(nowNanos: Long = System.nanoTime()): Int =

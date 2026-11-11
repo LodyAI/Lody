@@ -22,11 +22,14 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   let permissionService: PermissionService
   var permissionGate = SessionPermissionGate()
   weak var subagentPage: SubagentTaskController?
-  var simulator: SessionSimulator?
+  /// iOS Simulator and Android Emulator previews, independent and possibly both running.
+  var devicePreviews: [DevicePlatform: SessionSimulator] = [:]
+  /// Most recently opened platform first; the floating preview shows the first that is live.
+  var devicePreviewOrder: [DevicePlatform] = []
   var openingSimulator = false
   var browserBusy = false
   let requestBrowserPreview: BrowserRequest
-  let simulatorService: SimulatorService?
+  let deviceServices: [DevicePlatform: SimulatorService]
   let pullRequestPage: @MainActor (SessionPullRequest, SessionListState) -> PullRequestController
   weak var processPage: ProcessController?
   weak var tasksPage: TasksController?
@@ -73,7 +76,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   init(sessionId: String, findQuery: String = "", choice: ModelChoice? = nil, source: SessionSource = .live,
        feed: SessionFeedService = .live, environment: SessionSendEnvironment = .live, permission: PermissionService = .live,
-       itemDetail: ItemDetailService? = nil, simulator: SimulatorService? = nil,
+       itemDetail: ItemDetailService? = nil, simulator: SimulatorService? = nil, emulator: SimulatorService? = nil,
        pullRequest: @escaping @MainActor (SessionPullRequest, SessionListState) -> PullRequestController = SessionController.livePullRequest,
        browser: BrowserRequest? = nil) {
     requestBrowserPreview = browser ?? { state, action in
@@ -86,7 +89,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     self.environment = environment
     permissionService = permission
     itemDetailService = itemDetail ?? .live(sessionId: sessionId)
-    simulatorService = simulator
+    var services: [DevicePlatform: SimulatorService] = [:]
+    services[.ios] = simulator
+    services[.android] = emulator
+    deviceServices = services
     pullRequestPage = pullRequest
     initialChoice = choice
     feedService = feed
@@ -112,15 +118,15 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     memberTask?.cancel()
     githubSettle?.cancel()
     feed?.finish()
-    simulator?.finish()
+    for store in devicePreviews.values { store.finish() }
     if sender != nil { environment.foreground(sessionId, false) }
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
   }
 
   var queuedMessageBehavior: String { LodyPreferences.queuedMessageBehavior }
   var persistsDraft: Bool { true }
-  /// Browser preview and simulator icons for the action bar; preview fixtures override them.
-  var resourceItems: [[String: Any]] { [browserItem, simulatorItem].compactMap { $0 } }
+  /// Browser preview, simulator and emulator icons for the action bar; preview fixtures override them.
+  var resourceItems: [[String: Any]] { [browserItem, deviceItem(.ios), deviceItem(.android)].compactMap { $0 } }
   func adjustComposer(_ state: inout [String: Any]) {}
 
   // The chat binds its title and scroll edges to its nearest controller; the shell page shows this item.
@@ -225,6 +231,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     prepareSimulator(state, session)
     startFeed(state)
     chat.setAttachmentContext(Self.json(["workspaceId": state.workspaceId, "sessionId": sessionId]))
+    if chat.proposalUserID != state.userId {
+      chat.proposalUserID = state.userId
+      chat.applyRows()
+    }
     chat.showsThoughts = session.cliType == "builtin" && session.agentType == "deepseek"
     chat.setNavigationTitle(session.title)
     let tabs = DirectoryTabs.sessions(current: session, all: state.catalog.sessions)
@@ -420,7 +430,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         [weak self] _ in self?.openProjectFiles(title: String(localized: "files.title", bundle: .lody))
       })
     }
-    var children: [UIMenuElement] = changes
+    var children: [UIMenuElement] = changes + devicePreviewMenu()
     children.append(UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
       self?.find(query: "", keyboard: true)
     })

@@ -25,6 +25,9 @@ type Runtime = Pick<
   | 'setMemberRole'
 > &
   Partial<Pick<E2eeWorkspaceRuntime, 'memberKeyDeliveries' | 'retryMemberKeyDelivery'>>;
+/** Approval refused because the free workspace is full, as the refreshed list reports. */
+class MemberLimitReached extends Error {}
+
 const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
   row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
@@ -145,7 +148,14 @@ function TeamSession({
     try {
       await action();
     } catch (error) {
-      if (current()) setMessage(t(seatBillingErrorKey(error) ?? 'e2ee.team.retryOriginal'));
+      if (current())
+        setMessage(
+          t(
+            error instanceof MemberLimitReached
+              ? 'e2ee.team.memberLimit'
+              : (seatBillingErrorKey(error) ?? 'e2ee.team.retryOriginal')
+          )
+        );
     } finally {
       working.current = false;
       if (current()) setBusy(false);
@@ -317,22 +327,34 @@ function TeamSession({
                 {deviceFingerprint(request.signingPublicKey)}
               </code>
             </span>
-            {request.state === 'pending' && approvalCost && (
-              <span data-testid="e2ee-join-approve-cost" {...stylex.props(styles.approveCost)}>
-                {approvalCost}
+            {request.state === 'pending' && request.memberLimitReached ? (
+              <span data-testid="e2ee-join-member-limit" {...stylex.props(styles.approveCost)}>
+                {t('e2ee.team.memberLimit')}
               </span>
+            ) : (
+              request.state === 'pending' &&
+              approvalCost && (
+                <span data-testid="e2ee-join-approve-cost" {...stylex.props(styles.approveCost)}>
+                  {approvalCost}
+                </span>
+              )
             )}
             <div {...stylex.props(styles.row)}>
               <Button
                 data-testid="e2ee-join-approve"
                 data-request-id={request.requestId}
                 disabled={
-                  busy || (request.state === 'pending' && !isSeatAdmissionReady(data?.seatPreview))
+                  busy ||
+                  (request.state === 'pending' &&
+                    (!!request.memberLimitReached || !isSeatAdmissionReady(data?.seatPreview)))
                 }
                 aria-busy={approving === request.requestId || undefined}
                 onClick={() =>
                   void perform(async () => {
-                    if (request.state === 'pending' && !isSeatAdmissionReady(data?.seatPreview))
+                    if (
+                      request.state === 'pending' &&
+                      (request.memberLimitReached || !isSeatAdmissionReady(data?.seatPreview))
+                    )
                       return;
                     setApproving(request.requestId);
                     try {
@@ -346,6 +368,23 @@ function TeamSession({
                           t(result.admitted ? 'e2ee.team.admitted' : 'e2ee.team.reconciling')
                         );
                       if (result.admitted && current()) await onMembersChanged?.();
+                    } catch (error) {
+                      // The workspace may have filled since the list was read: the relay
+                      // then refuses the signed admission, and the fresh list says why.
+                      const fresh = await runtime.memberJoinRequests!(workspaceId).catch(
+                        () => null
+                      );
+                      if (fresh) {
+                        remember(fresh);
+                        if (current()) setData(fresh);
+                      }
+                      if (
+                        fresh?.items.some(
+                          (item) => item.requestId === request.requestId && item.memberLimitReached
+                        )
+                      )
+                        throw new MemberLimitReached();
+                      throw error;
                     } finally {
                       if (current()) setApproving(null);
                     }

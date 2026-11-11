@@ -31,11 +31,11 @@ final class LodySimulatorView: UIView {
   }
 
   func setCommand(_ json: String) {
-    struct Command: Decodable { let token: Int; let action: String }
+    struct Command: Decodable { let token: Int; let action: String; let text: String? }
     guard let command = try? JSONDecoder().decode(Command.self, from: Data(json.utf8)),
           command.token > lastCommand else { return }
     lastCommand = command.token
-    stream?.perform(command.action)
+    stream?.perform(command.action, text: command.text)
   }
 
   override func didMoveToSuperview() {

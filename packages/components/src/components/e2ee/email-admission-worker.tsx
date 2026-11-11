@@ -52,7 +52,8 @@ export function startEmailAdmissionWorker(
       const requests = await runtime.memberJoinRequests(workspaceId);
       for (const request of requests.items) {
         if (stopped) break;
-        if (request.source !== 'email') continue;
+        // A full free workspace would refuse the admission after it is signed.
+        if (request.source !== 'email' || request.memberLimitReached) continue;
         try {
           await runtime.approveMemberJoin(workspaceId, request.requestId, 'automatic');
         } catch {

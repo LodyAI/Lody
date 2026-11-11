@@ -15,7 +15,8 @@ struct LodyMenuAvatar {
   var image: String = ""
 }
 
-/// The workspace capsule uses the same native button menu as conversation More.
+/// The workspace capsule. Tapping it opens `WorkspaceSwitcherPanel` anchored below it: a UIMenu
+/// cannot keep long workspace names on one line with a trailing fade.
 @MainActor
 final class LodyMenuButton: UIView {
   var selected: ((String) -> Void)?
@@ -29,6 +30,7 @@ final class LodyMenuButton: UIView {
   private var labelHidden = false
   private var detail = ""
   private var items: [LodyMenuItem] = []
+  private weak var panel: WorkspaceSwitcherPanel?
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
@@ -36,7 +38,7 @@ final class LodyMenuButton: UIView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     button.changesSelectionAsPrimaryAction = false
-    button.showsMenuAsPrimaryAction = true
+    button.addAction(UIAction { [weak self] _ in self?.presentPanel() }, for: .primaryActionTriggered)
     addSubview(button)
   }
 
@@ -104,25 +106,34 @@ final class LodyMenuButton: UIView {
   }
 
   private func updateMenu() {
-    button.menu = items.isEmpty ? nil : UIMenu(title: accountEmail, children: items.map { item in
-      UIAction(title: item.title, image: menuImage(item), identifier: UIAction.Identifier(item.id),
-               state: item.selected ? .on : .off) { [weak self] _ in
-        guard let self, let current = self.items.first(where: { $0.id == item.id }), !current.selected else { return }
-        self.selected?(current.id)
-      }
-    })
+    panel?.update(items: items, accountEmail: accountEmail)
+    if items.isEmpty { panel?.dismiss(animated: true) }
   }
 
-  private func menuImage(_ item: LodyMenuItem) -> UIImage {
-    var image = LodyListPhoto.monogram(item.monogram, side: 24)
-    if let url = LodyListPhoto.url(item.photo) {
-      image = LodyListPhoto.image(for: url, ready: { [weak self] _ in self?.updateMenu() }) ?? image
+  private func presentPanel() {
+    guard !items.isEmpty, panel == nil, var presenter = owningController() else { return }
+    while let presented = presenter.presentedViewController, !presented.isBeingDismissed { presenter = presented }
+    let next = WorkspaceSwitcherPanel(
+      items: items, accountEmail: accountEmail, maxWidth: (window?.bounds.width ?? 375) - 32
+    ) { [weak self] id in self?.selected?(id) }
+    next.modalPresentationStyle = .popover
+    if let popover = next.popoverPresentationController {
+      popover.sourceView = button
+      popover.sourceRect = button.bounds
+      popover.permittedArrowDirections = [.up, .down]
+      popover.delegate = next
     }
+    panel = next
+    presenter.present(next, animated: true)
+  }
 
-    return UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
-      UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: 24, height: 24)).addClip()
-      image.draw(in: CGRect(x: 0, y: 0, width: 24, height: 24))
-    }.withRenderingMode(.alwaysOriginal)
+  private func owningController() -> UIViewController? {
+    var responder: UIResponder? = next
+    while let current = responder {
+      if let controller = current as? UIViewController { return controller }
+      responder = current.next
+    }
+    return nil
   }
 
   private func apply() {

@@ -258,6 +258,8 @@ private fun chatContext(catalog: CatalogState, id: String, title: String, user: 
         repository = repository.orEmpty(),
         repositories = (listOfNotNull(repository?.takeIf { it.isNotEmpty() }) + project?.repositories.orEmpty()).distinctBy { it.lowercase() },
         machineName = session?.let { snapshot?.machineNames?.get(it.machineId) }.orEmpty(),
+        machineSimulator = session?.let { snapshot?.machineSimulators?.get(it.machineId) },
+        machineEmulator = session?.let { snapshot?.machineEmulators?.get(it.machineId) } == "available",
         machineKind = snapshot?.let { app.lody.android.create.CreateSessionModel.machineKind(it, session?.machineId) }
             ?: app.lody.android.create.CreateSessionModel.MachineKind.Laptop,
     )

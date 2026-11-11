@@ -341,6 +341,7 @@ describe('local E2EE pairing authority', () => {
       startupCleanupOwners: new Map(),
       e2eeActivationInFlight: new Map(),
       e2eeResets: new Map(),
+      modeConflictWorkspaceIds: new Set(),
       startWorkspace: async () => {},
       resolveWorkspaceRuntime: async () => ({
         lody: { refreshEncryptedWorkspace: async () => true },

@@ -84,7 +84,11 @@ enum class Delivery { Sending, Sent, Queued, Seen, Failed }
 sealed interface ChatEntry {
     val id: String
 
-    data class Operations(override val id: String, val events: List<app.lody.android.runtime.OperationEvent>) : ChatEntry
+    /** A system entry: operation receipts and the Agent's Role / schedule proposals. */
+    data class Operations(
+        override val id: String, val events: List<app.lody.android.runtime.OperationEvent>,
+        val proposals: List<app.lody.android.runtime.ProposalCard> = emptyList(),
+    ) : ChatEntry
 
     data class User(
         override val id: String, val text: String, val who: TurnIdentity, val delivery: Delivery = Delivery.Sent,
@@ -139,6 +143,10 @@ fun ChatTranscript(
     loadDetail: (suspend (entryId: String, itemId: String) -> StepDetail)? = null,
     /** Opens a changed file's diff for a turn; null where there is no runtime. */
     loadDiff: (suspend (entryId: String, path: String) -> app.lody.android.runtime.FileDiff)? = null,
+    /** The signed-in user, who alone decides the Role proposals they asked for. */
+    meId: String? = null,
+    /** Decides an Agent's proposal; null where there is no runtime. */
+    decideProposal: ProposalDecider? = null,
 ) {
     // Only an actual drag leaves follow mode. Programmatic positioning and IME layout
     // changes must not look like the reader scrolled away from the end.
@@ -220,7 +228,7 @@ fun ChatTranscript(
     }
     LazyColumn(modifier, state = state, contentPadding = contentPadding) content@{
         keys.reset()
-        with(KeyRecorder(this@content, keys)) { transcriptRows(entries, open, toggle, details, openTasks, openFiles, actions, relatedSessions, navigateSession) }
+        with(KeyRecorder(this@content, keys)) { transcriptRows(entries, open, toggle, details, openTasks, openFiles, actions, relatedSessions, navigateSession, meId, decideProposal) }
         // A small stable end anchor avoids enormous scroll offsets and measuring the
         // whole final Markdown block merely to discover its bottom.
         item(key = "transcript-end", contentType = "end") { Spacer(Modifier.height(LodySpacing.xxs)) }
@@ -272,10 +280,17 @@ private fun LazyListScope.transcriptRows(
     actions: MessageActionState,
     relatedSessions: List<app.lody.android.runtime.CatalogSession>,
     navigateSession: (String) -> Unit,
+    meId: String?,
+    decideProposal: ProposalDecider?,
 ) {
         entries.forEach { entry ->
             when (entry) {
-                is ChatEntry.Operations -> item(key = entry.id, contentType = "operations") { OperationCards(entry.events, relatedSessions, navigateSession) }
+                is ChatEntry.Operations -> {
+                    if (entry.events.isNotEmpty()) item(key = entry.id, contentType = "operations") { OperationCards(entry.events, relatedSessions, navigateSession) }
+                    if (entry.proposals.isNotEmpty()) item(key = "${entry.id}#proposals", contentType = "proposals") {
+                        ProposalCards(entry.proposals, meId, decideProposal, Modifier.animateItem().padding(bottom = LodySpacing.md))
+                    }
+                }
                 is ChatEntry.User -> item(key = entry.id, contentType = "user") { UserTurn(entry, actions) }
                 is ChatEntry.Assistant -> {
                     val layout = entry.layout

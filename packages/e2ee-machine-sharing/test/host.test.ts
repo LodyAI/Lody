@@ -6,12 +6,68 @@ import { Clock, Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
 import * as P from '@lody/e2ee-core/protocol';
 import { disposeEpochKey } from '@lody/e2ee-core/internal';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
-import { makeMachineSharingHost, makeLazyMachineSharingHost, type SharingRemote } from '../src';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import {
+  makeMachineSharingHost,
+  makeLazyMachineSharingHost,
+  MachineSharingError,
+  type OpenMachineSharingStore,
+  type SharingRemote,
+} from '../src';
+import { openSqliteMachineSharingStore } from '../src/sqlite';
+import { openIndexedDbMachineSharingStore } from '../src/indexeddb';
 import type { E2eeMachineSharingVersion, E2eeMachineSharingHeadState } from '@lody/platform';
 
 const hex = (v: { toBytes(): Uint8Array }) => Buffer.from(v.toBytes()).toString('hex');
 const ok = Result.getOrThrow;
-const setup = Effect.fnUntraced(function* (directory: string) {
+/** Every case runs once per store: the desktop's SQLite file, then the browser's
+ * IndexedDB (fake-indexeddb in Node). Same names reopen the same storage in one case. */
+type Backend = {
+  readonly name: 'sqlite' | 'indexeddb';
+  readonly storeFor: (name: string) => OpenMachineSharingStore;
+  /** A store whose open fails until `repair` runs, as a missing directory does. */
+  readonly broken: () => { store: OpenMachineSharingStore; repair: () => Promise<void> };
+  readonly cleanup: () => Promise<void>;
+};
+const backends: readonly (() => Promise<Backend>)[] = [
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'sharing-host-'));
+    return {
+      name: 'sqlite',
+      storeFor: (name) => openSqliteMachineSharingStore(join(directory, `${name}.sqlite`)),
+      broken: () => ({
+        store: openSqliteMachineSharingStore(join(directory, 'missing', 'policy.sqlite')),
+        repair: async () => {
+          const { mkdir } = await import('node:fs/promises');
+          await mkdir(join(directory, 'missing'));
+        },
+      }),
+      cleanup: () => rm(directory, { recursive: true, force: true }),
+    };
+  },
+  async () => {
+    const environment = { indexedDB: new IDBFactory(), IDBKeyRange };
+    return {
+      name: 'indexeddb',
+      storeFor: (name) => openIndexedDbMachineSharingStore(name, environment),
+      broken: () => {
+        let repaired = false;
+        return {
+          store: Effect.suspend(() =>
+            repaired
+              ? openIndexedDbMachineSharingStore('policy', environment)
+              : Effect.fail(new MachineSharingError({ code: 'sharing_storage' }))
+          ),
+          repair: async () => {
+            repaired = true;
+          },
+        };
+      },
+      cleanup: async () => {},
+    };
+  },
+];
+const setup = Effect.fnUntraced(function* (backend: Backend) {
   const f = envelopeFixture(1);
   yield* Effect.addFinalizer(() => Effect.sync(() => disposeEpochKey(f.secret)));
   let view = f.view();
@@ -112,7 +168,7 @@ const setup = Effect.fnUntraced(function* (directory: string) {
   };
   const make = (name: string, signer = f.owner.signer) =>
     makeMachineSharingHost({
-      filename: join(directory, `${name}.sqlite`),
+      store: backend.storeFor(name),
       workspaceId: 'workspace',
       genesisHash: hex(view.genesis),
       signer,
@@ -132,6 +188,7 @@ const setup = Effect.fnUntraced(function* (directory: string) {
   const owner = yield* make('owner');
   const machine = yield* make('machine', f.phone.signer);
   return {
+    backend,
     f,
     bob,
     owner,
@@ -171,18 +228,23 @@ async function test(
     f: Effect.Success<ReturnType<typeof setup>>
   ) => Effect.Effect<unknown, unknown, Scope.Scope>
 ) {
-  const directory = await mkdtemp(join(tmpdir(), 'sharing-host-'));
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const f = yield* setup(directory);
-          return yield* body(f);
-        })
-      )
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+  for (const open of backends) {
+    const backend = await open();
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* setup(backend);
+            return yield* body(f);
+          })
+        )
+      );
+    } catch (error) {
+      if (error instanceof Error) error.message = `[${backend.name} store] ${error.message}`;
+      throw error;
+    } finally {
+      await backend.cleanup();
+    }
   }
 }
 const change = { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true } as const;
@@ -1040,12 +1102,9 @@ it('charges slow I/O to the cache lifetime and a backward clock never renews it'
 it('opens policy storage lazily and retries a failed open without touching content owners', () =>
   test((f) =>
     Effect.gen(function* () {
-      const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'sharing-lazy-')));
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() => rm(directory, { recursive: true, force: true }))
-      );
+      const broken = f.backend.broken();
       const host = yield* makeLazyMachineSharingHost({
-        filename: join(directory, 'missing', 'policy.sqlite'),
+        store: broken.store,
         workspaceId: 'workspace',
         genesisHash: hex(f.view().genesis),
         signer: f.f.phone.signer,
@@ -1067,10 +1126,7 @@ it('opens policy storage lazily and retries a failed open without touching conte
       expect(Result.isFailure(yield* Effect.result(host.read('fixture-machine', f.remote)))).toBe(
         true
       );
-      yield* Effect.promise(async () => {
-        const { mkdir } = await import('node:fs/promises');
-        await mkdir(join(directory, 'missing'));
-      });
+      yield* Effect.promise(broken.repair);
       expect((yield* host.read('fixture-machine', f.remote)).sharedWithTeam).toBe(false);
     })
   ));

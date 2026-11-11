@@ -112,9 +112,22 @@ class ChatRepository(
     suspend fun shortcut(scope: RuntimeScope, id: String): org.json.JSONObject =
         owner.use(scope) { (it.execute(RuntimeCommand.ShortcutBody(id)) as RuntimeResult.Shortcut).value }
 
+    /** The watched session's managed web preview: create (or reuse) its link, or revoke it. Never retried. */
+    suspend fun browserPreview(scope: RuntimeScope, sessionId: String, revoke: Boolean): BrowserPreviewReply =
+        owner.use(scope) { (it.execute(RuntimeCommand.SessionPreview(sessionId, revoke)) as RuntimeResult.Preview).value }
+
+    /** One iOS Simulator / Android Emulator lifecycle call for the session; start and stop are never retried. */
+    suspend fun deviceControl(scope: RuntimeScope, platform: DevicePlatform, sessionId: String, command: DeviceCommand): DeviceControlReply =
+        owner.use(scope) { (it.execute(RuntimeCommand.DeviceControl(platform, sessionId, command)) as RuntimeResult.Device).value }
+
     /** Stops the running turn; never retried (a lost reply is reported, not replayed). */
     suspend fun stop(scope: RuntimeScope, sessionId: String, machineId: String, turnId: String) {
         owner.use(scope) { it.execute(RuntimeCommand.StopTurn(sessionId, machineId, turnId)) }
+    }
+
+    /** Saves / creates or dismisses an Agent's proposal; a write, never retried (failures throw their code). */
+    suspend fun decideProposal(scope: RuntimeScope, sessionId: String, entryId: String, itemId: String, accept: Boolean) {
+        owner.use(scope) { it.execute(RuntimeCommand.DecideProposal(sessionId, entryId, itemId, accept)) }
     }
 
     /** Sends one text turn on the scope's lease. Never retried: an uncertain write is `unknown`. */

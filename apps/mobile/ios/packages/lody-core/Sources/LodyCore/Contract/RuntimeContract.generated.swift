@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","deleteSession","editSession","ensureSession","fileDiff","forkSession","hello","iosSimulatorControl","itemDetail","listDir","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forkSession","hello","iosSimulatorControl","itemDetail","listDir","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
 
   public struct AgentProviderAuthParamsStart: Codable, Sendable, Equatable {
     public var workspaceId: String
@@ -1571,6 +1571,279 @@ extension RuntimeContract {
     }
   }
 
+  public struct AndroidEmulatorControlParamsCommandList: Codable, Sendable, Equatable {
+    public init() {
+    }
+    public init(from decoder: any Decoder) throws {
+      _ = try decoder.container(keyedBy: Key.self)
+    }
+    public func encode(to encoder: any Encoder) throws {
+      _ = encoder.container(keyedBy: Key.self)
+    }
+  }
+
+  public enum AndroidEmulatorControlParamsCommandStartQuality: String, Codable, Sendable, Equatable, CaseIterable {
+    case saver = "saver"
+    case balanced = "balanced"
+    case clear = "clear"
+  }
+
+  public struct AndroidEmulatorControlParamsCommandStart: Codable, Sendable, Equatable {
+    public var id: String
+    public var quality: AndroidEmulatorControlParamsCommandStartQuality?
+    public init(id: String, quality: AndroidEmulatorControlParamsCommandStartQuality? = nil) {
+      self.id = id
+      self.quality = quality
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.id = try c.decode(String.self, forKey: Key("id"))
+      self.quality = try c.decodeIfPresent(AndroidEmulatorControlParamsCommandStartQuality.self, forKey: Key("quality"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.id, forKey: Key("id"))
+      try c.encodeIfPresent(self.quality, forKey: Key("quality"))
+    }
+  }
+
+  public struct AndroidEmulatorControlParamsCommandStatus: Codable, Sendable, Equatable {
+    public var operationId: String?
+    public init(operationId: String? = nil) {
+      self.operationId = operationId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.operationId = try c.decodeIfPresent(String.self, forKey: Key("operationId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encodeIfPresent(self.operationId, forKey: Key("operationId"))
+    }
+  }
+
+  public struct AndroidEmulatorControlParamsCommandStop: Codable, Sendable, Equatable {
+    public var operationId: String
+    public init(operationId: String) {
+      self.operationId = operationId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.operationId = try c.decode(String.self, forKey: Key("operationId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.operationId, forKey: Key("operationId"))
+    }
+  }
+
+  public enum AndroidEmulatorControlParamsCommand: Codable, Sendable, Equatable {
+    case list(AndroidEmulatorControlParamsCommandList)
+    case start(AndroidEmulatorControlParamsCommandStart)
+    case status(AndroidEmulatorControlParamsCommandStatus)
+    case stop(AndroidEmulatorControlParamsCommandStop)
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      let tag = try c.decode(String.self, forKey: Key("action"))
+      switch tag {
+      case "list": self = .list(try AndroidEmulatorControlParamsCommandList(from: decoder))
+      case "start": self = .start(try AndroidEmulatorControlParamsCommandStart(from: decoder))
+      case "status": self = .status(try AndroidEmulatorControlParamsCommandStatus(from: decoder))
+      case "stop": self = .stop(try AndroidEmulatorControlParamsCommandStop(from: decoder))
+      default: throw DecodingError.dataCorruptedError(forKey: Key("action"), in: c, debugDescription: "Unknown action \(tag)")
+      }
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      switch self {
+      case .list(let value):
+        try c.encode("list", forKey: Key("action"))
+        try value.encode(to: encoder)
+      case .start(let value):
+        try c.encode("start", forKey: Key("action"))
+        try value.encode(to: encoder)
+      case .status(let value):
+        try c.encode("status", forKey: Key("action"))
+        try value.encode(to: encoder)
+      case .stop(let value):
+        try c.encode("stop", forKey: Key("action"))
+        try value.encode(to: encoder)
+      }
+    }
+  }
+
+  public struct AndroidEmulatorControlParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public var userId: String
+    public var command: AndroidEmulatorControlParamsCommand
+    public init(workspaceId: String, sessionId: String, userId: String, command: AndroidEmulatorControlParamsCommand) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+      self.userId = userId
+      self.command = command
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.userId = try c.decode(String.self, forKey: Key("userId"))
+      self.command = try c.decode(AndroidEmulatorControlParamsCommand.self, forKey: Key("command"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encode(self.userId, forKey: Key("userId"))
+      try c.encode(self.command, forKey: Key("command"))
+    }
+  }
+
+  public enum AndroidEmulatorControlResultDevicesItemOccupancy: String, Codable, Sendable, Equatable, CaseIterable {
+    case available = "available"
+    case thisSession = "this-session"
+    case otherSession = "other-session"
+  }
+
+  public struct AndroidEmulatorControlResultDevicesItem: Codable, Sendable, Equatable {
+    public var id: String
+    public var name: String
+    public var runtime: String
+    public var deviceType: String
+    public var state: String
+    public var available: Bool
+    public var unavailableReason: String?
+    public var occupancy: AndroidEmulatorControlResultDevicesItemOccupancy
+    public init(id: String, name: String, runtime: String, deviceType: String, state: String, available: Bool, unavailableReason: String? = nil, occupancy: AndroidEmulatorControlResultDevicesItemOccupancy) {
+      self.id = id
+      self.name = name
+      self.runtime = runtime
+      self.deviceType = deviceType
+      self.state = state
+      self.available = available
+      self.unavailableReason = unavailableReason
+      self.occupancy = occupancy
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.id = try c.decode(String.self, forKey: Key("id"))
+      self.name = try c.decode(String.self, forKey: Key("name"))
+      self.runtime = try c.decode(String.self, forKey: Key("runtime"))
+      self.deviceType = try c.decode(String.self, forKey: Key("deviceType"))
+      self.state = try c.decode(String.self, forKey: Key("state"))
+      self.available = try c.decode(Bool.self, forKey: Key("available"))
+      self.unavailableReason = try c.decodeIfPresent(String.self, forKey: Key("unavailableReason"))
+      self.occupancy = try c.decode(AndroidEmulatorControlResultDevicesItemOccupancy.self, forKey: Key("occupancy"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.id, forKey: Key("id"))
+      try c.encode(self.name, forKey: Key("name"))
+      try c.encode(self.runtime, forKey: Key("runtime"))
+      try c.encode(self.deviceType, forKey: Key("deviceType"))
+      try c.encode(self.state, forKey: Key("state"))
+      try c.encode(self.available, forKey: Key("available"))
+      try c.encodeIfPresent(self.unavailableReason, forKey: Key("unavailableReason"))
+      try c.encode(self.occupancy, forKey: Key("occupancy"))
+    }
+  }
+
+  public enum AndroidEmulatorControlResultPreviewPhase: String, Codable, Sendable, Equatable, CaseIterable {
+    case preparing = "preparing"
+    case booting = "booting"
+    case connecting = "connecting"
+    case ready = "ready"
+    case closed = "closed"
+    case failed = "failed"
+  }
+
+  public enum AndroidEmulatorControlResultPreviewTransport: String, Codable, Sendable, Equatable, CaseIterable {
+    case local = "local"
+    case remote = "remote"
+  }
+
+  public struct AndroidEmulatorControlResultPreview: Codable, Sendable, Equatable {
+    public var operationId: String
+    public var id: String
+    public var phase: AndroidEmulatorControlResultPreviewPhase
+    public var transport: AndroidEmulatorControlResultPreviewTransport
+    public var viewerUrl: String?
+    public var message: String?
+    public init(operationId: String, id: String, phase: AndroidEmulatorControlResultPreviewPhase, transport: AndroidEmulatorControlResultPreviewTransport, viewerUrl: String? = nil, message: String? = nil) {
+      self.operationId = operationId
+      self.id = id
+      self.phase = phase
+      self.transport = transport
+      self.viewerUrl = viewerUrl
+      self.message = message
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.operationId = try c.decode(String.self, forKey: Key("operationId"))
+      self.id = try c.decode(String.self, forKey: Key("id"))
+      self.phase = try c.decode(AndroidEmulatorControlResultPreviewPhase.self, forKey: Key("phase"))
+      self.transport = try c.decode(AndroidEmulatorControlResultPreviewTransport.self, forKey: Key("transport"))
+      self.viewerUrl = try c.decodeIfPresent(String.self, forKey: Key("viewerUrl"))
+      self.message = try c.decodeIfPresent(String.self, forKey: Key("message"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.operationId, forKey: Key("operationId"))
+      try c.encode(self.id, forKey: Key("id"))
+      try c.encode(self.phase, forKey: Key("phase"))
+      try c.encode(self.transport, forKey: Key("transport"))
+      try c.encodeIfPresent(self.viewerUrl, forKey: Key("viewerUrl"))
+      try c.encodeIfPresent(self.message, forKey: Key("message"))
+    }
+  }
+
+  public struct AndroidEmulatorControlResult: Codable, Sendable, Equatable {
+    public var type: String?
+    public var sessionId: String?
+    public var success: Bool?
+    public var devices: [AndroidEmulatorControlResultDevicesItem]?
+    public var preview: AndroidEmulatorControlResultPreview?
+    public var error: String?
+    public var status: Int?
+    public var message: String?
+    public var capabilities: [String: Int]?
+    public init(type: String? = nil, sessionId: String? = nil, success: Bool? = nil, devices: [AndroidEmulatorControlResultDevicesItem]? = nil, preview: AndroidEmulatorControlResultPreview? = nil, error: String? = nil, status: Int? = nil, message: String? = nil, capabilities: [String: Int]? = nil) {
+      self.type = type
+      self.sessionId = sessionId
+      self.success = success
+      self.devices = devices
+      self.preview = preview
+      self.error = error
+      self.status = status
+      self.message = message
+      self.capabilities = capabilities
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.type = try c.decodeIfPresent(String.self, forKey: Key("type"))
+      self.sessionId = try c.decodeIfPresent(String.self, forKey: Key("sessionId"))
+      self.success = try c.decodeIfPresent(Bool.self, forKey: Key("success"))
+      self.devices = try c.decodeIfPresent([AndroidEmulatorControlResultDevicesItem].self, forKey: Key("devices"))
+      self.preview = try c.decodeIfPresent(AndroidEmulatorControlResultPreview.self, forKey: Key("preview"))
+      self.error = try c.decodeIfPresent(String.self, forKey: Key("error"))
+      self.status = try c.decodeIfPresent(Int.self, forKey: Key("status"))
+      self.message = try c.decodeIfPresent(String.self, forKey: Key("message"))
+      self.capabilities = try c.decodeIfPresent([String: Int].self, forKey: Key("capabilities"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encodeIfPresent(self.type, forKey: Key("type"))
+      try c.encodeIfPresent(self.sessionId, forKey: Key("sessionId"))
+      try c.encodeIfPresent(self.success, forKey: Key("success"))
+      try c.encodeIfPresent(self.devices, forKey: Key("devices"))
+      try c.encodeIfPresent(self.preview, forKey: Key("preview"))
+      try c.encodeIfPresent(self.error, forKey: Key("error"))
+      try c.encodeIfPresent(self.status, forKey: Key("status"))
+      try c.encodeIfPresent(self.message, forKey: Key("message"))
+      try c.encodeIfPresent(self.capabilities, forKey: Key("capabilities"))
+    }
+  }
+
   public struct ArchiveSessionParams: Codable, Sendable, Equatable {
     public var workspaceId: String
     public var sessionId: String
@@ -2456,6 +2729,67 @@ extension RuntimeContract {
       try c.encode(self.workspaceId, forKey: Key("workspaceId"))
       try c.encodeIfPresent(self.projectId, forKey: Key("projectId"))
       try c.encodeIfPresent(self.agentConfigId, forKey: Key("agentConfigId"))
+    }
+  }
+
+  public enum DecideProposalParamsDecision: String, Codable, Sendable, Equatable, CaseIterable {
+    case accept = "accept"
+    case dismiss = "dismiss"
+  }
+
+  public struct DecideProposalParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public var entryId: String
+    public var itemId: String
+    public var decision: DecideProposalParamsDecision
+    public init(workspaceId: String, sessionId: String, entryId: String, itemId: String, decision: DecideProposalParamsDecision) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+      self.entryId = entryId
+      self.itemId = itemId
+      self.decision = decision
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.entryId = try c.decode(String.self, forKey: Key("entryId"))
+      self.itemId = try c.decode(String.self, forKey: Key("itemId"))
+      self.decision = try c.decode(DecideProposalParamsDecision.self, forKey: Key("decision"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encode(self.entryId, forKey: Key("entryId"))
+      try c.encode(self.itemId, forKey: Key("itemId"))
+      try c.encode(self.decision, forKey: Key("decision"))
+    }
+  }
+
+  public enum DecideProposalResultOutcome: String, Codable, Sendable, Equatable, CaseIterable {
+    case saved = "saved"
+    case created = "created"
+    case dismissed = "dismissed"
+  }
+
+  public struct DecideProposalResult: Codable, Sendable, Equatable {
+    public var outcome: DecideProposalResultOutcome
+    public var scheduleId: String?
+    public init(outcome: DecideProposalResultOutcome, scheduleId: String? = nil) {
+      self.outcome = outcome
+      self.scheduleId = scheduleId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.outcome = try c.decode(DecideProposalResultOutcome.self, forKey: Key("outcome"))
+      self.scheduleId = try c.decodeIfPresent(String.self, forKey: Key("scheduleId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.outcome, forKey: Key("outcome"))
+      try c.encodeIfPresent(self.scheduleId, forKey: Key("scheduleId"))
     }
   }
 
@@ -8289,6 +8623,16 @@ extension RuntimeContract {
         return nil
       }
     }
+    public enum AndroidEmulatorControl: RuntimeCall {
+      public typealias Params = RuntimeContract.AndroidEmulatorControlParams
+      public typealias Result = RuntimeContract.AndroidEmulatorControlResult
+      public static let method = "androidEmulatorControl"
+      public static let timeout: Double = 100
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .androidEmulatorControl(let result) = value { return result }
+        return nil
+      }
+    }
     public enum ArchiveSession: RuntimeCall {
       public typealias Params = RuntimeContract.ArchiveSessionParams
       public typealias Result = RuntimeContract.Empty
@@ -8366,6 +8710,16 @@ extension RuntimeContract {
       public static let timeout: Double = 45
       public static func result(_ value: RuntimeContract.CallResult) -> Result? {
         if case .creationOptions(let result) = value { return result }
+        return nil
+      }
+    }
+    public enum DecideProposal: RuntimeCall {
+      public typealias Params = RuntimeContract.DecideProposalParams
+      public typealias Result = RuntimeContract.DecideProposalResult
+      public static let method = "decideProposal"
+      public static let timeout: Double = 75
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .decideProposal(let result) = value { return result }
         return nil
       }
     }
@@ -8775,6 +9129,7 @@ extension RuntimeContract {
     case agentProviderProbe(RuntimeContract.AgentProviderProbeResult)
     case agentProviders(RuntimeContract.AgentProvidersResult)
     case agentRoles(RuntimeContract.AgentRoleSnapshot)
+    case androidEmulatorControl(RuntimeContract.AndroidEmulatorControlResult)
     case archiveSession(RuntimeContract.Empty)
     case checkTurnQuota(RuntimeContract.CheckTurnQuotaResult)
     case closeSession(RuntimeContract.Empty)
@@ -8783,6 +9138,7 @@ extension RuntimeContract {
     case createSession(RuntimeContract.CreateSessionResult)
     case createTab(RuntimeContract.CreateSessionResult)
     case creationOptions(RuntimeContract.CreationOptions)
+    case decideProposal(RuntimeContract.DecideProposalResult)
     case deleteSession(RuntimeContract.DeleteSessionResult)
     case editSession(RuntimeContract.EditSessionResult)
     case ensureSession(RuntimeContract.Empty)
@@ -8890,6 +9246,7 @@ extension RuntimeContract {
         case "agentProviderProbe": message = .result(id: id, .agentProviderProbe(try c.decode(RuntimeContract.AgentProviderProbeResult.self, forKey: Key("payload"))))
         case "agentProviders": message = .result(id: id, .agentProviders(try c.decode(RuntimeContract.AgentProvidersResult.self, forKey: Key("payload"))))
         case "agentRoles": message = .result(id: id, .agentRoles(try c.decode(RuntimeContract.AgentRoleSnapshot.self, forKey: Key("payload"))))
+        case "androidEmulatorControl": message = .result(id: id, .androidEmulatorControl(try c.decode(RuntimeContract.AndroidEmulatorControlResult.self, forKey: Key("payload"))))
         case "archiveSession": message = .result(id: id, .archiveSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "checkTurnQuota": message = .result(id: id, .checkTurnQuota(try c.decode(RuntimeContract.CheckTurnQuotaResult.self, forKey: Key("payload"))))
         case "closeSession": message = .result(id: id, .closeSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
@@ -8898,6 +9255,7 @@ extension RuntimeContract {
         case "createSession": message = .result(id: id, .createSession(try c.decode(RuntimeContract.CreateSessionResult.self, forKey: Key("payload"))))
         case "createTab": message = .result(id: id, .createTab(try c.decode(RuntimeContract.CreateSessionResult.self, forKey: Key("payload"))))
         case "creationOptions": message = .result(id: id, .creationOptions(try c.decode(RuntimeContract.CreationOptions.self, forKey: Key("payload"))))
+        case "decideProposal": message = .result(id: id, .decideProposal(try c.decode(RuntimeContract.DecideProposalResult.self, forKey: Key("payload"))))
         case "deleteSession": message = .result(id: id, .deleteSession(try c.decode(RuntimeContract.DeleteSessionResult.self, forKey: Key("payload"))))
         case "editSession": message = .result(id: id, .editSession(try c.decode(RuntimeContract.EditSessionResult.self, forKey: Key("payload"))))
         case "ensureSession": message = .result(id: id, .ensureSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
