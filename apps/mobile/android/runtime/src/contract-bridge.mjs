@@ -73,6 +73,9 @@ export function contractBridge(runtime, emit) {
   projectGroups:args=>invoke('projectGroups',args),
   // A changed file's text before and after one turn, read from the session's computer.
   turnDiff:args=>invoke('turnDiff',args),
+  // The browse-files sheet: one folder of the session's local project, and one file's contents.
+  listDir:args=>invoke('listDir',args),
+  readFile:args=>invoke('readFile',args),
   // Schedules: the list with time zones, one schedule's detail, and owner writes (the runtime's 70 s budget).
   schedules:args=>invoke('schedules',args),
   scheduleDetail:args=>invoke('scheduleDetail',args),

@@ -136,4 +136,14 @@ class RuntimeProtocolTest {
   assertThrows(Exception::class.java){RuntimeProtocol.event(JSONObject("""{"type":"catalog","revision":7,"catalog":{}}"""))}
   assertNull(RuntimeProtocol.event(JSONObject("""{"type":"futureEvent"}""")))
  }
+ @Test fun browseFilesKeepsSafeEntriesFoldersFirstAndMapsFileOutcomes() {
+  val listing = RuntimeProtocol.directory(JSONObject("""{"truncated":true,"entries":[{"name":"b.md","type":"file"},{"name":"src","type":"directory"},{"name":"A.md","type":"file"},{"name":"..","type":"directory"},{"name":"x/y","type":"file"},{"name":"link","type":"symlink"},{"type":"file"}]}"""))
+  assertEquals(listOf(DirectoryEntry("src", true), DirectoryEntry("A.md", false), DirectoryEntry("b.md", false)), listing.entries)
+  assertTrue(listing.truncated)
+  assertThrows(IllegalArgumentException::class.java) { RuntimeProtocol.directory(JSONObject("{}")) }
+  assertEquals(FileContent.Text("docs/a.md", "# A\n", 4), RuntimeProtocol.file(JSONObject("""{"status":"ok","path":"docs/a.md","kind":"text","text":"# A\n","bytes":4}"""), "docs/a.md"))
+  assertEquals(FileContent.Binary("logo.png", 8), RuntimeProtocol.file(JSONObject("""{"status":"ok","path":"logo.png","kind":"binary","base64":"iVBORw0KGgo=","bytes":8}"""), "logo.png"))
+  assertEquals(FileContent.Failed("big.md", "too_large"), RuntimeProtocol.file(JSONObject("""{"status":"error","path":"big.md","code":"too_large"}"""), "big.md"))
+  assertEquals(FileContent.Failed("odd.md", "read_failed"), RuntimeProtocol.file(JSONObject("""{"status":"ok","kind":"text"}"""), "odd.md"))
+ }
 }

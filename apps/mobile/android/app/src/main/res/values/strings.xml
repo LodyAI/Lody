@@ -72,6 +72,7 @@
     <string name="home_empty">No chats yet</string>
     <string name="home_projects_empty">No projects yet</string>
     <string name="home_offline">Offline</string>
+    <string name="home_connecting">Connecting…</string>
     <string name="home_syncing">Syncing…</string>
     <string name="home_connected">Connected</string>
     <string name="home_no_workspaces">No accessible workspaces</string>
@@ -90,6 +91,20 @@
     <string name="chat_empty">No text messages yet</string>
     <string name="chat_offline">Messages unavailable</string>
     <string name="chat_retry">Retry</string>
+    <string name="chat_image_label">Image, %1$s</string>
+    <string name="chat_image_page">%1$d of %2$d</string>
+    <string name="chat_image_open">Open image</string>
+    <string name="chat_image_next">Next image</string>
+    <string name="chat_image_previous">Previous image</string>
+    <string name="chat_image_failed">Couldn\'t load the image. Tap to retry.</string>
+    <string name="chat_image_close">Close image</string>
+    <string name="chat_image_share">Share</string>
+    <string name="chat_image_copy">Copy</string>
+    <string name="chat_image_save">Save to gallery</string>
+    <string name="chat_image_copied">Image copied</string>
+    <string name="chat_image_saved">Saved to Pictures/Lody</string>
+    <string name="chat_image_save_failed">Couldn\'t save the image</string>
+    <string name="chat_image_unavailable">The image isn\'t available yet</string>
 
     <!-- New session -->
     <string name="create_title">New session</string>
@@ -291,6 +306,21 @@
         <item quantity="one">%d file</item>
         <item quantity="other">%d files</item>
     </plurals>
+    <string name="files_title">Project files</string>
+    <string name="files_retry">Retry</string>
+    <string name="files_error_folder">Could not read this folder. The computer may be offline.</string>
+    <string name="files_empty_folder">This folder is empty.</string>
+    <string name="files_truncated">Only the first 2,000 items are shown.</string>
+    <string name="files_markdown_only">Only Markdown files can be previewed for now.</string>
+    <string name="files_error_too_large">This file is too large to preview.</string>
+    <string name="files_error_not_found">This file no longer exists.</string>
+    <string name="files_error_permission">The computer does not allow reading this file.</string>
+    <string name="files_error_path">This file is outside the project.</string>
+    <string name="files_error_binary">This file is not text and cannot be previewed.</string>
+    <string name="files_error_read">Could not read this file. The computer may be offline.</string>
+    <string name="files_preview">Preview</string>
+    <string name="files_source">Source</string>
+    <string name="files_empty_file">This file is empty.</string>
     <string name="chat_files_back">Back to files</string>
     <string name="chat_diff_binary">This file is not text, so there is no line diff.</string>
     <string name="chat_diff_too_large">This change is too large to show on the phone.</string>

@@ -152,6 +152,17 @@ export function createEncryptedDispatchLegacy(options: {
   ): Promise<Reply | undefined> => {
     const iroh = options.iroh;
     if (!iroh || closed || (original.frames && original.frames.length !== 1)) return undefined;
+    // Route evidence only: why this request continues on Streams, never the frame.
+    const fallback = (reason: 'not-ready' | 'call-failed' | 'unverified') => {
+      console.debug('[e2ee-rpc-timing]', {
+        stage: 'iroh-fallback',
+        reason,
+        kind: call.kind,
+        requestId: original.requestId,
+        at: Date.now(),
+      });
+      return undefined;
+    };
     let budget: ReturnType<typeof setTimeout> | undefined;
     const ready = await Promise.race([
       iroh.ready(original.targetMachineId).catch(() => false),
@@ -159,15 +170,25 @@ export function createEncryptedDispatchLegacy(options: {
         budget = setTimeout(() => resolve(false), IROH_READY_BUDGET_MS);
       }),
     ]).finally(() => clearTimeout(budget));
-    if (!ready) return undefined;
-    const frames = await iroh
-      .call(
-        original.targetMachineId,
-        { id: original.requestId, frame: original.frames?.[0] ?? original.frameHex },
-        timeoutMs
-      )
-      .catch(() => undefined);
-    if (!frames) return undefined;
+    if (!ready) return fallback('not-ready');
+    // The renderer owns the deadline: the host may first wait for its account lock,
+    // and that wait must not hold the same original back from Streams. A late iroh
+    // delivery is deduplicated by the receiver.
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const frames = await Promise.race([
+      iroh
+        .call(
+          original.targetMachineId,
+          { id: original.requestId, frame: original.frames?.[0] ?? original.frameHex },
+          timeoutMs
+        )
+        .catch(() => undefined),
+      new Promise<undefined>((resolve) => {
+        deadline = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+    ]).finally(() => clearTimeout(deadline));
+    // A late reply or a broken connection; the same original continues on Streams.
+    if (!frames) return closed ? undefined : fallback('call-failed');
     if (call.kind === 'dispatch') {
       const dispatch = dispatches.get(original.requestId);
       if (effects && dispatch && !dispatch.appended) {
@@ -192,13 +213,7 @@ export function createEncryptedDispatchLegacy(options: {
         return reply;
       }
     }
-    console.debug('[e2ee-rpc-timing]', {
-      stage: 'iroh-fallback',
-      kind: call.kind,
-      requestId: original.requestId,
-      at: Date.now(),
-    });
-    return undefined;
+    return fallback('unverified');
   };
   const requestFeature = async (
     request: LocalMachineRpcRequest,

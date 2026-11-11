@@ -33,6 +33,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var permissionPage: PermissionController?
   var permissionScope: (userId: String, workspaceId: String)?
   var openingFiles: Set<String> = []
+  /// PR pages open from this conversation (`owner/repo#number`, lowercased) until their page closes.
+  var openPullRequests: Set<String> = []
   var mentions: MentionCatalogStore?
   var mentionSequence = 0
   var editable = ""
@@ -410,6 +412,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     if reviewable {
       changes.append(UIAction(title: String(localized: "workspaceChanges.title", bundle: .lody), image: UIImage(systemName: "plus.forwardslash.minus")) {
         [weak self] _ in self?.openWorkspaceChanges()
+      })
+    }
+    if browsable {
+      // Browse the local project and open a file (Markdown renders; Source toggles the text).
+      changes.append(UIAction(title: String(localized: "session.action.projectFiles", bundle: .lody), image: UIImage(systemName: "folder")) {
+        [weak self] _ in self?.openProjectFiles(title: String(localized: "files.title", bundle: .lody))
       })
     }
     var children: [UIMenuElement] = changes

@@ -19,8 +19,11 @@ import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rp
 import { isE2eeReadQuery, type E2eeQueryInput, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
 import {
   FileDownloadRequestSchema,
+  SessionDirectoryListRequestSchema,
   type FileDownloadRequest,
   type FileDownloadResponse,
+  type SessionDirectoryListRequest,
+  type SessionDirectoryListResponse,
 } from '@lody/shared';
 import type { ProjectProbeLocalMemberResult } from '@lody/shared';
 import type {
@@ -571,6 +574,10 @@ type RpcServerDeps = {
   /** File Preview v3 — a plain read; must not activate Code Collab. */
   previewFile?: (args: FilePreviewV3Request) => Promise<FilePreviewV3Response>;
   downloadFileChunk?: (args: FileDownloadRequest) => Promise<FileDownloadResponse>;
+  /** `file/list-dir`: one folder of the session's own workspace; a plain read like previewFile. */
+  listSessionDirectory?: (
+    args: SessionDirectoryListRequest
+  ) => Promise<SessionDirectoryListResponse>;
   refreshCodeCollabText?: (
     args: CodeCollabV2RefreshTextRequest
   ) => Promise<CodeCollabV2RefreshTextResponse>;
@@ -2269,6 +2276,23 @@ export class LoroStreamsMachineRpcServer {
           });
           return;
         }
+        case 'file/list-dir': {
+          const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
+          codeCollabOwnerSessionId = decoded.ownerSessionId;
+          const params = SessionDirectoryListRequestSchema.parse(decoded.payload);
+          // Same owner binding as file/preview: a client cannot list another
+          // session's workspace by swapping the session id.
+          await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
+          const response: SessionDirectoryListResponse = this.deps.listSessionDirectory
+            ? await this.deps.listSessionDirectory(params)
+            : filePreviewV3Error('unsupported_protocol', {
+                message: 'Session folder listing is not available on this machine.',
+              });
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
+            codeCollabOwnerSessionId: decoded.ownerSessionId,
+          });
+          return;
+        }
         case 'file/preview': {
           const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
           codeCollabOwnerSessionId = decoded.ownerSessionId;
@@ -2485,7 +2509,9 @@ export class LoroStreamsMachineRpcServer {
       }
       const codeCollabError = request.method.startsWith('code-collab/')
         ? toCodeCollabRpcError(failure)
-        : request.method === 'file/preview' || request.method === 'file/download-chunk'
+        : request.method === 'file/preview' ||
+            request.method === 'file/download-chunk' ||
+            request.method === 'file/list-dir'
           ? toFilePreviewRpcError(failure, message)
           : null;
       await appendErrorResponse(
@@ -2634,6 +2660,7 @@ export class LoroStreamsMachineRpcServer {
       | CodeCollabV2LspUnsupported
       | FilePreviewV3Response
       | FileDownloadResponse
+      | SessionDirectoryListResponse
       | SessionPreviewCreateResponse
       | SessionPreviewRevokeResponse
       | SessionPreviewStatusResponse
