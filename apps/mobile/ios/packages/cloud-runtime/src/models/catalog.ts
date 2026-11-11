@@ -64,6 +64,7 @@ export type Session = {
   /** Web `session.baseBranch || project.branch`: the branch the session started from. */
   baseBranch?: string;
   iosSimulatorPreviewRequestId?: string;
+  androidEmulatorPreviewRequestId?: string;
   pullRequests?: import('./pull-request').PullRequestReference[];
   diff?: { add: number; del: number };
   /** Uncommitted changes / local commits the remote lacks; drive the action bar's Commit & Push. */
@@ -81,6 +82,8 @@ export type Catalog = {
   /** Each computer's OS (`darwin` / `win32` / `linux`), for its icon. */
   machineOs?: Record<string, string>;
   machineSimulators?: Record<string, 'available' | 'upgrade-required'>;
+  /** Machines whose CLI advertises Android emulator preview (`androidEmulator: 1`), on any OS. */
+  machineEmulators?: Record<string, 'available'>;
 };
 export type SavedCatalog = { catalog: Catalog; syncedAt: number };
 export type Connection = {
