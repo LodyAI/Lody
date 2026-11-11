@@ -95,19 +95,19 @@ export function useManagedPreviewFrame({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const handledCommandIdRef = useRef(0);
-  // A static document is one srcdoc. Once its runtime has announced itself and
-  // the document has finished loading, any further load the parent did not start
-  // means page script replaced the document (for example `location.assign`),
-  // which the injected runtime cannot intercept. Loads before that point (an
-  // engine's initial about:blank, or a document without a live runtime) are
-  // ordinary.
-  const staticDocumentPhaseRef = useRef<'pending' | 'ready' | 'loaded'>('pending');
-  // A parent-owned reload replaces the srcdoc itself, so the outgoing runtime's
-  // unload signal is expected once. The next ready signal clears it.
-  const expectStaticUnloadRef = useRef(false);
-  // Set once a static frame was torn down after page script replaced it. A later
-  // reload re-acquires a fresh frame instead of reusing the detached one.
-  const staticFrameRetiredRef = useRef(false);
+  // Lifecycle of a static srcdoc, used to detect page script replacing it
+  // (for example `location.assign`), which the runtime cannot cancel:
+  // - `pending`: before the runtime announces itself. Loads here (an engine's
+  //   initial about:blank, or a document without a live runtime) are ordinary.
+  // - `reloading`: the parent replaced the srcdoc; the outgoing runtime's one
+  //   unload signal is expected.
+  // - `ready` → `loaded`: the runtime is live, then the document loaded. An unload
+  //   signal from either, or any load after `loaded`, is a replacement.
+  // - `retired`: the frame was removed after a replacement. Reload re-acquires a
+  //   fresh frame (bumping `frameGeneration`) instead of the detached one.
+  const staticPhaseRef = useRef<'pending' | 'reloading' | 'ready' | 'loaded' | 'retired'>(
+    'pending'
+  );
   const [frameGeneration, setFrameGeneration] = useState(0);
   const previewOrigin = useMemo(
     () => (documentHtml === undefined ? new URL(viewerUrl).origin : 'null'),
@@ -137,10 +137,8 @@ export function useManagedPreviewFrame({
   // policy. Callers normally unmount on that request; if one does not, reload
   // re-acquires a fresh frame.
   const retireReplacedStaticFrame = useStableCallback(() => {
-    if (staticFrameRetiredRef.current) return;
-    staticFrameRetiredRef.current = true;
-    staticDocumentPhaseRef.current = 'pending';
-    expectStaticUnloadRef.current = false;
+    if (staticPhaseRef.current === 'retired') return;
+    staticPhaseRef.current = 'retired';
     iframeRef.current?.remove();
     setIframeLoaded(false);
     onAnnotationAvailabilityChange(false);
@@ -150,13 +148,14 @@ export function useManagedPreviewFrame({
 
   const handleIframeLoad = useStableCallback(() => {
     if (documentHtml !== undefined) {
-      if (staticFrameRetiredRef.current) return;
-      if (staticDocumentPhaseRef.current === 'loaded') {
+      const phase = staticPhaseRef.current;
+      if (phase === 'retired') return;
+      if (phase === 'loaded') {
         // Fallback for a replacement the runtime could not report on unload.
         retireReplacedStaticFrame();
         return;
       }
-      if (staticDocumentPhaseRef.current === 'ready') staticDocumentPhaseRef.current = 'loaded';
+      if (phase === 'ready') staticPhaseRef.current = 'loaded';
     }
     // A new document starts its handshake from scratch; a live runtime re-reports
     // immediately in response to the SET_ANNOTATION_MODE message below.
@@ -178,19 +177,19 @@ export function useManagedPreviewFrame({
 
   const hardReloadFrame = useStableCallback(() => {
     const iframe = iframeRef.current;
-    if (documentHtml !== undefined && staticFrameRetiredRef.current) {
-      syncFrameLoadState(false);
-      setFrameGeneration((generation) => generation + 1);
-      return;
-    }
-    if (!iframe) return;
     if (documentHtml !== undefined) {
+      if (staticPhaseRef.current === 'retired') {
+        syncFrameLoadState(false);
+        setFrameGeneration((generation) => generation + 1);
+        return;
+      }
+      if (!iframe) return;
       syncFrameLoadState(false);
-      staticDocumentPhaseRef.current = 'pending';
-      expectStaticUnloadRef.current = true;
+      staticPhaseRef.current = 'reloading';
       iframe.srcdoc = documentHtml;
       return;
     }
+    if (!iframe) return;
     let nextSrc = viewerUrl;
     try {
       nextSrc = buildManagedViewerUrlForLogicalUrl(viewerUrl, logicalUrl);
@@ -204,9 +203,7 @@ export function useManagedPreviewFrame({
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
-    staticDocumentPhaseRef.current = 'pending';
-    expectStaticUnloadRef.current = false;
-    staticFrameRetiredRef.current = false;
+    staticPhaseRef.current = 'pending';
     const frame = acquireManagedPreviewFrame({
       sessionId,
       viewerUrl,
@@ -274,11 +271,13 @@ export function useManagedPreviewFrame({
     const handleMessage = (event: MessageEvent<unknown>) => {
       if (event.origin !== previewOrigin || event.source !== iframeRef.current?.contentWindow)
         return;
-      if (isRecord(event.data) && event.data.type === MANAGED_BROWSER_READY_MESSAGE_TYPE) {
-        if (documentHtml !== undefined) {
-          expectStaticUnloadRef.current = false;
-          if (staticDocumentPhaseRef.current === 'pending')
-            staticDocumentPhaseRef.current = 'ready';
+      const type = isRecord(event.data) ? event.data.type : undefined;
+      if (type === MANAGED_BROWSER_READY_MESSAGE_TYPE) {
+        if (
+          documentHtml !== undefined &&
+          (staticPhaseRef.current === 'pending' || staticPhaseRef.current === 'reloading')
+        ) {
+          staticPhaseRef.current = 'ready';
         }
         // Scripts can be ready while images or other page resources still load.
         // This reply does not require iframeLoaded and contains no page data.
@@ -286,16 +285,13 @@ export function useManagedPreviewFrame({
           { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: annotationEnabled },
           previewPostMessageOrigin
         );
-      } else if (
-        isRecord(event.data) &&
-        event.data.type === MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE
-      ) {
+      } else if (type === MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE) {
         // Only static documents send this, and never with page data. Unlike the
         // load fallback it does not wait for the replacement page to finish
         // loading, and it also covers a replacement before the srcdoc's own load.
         if (documentHtml === undefined) return;
-        if (expectStaticUnloadRef.current) {
-          expectStaticUnloadRef.current = false;
+        if (staticPhaseRef.current === 'reloading') {
+          staticPhaseRef.current = 'pending';
           return;
         }
         retireReplacedStaticFrame();

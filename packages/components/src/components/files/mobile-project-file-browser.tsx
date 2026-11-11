@@ -24,6 +24,7 @@ import {
 import { Button } from '@lody/ui/button';
 import { ReadOnlyHtmlPreview } from '@/components/sessions/read-only-html-preview';
 import { StaticHtmlScriptPreview } from '@/components/sessions/static-html-script-preview';
+import { useTextBoundScriptOptIn } from '@/components/sessions/use-text-bound-script-opt-in';
 import { getExecutableHtmlPreviewSupport } from '@/components/sessions/managed-preview-frame-cache';
 import { toast } from '@/lib/toast';
 import { Spinner } from '@/ui/spinner';
@@ -814,10 +815,12 @@ function MobileTextPreview({
   const [showHtml, setShowHtml] = useState(true);
   // Repository HTML is untrusted (it may come from a cloned third-party repo),
   // so it opens script-free and runs only after an explicit, labelled opt-in on
-  // every engine. The opt-in records the exact text it was given for, so a
-  // refreshed file needs a new opt-in.
-  const [htmlScriptsOptedInFor, setHtmlScriptsOptedInFor] = useState<string | null>(null);
-  const runHtmlScripts = htmlScriptsOptedInFor === text;
+  // every engine, for this exact text.
+  const {
+    optedIn: runHtmlScripts,
+    toggle: toggleHtmlScripts,
+    revoke: revokeHtmlScripts,
+  } = useTextBoundScriptOptIn(text);
   const canRunHtmlScripts = getExecutableHtmlPreviewSupport() !== 'unsupported';
   const resolvedTheme = useResolvedTheme();
   const activeVSCodeTheme = useActiveVSCodeTheme();
@@ -839,7 +842,7 @@ function MobileTextPreview({
                 : t('sessions.fileViewer.preview.show', 'Preview')
             }
             onClick={() => {
-              setHtmlScriptsOptedInFor(null);
+              revokeHtmlScripts();
               setShowHtml((value) => !value);
             }}
           >
@@ -850,7 +853,7 @@ function MobileTextPreview({
               variant="ghost"
               size="small"
               aria-pressed={runHtmlScripts}
-              onClick={() => setHtmlScriptsOptedInFor(runHtmlScripts ? null : text)}
+              onClick={toggleHtmlScripts}
             >
               {runHtmlScripts
                 ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
@@ -863,7 +866,7 @@ function MobileTextPreview({
             path={path}
             text={text}
             onNavigationRequest={() => {
-              setHtmlScriptsOptedInFor(null);
+              revokeHtmlScripts();
               toast.warning(
                 t(
                   'sessions.fileViewer.htmlPreview.navigationDisabled',

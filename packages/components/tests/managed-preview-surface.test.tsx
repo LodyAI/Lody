@@ -4,7 +4,17 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import {
   MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE,
@@ -111,6 +121,25 @@ const targetMessage = {
     nearbyText: { self: 'Save', siblingTexts: [] },
     style: {},
   },
+};
+
+const IOS_SAFARI_USER_AGENT =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+
+/** Runs `run` with credentialless iframes removed and `navigator.userAgent` spied, then restores both. */
+const withoutCredentiallessFrames = (run: (userAgent: MockInstance<() => string>) => void) => {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'credentialless');
+  const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
+  const prototype = HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean };
+  try {
+    delete prototype.credentialless;
+    run(userAgent);
+  } finally {
+    userAgent.mockRestore();
+    if (descriptor)
+      Object.defineProperty(HTMLIFrameElement.prototype, 'credentialless', descriptor);
+    else delete prototype.credentialless;
+  }
 };
 
 type StatePreservingElement = HTMLElement & {
@@ -364,18 +393,9 @@ describe('ManagedPreviewSurface', () => {
   });
 
   it('refuses an executable static frame on opt-in engines without explicit consent', () => {
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLIFrameElement.prototype,
-      'credentialless'
-    );
-    const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
-    const host = document.createElement('div');
-    try {
-      delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
-        .credentialless;
-      userAgent.mockReturnValue(
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
-      );
+    withoutCredentiallessFrames((userAgent) => {
+      userAgent.mockReturnValue(IOS_SAFARI_USER_AGENT);
+      const host = document.createElement('div');
       const request = {
         sessionId: null,
         viewerUrl: 'https://html-file-preview.invalid/a.html',
@@ -388,38 +408,22 @@ describe('ManagedPreviewSurface', () => {
       const frame = acquireManagedPreviewFrame({ ...request, scriptsOptedIn: true });
       expect(frame.iframe.getAttribute('srcdoc')).toBe('<p>a</p>');
       releaseManagedPreviewFrame(null, frame.iframe);
-    } finally {
-      userAgent.mockRestore();
-      if (descriptor)
-        Object.defineProperty(HTMLIFrameElement.prototype, 'credentialless', descriptor);
-      else
-        delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
-          .credentialless;
-    }
+    });
   });
 
   it('classifies executable HTML preview support by engine', () => {
-    const safari =
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
     const iosChrome =
       'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0 Mobile/15E148 Safari/604.1';
     const chrome =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
     const firefox = 'Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0';
-    expect(isWebKitUserAgent(safari)).toBe(true);
+    expect(isWebKitUserAgent(IOS_SAFARI_USER_AGENT)).toBe(true);
     expect(isWebKitUserAgent(iosChrome)).toBe(true);
     expect(isWebKitUserAgent(chrome)).toBe(false);
     expect(isWebKitUserAgent(firefox)).toBe(false);
 
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLIFrameElement.prototype,
-      'credentialless'
-    );
-    const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
-    try {
-      delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
-        .credentialless;
-      userAgent.mockReturnValue(safari);
+    withoutCredentiallessFrames((userAgent) => {
+      userAgent.mockReturnValue(IOS_SAFARI_USER_AGENT);
       expect(getExecutableHtmlPreviewSupport()).toBe('opt-in');
       userAgent.mockReturnValue(firefox);
       expect(getExecutableHtmlPreviewSupport()).toBe('unsupported');
@@ -430,14 +434,7 @@ describe('ManagedPreviewSurface', () => {
       });
       userAgent.mockReturnValue(chrome);
       expect(getExecutableHtmlPreviewSupport()).toBe('automatic');
-    } finally {
-      userAgent.mockRestore();
-      if (descriptor)
-        Object.defineProperty(HTMLIFrameElement.prototype, 'credentialless', descriptor);
-      else
-        delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
-          .credentialless;
-    }
+    });
   });
 
   it('accepts runtime data only from the current exact Quick origin and frame, including after restore', async () => {

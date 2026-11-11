@@ -119,6 +119,7 @@ import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-o
 import { SessionFileErrorState } from './session-file-error-state';
 import { SessionShikiTextViewer } from './session-shiki-text-viewer';
 import { ManagedPreviewSurface } from './managed-preview-surface';
+import { useTextBoundScriptOptIn } from './use-text-bound-script-opt-in';
 
 import { getExecutableHtmlPreviewSupport } from './managed-preview-frame-cache';
 import {
@@ -638,11 +639,6 @@ function SessionFileContentViewImpl({
   );
   const handledHtmlPreviewRequestSeqRef = useRef<number | undefined>(undefined);
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(false);
-  // WebKit has no credentialless frames, so HTML there runs scripts only after an
-  // explicit per-document opt-in. The opt-in records the exact text it was given
-  // for: new content (an agent rewrite) needs a new opt-in, and leaving rendered
-  // mode revokes it.
-  const [htmlScriptsOptedInFor, setHtmlScriptsOptedInFor] = useState<string | null>(null);
   const [htmlAnnotationAvailable, setHtmlAnnotationAvailable] = useState(false);
   const [htmlPreviewLoading, setHtmlPreviewLoading] = useState(false);
   const [htmlRuntimeError, setHtmlRuntimeError] = useState<string | null>(null);
@@ -1210,8 +1206,13 @@ function SessionFileContentViewImpl({
     isHtmlPath(normalizedPath)
       ? (latestEditorTextRef.current ?? data.snapshot.text)
       : null;
-  const htmlScriptsOptedIn =
-    htmlPreviewSource !== null && htmlScriptsOptedInFor === htmlPreviewSource;
+  // WebKit has no credentialless frames, so HTML there runs scripts only after an
+  // explicit opt-in for this exact text; leaving rendered mode revokes it.
+  const {
+    optedIn: htmlScriptsOptedIn,
+    toggle: toggleHtmlScriptsOptIn,
+    revoke: revokeHtmlScriptsOptIn,
+  } = useTextBoundScriptOptIn(htmlPreviewSource);
   const supportsHtmlPreview =
     htmlScriptSupport === 'automatic' || (htmlScriptSupport === 'opt-in' && htmlScriptsOptedIn);
   const isHtmlTextFile = htmlPreviewSource !== null;
@@ -1230,13 +1231,13 @@ function SessionFileContentViewImpl({
 
   useEffect(() => {
     if (showHtmlRendered) return;
-    setHtmlScriptsOptedInFor(null);
+    revokeHtmlScriptsOptIn();
     setHtmlAnnotationEnabled(false);
     setHtmlAnnotationAvailable(false);
     setHtmlPreviewLoading(false);
     setHtmlRuntimeError(null);
     setHtmlPreviewCommand(undefined);
-  }, [showHtmlRendered]);
+  }, [revokeHtmlScriptsOptIn, showHtmlRendered]);
 
   const handleHtmlAnnotationAvailabilityChange = useCallback((available: boolean) => {
     setHtmlAnnotationAvailable(available);
@@ -1250,7 +1251,7 @@ function SessionFileContentViewImpl({
   }, []);
   const handleHtmlBrowserStateChange = useCallback(() => undefined, []);
   const handleHtmlNavigationRequest = useCallback(() => {
-    setHtmlScriptsOptedInFor(null);
+    revokeHtmlScriptsOptIn();
     setHtmlAnnotationEnabled(false);
     setHtmlRenderMode('code');
     toast.warning(
@@ -1259,7 +1260,7 @@ function SessionFileContentViewImpl({
         'Navigation is disabled for self-contained HTML previews.'
       )
     );
-  }, [tRef]);
+  }, [revokeHtmlScriptsOptIn, tRef]);
   const isProviderEditorDirty =
     saveStatus.kind === 'pending' ||
     saveStatus.kind === 'saving' ||
@@ -1932,7 +1933,7 @@ function SessionFileContentViewImpl({
                 aria-pressed={htmlScriptsOptedIn}
                 onClick={() => {
                   setHtmlAnnotationEnabled(false);
-                  setHtmlScriptsOptedInFor(htmlScriptsOptedIn ? null : htmlPreviewSource);
+                  toggleHtmlScriptsOptIn();
                 }}
                 title={
                   htmlScriptsOptedIn
