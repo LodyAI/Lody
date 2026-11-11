@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -111,6 +113,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     var status by remember(id, scope) { mutableStateOf("syncing") }
     var historyHasMore by remember(id, scope) { mutableStateOf(false) }
     var historyLoading by remember(id, scope) { mutableStateOf(false) }
+    // User turns plus queued inputs, as the free-plan quota counts them (runtime `billableTurnCount`).
+    var billableTurns by remember(id, scope) { mutableStateOf<Int?>(null) }
     var messages by remember(id, scope) { mutableStateOf(emptyList<SessionMessage>()) }
     // The latest user turn's run config, from the session snapshot (iOS `composerJSON`).
     var usage by remember(id, scope) { mutableStateOf<app.lody.android.runtime.SessionUsage?>(null) }
@@ -210,6 +214,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 usage = snapshot.usage
                 historyHasMore = snapshot.historyHasMore
                 historyLoading = snapshot.historyLoading
+                billableTurns = snapshot.billableTurnCount
                 status = snapshot.status
                 if (snapshot.messages.any { it.streaming }) delay(33)
             }
@@ -242,10 +247,29 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     }
     val creationUnconfirmed = creation != null && creation.request.turnId !in forgotten && creation.state !in setOf("accepted", "queued") && creation.request.turnId !in authorsByMessage
     val creationNotice = if (creationUnconfirmed && creation?.state != "sending") {
-        stringResource(if (creation?.state == "rejected") R.string.create_result_rejected else R.string.create_result_unknown)
+        stringResource(quotaFailure(creation?.reason) ?: if (creation?.state == "rejected") R.string.create_result_rejected else R.string.create_result_unknown)
     } else null
     val session = context.session
-    val canSend = context.session?.isTabClosed != true && !creationUnconfirmed && status == "live" && session?.cliType != null && session.agentType != null
+    // Web's free-plan turn quota: from turn 25 the composer says how many remain, and at 30 it
+    // closes. The plan is read once the count nears the limit (iOS `watchTier`); an unknown plan
+    // shows nothing and the runtime still refuses an over-limit send.
+    val quotaTurns = billableTurns.takeIf { status == "live" }
+    val nearQuota = (quotaTurns ?: 0) >= FREE_SESSION_TURN_LIMIT - FREE_SESSION_TURN_WARNING_REMAINING
+    var planTier by remember(id, scope) { mutableStateOf<String?>(null) }
+    LaunchedEffect(scope, id, nearQuota) {
+        if (!nearQuota) return@LaunchedEffect
+        planTier = try { repository.planTier(scope) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+    }
+    val freeQuota = planTier == "free" && nearQuota
+    val quotaLocked = freeQuota && (quotaTurns ?: 0) >= FREE_SESSION_TURN_LIMIT
+    val quotaNotice = when {
+        !freeQuota -> null
+        quotaLocked -> stringResource(R.string.chat_free_turn_limit, FREE_SESSION_TURN_LIMIT)
+        else -> (FREE_SESSION_TURN_LIMIT - (quotaTurns ?: 0)).let { pluralStringResource(R.plurals.chat_free_turns_remaining, it, it) }
+    }
+    val canSend = context.session?.isTabClosed != true && !creationUnconfirmed && status == "live" && session?.cliType != null && session.agentType != null && !quotaLocked
     // The composer's run config (web's mobile run-config chip): the session's provider choices,
     // read once the conversation is live. Until the reader changes it the chip shows the latest
     // turn's config from the snapshot and sends nothing (upstream keeps it); the first change
@@ -427,11 +451,13 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 modelId = choice.first, modeId = choice.second, effort = choice.third, explicitChoice = explicit, attachments = blocks,
                 role = role, agentConfigId = session.agentConfigId, configOptionValues = switches, guide = guide,
             )
+            var reason: String? = null
             val result = try {
                 var sent = repository.send(scope, request)
                 // An earlier Roost input still awaits its owner and nothing was written. The runtime
                 // bounds each wait, so keep the message sending with the same identity, as Web does.
                 while (sent.state == "not_sent" && sent.reason == PREVIOUS_INPUT_PENDING) sent = repository.send(scope, request)
+                reason = sent.reason
                 sent.state
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { "unknown" }
@@ -443,7 +469,12 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 else -> Delivery.Sent
             }
             outgoing = outgoing.map { if (it.turnId == turnId) it.copy(delivery = delivery) else it }
-            if (result == "not_sent") snackbar.showSnackbar(failedText)
+            if (result == "not_sent") {
+                // A quota refusal wrote nothing: hand the text back, as Web keeps the draft.
+                val quota = quotaFailure(reason)
+                if (quota != null && prompt.isEmpty() && attachments.isEmpty()) { prompt = text; field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)); attachments = files }
+                snackbar.showSnackbar(quota?.let { appContext.getString(it) } ?: failedText)
+            }
         }
         Unit
     }
@@ -458,10 +489,12 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     }
     // Web's limits: at most 8 images and 8 files per turn; extra picks are dropped with a notice.
     val addAttachments: (List<PendingAttachment>) -> Unit = { picked ->
-        val merged = attachments + picked
+        val oversized = picked.filter(SessionAttachmentUploads::oversized)
+        val merged = attachments + (picked - oversized.toSet())
         val kept = merged.filter { it.image }.take(8) + merged.filter { !it.image }.take(8)
         attachments = merged.filter { it in kept }
-        if (kept.size < merged.size) coroutines.launch { snackbar.showSnackbar(attachLimit) }
+        if (oversized.isNotEmpty()) coroutines.launch { snackbar.showSnackbar(appContext.getString(R.string.chat_attach_too_large, SessionAttachmentUploads.FILE_LIMIT_MB, oversized.first().name)) }
+        else if (kept.size < merged.size) coroutines.launch { snackbar.showSnackbar(attachLimit) }
     }
     // @ references (iOS `ChatMentionPanel`, Notion-style): every category is read once the
     // conversation is live; a trigger at the caret opens the panel docked on the keyboard.
@@ -818,6 +851,12 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 )
             }
             val modelName = capability?.models?.firstOrNull { it.id == modelId }?.name ?: session?.modelName ?: agentName
+            if (quotaNotice != null && context.session?.isTabClosed != true) Text(
+                quotaNotice,
+                style = LodyTheme.typography.footnote,
+                color = LodyTheme.colors.textSecondary,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg, vertical = LodySpacing.xs).testTag("session-free-turn-notice"),
+            )
             if (context.session?.isTabClosed != true) ChatComposer(
                 field,
                 usage = if (chosen && modelId != usage?.modelId) usage?.copy(quota = null) else usage,
@@ -911,6 +950,18 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             }
         }
     }
+}
+
+/** Web's free-plan limits (`@lody/shared` billing): 30 user turns per session, noticed from 5 left. */
+internal const val FREE_SESSION_TURN_LIMIT = 30
+internal const val FREE_SESSION_TURN_WARNING_REMAINING = 5
+
+/** Copy for the runtime's billing refusals; nothing was written for any of them. */
+internal fun quotaFailure(reason: String?): Int? = when (reason) {
+    "free_session_turn_limit_reached" -> R.string.chat_free_turn_limit_reached
+    "free_session_limit_reached" -> R.string.create_free_session_limit_reached
+    "workspace_payment_required" -> R.string.chat_workspace_payment_required
+    else -> null
 }
 
 /** Runtime `not_sent` reason: an earlier Roost input awaits its owner and nothing was written. */

@@ -44,6 +44,7 @@ open class LodyApplication : Application() {
     private var prepared: Pair<RuntimeScope, ShortLivedGrant>? = null
     private val shortcutCloud by lazy { app.lody.android.cloud.PromptShortcutCloud() }
     private val previewTokens by lazy { app.lody.android.cloud.PreviewTokens() }
+    private val workspaceBilling by lazy { app.lody.android.cloud.WorkspaceBilling() }
     protected open fun createRuntime(scope: RuntimeScope): CloudRuntime {
         val ready = prepared?.takeIf { it.first == scope }
         if (ready != null) {
@@ -55,6 +56,8 @@ open class LodyApplication : Application() {
                 account.withVerifiedAccount(key) { credential -> shortcutCloud.call(credential, key.workspaceId, operation, args) }
             }, app.lody.android.runtime.PreviewTokenProvider { key, intent ->
                 account.withVerifiedAccount(key) { credential -> previewTokens.mint(credential, key, intent) }
+            }, app.lody.android.runtime.BillingProvider { key ->
+                account.withVerifiedAccount(key) { credential -> workspaceBilling.entitlement(credential, key.workspaceId) }
             })
         }
         return createOfflineRuntime(scope)

@@ -110,6 +110,10 @@ class ChatRepository(
     suspend fun mergeState(scope: RuntimeScope, repository: String, number: Int): String? =
         mergeStates.read(scope, repository, number)
 
+    /** The workspace's plan tier for the free-turn notice; null when unknown. A read, safe to repeat. */
+    suspend fun planTier(scope: RuntimeScope): String? =
+        owner.use(scope) { (it.execute(RuntimeCommand.WorkspacePlan) as? RuntimeResult.Plan)?.tier }
+
     /** The project's provider choices (models, efforts, modes) for the composer's run config; a read. */
     suspend fun options(scope: RuntimeScope, projectId: String?): CreationOptions =
         owner.use(scope) { (it.execute(RuntimeCommand.GetCreationOptions(projectId)) as RuntimeResult.Options).value }

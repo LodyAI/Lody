@@ -15,6 +15,7 @@ internal class ReadOnlyCloudRuntime(
     private val provider: GrantProvider,
     private val shortcutCloud: ShortcutCloudProvider? = null,
     private val previewTokens: PreviewTokenProvider? = null,
+    private val billing: BillingProvider? = null,
 ) : CloudRuntime {
     private val access = StreamAccess(scope.workspaceId, initialGrant.gatewayBaseUrl)
     private val runtime = WebViewRuntime(scope, WebViewCloudRuntime(context, "NetworkRuntime.html", access))
@@ -123,9 +124,30 @@ internal class ReadOnlyCloudRuntime(
         if (!active) { grantJob?.cancel(); grantJob = null }
         runtime.setActive(active)
     }
-    override suspend fun execute(command: RuntimeCommand): RuntimeResult = runtime.execute(command)
+    override suspend fun execute(command: RuntimeCommand): RuntimeResult = when (command) {
+        // Writes the free-plan quotas gate carry the plan, read per write as on iOS.
+        is RuntimeCommand.CreateAndSend -> runtime.execute(command.copy(billing = entitlement()))
+        is RuntimeCommand.SendText -> runtime.execute(command.copy(billing = entitlement()))
+        is RuntimeCommand.MessageAction ->
+            runtime.execute(if (command.kind == "edit" && command.payload.optString("action") == "send") command.copy(billing = entitlement()) else command)
+        RuntimeCommand.WorkspacePlan -> RuntimeResult.Plan(entitlement()?.optString("effectivePlanTier")?.ifBlank { null })
+        else -> runtime.execute(command)
+    }
+    private var cachedEntitlement: Pair<Long, JSONObject>? = null
+    /** The plan projection, cached for a minute after a successful read; a failed read is null (fail open). */
+    private suspend fun entitlement(): JSONObject? {
+        val provider = billing ?: return null
+        cachedEntitlement?.let { (at, value) -> if (System.nanoTime() - at < 60_000_000_000L) return JSONObject(value.toString()) }
+        val value = withTimeoutOrNull(15_000) {
+            try { provider.entitlement(scope) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        } ?: return null
+        cachedEntitlement = System.nanoTime() to value
+        return JSONObject(value.toString())
+    }
     override suspend fun stop() = withContext(Dispatchers.Main.immediate) {
-        lifetime?.cancel(); lifetime = null; grantJob = null; firstGrant = null
+        lifetime?.cancel(); lifetime = null; grantJob = null; firstGrant = null; cachedEntitlement = null
         runtime.stop()
     }
 }
