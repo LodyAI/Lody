@@ -17,9 +17,9 @@ one Lexical contenteditable that paints its own text, caret, selection, IME
 preedit and chips. Its external model is unchanged: a string plus UTF-16 ranges,
 the same wire format, the same drafts. The owner's requirement was that users
 notice nothing, so the editor reproduces the textarea's look and editing
-semantics. Composers without mention sources keep a plain textarea. Verification
-is Chromium-only (Storybook, Playwright, jsdom); WebKit, Android IMEs and
-devices are not yet checked.
+semantics. Composers without mention sources keep a plain textarea. It is
+verified in Chromium and WebKit, and with system IMEs in an iOS simulator;
+Chinese input through Gboard and the Electron app itself are not yet checked.
 
 ## Problem
 
@@ -66,7 +66,10 @@ there" pins this; it fails on the textarea and passes on the editor.
 - **Textarea parity.**
   - CSS gives it a textarea's UA box: inline-block, pre-wrap, `overflow: auto`.
   - It is `rows` lines high plus padding, and utilities can still size it.
-  - The placeholder colour is copied from a textarea styled like the editor.
+  - A caller's `placeholder:` utilities style the editor's placeholder too, through
+    a `placeholder` variant in `tailwind/index.css`. Without one, the UA placeholder
+    colour is copied from a textarea styled like the editor. WebKit cannot report a
+    `::placeholder` style, so there the copy is skipped and the CSS default applies.
   - Spellcheck is off and selection uses system colours wherever chips render,
     as under the mirror.
   - Programmatic and keyboard focus keep the caret, while a pointer places it.
@@ -123,6 +126,15 @@ there" pins this; it fails on the textarea and passes on the editor.
   `message-quotes`, `composer-submission-focus` and `interface-typography` show
   no failure beyond those that also fail on the textarea build in the same
   environment.
-- **Not verified:** WebKit/Safari (no WebKit runtime on the verification host),
-  Android Gboard and iOS pinyin on devices, and the Electron app itself. The
-  plain-text composers are unchanged.
+- **WebKit:** the same spec runs under Playwright WebKit (`LODY_E2E_BROWSER=webkit`)
+  except its clipboard and CDP IME cases, which are Chromium-only. Its placeholder
+  case failed there when the colour was copied from a `::placeholder` query.
+- **Simulators (2026-11-11):**
+  - iOS Safari with the system pinyin keyboard passed mixed-script input, owner
+    silence during composition, composition beside a chip, chip arrows and
+    deletion, undo (including after a clear), paste and newline.
+  - Android Chrome with Gboard passed click placement, the mention menu, chip
+    deletion, newline and paste.
+- **Not verified:** Chinese input through Gboard (its language pack would not
+  download in the emulator), long-press selection across chips, and the Electron
+  app itself. The plain-text composers are unchanged.

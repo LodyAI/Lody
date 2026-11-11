@@ -201,7 +201,10 @@ function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: n
   return new DOMRect(rect.left, top, 0, lineHeight);
 }
 
-/** Copy the placeholder paint of a textarea styled like the editor. */
+/**
+ * Copy the UA placeholder paint of a textarea styled like the editor. A
+ * `placeholder:` utility reaches the editor directly (`tailwind/index.css`).
+ */
 function usePlaceholderPaint(
   element: InputElement | null,
   className: string | undefined,
@@ -220,8 +223,12 @@ function usePlaceholderPaint(
       (element.parentElement ?? document.body).appendChild(probe);
       try {
         const style = window.getComputedStyle(probe, '::placeholder');
-        element.style.setProperty('--composer-placeholder-color', style.color);
-        element.style.setProperty('--composer-placeholder-opacity', style.opacity || '1');
+        // WebKit answers a pseudo-element query with the element's own style;
+        // copying that would paint the placeholder in the text colour.
+        if (style.color !== window.getComputedStyle(probe).color) {
+          element.style.setProperty('--composer-placeholder-color', style.color);
+          element.style.setProperty('--composer-placeholder-opacity', style.opacity || '1');
+        }
       } catch {
         // Engines without pseudo-element styles keep the CSS default.
       }
@@ -1256,8 +1263,6 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   }, [editor, isPublished, publish, readSelection]);
 
   const mirrorSelection = !!context.getMentionChip;
-  const editable = !readOnly && !disabled;
-
   return (
     <div className={cn('relative', containerClassName)}>
       <div

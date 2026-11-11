@@ -199,6 +199,26 @@ test('IME composition right before a chip keeps the chip whole', async ({ page, 
   ]);
 });
 
+test('an empty composer paints its placeholder in the placeholder colour', async ({ page }) => {
+  await page.goto(BEHAVIOUR);
+  const input = editor(page);
+  await expect(input).toBeVisible({ timeout: 30_000 });
+  const paint = await input.evaluate((element) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'hsl(var(--input-placeholder))';
+    element.parentElement!.appendChild(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    return {
+      placeholder: getComputedStyle(element, '::before').color,
+      text: getComputedStyle(element).color,
+      expected,
+    };
+  });
+  expect(paint.placeholder).toBe(paint.expected);
+  expect(paint.placeholder).not.toBe(paint.text);
+});
+
 test('the composer exposes a labelled, expandable combobox', async ({ page }) => {
   const input = await open(page);
   await expect(input).toHaveAttribute('aria-expanded', 'false');
@@ -231,7 +251,10 @@ test('a click on a visible glyph puts the caret there while the composer overflo
       await input.click();
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowDown' : 'Control+End');
       const { value } = await state(page);
-      const target = value.length - 30;
+      // A full-width glyph, so a click at three quarters of it is not a
+      // sub-pixel call (a 4px Latin `i` rounds either way in WebKit).
+      let target = value.length - 30;
+      while (target < value.length - 1 && !/[\u4e00-\u9fff]/.test(value[target]!)) target += 1;
       // Where the composer visibly paints the character at `target`.
       const box = await page.getByTestId('editor-frame').evaluate((frame, target) => {
         const walker = document.createTreeWalker(frame, NodeFilter.SHOW_TEXT);
@@ -248,7 +271,12 @@ test('a click on a visible glyph puts the caret there while the composer overflo
             const range = document.createRange();
             range.setStart(node, index);
             range.setEnd(node, index + 1);
-            const rect = range.getBoundingClientRect();
+            // WebKit can add an empty or line-spanning box around a glyph at a
+            // wrap; the glyph itself is the shortest box with any width.
+            const rect = [...range.getClientRects()]
+              .filter((r) => r.width > 0)
+              .sort((a, b) => a.height - b.height || b.width - a.width)[0];
+            if (!rect) return null;
             return { x: rect.left + rect.width * 0.75, y: rect.top + rect.height / 2 };
           }
           seen += content.length;

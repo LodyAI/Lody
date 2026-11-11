@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-共享 composer 原来是一个透明 `<textarea>` 叠在显示层 `<div>` 上：textarea 负责编辑和光标，显示层负责画文字和 mention chip。两者排版只要不同，光标就会落在和正在编辑的字不同的行上。2026-11-10 的报告里，经典滚动条只让 textarea 变窄，于是光标和输入法候选框掉到了文字下面一行。现在所有带 mention 的 composer 都在同一个 Lexical contenteditable 里编辑，文字、光标、选区、输入法预编辑和 chip 都由它自己画。对外模型不变：字符串加 UTF-16 区间，消息格式和草稿也不变。owner 要求用户完全无感知，所以编辑器复刻了 textarea 的外观和编辑语义。没有 mention 来源的 composer 仍保留普通 textarea。目前只在 Chromium 上验证过（Storybook、Playwright、jsdom）；WebKit、Android 输入法和真机还没有检查。
+共享 composer 原来是一个透明 `<textarea>` 叠在显示层 `<div>` 上：textarea 负责编辑和光标，显示层负责画文字和 mention chip。两者排版只要不同，光标就会落在和正在编辑的字不同的行上。2026-11-10 的报告里，经典滚动条只让 textarea 变窄，于是光标和输入法候选框掉到了文字下面一行。现在所有带 mention 的 composer 都在同一个 Lexical contenteditable 里编辑，文字、光标、选区、输入法预编辑和 chip 都由它自己画。对外模型不变：字符串加 UTF-16 区间，消息格式和草稿也不变。owner 要求用户完全无感知，所以编辑器复刻了 textarea 的外观和编辑语义。没有 mention 来源的 composer 仍保留普通 textarea。已在 Chromium 和 WebKit 上验证，并在 iOS 模拟器上用系统输入法验证过；Gboard 中文输入和 Electron 应用本身还没有检查。
 
 ## 问题
 
@@ -26,7 +26,7 @@ Translation: current
 - **与 textarea 对齐**：
   - CSS 给它 textarea 的 UA 盒模型：inline-block、pre-wrap、`overflow: auto`。
   - 高度为 `rows` 行加内边距，工具类仍可覆盖尺寸。
-  - 占位符颜色取自一个样式相同的 textarea。
+  - 调用方的 `placeholder:` 工具类通过 `tailwind/index.css` 里的 `placeholder` 变体，同样作用于编辑器的占位符。没有这类工具类时，从一个样式相同的 textarea 复制浏览器默认的占位符颜色。WebKit 读不到 `::placeholder` 的样式，所以在 WebKit 上不复制，使用 CSS 默认值。
   - 渲染 chip 的地方关闭拼写检查，选区用系统颜色，和显示层时期一样。
   - 程序或键盘聚焦保留原光标，指针聚焦按点击位置放光标。
   - 首次内容在元素挂载时写入，所以父组件的 layout effect 量到的是已填好内容的编辑器，和 textarea 一样。
@@ -56,4 +56,8 @@ Translation: current
 - **转换层**：`tests/composer-document.test.ts` 覆盖往返转换、区间清理和偏移量/DOM 映射。
 - **行为**：`tests/e2e/composer-editor.spec.ts` 覆盖打字、换行、chip、方向键、Backspace/Delete、点击 chip、撤销重做（包括调用方清空之后）、粘贴、CDP 模拟输入法（包括紧贴 chip 组字）、无障碍，以及内容溢出时光标落在字上。它在 textarea 版本上除光标落字那条外全部通过，在编辑器上全部通过。
 - **现有测试套件**：composer 相关的 vitest 套件，以及 `composer-mention-placement`、`message-quotes`、`composer-submission-focus`、`interface-typography`，除了同一环境下在 textarea 版本上也失败的用例，没有新增失败。
-- **尚未验证**：WebKit/Safari（验证机器上没有 WebKit 运行环境）、真机上的 Android Gboard 和 iOS 拼音，以及 Electron 应用本身。纯文本 composer 没有改动。
+- **WebKit**：同一套测试可在 Playwright WebKit 下运行（`LODY_E2E_BROWSER=webkit`），剪贴板和 CDP 输入法几条只适用于 Chromium。占位符那条在“从 `::placeholder` 查询复制颜色”的版本上会在 WebKit 失败。
+- **模拟器（2026-11-11）**：
+  - iOS Safari 配系统拼音键盘：中英混排、组字期间不写入调用方、紧贴 chip 组字、方向键跨 chip 和删除 chip、撤销（包括清空之后）、粘贴、换行均通过。
+  - Android Chrome 配 Gboard：点击落光标、mention 菜单、删除 chip、换行、粘贴均通过。
+- **尚未验证**：Gboard 中文输入（模拟器里语言包下载不下来）、长按跨 chip 选择，以及 Electron 应用本身。纯文本 composer 没有改动。

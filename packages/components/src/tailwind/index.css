@@ -27,6 +27,10 @@
 }
 
 @custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
+/* `placeholder:` also styles the composer editor's placeholder (`ui/mention/mention-input.tsx`),
+   painted as its `::before`, so a composer's placeholder colour is the textarea's in every
+   engine. WebKit reports no computed style for `::placeholder`, so it cannot be copied. */
+@custom-variant placeholder (&::placeholder, &[data-composer-editor]::before);
 
 @theme inline {
   --font-ios: var(--font-sans);
