@@ -31,6 +31,7 @@ import {
 } from '../src/lib/session-accepted-inputs';
 import { createSessionInputStorage } from '../src/lib/session-input-storage';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
+import { initI18n } from '../src/i18n';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 import type { SessionHistory, SessionId, SessionInputBlock, SessionMeta } from '@lody/shared';
 import type { SessionInputAcceptanceResult, SessionTurn } from '@lody/shared/session-data';
@@ -1076,6 +1077,7 @@ describe('locally accepted Roost input', () => {
     const { runtime, pending } = fixture.makeRuntime();
     const storage = createSessionInputStorage('input-account', input.workspaceId);
     cleanup.push(() => storage.close());
+    await initI18n('en');
     await acceptSessionUserTurn(
       runtime,
       sessionId,
@@ -1095,8 +1097,11 @@ describe('locally accepted Roost input', () => {
       ]
     );
     await when(pending, () => Boolean(pending.getSnapshot()[0]?.error));
+    // A same-machine preparation failure names that step and keeps the host's reason.
+    const prepareFailed =
+      "Lody on this computer couldn't prepare this attachment (Synthetic local transfer unavailable). Make sure the local agent is running and up to date, then continue sending.";
     expect(pending.getSnapshot()).toMatchObject([
-      { id: input.id, attachments: [{ error: 'Synthetic local transfer unavailable' }] },
+      { id: input.id, error: prepareFailed, attachments: [{ error: prepareFailed }] },
     ]);
     expect(await storage.list()).toEqual([]);
     expect(await owner.history.count()).toBe(0);
