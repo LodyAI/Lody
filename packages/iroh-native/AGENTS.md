@@ -34,5 +34,8 @@ rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2
   receive. Keep that plugin's bridge logging off and never return the seed to JS.
 - Rust tests (`cargo test -p lody-iroh`) cover the wire and endpoint rules; Node
   tests load the development build and skip when it is absent, except under
-  `LODY_IROH_REQUIRE=1` (CI on Linux and macOS), where absence fails. Release builds
+  `LODY_IROH_REQUIRE=1`, where absence fails. CI runs that job on Linux and macOS for
+  every main push and for pull requests that change this package, the CLI E2EE code
+  that drives it, the lockfile or the CI workflow; extend that path list in
+  `.github/workflows/ci.yml` when another caller starts loading the module. Release builds
   are not stripped: Cargo's macOS strip step produced an unloadable dylib.
