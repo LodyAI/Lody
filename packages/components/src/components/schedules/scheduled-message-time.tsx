@@ -117,7 +117,7 @@ export function ScheduledMessageTimeDialog({
   timeZone: string;
   onApply: (at: string) => void;
   onClose: () => void;
-  finalFocus?: RefObject<HTMLTextAreaElement | null> | false;
+  finalFocus?: RefObject<HTMLElement | null> | false;
   onRemoveTime?: () => void;
   now?: number;
 }) {

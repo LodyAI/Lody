@@ -156,6 +156,12 @@ import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
+import {
+  type ComposerInputElement,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 const sessionDraftsCache = new Map<SessionId, string>();
 
@@ -694,7 +700,7 @@ export const SessionChatInputArea = memo(
       useSessionPromptSuggestion(session.id);
     const promptSuggestionRef = useRef({ text: promptSuggestion, markPromptSuggestionAnswered });
     promptSuggestionRef.current = { text: promptSuggestion, markPromptSuggestionAnswered };
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const textareaRef = useRef<ComposerInputElement>(null);
     const quoteCaretRef = useRef<{ sessionId: SessionId; position: number } | null>(null);
     const pendingQuoteSendRef = useRef<{ sessionId: SessionId; draftId: string } | null>(null);
     const [quoteSendRevision, setQuoteSendRevision] = useState(0);
@@ -703,7 +709,10 @@ export const SessionChatInputArea = memo(
       const input = textareaRef.current;
       if (!input) return undefined;
       const remember = () => {
-        quoteCaretRef.current = { sessionId: session.id, position: input.selectionEnd };
+        quoteCaretRef.current = {
+          sessionId: session.id,
+          position: getComposerSelection(input).end,
+        };
       };
       const select = () => {
         if (input.ownerDocument.activeElement === input) remember();
@@ -712,11 +721,14 @@ export const SessionChatInputArea = memo(
       input.addEventListener('blur', remember);
       input.addEventListener('select', select);
       input.addEventListener('input', remember);
+      // The mention editor's caret moves without `select`; the document reports it.
+      input.ownerDocument.addEventListener('selectionchange', select);
       return () => {
         input.removeEventListener('focus', remember);
         input.removeEventListener('blur', remember);
         input.removeEventListener('select', select);
         input.removeEventListener('input', remember);
+        input.ownerDocument.removeEventListener('selectionchange', select);
       };
     }, [session.id]);
     const cancelNavigationDismissal = useRef<(() => void) | undefined>(undefined);
@@ -1497,7 +1509,7 @@ export const SessionChatInputArea = memo(
           return false;
         }
 
-        let currentValue = textareaRef.current?.value ?? userInput;
+        let currentValue = textareaRef.current ? getComposerText(textareaRef.current) : userInput;
         // A quote is spliced against the input's own value, so it takes no
         // separator that the textarea would not also receive.
         if (
@@ -1510,15 +1522,24 @@ export const SessionChatInputArea = memo(
         const selectionStart = options?.append
           ? currentValue.length
           : options?.kind === 'message_quote'
-            ? quoteCaretRef.current?.sessionId === session.id
-              ? quoteCaretRef.current.position
-              : currentValue.length
-            : (textareaRef.current?.selectionStart ?? null);
+            ? // While the composer has focus its caret is live; once focus left
+              // for the conversation, the caret it last had is remembered.
+              textareaRef.current &&
+              textareaRef.current.ownerDocument.activeElement === textareaRef.current
+              ? getComposerSelection(textareaRef.current).end
+              : quoteCaretRef.current?.sessionId === session.id
+                ? quoteCaretRef.current.position
+                : currentValue.length
+            : textareaRef.current
+              ? getComposerSelection(textareaRef.current).start
+              : null;
         const selectionEnd = options?.append
           ? currentValue.length
           : options?.kind === 'message_quote'
             ? selectionStart
-            : (textareaRef.current?.selectionEnd ?? null);
+            : textareaRef.current
+              ? getComposerSelection(textareaRef.current).end
+              : null;
         const result = insertPastedTextDraft({
           currentValue,
           pastedText: normalizedText,
@@ -1571,11 +1592,12 @@ export const SessionChatInputArea = memo(
         requestAnimationFrame(() => {
           if (
             activeSessionIdRef.current !== session.id ||
-            textareaRef.current?.value !== result.nextValue
+            !textareaRef.current ||
+            getComposerText(textareaRef.current) !== result.nextValue
           )
             return;
-          textareaRef.current?.focus({ preventScroll: true });
-          textareaRef.current?.setSelectionRange(result.draft.end, result.draft.end);
+          textareaRef.current.focus({ preventScroll: true });
+          setComposerSelection(textareaRef.current, result.draft.end, result.draft.end);
         });
 
         return true;
@@ -1617,7 +1639,7 @@ export const SessionChatInputArea = memo(
       [isArchived]
     );
     const handlePaste = useCallback(
-      (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      (event: React.ClipboardEvent<ComposerInputElement>) => {
         if (isArchived) {
           return;
         }
@@ -1635,8 +1657,7 @@ export const SessionChatInputArea = memo(
             });
           } else {
             const target = event.currentTarget;
-            const at = target.selectionStart ?? target.value.length;
-            const replaceEnd = target.selectionEnd ?? at;
+            const { start: at, end: replaceEnd } = getComposerSelection(target);
             if (insertSessionMention(sessionUrl.sessionId, { at, replaceEnd })) {
               capturePostHogEvent(postHog, 'mention/session_link_pasted', {
                 converted: true,
@@ -1918,7 +1939,7 @@ export const SessionChatInputArea = memo(
           );
           return;
         }
-        const currentValue = textareaRef.current?.value ?? userInput;
+        const currentValue = textareaRef.current ? getComposerText(textareaRef.current) : userInput;
         // One pass: pasted placeholders, `$skill`, `@session:`, and the mentions
         // that need no rewrite all resolve against the same original text, and
         // the spans record where each landed.
@@ -2130,13 +2151,13 @@ export const SessionChatInputArea = memo(
         return;
       }
       if (!mentionRangesRef.current.some((range) => range.value === pending.draftId)) return;
-      if (textareaRef.current && textareaRef.current.value !== userInput) return;
+      if (textareaRef.current && getComposerText(textareaRef.current) !== userInput) return;
       pendingQuoteSendRef.current = null;
       void sendMessage();
     }, [draftMentionRevision, quoteSendRevision, sendMessage, session.id, userInput]);
 
     const handleKeyDown = useCallback(
-      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      (e: React.KeyboardEvent<ComposerInputElement>) => {
         if (e.key !== 'Enter' || isImeComposingKeyboardEvent(e)) {
           return;
         }

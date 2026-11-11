@@ -5,6 +5,7 @@ import {
   useState,
   type ReactNode,
   type ComponentPropsWithRef,
+  type Ref,
 } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -28,6 +29,7 @@ import { PropertyRow, scheduleCardProps } from './schedule-property-row';
 import { FieldIssueMark } from './schedule-field-issue-mark';
 import type { ScheduleSaveIssue } from './schedule-save-blockers';
 import { ScheduleRecurrenceEditor } from './schedule-recurrence-editor';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 
 const WIDE = '@media (min-width: 40rem)';
 const DARK =
@@ -283,13 +285,24 @@ export {
   type ScheduleRowContext,
 } from './schedule-list';
 
-export type SchedulePromptProps = Omit<ComponentPropsWithRef<'textarea'>, 'value' | 'onChange'> & {
+export type SchedulePromptProps = Omit<
+  ComponentPropsWithRef<'textarea'>,
+  'value' | 'onChange' | 'ref'
+> & {
+  /** The plain textarea or the mention editor, whichever renders the prompt. */
+  ref?: Ref<ComposerInputElement>;
   value: string;
   onValueChange: (value: string) => void;
 };
 
-function PlainSchedulePrompt({ onValueChange, ...props }: SchedulePromptProps) {
-  return <textarea {...props} onChange={(event) => onValueChange(event.target.value)} />;
+function PlainSchedulePrompt({ onValueChange, ref, ...props }: SchedulePromptProps) {
+  return (
+    <textarea
+      {...props}
+      ref={ref as Ref<HTMLTextAreaElement>}
+      onChange={(event) => onValueChange(event.target.value)}
+    />
+  );
 }
 
 export type ScheduleFormValue = {
@@ -378,7 +391,7 @@ export function ScheduleForm({
   const [value, setValue] = useState(initial);
   const [attempted, setAttempted] = useState(revealIssues);
   const titleRef = useRef<HTMLInputElement>(null);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const [mode, setMode] = useState<TriggerMode>(
     initial.trigger.kind === 'manual' ? 'manual' : 'timed'
   );

@@ -17,6 +17,7 @@ import {
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { useMentionContext } from '@/ui/mention';
+import { getComposerCaretRect, getComposerRangeRects } from '@/ui/mention/composer-input';
 import { Popover } from '@lody/ui/popover';
 
 // ============================================================================
@@ -622,126 +623,10 @@ type IssuePrMentionMeta = {
   type: 'issue' | 'pr';
 };
 
-function getLineHeight(input: HTMLTextAreaElement) {
-  const style = window.getComputedStyle(input);
-  const parsed = Number.parseInt(style.lineHeight, 10);
-  return Number.isFinite(parsed) ? parsed : input.offsetHeight;
-}
-
-function getTextWidth(text: string, input: HTMLTextAreaElement) {
-  const style = window.getComputedStyle(input);
-  const measureSpan = document.createElement('span');
-  measureSpan.style.cssText = `
-    position: absolute;
-    visibility: hidden;
-    white-space: pre;
-    font: ${style.font};
-    letter-spacing: ${style.letterSpacing};
-    text-transform: ${style.textTransform};
-  `;
-  measureSpan.textContent = text;
-  document.body.appendChild(measureSpan);
-  const width = measureSpan.offsetWidth;
-  document.body.removeChild(measureSpan);
-  return width;
-}
-
-function rectFromEdges({
-  left,
-  top,
-  right,
-  bottom,
-}: {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}) {
-  return DOMRect.fromRect({
-    x: left,
-    y: top,
-    width: Math.max(0, right - left),
-    height: Math.max(0, bottom - top),
-  });
-}
-
-function calculateCaretRect(input: HTMLTextAreaElement, cursorPosition: number) {
-  const rect = input.getBoundingClientRect();
-  const textBeforeCursor = input.value.slice(0, cursorPosition);
-  const lines = textBeforeCursor.split('\n');
-  const currentLine = lines.length - 1;
-  const currentLineText = lines[currentLine] ?? '';
-  const textWidth = getTextWidth(currentLineText, input);
-
-  const style = window.getComputedStyle(input);
-  const lineHeight = getLineHeight(input);
-  const paddingLeft = Number.parseFloat(style.getPropertyValue('padding-left') ?? '0');
-  const paddingRight = Number.parseFloat(style.getPropertyValue('padding-right') ?? '0');
-  const paddingTop = Number.parseFloat(style.getPropertyValue('padding-top') ?? '0');
-
-  const containerWidth = input.clientWidth - paddingLeft - paddingRight;
-  const wrappedLines = containerWidth > 0 ? Math.floor(textWidth / containerWidth) : 0;
-  const totalLines = currentLine + wrappedLines;
-
-  const scrollTop = input.scrollTop;
-  const scrollLeft = input.scrollLeft;
-
-  const effectiveTextWidth = containerWidth > 0 ? textWidth % containerWidth : textWidth;
-  const isRTL = style.direction === 'rtl';
-  const x = isRTL
-    ? Math.min(rect.right - paddingRight - effectiveTextWidth + scrollLeft, rect.right - 10)
-    : Math.min(rect.left + paddingLeft + effectiveTextWidth - scrollLeft, rect.right - 10);
-  const y = rect.top + paddingTop + (totalLines * lineHeight - scrollTop);
-
-  return rectFromEdges({ left: x, top: y, right: x, bottom: y + lineHeight });
-}
-
 function pointInRect(clientX: number, clientY: number, rect: DOMRect) {
   return (
     clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
   );
-}
-
-function getMentionHitRects(input: HTMLTextAreaElement, start: number, end: number) {
-  const startRect = calculateCaretRect(input, start);
-  const endRect = calculateCaretRect(input, end);
-  const lineHeight = getLineHeight(input);
-  const style = window.getComputedStyle(input);
-  const paddingLeft = Number.parseFloat(style.getPropertyValue('padding-left') ?? '0');
-  const paddingRight = Number.parseFloat(style.getPropertyValue('padding-right') ?? '0');
-
-  const inputRect = input.getBoundingClientRect();
-  const singleLine = Math.abs(endRect.top - startRect.top) < lineHeight / 2;
-
-  if (singleLine) {
-    const right = Math.max(endRect.left, startRect.left + 1);
-    return [
-      rectFromEdges({
-        left: startRect.left,
-        right,
-        top: startRect.top,
-        bottom: startRect.top + lineHeight,
-      }),
-    ];
-  }
-
-  // Wrapped: split into two hit rects (mentions are short, so 2 lines max is a safe approximation).
-  const firstLineRight = inputRect.right - paddingRight;
-  const secondLineLeft = inputRect.left + paddingLeft;
-  return [
-    rectFromEdges({
-      left: startRect.left,
-      right: firstLineRight,
-      top: startRect.top,
-      bottom: startRect.top + lineHeight,
-    }),
-    rectFromEdges({
-      left: secondLineLeft,
-      right: Math.max(endRect.left, secondLineLeft + 1),
-      top: endRect.top,
-      bottom: endRect.top + lineHeight,
-    }),
-  ];
 }
 
 export function IssuePrMentionTitleHint({
@@ -833,10 +718,10 @@ export function IssuePrMentionTitleHint({
       if (issuePrMentions.length === 0) return false;
 
       for (const meta of issuePrMentions) {
-        const rects = getMentionHitRects(input, meta.start, meta.end);
+        const rects = getComposerRangeRects(input, meta.start, meta.end);
         if (rects.some((r) => pointInRect(clientX, clientY, r))) {
           cancelScheduledClose();
-          const anchorRect = calculateCaretRect(input, meta.start);
+          const anchorRect = getComposerCaretRect(input, meta.start);
           setActive({ meta, anchor: { left: anchorRect.left, top: anchorRect.top } });
           setOpen(true);
           return true;
@@ -849,7 +734,7 @@ export function IssuePrMentionTitleHint({
   );
 
   React.useEffect(() => {
-    const input = context.inputRef.current;
+    const input: HTMLElement | null = context.inputRef.current;
     if (!input) return undefined;
     if (!enabled) return undefined;
 
@@ -924,17 +809,21 @@ export function IssuePrMentionTitleHint({
         if (!next) close();
       }}
     >
-      <Popover.Trigger render={<span
-          aria-hidden="true"
-          style={{
-            position: 'fixed',
-            left: active.anchor.left,
-            top: active.anchor.top,
-            width: 1,
-            height: 1,
-            pointerEvents: 'none',
-          }}
-        />}/>
+      <Popover.Trigger
+        render={
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'fixed',
+              left: active.anchor.left,
+              top: active.anchor.top,
+              width: 1,
+              height: 1,
+              pointerEvents: 'none',
+            }}
+          />
+        }
+      />
       <Popover.Content
         side="top"
         align="start"

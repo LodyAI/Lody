@@ -68,6 +68,7 @@ import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { SettingsStoryProviders } from './settings-story-shell';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 
 const meta = {
   title: 'Mobile/MobileNewChatSheet',
@@ -369,7 +370,7 @@ export function InlinePageReview({
     remote: t('chat.branchRemote'),
     placeholder: t('chat.branchPlaceholder', 'Branch'),
   };
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const [roleId, setRoleId] = useState<AgentRoleId | null>(
     initialRole ? ('reviewer' as AgentRoleId) : null
   );

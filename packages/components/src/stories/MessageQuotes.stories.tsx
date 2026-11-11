@@ -20,6 +20,12 @@ import {
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
 import { SettingsStoryProviders } from './settings-story-shell';
+import {
+  type ComposerInputElement,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 const styles = stylex.create({
   page: {
@@ -55,13 +61,13 @@ const initialItems: ChatStreamItem[] = Array.from({ length: 12 }, (_, index) => 
 
 function QuoteHarness({ reject = false }: { reject?: boolean }) {
   const [area, setArea] = useState<HTMLDivElement | null>(null);
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const textarea = useRef<ComposerInputElement>(null);
   const [value, setValue] = useState('Explain this passage: ');
   const [drafts, setDrafts] = useState<PastedTextDraft[]>([]);
   const [items, setItems] = useState(initialItems);
   useEffect(() => {
     const input = textarea.current;
-    input?.setSelectionRange(input.value.length, input.value.length);
+    if (input) setComposerSelection(input, getComposerText(input).length);
   }, []);
   return (
     <div {...stylex.props(styles.page)}>
@@ -79,7 +85,11 @@ function QuoteHarness({ reject = false }: { reject?: boolean }) {
         enabled
         onQuote={(text, options) => {
           const comment = options?.comment?.trim() ?? '';
-          const caret = comment ? value.length : (textarea.current?.selectionEnd ?? value.length);
+          const caret = comment
+            ? value.length
+            : textarea.current
+              ? getComposerSelection(textarea.current).end
+              : value.length;
           const inserted = insertPastedTextDraft({
             currentValue: value,
             pastedText: text,
@@ -102,7 +112,7 @@ function QuoteHarness({ reject = false }: { reject?: boolean }) {
           );
           requestAnimationFrame(() => {
             textarea.current?.focus({ preventScroll: true });
-            textarea.current?.setSelectionRange(inserted.draft.end, inserted.draft.end);
+            setComposerSelection(textarea.current, inserted.draft.end, inserted.draft.end);
           });
           return true;
         }}

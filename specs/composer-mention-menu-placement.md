@@ -16,7 +16,7 @@ too close to the top edge to show a useful row may the menu open below it.
 
 The inline edit-and-resend menu and dialog composer also follow the current
 caret. They prefer the space below it and flip above when needed. Soft wrapping,
-textarea scrolling, layout movement, and scaled editor containers must not
+input scrolling, layout movement, and scaled editor containers must not
 leave those menus at an earlier caret position. Their width is constrained to
 the input, and their rows remain scrollable within the visible viewport when
 neither side fits the full menu.
@@ -24,7 +24,7 @@ neither side fits the full menu.
 On small mobile viewports, the main composer retains its keyboard-adjacent
 docked mention panel; the inline editor retains its floating menu. The docked
 panel sits above the whole composer frame, including attachments and controls
-above the textarea, and never extends behind the top viewport inset.
+above the input, and never extends behind the top viewport inset.
 
 Caret measurement must not change the body’s positional selector state and
 trigger a whole-page restyle as menus open or queries change.
@@ -35,5 +35,5 @@ trigger a whole-page restyle as menus open or queries change.
 - [Menu caller](../packages/components/src/components/mentions/mention-two-level-menu.tsx)
 - [Caret anchor](../packages/components/src/ui/mention/mention-input.tsx)
 - [Composer placement test](../packages/components/tests/e2e/composer-mention-placement.spec.ts)
-- [Caret anchor test](../packages/components/tests/mention-ref-stability.test.tsx)
+- [Caret on glyph and IME tests](../packages/components/tests/e2e/composer-editor.spec.ts)
 - [Mobile placement test](../packages/components/tests/mention-two-level-menu.test.tsx)

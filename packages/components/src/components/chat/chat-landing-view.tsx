@@ -29,6 +29,7 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
+import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
 
 export type ChatLandingTone = 'light' | 'dark';
 
@@ -57,9 +58,9 @@ export interface ChatLandingViewProps {
   /** Callback when prompt changes */
   onPromptChange: (value: string) => void;
   /** Callback for prompt keydown events */
-  onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPromptKeyDown?: (event: KeyboardEvent<ComposerInputElement>) => void;
   /** Callback for prompt paste events */
-  onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onPromptPaste?: (event: ClipboardEvent<ComposerInputElement>) => void;
   /** Callback when files are dropped onto the composer */
   onImageDrop?: (files: File[]) => void;
   /** Placeholder text for the prompt textarea */
@@ -68,7 +69,7 @@ export interface ChatLandingViewProps {
   /** Mobile keyboard action hint for the prompt textarea */
   promptEnterKeyHint?: 'send' | 'enter';
   /** Ref for the prompt textarea */
-  promptRef?: Ref<HTMLTextAreaElement>;
+  promptRef?: Ref<ComposerInputElement>;
   /** Inline pasted text drafts rendered as protected tokens inside the textarea */
   pastedTextDrafts?: PastedTextDraft[];
   /** Callback when pasted text draft ranges change */
@@ -277,7 +278,7 @@ export function ChatLandingView({
   );
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const handlePromptPasteWithSessionUrl = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const text = event.clipboardData.getData('text/plain');
       // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
       const sessionUrl = text
@@ -291,8 +292,7 @@ export function ChatLandingView({
           });
         } else {
           const target = event.currentTarget;
-          const at = target.selectionStart ?? target.value.length;
-          const replaceEnd = target.selectionEnd ?? at;
+          const { start: at, end: replaceEnd } = getComposerSelection(target);
           if (
             mentionActionsRef.current?.insertSessionMention(sessionUrl.sessionId, {
               at,
@@ -387,7 +387,7 @@ export function ChatLandingView({
       <div className="mt-1 text-xs text-muted-foreground">{composerCrashed}</div>
       <textarea
         id={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
-        ref={promptRef}
+        ref={promptRef as Ref<HTMLTextAreaElement>}
         value={submissionPending ? '' : promptValue}
         onChange={(event) => onPromptChange(event.target.value)}
         onKeyDown={onPromptKeyDown}

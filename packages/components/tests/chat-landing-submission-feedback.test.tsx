@@ -18,6 +18,7 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
 
 import { ChatLandingView } from '../src/components/chat/chat-landing-view';
 import { initI18n } from '../src/i18n';
+import { composerIn } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -77,7 +78,7 @@ describe('ChatLandingView submission feedback', () => {
   it('hides but preserves the draft while durable acceptance is pending', async () => {
     await render(true);
 
-    const textarea = container?.querySelector('textarea');
+    const textarea = composerIn(container!);
     expect(
       Array.from(container?.querySelectorAll('button') ?? []).some(
         (button) => button.textContent === 'Crash fallback retry'
@@ -94,8 +95,8 @@ describe('ChatLandingView submission feedback', () => {
         (button) => button.textContent === 'Crash fallback retry'
       )
     ).toBe(false);
-    expect(container?.querySelector('textarea')?.value).toBe('preserved draft');
-    expect(container?.querySelector('textarea')?.disabled).toBe(false);
+    expect(composerIn(container!).value).toBe('preserved draft');
+    expect(composerIn(container!).disabled).toBe(false);
     expect(container?.querySelector('button[aria-label="Send"]')).not.toBeNull();
   });
 });

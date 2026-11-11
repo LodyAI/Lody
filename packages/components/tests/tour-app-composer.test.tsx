@@ -99,7 +99,7 @@ describe('TourApp real composer', () => {
       );
     });
 
-    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(container.querySelector('[data-lody-composer-input]')).not.toBeNull();
     expect(useOuterCloudQuery).not.toHaveBeenCalled();
   });
 });
