@@ -85,6 +85,8 @@ export function isWorkspaceModeRejection(error: unknown): boolean {
 
 /** One host identity read may take this long before it counts as unanswered. */
 export const HOST_IDENTITY_READ_TIMEOUT_MS = 5_000;
+/** Continuous transient host failure for this long is reported as a stall. */
+export const HOST_IDENTITY_STALL_MS = 15_000;
 
 /** The host has no identity record at all for this account and workspace. */
 function isMissingHostIdentity(error: unknown): boolean {
@@ -96,6 +98,14 @@ class HostIdentityReadTimeoutError extends Error {
   constructor() {
     super('Device host did not answer the workspace identity read');
     this.name = 'HostIdentityReadTimeoutError';
+  }
+}
+
+/** A transient host state ended a caller that does not wait for recovery. */
+export class HostIdentityUnavailableError extends Error {
+  constructor(options: ErrorOptions) {
+    super('Device host identity check is temporarily unavailable', options);
+    this.name = 'HostIdentityUnavailableError';
   }
 }
 
@@ -117,11 +127,41 @@ function isTransientHostIdentityError(error: unknown): boolean {
   );
 }
 
-/** A single read bounded by its own timeout and the owner's signal. A late
- * answer after timeout or abort is ignored. */
-async function readHostIdentityOnce(
+/** The host's own failure code, for display and diagnostics; never key material. */
+export function hostIdentityErrorCode(error: unknown): string {
+  const portable = personalHostFailureCode(error);
+  if (portable) return portable;
+  if (error instanceof HostIdentityReadTimeoutError) return 'timeout';
+  const code = error instanceof Error ? /\be2ee_[A-Za-z_-]+/.exec(error.message)?.[0] : undefined;
+  return code ?? (error instanceof Error ? error.name : 'unknown');
+}
+
+type HostIdentityRead = Promise<{ workspaceId: string; genesisHash: string }>;
+/** One unanswered host read per runtime, account and workspace. A timed-out wait
+ * stops waiting but joins the same call later instead of starting another. */
+const hostReads = new WeakMap<object, Map<string, HostIdentityRead>>();
+function sharedHostRead(
+  runtime: object,
   readIdentity: NonNullable<E2eeWorkspaceRuntime['readIdentity']>,
-  input: { accountId: string; workspaceId: string },
+  input: { accountId: string; workspaceId: string }
+): HostIdentityRead {
+  let reads = hostReads.get(runtime);
+  if (!reads) hostReads.set(runtime, (reads = new Map()));
+  const key = JSON.stringify([input.accountId, input.workspaceId]);
+  const existing = reads.get(key);
+  if (existing) return existing;
+  const read = Promise.resolve().then(() => readIdentity(input));
+  reads.set(key, read);
+  const settle = () => {
+    if (reads.get(key) === read) reads.delete(key);
+  };
+  read.then(settle, settle);
+  return read;
+}
+
+/** Waits for one read bounded by its own timeout and the owner's signal. */
+async function awaitHostRead(
+  read: HostIdentityRead,
   signal: AbortSignal,
   timeoutMs: number
 ): Promise<{ workspaceId: string; genesisHash: string }> {
@@ -130,7 +170,7 @@ async function readHostIdentityOnce(
   let onAbort: (() => void) | undefined;
   try {
     return await Promise.race([
-      readIdentity(input),
+      read,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new HostIdentityReadTimeoutError()), timeoutMs);
         onAbort = () => reject(signal.reason);
@@ -143,15 +183,22 @@ async function readHostIdentityOnce(
   }
 }
 
+/** Reported once transient host failure has lasted `HOST_IDENTITY_STALL_MS`, and
+ * again whenever its code changes. `retry` asks the host again immediately. */
+export type HostIdentityStall = { error: unknown; code: string; retry: () => void };
+
 /**
  * A server answer other than encrypted is accepted only when this device's host
  * holds no encrypted identity for the workspace. Renderer storage can be cleared
  * while native or IndexedDB custody survives; the host's verified identity then
  * outranks the server, and its genesis is retained as the sticky marker.
  * Missing identity is the only answer that permits plaintext. Transient host
- * states are asked again with backoff while the workspace stays unclassified;
+ * states are asked again with backoff while the workspace stays unclassified:
  * `deadlineMs` bounds that wait (null: until `signal` aborts) and its timeout
- * keeps the last host error as its cause. Other host failures are rethrown.
+ * keeps the last host error as its cause; `failFast` instead ends at the first
+ * transient state. A long stall is logged and reported through `onStall`, without
+ * ending the wait; `onRecover` follows the next definite host answer. Other host
+ * failures are rethrown.
  */
 export async function assertNoRetainedEncryptedIdentity(input: {
   runtime: Pick<E2eeWorkspaceRuntime, 'readIdentity'> | undefined;
@@ -161,6 +208,9 @@ export async function assertNoRetainedEncryptedIdentity(input: {
   descriptor: WorkspaceAdmissionDescriptor;
   signal: AbortSignal;
   deadlineMs: number | null;
+  failFast?: boolean;
+  onStall?: (stall: HostIdentityStall) => void;
+  onRecover?: () => void;
 }): Promise<void> {
   const { runtime, descriptor, signal } = input;
   if ('contentMode' in descriptor && descriptor.contentMode === 'e2ee') return;
@@ -168,27 +218,54 @@ export async function assertNoRetainedEncryptedIdentity(input: {
   if (!runtime) return;
   if (!runtime.readIdentity) throw new Error('e2ee_identity_check_unavailable');
   const readIdentity = runtime.readIdentity.bind(runtime);
+  const target = { accountId: input.accountId, workspaceId: input.workspaceId };
   const deadline = input.deadlineMs === null ? null : Date.now() + input.deadlineMs;
+  let unavailableSince: number | null = null;
+  let reportedCode: string | null = null;
+  let wake = Promise.withResolvers<void>();
+  const retry = () => wake.resolve();
+  const definite = () => {
+    if (reportedCode !== null) input.onRecover?.();
+  };
   let identity: { workspaceId: string; genesisHash: string } | undefined;
   for (let failures = 0; !identity; failures += 1) {
     const remaining = deadline === null ? HOST_IDENTITY_READ_TIMEOUT_MS : deadline - Date.now();
     try {
-      identity = await readHostIdentityOnce(
-        readIdentity,
-        { accountId: input.accountId, workspaceId: input.workspaceId },
+      identity = await awaitHostRead(
+        sharedHostRead(runtime, readIdentity, target),
         signal,
         Math.max(0, Math.min(HOST_IDENTITY_READ_TIMEOUT_MS, remaining))
       );
     } catch (error) {
       signal.throwIfAborted();
-      if (isMissingHostIdentity(error)) return;
-      if (!isTransientHostIdentityError(error)) throw error;
+      if (isMissingHostIdentity(error)) {
+        definite();
+        return;
+      }
+      if (!isTransientHostIdentityError(error)) {
+        definite();
+        throw error;
+      }
+      if (input.failFast) throw new HostIdentityUnavailableError({ cause: error });
+      unavailableSince ??= Date.now();
+      const code = hostIdentityErrorCode(error);
+      if (Date.now() - unavailableSince >= HOST_IDENTITY_STALL_MS && code !== reportedCode) {
+        reportedCode = code;
+        console.warn('Device host identity check is still unavailable', {
+          workspaceId: input.workspaceId,
+          code,
+          error,
+        });
+        input.onStall?.({ error, code, retry });
+      }
       const wait = getConvexAuthRecoveryDelayMs(failures);
       if (deadline !== null && Date.now() + wait >= deadline)
         throw new WorkspaceModeAdmissionTimeoutError({ cause: error });
-      await delay(wait, signal);
+      await Promise.race([delay(wait, signal), wake.promise]);
+      wake = Promise.withResolvers<void>();
     }
   }
+  definite();
   if (identity.workspaceId !== input.workspaceId) throw new WorkspaceModeMismatchError();
   try {
     retainHostEncryptedEvidence(

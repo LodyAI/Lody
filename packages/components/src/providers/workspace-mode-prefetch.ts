@@ -4,6 +4,7 @@ import { readWorkspaceModeEvidence, retainWorkspaceModeProof } from '@/lib/e2ee-
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import {
   assertNoRetainedEncryptedIdentity,
+  HostIdentityUnavailableError,
   WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
 } from './workspace-mode-admission';
 
@@ -66,6 +67,7 @@ export function useWorkspaceModeProofPrefetch(
             descriptor,
             signal: abort.signal,
             deadlineMs: WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
+            failFast: true,
           });
           if (cancelled) return;
           retainWorkspaceModeProof(localStorage, accountId, slug, descriptor);
@@ -73,6 +75,9 @@ export function useWorkspaceModeProofPrefetch(
           // Unreadable or conflicting local evidence and failed reads are handled
           // by runtime admission when that workspace is actually opened.
           console.info('Workspace mode prefetch skipped', { workspaceId, error });
+          // A temporarily unavailable host affects every remaining workspace alike;
+          // the next listing change or launch prefetches again.
+          if (error instanceof HostIdentityUnavailableError) return;
         }
       }
     })();

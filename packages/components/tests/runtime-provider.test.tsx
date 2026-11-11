@@ -236,6 +236,7 @@ import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 import { createPendingSessionSends } from '../src/lib/session-pending-sends';
 import {
+  HOST_IDENTITY_STALL_MS,
   WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
   WorkspaceModeAdmissionTimeoutError,
 } from '../src/providers/workspace-mode-admission';
@@ -1620,6 +1621,96 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }
   });
 
+  it('reports a persistent host failure with its code, keeps egress closed, and admits after recovery', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let failure: unknown = { _tag: 'PersonalHostError', code: 'storage' };
+    const readIdentity = hostIdentity(async () => {
+      throw failure;
+    });
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => vi.advanceTimersByTimeAsync(HOST_IDENTITY_STALL_MS + 8_000));
+      const notice = container.querySelector('[role="status"]');
+      expect(notice?.querySelector('code')?.textContent).toBe('storage');
+      expect(warn).toHaveBeenCalledWith(
+        'Device host identity check is still unavailable',
+        expect.objectContaining({ code: 'storage', error: failure })
+      );
+      // Still unclassified: no plaintext admission while the host is unavailable.
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      const calls = readIdentity.mock.calls.length;
+      failure = new Error('e2ee_missing-binding');
+      await act(async () => {
+        notice?.querySelector('button')?.click();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(readIdentity.mock.calls.length).toBe(calls + 1);
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+        contentMode: 'plaintext',
+      });
+      expect(container.querySelector('[role="status"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps at most one unanswered host read per workspace', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const readIdentity = hostIdentity(() => new Promise(() => {}));
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(readIdentity).toHaveBeenCalledTimes(1);
+      expect(container.querySelector('[role="status"] code')?.textContent).toBe('timeout');
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ends a prefetch round at the first temporarily unavailable host answer', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    environment.workspaces.set({
+      status: 'ready',
+      activeWorkspaceId: 'local:workspace',
+      workspaces: [
+        { id: 'local:workspace', slug: 'local', name: 'Local', role: 'owner' },
+        { id: 'workspace-beta', slug: 'beta', name: 'Beta', role: 'member' },
+        { id: 'workspace-gamma', slug: 'gamma', name: 'Gamma', role: 'member' },
+      ],
+    });
+    const asked: string[] = [];
+    const first = Promise.withResolvers<void>();
+    hostIdentity(async ({ workspaceId }) => {
+      if (workspaceId === 'local:workspace') throw new Error('e2ee_missing-binding');
+      asked.push(workspaceId);
+      first.resolve();
+      throw { _tag: 'PersonalHostError', code: 'storage' };
+    });
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => first.promise);
+      // Past every per-workspace deadline: no re-ask and no next workspace.
+      await act(async () => vi.advanceTimersByTimeAsync(2 * WORKSPACE_MODE_ADMISSION_TIMEOUT_MS));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(asked).toEqual(['workspace-beta']);
+    for (const [id, slug] of [
+      ['workspace-beta', 'beta'],
+      ['workspace-gamma', 'gamma'],
+    ])
+      expect(readWorkspaceModeProof(localStorage, 'local:user', id, slug)).toBeNull();
+  });
+
   it('shows a recoverable timeout instead of initializing forever when the host never answers', async () => {
     ordinaryCloud();
     listEncrypted();
@@ -1629,7 +1720,8 @@ describe('RuntimeProvider warm workspace preparation', () => {
     try {
       await render();
       await act(async () => vi.advanceTimersByTimeAsync(WORKSPACE_MODE_ADMISSION_TIMEOUT_MS + 1));
-      expect(readIdentity.mock.calls.length).toBeGreaterThan(1);
+      // The unanswered read is joined, not repeated, until it settles.
+      expect(readIdentity).toHaveBeenCalledTimes(1);
       expect(createWorkspaceRuntime).not.toHaveBeenCalled();
       expect(store.get(workspaceContentModeAtom)).toBeNull();
       expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({

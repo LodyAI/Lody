@@ -1148,11 +1148,9 @@ describe('LodyFleet encrypted mode downgrade', () => {
     }
   });
 
-  it.each([
-    ['retries an unreadable binding with its original error', 'EMFILE', true],
-    ['does not retry a readable contradicting binding', null, false],
-  ] as const)('startup %s', async (_, fault, retried) => {
-    vi.useFakeTimers();
+  /** Real startWorkspace; the opener runs the real binding check, then a runtime
+   * stub whose start fails, so each attempt is observable without a full runtime. */
+  const startingFleet = async () => {
     const directory = await mkdtemp(join(tmpdir(), 'fleet-e2ee-downgrade-start-'));
     await pairHere(directory);
     const opened: string[] = [];
@@ -1167,11 +1165,22 @@ describe('LodyFleet encrypted mode downgrade', () => {
         contentMode: open.contentMode,
       });
       opened.push(open.workspaceId);
-      throw new Error('synthetic runtime stop after the mode check');
+      return {
+        start: async () => Promise.reject(new Error('synthetic runtime stop after the mode check')),
+        cleanup: async () => {},
+        documentManager: { repo: {} },
+      } as never;
     });
     const { fleet: harness, runtimeStateReporter } = createFleetHarness(
       createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
     );
+    const issues = new Map<string, string>();
+    runtimeStateReporter.upsertIssue.mockImplementation((issue) => {
+      issues.set(issue.code, issue.message);
+    });
+    runtimeStateReporter.clearIssue.mockImplementation((code) => {
+      issues.delete(code);
+    });
     const fleet = harness as unknown as {
       desiredWorkspaces: Map<string, Row>;
       retryTimers: Map<string, ReturnType<typeof setTimeout>>;
@@ -1179,32 +1188,102 @@ describe('LodyFleet encrypted mode downgrade', () => {
       stopped: boolean;
     };
     delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
-    const target = fault ? fresh : { ...paired, contentMode: 'plaintext', genesisHash: undefined };
-    fleet.desiredWorkspaces.set(target.id, target);
-    bindingReadFault.code = fault;
-    try {
-      await fleet.startWorkspace(target);
-      expect(opened).toEqual([]);
-      expect(fleet.retryTimers.has(target.id)).toBe(retried);
-      const issue = runtimeStateReporter.upsertIssue.mock.calls
-        .map(([candidate]) => candidate)
-        .find(
-          (candidate) =>
-            candidate.code ===
-            (retried ? `workspace_start_failed:${target.id}` : `e2ee_mode_conflict:${target.id}`)
-        );
-      expect(issue?.message).toContain(fault ?? 'refused to open it without encryption');
-      bindingReadFault.code = null;
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(opened).toEqual(retried ? [target.id] : []);
-    } finally {
+    const dispose = async () => {
       bindingReadFault.code = null;
       fleet.stopped = true;
       for (const timer of fleet.retryTimers.values()) clearTimeout(timer);
       create.mockRestore();
-      vi.useRealTimers();
       vi.unstubAllEnvs();
       await rm(directory, { recursive: true, force: true });
+    };
+    return { fleet, opened, issues, dispose };
+  };
+
+  it('backs off unreadable bindings, merges them into one issue, and opens after recovery', async () => {
+    vi.useFakeTimers();
+    const t = await startingFleet();
+    try {
+      for (const workspace of [ordinary, fresh])
+        t.fleet.desiredWorkspaces.set(workspace.id, workspace);
+      bindingReadFault.code = 'EMFILE';
+      await t.fleet.startWorkspace(ordinary);
+      await t.fleet.startWorkspace(fresh);
+      const attempts = () => vi.mocked(Lody.create).mock.calls.length;
+      expect(attempts()).toBe(2);
+      // One Fleet-level issue for the errno, no per-workspace start failures.
+      expect(
+        [...t.issues.keys()].filter(
+          (code) =>
+            code.startsWith('e2ee_binding_unreadable:') ||
+            code.startsWith('workspace_start_failed:')
+        )
+      ).toEqual(['e2ee_binding_unreadable:EMFILE']);
+      expect(t.issues.get('e2ee_binding_unreadable:EMFILE')).toContain('2 workspace(s)');
+      // 10 s, then 20 s, then 40 s per workspace.
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(attempts()).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(attempts()).toBe(4);
+      await vi.advanceTimersByTimeAsync(19_999);
+      expect(attempts()).toBe(4);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(attempts()).toBe(6);
+      expect(t.opened).toEqual([]);
+      bindingReadFault.code = null;
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(t.opened).toEqual([ordinary.id, fresh.id]);
+      expect(t.issues.has('e2ee_binding_unreadable:EMFILE')).toBe(false);
+    } finally {
+      await t.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry a readable contradicting binding at startup', async () => {
+    vi.useFakeTimers();
+    const t = await startingFleet();
+    const downgraded = { ...paired, contentMode: 'plaintext', genesisHash: undefined };
+    try {
+      t.fleet.desiredWorkspaces.set(paired.id, downgraded);
+      await t.fleet.startWorkspace(downgraded);
+      expect(t.fleet.retryTimers.has(paired.id)).toBe(false);
+      expect(t.issues.get(`e2ee_mode_conflict:${paired.id}`)).toContain(
+        'refused to open it without encryption'
+      );
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(t.opened).toEqual([]);
+    } finally {
+      await t.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets an explicit identity reset release a contradicted workspace into pairing, reporting the conflict once', async () => {
+    const t = await bridgedFleet();
+    const fleet = t.fleet as typeof t.fleet & {
+      resetLocalE2eeIdentity(message: unknown): Promise<{ ok: true; archive: string | null }>;
+      waitingForPairing: Set<string>;
+    };
+    const reported = vi.fn();
+    const downgraded = { ...paired, contentMode: 'plaintext', genesisHash: undefined };
+    try {
+      await t.apply([downgraded]);
+      await t.apply([{ ...downgraded, name: 'Renamed' }]);
+      for (const [code] of t.issues) if (code.startsWith('e2ee_mode_conflict')) reported(code);
+      expect(reported).toHaveBeenCalledTimes(1);
+      const result = await fleet.resetLocalE2eeIdentity({
+        machineId: 'machine-1',
+        accountId: 'user-1',
+        workspaceId: paired.id,
+        resetId: crypto.randomUUID(),
+      });
+      expect(result.ok).toBe(true);
+      expect(result.archive).not.toBeNull();
+      expect(t.issues.has(`e2ee_mode_conflict:${paired.id}`)).toBe(false);
+      expect(fleet.waitingForPairing.has(paired.id)).toBe(true);
+      expect(t.events).toEqual([]);
+    } finally {
+      await t.dispose();
     }
   });
 

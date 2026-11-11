@@ -267,6 +267,8 @@
   "e2ee.localAgent.retryHelp": "The local agent is temporarily unavailable. Try again.",
   "e2ee.content.snapshotRecoveryPending": "Requesting another device to upload a fresh snapshot. Sync will retry automatically.",
   "e2ee.content.retryKeyUpdate": "Retry key update",
+  "e2ee.content.hostIdentityPending": "Checking this device's encryption identity for this workspace. Sending and sync wait until the check finishes.",
+  "e2ee.content.retryHostIdentity": "Check again",
   "e2ee.content.keyUpdateRequired": "Key update pending. You can keep reading and editing. Retry if needed.",
   "e2ee.content.receivingNewKey": "Receiving a new encryption key…",
   "sessions.fileLinks.chooseTitle": "Choose a file",
