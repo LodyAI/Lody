@@ -125,9 +125,10 @@ them in Effect is not a completed migration. Private launch snapshots and creden
 fingerprints do not enter queue history or tool-visible activities. Local automations
 make no authenticated product-cloud requests.
 
-Encrypted workspaces withhold Automations through the shared workspace content policy,
-including startup, explicit control and background retries, until an encrypted automation
-channel is implemented. Existing encrypted PR-poller isolation remains intact.
+Encrypted workspaces run Automations locally: Session actions sign queued continuations as
+this machine, and encrypted admission requires that signature. Remote control follows the
+shared `rpc` content verdict and is therefore withheld there. Existing encrypted PR-poller
+isolation remains intact.
 
 ## Native policies
 
