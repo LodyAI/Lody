@@ -139,7 +139,7 @@ class HomeActivity : ComponentActivity() {
                         app.notifications.consumeClick()
                     }
                 }
-                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments, app.mergeStates, app.branches) }
+                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments, app.mergeStates, app.branches, app.pullRequestDetails) }
                 val selectedSession = catalog.snapshot?.sessions?.firstOrNull { it.id == selectedId }
                 LaunchedEffect(selectedSession, activeScope, resumed) {
                     if (resumed && activeScope != null && selectedSession != null) {
@@ -256,6 +256,7 @@ private fun chatContext(catalog: CatalogState, id: String, title: String, user: 
         closedTabs = session?.let { app.lody.android.chat.DirectoryTabs.closed(it, snapshot.sessions) }.orEmpty(),
         tabs = session?.let { app.lody.android.chat.DirectoryTabs.sessions(it, snapshot.sessions) }.orEmpty(),
         repository = repository.orEmpty(),
+        repositories = (listOfNotNull(repository?.takeIf { it.isNotEmpty() }) + project?.repositories.orEmpty()).distinctBy { it.lowercase() },
         machineName = session?.let { snapshot?.machineNames?.get(it.machineId) }.orEmpty(),
         machineKind = snapshot?.let { app.lody.android.create.CreateSessionModel.machineKind(it, session?.machineId) }
             ?: app.lody.android.create.CreateSessionModel.MachineKind.Laptop,

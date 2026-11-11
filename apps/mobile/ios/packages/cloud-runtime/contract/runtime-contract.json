@@ -2287,7 +2287,8 @@
         "machineId": { "type": "string" },
         "name": { "type": "string" },
         "rootPath": { "type": "string" },
-        "repoFullName": { "type": "string" }
+        "repoFullName": { "type": "string" },
+        "repositories": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["id", "machineId", "name", "rootPath"]
     },

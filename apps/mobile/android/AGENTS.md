@@ -129,6 +129,7 @@
 - The repository context popover leads with repository name and a small one-line branch plus trailing copy button. Its aligned action columns show View PR / #number (never localized digit grouping) and All changes / coloured ±counts. Compact capsules omit diff counts without substituting an unexplained dot; short PR labels use intrinsic width.
 
 - The PR panel (`PullRequestSheet`) offers Merge while the PR is open, opening `MergeSheet` as the confirmation. Once merged, it offers Delete branch after a confirmation dialog, only while the PR's own same-repository head branch exists (`GitHubPullRequestWrites.headBranchExists`). `deleteBranch` re-reads the PR with the write grant, treats a branch already gone as deleted, and is never retried.
+- A transcript link to a PR in the session's project, including a multi-repository project's GitHub members, opens the PR panel; other links open in the browser. See [PR links](README.md#pr-links).
 
 - PR marks use shared `LodyPullRequestIcon` from the design system in lists, composer context and its PR action. Match Web SessionPrIcon: four Lucide status shapes, PR colour independent of CI, s check / f,e cross / p solid dot / x circle-dot, including merged/closed when CI is provided. Keep the 14/16 base, 10/16 verdict and transparent circular cutout; do not replace the whole mark with a CI tint.
 

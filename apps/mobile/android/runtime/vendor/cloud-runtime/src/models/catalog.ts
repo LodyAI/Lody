@@ -4,6 +4,8 @@ export type Project = {
   name: string;
   rootPath: string;
   repoFullName?: string;
+  /** A multi-repository project's GitHub members (`projectRun`), in member order. */
+  repositories?: string[];
 };
 export type Session = {
   lastModel?: { modelId?: string; name?: string } | null;

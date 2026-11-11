@@ -96,7 +96,8 @@ enum class RuntimeErrorCategory { AUTH, NETWORK, PROTOCOL, RUNTIME, BUSINESS, CA
 data class RuntimeFault(val code: String, val category: RuntimeErrorCategory)
 class RuntimeException(val fault: RuntimeFault) : Exception(fault.code)
 
-data class CatalogProject(val id: String, val machineId: String, val name: String, val rootPath: String, val repoFullName: String? = null)
+/** [repositories]: a multi-repository project's GitHub members (`projectRun`), in member order. */
+data class CatalogProject(val id: String, val machineId: String, val name: String, val rootPath: String, val repoFullName: String? = null, val repositories: List<String> = emptyList())
 /** [ci] is the web CI verdict code, [merge] GitHub's merge state (`c` clean, `d` conflicts, …); [url] opens it. */
 data class CatalogPullRequest(
     val repository: String, val number: Int, val status: String, val ci: String? = null,

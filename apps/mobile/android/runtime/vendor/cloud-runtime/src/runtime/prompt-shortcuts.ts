@@ -17,6 +17,7 @@ import { PromptShortcutDocument } from '../protocol/prompt-shortcuts/document.ts
 import { parsePromptShortcut } from '../protocol/prompt-shortcuts/compiler.ts';
 import {
   simpleShortcut,
+  type PromptShortcut,
   type ShortcutRequest,
 } from '../models/prompt-shortcuts.ts';
 import { z } from 'zod';
@@ -38,24 +39,92 @@ const directorySchema = z
   )
   .max(10000);
 
+type Row = z.infer<typeof directorySchema>[number];
+type Grant = { token: string; gatewayBaseUrl: string; expiresIn: number };
+
+/**
+ * What this runtime remembers for one workspace and account, so a shortcut opens without
+ * network round trips. Mobile trades freshness for speed here: the access directory is
+ * reused for `DIRECTORY_TTL` (saves and explicit refreshes re-read it), stream grants until
+ * shortly before they expire, and a body for as long as its exact index entry is listed. A
+ * body document is immutable once published (every save writes a new `bodyDocId`), so a
+ * cached body is the one a fresh read would return; only a revocation can go unseen, and
+ * only until the next directory read.
+ */
+type ShortcutScope = {
+  key: string;
+  directory?: { rows: Row[]; at: number };
+  directoryPending?: Promise<Row[]>;
+  grants: Map<string, { value: Promise<Grant>; until: number }>;
+  bodies: Map<string, { entry: string; value: PromptShortcut }>;
+  reads: Map<string, Promise<PromptShortcut>>;
+  prefetch: PromptShortcutIndexEntry[];
+  prefetching: boolean;
+};
+const DIRECTORY_TTL = 30_000;
+const BODY_LIMIT = 500;
+const PREFETCH_LIMIT = 100;
+let currentScope: ShortcutScope | undefined;
+
+function scopeFor(workspaceId: string, userId: string) {
+  const key = `${workspaceId}:${userId}`;
+  if (currentScope?.key !== key)
+    currentScope = {
+      key,
+      grants: new Map(),
+      bodies: new Map(),
+      reads: new Map(),
+      prefetch: [],
+      prefetching: false,
+    };
+  return currentScope;
+}
+
+/** Drops every remembered shortcut read (a new account or workspace). */
+export function forgetShortcuts() {
+  currentScope = undefined;
+  listings.clear();
+}
+
 export function shortcutAccess(
   workspaceId: string,
   userId: string,
   cloud: Cloud,
   signal: AbortSignal,
 ) {
-  const directory = async () =>
-    directorySchema
-      .parse(await cloud('listAccessibleDocuments', {}))
-      .filter(
-        (row) =>
-          !row.deleted &&
-          (row.visibility === 'workspace' || row.ownerUserId === userId),
-      );
-  const authorized = async (entry: PromptShortcutIndexEntry) => {
+  const scope = scopeFor(workspaceId, userId);
+  const live = () => currentScope === scope;
+  /** The rows this account may read; `fresh` skips the recent copy (writes, refresh). */
+  const directory = async (fresh = false) => {
+    const cached = scope.directory;
+    if (!fresh && cached && Date.now() - cached.at < DIRECTORY_TTL)
+      return cached.rows;
+    if (!fresh && scope.directoryPending) return scope.directoryPending;
+    const pending = cloud('listAccessibleDocuments', {})
+      .then((value) => {
+        const rows = directorySchema
+          .parse(value)
+          .filter(
+            (row) =>
+              !row.deleted &&
+              (row.visibility === 'workspace' || row.ownerUserId === userId),
+          );
+        if (live()) scope.directory = { rows, at: Date.now() };
+        return rows;
+      })
+      .finally(() => {
+        if (scope.directoryPending === pending)
+          scope.directoryPending = undefined;
+      });
+    scope.directoryPending = pending;
+    const rows = await pending;
+    signal.throwIfAborted();
+    return rows;
+  };
+  const authorized = async (entry: PromptShortcutIndexEntry, fresh = false) => {
     if (
       entry.workspaceId !== workspaceId ||
-      !(await directory()).some(
+      !(await directory(fresh)).some(
         (row) =>
           row.shortcutId === entry.id &&
           row.bodyDocId === entry.bodyDocId &&
@@ -66,35 +135,32 @@ export function shortcutAccess(
     )
       throw new Error('shortcut_changed');
   };
-  // One stream token serves every request of this call until shortly before it expires.
-  const tokens = new Map<
-    string,
-    { value: Promise<{ token: string; gatewayBaseUrl: string }>; until: number }
-  >();
+  // A grant serves every request of this runtime until shortly before it expires. The
+  // fetch is shared, so it never observes one caller's abort signal.
   const grant =
     (streamId: string, target: object, write: boolean) => async () => {
-      signal.throwIfAborted();
       const key = `${write}:${streamId}`;
-      const cached = tokens.get(key);
+      const cached = scope.grants.get(key);
       if (cached && cached.until > Date.now()) return cached.value;
-      const value = fetchGrant(streamId, target, write).catch((error) => {
-        tokens.delete(key);
+      const value = fetchGrant(streamId, target, write);
+      const slot = { value, until: Date.now() + 30000 };
+      scope.grants.set(key, slot);
+      try {
+        const resolved = await value;
+        slot.until =
+          Date.now() + Math.max(0, resolved.expiresIn * 1000 - 30000);
+        return resolved;
+      } catch (error) {
+        if (scope.grants.get(key) === slot) scope.grants.delete(key);
         throw error;
-      });
-      tokens.set(key, { value, until: Date.now() + 30000 });
-      const resolved = await value;
-      tokens.set(key, {
-        value,
-        until: Date.now() + Math.max(0, resolved.expiresIn * 1000 - 30000),
-      });
-      return resolved;
+      }
     };
   const fetchGrant = async (
     streamId: string,
     target: object,
     write: boolean,
-  ) => {
-    const value = z
+  ): Promise<Grant> =>
+    z
       .object({
         token: z.string().min(1),
         expiresIn: z.number().positive(),
@@ -105,9 +171,6 @@ export function shortcutAccess(
         streamId: z.literal(streamId),
       })
       .parse(await cloud('getStreamToken', { target, write }));
-    signal.throwIfAborted();
-    return value;
-  };
   const index = async (
     ownerUserId: string,
     visibility: 'private' | 'workspace',
@@ -132,7 +195,6 @@ export function shortcutAccess(
     }
     return openSettings(stream, getGrant, signal, { cached: !write });
   };
-  type Row = Awaited<ReturnType<typeof directory>>[number];
   const listed = (entry: PromptShortcutIndexEntry, rows: Row[]) =>
     rows.some(
       (row) =>
@@ -159,15 +221,15 @@ export function shortcutAccess(
   ];
   const byName = (a: PromptShortcutIndexEntry, b: PromptShortcutIndexEntry) =>
     a.name.localeCompare(b.name);
+  /** Send-time expansion: every directory row must have landed in its owner's index. */
   const list = async () => {
     const rows = await directory();
     const entries = (
       await Promise.all(domains(rows).map((row) => domain(row, rows)))
     ).flat();
-    const fresh = await directory();
-    if (fresh.some((row) => !entries.some((entry) => listed(entry, [row]))))
+    if (rows.some((row) => !entries.some((entry) => listed(entry, [row]))))
       throw new Error('shortcut_index_pending');
-    return entries.filter((entry) => listed(entry, fresh)).sort(byName);
+    return entries.sort(byName);
   };
   /**
    * Mention discovery: everything readable now. One owner's index that fails to read, or a
@@ -175,8 +237,8 @@ export function shortcutAccess(
    * incomplete instead of hiding every shortcut. Send-time expansion keeps the strict `list`;
    * a listed row is only a display, and reading its body re-checks the directory.
    */
-  const listAvailable = async () => {
-    const rows = await directory();
+  const listAvailable = async (fresh = false) => {
+    const rows = await directory(fresh);
     let incomplete = false;
     const entries = (
       await Promise.all(
@@ -191,10 +253,43 @@ export function shortcutAccess(
     ).flat();
     if (rows.some((row) => !entries.some((entry) => listed(entry, [row]))))
       incomplete = true;
+    prefetch(entries);
     return { entries: entries.sort(byName), incomplete };
   };
-  const read = async (entry: PromptShortcutIndexEntry) => {
-    await authorized(entry);
+  const remember = (entry: PromptShortcutIndexEntry, value: PromptShortcut) => {
+    if (!live()) return;
+    scope.bodies.delete(entry.bodyDocId);
+    scope.bodies.set(entry.bodyDocId, { entry: JSON.stringify(entry), value });
+    while (scope.bodies.size > BODY_LIMIT)
+      scope.bodies.delete(scope.bodies.keys().next().value!);
+  };
+  const cachedBody = (entry: PromptShortcutIndexEntry) => {
+    const hit = scope.bodies.get(entry.bodyDocId);
+    return hit?.entry === JSON.stringify(entry) ? hit.value : undefined;
+  };
+  /** The body for an authorized entry: remembered, joined in flight, or downloaded once. */
+  const body = (entry: PromptShortcutIndexEntry) => {
+    const hit = cachedBody(entry);
+    if (hit) return Promise.resolve(hit);
+    const key = JSON.stringify(entry);
+    let pending = scope.reads.get(key);
+    if (!pending) {
+      pending = download(entry, AbortSignal.timeout(30000))
+        .then((value) => {
+          remember(entry, value);
+          return value;
+        })
+        .finally(() => {
+          if (scope.reads.get(key) === pending) scope.reads.delete(key);
+        });
+      scope.reads.set(key, pending);
+    }
+    return pending;
+  };
+  const download = async (
+    entry: PromptShortcutIndexEntry,
+    signal: AbortSignal,
+  ) => {
     const stream = getShortcutBodyStreamId(entry.bodyDocId);
     const client = await clientFor(
       stream,
@@ -243,10 +338,45 @@ export function shortcutAccess(
         JSON.stringify(entry)
     )
       throw new Error('shortcut_changed');
-    await authorized(entry);
     return value;
   };
-  return { list, listAvailable, read, authorized, index, grant, directory };
+  /** `fresh` re-reads the directory first; saves use it, opening and sending do not. */
+  const read = async (entry: PromptShortcutIndexEntry, fresh = false) => {
+    await authorized(entry, fresh);
+    const value = await body(entry);
+    signal.throwIfAborted();
+    return value;
+  };
+  /**
+   * Listed bodies download in the background, one at a time, so opening or choosing a
+   * shortcut usually needs no network. Best effort: a failure only leaves a later read to
+   * download it; a foreground read of the same body joins the download in flight.
+   */
+  const prefetch = (entries: PromptShortcutIndexEntry[]) => {
+    if (!live()) return;
+    scope.prefetch = entries
+      .filter((entry) => !cachedBody(entry))
+      .slice(0, PREFETCH_LIMIT);
+    if (scope.prefetching) return;
+    scope.prefetching = true;
+    void (async () => {
+      try {
+        for (let next; live() && (next = scope.prefetch.shift());)
+          await body(next).catch(() => undefined);
+      } finally {
+        scope.prefetching = false;
+      }
+    })();
+  };
+  return {
+    list,
+    listAvailable,
+    read,
+    authorized,
+    index,
+    grant,
+    directory,
+  };
 }
 
 type ShortcutListing = {
@@ -306,7 +436,8 @@ export async function promptShortcuts(
   const access = shortcutAccess(request.workspaceId, userId, cloud, signal);
   // Settings and the composer's body read list what is readable now; one owner's index that
   // has not landed hides only its own rows. Send-time expansion keeps the strict listing.
-  if (request.action === 'list') return (await access.listAvailable()).entries;
+  if (request.action === 'list')
+    return (await access.listAvailable(request.fresh === true)).entries;
   if (request.action === 'read')
     return access.read(parseShortcutIndex(request.entry));
   if (request.action !== 'save') throw new Error('invalid_shortcut');
@@ -337,13 +468,13 @@ export async function promptShortcuts(
   const entry = projectShortcutIndex(value, request.bodyDocId);
   // Explicit retry uses the same body/revision. An activated save only repairs
   // its index; no recovery path automatically replays an uncertain write.
-  const active = (await access.directory()).find(
+  const active = (await access.directory(true)).find(
     (row) => row.shortcutId === value.id,
   );
   const alreadyActive =
     active?.bodyDocId === entry.bodyDocId && active.revision === entry.revision;
   if (!alreadyActive) {
-    if (base) await access.read(base);
+    if (base) await access.read(base, true);
     else if (active) throw new Error('shortcut_changed');
     const current = await access.index(userId, entry.visibility, true);
     new PromptShortcutCatalog(current.flock).put(entry); // Validate slug/quota before staging.
@@ -396,11 +527,11 @@ export async function promptShortcuts(
       });
     }
   }
-  const published = await access.read(entry);
+  const published = await access.read(entry, true);
   if (JSON.stringify(published) !== JSON.stringify(value))
     throw new Error('shortcut_changed');
   const { flock, client } = await access.index(userId, entry.visibility, true);
-  await access.authorized(entry);
+  await access.authorized(entry, true);
   const version = flock.version();
   new PromptShortcutCatalog(flock).put(entry);
   signal.throwIfAborted();
