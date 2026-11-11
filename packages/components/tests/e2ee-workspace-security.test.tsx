@@ -483,11 +483,64 @@ describe('recovery vault settings actions', () => {
       // Read-only until the starting device finishes: no setup, passkey changes or
       // replacement actions, only restoring.
       expect(view.labels).toEqual(['e2ee.recovery.restore', 'e2ee.recovery.restorePasskey']);
+      // Restoring is this host's only next step, so the file restore leads.
+      expect(view.primary).toEqual(['e2ee.recovery.restore']);
       await view.click('e2ee.recovery.restore');
       // A wait that timed out is still waiting, and an uncovered workspace is not a failure.
       expect(view.text).toContain('e2ee.recovery.restoreWaiting');
       expect(view.text).toContain('e2ee.recovery.restoreNotBackedUp');
       expect(view.text).not.toContain('e2ee.recovery.restoreFailed');
+    } finally {
+      view.done();
+    }
+  });
+
+  it('lets restore lead when a host without a file check has nothing to set up', async () => {
+    const port = fakeRecoveryPort({
+      hasVault: true,
+      replacing: false,
+      covered: [workspace('a', { kind: 'verified', update: 1 })],
+      uncovered: [workspace('b', { kind: 'notSet' })],
+    } as RecoveryPlan);
+    const view = await mount(undefined, {}, port);
+    try {
+      expect(view.labels).not.toContain('e2ee.recovery.check');
+      expect(view.primary).toEqual(['e2ee.recovery.restore']);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('keeps a settled passkey removal when the list cannot be read again', async () => {
+    const port = fakeRecoveryPort(
+      {
+        hasVault: true,
+        replacing: false,
+        covered: [workspace('a', { kind: 'verified', update: 1 })],
+        uncovered: [],
+      } as RecoveryPlan,
+      {
+        passkeyAvailable: async () => true,
+        listPasskeys: async () => ({
+          outcome: 'listed',
+          passkeys: [{ entryId: 'kept', label: 'Kept passkey' }],
+          pending: [{ entryId: 'stale', label: 'Stale passkey' }],
+        }),
+        // The removal committed, then reading the list again failed.
+        removePasskey: async () => ({ outcome: 'removed' }),
+      }
+    );
+    const view = await mount(undefined, {}, port);
+    try {
+      await view.click('e2ee.recovery.passkeyManage');
+      expect(view.text).toContain('Kept passkey');
+      await view.click('e2ee.recovery.passkeyRemoveRetry');
+      expect(view.text).toContain('e2ee.recovery.passkeyRemoved');
+      expect(view.text).not.toContain('e2ee.recovery.failed');
+      // The old lists may no longer be true; they are dropped until read anew.
+      expect(view.text).not.toContain('Kept passkey');
+      expect(view.labels).not.toContain('e2ee.recovery.passkeyRemoveRetry');
+      expect(view.labels).toContain('e2ee.recovery.passkeyManage');
     } finally {
       view.done();
     }

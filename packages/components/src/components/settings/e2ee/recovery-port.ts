@@ -57,11 +57,7 @@ export type RecoveryPort = {
   readonly listPasskeys: () => Promise<
     RecoveryCancelled | ({ readonly outcome: 'listed' } & RecoveryPasskeys)
   >;
-  readonly removePasskey: (
-    entryId: string
-  ) => Promise<
-    RecoveryCancelled | ({ readonly outcome: 'removed' | 'incomplete' } & RecoveryPasskeys)
-  >;
+  readonly removePasskey: (entryId: string) => Promise<RecoveryCancelled | RecoveryPasskeyRemoval>;
   /** Open a chosen recovery file and authenticate it, without restoring anything.
    * Null when this host cannot check a file: the section then offers no check. */
   readonly checkFile:
@@ -103,6 +99,16 @@ export type RecoveryRestoreResult = {
   readonly name: string;
   readonly outcome: RecoveryCommitOutcome;
 };
+/** A settled passkey removal. When the removal settled but the list could not be read
+ * again, return the outcome without lists: the section keeps the outcome instead of
+ * reporting a failure, and the user opens the list again to see it. */
+export type RecoveryPasskeyRemoval =
+  | ({ readonly outcome: 'removed' | 'incomplete' } & RecoveryPasskeys)
+  | {
+      readonly outcome: 'removed' | 'incomplete';
+      readonly passkeys?: undefined;
+      readonly pending?: undefined;
+    };
 export type RecoveryPasskey = { readonly entryId: string; readonly label: string };
 export type RecoveryPasskeys = {
   readonly passkeys: readonly RecoveryPasskey[];
