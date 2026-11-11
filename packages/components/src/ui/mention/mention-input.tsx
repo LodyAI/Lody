@@ -5,6 +5,7 @@ import { registerPlainText } from '@lexical/plain-text';
 import { mergeRegister } from '@lexical/utils';
 import {
   BEFORE_INPUT_COMMAND,
+  CLEAR_HISTORY_COMMAND,
   COMMAND_PRIORITY_CRITICAL,
   COPY_COMMAND,
   CUT_COMMAND,
@@ -884,6 +885,9 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           ],
         }
       );
+      // Assigning a textarea's value drops its native undo history; an owner's
+      // write (clearing a sent draft, a committed chip) is not undoable here either.
+      editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
       if (pendingApplies) pendingSelectionRef.current = null;
       return;
     }

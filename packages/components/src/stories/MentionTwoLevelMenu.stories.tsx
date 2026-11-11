@@ -546,7 +546,13 @@ const LONG_PROSE =
  * publishes its owner state, so browser tests can assert what the composer
  * holds after real keyboard, pointer, clipboard and IME input.
  */
-function EditorBehaviourHarness({ initialValue = '' }: { initialValue?: string }) {
+function EditorBehaviourHarness({
+  initialValue = '',
+  undoHistory = true,
+}: {
+  initialValue?: string;
+  undoHistory?: boolean;
+}) {
   const [value, setValue] = React.useState(initialValue);
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
@@ -570,7 +576,7 @@ function EditorBehaviourHarness({ initialValue = '' }: { initialValue?: string }
           onFilter={(options) => options}
           getMentionChip={getComposerMentionChip}
           onMentionClick={(mention) => setClicked(mention.value)}
-          undoHistory
+          undoHistory={undoHistory}
         >
           <MentionInput
             value={value}
@@ -588,6 +594,10 @@ function EditorBehaviourHarness({ initialValue = '' }: { initialValue?: string }
           />
         </Mention>
       </div>
+      {/* The owner clearing its draft, as a composer does after a send. */}
+      <button type="button" onClick={() => setValue('')}>
+        Clear draft
+      </button>
       <output data-testid="editor-state" hidden>
         {JSON.stringify({
           value,
@@ -916,4 +926,10 @@ export const EditorBehaviour: Story = {
 export const EditorOverflow: Story = {
   args: { search: '' },
   render: () => <EditorBehaviourHarness initialValue={LONG_PROSE} />,
+};
+
+/** Behaviour harness with the editor's own undo, as a composer without quotes uses. */
+export const EditorBehaviourEditorUndo: Story = {
+  args: { search: '' },
+  render: () => <EditorBehaviourHarness undoHistory={false} />,
 };

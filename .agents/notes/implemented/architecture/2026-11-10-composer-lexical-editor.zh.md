@@ -19,7 +19,7 @@ Translation: current
 
 - **编辑器**：Lexical core、`@lexical/plain-text`、`@lexical/history`，精确锁定 0.53.0，不用 `@lexical/react`。chip 通过 portal 渲染进各自装饰节点的 DOM。
 - **文档结构**：一个段落，由文本节点、换行节点和 `MentionDecoratorNode` 组成。mention 节点的文本内容正好是它的区间所覆盖的文字。`ui/mention/composer-document.ts` 是唯一计算偏移量的地方，负责 `{text, mentions}` 与 Lexical 位置（包括实时 DOM 位置）之间的换算。
-- **对外模型不变**：调用方仍持有字符串和区间。调用方的值与文档不同时就重建文档；就像给 textarea 赋值一样，光标随后到末尾，除非组件自身要求了特定光标。组字期间不写入调用方的值；调用方只在组字提交后才收到文字。
+- **对外模型不变**：调用方仍持有字符串和区间。调用方的值与文档不同时就重建文档；就像给 textarea 赋值一样，光标随后到末尾，除非组件自身要求了特定光标；编辑器自带的撤销历史也随之清空，所以发送后被清空的草稿不能被撤销找回。组字期间不写入调用方的值；调用方只在组字提交后才收到文字。
 - **编辑逻辑保留**：方向键跨 chip、Backspace/Delete 规则、菜单按键、触发符、历史快照和所有插入路径，都还是原来的字符串运算，没有改动。
 - **事件处理顺序**：调用方的 `onKeyDown`、`onPaste`、`onCopy`、`onCut`、`onBeforeInput` 先于 Lexical 执行；它们调用 `preventDefault` 时，跳过 Lexical 的默认处理。脚本派发的输入事件不会改动内容，和 textarea 一样。
 - **元素与接口**：ref 仍是一个 DOM 元素，即编辑器的 `div`。文字、光标和几何信息通过 `ui/mention/composer-input.ts` 读写，它同时支持编辑器和普通 textarea；因此 focus、`closest`、floating-ui 锚定和 `activeElement` 判断都还是普通 DOM 操作。
@@ -54,6 +54,6 @@ Translation: current
 ## 验证
 
 - **转换层**：`tests/composer-document.test.ts` 覆盖往返转换、区间清理和偏移量/DOM 映射。
-- **行为**：`tests/e2e/composer-editor.spec.ts` 覆盖打字、换行、chip、方向键、Backspace/Delete、点击 chip、撤销重做、粘贴、CDP 模拟输入法（包括紧贴 chip 组字）、无障碍，以及内容溢出时光标落在字上。它在 textarea 版本上除光标落字那条外全部通过，在编辑器上全部通过。
+- **行为**：`tests/e2e/composer-editor.spec.ts` 覆盖打字、换行、chip、方向键、Backspace/Delete、点击 chip、撤销重做（包括调用方清空之后）、粘贴、CDP 模拟输入法（包括紧贴 chip 组字）、无障碍，以及内容溢出时光标落在字上。它在 textarea 版本上除光标落字那条外全部通过，在编辑器上全部通过。
 - **现有测试套件**：composer 相关的 vitest 套件，以及 `composer-mention-placement`、`message-quotes`、`composer-submission-focus`、`interface-typography`，除了同一环境下在 textarea 版本上也失败的用例，没有新增失败。
 - **尚未验证**：WebKit/Safari（验证机器上没有 WebKit 运行环境）、真机上的 Android Gboard 和 iOS 拼音，以及 Electron 应用本身。纯文本 composer 没有改动。

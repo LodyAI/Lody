@@ -49,7 +49,8 @@ there" pins this; it fails on the textarea and passes on the editor.
 - **Owner model unchanged.** The owner still holds the string and ranges. An
   owner value that differs from the document rebuilds it. As when a textarea's
   value is assigned, the caret then goes to the end, unless the primitive asked
-  for a specific caret. No owner write lands mid-composition, and the owner hears
+  for a specific caret, and the editor's own undo history is cleared, so undo
+  cannot bring back a draft the owner cleared after sending. No owner write lands mid-composition, and the owner hears
   IME text only once committed.
 - **Editing logic kept.** Arrows over chips, Backspace and Delete rules, menu
   keys, triggers, history snapshots and every insert route are today's string
@@ -113,7 +114,8 @@ there" pins this; it fails on the textarea and passes on the editor.
 - **Boundary:** `tests/composer-document.test.ts` covers round trips, sanitizing
   and offset/DOM mapping.
 - **Behaviour:** `tests/e2e/composer-editor.spec.ts` covers typing, newlines,
-  chips, arrows, Backspace/Delete, chip clicks, undo/redo, paste, CDP IME
+  chips, arrows, Backspace/Delete, chip clicks, undo/redo (including after an
+  owner clear), paste, CDP IME
   (including next to a chip), accessibility, and caret on glyph under overflow.
   It passes on the textarea build except the caret-on-glyph case, and fully on
   the editor.

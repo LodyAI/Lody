@@ -137,6 +137,22 @@ test('undo restores the text and the chip together', async ({ page }) => {
   await expect.poll(async () => await state(page)).toEqual(before);
 });
 
+test('undo does not bring back a draft its owner cleared', async ({ page }) => {
+  await open(
+    page,
+    '/iframe.html?id=mentions-mentiontwolevelmenu--editor-behaviour-editor-undo&viewMode=story'
+  );
+  await page.keyboard.type('sent draft');
+  await expect.poll(async () => (await state(page)).value).toBe('sent draft');
+  await page.getByRole('button', { name: 'Clear draft' }).click();
+  await expect.poll(async () => (await state(page)).value).toBe('');
+  await editor(page).focus();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+  // A textarea forgets its undo history when its value is assigned; so does the editor.
+  await expect.poll(async () => (await state(page)).value).toBe('');
+  await expect(page.getByTestId('editor-frame')).not.toContainText('sent draft');
+});
+
 test('pasted plain text keeps its line breaks', async ({ page, context, browserName }) => {
   test.skip(browserName !== 'chromium', 'clipboard permissions are Chromium-only in Playwright');
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);

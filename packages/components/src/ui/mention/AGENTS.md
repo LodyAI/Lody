@@ -5,7 +5,8 @@ Shared mention primitive used by composer autocomplete surfaces.
 The input is one Lexical contenteditable that edits and paints text, caret,
 selection, IME preedit and chips; it replaced a textarea under a painted mirror
 ([decision](../../../../../.agents/notes/implemented/architecture/2026-11-10-composer-lexical-editor.md)).
-It keeps textarea semantics: an owner-assigned value puts the caret at the end,
+It keeps textarea semantics: an owner-assigned value puts the caret at the end
+and clears the editor's own undo history,
 focus keeps the caret, `rows` sets the height, and the placeholder takes a
 textarea's colour. Code outside the primitive reads and writes text and caret
 only through `composer-input.ts`, which also serves the plain textarea of a
