@@ -71,6 +71,7 @@
     <string name="home_empty">还没有对话</string>
     <string name="home_projects_empty">还没有项目</string>
     <string name="home_offline">离线</string>
+    <string name="home_connecting">正在连接…</string>
     <string name="home_syncing">正在同步…</string>
     <string name="home_connected">已连接</string>
     <string name="home_no_workspaces">没有可访问的工作区</string>

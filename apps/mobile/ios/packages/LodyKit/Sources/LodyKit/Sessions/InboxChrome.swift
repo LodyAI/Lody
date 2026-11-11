@@ -294,7 +294,7 @@ final class InboxChrome {
     )
   }
 
-  /// Centre pill, as on the web mobile header: syncing / offline, plus a brief "connected" flash on recovery.
+  /// Centre pill, as on the web mobile header: syncing / connecting, plus a brief "connected" flash on recovery.
   private func updateSync(_ next: HomeSyncState, compact: Bool) {
     guard let host else { return }
     let previous = syncState
@@ -313,7 +313,7 @@ final class InboxChrome {
     let shown: HomeSyncPill.Shown? = switch next {
     case .live: syncShown == .recovered ? .recovered : nil
     case .syncing: .syncing
-    case .offline: .offline
+    case .connecting: .connecting
     }
     showSync(shown, in: host, compact: compact)
   }
