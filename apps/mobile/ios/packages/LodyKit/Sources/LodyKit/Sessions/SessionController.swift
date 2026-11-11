@@ -33,6 +33,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var permissionPage: PermissionController?
   var permissionScope: (userId: String, workspaceId: String)?
   var openingFiles: Set<String> = []
+  /// PR pages open from this conversation (`owner/repo#number`, lowercased) until their page closes.
+  var openPullRequests: Set<String> = []
   var mentions: MentionCatalogStore?
   var mentionSequence = 0
   var editable = ""
