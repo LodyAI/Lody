@@ -3,6 +3,7 @@ import type { RefObject } from 'react';
 import type { SessionId } from '@lody/shared';
 import {
   MANAGED_BROWSER_COMMAND_MESSAGE_TYPE,
+  MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE,
   MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
   MANAGED_BROWSER_READY_MESSAGE_TYPE,
   MANAGED_BROWSER_STATE_MESSAGE_TYPE,
@@ -48,6 +49,12 @@ export type ManagedPreviewFrameOptions = {
   logicalUrl: string;
   /** A policy-owned static document (`buildStaticHtmlPreviewDocument`). */
   documentHtml?: string;
+  /**
+   * The user explicitly chose to run this document's scripts. Required on engines
+   * where `getExecutableHtmlPreviewSupport()` is `opt-in`; the frame cache refuses
+   * to create an executable static frame there without it.
+   */
+  scriptsOptedIn?: boolean;
   title: string;
   annotationEnabled: boolean;
   command?: { id: number; action: ManagedBrowserCommand };
@@ -73,6 +80,7 @@ export function useManagedPreviewFrame({
   viewerUrl,
   logicalUrl,
   documentHtml,
+  scriptsOptedIn = false,
   title,
   annotationEnabled,
   command,
@@ -94,6 +102,13 @@ export function useManagedPreviewFrame({
   // engine's initial about:blank, or a document without a live runtime) are
   // ordinary.
   const staticDocumentPhaseRef = useRef<'pending' | 'ready' | 'loaded'>('pending');
+  // A parent-owned reload replaces the srcdoc itself, so the outgoing runtime's
+  // unload signal is expected once. The next ready signal clears it.
+  const expectStaticUnloadRef = useRef(false);
+  // Set once a static frame was torn down after page script replaced it. A later
+  // reload re-acquires a fresh frame instead of reusing the detached one.
+  const staticFrameRetiredRef = useRef(false);
+  const [frameGeneration, setFrameGeneration] = useState(0);
   const previewOrigin = useMemo(
     () => (documentHtml === undefined ? new URL(viewerUrl).origin : 'null'),
     [documentHtml, viewerUrl]
@@ -117,16 +132,28 @@ export function useManagedPreviewFrame({
     [documentHtml, logicalUrl]
   );
 
+  // Page script replaced the policy-owned srcdoc. Remove the frame at once so the
+  // replacement page cannot be used, then leave rendered mode via the navigation
+  // policy. Callers normally unmount on that request; if one does not, reload
+  // re-acquires a fresh frame.
+  const retireReplacedStaticFrame = useStableCallback(() => {
+    if (staticFrameRetiredRef.current) return;
+    staticFrameRetiredRef.current = true;
+    staticDocumentPhaseRef.current = 'pending';
+    expectStaticUnloadRef.current = false;
+    iframeRef.current?.remove();
+    setIframeLoaded(false);
+    onAnnotationAvailabilityChange(false);
+    onLoadingChange(false);
+    onNavigationRequest(logicalUrl);
+  });
+
   const handleIframeLoad = useStableCallback(() => {
     if (documentHtml !== undefined) {
+      if (staticFrameRetiredRef.current) return;
       if (staticDocumentPhaseRef.current === 'loaded') {
-        // Leave rendered mode before the replacement page can be used.
-        staticDocumentPhaseRef.current = 'pending';
-        iframeRef.current?.remove();
-        setIframeLoaded(false);
-        onAnnotationAvailabilityChange(false);
-        onLoadingChange(false);
-        onNavigationRequest(logicalUrl);
+        // Fallback for a replacement the runtime could not report on unload.
+        retireReplacedStaticFrame();
         return;
       }
       if (staticDocumentPhaseRef.current === 'ready') staticDocumentPhaseRef.current = 'loaded';
@@ -151,10 +178,16 @@ export function useManagedPreviewFrame({
 
   const hardReloadFrame = useStableCallback(() => {
     const iframe = iframeRef.current;
+    if (documentHtml !== undefined && staticFrameRetiredRef.current) {
+      syncFrameLoadState(false);
+      setFrameGeneration((generation) => generation + 1);
+      return;
+    }
     if (!iframe) return;
     if (documentHtml !== undefined) {
       syncFrameLoadState(false);
       staticDocumentPhaseRef.current = 'pending';
+      expectStaticUnloadRef.current = true;
       iframe.srcdoc = documentHtml;
       return;
     }
@@ -172,12 +205,15 @@ export function useManagedPreviewFrame({
     const host = hostRef.current;
     if (!host) return undefined;
     staticDocumentPhaseRef.current = 'pending';
+    expectStaticUnloadRef.current = false;
+    staticFrameRetiredRef.current = false;
     const frame = acquireManagedPreviewFrame({
       sessionId,
       viewerUrl,
       title: titleRef.current,
       host,
       documentHtml,
+      scriptsOptedIn,
     });
     iframeRef.current = frame.iframe;
     frame.iframe.addEventListener('load', handleIframeLoad);
@@ -187,7 +223,16 @@ export function useManagedPreviewFrame({
       if (iframeRef.current === frame.iframe) iframeRef.current = null;
       releaseManagedPreviewFrame(documentHtml === undefined ? sessionId : null, frame.iframe);
     };
-  }, [documentHtml, handleIframeLoad, hostRef, sessionId, syncFrameLoadState, viewerUrl]);
+  }, [
+    documentHtml,
+    frameGeneration,
+    handleIframeLoad,
+    hostRef,
+    scriptsOptedIn,
+    sessionId,
+    syncFrameLoadState,
+    viewerUrl,
+  ]);
 
   useEffect(() => {
     titleRef.current = title;
@@ -230,8 +275,10 @@ export function useManagedPreviewFrame({
       if (event.origin !== previewOrigin || event.source !== iframeRef.current?.contentWindow)
         return;
       if (isRecord(event.data) && event.data.type === MANAGED_BROWSER_READY_MESSAGE_TYPE) {
-        if (documentHtml !== undefined && staticDocumentPhaseRef.current === 'pending') {
-          staticDocumentPhaseRef.current = 'ready';
+        if (documentHtml !== undefined) {
+          expectStaticUnloadRef.current = false;
+          if (staticDocumentPhaseRef.current === 'pending')
+            staticDocumentPhaseRef.current = 'ready';
         }
         // Scripts can be ready while images or other page resources still load.
         // This reply does not require iframeLoaded and contains no page data.
@@ -239,6 +286,19 @@ export function useManagedPreviewFrame({
           { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: annotationEnabled },
           previewPostMessageOrigin
         );
+      } else if (
+        isRecord(event.data) &&
+        event.data.type === MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE
+      ) {
+        // Only static documents send this, and never with page data. Unlike the
+        // load fallback it does not wait for the replacement page to finish
+        // loading, and it also covers a replacement before the srcdoc's own load.
+        if (documentHtml === undefined) return;
+        if (expectStaticUnloadRef.current) {
+          expectStaticUnloadRef.current = false;
+          return;
+        }
+        retireReplacedStaticFrame();
       } else if (isManagedBrowserStateMessage(event.data)) {
         let mappedUrl: string;
         try {
@@ -279,6 +339,7 @@ export function useManagedPreviewFrame({
     onRuntimeError,
     previewOrigin,
     previewPostMessageOrigin,
+    retireReplacedStaticFrame,
   ]);
 
   return { iframeRef, iframeLoaded, postToPreview, mapRuntimeUrl };

@@ -42,10 +42,12 @@ Read parent rules and linked context.
   (`fromPageContent`) never opens private LAN; only the address bar may.
 - Preload one bounded frame after live confirmation; require atomic moves, no
   polling, and cleanup safe after Browser takeover.
-- Static HTML requires policy-owned `srcdoc` and `allow-scripts` only. Scripts run
-  per `getExecutableHtmlPreviewSupport()`: automatically with credentialless, only
-  after an explicit "Run scripts" opt-in on WebKit, never elsewhere (Gecko included);
-  otherwise use navigation-stripped HTML with an empty sandbox. Executable frames go
+- Static HTML requires policy-owned `srcdoc` and `allow-scripts` only. In the session
+  file viewer, scripts run per `getExecutableHtmlPreviewSupport()`: automatically with
+  credentialless, only after an explicit per-text "Run scripts" opt-in on WebKit
+  (enforced by the frame cache via `scriptsOptedIn`), never elsewhere (Gecko included).
+  The mobile project browser always requires the opt-in, on every supported engine.
+  Otherwise use navigation-stripped HTML with an empty sandbox. Executable frames go
   through `useManagedPreviewFrame` only; never add a second executable iframe.
   Never preview truncated text; static frames die with their tab.
 - Encrypted remote preview controls require the existing protected feature host

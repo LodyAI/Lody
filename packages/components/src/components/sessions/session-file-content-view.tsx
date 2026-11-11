@@ -639,8 +639,10 @@ function SessionFileContentViewImpl({
   const handledHtmlPreviewRequestSeqRef = useRef<number | undefined>(undefined);
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(false);
   // WebKit has no credentialless frames, so HTML there runs scripts only after an
-  // explicit per-document opt-in; leaving rendered mode revokes it.
-  const [htmlScriptsOptedIn, setHtmlScriptsOptedIn] = useState(false);
+  // explicit per-document opt-in. The opt-in records the exact text it was given
+  // for: new content (an agent rewrite) needs a new opt-in, and leaving rendered
+  // mode revokes it.
+  const [htmlScriptsOptedInFor, setHtmlScriptsOptedInFor] = useState<string | null>(null);
   const [htmlAnnotationAvailable, setHtmlAnnotationAvailable] = useState(false);
   const [htmlPreviewLoading, setHtmlPreviewLoading] = useState(false);
   const [htmlRuntimeError, setHtmlRuntimeError] = useState<string | null>(null);
@@ -1201,8 +1203,6 @@ function SessionFileContentViewImpl({
 
   const isTextFileReady = data.status === 'ready' && data.snapshot.kind === 'text';
   const htmlScriptSupport = getExecutableHtmlPreviewSupport();
-  const supportsHtmlPreview =
-    htmlScriptSupport === 'automatic' || (htmlScriptSupport === 'opt-in' && htmlScriptsOptedIn);
   const htmlPreviewSource =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
@@ -1210,6 +1210,10 @@ function SessionFileContentViewImpl({
     isHtmlPath(normalizedPath)
       ? (latestEditorTextRef.current ?? data.snapshot.text)
       : null;
+  const htmlScriptsOptedIn =
+    htmlPreviewSource !== null && htmlScriptsOptedInFor === htmlPreviewSource;
+  const supportsHtmlPreview =
+    htmlScriptSupport === 'automatic' || (htmlScriptSupport === 'opt-in' && htmlScriptsOptedIn);
   const isHtmlTextFile = htmlPreviewSource !== null;
   const showHtmlRendered = isActiveSurface && isHtmlTextFile && htmlRenderMode === 'rendered';
   const htmlPreviewDocument = useMemo(
@@ -1226,7 +1230,7 @@ function SessionFileContentViewImpl({
 
   useEffect(() => {
     if (showHtmlRendered) return;
-    setHtmlScriptsOptedIn(false);
+    setHtmlScriptsOptedInFor(null);
     setHtmlAnnotationEnabled(false);
     setHtmlAnnotationAvailable(false);
     setHtmlPreviewLoading(false);
@@ -1246,7 +1250,7 @@ function SessionFileContentViewImpl({
   }, []);
   const handleHtmlBrowserStateChange = useCallback(() => undefined, []);
   const handleHtmlNavigationRequest = useCallback(() => {
-    setHtmlScriptsOptedIn(false);
+    setHtmlScriptsOptedInFor(null);
     setHtmlAnnotationEnabled(false);
     setHtmlRenderMode('code');
     toast.warning(
@@ -1655,6 +1659,7 @@ function SessionFileContentViewImpl({
           viewerUrl={htmlPreviewLogicalUrl}
           logicalUrl={htmlPreviewLogicalUrl}
           documentHtml={htmlPreviewDocument}
+          scriptsOptedIn={htmlScriptsOptedIn}
           annotationEnabled={htmlAnnotationEnabled}
           command={htmlPreviewCommand}
           {...stylex.props(styles.fullSize)}
@@ -1927,7 +1932,7 @@ function SessionFileContentViewImpl({
                 aria-pressed={htmlScriptsOptedIn}
                 onClick={() => {
                   setHtmlAnnotationEnabled(false);
-                  setHtmlScriptsOptedIn((enabled) => !enabled);
+                  setHtmlScriptsOptedInFor(htmlScriptsOptedIn ? null : htmlPreviewSource);
                 }}
                 title={
                   htmlScriptsOptedIn

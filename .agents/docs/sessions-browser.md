@@ -47,14 +47,17 @@ this page is the full text of the rules summarised there.
   credentialless iframes (Chromium); `opt-in` on WebKit (every iOS browser), where a
   self-navigation is an ordinary request and frame JS shares the app's main thread, so the
   rendered view starts read-only and runs scripts only after the user presses "Run scripts"
-  for that document (revoked when rendered mode ends); `unsupported` (Gecko and any other
-  engine) never runs them. The read-only fallback is `ReadOnlyHtmlPreview`: an empty sandbox,
+  for that exact document text (revoked when rendered mode ends or the text changes; the frame
+  cache refuses an executable static frame there without `scriptsOptedIn`); `unsupported`
+  (Gecko and any other engine) never runs them. The read-only fallback is `ReadOnlyHtmlPreview`: an empty sandbox,
   script-blocking CSP, and a document stripped of navigation, scripts, nested documents, and
   SVG mutation. It preserves inline CSS and embedded media but offers no script interaction
   or annotation. Any executable static document goes through `useManagedPreviewFrame`
   (frame policy from the frame cache, runtime handshake, navigation policy); never build a
-  second executable iframe. A static-document load the parent did not initiate (page script
-  replacing the document) is treated as a navigation request and leaves rendered mode.
+  second executable iframe. When page script replaces the document, the runtime's `pagehide`
+  unload signal (with a parent-initiated load as fallback) removes the frame at once and is
+  treated as a navigation request that leaves rendered mode. This narrows, but does not close,
+  the window in which a replacement page can run; the outgoing request has already been sent.
   The standalone mobile project browser treats repository HTML as untrusted: it opens the
   read-only preview with the eye toggle and runs scripts only behind an explicit "Run
   scripts" opt-in (`StaticHtmlScriptPreview`, no annotation), on any engine that supports it.

@@ -113,6 +113,8 @@ type ManagedPreviewSurfaceProps = {
   command?: { id: number; action: ManagedBrowserCommand };
   className?: string;
   documentHtml?: string;
+  /** See `ManagedPreviewFrameOptions.scriptsOptedIn`. */
+  scriptsOptedIn?: boolean;
   visualAnnotationReferenceKeys?: readonly string[];
   onAnnotationAvailabilityChange: (available: boolean) => void;
   onRuntimeError: (error: string | null) => void;
@@ -295,6 +297,7 @@ export function ManagedPreviewSurface({
   command,
   className,
   documentHtml,
+  scriptsOptedIn,
   visualAnnotationReferenceKeys = EMPTY_VISUAL_ANNOTATION_REFERENCE_KEYS,
   onAnnotationAvailabilityChange,
   onRuntimeError,
@@ -430,6 +433,7 @@ export function ManagedPreviewSurface({
     viewerUrl,
     logicalUrl,
     documentHtml,
+    scriptsOptedIn,
     title: managedFrameTitle,
     annotationEnabled,
     command,

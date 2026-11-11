@@ -813,8 +813,11 @@ function MobileTextPreview({
   const { t } = useTranslation();
   const [showHtml, setShowHtml] = useState(true);
   // Repository HTML is untrusted (it may come from a cloned third-party repo),
-  // so it opens script-free and runs only after an explicit, labelled opt-in.
-  const [runHtmlScripts, setRunHtmlScripts] = useState(false);
+  // so it opens script-free and runs only after an explicit, labelled opt-in on
+  // every engine. The opt-in records the exact text it was given for, so a
+  // refreshed file needs a new opt-in.
+  const [htmlScriptsOptedInFor, setHtmlScriptsOptedInFor] = useState<string | null>(null);
+  const runHtmlScripts = htmlScriptsOptedInFor === text;
   const canRunHtmlScripts = getExecutableHtmlPreviewSupport() !== 'unsupported';
   const resolvedTheme = useResolvedTheme();
   const activeVSCodeTheme = useActiveVSCodeTheme();
@@ -836,7 +839,7 @@ function MobileTextPreview({
                 : t('sessions.fileViewer.preview.show', 'Preview')
             }
             onClick={() => {
-              setRunHtmlScripts(false);
+              setHtmlScriptsOptedInFor(null);
               setShowHtml((value) => !value);
             }}
           >
@@ -847,7 +850,7 @@ function MobileTextPreview({
               variant="ghost"
               size="small"
               aria-pressed={runHtmlScripts}
-              onClick={() => setRunHtmlScripts((value) => !value)}
+              onClick={() => setHtmlScriptsOptedInFor(runHtmlScripts ? null : text)}
             >
               {runHtmlScripts
                 ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
@@ -860,7 +863,7 @@ function MobileTextPreview({
             path={path}
             text={text}
             onNavigationRequest={() => {
-              setRunHtmlScripts(false);
+              setHtmlScriptsOptedInFor(null);
               toast.warning(
                 t(
                   'sessions.fileViewer.htmlPreview.navigationDisabled',

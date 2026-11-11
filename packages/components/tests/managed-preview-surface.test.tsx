@@ -7,6 +7,7 @@ import { Provider, createStore } from 'jotai';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import {
+  MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE,
   MANAGED_BROWSER_STATE_MESSAGE_TYPE,
   MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
   MANAGED_BROWSER_READY_MESSAGE_TYPE,
@@ -18,9 +19,11 @@ import {
 import { userAtom } from '../src/atoms';
 import { ManagedPreviewSurface } from '../src/components/sessions/managed-preview-surface';
 import {
+  acquireManagedPreviewFrame,
   clearManagedPreviewFrame,
   getExecutableHtmlPreviewSupport,
   isWebKitUserAgent,
+  releaseManagedPreviewFrame,
 } from '../src/components/sessions/managed-preview-frame-cache';
 
 const mocks = vi.hoisted(() => ({
@@ -289,6 +292,110 @@ describe('ManagedPreviewSurface', () => {
     await act(async () => iframe.dispatchEvent(new Event('load')));
     expect(onNavigationRequest).toHaveBeenCalledWith(logicalUrl);
     expect(iframe.isConnected).toBe(false);
+  });
+
+  it('retires a static frame on the runtime unload signal, ignores parent reloads, and reloads fresh', async () => {
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const onNavigationRequest = vi.fn();
+    const logicalUrl = 'https://html-file-preview.invalid/result.html';
+    const documentHtml = '<!doctype html><p>Preview</p>';
+    const renderSurface = (command?: { id: number; action: 'reload' }) =>
+      root?.render(
+        <Provider store={store}>
+          <ManagedPreviewSurface
+            session={session}
+            viewerUrl={logicalUrl}
+            logicalUrl={logicalUrl}
+            documentHtml={documentHtml}
+            command={command}
+            annotationEnabled={false}
+            onAnnotationAvailabilityChange={vi.fn()}
+            onRuntimeError={vi.fn()}
+            onLoadingChange={vi.fn()}
+            onBrowserStateChange={vi.fn()}
+            onNavigationRequest={onNavigationRequest}
+          />
+        </Provider>
+      );
+    const sendFromFrame = (frame: HTMLIFrameElement, type: string) =>
+      act(async () => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: 'null',
+            source: frame.contentWindow,
+            data: { type },
+          })
+        );
+      });
+
+    await act(async () => renderSurface());
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Expected static preview iframe');
+    vi.spyOn(iframe.contentWindow, 'postMessage').mockImplementation(() => {});
+    await sendFromFrame(iframe, MANAGED_BROWSER_READY_MESSAGE_TYPE);
+
+    // A parent-owned reload replaces the srcdoc; its unload signal is expected.
+    await act(async () => renderSurface({ id: 1, action: 'reload' }));
+    await sendFromFrame(iframe, MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE);
+    expect(onNavigationRequest).not.toHaveBeenCalled();
+    expect(iframe.isConnected).toBe(true);
+    await sendFromFrame(iframe, MANAGED_BROWSER_READY_MESSAGE_TYPE);
+
+    // Page script replacing the document is caught on unload, before the srcdoc
+    // (or the replacement page) ever fires load.
+    await sendFromFrame(iframe, MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE);
+    expect(onNavigationRequest).toHaveBeenCalledOnce();
+    expect(onNavigationRequest).toHaveBeenCalledWith(logicalUrl);
+    expect(iframe.isConnected).toBe(false);
+    // The replacement page's load is not reported a second time.
+    await act(async () => iframe.dispatchEvent(new Event('load')));
+    expect(onNavigationRequest).toHaveBeenCalledOnce();
+
+    // A caller that stays mounted can reload into a fresh frame.
+    await act(async () => renderSurface({ id: 2, action: 'reload' }));
+    const fresh = container.querySelector('iframe');
+    expect(fresh).not.toBeNull();
+    expect(fresh).not.toBe(iframe);
+    expect(fresh?.getAttribute('srcdoc')).toBe(documentHtml);
+  });
+
+  it('refuses an executable static frame on opt-in engines without explicit consent', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLIFrameElement.prototype,
+      'credentialless'
+    );
+    const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
+    const host = document.createElement('div');
+    try {
+      delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+        .credentialless;
+      userAgent.mockReturnValue(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+      );
+      const request = {
+        sessionId: null,
+        viewerUrl: 'https://html-file-preview.invalid/a.html',
+        title: 'Preview',
+        host,
+        documentHtml: '<p>a</p>',
+      };
+      expect(() => acquireManagedPreviewFrame(request)).toThrow(/opt-in/u);
+      expect(host.querySelector('iframe')).toBeNull();
+      const frame = acquireManagedPreviewFrame({ ...request, scriptsOptedIn: true });
+      expect(frame.iframe.getAttribute('srcdoc')).toBe('<p>a</p>');
+      releaseManagedPreviewFrame(null, frame.iframe);
+    } finally {
+      userAgent.mockRestore();
+      if (descriptor)
+        Object.defineProperty(HTMLIFrameElement.prototype, 'credentialless', descriptor);
+      else
+        delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+          .credentialless;
+    }
   });
 
   it('classifies executable HTML preview support by engine', () => {

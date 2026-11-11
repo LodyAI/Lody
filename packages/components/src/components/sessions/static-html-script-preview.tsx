@@ -43,6 +43,8 @@ export function StaticHtmlScriptPreview({
     viewerUrl: logicalUrl,
     logicalUrl,
     documentHtml,
+    // Mounted only after the user pressed "Run scripts" for this exact text.
+    scriptsOptedIn: true,
     title: t('sessions.fileViewer.htmlPreview.scriptFrameTitle', 'HTML preview (scripts running)'),
     annotationEnabled: false,
     invalidRuntimeUrlMessage: '',

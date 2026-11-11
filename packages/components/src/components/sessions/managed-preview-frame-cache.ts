@@ -213,6 +213,7 @@ export const acquireManagedPreviewFrame = ({
   title,
   host,
   documentHtml,
+  scriptsOptedIn = false,
 }: {
   /** Cache key for application previews; static documents are never cached and need none. */
   sessionId: SessionId | null;
@@ -220,9 +221,19 @@ export const acquireManagedPreviewFrame = ({
   title: string;
   host: HTMLElement;
   documentHtml?: string;
+  /** The user explicitly chose to run this static document's scripts. */
+  scriptsOptedIn?: boolean;
 }): { iframe: HTMLIFrameElement; loaded: boolean } => {
-  if (documentHtml !== undefined && getExecutableHtmlPreviewSupport() === 'unsupported') {
-    throw new Error('Static HTML preview is not supported by this browser engine.');
+  if (documentHtml !== undefined) {
+    const support = getExecutableHtmlPreviewSupport();
+    if (support === 'unsupported') {
+      throw new Error('Static HTML preview is not supported by this browser engine.');
+    }
+    // Enforce the WebKit opt-in here, not only in the UI, so a new caller that
+    // passes a document cannot run repository scripts without consent.
+    if (support === 'opt-in' && !scriptsOptedIn) {
+      throw new Error('Static HTML preview scripts require an explicit opt-in on this engine.');
+    }
   }
   // Static documents can execute arbitrary user-authored JavaScript. Never
   // park them in the dormant-frame cache where they could keep running after
