@@ -132,3 +132,12 @@ null → `shortcut_unavailable`, 60-second native deadline); `shortcut-commands.
 `shortcutSettings` (list / read / save). Both gates permit read, create and append of
 `shortcut-index:<workspace>:<owner>:<visibility>` and `shortcut-body:<id>`, whose
 stream-specific tokens come from `getStreamToken`.
+
+## Previews
+
+The bridge forwards `sessionPreview`, `iosSimulatorControl` and `androidEmulatorControl` to the
+snapshot unchanged, with the verified identity, and answers the runtime's `shareRequest`
+`previewToken` host call through native (`previewToken` event, `previewTokenReply`); other
+share-request operations stay unsupported. The network gates need no new streams: the preview calls
+use the existing machine RPC request and response streams. See [Remote previews](rules/previews.md).
+

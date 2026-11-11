@@ -111,6 +111,7 @@ class CatalogRepository(private val account: AccountController, private val owne
       is RuntimeEvent.ProvidersChanged -> Unit
       RuntimeEvent.GrantRequested -> Unit
       is RuntimeEvent.ShortcutCloudRequested -> Unit
+      is RuntimeEvent.PreviewTokenRequested -> Unit
      }
     }
    }
