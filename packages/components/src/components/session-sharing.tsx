@@ -29,7 +29,7 @@ import { Popover } from '@lody/ui/popover';
 import { Separator } from '@lody/ui/separator';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { ease, space, text } from '@lody/ui/tokens/scales.stylex';
+import { control, ease, space, text } from '@lody/ui/tokens/scales.stylex';
 import { AlertDialog, Dialog } from '@/ui/dialog';
 import { toast } from '@/lib/toast';
 import { Tabs } from '@lody/ui/tabs';
@@ -268,10 +268,10 @@ const accessPanel = stylex.create({
     lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
-  ownerReason: { paddingInline: space[1], marginTop: space[2] },
-  stops: { position: 'relative', marginTop: space[2] },
+  ownerReason: { paddingInline: space[1], marginTop: space[1.5] },
+  stops: { position: 'relative', marginTop: space[1.5] },
   /** The one rule: who can open it above, what to do with it below. */
-  rule: { position: 'relative', marginBlock: space[2], marginInline: space[1] },
+  rule: { position: 'relative', marginBlock: space[1.5], marginInline: space[1] },
   /** Plain rows in the density of the app's menus: ghost, left-aligned, one per action. */
   actions: { position: 'relative', display: 'flex', flexDirection: 'column' },
 });
@@ -362,7 +362,9 @@ function SessionAccessMembers({
   const available = [...directory.values()].filter((member) => !ids.includes(member.userId));
   return (
     <section {...stylex.props(memberStyles.section)}>
-      <Separator />
+      <div {...stylex.props(accessPanel.rule)}>
+        <Separator />
+      </div>
       <p {...stylex.props(memberStyles.heading)}>{t('sessions.access.members')}</p>
       {state.membersError && (
         <div role="status" {...stylex.props(memberStyles.notice)}>
@@ -452,15 +454,16 @@ const memberStyles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
+    paddingInline: space[1],
     fontSize: text.captionSize,
     color: colors.secondaryLabel,
   },
-  section: { display: 'flex', flexDirection: 'column', gap: space[1], marginTop: space[2] },
+  section: { display: 'flex', flexDirection: 'column', gap: '2px' },
   heading: {
     margin: 0,
-    marginTop: space[2],
     paddingInline: space[1],
     fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
     color: colors.secondaryLabel,
   },
   row: {
@@ -468,8 +471,10 @@ const memberStyles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     minWidth: 0,
-    minHeight: space[8],
+    minHeight: control.small,
     paddingInline: space[1],
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
   },
   placeholder: { visibility: 'hidden', pointerEvents: 'none' },
   name: {
@@ -605,7 +610,9 @@ export function SessionAccessControl({
             <div {...stylex.props(accessPanel.head)}>
               <p {...stylex.props(accessPanel.title)}>{t('sessions.access.teamAccess')}</p>
               <p {...stylex.props(accessPanel.description)}>{caption}</p>
-              {level === 'edit' && state?.openMachineSettings && (
+            </div>
+            {level === 'edit' && state?.openMachineSettings && (
+              <div {...stylex.props(accessPanel.actions, accessPanel.stops)}>
                 <Button
                   variant="ghost"
                   size="small"
@@ -615,8 +622,8 @@ export function SessionAccessControl({
                   <Settings {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
                   {t('sessions.access.machineSettings')}
                 </Button>
-              )}
-            </div>
+              </div>
+            )}
             {state && level !== 'edit' && (
               <>
                 <div {...stylex.props(accessPanel.stops)}>
