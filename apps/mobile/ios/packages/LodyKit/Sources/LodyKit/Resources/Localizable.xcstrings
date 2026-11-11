@@ -120,6 +120,23 @@
         }
       }
     },
+    "create.runConfig.recent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recently used"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近使用"
+          }
+        }
+      }
+    },
     "create.runConfig.role": {
       "extractionState": "manual",
       "localizations": {

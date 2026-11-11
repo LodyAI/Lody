@@ -110,6 +110,20 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
             .put("repo", repo).put("names", JSONArray())
         save(file, data.put("selected", name), 1024 * 1024)
     }
+    private fun runConfigsFile(scope: RuntimeScope) = File(directory, "runconfig-" + catalogFile(scope).name)
+    override suspend fun readRunConfigs(scope: RuntimeScope): RunConfigPrefs? = io {
+        if (!owns(scope)) return@io null
+        val data = load(runConfigsFile(scope), 1024 * 1024) ?: return@io null
+        try {
+            require(data.getString("account") == scope.accountId && data.getString("workspace") == scope.workspaceId)
+            CreationJson.runConfigs(data.getJSONObject("runConfigs"))
+        } catch (_: Exception) { AtomicFile(runConfigsFile(scope)).delete(); null }
+    }
+    override suspend fun writeRunConfigs(scope: RuntimeScope, value: RunConfigPrefs) = io {
+        require(owns(scope)) { "cache_scope_changed" }
+        save(runConfigsFile(scope), JSONObject().put("account", scope.accountId).put("workspace", scope.workspaceId)
+            .put("runConfigs", CreationJson.encodeRunConfigs(value)), 1024 * 1024)
+    }
     private fun schedulesFile(scope: RuntimeScope) = File(directory, "schedules-" + catalogFile(scope).name)
     override suspend fun readSchedules(scope: RuntimeScope): ScheduleList? = io {
         if (!owns(scope)) return@io null
@@ -149,7 +163,7 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
         previous?.account?.workspaces?.filter { old -> account.id != previous.account.id || account.workspaces.none { it.id == old.id } }?.forEach {
             AtomicFile(catalogFile(RuntimeScope(previous.account.id, it.id))).delete()
         }
-        directory.listFiles()?.filter { (it.name.startsWith("options-") || it.name.startsWith("branches-") || it.name.startsWith("members-") || it.name.startsWith("schedules-")) && it.name.endsWith(".json") }?.forEach { file ->
+        directory.listFiles()?.filter { (it.name.startsWith("options-") || it.name.startsWith("branches-") || it.name.startsWith("members-") || it.name.startsWith("schedules-") || it.name.startsWith("runconfig-")) && it.name.endsWith(".json") }?.forEach { file ->
             val cached = load(file)
             if (cached == null || cached.optString("account") != account.id || account.workspaces.none { it.id == cached.optString("workspace") }) AtomicFile(file).delete()
         }
