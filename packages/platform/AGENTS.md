@@ -20,9 +20,6 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   public managed-runtime artifact downloads are the explicit exception.
 - An absent platform selector resolves to `local`; public build scripts must
   not accept or discover staging/production deployment presets.
-- Dedicated release-CI configuration may compile an explicitly requested cloud
-  composition from a validated non-secret request. It must not discover deployment
-  presets, read private source or change the default local product commands.
 - Local CLI, renderer, and Electron-main telemetry is hard-disabled even when
   unrelated PostHog variables exist in the caller's shell.
 
