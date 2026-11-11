@@ -93,7 +93,7 @@ final class WorkspaceSwitcherPanel: UIViewController, UIPopoverPresentationContr
     let names = items.map { ceil(($0.title as NSString).size(withAttributes: [.font: font]).width) }
     // Leading margin, checkmark, gap, logo, gap, name, trailing margin.
     let natural = (names.max() ?? 0) + 16 + Self.checkSlot + 8 + Self.avatarSide + 12 + 20
-    let width = min(max(natural, 240), max(240, min(320, maxWidth)))
+    let width = min(max(natural, 200), max(200, min(260, maxWidth)))
     let header = accountEmail.isEmpty ? 0 : Self.headerHeight
     let rows = min(CGFloat(items.count), Self.maxVisibleRows) * Self.rowHeight
     preferredContentSize = CGSize(width: width, height: header + rows + Self.inset * 2)
