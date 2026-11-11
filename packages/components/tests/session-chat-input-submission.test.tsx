@@ -712,7 +712,8 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     expect(submitted).toHaveLength(0);
     expect(textarea.value.startsWith('focus regression draft')).toBe(true);
-    expect(textarea.value.endsWith('\nWhy keep it?')).toBe(true);
+    expect(textarea.value.endsWith('Why keep it?')).toBe(true);
+    expect(textarea.value).not.toContain('\n');
     await act(async () => {
       expect(
         composerRef.current!.addMessageQuote('Second passage', {

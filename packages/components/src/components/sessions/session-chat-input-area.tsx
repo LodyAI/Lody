@@ -1787,7 +1787,7 @@ export const SessionChatInputArea = memo(
           return insertLargePastedTextAtSelection(text, {
             kind: 'message_quote',
             label: t('composer.messageQuoteInlineLabel', '[Quote: {{text}}]', { text: excerpt }),
-            ...(comment ? { append: true, suffix: `\n${comment}` } : {}),
+            ...(comment ? { append: true, suffix: comment } : {}),
             onInserted: options?.send
               ? (draftId) => {
                   pendingQuoteSendRef.current = { sessionId: session.id, draftId };

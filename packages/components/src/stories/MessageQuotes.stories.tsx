@@ -91,7 +91,7 @@ function QuoteHarness({ reject = false }: { reject?: boolean }) {
             kind: 'message_quote',
           });
           if (!inserted) return false;
-          setValue(comment ? `${inserted.nextValue}\n${comment}` : inserted.nextValue);
+          setValue(`${inserted.nextValue}${comment}`);
           setDrafts((current) =>
             getPastedTextDraftsAfterInsertion({
               drafts: current,

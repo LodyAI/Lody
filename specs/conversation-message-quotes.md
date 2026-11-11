@@ -8,9 +8,9 @@ Translation: current
 ## Scenario and decision
 
 A user selects part of a chat message and asks about it in a small field that
-opens beside the selection (a compact dialog on mobile). Sending puts the quote
-and question into the composer and sends it to an Agent; adding keeps them in the
-composer draft so the user can quote again before sending. Lody owns the
+opens beside the selection (a compact dialog on mobile). The default action adds
+the quote and question to the composer draft, so the user can quote again before
+sending; an explicit Send puts them there and sends the composer to an Agent. Lody owns the
 quote interaction and durable snapshot; delivery uses ordinary ACP text across
 Agents. An experimental implementation exists; this draft does not assert human
 approval or completed runtime acceptance across Agents.

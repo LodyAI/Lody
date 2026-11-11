@@ -272,7 +272,7 @@ export function MessageQuoteAction({
           )
             return;
           event.preventDefault();
-          submitReply(true);
+          submitReply(false);
         }}
       />
     );
@@ -282,20 +282,20 @@ export function MessageQuoteAction({
           type="button"
           variant="ghost"
           size="small"
-          data-testid="message-quote-add"
-          onClick={() => submitReply(false)}
-        >
-          {t('composer.messageQuoteAddToComposer', 'Add to message')}
-        </Button>
-        <Button
-          type="button"
-          size="small"
           data-testid="message-quote-send"
           disabled={!comment.trim()}
           onClick={() => submitReply(true)}
         >
           <ArrowUp size={14} />
           {t('composer.messageQuoteSend', 'Send')}
+        </Button>
+        <Button
+          type="button"
+          size="small"
+          data-testid="message-quote-add"
+          onClick={() => submitReply(false)}
+        >
+          {t('composer.messageQuoteAddToComposer', 'Add to message')}
         </Button>
       </div>
     );
