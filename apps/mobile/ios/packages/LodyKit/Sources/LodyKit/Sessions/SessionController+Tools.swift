@@ -61,6 +61,10 @@ extension SessionController {
   }
 
   func openPullRequest(_ reference: SessionPullRequest) {
+    // One tap on a transcript link can be delivered twice (as with file links); keep one
+    // page per PR until it closes, while a different PR still opens normally.
+    let key = "\(reference.repository.lowercased())#\(reference.number)"
+    guard openPullRequests.insert(key).inserted else { return }
     let state = source.state
     let page = pullRequestPage(reference, state)
     page.investigate = { [weak self] text in
@@ -68,7 +72,9 @@ extension SessionController {
       chat.composer.appendDraft(Self.json(["id": UUID().uuidString, "text": text]))
     }
     // A panel over the conversation (sheet with detents; the inspector on iPad), not a push.
-    LodyShell.shared.presentDetail(page, title: "PR #\(reference.number)", from: self)
+    LodyShell.shared.presentDetail(page, title: "PR #\(reference.number)", from: self) { [weak self] in
+      self?.openPullRequests.remove(key)
+    }
   }
 
   /// A PR link in the conversation opens the native PR page when it belongs to the session's
