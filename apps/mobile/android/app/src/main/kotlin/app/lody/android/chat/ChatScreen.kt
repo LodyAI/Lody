@@ -776,7 +776,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 usage = if (chosen && modelId != usage?.modelId) usage?.copy(quota = null) else usage,
                 onPromptChange = { if (it.text.length <= 32000) { field = app.lody.android.chat.MentionPresentation.edit(field, it); prompt = field.text } },
                 onFocusChange = { composerFocused = it },
-                referencePresentation = mentions.presentation(LodyTheme.colors.accentDefault),
+                referencePresentation = mentions.presentation(LodyTheme.colors.accentOnSubtle, LodyTheme.colors.accentSubtle),
                 enabled = canSend,
                 agentCliType = session?.cliType,
                 agentType = session?.agentType,
