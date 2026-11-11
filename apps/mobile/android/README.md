@@ -288,7 +288,9 @@ Saves and deletes show at once and roll back on failure; unknown outcomes are ne
 replayed. Canonical role settings validate ownership and conflicts.
 
 Prompt shortcuts (`ShortcutsScreen`, runtime `shortcutSettings`) list private and
-workspace shortcuts with their `/slug`, read a fresh body before editing, and create or
+workspace shortcuts with their `/slug`, open the editor at once from the list entry and
+read a fresh body into it (nothing is editable or saved until it arrives; a failed read
+closes the editor with a notice only while it is still open), and create or
 edit simple ones (name, slug, prompt; visibility only when creating), as iOS: owner
 only, and shortcuts with a project / computer / provider scope or structured references
 stay view only. A save shows at once and rolls back on failure; an unknown outcome holds

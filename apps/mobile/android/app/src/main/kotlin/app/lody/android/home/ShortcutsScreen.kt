@@ -127,12 +127,17 @@ internal fun ShortcutsScreen(home: ChatListUiState, service: ShortcutSettingsSer
                 items(group, key = { "shortcut-${it.id}" }) { entry ->
                     val viewOnly = entry.ownerUserId != home.userId || !entry.simple
                     SettingsLine(entry.name, LodyIcons.File, "/${entry.slug}", onClick = {
-                        if (opening || state == null) return@SettingsLine
+                        if (state == null) return@SettingsLine
+                        // Open at once from the list entry; the body fills in when its read returns
+                        // and saving waits for it (iOS #2531).
+                        val opened = ShortcutDraft(entry, null)
+                        draft = opened
                         opening = true
                         tasks.launch {
                             val body = state.read(entry)
                             opening = false
-                            if (body == null) { snackbar.showSnackbar(changed); state.refresh() } else draft = ShortcutDraft(entry, body)
+                            if (draft !== opened) return@launch
+                            if (body == null) { draft = null; snackbar.showSnackbar(changed); state.refresh() } else draft = ShortcutDraft(entry, body)
                         }
                     }, leading = {
                         val glyph = entry.emoji
@@ -156,17 +161,20 @@ internal fun ShortcutsScreen(home: ChatListUiState, service: ShortcutSettingsSer
 private fun ShortcutEditor(state: ShortcutsState, draft: ShortcutDraft, userId: String, onClose: () -> Unit) {
     val base = draft.base
     val body = draft.body
-    val readOnly = base != null && (base.ownerUserId != userId || !base.simple || body?.simple != true || body.prompt.length > ShortcutSettingsJson.PROMPT_LIMIT)
+    // An existing shortcut opens before its body is read; nothing is editable until it arrives.
+    val loading = base != null && body == null
+    val readOnly = base != null && !loading && (base.ownerUserId != userId || !base.simple || body?.simple != true || body.prompt.length > ShortcutSettingsJson.PROMPT_LIMIT)
     var name by remember(base?.id) { mutableStateOf(base?.name.orEmpty()) }
     var slug by remember(base?.id) { mutableStateOf(base?.slug.orEmpty()) }
     var prompt by remember(base?.id) { mutableStateOf(body?.prompt.orEmpty()) }
+    LaunchedEffect(base?.id, body) { if (body != null) prompt = body.prompt }
     var shared by remember(base?.id) { mutableStateOf(base?.shared == true) }
     // A save of unknown outcome is held unchanged so a retry can only repeat that same save.
     var attempt by remember(base?.id) { mutableStateOf<ShortcutSettingsAction.Save?>(null) }
     var failure by remember(base?.id) { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     val tasks = rememberCoroutineScope()
-    val editable = !readOnly && !saving && attempt == null
+    val editable = !loading && !readOnly && !saving && attempt == null
     val valid = name.isNotBlank() && prompt.isNotBlank() && ShortcutSettingsJson.validSlug(slug) && prompt.length <= ShortcutSettingsJson.PROMPT_LIMIT
     val save = {
         val action = attempt ?: ShortcutSettingsJson.save(state.scope, base, body, ShortcutFields(name, slug, prompt, shared))
@@ -189,13 +197,13 @@ private fun ShortcutEditor(state: ShortcutsState, draft: ShortcutDraft, userId: 
             IconButton(onClick = onClose, enabled = !saving) { Icon(LodyIcons.Close, stringResource(R.string.settings_agent_cancel)) }
             Text(stringResource(if (base == null) R.string.shortcuts_add else R.string.settings_shortcuts), Modifier.weight(1f),
                 style = LodyTheme.typography.headline, color = LodyTheme.colors.textPrimary)
-            if (!readOnly) IconButton(onClick = save, enabled = !saving && (attempt != null || valid)) {
+            if (!readOnly) IconButton(onClick = save, enabled = !loading && !saving && (attempt != null || valid)) {
                 Icon(if (attempt != null) LodyIcons.Refresh else LodyIcons.Check, stringResource(if (attempt != null) R.string.shortcuts_retry else R.string.settings_agent_save))
             }
         }
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).imePadding()) {
-            if (saving) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (saving || loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (readOnly) ShortcutNotice(stringResource(R.string.shortcuts_read_only))
             failure?.let { ShortcutNotice(stringResource(if (it == "shortcut_write_unknown") R.string.shortcuts_save_unknown else R.string.shortcuts_save_failed), danger = true) }
             Column(Modifier.padding(horizontal = LodySpacing.lg, vertical = LodySpacing.md), verticalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
