@@ -2053,6 +2053,11 @@ describe('Fleet PR observation composition', () => {
             return association;
           },
         },
+        remoteAutomation: {
+          value: {
+            verifyControl: async () => ({ requesterUserId: 'owner', expiresAt: 0 }),
+          },
+        },
       });
       const create = vi.spyOn(Lody, 'create').mockResolvedValue({
         start: async () => {},
@@ -2119,17 +2124,17 @@ describe('Fleet PR observation composition', () => {
         const runtime = fleet.runtimes.get(workspace.id);
         expect(runtime).toBeDefined();
         expect(runtime?.schedules).toBe(scheduleHandle);
+        // Local automations run in both modes; remote control rides workspace Machine RPC,
+        // which encrypted workspaces withhold, so its cloud-proof verifier stays plaintext-only.
+        expect(runtime?.automations).toBe(automationHandle);
+        await expect(fleet.ensureAutomations(runtime)).resolves.toBe(automationHandle);
+        expect(automations.mock.calls[0]?.[0].verifyRemoteControl).toBe(
+          encrypted ? undefined : cloud.remoteAutomation?.verifyControl
+        );
         if (encrypted) {
           expect(runtime?.prPollerWorkspace).toBeNull();
-          expect(runtime?.automations).toBeUndefined();
-          expect(runtime?.automationsRetryAt).toBeUndefined();
-          await expect(fleet.ensureAutomations(runtime)).rejects.toThrow(
-            'AUTOMATIONS_UNSUPPORTED_FOR_ENCRYPTED_WORKSPACE'
-          );
-          expect(runtime?.automations).toBeUndefined();
           expect(requests).toEqual([]);
         } else {
-          expect(runtime?.automations).toBe(automationHandle);
           expect(
             await runtime?.prPollerWorkspace?.associatePullRequest?.({
               repoFullName: 'synthetic/repo',
