@@ -82,6 +82,7 @@ struct SessionItem: Equatable, Sendable {
   var resume: String?
   var pullRequests: [SessionPullRequest] = []
   var iosSimulatorPreviewRequestId: String?
+  var androidEmulatorPreviewRequestId: String?
   /// Uncommitted changes / local commits the remote lacks (the action bar's Commit & Push).
   var workspaceDirty = false
   var workspaceUnpushed = false
@@ -101,7 +102,7 @@ extension SessionItem: Decodable {
   private enum CodingKeys: String, CodingKey {
     case id, title, status, isTabClosed, archived, pinned, projectId, createdAt, openedBySessionId, openedByRootSessionId
     case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, awaitingUserSince, branchName, baseBranch, lastModel, diff, machineId
-    case cliType, agentType, resume, pullRequests, iosSimulatorPreviewRequestId, userId, agentConfigId
+    case cliType, agentType, resume, pullRequests, iosSimulatorPreviewRequestId, androidEmulatorPreviewRequestId, userId, agentConfigId
     case workspaceDirty, workspaceUnpushed, projectRun
   }
 
@@ -144,6 +145,7 @@ extension SessionItem: Decodable {
     resume = present(value(.resume))
     pullRequests = value(.pullRequests) ?? []
     iosSimulatorPreviewRequestId = present(value(.iosSimulatorPreviewRequestId))
+    androidEmulatorPreviewRequestId = present(value(.androidEmulatorPreviewRequestId))
     workspaceDirty = value(.workspaceDirty) ?? false
     workspaceUnpushed = value(.workspaceUnpushed) ?? false
     projectRun = value(.projectRun)
@@ -203,7 +205,10 @@ struct SessionCatalog: Equatable, Sendable {
   var machineNames: [String: String] = [:]
   /// Computer id to OS (`darwin` / `win32` / `linux`), for its icon.
   var machineOs: [String: String] = [:]
+  /// Computer id to `available` / `upgrade-required` for iOS Simulator preview (Macs only).
   var machineSimulators: [String: String] = [:]
+  /// Computer id to `available` when its CLI offers Android Emulator preview, on any OS.
+  var machineEmulators: [String: String] = [:]
 
   func session(_ id: String) -> SessionItem? { sessions.first { $0.id == id } }
 
@@ -226,12 +231,14 @@ struct SessionCatalog: Equatable, Sendable {
       var machineNames: Lossy<[String: String]>?
       var machineOs: Lossy<[String: String]>?
       var machineSimulators: Lossy<[String: String]>?
+      var machineEmulators: Lossy<[String: String]>?
     }
     struct Saved: Decodable { var catalog: Shape }
     guard let shape = try? JSONDecoder().decode(Saved.self, from: saved).catalog else { return nil }
     return SessionCatalog(
       projects: shape.projects.compactMap(\.value), sessions: shape.sessions.compactMap(\.value) + pending,
-      machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineOs: shape.machineOs?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:]
+      machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineOs: shape.machineOs?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:],
+      machineEmulators: shape.machineEmulators?.value ?? [:]
     )
   }
 }

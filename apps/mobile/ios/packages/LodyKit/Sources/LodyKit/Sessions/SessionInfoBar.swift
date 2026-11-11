@@ -4,6 +4,8 @@ struct SessionPullRequestUpdates {
   private var confirmed: [String: String] = [:]
   /// Merge states read straight from GitHub after Ready for review, until the catalog has one.
   private var merges: [String: String] = [:]
+  /// The write in flight. Its PR keeps the catalog's status until GitHub acknowledges it; the
+  /// action bar shows progress meanwhile instead of claiming a merge that may still fail.
   private var pending: (pr: SessionPullRequest, merged: Bool)?
   mutating func begin(_ pr: SessionPullRequest, merged: Bool) { pending = (pr, merged) }
   mutating func finish(success: Bool) {
@@ -50,14 +52,6 @@ struct SessionPullRequestUpdates {
       updated.merge = merge
       return updated
     }
-    if let pending {
-      result.pullRequests = result.pullRequests.map { pr in
-        guard key(pr) == key(pending.pr), pending.merged || pr.status == "draft" else { return pr }
-        var updated = pr
-        updated.status = pending.merged ? "merged" : "open"
-        return updated
-      }
-    }
     return result
   }
 }
@@ -77,7 +71,7 @@ enum PullRequestMergeSettle {
     return mergeable == false ? "d" : nil
   }
 
-  static func run(attempts: Int = attempts, read: () async throws -> String?, sleep: () async throws -> Void) async -> String? {
+  static func run(isolation: isolated (any Actor)? = #isolation, attempts: Int = attempts, read: () async throws -> String?, sleep: () async throws -> Void) async -> String? {
     for attempt in 0..<attempts {
       do {
         if attempt > 0 { try await sleep() }

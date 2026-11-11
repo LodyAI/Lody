@@ -3,6 +3,7 @@ import {
   MachineSharingError,
   type SharingRemote
 } from '@lody/e2ee-machine-sharing'
+import { openSqliteMachineSharingStore } from '@lody/e2ee-machine-sharing/sqlite'
 import { makeDesktopRemotePairing } from './e2ee-remote-pairing.mjs'
 import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services'
 import {
@@ -1136,7 +1137,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         }, Effect.uninterruptible)
         const history = Context.get(historyContext, InstalledEpochHistory)
         const sharing = yield* makeLazyMachineSharingHost({
-          filename: join(directory, 'machine-sharing.sqlite'),
+          store: openSqliteMachineSharingStore(join(directory, 'machine-sharing.sqlite')),
           admissionHistory: (view) =>
             sql(() =>
               rows()

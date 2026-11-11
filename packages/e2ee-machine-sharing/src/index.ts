@@ -1,5 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
-import { Clock, Data, Effect, Exit, Fiber, Result, Scope, Semaphore } from 'effect';
+import { Clock, Effect, Exit, Fiber, Result, Scope, Semaphore } from 'effect';
 import { z } from 'zod';
 import {
   Bytes,
@@ -32,16 +31,17 @@ import type {
   E2eeMachineSharingWriteResult,
 } from '@lody/platform';
 
-export class MachineSharingError extends Data.TaggedError('MachineSharingError')<{
-  readonly code:
-    | 'machine_not_shared'
-    | 'machine_not_owned'
-    | 'sharing_conflict'
-    | 'sharing_unavailable'
-    | 'sharing_storage'
-    | 'sharing_invalid'
-    | 'closed';
-}> {}
+import { MachineSharingError } from './errors';
+import { hex, unhex } from './hex';
+import type { OpenMachineSharingStore } from './store';
+export { MachineSharingError } from './errors';
+export type {
+  MachineSharingPinRow,
+  MachineSharingRequestRow,
+  MachineSharingStore,
+  MachineSharingStoreStep,
+  OpenMachineSharingStore,
+} from './store';
 const fail = (code: MachineSharingError['code']) => new MachineSharingError({ code });
 export { sharingChangeSchema, sharingReplySchemas } from './schemas';
 import { id, requestId, sharingChangeSchema, sharingReplySchemas } from './schemas';
@@ -50,15 +50,8 @@ export type SharingRemote = {
     input: E2eeMachineSharingRequests[K]
   ) => Effect.Effect<E2eeMachineSharingReplies[K], unknown>;
 } & { refreshLedger?: () => Effect.Effect<void, unknown> };
-const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
-const unhex = (value: string) => Uint8Array.from(Buffer.from(value, 'hex'));
 const parse = <A>(schema: z.ZodType<A>, value: unknown) =>
   Effect.try({ try: () => schema.parse(value), catch: () => fail('sharing_invalid') });
-const sql = <A>(f: () => A) =>
-  Effect.try({
-    try: f,
-    catch: (e) => (e instanceof MachineSharingError ? e : fail('sharing_storage')),
-  });
 const key = (binding: MachineSharingBinding) =>
   JSON.stringify([
     binding.workspaceId,
@@ -128,10 +121,12 @@ const authorizeOwner = Effect.fnUntraced(function* (
   return undefined;
 });
 
-/** Native, workspace-scoped owner. SQLite retains ciphertext/pins, never keys, credentials or freshness.
- * Atomic SQLite writes fence concurrent results; no lock spans crypto/network work. */
+/** Workspace-scoped owner. Its store retains ciphertext/pins, never keys, credentials or
+ * freshness. Atomic store steps fence concurrent results; no lock spans crypto/network work. */
 export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(function* (options: {
-  filename: string;
+  /** Opened in this host's Scope: `openSqliteMachineSharingStore` on desktop,
+   * `openIndexedDbMachineSharingStore` in a browser or webview. */
+  store: OpenMachineSharingStore;
   workspaceId: string;
   genesisHash: string;
   signer: DeviceSigner;
@@ -146,21 +141,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
 }) {
   const scope = yield* Effect.scope;
   const clock = yield* Clock.Clock;
-  const db = yield* Effect.acquireRelease(
-    sql(() => {
-      const connection = new DatabaseSync(options.filename);
-      try {
-        connection.exec(
-          'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS sharing_pins(resource TEXT PRIMARY KEY, head TEXT NOT NULL, original TEXT); CREATE TABLE IF NOT EXISTS sharing_requests(resource TEXT NOT NULL, request_id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(resource,request_id));'
-        );
-        return connection;
-      } catch (e) {
-        connection.close();
-        throw e;
-      }
-    }),
-    (connection) => sql(() => connection.close()).pipe(Effect.orDie)
-  );
+  const store = yield* options.store;
   const credential = () =>
     typeof options.credential === 'string'
       ? Effect.succeed(options.credential)
@@ -206,10 +187,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     };
   });
   const pin = (binding: MachineSharingBinding) =>
-    sql(() => {
-      const row = db
-        .prepare('SELECT head, original FROM sharing_pins WHERE resource=?')
-        .get(key(binding));
+    store.readPin(key(binding), (row) => {
       if (!row) return null;
       return {
         head: sharingReplySchemas.readHead.parse(JSON.parse(String(row.head))),
@@ -227,43 +205,34 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     original: E2eeMachineSharingVersion | null,
     allowSuperseded = false
   ) =>
-    sql(() => {
+    store.updatePin(key(binding), (row) => {
       if (closed) throw fail('closed');
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        const row = db.prepare('SELECT head FROM sharing_pins WHERE resource=?').get(key(binding));
-        const previous = row
-          ? sharingReplySchemas.readHead.parse(JSON.parse(String(row.head)))
-          : null;
-        if (previous && allowSuperseded && head.revision < previous.revision) {
-          db.exec('COMMIT');
-          return;
-        }
-        if (
-          previous &&
-          (head.revision < previous.revision ||
-            (head.revision === previous.revision &&
-              (head.digest !== previous.digest ||
-                (previous.status === 'removed' && head.status !== 'removed'))))
-        )
-          throw fail('sharing_conflict');
-        cache.delete(key(binding));
-        db.prepare(
-          'INSERT INTO sharing_pins VALUES(?,?,?) ON CONFLICT(resource) DO UPDATE SET head=excluded.head,original=excluded.original'
-        ).run(key(binding), JSON.stringify(head), original ? JSON.stringify(original) : null);
-        db.exec('COMMIT');
-      } catch (error) {
-        db.exec('ROLLBACK');
-        throw error;
-      }
+      const previous = row
+        ? sharingReplySchemas.readHead.parse(JSON.parse(String(row.head)))
+        : null;
+      if (previous && allowSuperseded && head.revision < previous.revision)
+        return { result: undefined };
+      if (
+        previous &&
+        (head.revision < previous.revision ||
+          (head.revision === previous.revision &&
+            (head.digest !== previous.digest ||
+              (previous.status === 'removed' && head.status !== 'removed'))))
+      )
+        throw fail('sharing_conflict');
+      cache.delete(key(binding));
+      return {
+        write: {
+          head: JSON.stringify(head),
+          original: original ? JSON.stringify(original) : null,
+        },
+        result: undefined,
+      };
     });
   const pending = (binding: MachineSharingBinding, rid: string) =>
-    sql(() => {
-      const row = db
-        .prepare('SELECT value FROM sharing_requests WHERE resource=? AND request_id=?')
-        .get(key(binding), rid);
-      if (!row) return null;
-      const value = JSON.parse(String(row.value)) as Pending;
+    store.readRequest(key(binding), rid, (row) => {
+      if (row === null) return null;
+      const value = JSON.parse(row) as Pending;
       // Credentials are reconstructed, never persisted.
       sharingReplySchemas.commit.parse({
         status: 'committed',
@@ -280,23 +249,17 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       return { ...value, request: { ...value.request, credential: '' } };
     });
   const retain = (binding: MachineSharingBinding, value: Pending, adoptExisting = false) =>
-    sql(() => {
+    Effect.suspend(() => {
       const { credential: _, ...original } = value.request;
       const next = { ...value, request: original };
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        const row = db
-          .prepare('SELECT value FROM sharing_requests WHERE resource=? AND request_id=?')
-          .get(key(binding), original.requestId);
-        if (row) {
-          const previous = JSON.parse(String(row.value)) as Pending;
+      return store.updateRequest(key(binding), original.requestId, (row) => {
+        if (row !== null) {
+          const previous = JSON.parse(row) as Pending;
           if (previous.intent !== value.intent) throw fail('sharing_conflict');
           // Concurrent exact retries may both finish signing before either has retained.
           // The first durable original wins; later callers adopt it, never publish their alternate frame.
-          if (adoptExisting) {
-            db.exec('COMMIT');
-            return { ...previous, request: { ...previous.request, credential: '' } };
-          }
+          if (adoptExisting)
+            return { result: { ...previous, request: { ...previous.request, credential: '' } } };
           if (
             previous.intent !== value.intent ||
             JSON.stringify(previous.request) !== JSON.stringify(original) ||
@@ -304,15 +267,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           )
             throw fail('sharing_conflict');
         }
-        db.prepare(
-          'INSERT INTO sharing_requests VALUES(?,?,?) ON CONFLICT(resource,request_id) DO UPDATE SET value=excluded.value'
-        ).run(key(binding), original.requestId, JSON.stringify(next));
-        db.exec('COMMIT');
-        return value;
-      } catch (error) {
-        db.exec('ROLLBACK');
-        throw error;
-      }
+        return { write: JSON.stringify(next), result: value };
+      });
     });
   const readFrame = Effect.fnUntraced(function* (
     binding: MachineSharingBinding,
@@ -415,8 +371,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     if (!policy || !fullState || !sharingFresh(started, yield* sharingStamp))
       return yield* fail('sharing_unavailable');
     if (policy)
-      yield* sql(() => {
-        const row = db.prepare('SELECT head FROM sharing_pins WHERE resource=?').get(resource);
+      yield* store.readPin(resource, (row) => {
         const current = row
           ? sharingReplySchemas.readHead.parse(JSON.parse(String(row.head)))
           : null;
@@ -490,18 +445,13 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     const { binding, machineGeneration } = yield* target(machineId);
     return yield* admitted(
       Effect.gen(function* () {
-        const unfinished = yield* sql(() => {
-          const rows = db
-            .prepare(
-              'SELECT request_id,value FROM sharing_requests WHERE resource=? ORDER BY request_id'
-            )
-            .all(key(binding));
+        const unfinished = yield* store.readRequests(key(binding), (rows) => {
           const row = rows.find(
             (value) => (JSON.parse(String(value.value)) as Pending).state === 'pending'
           );
           if (!row) return undefined;
           return {
-            requestId: String(row.request_id),
+            requestId: String(row.requestId),
             change: sharingChangeSchema.parse(
               JSON.parse((JSON.parse(String(row.value)) as Pending).intent)
             ),
@@ -655,11 +605,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       );
     return yield* admitted(
       Effect.gen(function* () {
-        const uncertain = yield* sql(() =>
-          db
-            .prepare('SELECT value FROM sharing_requests WHERE resource=?')
-            .all(key(initial.binding))
-            .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
+        const uncertain = yield* store.readRequests(key(initial.binding), (rows) =>
+          rows.some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
         );
         if (uncertain) return yield* unknown();
         const resource = key(initial.binding);
@@ -763,11 +710,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         )
           return yield* fail('sharing_conflict');
         if (!retained) {
-          const unfinished = yield* sql(() =>
-            db
-              .prepare('SELECT value FROM sharing_requests WHERE resource=?')
-              .all(key(binding))
-              .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
+          const unfinished = yield* store.readRequests(key(binding), (rows) =>
+            rows.some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
           );
           if (unfinished) return yield* fail('sharing_conflict');
           const current = yield* latest(binding, remote, machineGeneration, true);

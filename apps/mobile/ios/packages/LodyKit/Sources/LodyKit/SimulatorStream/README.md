@@ -36,6 +36,21 @@ Run `pnpm verify:native --case simulator-transport` for native transport behavio
 and `pnpm verify:ui --app <app> --case simulator-preview` for both preview hosts.
 These offline checks do not prove real TURN service availability or WAN performance.
 
+## Android Emulator
+
+Android emulators use the same gateway paths, transport and viewer as the iOS Simulator.
+`SessionSimulator` is generalized by `DevicePlatform`: Android calls the runtime's
+`androidEmulatorControl` (AVD names travel as `id`), keeps its own state and stream, and
+may run beside an iOS preview. The source JSON carries `platform: "android"` and a
+`streamId` prefixed by the platform, so shared streams never collide. An Android stream
+never requests `exterior.json` or `bezel.png` and shows a plain rounded screen that
+reshapes when native rotation turns the frames landscape. It is H.264 only: a 4002 or
+codec failure ends the stream instead of switching to MJPEG. Its controls are Back, Home,
+Recents, rotation, Light/Dark appearance and pasted text on the private `control` channel.
+Remote previews start Balanced; another quality starts the same AVD again, replacing the
+capture operation. The conversation's floating preview shows the most recently opened
+live platform.
+
 Interactive dismissal uses UIKit's zoom transition. `LodyWillPush` configures
 it before UIKit starts the push; native preferred transitions own their interaction gestures. Swipes inside the remote
 device remain remote input.

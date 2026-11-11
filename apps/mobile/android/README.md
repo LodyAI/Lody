@@ -146,6 +146,13 @@ unavailable targets. A separate View full reply action opens the complete saved
 Markdown in a scrollable, selectable bottom sheet, even when its target is gone.
 Reply text stays separate from failure detail; upstream truncation is identified
 in both the preview and sheet. Lists over five entries can expand.
+Agent Role and schedule proposals in system entries (`ProposalEvents`) render as
+`ProposalCards` after the entry's receipts: the proposed fields, then Dismiss and
+Save / Create through the `decideProposal` bridge command. Only the requesting member
+decides a Role proposal; decided proposals read as receipts, and failures stay on the
+card for an explicit retry. See the [decision](../../../.agents/notes/implemented/feature/2026-11-11-mobile-proposal-cards.md). Files the Agent shares (`TurnItem.File`) show as
+never-folded `AgentFileCard`s with name, type and size; Android has no session-file
+download yet, so they do not open.
 The relation sheet groups each root and its contained Tabs on one horizontal row.
 Overflow scrolls horizontally without a scrollbar; edge fades appear only in
 directions with more content. Only opened-by conversations increase hierarchy

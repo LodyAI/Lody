@@ -17,7 +17,8 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 - Full-width sidebar stays mounted/inert with scroll; Cmd+B animates content width
   (zero for reduced motion); pause hidden eager-sync/keyboard-nav. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,
-  nested Escape first. [Spec](../../../../specs/desktop-windows.md).
+  nested Escape first. [Spec](../../../../specs/desktop-windows.md). It opens only once
+  the synced compact state agrees, and a close that never finishes is unmounted.
 - Every list uses `lib/session-opened-by-tree.ts`; keyboard navigation uses
   `sidebar-navigation-model.ts`.
 - `openedBySessionId` is the precise opener; `openedByRowSessionId` is its row.

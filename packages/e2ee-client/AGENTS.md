@@ -76,6 +76,8 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   session of the credential binding. The key package is retained before submission and
   resubmitted unchanged on retry. The relay's `committed` is a hint: only this device's
   admission in the verified full signed history is accepted, as a history approval.
+  The retained join reports `joined` once that approval original exists, so a reopened
+  join page shows it joined before its confirming claim; the hint grants nothing.
 - A new invitation after an ended join first retires the old request through the relay;
   only `cancelled` writes the terminal receipt that settles it. The old credential is
   pinned to that membership, so the new one gets a replacement identity, activated only

@@ -107,6 +107,7 @@ private fun LazyListScope.content(
         is TurnItem.Checklist -> item(key = block.key, contentType = "checklist") { Checklist(value, Modifier.animateItem()) }
         is TurnItem.Notice -> item(key = block.key, contentType = "notice") { Notice(value, Modifier.animateItem()) }
         is TurnItem.Images -> item(key = block.key, contentType = "images") { TurnImages(value, Modifier.animateItem()) }
+        is TurnItem.File -> item(key = block.key, contentType = "file") { AgentFileCard(value, Modifier.animateItem()) }
         is TurnItem.Tool -> step(entry, value, block.key, entry.working && value.status == "in_progress", open, toggle, details)
         is TurnItem.Thought -> prose(block.key, entry.prose[value.id], secondary = true)
         is TurnItem.Task -> Unit

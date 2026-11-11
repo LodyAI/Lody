@@ -6,6 +6,7 @@ import {
   readDaemonLossAuthority,
 } from './client-loss-observer';
 import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
+import { openSqliteMachineSharingStore } from '@lody/e2ee-machine-sharing/sqlite';
 import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
 import { getScheduleIdFromRoomId, type ScheduleAuthorizationRequest } from '@lody/shared';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
@@ -31,7 +32,7 @@ import type { LoroDoc } from 'loro-crdt';
 import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../cloud-e2ee-errors';
 import { isSessionDocRoomId, type SessionId, type LoroStreamsTokenAuth } from '@lody/shared';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import { link, mkdir, open, readFile, rename, unlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -41,7 +42,6 @@ import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { CloudE2eePort, CloudStreamsTokenPort } from '@lody/platform';
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services';
 import { decodeEpochStagedGroup } from '@lody/e2ee-core/host';
-import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
   encryptedWorkspaceNamespace,
   encryptedWorkspaceResolver,
@@ -50,6 +50,8 @@ import {
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
+import { cliE2eeIdentityDirectory } from './retained-binding';
+export { cliE2eeIdentityDirectory };
 import { authorityStamp, type AuthorityStamp } from './authority-clock';
 import { makeCliE2eeRuntime } from './runtime';
 import {
@@ -76,17 +78,6 @@ const Binding = z
   .strict();
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 const bytes = (value: string) => new Uint8Array(Buffer.from(value, 'hex'));
-export const cliE2eeIdentityDirectory = (accountId: string, workspaceId: string) => {
-  if (!accountId || !/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId))
-    throw new Error('e2ee_invalid_input');
-  return join(
-    getLodyDataDir(),
-    'e2ee',
-    createHash('sha256').update(accountId).digest('hex'),
-    workspaceId
-  );
-};
-
 // This repo belongs to the same account/workspace lease as custody, and to
 // this exact retained device. Removal never touches a workspace-global repo.
 const repositoryDirectory = (directory: string, genesisHash: string, signingPublicKey: string) =>
@@ -790,11 +781,8 @@ async function openWorkspaceOwned(
           : undefined,
       });
       sharing = yield* makeLazyMachineSharingHost({
-        filename: join(
-          directory,
-          'runtime',
-          hex(device.publicKey.toBytes()),
-          'machine-sharing.sqlite'
+        store: openSqliteMachineSharingStore(
+          join(directory, 'runtime', hex(device.publicKey.toBytes()), 'machine-sharing.sqlite')
         ),
         workspaceId: options.workspaceId,
         genesisHash: binding.genesisHash,

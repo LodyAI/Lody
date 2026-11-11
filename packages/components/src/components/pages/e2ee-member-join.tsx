@@ -149,6 +149,9 @@ function JoinSession({
   const { t } = useTranslation();
   const [request, setRequest] = useState<{ requestId: string; state: string } | null>(null);
   const [ready, setReady] = useState(false);
+  // A resumed join the host reports as already joined shows as joined at once; one claim
+  // still runs to confirm it, and its answer replaces the hint.
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [recovering, setRecovering] = useState(Boolean(accountId && runtime?.pendingMemberJoin));
   const [error, setError] = useState(false);
@@ -176,8 +179,16 @@ function JoinSession({
     void runtime
       .pendingMemberJoin(offer.workspaceId)
       .then((pending) => {
-        if (!disposed && pending?.requestId && sameMemberOffer(pending.offer, offer))
-          setRequest({ requestId: pending.requestId, state: 'pending' });
+        if (!disposed && pending?.requestId && sameMemberOffer(pending.offer, offer)) {
+          setRequest({
+            requestId: pending.requestId,
+            state: pending.joined ? 'committed' : 'pending',
+          });
+          if (pending.joined) {
+            setReady(true);
+            setUnconfirmed(true);
+          }
+        }
       })
       .catch(() => {
         if (!disposed) setError(true);
@@ -192,7 +203,8 @@ function JoinSession({
   const requestId = request?.requestId;
   const requestTerminal = request ? ['rejected', 'cancelled'].includes(request.state) : false;
   useEffect(() => {
-    if (!requestId || !runtime?.claimMemberJoin || ready || requestTerminal) return undefined;
+    if (!requestId || !runtime?.claimMemberJoin || (ready && !unconfirmed) || requestTerminal)
+      return undefined;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Committed but not ready means the key is in flight: claim sooner, for a bounded time.
@@ -208,6 +220,7 @@ function JoinSession({
           previous?.requestId === requestId ? { ...previous, state: result.state } : previous
         );
         setReady(result.ready);
+        setUnconfirmed(false);
         setError(false);
         if (result.ready || ['rejected', 'cancelled'].includes(result.state)) return;
         if (result.state === 'committed') {
@@ -231,7 +244,7 @@ function JoinSession({
       clearTimeout(timer);
       window.removeEventListener('online', reconnect);
     };
-  }, [runtime, offer.workspaceId, requestId, requestTerminal, ready, retry]);
+  }, [runtime, offer.workspaceId, requestId, requestTerminal, ready, unconfirmed, retry]);
   const accept = async () => {
     if (working.current || !runtime?.prepareMemberJoin) return;
     working.current = true;

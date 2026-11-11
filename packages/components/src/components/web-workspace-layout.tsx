@@ -8,6 +8,7 @@ import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
 import { useIsCompactDesktop } from '../hooks/use-mobile';
 import {
+  compactDesktopLayoutAtom,
   navigationSidebarVisibleAtom,
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
@@ -50,6 +51,12 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // Effective on-screen visibility: compact may auto-suppress the sidebar even
   // while the persisted preference says open — see atoms/layout-state.ts.
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
+  // The viewport hook knows the window is compact one commit before the layout bridge
+  // syncs that into atom state, and only the synced state applies the compact
+  // auto-hide. Until then the navigation would mount open and close again before its
+  // opening frame, an exit Base UI never finishes. Open it only once they agree.
+  const compactSynced = useAtomValue(compactDesktopLayoutAtom);
+  const compactNavigationOpen = compact && compactSynced && sidebarVisible;
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const sidebarLastWidth = useAtomValue(sidebarLastWidthAtom);
   const shouldReduceMotion = useReducedMotion();
@@ -120,7 +127,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     >
       {compact ? (
         <CompactNavigationDialog
-          open={sidebarVisible}
+          open={compactNavigationOpen}
           onOpenChange={(open) => setSidebarCollapsed(!open)}
           container={layoutRoot}
           returnFocus={returnFocusRef}
@@ -150,7 +157,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       <FocusScope
         ref={contentRef}
         id={WORKSPACE_FOCUS_SCOPES.content}
-        inert={compact && sidebarVisible}
+        inert={compactNavigationOpen}
         onFocusCapture={(event) => {
           // Capture before inert can blur the opener during the open commit.
           returnFocusRef.current = event.target;

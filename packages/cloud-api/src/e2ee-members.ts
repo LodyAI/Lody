@@ -75,7 +75,13 @@ export type E2eeMemberReplies = {
     /** Email invitations created before offers were signed, with their address. Re-sending
      * one issues a signed replacement; they never qualify for automatic admission. */
     unsignedInvitations?: { token: string; email: string }[];
-    items: (E2eeMemberRequest & { applicantName: string; applicantEmail: string })[];
+    items: (E2eeMemberRequest & {
+      applicantName: string;
+      applicantEmail: string;
+      /** The relay would refuse this admission for the free plan's member limit. A hint
+       * for the approver, never authority; absent when the relay does not say. */
+      memberLimitReached?: boolean;
+    })[];
     hasMore: boolean;
     seatPreview: import('./index').SeatInvitePreview;
   };

@@ -206,6 +206,7 @@ import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtim
 import { currentWorkspaceSlugAtom, currentWorkspaceIdAtom, userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
+  readWorkspaceModeEvidence,
   readWorkspaceModeProof,
   repairUnreadableE2eeCaches,
   retainWorkspaceModeProof,
@@ -234,7 +235,11 @@ import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
 
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 import { createPendingSessionSends } from '../src/lib/session-pending-sends';
-import { WorkspaceModeAdmissionTimeoutError } from '../src/providers/workspace-mode-admission';
+import {
+  HOST_IDENTITY_STALL_MS,
+  WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
+  WorkspaceModeAdmissionTimeoutError,
+} from '../src/providers/workspace-mode-admission';
 
 function editDraft(store: ReturnType<typeof createStore>, accountId = 'local:user') {
   const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
@@ -1516,6 +1521,250 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(createWorkspaceRuntime).toHaveBeenCalledTimes(1);
     expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({ contentMode: 'e2ee' });
   });
+
+  /** Renderer storage was cleared (or this is another window profile) while the
+   * device host still holds the workspace's encrypted identity. */
+  function hostIdentity(
+    answer: (input: {
+      accountId: string;
+      workspaceId: string;
+    }) => Promise<{ workspaceId: string; genesisHash: string }>
+  ) {
+    const readIdentity = vi.fn(answer);
+    environment.e2eeWorkspaces = {
+      ...environment.e2eeWorkspaces!,
+      runtime: { readIdentity } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>,
+    };
+    return readIdentity;
+  }
+
+  it.each(['plaintext', 'legacy'] as const)(
+    'never admits a %s answer for a workspace whose encrypted identity the device host retains',
+    async (kind) => {
+      ordinaryCloud();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      environment.e2eeWorkspaces!.describe = async ({ workspaceId }) =>
+        kind === 'legacy'
+          ? { workspaceId, admission: 'legacy-unclassified' }
+          : { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 };
+      hostIdentity(async () => ({ workspaceId: 'local:workspace', genesisHash: '11'.repeat(32) }));
+      await render();
+      const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+      await expect(gate(new AbortController().signal)).rejects.toThrow();
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(prepared.disposed).toBe(true);
+      expect(store.get(workspaceContentModeAtom)).toBeNull();
+      // The host's genesis is now local evidence: no later start opens provisionally.
+      expect(
+        readWorkspaceModeEvidence(localStorage, 'local:user', 'local:workspace')
+      ).toMatchObject({ encrypted: true, descriptor: null });
+      await act(async () => store.set(workspaceModeAdmissionRetryAtom, 1));
+      expect(createWorkspaceRuntime).toHaveBeenCalledTimes(1);
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+        modeAdmission: { knownEncrypted: true },
+      });
+    }
+  );
+
+  it.each([
+    [
+      'Electron',
+      new Error("Error invoking remote method 'e2ee': Error: e2ee_missing-binding"),
+      true,
+    ],
+    ['portable', { _tag: 'PersonalHostError', code: 'approval-required' }, true],
+    ['unreadable', new Error('e2ee_permissions'), false],
+  ] as const)(
+    'admits plaintext only when the %s host has no identity record',
+    async (_, failure, admitted) => {
+      ordinaryCloud();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      hostIdentity(async () => {
+        throw failure;
+      });
+      await render();
+      const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+      if (admitted) {
+        await gate(new AbortController().signal);
+        expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+          contentMode: 'plaintext',
+        });
+      } else {
+        // Unknown host state is not plaintext proof: local data stays, egress waits.
+        await expect(gate(new AbortController().signal)).rejects.toBe(failure);
+        expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+      }
+      expect(store.get(runtimeAtom)).toBe(prepared);
+    }
+  );
+
+  it('asks a transiently unavailable host again and admits without any send once it reports no identity', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let answers = 0;
+    const readIdentity = hostIdentity(async () => {
+      answers += 1;
+      throw new Error(answers === 1 ? 'e2ee_account_unavailable' : 'e2ee_missing-binding');
+    });
+    vi.useFakeTimers();
+    try {
+      await render();
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+      expect(readIdentity).toHaveBeenCalledTimes(2);
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+        contentMode: 'plaintext',
+      });
+      expect(store.get(runtimeAtom)).toBe(prepared);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports a persistent host failure with its code, keeps egress closed, and admits after recovery', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let failure: unknown = { _tag: 'PersonalHostError', code: 'storage' };
+    const readIdentity = hostIdentity(async () => {
+      throw failure;
+    });
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => vi.advanceTimersByTimeAsync(HOST_IDENTITY_STALL_MS + 8_000));
+      const notice = container.querySelector('[role="status"]');
+      expect(notice?.querySelector('code')?.textContent).toBe('storage');
+      expect(warn).toHaveBeenCalledWith(
+        'Device host identity check is still unavailable',
+        expect.objectContaining({ code: 'storage', error: failure })
+      );
+      // Still unclassified: no plaintext admission while the host is unavailable.
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      const calls = readIdentity.mock.calls.length;
+      failure = new Error('e2ee_missing-binding');
+      await act(async () => {
+        notice?.querySelector('button')?.click();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(readIdentity.mock.calls.length).toBe(calls + 1);
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+        contentMode: 'plaintext',
+      });
+      expect(container.querySelector('[role="status"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps at most one unanswered host read per workspace', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const readIdentity = hostIdentity(() => new Promise(() => {}));
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(readIdentity).toHaveBeenCalledTimes(1);
+      expect(container.querySelector('[role="status"] code')?.textContent).toBe('timeout');
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ends a prefetch round at the first temporarily unavailable host answer', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    environment.workspaces.set({
+      status: 'ready',
+      activeWorkspaceId: 'local:workspace',
+      workspaces: [
+        { id: 'local:workspace', slug: 'local', name: 'Local', role: 'owner' },
+        { id: 'workspace-beta', slug: 'beta', name: 'Beta', role: 'member' },
+        { id: 'workspace-gamma', slug: 'gamma', name: 'Gamma', role: 'member' },
+      ],
+    });
+    const asked: string[] = [];
+    const first = Promise.withResolvers<void>();
+    hostIdentity(async ({ workspaceId }) => {
+      if (workspaceId === 'local:workspace') throw new Error('e2ee_missing-binding');
+      asked.push(workspaceId);
+      first.resolve();
+      throw { _tag: 'PersonalHostError', code: 'storage' };
+    });
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => first.promise);
+      // Past every per-workspace deadline: no re-ask and no next workspace.
+      await act(async () => vi.advanceTimersByTimeAsync(2 * WORKSPACE_MODE_ADMISSION_TIMEOUT_MS));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(asked).toEqual(['workspace-beta']);
+    for (const [id, slug] of [
+      ['workspace-beta', 'beta'],
+      ['workspace-gamma', 'gamma'],
+    ])
+      expect(readWorkspaceModeProof(localStorage, 'local:user', id, slug)).toBeNull();
+  });
+
+  it('shows a recoverable timeout instead of initializing forever when the host never answers', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const readIdentity = hostIdentity(() => new Promise(() => {}));
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => vi.advanceTimersByTimeAsync(WORKSPACE_MODE_ADMISSION_TIMEOUT_MS + 1));
+      // The unanswered read is joined, not repeated, until it settles.
+      expect(readIdentity).toHaveBeenCalledTimes(1);
+      expect(createWorkspaceRuntime).not.toHaveBeenCalled();
+      expect(store.get(workspaceContentModeAtom)).toBeNull();
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+        errorType: 'WorkspaceModeAdmissionTimeoutError',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['retains an encrypted identity', true],
+    ['cannot be read', false],
+  ] as const)(
+    'never prefetches a plaintext proof for a listed workspace whose host %s',
+    async (_, retained) => {
+      ordinaryCloud();
+      vi.spyOn(console, 'info').mockImplementation(() => {});
+      environment.workspaces.set({
+        status: 'ready',
+        activeWorkspaceId: 'local:workspace',
+        workspaces: [
+          { id: 'local:workspace', slug: 'local', name: 'Local', role: 'owner' },
+          { id: 'workspace-beta', slug: 'beta', name: 'Beta', role: 'member' },
+        ],
+      });
+      const beta = Promise.withResolvers<void>();
+      hostIdentity(async ({ workspaceId }) => {
+        if (workspaceId !== 'workspace-beta') throw new Error('e2ee_missing-binding');
+        beta.resolve();
+        if (!retained) throw new Error('e2ee_permissions');
+        return { workspaceId, genesisHash: '11'.repeat(32) };
+      });
+      await render();
+      await act(async () => beta.promise);
+      expect(
+        readWorkspaceModeProof(localStorage, 'local:user', 'workspace-beta', 'beta')
+      ).toBeNull();
+      expect(
+        readWorkspaceModeEvidence(localStorage, 'local:user', 'workspace-beta').encrypted
+      ).toBe(retained);
+    }
+  );
 
   it.each(['plaintext', 'encrypted', 'account change'] as const)(
     'keeps the provisional Repo local and releases its content gate only for %s admission',

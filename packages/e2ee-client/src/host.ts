@@ -906,9 +906,19 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     /** The retained invitation behind an identity offer, or null for a personal pairing. */
     memberJoin: (pairingOffer: PersonalPairingOffer) =>
       run(
-        Effect.map(retainedMember(pairingOffer), (found) =>
-          found ? { offer: found.saved.offer, requestId: found.p.offer.pairingSessionId } : null
-        )
+        Effect.gen(function* () {
+          const found = yield* retainedMember(pairingOffer);
+          if (!found) return null;
+          // This device's retained approval original exists only after its admission was
+          // accepted from the verified history. It is a display hint for a reopened page,
+          // which still claims once; it grants nothing.
+          const joined = !!(yield* pairings.load(key(found.p, 'approval')));
+          return {
+            offer: found.saved.offer,
+            requestId: found.p.offer.pairingSessionId,
+            ...(joined ? { joined: true as const } : {}),
+          };
+        })
       ),
     /** Recover this pinned workspace from an authenticated vault; no private key escapes. */
     restoreRecovery: (input: PersonalHostRecoveryInput) => run(restoreRecovery(input)),

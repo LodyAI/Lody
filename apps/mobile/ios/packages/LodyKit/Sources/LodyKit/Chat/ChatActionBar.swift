@@ -51,6 +51,8 @@ struct ChatActionBarState: Decodable, Equatable {
     var repository: String?
     var prStatus: String?
     var prCI: String?
+    /// A PR write (merge, ready for review) is in flight: a spinner replaces the PR mark.
+    var busy: Bool?
     let actions: [ChatMenuAction]
     /// A Project group: the popover lists these instead of one repository's actions.
     var menuSubtitle: String?
@@ -182,7 +184,7 @@ struct ChatActionBarContent: View {
   private var foldedEnvironment: some View {
     let items = environment
     let lead = items.first { $0.id == "machine" && $0.tint == "warning" }
-      ?? items.first { ["browser", "simulator"].contains($0.id) }
+      ?? items.first { ["browser", "simulator", "emulator"].contains($0.id) }
       ?? items[0]
     return Menu {
       ForEach(items) { item in
@@ -230,7 +232,7 @@ struct ChatActionBarContent: View {
 
   private static func identifier(_ id: String) -> String {
     switch id {
-    case "browser", "simulator": "session-preview"
+    case "browser", "simulator", "emulator": "session-preview"
     default: "session-bar:" + id
     }
   }
@@ -307,7 +309,9 @@ struct ChatActionBarContent: View {
     }
     let label = HStack(spacing: 6) {
       if let context {
-          if let status = context.prStatus, !status.isEmpty {
+          if context.busy == true {
+            ProgressView().controlSize(.small)
+          } else if let status = context.prStatus, !status.isEmpty {
             LodyPullRequestIcon(status: status, ci: context.prCI)
           } else {
             Image(systemName: context.symbol).foregroundStyle(Self.tint(context.tint))

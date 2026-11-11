@@ -23,7 +23,6 @@ public final class LodyApplication {
   private var onboarding: LodyPageController?
   private var link: (route: String, user: String?)?
   private let shares = NativeShareCoordinator()
-  private var offeredCommunity = false
 
   public func start(in window: UIWindow) {
     precondition(observers.isEmpty, "Lody supports one active scene")
@@ -89,35 +88,6 @@ public final class LodyApplication {
     }
     routeNotification()
     shares.reconcile()
-    if onboarding == nil { offerCommunityNotice() }
-  }
-
-  private func offerCommunityNotice() {
-    guard !offeredCommunity else { return }
-    offeredCommunity = true
-    Task {
-      do {
-        let seen = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
-          LocalStore.queue.async {
-            do {
-              let seen = try LocalStore.shared.read("communityNoticeSeen") == "true"
-              if !seen { try LocalStore.shared.write("communityNoticeSeen", "true") }
-              continuation.resume(returning: seen)
-            } catch { continuation.resume(throwing: error) }
-          }
-        }
-        guard !seen else { return }
-        let alert = UIAlertController(title: String(localized: "communityNotice.title", bundle: .lody),
-          message: String(localized: "communityNotice.message", bundle: .lody), preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: String(localized: "communityNotice.later", bundle: .lody), style: .cancel))
-        alert.addAction(UIAlertAction(title: String(localized: "communityNotice.star", bundle: .lody), style: .default) { _ in
-          UIApplication.shared.open(URL(string: "https://github.com/Innei/lody-ios")!)
-        })
-        LodyShell.shared.presenter?.present(alert, animated: true)
-      } catch {
-        DiagnosticsStore.shared.record("app", "community_notice_failed", fields: ["error": error.localizedDescription])
-      }
-    }
   }
 
   private func routeNotification() {

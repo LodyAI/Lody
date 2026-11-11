@@ -21,7 +21,7 @@ CHAT = ROOT / 'apps/ios/verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
     'pages': ['onboarding', 'home', 'home-grouping-crash', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
-    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
+    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
     'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'],
 }
 SUITES = {
@@ -43,6 +43,7 @@ PREVIEW = {
     'role-mention-sheet': 'mention-sheet',
     'agent-roles': 'agent-roles-preview',
     'session-native': 'session-preview-live',
+    'proposal-cards': 'session-preview-cards-role-create',
     'session-simulator': 'session-preview-live',
     'permission-native': 'permission-native-preview',
     'native-diff': 'file-diff-preview',
@@ -151,13 +152,13 @@ PREVIEW = {
     'composer-fullscreen': 'composer-success',
     'inbox': 'inbox-preview',
     'onboarding': 'onboarding-preview',
-    'community-notice': 'community-notice',
 }
 READY = {
     'toast': 'session-preview-probe',
     'role-mention-sheet': 'create-session-input',
     'agent-roles': 'list-unavailable-action',
     'session-native': 'session-preview-probe',
+    'proposal-cards': 'session-preview-probe',
     'session-simulator': 'session-preview-probe',
     'permission-native': 'permission-preview-probe',
     'native-diff': 'diff-preview:changes:docs/superpowers/.diff-check.md',
@@ -255,7 +256,6 @@ READY = {
     'composer-fullscreen': 'session-input',
     'inbox': 'inbox-wait',
     'onboarding': 'auth.native.github',
-    'community-notice': 'community-notice',
 }
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
@@ -513,7 +513,7 @@ try:
                     ui.axe('tap', '--label', 'Image Fixture')
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
-                script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'preferences', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'preferences', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
                 if case == 'home-grouping-crash':
                     script = Path(__file__).with_name('home-grouping-crash.py')
                 if case.startswith('send-scroll-'):
@@ -522,7 +522,7 @@ try:
                     script = Path(__file__).with_name('devices.py')
                 if case in ('diagnostics', 'directory', 'project', 'activity', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'):
                     script = Path(__file__).with_name(f'{case}.py')
-                if case in ('session-native', 'session-simulator', 'permission-native', 'native-diff', 'native-workspace-changes', 'native-file-content'):
+                if case in ('session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'native-diff', 'native-workspace-changes', 'native-file-content'):
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'file-selection':
                     script = Path(__file__).with_name('file-selection.py')
@@ -659,8 +659,8 @@ try:
                 elif case in ('session-search', 'mentions-production'):
                     # Long search and mention-kind loops reach ~290s alone.
                     check_timeout = 420
-                elif case == 'session-native':
-                    # Shared-feed details, PR draft handoff, previews and session actions.
+                elif case in ('session-native', 'proposal-cards'):
+                    # Shared-feed actions or seven proposal scenes with captures and navigation.
                     check_timeout = 420
                 elif case == 'ipad':
                     # Sidebar, both orientations, keyboard and two native creation flows.

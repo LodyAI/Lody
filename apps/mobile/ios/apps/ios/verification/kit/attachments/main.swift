@@ -8,6 +8,7 @@ final class UploadRecorder: @unchecked Sendable {
   private let lock = NSLock()
   private var storedRequests: [URLRequest] = []
   private var storedFailPart = false
+  private var storedImageParts: [(String, Data)] = []
   private var storedProgress: [(String, String, Int?)] = []
   private var storedBytes: [Int64] = []
   var progress: [(String, String, Int?)] {
@@ -26,6 +27,10 @@ final class UploadRecorder: @unchecked Sendable {
     get { lock.lock(); defer { lock.unlock() }; return storedRequests }
     set { lock.lock(); storedRequests = newValue; lock.unlock() }
   }
+  var imageParts: [(String, Data)] {
+    get { lock.lock(); defer { lock.unlock() }; return storedImageParts }
+    set { lock.lock(); storedImageParts = newValue; lock.unlock() }
+  }
   var failPart: Bool {
     get { lock.lock(); defer { lock.unlock() }; return storedFailPart }
     set { lock.lock(); storedFailPart = newValue; lock.unlock() }
@@ -41,6 +46,10 @@ final class UploadProtocol: URLProtocol {
   static var failPart: Bool {
     get { recorder.failPart }
     set { recorder.failPart = newValue }
+  }
+  static var imageParts: [(String, Data)] {
+    get { recorder.imageParts }
+    set { recorder.imageParts = newValue }
   }
   override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "api.lody.ai" }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -126,6 +135,21 @@ final class UploadProtocol: URLProtocol {
       assert(uploaded.range(of: Data("name=\"sessionId\"\r\n\r\ns1\r\n".utf8)) != nil)
       assert(uploaded.range(of: Data("name=\"file\"".utf8)) != nil)
       assert(uploaded.count > 100)
+      // Mirror the server: the declared part type must match the image's magic bytes.
+      let header = uploaded.range(of: Data("Content-Type: ".utf8), options: .backwards)!
+      let end = uploaded.range(of: Data("\r\n\r\n".utf8), in: header.upperBound..<uploaded.endIndex)!
+      let declared = String(decoding: uploaded[header.upperBound..<end.lowerBound], as: UTF8.self)
+      let magic = ["image/png": [0x89, 0x50, 0x4e, 0x47], "image/jpeg": [0xff, 0xd8, 0xff], "image/gif": [0x47, 0x49, 0x46], "image/webp": [0x52, 0x49, 0x46, 0x46]]
+      let content = uploaded[end.upperBound...]
+      if let prefix = magic[declared], content.starts(with: prefix.map(UInt8.init)) {
+        Self.imageParts.append((declared, uploaded))
+      } else {
+        status = 400; body = ["success": false, "error": "Image content does not match mime type"]
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: body))
+        client?.urlProtocolDidFinishLoading(self)
+        return
+      }
       body = ["image": ["type": "image", "imageId": "image1", "mimeType": "image/png", "fileName": "photo.png", "sizeBytes": 100]]
     } else if path.hasSuffix("/create") {
       assert(request.value(forHTTPHeaderField: "x-file-sha256")!.count == 64)
@@ -204,11 +228,25 @@ final class UploadProtocol: URLProtocol {
     assert(imageProgress.progress.contains { $0.1 == "uploading" && $0.2 == 0 })
     assert(imageProgress.progress.last?.0 == "photo.png" && imageProgress.progress.last?.1 == "complete")
     assert(images[0]["imageId"] as? String == "image1")
+    // An edited Photos screenshot keeps its `.PNG` name while `.current` renders JPEG data.
+    let edited = root.appendingPathComponent("IMG_9744.PNG")
+    let jpegBytes = UIImage(contentsOfFile: image.path)!.jpegData(compressionQuality: 0.9)!
+    try jpegBytes.write(to: edited)
+    _ = try await SessionAttachments.upload([attachment(edited, "image")], workspace: "w1", session: "s1")
+    let editedPart = UploadProtocol.imageParts.last!
+    assert(editedPart.0 == "image/jpeg", "Declare the image type from its bytes, not its file extension")
+    assert(editedPart.1.range(of: Data("filename=\"IMG_9744.jpeg\"".utf8)) != nil, "Rename to match the uploaded type")
+    assert(editedPart.1.range(of: jpegBytes) != nil, "A supported image whose name lies must upload unchanged, not re-encoded")
     let tiff = root.appendingPathComponent("converted.tiff")
     let destination = CGImageDestinationCreateWithURL(tiff as CFURL, "public.tiff" as CFString, 1, nil)!
     CGImageDestinationAddImage(destination, UIImage(contentsOfFile: image.path)!.cgImage!, nil)
     assert(CGImageDestinationFinalize(destination))
     _ = try await SessionAttachments.upload([attachment(tiff, "image")], workspace: "w1", session: "s1")
+    let disguised = root.appendingPathComponent("disguised.png")
+    try FileManager.default.copyItem(at: tiff, to: disguised)
+    _ = try await SessionAttachments.upload([attachment(disguised, "image")], workspace: "w1", session: "s1")
+    assert(UploadProtocol.imageParts.last!.0 == "image/jpeg", "Unsupported content behind an image extension converts to JPEG")
+    assert(UploadProtocol.imageParts.last!.1.range(of: Data("filename=\"disguised.jpg\"".utf8)) != nil)
     let video = root.appendingPathComponent("IMG_3933.mov")
     try Data("hi!".utf8).write(to: video)
     UploadProtocol.requests = []

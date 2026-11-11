@@ -61,9 +61,10 @@ export function startEmailAdmissionWorker(
       );
       for (const request of requests.items) {
         if (stopped) break;
-        // `source` only skips link requests early. The host signs only an invitation it
-        // verifies itself; anything else is refused and stays for explicit approval.
-        if (request.source !== 'email') continue;
+        // `source` only skips link requests early; the host signs only an invitation it
+        // verifies itself, anything else is refused and stays for explicit approval. A full
+        // free workspace would refuse the admission after it is signed.
+        if (request.source !== 'email' || request.memberLimitReached) continue;
         try {
           await runtime.approveMemberJoin(workspaceId, request.requestId, 'automatic');
           recordAutomaticAdmission(workspaceId, request.requestId, null);

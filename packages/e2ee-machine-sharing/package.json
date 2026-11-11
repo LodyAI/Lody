@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./schemas": "./src/schemas.ts"
+    "./schemas": "./src/schemas.ts",
+    "./sqlite": "./src/sqlite.ts",
+    "./indexeddb": "./src/indexeddb.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -21,8 +23,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "fake-indexeddb": "^6.2.5",
+    "oxfmt": "^0.65.0",
     "typescript": "catalog:",
-    "vitest": "5.0.2",
-    "oxfmt": "^0.65.0"
+    "vitest": "5.0.2"
   }
 }

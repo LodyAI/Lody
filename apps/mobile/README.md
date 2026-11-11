@@ -140,7 +140,9 @@ example through an image upload tool). Both clients render them the same way:
 iOS (`ChatTranscript.stackImages`, `ChatImageStackCell`, `ChatImagePreview`)
 pages through every image in the conversation, flies the photo back into its
 card on a swipe-down close, and saves with the Photos add-only permission
-(`NSPhotoLibraryAddUsageDescription`).
+(`NSPhotoLibraryAddUsageDescription`). The Photos change block runs on the
+framework's queue without main-actor isolation; completion and error feedback
+remain on the main actor.
 
 Android (`TurnLayout`, `chat/ImageViews`, `chat/SessionImages`) pages through the
 images of the turn. `SessionImageHttp` reads the Worker session-images endpoints
