@@ -153,7 +153,15 @@ export function E2eeRemoteMachinePairing({
             <p {...stylex.props(styles.message)}>{t('e2ee.remoteMachine.commandHelp')}</p>
           </>
         )}
-        {preview && <p role="status">{t(`e2ee.remoteMachine.status.${preview.status}`)}</p>}
+        {preview && (
+          <p role="status">
+            {t(
+              preview.status === 'conflict' && preview.noAdmissionReserved
+                ? 'e2ee.remoteMachine.status.claimedByAnotherMachine'
+                : `e2ee.remoteMachine.status.${preview.status}`
+            )}
+          </p>
+        )}
         {preview?.summary && (
           <>
             <div {...stylex.props(styles.machine)}>

@@ -484,6 +484,13 @@ describe('portable account pairing workflow', () => {
     ['an automatic cancellation', null, 'history:w1', true, 'cancel'],
     ['an expired automatic approval', null, 'history:w1', true, 'expire'],
     [
+      'an automatic request ended after three wrong codes on the approver',
+      null,
+      'history:w1',
+      true,
+      'wrong-code',
+    ],
+    [
       'a background device notification followed by foreground approval',
       null,
       'history:w1',
@@ -684,8 +691,27 @@ describe('portable account pairing workflow', () => {
           expect([...requests.values()][0]!.expiresAt).toBe(600_000);
           const reviews = await desktop.pendingAutomaticPairing();
           expect(reviews).toHaveLength(1);
-          expect(reviews[0]!.comparisonCode).toBe(waiting!.comparisonCode);
+          // The approver never displays its code: the person must type the new device's.
+          expect(reviews[0]).not.toHaveProperty('comparisonCode');
           expect(reviews[0]!.workspaceId).toBe('w1');
+          const shown = waiting!.comparisonCode!;
+          const wrong = String((Number(shown) + 1) % 1_000_000).padStart(6, '0');
+          if (action === 'wrong-code') {
+            for (const attemptsLeft of [2, 1])
+              await expect(
+                desktop.approveAutomaticPairing(reviews[0]!.id, wrong)
+              ).rejects.toMatchObject({ code: 'pairing-code-mismatch', attemptsLeft });
+            await expect(desktop.approveAutomaticPairing(reviews[0]!.id, wrong)).rejects.toThrow(
+              'e2ee_pairing-code-locked'
+            );
+            // The request is void: even the right code can no longer admit the device.
+            await expect(desktop.approveAutomaticPairing(reviews[0]!.id, shown)).rejects.toThrow();
+            expect(await desktop.pendingAutomaticPairing()).toEqual([]);
+            expect((await phone.automaticPairingState('w1'))?.phase).toBe('declined');
+            expect(approvals.size).toBe(0);
+            expect(installed).toEqual([]);
+            return;
+          }
           if (action === 'decline') {
             await desktop.declineAutomaticPairing(reviews[0]!.id);
             expect((await phone.automaticPairingState('w1'))?.phase).toBe('declined');
@@ -700,14 +726,18 @@ describe('portable account pairing workflow', () => {
           }
           if (action === 'expire') {
             time = 600_001;
-            await expect(desktop.approveAutomaticPairing(reviews[0]!.id)).rejects.toThrow(
+            await expect(desktop.approveAutomaticPairing(reviews[0]!.id, shown)).rejects.toThrow(
               'e2ee_pairing-expired'
             );
             expect((await phone.automaticPairingState('w1'))?.phase).toBe('expired');
             expect(installed).toEqual([]);
             return;
           }
-          await expect(desktop.approveAutomaticPairing(reviews[0]!.id)).rejects.toThrow(
+          await expect(
+            desktop.approveAutomaticPairing(reviews[0]!.id, wrong)
+          ).rejects.toMatchObject({ code: 'pairing-code-mismatch' });
+          expect(approvals.size).toBe(0);
+          await expect(desktop.approveAutomaticPairing(reviews[0]!.id, shown)).rejects.toThrow(
             'synthetic lost approval reply'
           );
           expect(await desktop.pendingAutomaticPairing()).toEqual([]);

@@ -46,6 +46,8 @@ type Entry = {
   admitted: boolean;
   submitted: boolean;
   authorizing: boolean;
+  /** Approver only: wrong codes entered for this request on this device. */
+  codeFailures: number;
   phase: E2eeAutomaticPairingState['phase'];
 };
 const refuse = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code });
@@ -55,6 +57,14 @@ const id = (crypto: Crypto) =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
     b.toString(16).padStart(2, '0')
   ).join('');
+/** Wrong codes an approving device accepts for one request before it ends that request. */
+export const AUTOMATIC_PAIRING_CODE_ATTEMPTS = 3;
+const sameCode = (entered: string, expected: string) => {
+  let difference = entered.length ^ expected.length;
+  for (let i = 0; i < expected.length; i++)
+    difference |= entered.charCodeAt(i) ^ expected.charCodeAt(i);
+  return difference === 0;
+};
 const original = (context: AutomaticPairingContext) =>
   JSON.stringify(AutomaticPairingContextSchema.parse(context));
 
@@ -104,6 +114,7 @@ export function makeAutomaticPairingRuntime(options: {
     admitted: false,
     submitted: false,
     authorizing: false,
+    codeFailures: 0,
     phase: 'preparing',
   });
   const dispose = (value: Entry) => {
@@ -120,6 +131,11 @@ export function makeAutomaticPairingRuntime(options: {
     comparisonCode: value.channel?.comparisonCode ?? null,
     phase: value.phase,
   });
+  /** The approver never shows its derived code: the person types the new device's code. */
+  const review = (value: Entry, requestId: string, deviceName = value.context.deviceName) => {
+    const { comparisonCode: _hidden, ...state } = snapshot(value);
+    return { ...state, deviceName, requestId } satisfies E2eeAutomaticPairingReview;
+  };
   const checked = (value: Entry, row: E2eeAutomaticPairingRecord) =>
     Effect.try({
       try: () => {
@@ -295,9 +311,7 @@ export function makeAutomaticPairingRuntime(options: {
     let row = yield* checked(value, source);
     if (value.authorizing) {
       yield* approveTick(value);
-      return value.phase === 'joined'
-        ? null
-        : { ...snapshot(value), requestId: value.nativeRequestId ?? '' };
+      return value.phase === 'joined' ? null : review(value, value.nativeRequestId ?? '');
     }
     const exchange = yield* exchangeFor(value);
     const commitment = exchange.commitment!;
@@ -323,11 +337,7 @@ export function makeAutomaticPairingRuntime(options: {
       return yield* Effect.fail(refuse('pairing-tampered'));
     value.nativeRequestId = preview.requestId;
     value.phase = 'waiting';
-    return {
-      ...snapshot(value),
-      deviceName: preview.deviceName,
-      requestId: preview.requestId,
-    } satisfies E2eeAutomaticPairingReview;
+    return review(value, preview.requestId, preview.deviceName);
   });
   const start = Effect.fnUntraced(function* (workspaceId: string) {
     yield* check();
@@ -546,17 +556,42 @@ export function makeAutomaticPairingRuntime(options: {
         })
       ),
     pendingAutomaticPairing: () => options.run(pending()),
-    approveAutomaticPairing: (id: string) =>
+    approveAutomaticPairing: (id: string, enteredCode: string) =>
       options.run(
         Effect.gen(function* () {
           yield* check();
+          if (typeof enteredCode !== 'string' || !/^\d{6}$/.test(enteredCode))
+            return yield* Effect.fail(refuse('invalid-input'));
           const value = approving.get(id);
           if (!value?.nativeRequestId || !value.channel || value.phase !== 'waiting')
             return yield* Effect.fail(refuse('pairing-tampered'));
           yield* value.gate.withPermit(
             Effect.gen(function* () {
               if (yield* expires(value)) return yield* Effect.fail(refuse('pairing-expired'));
-              value.authorizing = true;
+              // A retry after a lost reply resumes the already-verified approval.
+              if (!value.authorizing) {
+                if (!value.channel || !sameCode(enteredCode, value.channel.comparisonCode)) {
+                  value.codeFailures += 1;
+                  const attemptsLeft = AUTOMATIC_PAIRING_CODE_ATTEMPTS - value.codeFailures;
+                  if (attemptsLeft > 0)
+                    return yield* Effect.fail(
+                      Object.assign(refuse('pairing-code-mismatch'), { attemptsLeft })
+                    );
+                  // End the request on this device first, so no later entry can sign it,
+                  // then tell the new device and the service; either may be unreachable.
+                  const pairingString = value.code;
+                  const requestId = value.nativeRequestId;
+                  value.phase = 'declined';
+                  dispose(value);
+                  yield* Effect.result(relay.exchange({ id, terminal: 'declined' }));
+                  if (pairingString && requestId && runtime.declineAccountPairing)
+                    yield* Effect.result(
+                      promise(() => runtime.declineAccountPairing!({ pairingString, requestId }))
+                    );
+                  return yield* Effect.fail(refuse('pairing-code-locked'));
+                }
+                value.authorizing = true;
+              }
               yield* approveTick(value);
             })
           );

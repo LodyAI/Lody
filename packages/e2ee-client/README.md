@@ -255,7 +255,10 @@ Identity protection comes from each host's platform (`PersonalHostPlatform.prote
 `./automatic-pairing` owns a ten-minute, current-workspace verification attempt.
 A personal device first verifies its retained local identity, then commits its
 P-256 ephemeral key and nonce before the new device reveals its own key. Both
-screens compare the resulting six-digit SAS. Separate HKDF labels derive the
+devices derive the same six-digit SAS: the new device shows it, and the approver
+signs only after the person types a matching code (`approveAutomaticPairing(id,
+code)`; the review DTO omits it). The third wrong entry declines the request on
+that approver. Separate HKDF labels derive the
 128-bit secret used by the existing account request/approval HMAC workflow;
 neither private ephemeral keys nor the secret reach the relay. The short code is
 for comparison, never a login token or a truncated pairing secret.

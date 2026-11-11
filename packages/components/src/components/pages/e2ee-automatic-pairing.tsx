@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronLeft, Smartphone } from 'lucide-react';
 import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
 import { accountPairingErrorCode } from '@lody/platform';
 import type {
   E2eeAutomaticPairingReview,
@@ -57,7 +58,7 @@ const ComparisonCode = ({ code }: { code: string | null }) => {
   const { t } = useTranslation();
   return (
     <div className="my-6 rounded-2xl border bg-muted/40 px-4 py-5 text-center">
-      <p className="mb-2 text-xs text-muted-foreground">{t('e2ee.auto.compare')}</p>
+      <p className="mb-2 text-xs text-muted-foreground">{t('e2ee.auto.showCode')}</p>
       <p
         className="font-mono text-4xl font-semibold tracking-[0.15em] tabular-nums"
         aria-live="polite"
@@ -498,7 +499,12 @@ export function E2eeAutomaticPairingInbox({
   const [selected, setSelected] = useState<string | null>(null);
   const [inbox, setInbox] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<
+    { kind: 'retry' } | { kind: 'mismatch'; attemptsLeft: number } | null
+  >(null);
+  const [code, setCode] = useState('');
+  /** A request this device ended after too many wrong codes; shown until dismissed. */
+  const [ended, setEnded] = useState<E2eeAutomaticPairingReview | null>(null);
   const deferred = useRef(new Set<string>());
   const actionOwner = useRef({ runtime });
   if (actionOwner.current.runtime !== runtime) actionOwner.current = { runtime };
@@ -518,7 +524,9 @@ export function E2eeAutomaticPairingInbox({
       running = false;
     setRequests([]);
     setBusy(null);
-    setError(false);
+    setError(null);
+    setCode('');
+    setEnded(null);
     setSelected(null);
     deferred.current.clear();
     if (!runtime?.pendingAutomaticPairing) return;
@@ -541,7 +549,7 @@ export function E2eeAutomaticPairingInbox({
           !document.querySelector('[role="dialog"]:not([hidden])')
         ) {
           const next = rows.find(
-            (row) => row.phase === 'waiting' && row.comparisonCode && !deferred.current.has(row.id)
+            (row) => row.phase === 'waiting' && !deferred.current.has(row.id)
           );
           if (next) setSelected(next.id);
         }
@@ -566,25 +574,42 @@ export function E2eeAutomaticPairingInbox({
     };
   }, [runtime]);
   const current = requests.find((row) => row.id === selected);
+  useEffect(() => {
+    setCode('');
+    setError(null);
+  }, [selected]);
   const later = () => {
     if (selected) deferred.current.add(selected);
     setSelected(null);
-    setError(false);
+    setEnded(null);
+    setError(null);
   };
   const act = async (approve: boolean) => {
     if (!current || busy || !runtime) return;
+    if (approve && !/^\d{6}$/.test(code)) return;
     const owner = actionOwner.current;
     setBusy(current.id);
-    setError(false);
+    setError(null);
     try {
-      if (approve) await runtime.approveAutomaticPairing!(current.id);
+      if (approve) await runtime.approveAutomaticPairing!(current.id, code);
       else await runtime.declineAutomaticPairing!(current.id);
       if (owner !== actionOwner.current) return;
       deferred.current.add(current.id);
       setSelected(null);
       if (!approve) setRequests((rows) => rows.filter((row) => row.id !== current.id));
-    } catch {
-      if (owner === actionOwner.current) setError(true);
+    } catch (cause) {
+      if (owner !== actionOwner.current) return;
+      const refusal = accountPairingErrorCode(cause);
+      if (refusal === 'pairing-code-locked') {
+        deferred.current.add(current.id);
+        setRequests((rows) => rows.filter((row) => row.id !== current.id));
+        setSelected(null);
+        setEnded(current);
+      } else if (refusal === 'pairing-code-mismatch') {
+        const left = (cause as { attemptsLeft?: unknown }).attemptsLeft;
+        setCode('');
+        setError({ kind: 'mismatch', attemptsLeft: typeof left === 'number' ? left : 1 });
+      } else setError({ kind: 'retry' });
     } finally {
       if (owner === actionOwner.current) setBusy(null);
     }
@@ -620,7 +645,7 @@ export function E2eeAutomaticPairingInbox({
         </Drawer.Content>
       </Drawer.Root>
       <Dialog.Root
-        open={Boolean(current)}
+        open={Boolean(current || ended)}
         onOpenChange={(open) => {
           if (!open) later();
         }}
@@ -634,20 +659,71 @@ export function E2eeAutomaticPairingInbox({
           initialFocus={dialog}
         >
           <PrivatePairingSurface>
+            {ended && !current && (
+              <>
+                <Dialog.Title className="text-2xl leading-snug">
+                  {t('e2ee.auto.codeLocked.title')}
+                </Dialog.Title>
+                <Dialog.Description>
+                  {t('e2ee.auto.codeLocked.help', { workspace: ended.workspaceName })}
+                </Dialog.Description>
+                <Button className="mt-4" onClick={() => setEnded(null)}>
+                  {t('e2ee.auto.codeLocked.ok')}
+                </Button>
+              </>
+            )}
+            {current && (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>{t('e2ee.auto.newRequest')}</span>
               <Button variant="ghost" onClick={later}>
                 {t('e2ee.auto.later')}
               </Button>
             </div>
-            <Dialog.Title className="text-2xl leading-snug">
-              {t('e2ee.auto.approve.title')}
-            </Dialog.Title>
-            <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
+            )}
             {current && (
               <>
+                <Dialog.Title className="text-2xl leading-snug">
+                  {t('e2ee.auto.approve.title')}
+                </Dialog.Title>
+                <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
                 <p className="mt-2 text-sm font-medium">{current.deviceName}</p>
-                <ComparisonCode code={current.comparisonCode} />
+                <p className="text-xs text-muted-foreground">{t('e2ee.auto.deviceNameUnverified')}</p>
+                <form
+                  className="my-5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void act(true);
+                  }}
+                >
+                  <label htmlFor="e2ee-approval-code" className="mb-2 block text-sm">
+                    {t('e2ee.auto.enterCode')}
+                  </label>
+                  <Input
+                    id="e2ee-approval-code"
+                    data-testid="e2ee-approval-code"
+                    size="large"
+                    value={code}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="000000"
+                    aria-invalid={error?.kind === 'mismatch' || undefined}
+                    aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
+                    disabled={Boolean(busy)}
+                    onChange={(event) => {
+                      setCode(event.target.value.replace(/\D/g, '').slice(0, 6));
+                      if (error?.kind === 'retry') setError(null);
+                    }}
+                  />
+                  {error?.kind === 'mismatch' && (
+                    <p
+                      id="e2ee-approval-code-error"
+                      role="alert"
+                      className="mt-2 text-sm text-destructive"
+                    >
+                      {t('e2ee.auto.codeMismatch', { count: error.attemptsLeft })}
+                    </p>
+                  )}
+                </form>
                 <div className="rounded-xl border bg-muted/30 p-4">
                   <p className="font-medium">{current.workspaceName}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{t('e2ee.auto.scope')}</p>
@@ -667,16 +743,21 @@ export function E2eeAutomaticPairingInbox({
                   </Button>
                   <Button
                     className="flex-1"
+                    data-testid="e2ee-approval-authorize"
                     disabled={
-                      Boolean(busy) || !current.comparisonCode || current.expiresAt <= Date.now()
+                      Boolean(busy) || !/^\d{6}$/.test(code) || current.expiresAt <= Date.now()
                     }
                     onClick={() => void act(true)}
                   >
                     {t(busy ? 'e2ee.auto.confirming' : 'e2ee.auto.authorize')}
                   </Button>
                 </div>
-                {error && (
-                  <p role="alert" className="text-sm text-muted-foreground">
+                {error?.kind === 'retry' && (
+                  <p
+                    id="e2ee-approval-code-error"
+                    role="alert"
+                    className="text-sm text-muted-foreground"
+                  >
                     {t('e2ee.auto.approvalRetry')}
                   </p>
                 )}
