@@ -34,6 +34,12 @@ finalization does not commit and the user asked for a PR that tracks the work
   Role. The Lody MCP server instructions describe this format and say that
   `lody_session_create` accepts the ids, as they already do for Session mentions. Messages persist display spans, so native clients still render the chip;
   their legacy text grammar applies only to span-less messages.
+- The iOS cloud runtime sends the same Session and Role references as Web. The
+  Android runtime is a pinned snapshot of it and picks this up at its next re-snapshot.
+- A capacity-recovery automation states that capacity is back and that the recorded
+  tool results show what was completed, without a reconciliation procedure. An
+  external-event delivery no longer adds "continue within the existing task".
+- A Session created from a feedback post receives the postId only, not a named skill.
 - A Project group adds only its facts: the group directory is not a Git repository
   and the members are listed in the conversation.
 - The binding rule is in the root `AGENTS.md`; the Inbox-specific rule is in

@@ -27,6 +27,11 @@ results…” 开头；Fix CI 先在客户端拉取失败检查，再规定读�
   “use lody mcp to create a session…”：用户自己的话决定怎么用这个 Role。Lody MCP 服务说明描述了这个格式，并说明
   `lody_session_create` 接受这些 id，与会话提及的做法一致。消息保存了
   显示 span，原生客户端照常显示标签；它们的旧文本语法只用于没有 span 的消息。
+- iOS cloud runtime 发送与 Web 相同的会话和 Role 引用。Android runtime 是它的锁定
+  快照，下次重新同步快照时带上。
+- 额度恢复自动化只说明额度已恢复、已记录的工具结果显示哪些已完成，不再规定对账流程。
+  外部事件投递不再附加“在现有任务内继续”。
+- 从反馈帖创建的会话只收到 postId，不再指名某个 skill。
 - Project group 只追加事实：组目录不是 Git 仓库，成员列在对话里。
 - 约束规则在根 `AGENTS.md`；Inbox 专属规则在 `apps/cli/src/orchestration/AGENTS.md`。
 
