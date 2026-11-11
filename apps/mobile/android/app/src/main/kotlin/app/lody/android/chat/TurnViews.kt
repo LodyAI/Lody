@@ -106,6 +106,7 @@ private fun LazyListScope.content(
         is TurnItem.Text, is TurnItem.ProposedPlan -> prose(block.key, entry.prose[value.id], secondary = false)
         is TurnItem.Checklist -> item(key = block.key, contentType = "checklist") { Checklist(value, Modifier.animateItem()) }
         is TurnItem.Notice -> item(key = block.key, contentType = "notice") { Notice(value, Modifier.animateItem()) }
+        is TurnItem.Images -> item(key = block.key, contentType = "images") { TurnImages(value, Modifier.animateItem()) }
         is TurnItem.Tool -> step(entry, value, block.key, entry.working && value.status == "in_progress", open, toggle, details)
         is TurnItem.Thought -> prose(block.key, entry.prose[value.id], secondary = true)
         is TurnItem.Task -> Unit
@@ -762,11 +763,11 @@ private fun DiffLineRow(line: LineDiff.Line, style: androidx.compose.ui.text.Tex
     }
 }
 
-private enum class Segment { Only, First, Middle, Last }
+internal enum class Segment { Only, First, Middle, Last }
 
 /** One row's slice of the task card: rounded only where the card starts or ends, ruled between rows. */
 @Composable
-private fun Modifier.cardSegment(segment: Segment): Modifier {
+internal fun Modifier.cardSegment(segment: Segment): Modifier {
     val colors = LodyTheme.colors
     val radius = LodySpacing.md
     val shape = when (segment) {
