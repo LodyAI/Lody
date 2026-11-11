@@ -332,9 +332,29 @@ async function downloadArtifact(
     await fs.rm(temporary, { force: true });
   }
 }
+/** The release identity a downloader trusts; a SEA context satisfies it. */
+export type ReleaseTrust = {
+  metadata: Pick<SeaContext['metadata'], 'product' | 'distribution' | 'platform'>;
+};
+/**
+ * An npm-installed daemon has no SEA metadata. It trusts only its own build's
+ * product and the channel bound into the authorized upgrade request.
+ */
+export function npmMigrationTrust(
+  product: SeaContext['metadata']['product'],
+  channel: SeaContext['metadata']['channel']
+): ReleaseTrust {
+  return {
+    metadata: {
+      product,
+      distribution: `${product}${channel === 'next' ? '-next' : ''}-daemon`,
+      platform: `${process.platform}-${process.arch}`,
+    },
+  };
+}
 /** Target is resolved once; never accept a remote command or artifact URL. */
 export async function prepareManagedRelease(
-  context: SeaContext,
+  context: ReleaseTrust,
   target: string,
   options: {
     signal?: AbortSignal;

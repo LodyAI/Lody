@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import {
+  npmMigrationTrust,
   prepareManagedRelease,
   readManagedOperation,
   readSelectedInstallation,
@@ -104,6 +105,29 @@ describe('checksummed managed daemon installation', () => {
     await prepareManagedRelease(context, '1.2.3');
     expect(downloads.filter((url) => url.endsWith('/node.gz'))).toHaveLength(1);
     expect(await fs.readdir(dir)).toEqual(['daemon-managed']);
+  });
+  it('an npm daemon without a SEA context downloads only its own product and channel distribution', async () => {
+    await fixture();
+    const urls: string[] = [];
+    const cloudNext = {
+      ...release,
+      product: 'lody-cloud',
+      distribution: 'lody-cloud-next-daemon',
+      channel: 'next',
+    };
+    let served: unknown = cloudNext;
+    vi.stubGlobal('fetch', async (url: string) => {
+      urls.push(url);
+      return new Response(
+        url.endsWith('.json') ? manifestJson(served) : new Uint8Array(compressed)
+      );
+    });
+    const trust = npmMigrationTrust('lody-cloud', 'next');
+    const prepared = await prepareManagedRelease(trust, '1.2.3');
+    expect(prepared.release.version).toBe('1.2.3');
+    expect(urls[0]).toContain(`/api/runtimes/lody-cloud-next-daemon/1.2.3/${release.platform}/`);
+    served = { ...cloudNext, distribution: 'lody-cloud-daemon' };
+    await expect(prepareManagedRelease(trust, '1.2.3')).rejects.toThrow(/mismatch/);
   });
   it.each(['compressed', 'extracted'] as const)(
     'a bad %s SHA never publishes an executable or a successful update record',
