@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 
 // @vitest-environment jsdom
-import React, { act } from 'react';
+import React, { act, useLayoutEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createStore, Provider } from 'jotai';
+import { createStore, Provider, useSetAtom } from 'jotai';
 
 import { sidebarCollapsedAtom, sidebarLastWidthAtom } from '../src/atoms/sidebar-state';
 import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
 import { WebWorkspaceLayout } from '../src/components/web-workspace-layout';
+import { COMPACT_NAVIGATION_CLOSE_SETTLE_MS } from '../src/components/compact-navigation-dialog';
+import { compactDesktopLayoutAtom, syncCompactDesktopLayoutAtom } from '../src/atoms/layout-state';
 
 const layout = vi.hoisted(() => ({ compact: false }));
 
@@ -53,6 +55,7 @@ describe('desktop sidebar toggle', () => {
   it('isolates compact navigation from the background content', async () => {
     layout.compact = true;
     const store = createStore();
+    store.set(compactDesktopLayoutAtom, true);
     store.set(sidebarCollapsedAtom, false);
     await act(async () =>
       render(
@@ -75,6 +78,7 @@ describe('desktop sidebar toggle', () => {
   it('closes compact navigation on Escape, persists collapse and restores the opener twice', async () => {
     layout.compact = true;
     const store = createStore();
+    store.set(compactDesktopLayoutAtom, true);
     store.set(sidebarCollapsedAtom, true);
     await act(async () =>
       render(
@@ -109,6 +113,7 @@ describe('desktop sidebar toggle', () => {
   it('releases background isolation when compact navigation becomes a desktop column', async () => {
     layout.compact = true;
     const store = createStore();
+    store.set(compactDesktopLayoutAtom, true);
     store.set(sidebarCollapsedAtom, false);
     const node = (
       <Provider store={store}>
@@ -135,6 +140,85 @@ describe('desktop sidebar toggle', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(container!.querySelector('[data-sidebar-identity]')).not.toBeNull();
     expect(store.get(sidebarCollapsedAtom)).toBe(false);
+  });
+
+  it('mounts a narrow window with its navigation closed and the content usable', async () => {
+    layout.compact = true;
+    const store = createStore();
+    // The persisted preference is an open sidebar, as on a wide window before it narrowed.
+    store.set(sidebarCollapsedAtom, false);
+    // MainLayout's bridge syncs the viewport into atom state in a layout effect, one
+    // commit after the layout first renders.
+    function CompactBridge() {
+      const sync = useSetAtom(syncCompactDesktopLayoutAtom);
+      useLayoutEffect(() => sync(true), [sync]);
+      return null;
+    }
+    const mounted: string[] = [];
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('[role="dialog"]')) mounted.push('dialog');
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      await act(async () =>
+        render(
+          <Provider store={store}>
+            <WebWorkspaceLayout>
+              <button>Machine</button>
+            </WebWorkspaceLayout>
+            <CompactBridge />
+          </Provider>
+        )
+      );
+    } finally {
+      observer.disconnect();
+    }
+    // Mounting open and closing before the opening frame is the exit that never ends.
+    expect(mounted).toEqual([]);
+    const content = container!.querySelector(
+      `[data-focus-scope="${WORKSPACE_FOCUS_SCOPES.content}"]`
+    )!;
+    expect(content.hasAttribute('inert')).toBe(false);
+    expect(store.get(sidebarCollapsedAtom)).toBe(false);
+  });
+
+  it('finishes a compact navigation close whose exit transition never ends', async () => {
+    layout.compact = true;
+    const store = createStore();
+    store.set(compactDesktopLayoutAtom, true);
+    store.set(sidebarCollapsedAtom, false);
+    await act(async () =>
+      render(
+        <Provider store={store}>
+          <WebWorkspaceLayout>
+            <button>Machine</button>
+          </WebWorkspaceLayout>
+        </Provider>
+      )
+    );
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    // A browser that reports an exit animation which never finishes, as Base UI sees a
+    // close that began before the opening frame.
+    const disabled = Object.getOwnPropertyDescriptor(globalThis, 'BASE_UI_ANIMATIONS_DISABLED');
+    const getAnimations = Element.prototype.getAnimations;
+    Object.assign(globalThis, { BASE_UI_ANIMATIONS_DISABLED: false });
+    Element.prototype.getAnimations = () =>
+      [{ finished: new Promise(() => {}), pending: false, playState: 'running' }] as never;
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'],
+    });
+    try {
+      await act(async () => store.set(sidebarCollapsedAtom, true));
+      await act(async () => vi.advanceTimersByTime(100));
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+      await act(async () => vi.advanceTimersByTime(COMPACT_NAVIGATION_CLOSE_SETTLE_MS));
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(document.querySelector('[inert]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      Element.prototype.getAnimations = getAnimations;
+      if (disabled) Object.defineProperty(globalThis, 'BASE_UI_ANIMATIONS_DISABLED', disabled);
+    }
   });
 
   it('retains the same sidebar DOM and scroll state across collapse and expand', () => {
