@@ -347,6 +347,116 @@ End of synthetic document.`,
     expect(container?.textContent).toContain('**');
   });
 
+  it.each([
+    ['```html\n<button>Add</button>\n```', true],
+    ['~~~html\n<button>Add</button>\n~~~~', true],
+    ['````html\n<button>Add</button>\n```', false],
+    ['```html\n<button>Add</button>\n~~~', false],
+    ['```html\n<button>Add</button>', false],
+    ['```html\n<button>Add</button>\n    ```', false],
+    ['> - ~~~html\n>   <button>Add</button>\n>   ~~~', true],
+    ['    ```html\n    <button>Add</button>\n    ```', false],
+    ['```htmlbars\n<button>Add</button>\n```', false],
+    ['```HTML\n<button>Add</button>\n```', false],
+    [
+      '<pre><code class="language-html" data-incomplete="false">&lt;button&gt;Add&lt;/button&gt;</code></pre>',
+      false,
+    ],
+  ])('requires parser-confirmed html closure: %s', async (source, executable) => {
+    for (const allowHtml of [false, true]) {
+      await renderMarkdown(source, { allowHtml });
+      expect(Boolean(container?.querySelector('iframe'))).toBe(executable);
+    }
+  });
+
+  it.each(['plain', 'quote', 'list'] as const)(
+    'retains the %s HTML document through appended text and stream completion',
+    async (kind) => {
+      const block = '```html title="Counter"\n<button>Add</button>\n```';
+      const nested =
+        kind === 'quote'
+          ? block
+              .split('\n')
+              .map((line) => '> ' + line)
+              .join('\n')
+          : kind === 'list'
+            ? '- Item\n\n' +
+              block
+                .split('\n')
+                .map((line) => '  ' + line)
+                .join('\n')
+            : block;
+      const source = 'Before\n\n' + nested;
+      await renderMarkdown(source, { isStreaming: true });
+      const frame = container?.querySelector('iframe');
+      expect(frame).not.toBeNull();
+      await renderMarkdown(source + '\n\nAfter', {
+        isStreaming: true,
+        onAgentFileLinkClick: () => {},
+      });
+      expect(container?.querySelector('iframe')).toBe(frame);
+      vi.useFakeTimers();
+      await renderMarkdown(source + '\n\nAfter', { isStreaming: false });
+      expect(container?.querySelector('iframe')).toBe(frame);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      vi.useRealTimers();
+      expect(container?.querySelector('iframe')).toBe(frame);
+      expect(container?.textContent).toContain('After');
+    }
+  );
+
+  it.each([false, true])(
+    'shows bootstrap failure only without confirmation (confirmed=%s)',
+    async (confirmed) => {
+      await renderMarkdown('Warm parser');
+      vi.useFakeTimers();
+      try {
+        await renderMarkdown('```html\n<button>Bootstrap boundary</button>\n```');
+        const frame = container!.querySelector('iframe')!;
+        let id = '';
+        vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation((payload) => {
+          id = (payload as { id: string }).id;
+        });
+        await act(async () => {
+          frame.dispatchEvent(new Event('load'));
+        });
+        expect(id).not.toBe('');
+        await act(async () => {
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              source: frame.contentWindow,
+              data: { id: confirmed ? id : 'old-instance', type: 'initialized' },
+            })
+          );
+          await vi.advanceTimersByTimeAsync(1000);
+        });
+        expect(frame.style.visibility).toBe('visible');
+        expect(frame.style.height).toBe('120px');
+        expect(container!.textContent!.includes('HTML preview failed to load')).toBe(!confirmed);
+        expect(
+          [...container!.querySelectorAll('button')].some(
+            (button) => button.textContent === 'Reload'
+          )
+        ).toBe(true);
+        if (!confirmed) {
+          await act(async () => {
+            window.dispatchEvent(
+              new MessageEvent('message', {
+                source: frame.contentWindow,
+                data: { id, type: 'initialized' },
+              })
+            );
+          });
+          expect(container!.textContent).not.toContain('HTML preview failed to load');
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('keeps raw HTML escaped by default', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.');
 

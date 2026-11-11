@@ -71,6 +71,12 @@ import {
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
+import { MarkdownHtmlBlock } from './html-preview/markdown-html-block';
+import {
+  hasHtmlCodeBlock,
+  rehypeFenceClosure,
+  remarkFenceClosure,
+} from './html-preview/markdown-html-fences';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { MarkdownMermaidBlock } from './markdown-mermaid-block';
 import {
@@ -844,38 +850,6 @@ const remarkLinkifyFilePaths = () => {
   };
 };
 
-const FENCE_OPEN_PATTERN = /^[ \t]*(`{3,}|~{3,})/u;
-const FENCE_CLOSE_PATTERN = /\n[\t >]*(`{3,}|~{3,})[ \t]*$/u;
-
-const isUnclosedFence = (raw: string) => {
-  const open = FENCE_OPEN_PATTERN.exec(raw)?.[1];
-  if (!open) return false;
-  const close = FENCE_CLOSE_PATTERN.exec(raw)?.[1];
-  return !close || close[0] !== open[0] || close.length < open.length;
-};
-
-const remarkMarkUnclosedFences = () => (tree: unknown, file: MarkdownFile) => {
-  const source = file.toString();
-  const walk = (node: MdastNode) => {
-    if (node.type === 'code') {
-      const start = node.position?.start?.offset;
-      const end = node.position?.end?.offset;
-      if (
-        typeof start === 'number' &&
-        typeof end === 'number' &&
-        isUnclosedFence(source.slice(start, end))
-      ) {
-        node.data = {
-          ...node.data,
-          hProperties: { ...node.data?.hProperties, dataIncomplete: true },
-        };
-      }
-    }
-    node.children?.forEach(walk);
-  };
-  if (typeof tree === 'object' && tree !== null) walk(tree as MdastNode);
-};
-
 const MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
   remarkCjkFriendly,
@@ -883,7 +857,7 @@ const MARKDOWN_REMARK_PLUGINS = [
   remarkRepairMalformedGfmAutolinks,
   remarkLinkifyPlainUrls,
   remarkLinkifyFilePaths,
-  remarkMarkUnclosedFences,
+  remarkFenceClosure,
   [remarkMath, { singleDollarTextMath: false }],
 ] satisfies StreamdownProps['remarkPlugins'];
 const INLINE_MATH_REMARK_PLUGINS = [
@@ -904,7 +878,12 @@ const KATEX_REHYPE_PLUGIN = [
   { errorColor: 'var(--color-muted-foreground)' },
 ] satisfies NonNullable<StreamdownProps['rehypePlugins']>[number];
 const MARKDOWN_REHYPE_PLUGINS = [KATEX_REHYPE_PLUGIN];
-const HTML_MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, KATEX_REHYPE_PLUGIN];
+const HTML_MARKDOWN_REHYPE_PLUGINS = [
+  rehypeRaw,
+  rehypeSanitize,
+  rehypeFenceClosure,
+  KATEX_REHYPE_PLUGIN,
+];
 const ANCHORED_MARKDOWN_REHYPE_PLUGINS = [...MARKDOWN_REHYPE_PLUGINS, rehypeHeadingAnchors];
 const ANCHORED_HTML_MARKDOWN_REHYPE_PLUGINS = [
   ...HTML_MARKDOWN_REHYPE_PLUGINS,
@@ -968,7 +947,10 @@ const readCodeElement = (pre: HastElement | undefined) => {
     code: code.children.map((child) => (child.type === 'text' ? child.value : '')).join(''),
     language: language || 'text',
     meta: (code.data as { meta?: string | null } | undefined)?.meta ?? undefined,
-    isIncomplete: code.properties.dataIncomplete === true,
+    isIncomplete:
+      language === 'html'
+        ? code.properties.dataIncomplete !== false
+        : code.properties.dataIncomplete === true,
   };
 };
 
@@ -978,6 +960,8 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
   if (block.language === 'mermaid' && !block.isIncomplete) {
     return <MarkdownMermaidBlock code={block.code} />;
   }
+  if (block.language === 'html' && !block.isIncomplete)
+    return <MarkdownHtmlBlock code={block.code.replace(/\n$/u, '')} meta={block.meta} />;
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
   return <MarkdownFencedCodeBlock {...block} />;
 }
@@ -1202,6 +1186,24 @@ function isWorkspaceResourceHref(href: string): boolean {
   }
 }
 
+const MarkdownUnorderedList: Components['ul'] = ({ node: _node, className, ...props }) => (
+  <MarkdownListKindContext.Provider
+    value={className?.split(' ').includes('contains-task-list') ? 'task' : 'unordered'}
+  >
+    <ul {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+  </MarkdownListKindContext.Provider>
+);
+
+const MarkdownOrderedList: Components['ol'] = ({ node: _node, className, ...props }) => (
+  <MarkdownListKindContext.Provider value="ordered">
+    <ol {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+  </MarkdownListKindContext.Provider>
+);
+
+const MarkdownBlockquote: Components['blockquote'] = ({ node: _node, className, ...props }) => (
+  <blockquote {...props} {...withClassName(stylex.props(markdownStyles.quote), className)} />
+);
+
 const createMarkdownComponents = ({
   copyAgentFileLabel,
   openAgentFileLabel,
@@ -1233,22 +1235,10 @@ const createMarkdownComponents = ({
       {children}
     </p>
   ),
-  ul: ({ node: _node, className, ...props }) => (
-    <MarkdownListKindContext.Provider
-      value={className?.split(' ').includes('contains-task-list') ? 'task' : 'unordered'}
-    >
-      <ul {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
-    </MarkdownListKindContext.Provider>
-  ),
-  ol: ({ node: _node, className, ...props }) => (
-    <MarkdownListKindContext.Provider value="ordered">
-      <ol {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
-    </MarkdownListKindContext.Provider>
-  ),
+  ul: MarkdownUnorderedList,
+  ol: MarkdownOrderedList,
   li: MarkdownListItem,
-  blockquote: ({ node: _node, className, ...props }) => (
-    <blockquote {...props} {...withClassName(stylex.props(markdownStyles.quote), className)} />
-  ),
+  blockquote: MarkdownBlockquote,
   strong: ({ node: _node, className, ...props }) => (
     <strong {...props} {...withClassName(stylex.props(markdownStyles.strong), className)} />
   ),
@@ -1330,7 +1320,7 @@ const createMarkdownComponents = ({
       )}
     />
   ),
-  pre: (props) => <MarkdownPre {...props} />,
+  pre: MarkdownPre,
   code: (props: MarkdownCodeProps) => {
     const { className, children, style: _style, node: _node, ...rest } = props;
     return (
@@ -1678,7 +1668,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   // Search needs the complete current text in the same commit as its index.
   // The stream engine reveals buffered text asynchronously and can replace marks.
-  const showStreamingMarkdown = streamingRendererActive && !(search?.isOpen && search.query);
+  const containsHtml = useMemo(() => hasHtmlCodeBlock(normalizedText), [normalizedText]);
+  // Keep one React tree through stream completion: iframe state belongs to its document.
+  const showStreamingMarkdown =
+    streamingRendererActive && !containsHtml && !(search?.isOpen && search.query);
 
   const staticMarkdown = (
     <Markdown

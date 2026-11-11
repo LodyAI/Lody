@@ -21,6 +21,7 @@ const INTERACTIVE_TAB_CONTEXT = [
   'select',
   '[contenteditable=""]',
   '[contenteditable="true"]',
+  'dialog',
   '[role="dialog"]',
   '[role="menu"]',
   '[role="listbox"]',
