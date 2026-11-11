@@ -2997,7 +2997,6 @@ export const SessionChatInterface = memo(
     const {
       data: activePrData,
       state: activePrState,
-      refreshCheckRuns: refreshActivePrCheckRuns,
       mergePullRequest: mergeActivePullRequest,
       isMerging: isActivePrMerging,
       markReadyForReview: markActivePrReadyForReview,
