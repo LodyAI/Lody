@@ -246,9 +246,9 @@ export const CompactLinkRow = forwardRef<HTMLButtonElement, CompactLinkRowProps>
 
 /**
  * An empty catalog, in its list's own geometry: the records card it will
- * hold, with one quiet line where the records will be. No centred icon and no
- * second copy of the page's add action; `action` is for the one list whose way
- * in is not the page's add (installing the GitHub App).
+ * hold, with one quiet line where the records will be. No centred icon. A
+ * catalog the page adds records to uses `SettingsEmptyState` instead; `action`
+ * is for a list whose way in is not the page's add (installing the GitHub App).
  */
 export function SettingsEmptyList({
   children,
@@ -267,6 +267,32 @@ export function SettingsEmptyList({
       ) : (
         <p {...stylex.props(surface.cardNote)}>{children}</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * An empty catalog whose records the page adds (Agent Roles, MCP servers,
+ * Prompt Shortcuts): the records card it will hold, naming what is missing,
+ * what a record is for, and the add action. The page hides its header add
+ * button while this shows, so the action appears once.
+ */
+export function SettingsEmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: ReactNode;
+  description: ReactNode;
+  action: ReactNode;
+}) {
+  return (
+    <div {...stylex.props(settingsRecordsCard)}>
+      <div {...stylex.props(surface.emptyState)}>
+        <p {...stylex.props(surface.emptyStateTitle)}>{title}</p>
+        <p {...stylex.props(surface.emptyStateDescription)}>{description}</p>
+        <div {...stylex.props(surface.emptyStateAction)}>{action}</div>
+      </div>
     </div>
   );
 }

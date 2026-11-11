@@ -98,6 +98,8 @@
     <string name="chat_image_previous">上一张</string>
     <string name="chat_image_failed">图片加载失败，轻点重试</string>
     <string name="chat_image_close">关闭图片</string>
+    <string name="chat_mermaid_open">全屏查看</string>
+    <string name="chat_mermaid_close">关闭图表</string>
     <string name="chat_image_share">分享</string>
     <string name="chat_image_copy">复制</string>
     <string name="chat_image_save">保存到相册</string>
@@ -187,12 +189,12 @@
     <string name="bar_conflicts">有冲突</string>
     <string name="bar_prompt_createPrOrigin">（此消息由 Lody 的「**创建 PR**」按钮发送）</string>
     <string name="bar_prompt_createDraftPrOrigin">（此消息由 Lody 的「**创建草稿 PR**」按钮发送）</string>
-    <string name="bar_prompt_createPr">为当前工作区创建一个正式 PR（非草稿）。使用当前 PATH 中的 `gh`。`gh` 依赖本机已保存的 GitHub 登录信息，而沙盒内的命令通常读取不到它，所以需要访问 GitHub 的 `gh` 命令请在沙盒外运行（如果你的工具要求审批，就发起审批）。只有在沙盒外仍然认证失败时，才请用户登录。确认推送的提交与 PR head 一致，然后报告 PR URL。</string>
-    <string name="bar_prompt_createDraftPr">为当前工作区创建一个草稿 PR。使用当前 PATH 中的 `gh`。`gh` 依赖本机已保存的 GitHub 登录信息，而沙盒内的命令通常读取不到它，所以需要访问 GitHub 的 `gh` 命令请在沙盒外运行（如果你的工具要求审批，就发起审批）。只有在沙盒外仍然认证失败时，才请用户登录。确认推送的提交与 PR head 一致，然后报告 PR URL。</string>
-    <string name="bar_prompt_prBranchUpkeep">PR 创建后请保持它是最新的：在本对话的每一轮结束前，提交所有未提交的改动并推送到 PR 分支，让 PR head 始终对应你最新的工作。把这当作默认行为，不必每次都先询问。只有在用户打断你，或要求做别的事情从而覆盖了这一点时才跳过——这种情况下请说明原因，而不是默默推送。</string>
-    <string name="bar_prompt_commitAndPush">发布当前分支：提交所有未提交的改动，然后推送到远程分支。\n\n要求：\n- 根据变更生成简洁且准确的 commit message\n- 暂存全部变更（git add -A）\n- 使用生成的 commit message 提交\n- 如果工作区已经是干净的，就跳过提交——这个分支可能只是有从未推送过的提交\n- 推送到当前分支；如果推送失败，请明确说明</string>
-    <string name="bar_prompt_resolveConflicts">解决 %1$s PR %2$s 与其目标分支之间的合并冲突。\nPR: %3$s\n\n先检查该 PR 和仓库说明。根据仓库约定选择 merge 或 rebase，保留双方变更的意图，运行相关检查，然后推送已解决冲突的分支。</string>
-    <string name="bar_prompt_fixCi">修复 %1$s PR #%2$d 中失败的 CI 检查。\n\n修改代码前，先自行检查完整的 GitHub Actions/检查日志。阅读仓库说明，定位根因，实施范围最小且正确的修复，在本地运行相关检查，然后提交并推送到 PR 分支。\n\n当前 PR 快照：\n- URL: %3$s\n- Head: %4$s\n\n失败的检查：请自行从 GitHub 获取 PR head 上失败的检查列表。</string>
+    <string name="bar_prompt_createPr">为当前 worktree 创建 PR（非草稿）。`gh` 使用本机保存的 GitHub 登录，沙箱内的命令通常读不到。</string>
+    <string name="bar_prompt_createDraftPr">为当前 worktree 创建草稿 PR。`gh` 使用本机保存的 GitHub 登录，沙箱内的命令通常读不到。</string>
+    <string name="bar_prompt_prBranchUpkeep">PR 创建后，在本对话的每轮结束时把改动提交并推送到 PR 分支。</string>
+    <string name="bar_prompt_commitAndPush">提交未提交的改动，并推送当前分支。</string>
+    <string name="bar_prompt_resolveConflicts">解决 %1$s PR %2$s 的合并冲突：%3$s</string>
+    <string name="bar_prompt_fixCi">修复 %1$s PR %2$s 失败的 CI 检查：%3$s</string>
     <string name="bar_copy_branch">拷贝分支名</string>
     <string name="bar_branch_copied">已拷贝分支名</string>
     <string name="bar_machine">电脑</string>

@@ -162,14 +162,3 @@ $ pnpm build:mac
 # For Linux
 $ pnpm build:linux
 ```
-
-## Unsigned release packaging
-
-`release-builder.config.mjs` uses explicit non-secret Nightly configuration and the
-existing native staging and packaged-runtime probes. It assembles both unsigned
-macOS app architectures or complete Windows/Linux installers. It must never receive
-production signing, notarization, npm or storage credentials. Mac app bundles travel
-in tar archives so Framework symlinks and executable modes survive artifact transfer.
-The consumer injects its Sparkle key, signs/notarizes, then creates final ZIP/DMG and
-feeds privately. Normal local packaging retains the existing package command and
-`electron-builder.yml`; release-specific config files are excluded from the app.

@@ -198,7 +198,7 @@ struct SessionInfoBar: Equatable {
       return String(format: text("resolveConflicts"), repository, "#\(pullRequest.number)", pullRequestURL)
     case .fixCi:
       guard let pullRequest else { return "" }
-      return String(format: text("fixCi"), repository, pullRequest.number, pullRequestURL, branch.isEmpty ? "-" : branch)
+      return String(format: text("fixCi"), repository, "#\(pullRequest.number)", pullRequestURL)
     case .readyForReview, .merge:
       return ""
     }
@@ -207,13 +207,9 @@ struct SessionInfoBar: Equatable {
   /// Web `withProjectGroupPrScope` (`packages/shared/src/pr-prompts.ts`), which web sends
   /// untranslated: it instructs the agent rather than reading back to the user.
   static let projectGroupScope = [
-    "Project group scope:",
-    "- Apply the requested action to each member repository with changes or unpublished commits. Use the member inventory in this conversation and run Git in each member directory; the Project group directory itself is not a Git repository.",
-    "- Process submodules before their parents, recursively: commit and push each changed submodule first, then update and commit its gitlink in the parent repository and push the parent branch.",
-    "- If this action requests PRs, create or update one PR per changed repository. Open submodule PRs before parent PRs, preserve the requested draft or regular status, and link all related PRs in each PR body once their URLs are available.",
-    "- If this action only requests Commit & Push, do not open PRs. If PR upkeep was requested, apply it to each repository with a PR.",
-    "- If publishing a child fails, report the failure and do not publish a parent gitlink pointing to that unpublished commit. Report results and any PR URLs per repository.",
-  ].joined(separator: "\n")
+    "This conversation is a Project group: its directory is not a Git repository, and its member repositories are listed in this conversation.",
+    "The request applies to each member repository with changes or unpublished commits.",
+  ].joined(separator: " ")
 
   var pullRequestURL: String {
     guard let pullRequest else { return "" }

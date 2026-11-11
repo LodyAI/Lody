@@ -69,8 +69,10 @@ export function contractBridge(runtime, emit) {
   retryPendingInput:args=>invoke('retryPendingInput',args),
   ensureSession:args=>invoke('ensureSession',args),
   creationOptions:args=>invoke('creationOptions',args),
-  createSession:args=>invoke('createSession',args),
-  editSession:args=>invoke('editSession',args),
+  // The shared contract requires the entitlement on writes that check quota. Android reads none,
+  // so it sends null: the runtime's fail-open policy, as iOS does when its read is unavailable.
+  createSession:args=>invoke('createSession',{...args,billingEntitlement:null}),
+  editSession:args=>invoke('editSession',{...args,billingEntitlement:null}),
   forkSession:args=>invoke('forkSession',args),
   setTabClosed:args=>invoke('setTabClosed',args),
   createTab:args=>invoke('createTab',args),

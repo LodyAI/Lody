@@ -866,3 +866,25 @@ it.each(['chromium', 'webkit'] as const)(
     });
   }
 );
+
+// One tab's custody calls queue instead of colliding: a content read made while a key round
+// holds the writer waits and opens its key, and a holder that never finishes costs another
+// call only its bounded wait, never the lock.
+it.each(['chromium', 'webkit'] as const)(
+  'queues custody calls within a tab without stealing a holder in %s',
+  async (engine) => {
+    await withCustodyBrowser(engine, async (page) => {
+      await boot(page, 'tab-queue');
+      for (const action of ['prepare', 'create']) expect((await call(page, action)).ok).toBe(true);
+      expect(await call(page, 'queuedRead')).toEqual({
+        ok: true,
+        value: { waitedWhileHeld: true, read: '44'.repeat(32) },
+      });
+      expect(await call(page, 'hungHolder')).toEqual({
+        ok: true,
+        value: { whileHung: 'conflict', afterRelease: 'ran' },
+      });
+      await stop(page);
+    });
+  }
+);

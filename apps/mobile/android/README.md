@@ -288,7 +288,9 @@ Saves and deletes show at once and roll back on failure; unknown outcomes are ne
 replayed. Canonical role settings validate ownership and conflicts.
 
 Prompt shortcuts (`ShortcutsScreen`, runtime `shortcutSettings`) list private and
-workspace shortcuts with their `/slug`, read a fresh body before editing, and create or
+workspace shortcuts with their `/slug`, open the editor at once from the list entry and
+read a fresh body into it (nothing is editable or saved until it arrives; a failed read
+closes the editor with a notice only while it is still open), and create or
 edit simple ones (name, slug, prompt; visibility only when creating), as iOS: owner
 only, and shortcuts with a project / computer / provider scope or structured references
 stay view only. A save shows at once and rolls back on failure; an unknown outcome holds
@@ -297,6 +299,12 @@ the same payload so the only next step is retrying that save. The runtime's
 `activateDocument`) reach `PromptShortcutCloud`, which calls `promptShortcuts:*` on Convex
 with the verified account and the native workspace; mutations use a one-shot client.
 This also lets the composer's `/` shortcuts load their bodies.
+The list and the bodies already read are cached per account/workspace (process memory,
+then the `prompt-shortcuts` settings snapshot in `AtomicCatalogStore`, cleared on logout):
+the list shows at once on cold start, an opened shortcut shows its last body read only until
+the fresh read (the save base) arrives, and while the page is open up to 20 uncached bodies
+are read one at a time in the background. Changed or removed entries drop their bodies; at
+most 64 bodies are kept.
 
 GitHub (`GitHubSettingsScreen`) mirrors iOS Settings › GitHub: personal identity with an
 "Act as you" switch (turning it on needs a live authorization), Manage GitHub App for owners

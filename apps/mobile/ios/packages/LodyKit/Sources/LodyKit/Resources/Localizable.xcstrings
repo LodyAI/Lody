@@ -8507,6 +8507,23 @@
         }
       }
     },
+    "native.chat.mermaid.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View full screen"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全屏查看"
+          }
+        }
+      }
+    },
     "native.chat.copied": {
       "extractionState": "manual",
       "localizations": {
@@ -22180,13 +22197,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "为当前工作区创建一个正式 PR（非草稿）。使用当前 PATH 中的 `gh`。`gh` 依赖本机已保存的 GitHub 登录信息，而沙盒内的命令通常读取不到它，所以需要访问 GitHub 的 `gh` 命令请在沙盒外运行（如果你的工具要求审批，就发起审批）。只有在沙盒外仍然认证失败时，才请用户登录。确认推送的提交与 PR head 一致，然后报告 PR URL。"
+            "value": "为当前 worktree 创建 PR（非草稿）。`gh` 使用本机保存的 GitHub 登录，沙箱内的命令通常读不到。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Create a PR for the current worktree (a regular PR, not a draft). Use `gh` from the current PATH. `gh` signs in with the GitHub login saved on this machine, which sandboxed commands usually cannot read, so run the `gh` commands that talk to GitHub outside the sandbox (request approval if your tool requires it). Ask the user to log in only if authentication still fails there. Verify that the pushed commit matches the PR head, then report the PR URL."
+            "value": "Create a PR (not a draft) for the current worktree. `gh` uses the GitHub login saved on this machine, which sandboxed commands usually cannot read."
           }
         }
       }
@@ -22197,13 +22214,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "为当前工作区创建一个草稿 PR。使用当前 PATH 中的 `gh`。`gh` 依赖本机已保存的 GitHub 登录信息，而沙盒内的命令通常读取不到它，所以需要访问 GitHub 的 `gh` 命令请在沙盒外运行（如果你的工具要求审批，就发起审批）。只有在沙盒外仍然认证失败时，才请用户登录。确认推送的提交与 PR head 一致，然后报告 PR URL。"
+            "value": "为当前 worktree 创建草稿 PR。`gh` 使用本机保存的 GitHub 登录，沙箱内的命令通常读不到。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Create a draft PR for the current worktree. Use `gh` from the current PATH. `gh` signs in with the GitHub login saved on this machine, which sandboxed commands usually cannot read, so run the `gh` commands that talk to GitHub outside the sandbox (request approval if your tool requires it). Ask the user to log in only if authentication still fails there. Verify that the pushed commit matches the PR head, then report the PR URL."
+            "value": "Create a draft PR for the current worktree. `gh` uses the GitHub login saved on this machine, which sandboxed commands usually cannot read."
           }
         }
       }
@@ -22214,13 +22231,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "PR 创建后请保持它是最新的：在本对话的每一轮结束前，提交所有未提交的改动并推送到 PR 分支，让 PR head 始终对应你最新的工作。把这当作默认行为，不必每次都先询问。只有在用户打断你，或要求做别的事情从而覆盖了这一点时才跳过——这种情况下请说明原因，而不是默默推送。"
+            "value": "PR 创建后，在本对话的每轮结束时把改动提交并推送到 PR 分支。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "After the PR exists, keep it current: at the end of every turn in this conversation, commit any outstanding changes and push them to the PR branch before you finish, so the PR head always matches your latest work. Treat this as the default rather than something to ask about each time. Skip it only when the user interrupts you or asks for something that overrides it — in that case say so instead of pushing silently."
+            "value": "After the PR exists, commit and push your changes to the PR branch at the end of every turn in this conversation."
           }
         }
       }
@@ -22231,13 +22248,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "发布当前分支：提交所有未提交的改动，然后推送到远程分支。\n\n要求：\n- 根据变更生成简洁且准确的 commit message\n- 暂存全部变更（git add -A）\n- 使用生成的 commit message 提交\n- 如果工作区已经是干净的，就跳过提交——这个分支可能只是有从未推送过的提交\n- 推送到当前分支；如果推送失败，请明确说明"
+            "value": "提交未提交的改动，并推送当前分支。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Publish the current branch: commit anything uncommitted, then push to the remote branch.\n\nInstructions:\n- Generate a concise, descriptive commit message based on the changes\n- Stage all changes (git add -A)\n- Commit with the generated message\n- If the working tree is already clean, skip the commit — the branch may simply\n  hold commits that were never pushed\n- Push to the current branch, and report it if the push fails"
+            "value": "Commit the uncommitted changes and push the current branch."
           }
         }
       }
@@ -22248,13 +22265,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "解决 %1$@ PR %2$@ 与其目标分支之间的合并冲突。\nPR: %3$@\n\n先检查该 PR 和仓库说明。根据仓库约定选择 merge 或 rebase，保留双方变更的意图，运行相关检查，然后推送已解决冲突的分支。"
+            "value": "解决 %1$@ PR %2$@ 的合并冲突：%3$@"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Resolve the merge conflicts for %1$@ pull request %2$@ against its base branch.\nPR: %3$@\n\nInspect the pull request and repository instructions first. Choose the merge or rebase workflow that matches this repository’s conventions, preserve the intent of both sides, run the relevant checks, and push the resolved branch."
+            "value": "Resolve the merge conflicts of %1$@ pull request %2$@: %3$@"
           }
         }
       }
@@ -22265,13 +22282,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "修复 %1$@ PR #%2$ld 中失败的 CI 检查。\n\n修改代码前，先自行检查完整的 GitHub Actions/检查日志。阅读仓库说明，定位根因，实施范围最小且正确的修复，在本地运行相关检查，然后提交并推送到 PR 分支。\n\n当前 PR 快照：\n- URL: %3$@\n- Head: %4$@\n\n失败的检查：请自行从 GitHub 获取 PR head 上失败的检查列表。"
+            "value": "修复 %1$@ PR %2$@ 失败的 CI 检查：%3$@"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Fix the failing CI checks for %1$@ pull request #%2$ld.\n\nInspect the complete GitHub Actions/check logs yourself before changing code. Read the repository instructions, identify the root cause, implement the smallest correct fix, run the relevant checks locally, then commit and push the fix to the PR branch.\n\nCurrent PR snapshot:\n- URL: %3$@\n- Head: %4$@\n\nFailed checks: list the failing checks of the PR head from GitHub yourself."
+            "value": "Fix the failing CI checks of %1$@ pull request %2$@: %3$@"
           }
         }
       }

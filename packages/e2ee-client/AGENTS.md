@@ -68,9 +68,10 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   the reader only during an attempt and never opening one; only an exhausted schedule or
   an ineligible sender ends it `failed` for a manual retry. Its task stays in the core
   distribution journal, so any later key round on this device also sends it. An open on
-  a device that can send (active member, non-recovery, usable key) schedules one delayed
-  background key round, at most one in flight and spaced by an interval; it borrows the
-  reader only while it runs, never opens one, and only reports failure.
+  an active member's non-recovery device schedules one delayed background installing key
+  round, even before the current key is installed: it receives and installs before it
+  distributes. At most one is in flight, spaced by an interval; it borrows the reader
+  only while it runs, never opens one, and only reports failure.
   Automatic approval never trusts the relay's `source`: it signs only after
   `verifyAutomaticMemberAdmission` accepts the endorser-signed email offer against the
   verified ledger (eligible endorser now, unexpired, token-derived request id, unused).
@@ -78,6 +79,10 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   request for explicit approval. Only that verifier requires the signature: retained
   joins, links and lists read offers without it, and a retained join keeps its signed
   request id rather than re-deriving one.
+- Removing a member on the portable runtime follows core authority, as desktop does: only
+  the owner removes and publishes the next epoch in one record. An administrator removes
+  the member plainly, declaring removal support first if the ledger lacks it; that marks
+  the epoch for rotation, which an administrator may then publish as a separate update.
 - Joining a team on the portable runtime prepares this workspace's identity for
   `memberPairingOffer`, whose request id is the admitted membership and the pairing
   session of the credential binding. The key package is retained before submission and

@@ -66,10 +66,16 @@ sealed interface MentionLevel {
  * under the prompt; the text after the trigger filters the visible level.
  */
 object Mentions {
-    /** What the runtime lists (`mentionCatalog` categories). */
-    val categories = listOf("file", "skill", "session", "role", "issue", "pr", "cmd")
-    /** What the panel shows: prompt shortcuts split from the agent's commands (web). */
-    val shownCategories = listOf("file", "skill", "session", "role", "issue", "pr", "shortcut", "cmd")
+    /**
+     * What the runtime lists (`mentionCatalog` categories), in load order: Agent Roles and the
+     * commands carrying prompt shortcuts first, as they list first (iOS `MentionCatalogStore`).
+     */
+    val categories = listOf("role", "cmd", "file", "skill", "session", "issue", "pr")
+    /**
+     * What the panel shows, in order: Agent Roles and prompt shortcuts (split from the agent's
+     * commands, web) lead, then the rest, the agent's commands last (iOS `ChatMentionItem`).
+     */
+    val shownCategories = listOf("role", "shortcut", "file", "skill", "session", "issue", "pr", "cmd")
 
     /** Whether a trigger's scope includes an item: `/` offers shortcuts and commands (web). */
     private fun inScope(item: MentionCandidate, scoped: String?) =
@@ -116,10 +122,9 @@ object Mentions {
                 if (query.isEmpty() && trigger.scoped == null) {
                     shownCategories.filter { category -> category == "file" || category == "skill" || category == "session" || items.any { it.category == category } }
                         .map { MentionCandidate(it, it, "category") }
-                } else items.filter { inScope(it, trigger.scoped) && matches(it, query) }.let { found ->
-                    // `/` leads with prompt shortcuts, then the agent's commands (web's category order).
-                    if (trigger.scoped == "cmd") found.filter { it.category == "shortcut" } + found.filter { it.category != "shortcut" } else found
-                }
+                } else items.filter { inScope(it, trigger.scoped) && matches(it, query) }
+                    // Typed matches keep the root order, so `/` also leads with prompt shortcuts.
+                    .sortedBy { shownCategories.indexOf(it.category).let { index -> if (index < 0) shownCategories.size else index } }
             is MentionLevel.Category -> {
                 val scoped = items.filter { it.category == level.category }
                 if (level.category == "file" && query.isEmpty()) scoped.filter { parent(it.path).isEmpty() }
@@ -357,19 +362,44 @@ class MentionState {
     internal fun presentation(color: androidx.compose.ui.graphics.Color, background: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified) =
         MentionPresentation(catalogs.values.flatMap { it.items }, color, background, labels.keys)
 
-    /** Reads every category in parallel; a category that fails stays empty. */
-    suspend fun load(fetch: suspend (String) -> MentionCatalogPage) = coroutineScope {
+    /**
+     * Reads every category in parallel; a category that fails stays empty. Agent Roles and prompt
+     * shortcuts are workspace-wide, so the last accepted lists for [workspace] show at once
+     * (display only) until this composer's own read replaces them (iOS `MentionWorkspaceCache`).
+     */
+    suspend fun load(workspace: Any? = null, fetch: suspend (String) -> MentionCatalogPage) = coroutineScope {
         pending = Mentions.categories.toSet()
+        if (workspace != null) workspaceCache[workspace]?.let { cached -> catalogs = cached + catalogs }
         Mentions.categories.forEach { category ->
             launch {
                 try {
                     val page = fetch(category)
-                    catalogs = catalogs + (category to page)
+                    // A Role read made before presence is live comes back empty and incomplete; it
+                    // never replaces cached Roles.
+                    val keep = category == "role" && page.incomplete && page.items.isEmpty() && catalogs["role"]?.items?.isNotEmpty() == true
+                    if (!keep) catalogs = catalogs + (category to page)
+                    if (workspace != null && !keep) cacheWorkspace(workspace, category, page)
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { /* The other categories still work. */ }
                 finally { pending = pending - category }
             }
         }
+    }
+
+    private fun cacheWorkspace(workspace: Any, category: String, page: MentionCatalogPage) {
+        val cached = workspaceCache[workspace].orEmpty()
+        val next = when (category) {
+            "role" -> if (page.incomplete && page.items.isEmpty()) return else page
+            // Only the shortcuts: the agent's own commands belong to this conversation's agent.
+            "cmd" -> MentionCatalogPage(page.items.filter { it.category == "shortcut" })
+            else -> return
+        }
+        workspaceCache[workspace] = cached + (category to next)
+    }
+
+    companion object {
+        /** Per account/workspace, in memory for the process; never sent anywhere. */
+        private val workspaceCache = java.util.concurrent.ConcurrentHashMap<Any, Map<String, MentionCatalogPage>>()
     }
 }
 

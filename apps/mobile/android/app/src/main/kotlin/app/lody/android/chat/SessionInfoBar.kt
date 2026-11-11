@@ -124,7 +124,7 @@ data class SessionInfoBar(
         val commitAndPush: String,
         /** `%1$s` repository, `%2$s` PR label, `%3$s` URL. */
         val resolveConflicts: String,
-        /** `%1$s` repository, `%2$d` number, `%3$s` URL, `%4$s` head branch. */
+        /** `%1$s` repository, `%2$s` PR label, `%3$s` URL. */
         val fixCi: String,
     )
 
@@ -134,7 +134,7 @@ data class SessionInfoBar(
         Action.CreateDraftPr -> "${prompts.createDraftPrOrigin}\n\n${scoped("${prompts.createDraftPr}\n\n${prompts.upkeep}")}"
         Action.CommitAndPush -> scoped(prompts.commitAndPush)
         Action.ResolveConflicts -> pullRequest?.let { prompts.resolveConflicts.format(repository, "#${it.number}", pullRequestUrl) }.orEmpty()
-        Action.FixCi -> pullRequest?.let { prompts.fixCi.format(repository, it.number, pullRequestUrl, branch.ifEmpty { "-" }) }.orEmpty()
+        Action.FixCi -> pullRequest?.let { prompts.fixCi.format(repository, "#${it.number}", pullRequestUrl) }.orEmpty()
         Action.ReadyForReview, Action.Merge -> ""
     }
 
@@ -147,13 +147,9 @@ data class SessionInfoBar(
          * does: it instructs the agent rather than reading back to the user.
          */
         val PROJECT_GROUP_SCOPE = listOf(
-            "Project group scope:",
-            "- Apply the requested action to each member repository with changes or unpublished commits. Use the member inventory in this conversation and run Git in each member directory; the Project group directory itself is not a Git repository.",
-            "- Process submodules before their parents, recursively: commit and push each changed submodule first, then update and commit its gitlink in the parent repository and push the parent branch.",
-            "- If this action requests PRs, create or update one PR per changed repository. Open submodule PRs before parent PRs, preserve the requested draft or regular status, and link all related PRs in each PR body once their URLs are available.",
-            "- If this action only requests Commit & Push, do not open PRs. If PR upkeep was requested, apply it to each repository with a PR.",
-            "- If publishing a child fails, report the failure and do not publish a parent gitlink pointing to that unpublished commit. Report results and any PR URLs per repository.",
-        ).joinToString("\n")
+            "This conversation is a Project group: its directory is not a Git repository, and its member repositories are listed in this conversation.",
+            "The request applies to each member repository with changes or unpublished commits.",
+        ).joinToString(" ")
 
         fun of(session: CatalogSession, repository: String, busy: Boolean): SessionInfoBar {
             session.projectRun?.takeIf { it.members.isNotEmpty() }?.let { run ->

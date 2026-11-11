@@ -441,7 +441,7 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
             )
             LaunchedEffect(runtimeScope, mentionSource) {
                 if (mentionSource.machineId == null) return@LaunchedEffect
-                mentions.load { category -> repository.mentions(runtimeScope, category, mentionSource) }
+                mentions.load(runtimeScope) { category -> repository.mentions(runtimeScope, category, mentionSource) }
             }
             app.lody.android.chat.MentionDock(
                 mentions, field, active = composerFocused && !attempted && !coverComposer,

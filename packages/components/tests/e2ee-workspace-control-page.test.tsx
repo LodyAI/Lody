@@ -7,11 +7,12 @@ import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ComponentProps } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2eeWorkspaceControlPage } from '../src/components/pages/e2ee-workspace-control-page';
-import { appendLedgerHistory } from '../src/lib/e2ee-ledger-history';
+import { appendLedgerHistory, type VerifiedLedgerHistory } from '../src/lib/e2ee-ledger-history';
+import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
 import { ledgerVerificationCode } from '../src/lib/e2ee-ledger-verification';
 
 vi.mock('react-i18next', () => ({
@@ -276,6 +277,115 @@ describe('encrypted workspace control page reading', () => {
     expect(verified.view.inspectState().epoch).toMatchObject({ number: 2, rotationRequired: true });
   });
 
+  it('keeps a key update that failed after a removal on the console, with a retry that replaces the key', async () => {
+    const before = history(vector.anchor);
+    const count = vector.records.length - 1;
+    const after = appendLedgerHistory(
+      null,
+      page(count, vector.records[count - 1]!.hash),
+      expected(vector.anchor)
+    );
+    const remaining = new Set(ledgerOverview(after).members.map((member) => member.membershipId));
+    const target = ledgerOverview(before).members.find(
+      (member) => !remaining.has(member.membershipId)
+    )!;
+    expect(target.role).not.toBe('owner');
+    const workspace = { removed: [] as string[], keyReplaced: 0, keyFailures: 0 };
+    // Like the encryption console: a management result reloads the verified ledger, and
+    // no member controls are offered while it reloads.
+    function Console() {
+      const [state, setState] = useState<{ history: VerifiedLedgerHistory; loading: boolean }>({
+        history: before,
+        loading: false,
+      });
+      const management = state.loading
+        ? undefined
+        : {
+            actorRole: 'owner' as const,
+            remove: async (membershipId: string) => {
+              workspace.removed.push(membershipId);
+              setState({ history: after, loading: true });
+              await Promise.resolve();
+              setState({ history: after, loading: false });
+            },
+            setRole: async () => {},
+            rotate: async () => {
+              if (workspace.keyFailures > 0) {
+                workspace.keyFailures -= 1;
+                throw new Error('e2ee_restart-required');
+              }
+              workspace.keyReplaced += 1;
+            },
+          };
+      return (
+        <E2eeWorkspaceControlPage
+          workspaceId="w"
+          initialTab="members"
+          history={state.history}
+          loading={state.loading}
+          failure={null}
+          memberManagement={management}
+          diagnostics={() => '{}'}
+          onRepairLocal={vi.fn()}
+          onResetProgress={vi.fn()}
+          onLoadMore={vi.fn()}
+          onRefresh={vi.fn()}
+          onBack={vi.fn()}
+        />
+      );
+    }
+    const notice = () => document.querySelector('[data-testid="e2ee-member-rotate-failed"]');
+    const removeTarget = async (keyFailures: number) => {
+      workspace.keyFailures = keyFailures;
+      act(() => root?.unmount());
+      container?.remove();
+      container = document.createElement('div');
+      document.body.append(container);
+      root = createRoot(container);
+      act(() => root!.render(<Console />));
+      await act(async () =>
+        (
+          document.querySelector(
+            `[data-testid="e2ee-member-manage"][data-membership-id="${target.membershipId}"]`
+          ) as HTMLButtonElement
+        ).click()
+      );
+      await act(async () =>
+        (document.querySelector('[data-testid="e2ee-member-remove"]') as HTMLElement).click()
+      );
+      await act(async () =>
+        (
+          document.querySelector('[data-testid="e2ee-member-remove-confirm"]') as HTMLButtonElement
+        ).click()
+      );
+      expect(
+        document.querySelector(
+          `[data-testid="e2ee-member"][data-membership-id="${target.membershipId}"]`
+        )
+      ).toBeNull();
+    };
+
+    // Removal and key update both succeed: nothing extra is shown.
+    await removeTarget(0);
+    expect(workspace.keyReplaced).toBe(1);
+    expect(notice()).toBeNull();
+
+    // The removal commits, the key update fails, and the row is gone: the console
+    // still says so in place of the generic hint, and its retry replaces the key.
+    await removeTarget(2);
+    expect(workspace.removed).toHaveLength(2);
+    expect(notice()?.textContent).toContain('e2ee.members.rotateFailed');
+    expect(document.body.textContent).not.toContain('e2ee.members.failed');
+    expect(document.body.textContent).not.toContain('e2ee.members.rotationHint');
+    const retry = () =>
+      document.querySelector('[data-testid="e2ee-member-rotate-retry"]') as HTMLButtonElement;
+    await act(async () => retry().click());
+    expect(notice()?.textContent).toContain('e2ee.members.rotateRetryFailed');
+    await act(async () => retry().click());
+    expect(workspace.keyReplaced).toBe(2);
+    expect(notice()).toBeNull();
+  });
+
   it('stops at an unverifiable capability and asks for an upgrade instead of offering more', () => {
     render({ history: full });
     expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
@@ -305,6 +415,7 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
           member={{ ...member, role }}
           name="Jordan"
           management={{ actorRole, remove, setRole }}
+          onRotationSettled={() => {}}
         />
       )
     );
@@ -341,64 +452,6 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
 
-it('replaces the key after a confirmed removal by default, and a failed key update never reads as a failed removal', async () => {
-  const workspace = { removed: [] as string[], keyReplaced: 0, keyFails: false };
-  const member = {
-    ordinal: 2,
-    membershipId: '34'.repeat(16),
-    userId: '45'.repeat(32),
-    role: 'member' as const,
-    devices: [],
-  };
-  const management = {
-    actorRole: 'owner' as const,
-    remove: async (id: string) => {
-      workspace.removed.push(id);
-    },
-    setRole: async () => {},
-    rotate: async () => {
-      if (workspace.keyFails) throw new Error('e2ee_restart-required');
-      workspace.keyReplaced += 1;
-    },
-  };
-  container = document.createElement('div');
-  document.body.append(container);
-  root = createRoot(container);
-  const removeOnce = async (keepRotation: boolean) => {
-    act(() =>
-      root!.render(<E2eeMemberActions member={member} name="Sam" management={management} />)
-    );
-    await act(async () => container!.querySelector('button')!.click());
-    const remove = [...document.querySelectorAll('[role="menuitem"]')].find(
-      (node) => node.textContent === 'e2ee.members.remove'
-    ) as HTMLElement;
-    await act(async () => remove.click());
-    const rotate = document.querySelector(
-      '[data-testid="e2ee-member-remove-rotate"]'
-    ) as HTMLButtonElement;
-    expect(rotate.getAttribute('aria-checked')).toBe('true');
-    if (!keepRotation) await act(async () => rotate.click());
-    const confirm = document.querySelector(
-      '[data-testid="e2ee-member-remove-confirm"]'
-    ) as HTMLButtonElement;
-    await act(async () => confirm.click());
-  };
-  await removeOnce(true);
-  expect(workspace.removed).toEqual([member.membershipId]);
-  expect(workspace.keyReplaced).toBe(1);
-  expect(document.body.textContent).not.toContain('e2ee.members.rotateFailed');
-
-  await removeOnce(false);
-  expect(workspace.removed).toHaveLength(2);
-  expect(workspace.keyReplaced).toBe(1);
-
-  workspace.keyFails = true;
-  await removeOnce(true);
-  expect(workspace.removed).toHaveLength(3);
-  expect(document.body.textContent).toContain('e2ee.members.rotateFailed');
-  expect(document.body.textContent).not.toContain('e2ee.members.failed');
-});
-
 it('lets only the owner transfer ownership, after a confirmation that states the outcome', async () => {
   const workspace = { owner: 'self' };
   const member = {
@@ -422,7 +475,12 @@ it('lets only the owner transfer ownership, after a confirmation that states the
   const openMenu = async (actorRole: 'owner' | 'admin') => {
     act(() =>
       root!.render(
-        <E2eeMemberActions member={member} name="Jordan" management={management(actorRole)} />
+        <E2eeMemberActions
+          member={member}
+          name="Jordan"
+          management={management(actorRole)}
+          onRotationSettled={() => {}}
+        />
       )
     );
     const trigger = container!.querySelector('button');

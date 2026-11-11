@@ -309,10 +309,13 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       }
     });
   };
-  // After an open on a device that can send (an active member's non-recovery device with a
-  // usable key), one background key round sends what an earlier session left undelivered,
-  // for example after the approval page closed. Core's journal keeps those tasks; this only
-  // gives them a round. It starts after a delay, so the open and its first reads go first;
+  // After an open on an active member's non-recovery device, one background key round sends
+  // what an earlier session left undelivered, for example after the approval page closed.
+  // Core's journal keeps those tasks; this only gives them a round. A device still without
+  // the current key (another device just rotated it) is not skipped: like an installing
+  // refresh, each round receives and installs before it distributes, and a round that asks
+  // for the ledger catches up and runs again (at most four). Core decides whether this
+  // device may send at all. It starts after a delay, so the open and its first reads go first;
   // it holds the reader only while it runs and never opens one. At most one is in flight and
   // rounds that reach the reader are spaced by the interval. A failure is only reported.
   // Desktop composes its own runtime, so this never doubles its maintenance.
@@ -331,7 +334,6 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     if (
       retired ||
       openRound.running ||
-      !opened.hasCurrentKey ||
       opened.memberRole === null ||
       opened.deviceKind === null ||
       opened.deviceKind === 'recovery'
@@ -344,7 +346,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       yield* withSession(id, (session) =>
         Effect.gen(function* () {
           openRound.due = (yield* Clock.currentTimeMillis) + openRoundInterval;
-          yield* session.keyRound();
+          yield* installKeys(session);
         })
       );
     }).pipe(
@@ -1010,9 +1012,19 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         withSession(id, (session) =>
           Effect.gen(function* () {
             if (!/^[0-9a-f]{32}$/.test(membership)) return yield* fail('invalid-input');
-            const result = yield* session.removeMember(
-              Result.getOrThrow(Bytes.membershipId(fromHex(membership)))
-            );
+            const membershipId = Result.getOrThrow(Bytes.membershipId(fromHex(membership)));
+            const state = (yield* session.ledgerState()).view.inspectState();
+            const self = state.devices.get(toHex(session.binding.device.toBytes()));
+            // Core lets only the owner remove a member and publish the next epoch in one
+            // record. An administrator removes the member plainly, as desktop does; that
+            // marks the epoch for rotation, which an administrator may then publish.
+            if (self && state.members.get(toHex(self.membershipId.toBytes()))?.role !== 'owner') {
+              if (!state.capabilities.includes(1))
+                yield* finish(session, { _tag: 'DeclareCapabilities', capabilities: [1] });
+              yield* finish(session, { _tag: 'RemoveMember', membershipId });
+              return undefined;
+            }
+            const result = yield* session.removeMember(membershipId);
             yield* session.refresh();
             yield* session.acknowledgeRotation(result);
             if (result.outcome !== 'Committed') return yield* fail('conflict');

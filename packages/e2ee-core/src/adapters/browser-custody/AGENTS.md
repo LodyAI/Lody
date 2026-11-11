@@ -10,8 +10,9 @@ Implementation and ownership: [services](../../../docs/services.md#browser-custo
   production KEK import/export, nonce override, alternate verifier or plaintext fallback.
 - Web Locks bind the origin's account/workspace/genesis scope. Enter the writer
   before identity allocation; hold it through actual local/native settlement and
-  release before network. Busy returns conflict; never steal or infer termination
-  from cancellation or a deadline. Only the holding fiber may reenter; inherited
+  release before network. Calls of one tab queue in order with a bounded wait that
+  ends in conflict, interruption or close; another tab finds a busy lock and gets
+  conflict at once. Never steal or infer termination from cancellation or a deadline. Only the holding fiber may reenter; inherited
   child-fiber context never lends physical ownership. Close fences admission and drains admitted work.
 - Persist creation intent before generating the non-extractable AES-GCM key.
   Marker/key/probe and actual key readback establish protection only. Probe native

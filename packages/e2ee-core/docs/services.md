@@ -332,14 +332,18 @@ must be handled by the host under the approved custody contract.
 
 ## Browser custody and installation
 
-`browserClientWriter({ accountId, workspaceId })` provides `ClientCustodyWriter`
+`browserClientWriter({ accountId, workspaceId, queueTimeout? })` provides `ClientCustodyWriter`
 under `WorkspaceScope`. Enter `writer.run` before allocating an installation, hold
 it through finite local protection/storage work, and release before network waits.
 The origin's Web Lock binds account/workspace/genesis across tabs and workers,
-independent of database/device names. Busy fails conflict without queueing or
-stealing. Reentry is limited to the holding fiber; a child fiber must acquire its
-own lease and fails conflict while the parent holds it. Close fences new calls
-and waits for actual native settlement.
+independent of database/device names. Calls of one tab queue in order before the
+lock, so a content read never collides with a key round in the same tab; the wait
+is bounded by `queueTimeout` (default 15 s, `0` never waits) and ends with conflict,
+on interruption, or when the writer closes. Another tab that finds the lock busy
+fails conflict at once. Nothing steals from or times out a holder. Reentry is
+limited to the holding fiber; a child fiber must acquire its own lease and fails
+conflict at once while the parent holds it. Close fences new calls and waits for
+actual native settlement.
 
 `indexedDbClientInstallationStore(options)` captures the stable scope before the
 host knows its device. Ordinary CAS retains the first incarnation and wrapped

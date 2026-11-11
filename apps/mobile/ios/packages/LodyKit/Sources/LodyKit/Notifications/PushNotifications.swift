@@ -143,7 +143,9 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   }
 
   func deviceToken(_ data: Data) {
-    registration.deviceToken(data.map { String(format: "%02x", $0) }.joined(), bundle: Bundle.main.bundleIdentifier)
+    // OneSignal's optIn re-registers with APNs and lands here too; refreshing on an
+    // unchanged token would loop through login/optIn and the backend every few seconds.
+    guard registration.deviceToken(data.map { String(format: "%02x", $0) }.joined(), bundle: Bundle.main.bundleIdentifier) else { return }
     refresh()
   }
 
@@ -185,14 +187,20 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     }
   }
 
-  nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-    guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+  // Not the async variant: it completes on a cooperative thread, and UIKit's completion
+  // updates the app snapshot, which aborts off the main thread when a notification is tapped.
+  nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                          withCompletionHandler completionHandler: @escaping () -> Void) {
     let data = response.notification.request.content.userInfo
-    guard let payload = PushClickBuffer.payload(data) else { return }
+    let payload = response.actionIdentifier == UNNotificationDefaultActionIdentifier ? PushClickBuffer.payload(data) : nil
     let id = (data["custom"] as? [String: Any])?["i"] as? String ?? response.notification.request.identifier
-    await MainActor.run {
-      self.clicks.receive(id: id, route: payload.route, userId: payload.recipient)
-      self.onClickAvailable?()
+    nonisolated(unsafe) let completionHandler = completionHandler
+    Task { @MainActor in
+      if let payload {
+        self.clicks.receive(id: id, route: payload.route, userId: payload.recipient)
+        self.onClickAvailable?()
+      }
+      completionHandler()
     }
   }
 

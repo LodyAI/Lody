@@ -478,9 +478,8 @@ it.each(['chromium', 'webkit'] as const)(
   }
 );
 
-/** An admitted, key-holding owner device whose runtime has just approved one applicant
- * while the mailbox refuses every envelope. */
-async function approvedWhileMailboxRefuses(directory: string, hold: boolean) {
+/** An admitted, key-holding owner device with an open runtime, in Chromium. */
+async function openedOwnerRuntime(directory: string) {
   const output = await build({
     entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
     bundle: true,
@@ -513,6 +512,12 @@ async function approvedWhileMailboxRefuses(directory: string, hold: boolean) {
   await good(page, 'open');
   expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true });
   expect(await good(page, 'memberInvite')).toBe('link');
+  return { context, page };
+}
+/** An admitted, key-holding owner device whose runtime has just approved one applicant
+ * while the mailbox refuses every envelope. */
+async function approvedWhileMailboxRefuses(directory: string, hold: boolean) {
+  const { context, page } = await openedOwnerRuntime(directory);
   const requestId = await good(page, 'memberApplicant');
   // Approval signs only a package this session listed.
   expect(await good(page, 'memberList')).toEqual([requestId]);
@@ -531,6 +536,58 @@ type Deliveries = {
   envelopes: boolean[];
   storedSinceAccept: number;
 };
+
+// Core lets only the owner remove a member and publish the next epoch in one record. An
+// administrator removes the member plainly, which marks the epoch for rotation, and may
+// then publish that update; the owner's single-record removal is unchanged.
+it('an owner removes with the key update and an administrator removes plainly, then updates keys', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-removal-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await openedOwnerRuntime(directory);
+    context = opened.context;
+    const page = opened.page;
+    const admit = async (applicant: string) => {
+      const requestId = (await good(page, applicant)) as string;
+      await good(page, 'memberList');
+      expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
+      // The admitted membership id is the join request id.
+      return requestId;
+    };
+    const successor = await admit('memberApplicant');
+    const second = await admit('memberNextApplicant');
+    const third = await admit('memberThirdApplicant');
+    const start = (await good(page, 'refresh')) as { epoch: number; membershipId: string };
+    await good(page, `memberRemove:${third}`);
+    expect(await good(page, 'memberRoles')).not.toHaveProperty(third);
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: start.epoch + 1,
+      rotationRequired: false,
+      memberRole: 'owner',
+    });
+    await good(page, 'ownerTransfersToFirstMember');
+    expect(await good(page, 'refresh')).toMatchObject({ memberRole: 'admin' });
+    expect(await good(page, 'memberRoles')).toMatchObject({
+      [successor]: 'owner',
+      [start.membershipId]: 'admin',
+      [second]: 'member',
+    });
+    await good(page, `memberRemove:${second}`);
+    expect(await good(page, 'memberRoles')).not.toHaveProperty(second);
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: start.epoch + 1,
+      rotationRequired: true,
+    });
+    await good(page, 'updateKeys');
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: start.epoch + 2,
+      rotationRequired: false,
+    });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 // The approval's first key round ends with the applicant's slot still NeedsEnvelope. The
 // runtime retries on its own after the injected backoff, without the approver pressing
@@ -1716,6 +1773,49 @@ it('reopening the workspace on the approving device delivers a key its closed ap
       sleeps: [30_000, 30_000],
       diagnostics: ['e2ee-open-key-round'],
     });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// Another device rotated the key before this owner device reopens the workspace: the open
+// reports no current key yet, and the background round still receives the new key, installs
+// it and sends the waiting member that epoch's envelope.
+it('reopening after another device rotated the key installs it and delivers to the waiting member', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-rotated-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    const page = opened.page;
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).items[0]?.code, {
+        timeout: 30_000,
+      })
+      .toBe('e2ee_key_not_sent');
+    // The owner's other device rotates; the new key waits in its staged group.
+    expect((await raw(page, 'rotateRemote')).ok).toBe(true);
+    expect((await raw(page, 'stageCurrent')).ok).toBe(true);
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 1, hasCurrentKey: false });
+    // The approval page closes; an earlier open's waiting round finds no reader.
+    await good(page, 'close');
+    await good(page, 'memberAcceptKeys');
+    await good(page, 'openRoundRelease');
+    await expect
+      .poll(
+        async () => ((await good(page, 'openRound')) as { diagnostics: string[] }).diagnostics,
+        { timeout: 30_000 }
+      )
+      .toEqual(['e2ee-open-key-round']);
+    // Reopening, still without the current key, installs it and sends the member's envelope.
+    expect(await good(page, 'open')).toMatchObject({ epoch: 1, hasCurrentKey: false });
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept, {
+        timeout: 30_000,
+      })
+      .toBe(1);
+    expect(await good(page, 'status')).toMatchObject({ epoch: 1, hasCurrentKey: true });
   } finally {
     await context?.close();
     await rm(directory, { recursive: true, force: true });

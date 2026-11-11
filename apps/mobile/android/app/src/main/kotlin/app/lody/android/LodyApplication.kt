@@ -11,6 +11,9 @@ import app.lody.android.cloud.NetworkAvailability
 
 open class LodyApplication : Application() {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** Last accepted settings-page reads (display only), per account/workspace; cleared on logout. */
+    lateinit var settingsCache: app.lody.android.home.SettingsSnapshotStore
+        private set
     lateinit var runtimeOwner: RuntimeOwner
         private set
     lateinit var account: AccountController
@@ -62,6 +65,7 @@ open class LodyApplication : Application() {
         app.lody.android.home.AvatarImages.initialize(this)
         runtimeOwner = RuntimeOwner(::createRuntime, Dispatchers.Main.immediate)
         val cache = AtomicCatalogStore(this)
+        settingsCache = cache
         val scheduleCache = app.lody.android.schedules.ScheduleDisplayCache(cache)
         val branches = app.lody.android.create.GitHubBranches()
         creation = app.lody.android.create.CreateSessionRepository(runtimeOwner, cache) { scope, repo, page ->

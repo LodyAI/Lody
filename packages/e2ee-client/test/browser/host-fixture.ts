@@ -432,6 +432,9 @@ export async function boot(
         browserClientWriter({
           accountId: recoveryAccount ?? 'account',
           workspaceId: offer.workspaceId,
+          // Controlled-close boots move every timer by hand; their in-tab calls keep the
+          // no-wait conflict, so only the close budget waits on the injected clock.
+          ...(controlledClose ? { queueTimeout: 0 } : {}),
         })
       ).pipe(Layer.provide(ws));
       const platform = PersonalHostPlatform.of({
@@ -732,7 +735,11 @@ export async function boot(
                 ),
             }),
             Layer.succeed(EpochStagingStore, {
-              stageGroup: () => Effect.void,
+              // A key update this device publishes stages its group here and reads it back.
+              stageGroup: (group) =>
+                Effect.sync(() => {
+                  stagedGroup = group;
+                }),
               readGroup: () =>
                 Effect.gen(function* () {
                   if (failStaging) {
@@ -2455,7 +2462,48 @@ export async function runtimeInvoke(action: string) {
       case 'closeWrongOwner':
         value = await runtime.close(offer.workspaceId, 'account', 'wrong-reader');
         break;
+      case 'updateKeys':
+        value = await runtime.updateKeys!(offer.workspaceId);
+        break;
+      case 'memberThirdApplicant':
+        memberRelay.item = await Effect.runPromise(memberApplicant(75, 0x54));
+        value = memberRelay.item.requestId;
+        break;
+      case 'memberRoles':
+        // Membership → role in the relay's genuine ledger.
+        value = Object.fromEntries(
+          [...view().inspectState().members].map(([id, member]) => [id, member.role])
+        );
+        break;
+      case 'ownerTransfersToFirstMember':
+        // The owner's desktop hands ownership to the 0x51 member, which makes this
+        // device's membership an administrator.
+        records.push(
+          await Effect.runPromise(
+            signLedgerRecord(
+              Result.getOrThrow(
+                prepareLedgerCommand(view(), owner.publicKey, {
+                  _tag: 'TransferOwner',
+                  successorMembershipId: Result.getOrThrow(
+                    Bytes.membershipId(new Uint8Array(16).fill(0x51))
+                  ),
+                })
+              ),
+              owner
+            )
+          )
+        );
+        retain();
+        value = true;
+        break;
       default:
+        if (action.startsWith('memberRemove:')) {
+          value = await runtime.removeMember!(
+            offer.workspaceId,
+            action.slice('memberRemove:'.length)
+          );
+          break;
+        }
         throw new Error('unknown runtime action');
     }
     return { ok: true, value };
