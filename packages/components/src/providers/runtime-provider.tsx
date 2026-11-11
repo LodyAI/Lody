@@ -885,12 +885,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           if (disposed) return;
           if (descriptor.workspaceId !== effectiveWorkspaceId)
             throw new WorkspaceModeMismatchError();
+          // Background verification keeps asking a transiently unavailable host
+          // until this initialization ends; the workspace stays unclassified meanwhile.
           await assertNoRetainedEncryptedIdentity({
             runtime: encryptedRuntime,
             storage: localStorage,
             accountId: accountId!,
             workspaceId: effectiveWorkspaceId,
             descriptor,
+            signal: initializationAbort.signal,
+            deadlineMs: null,
           });
           if (disposed) return;
           if (isEncryptedDescriptor(descriptor)) {
@@ -987,6 +991,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               accountId: accountId!,
               workspaceId: effectiveWorkspaceId,
               descriptor,
+              signal: initializationAbort.signal,
+              deadlineMs: WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
             });
             if (disposed) return;
           }

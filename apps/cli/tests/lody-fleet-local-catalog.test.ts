@@ -24,6 +24,7 @@ import {
 } from '../src/lib/local-workspace-catalog';
 import { Lody } from '../src/lib/lody';
 import { LodyFleet } from '../src/lib/lody-fleet';
+import { assertRetainedE2eeModeAllowsOpen } from '../src/lib/e2ee/retained-binding';
 import { RemoteBridge, type RemoteBridgeRuntime } from '../src/lib/remote-bridge';
 import { fileLocksLegacy } from '../src/utils/file-lock';
 import * as projectMeta from '../src/lib/local-project-meta';
@@ -32,6 +33,20 @@ import * as automationWorkspace from '../src/automations/workspace-legacy';
 import { createCloudPrAssociationPort } from '../src/lib/cloud-pr-association';
 import type { PrPollerWorkspaceHandle } from '../src/lib/pr-poller/pr-poller-workspace';
 import type { Logger } from '../src/utils/logger';
+
+// Injects transient I/O failures into retained pairing binding reads only.
+const bindingReadFault = vi.hoisted(() => ({ code: null as string | null }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const openSync = ((path: Parameters<typeof actual.openSync>[0], ...rest: unknown[]) => {
+    if (bindingReadFault.code && String(path).endsWith('binding.json'))
+      throw Object.assign(new Error(`synthetic ${bindingReadFault.code}`), {
+        code: bindingReadFault.code,
+      });
+    return (actual.openSync as (...args: unknown[]) => number)(path, ...rest);
+  }) as typeof actual.openSync;
+  return { ...actual, default: { ...actual, openSync }, openSync };
+});
 
 const createTestCloudPort = (
   watchWorkspaceAccess?: CloudPort['access']['watchWorkspaceAccess']
@@ -946,11 +961,12 @@ describe('LodyFleet local E2EE pairing during startup', () => {
 });
 
 // The server's mode field is not authority over a workspace this machine has paired
-// into: a listing that downgrades it must never start a plaintext runtime.
+// into: a listing that downgrades it must never start a plaintext runtime. Neither a
+// contradicting listing nor an unreadable binding may revoke, relabel or forget a
+// workspace; an unreadable binding is retried, never turned into a verdict.
 describe('LodyFleet encrypted mode downgrade', () => {
-  type Snapshot = Parameters<Parameters<CloudPort['access']['watchWorkspaceAccess']>[0]>[0];
   const genesisHash = 'ab'.repeat(32);
-  const encrypted = {
+  const paired = {
     id: 'ws-paired',
     name: 'Private',
     slug: 'private',
@@ -959,87 +975,242 @@ describe('LodyFleet encrypted mode downgrade', () => {
     genesisHash,
   };
   const ordinary = { id: 'ws-ordinary', name: 'Ordinary', slug: null, role: 'owner' };
-  const pairHere = async () => {
-    vi.stubEnv('LODY_DATA_DIR', await mkdtemp(join(tmpdir(), 'fleet-e2ee-downgrade-')));
+  const fresh = { id: 'ws-fresh', name: 'Fresh', slug: null, role: 'owner' };
+  const pairHere = async (directory: string) => {
+    vi.stubEnv('LODY_DATA_DIR', directory);
     const root = join(
       getLodyDataDir(),
       'e2ee',
       createHash('sha256').update('user-1').digest('hex'),
-      encrypted.id
+      paired.id
     );
     await mkdir(root, { recursive: true });
     await writeFile(
       join(root, 'binding.json'),
-      JSON.stringify({ workspaceId: encrypted.id, genesisHash, genesisRecordHex: 'aa' })
+      JSON.stringify({ workspaceId: paired.id, genesisHash, genesisRecordHex: 'aa' })
     );
   };
-  const issueCodes = (reporter: ReturnType<typeof createRuntimeStateReporter>) => {
-    const issues = new Set<string>();
-    reporter.upsertIssue.mockImplementation((issue) => {
-      issues.add(issue.code);
+  type Row = { id: string; contentMode?: string; genesisHash?: string };
+
+  /** Real catalog and Streams bridge; runtimes record attach/revocation. */
+  const bridgedFleet = async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'fleet-e2ee-downgrade-'));
+    await pairHere(join(directory, 'data'));
+    const originalLocksDir = process.env.LODY_LOCKS_DIR;
+    process.env.LODY_LOCKS_DIR = join(directory, 'locks');
+    const filePath = join(directory, 'workspace-catalog.json');
+    const catalog = makeLocalWorkspaceCatalog({
+      filePath,
+      lockName: `downgrade-${basename(directory)}`,
+      cacheTtlMs: 0,
     });
-    reporter.clearIssue.mockImplementation((code) => {
+    const harness = createFleetHarness(catalog);
+    const events: string[] = [];
+    const issues = new Map<string, string>();
+    harness.runtimeStateReporter.upsertIssue.mockImplementation((issue) => {
+      issues.set(issue.code, issue.message);
+    });
+    harness.runtimeStateReporter.clearIssue.mockImplementation((code) => {
       issues.delete(code);
     });
-    return issues;
+    const state = (workspace: Row) => ({
+      workspace,
+      lody: {
+        isControlPlaneReady: () => true,
+        isControlPlaneRecovering: () => false,
+        isRemoteBridgeAttached: () => true,
+        getActiveSessionCount: () => 0,
+        getConnectedRoomCount: () => 0,
+        attachRemoteBridge: async () => {},
+        detachRemoteBridge: async () => {},
+        handleRemoteAccessRevoked: async () => {
+          events.push(`${workspace.id}:revoked`);
+        },
+      },
+    });
+    const fleet = harness.fleet as unknown as {
+      runtimes: Map<string, ReturnType<typeof state>>;
+      remoteBridge: RemoteBridge;
+      startWorkspace(workspace: Row): Promise<void>;
+      applyRemoteWorkspaceList(input: unknown): Promise<void>;
+      lastValidWorkspaceListResult: unknown;
+      readWorkspaceAccess(workspaceId: string): { status: string; workspace?: Row };
+      clearReconcileRetry(): void;
+    };
+    fleet.startWorkspace = async (workspace) => {
+      events.push(`${workspace.id}:start:${workspace.contentMode ?? 'plaintext'}`);
+    };
+    fleet.remoteBridge = new RemoteBridge({
+      logger: createSilentLogger(),
+      catalog,
+      userId: 'user-1',
+      machineId: 'machine-1' as MachineId,
+      machineName: 'host',
+      getRuntime: (id) => fleet.runtimes.get(id)?.lody as RemoteBridgeRuntime | undefined,
+    });
+    const apply = async (workspaces: Row[]) => {
+      const remote = { status: 'authorized', userId: 'user-1', workspaces };
+      fleet.lastValidWorkspaceListResult = remote;
+      await fleet.applyRemoteWorkspaceList(remote);
+    };
+    const cachedRows = async () =>
+      Object.fromEntries(
+        (
+          await fileLocksLegacy.runPromise(makeLocalWorkspaceCatalog({ filePath }).read())
+        ).workspaces.map((row) => [
+          row.workspaceId,
+          `${row.state}:${row.contentMode ?? 'plaintext'}`,
+        ])
+      );
+    const dispose = async () => {
+      fleet.clearReconcileRetry();
+      fleet.remoteBridge.shutdown();
+      vi.unstubAllEnvs();
+      if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+      else process.env.LODY_LOCKS_DIR = originalLocksDir;
+      await rm(directory, { recursive: true, force: true });
+    };
+    return { fleet, state, events, issues, apply, cachedRows, dispose };
   };
 
   it.each([
-    ['plaintext', { ...encrypted, contentMode: 'plaintext', genesisHash: undefined }],
-    ['without a mode', { ...encrypted, contentMode: undefined, genesisHash: undefined }],
-    ['with another genesis', { ...encrypted, genesisHash: 'cd'.repeat(32) }],
+    ['plaintext', { ...paired, contentMode: 'plaintext', genesisHash: undefined }],
+    ['without a mode', { ...paired, contentMode: undefined, genesisHash: undefined }],
+    ['with another genesis', { ...paired, genesisHash: 'cd'.repeat(32) }],
   ] as const)(
-    'refuses a paired workspace listed %s until a consistent list returns',
+    'keeps a running paired workspace encrypted and unrevoked when the server lists it %s',
     async (_, downgraded) => {
-      await pairHere();
+      const t = await bridgedFleet();
       try {
-        let push: (snapshot: Snapshot) => void = () => {};
-        const {
-          fleet: harness,
-          started,
-          runtimeStateReporter,
-        } = createFleetHarness(
-          createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
-          createTestCloudPort((onValue) => {
-            push = onValue;
-            return () => {};
-          })
-        );
-        const issues = issueCodes(runtimeStateReporter);
-        const fleet = harness as unknown as typeof harness & {
-          startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
-          applyRemoteWorkspaceList: (result: { workspaces: (typeof encrypted)[] }) => Promise<void>;
-          applyWorkspaceList: (next: (typeof encrypted)[]) => Promise<void>;
-          readWorkspaceAccess: (workspaceId: string) => { status: string };
-        };
-        let applied = Promise.resolve();
-        fleet.applyRemoteWorkspaceList = (result) =>
-          (applied = fleet.applyWorkspaceList([...result.workspaces]));
-        await fleet.startWorkspaceSubscription({ waitForInitial: false });
+        await t.apply([paired, ordinary]);
+        t.fleet.runtimes.set(paired.id, t.state(paired));
+        t.events.length = 0;
 
-        push({
+        await t.apply([downgraded, ordinary]);
+        expect(t.events).toEqual([`${ordinary.id}:start:plaintext`]);
+        expect(t.fleet.runtimes.get(paired.id)?.workspace).toMatchObject({
+          contentMode: 'e2ee',
+          genesisHash,
+        });
+        expect(t.fleet.readWorkspaceAccess(paired.id)).toMatchObject({
           status: 'authorized',
-          userId: 'user-1',
-          workspaces: [ordinary, downgraded],
-        } as Snapshot);
-        await applied;
-        expect(started).toEqual([ordinary.id]);
-        // Daemon commands cannot reach it under the server's label either.
-        expect(fleet.readWorkspaceAccess(encrypted.id).status).toBe('revoked');
-        expect(issues.has(`e2ee_mode_conflict:${encrypted.id}`)).toBe(true);
+          workspace: { contentMode: 'e2ee', genesisHash },
+        });
+        expect(t.issues.has(`e2ee_mode_conflict:${paired.id}`)).toBe(true);
+        // Neither forgotten nor rewritten from the contradicting listing.
+        expect(await t.cachedRows()).toMatchObject({ [paired.id]: 'active:e2ee' });
 
-        push({ status: 'authorized', userId: 'user-1', workspaces: [ordinary, encrypted] });
-        await applied;
-        expect(started).toContain(encrypted.id);
-        expect(issues.has(`e2ee_mode_conflict:${encrypted.id}`)).toBe(false);
+        await t.apply([paired, ordinary]);
+        expect(t.issues.has(`e2ee_mode_conflict:${paired.id}`)).toBe(false);
       } finally {
-        vi.unstubAllEnvs();
+        await t.dispose();
       }
     }
   );
 
+  it('never starts a stopped paired workspace from a downgraded listing', async () => {
+    const t = await bridgedFleet();
+    try {
+      await t.apply([{ ...paired, contentMode: 'plaintext', genesisHash: undefined }]);
+      expect(t.events).toEqual([]);
+      expect(t.fleet.readWorkspaceAccess(paired.id).status).toBe('unknown');
+      await t.apply([paired]);
+      expect(t.events).toEqual([`${paired.id}:start:e2ee`]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it('treats an unreadable binding as unknown, never as revocation, and recovers', async () => {
+    const t = await bridgedFleet();
+    try {
+      await t.apply([ordinary]);
+      t.fleet.runtimes.set(ordinary.id, t.state(ordinary));
+      t.events.length = 0;
+      bindingReadFault.code = 'EMFILE';
+      await t.apply([ordinary, fresh]);
+      // The running workspace keeps its turns and cache; the new one reaches its
+      // opener, which refuses it until the binding is readable again.
+      expect(t.events).toEqual([`${fresh.id}:start:plaintext`]);
+      expect(t.fleet.readWorkspaceAccess(ordinary.id).status).toBe('authorized');
+      expect(await t.cachedRows()).toMatchObject({
+        [ordinary.id]: 'active:plaintext',
+        [fresh.id]: 'active:plaintext',
+      });
+      expect(() => assertRetainedE2eeModeAllowsOpen('user-1', fresh)).toThrow(
+        expect.objectContaining({ name: 'E2eeBindingUnreadableError', code: 'EMFILE' })
+      );
+      bindingReadFault.code = null;
+      expect(() => assertRetainedE2eeModeAllowsOpen('user-1', fresh)).not.toThrow();
+    } finally {
+      bindingReadFault.code = null;
+      await t.dispose();
+    }
+  });
+
+  it.each([
+    ['retries an unreadable binding with its original error', 'EMFILE', true],
+    ['does not retry a readable contradicting binding', null, false],
+  ] as const)('startup %s', async (_, fault, retried) => {
+    vi.useFakeTimers();
+    const directory = await mkdtemp(join(tmpdir(), 'fleet-e2ee-downgrade-start-'));
+    await pairHere(directory);
+    const opened: string[] = [];
+    const create = vi.spyOn(Lody, 'create').mockImplementation(async (options) => {
+      const open = options as unknown as {
+        userId: string;
+        workspaceId: string;
+        contentMode?: string;
+      };
+      assertRetainedE2eeModeAllowsOpen(open.userId, {
+        id: open.workspaceId,
+        contentMode: open.contentMode,
+      });
+      opened.push(open.workspaceId);
+      throw new Error('synthetic runtime stop after the mode check');
+    });
+    const { fleet: harness, runtimeStateReporter } = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
+    );
+    const fleet = harness as unknown as {
+      desiredWorkspaces: Map<string, Row>;
+      retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+      startWorkspace(workspace: Row): Promise<void>;
+      stopped: boolean;
+    };
+    delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
+    const target = fault ? fresh : { ...paired, contentMode: 'plaintext', genesisHash: undefined };
+    fleet.desiredWorkspaces.set(target.id, target);
+    bindingReadFault.code = fault;
+    try {
+      await fleet.startWorkspace(target);
+      expect(opened).toEqual([]);
+      expect(fleet.retryTimers.has(target.id)).toBe(retried);
+      const issue = runtimeStateReporter.upsertIssue.mock.calls
+        .map(([candidate]) => candidate)
+        .find(
+          (candidate) =>
+            candidate.code ===
+            (retried ? `workspace_start_failed:${target.id}` : `e2ee_mode_conflict:${target.id}`)
+        );
+      expect(issue?.message).toContain(fault ?? 'refused to open it without encryption');
+      bindingReadFault.code = null;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(opened).toEqual(retried ? [target.id] : []);
+    } finally {
+      bindingReadFault.code = null;
+      fleet.stopped = true;
+      for (const timer of fleet.retryTimers.values()) clearTimeout(timer);
+      create.mockRestore();
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('refuses a stale ordinary cache row offline and at runtime start', async () => {
-    await pairHere();
+    const directory = await mkdtemp(join(tmpdir(), 'fleet-e2ee-downgrade-cache-'));
+    await pairHere(directory);
     try {
       const { fleet, started, runtimeStateReporter } = createFleetHarness(
         createCatalogStub(() =>
@@ -1047,26 +1218,30 @@ describe('LodyFleet encrypted mode downgrade', () => {
             catalogSnapshot({
               workspaces: [
                 activeWorkspace(ordinary.id, ordinary.name, null, 'owner'),
-                activeWorkspace(encrypted.id, encrypted.name, encrypted.slug, 'owner'),
+                activeWorkspace(paired.id, paired.name, paired.slug, 'owner'),
               ],
             })
           )
         )
       );
-      const issues = issueCodes(runtimeStateReporter);
+      const issues = new Set<string>();
+      runtimeStateReporter.upsertIssue.mockImplementation((issue) => {
+        issues.add(issue.code);
+      });
       await fleet.bootstrapFromLocalCatalog();
       expect(started).toEqual([ordinary.id]);
-      expect(issues.has(`e2ee_mode_conflict:${encrypted.id}`)).toBe(true);
+      expect(issues.has(`e2ee_mode_conflict:${paired.id}`)).toBe(true);
       // Every other opener reaches the same check before choosing a data plane.
       await expect(
         Lody.create({
           userId: 'user-1',
-          workspaceId: encrypted.id,
+          workspaceId: paired.id,
           contentMode: 'plaintext',
         } as Parameters<typeof Lody.create>[0])
       ).rejects.toMatchObject({ name: 'E2eeModeConflictError' });
     } finally {
       vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });

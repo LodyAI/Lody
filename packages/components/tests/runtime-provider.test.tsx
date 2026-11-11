@@ -235,7 +235,10 @@ import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
 
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 import { createPendingSessionSends } from '../src/lib/session-pending-sends';
-import { WorkspaceModeAdmissionTimeoutError } from '../src/providers/workspace-mode-admission';
+import {
+  WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
+  WorkspaceModeAdmissionTimeoutError,
+} from '../src/providers/workspace-mode-admission';
 
 function editDraft(store: ReturnType<typeof createStore>, accountId = 'local:user') {
   const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
@@ -1520,7 +1523,12 @@ describe('RuntimeProvider warm workspace preparation', () => {
 
   /** Renderer storage was cleared (or this is another window profile) while the
    * device host still holds the workspace's encrypted identity. */
-  function hostIdentity(answer: () => Promise<{ workspaceId: string; genesisHash: string }>) {
+  function hostIdentity(
+    answer: (input: {
+      accountId: string;
+      workspaceId: string;
+    }) => Promise<{ workspaceId: string; genesisHash: string }>
+  ) {
     const readIdentity = vi.fn(answer);
     environment.e2eeWorkspaces = {
       ...environment.e2eeWorkspaces!,
@@ -1586,6 +1594,83 @@ describe('RuntimeProvider warm workspace preparation', () => {
         expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
       }
       expect(store.get(runtimeAtom)).toBe(prepared);
+    }
+  );
+
+  it('asks a transiently unavailable host again and admits without any send once it reports no identity', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let answers = 0;
+    const readIdentity = hostIdentity(async () => {
+      answers += 1;
+      throw new Error(answers === 1 ? 'e2ee_account_unavailable' : 'e2ee_missing-binding');
+    });
+    vi.useFakeTimers();
+    try {
+      await render();
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+      expect(readIdentity).toHaveBeenCalledTimes(2);
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+        contentMode: 'plaintext',
+      });
+      expect(store.get(runtimeAtom)).toBe(prepared);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a recoverable timeout instead of initializing forever when the host never answers', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const readIdentity = hostIdentity(() => new Promise(() => {}));
+    vi.useFakeTimers();
+    try {
+      await render();
+      await act(async () => vi.advanceTimersByTimeAsync(WORKSPACE_MODE_ADMISSION_TIMEOUT_MS + 1));
+      expect(readIdentity.mock.calls.length).toBeGreaterThan(1);
+      expect(createWorkspaceRuntime).not.toHaveBeenCalled();
+      expect(store.get(workspaceContentModeAtom)).toBeNull();
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+        errorType: 'WorkspaceModeAdmissionTimeoutError',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['retains an encrypted identity', true],
+    ['cannot be read', false],
+  ] as const)(
+    'never prefetches a plaintext proof for a listed workspace whose host %s',
+    async (_, retained) => {
+      ordinaryCloud();
+      vi.spyOn(console, 'info').mockImplementation(() => {});
+      environment.workspaces.set({
+        status: 'ready',
+        activeWorkspaceId: 'local:workspace',
+        workspaces: [
+          { id: 'local:workspace', slug: 'local', name: 'Local', role: 'owner' },
+          { id: 'workspace-beta', slug: 'beta', name: 'Beta', role: 'member' },
+        ],
+      });
+      const beta = Promise.withResolvers<void>();
+      hostIdentity(async ({ workspaceId }) => {
+        if (workspaceId !== 'workspace-beta') throw new Error('e2ee_missing-binding');
+        beta.resolve();
+        if (!retained) throw new Error('e2ee_permissions');
+        return { workspaceId, genesisHash: '11'.repeat(32) };
+      });
+      await render();
+      await act(async () => beta.promise);
+      expect(
+        readWorkspaceModeProof(localStorage, 'local:user', 'workspace-beta', 'beta')
+      ).toBeNull();
+      expect(
+        readWorkspaceModeEvidence(localStorage, 'local:user', 'workspace-beta').encrypted
+      ).toBe(retained);
     }
   );
 

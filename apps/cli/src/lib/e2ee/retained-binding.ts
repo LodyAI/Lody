@@ -17,7 +17,8 @@ export const cliE2eeIdentityDirectory = (accountId: string, workspaceId: string)
   );
 };
 
-/** A listed workspace that this machine's retained pairing binding contradicts. */
+/** A retained pairing binding was read and contradicts the listed mode or genesis.
+ * Local evidence cannot change by retrying; only a consistent listing clears it. */
 export class E2eeModeConflictError extends Error {
   constructor(readonly workspaceId: string) {
     super(
@@ -27,24 +28,48 @@ export class E2eeModeConflictError extends Error {
   }
 }
 
+/** The binding could not be read, so this machine cannot tell whether it holds an
+ * encrypted identity. Not a verdict: the workspace stays closed to plaintext and the
+ * opener retries; the original error stays the cause. */
+export class E2eeBindingUnreadableError extends Error {
+  readonly code: string | undefined;
+  constructor(
+    readonly workspaceId: string,
+    cause: unknown
+  ) {
+    const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+    super(
+      `The encrypted pairing binding of workspace ${workspaceId} could not be read${code ? ` (${code})` : ''}. Lody will retry and does not open the workspace without encryption meanwhile.`,
+      { cause }
+    );
+    this.name = 'E2eeBindingUnreadableError';
+    this.code = code;
+  }
+}
+
+export type RetainedModeVerdict =
+  | { kind: 'consistent' }
+  | { kind: 'conflict'; error: E2eeModeConflictError }
+  | { kind: 'unreadable'; error: E2eeBindingUnreadableError };
+
 /**
  * The binding is written only through the trusted local pairing approval and
  * survives until member removal or an explicit identity reset. While it exists,
- * the server's mode field cannot downgrade this workspace: a listing that is not
- * `e2ee` with the same genesis is refused. Only a missing binding is absence;
- * an unreadable one still counts as encrypted evidence.
+ * the server's mode field cannot downgrade this workspace. Only a missing binding
+ * is absence. A binding that cannot be read or parsed is `unreadable`, never
+ * plaintext permission, and never a conflict verdict.
  */
-export function findRetainedE2eeModeConflict(
+export function classifyRetainedE2eeMode(
   accountId: string,
   workspace: { id: string; contentMode?: string; genesisHash?: string }
-): E2eeModeConflictError | null {
+): RetainedModeVerdict {
   let directory: string;
   try {
     directory = cliE2eeIdentityDirectory(accountId, workspace.id);
   } catch {
-    return null; // No identity can be stored for an ID this host cannot name.
+    return { kind: 'consistent' }; // No identity can be stored for an ID this host cannot name.
   }
-  let retainedGenesis: string | null;
+  let retainedGenesis: string;
   try {
     const descriptor = openSync(
       join(directory, 'binding.json'),
@@ -57,22 +82,31 @@ export function findRetainedE2eeModeConflict(
         typeof parsed === 'object' && parsed !== null && 'genesisHash' in parsed
           ? parsed.genesisHash
           : null;
-      retainedGenesis =
-        typeof genesis === 'string' && /^[0-9a-f]{64}$/.test(genesis) ? genesis : null;
+      if (typeof genesis !== 'string' || !/^[0-9a-f]{64}$/.test(genesis))
+        throw new Error('e2ee_binding_invalid');
+      retainedGenesis = genesis;
     } finally {
       closeSync(descriptor);
     }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
-    retainedGenesis = null;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'consistent' };
+    // An encrypted listing proceeds: its opener validates the binding itself and
+    // fails closed. Anything else cannot be opened until the binding is readable.
+    return workspace.contentMode === 'e2ee'
+      ? { kind: 'consistent' }
+      : { kind: 'unreadable', error: new E2eeBindingUnreadableError(workspace.id, error) };
   }
-  // An unreadable binding cannot name its genesis, so only an encrypted listing
-  // may proceed; its opener validates the binding itself and fails closed.
-  if (
-    workspace.contentMode === 'e2ee' &&
-    (retainedGenesis === null || retainedGenesis === workspace.genesisHash)
-  )
-    return null;
-  return new E2eeModeConflictError(workspace.id);
+  return workspace.contentMode === 'e2ee' && retainedGenesis === workspace.genesisHash
+    ? { kind: 'consistent' }
+    : { kind: 'conflict', error: new E2eeModeConflictError(workspace.id) };
+}
+
+/** Every opener calls this before choosing a data plane. */
+export function assertRetainedE2eeModeAllowsOpen(
+  accountId: string,
+  workspace: { id: string; contentMode?: string; genesisHash?: string }
+): void {
+  const verdict = classifyRetainedE2eeMode(accountId, workspace);
+  if (verdict.kind !== 'consistent') throw verdict.error;
 }

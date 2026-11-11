@@ -43,8 +43,8 @@ export async function waitForWorkspaceContentAdmission(
 }
 
 export class WorkspaceModeAdmissionTimeoutError extends Error {
-  constructor() {
-    super('Workspace mode verification needs a live authenticated connection');
+  constructor(options?: ErrorOptions) {
+    super('Workspace mode verification needs a live authenticated connection', options);
     this.name = 'WorkspaceModeAdmissionTimeoutError';
   }
 }
@@ -83,10 +83,64 @@ export function isWorkspaceModeRejection(error: unknown): boolean {
   );
 }
 
+/** One host identity read may take this long before it counts as unanswered. */
+export const HOST_IDENTITY_READ_TIMEOUT_MS = 5_000;
+
 /** The host has no identity record at all for this account and workspace. */
 function isMissingHostIdentity(error: unknown): boolean {
   if (personalHostFailureCode(error) === 'approval-required') return true;
   return error instanceof Error && /\be2ee_missing-binding\b/.test(error.message);
+}
+
+class HostIdentityReadTimeoutError extends Error {
+  constructor() {
+    super('Device host did not answer the workspace identity read');
+    this.name = 'HostIdentityReadTimeoutError';
+  }
+}
+
+/** Host states that say nothing about this workspace's identity and can clear on
+ * their own: account routing not ready, a closed or busy owner, an unanswered
+ * read, or portable pin storage that could not open. Other failures (permissions,
+ * corruption, removal) are kept as they are: unclassified, retried only by a later
+ * send, online event or Retry. */
+function isTransientHostIdentityError(error: unknown): boolean {
+  if (error instanceof HostIdentityReadTimeoutError) return true;
+  const portable = personalHostFailureCode(error);
+  if (portable)
+    return portable === 'closed' || portable === 'scope-mismatch' || portable === 'storage';
+  return (
+    error instanceof Error &&
+    /\be2ee_(account_unavailable|account_mismatch|closed|identity-busy|cleanup_failed)\b/.test(
+      error.message
+    )
+  );
+}
+
+/** A single read bounded by its own timeout and the owner's signal. A late
+ * answer after timeout or abort is ignored. */
+async function readHostIdentityOnce(
+  readIdentity: NonNullable<E2eeWorkspaceRuntime['readIdentity']>,
+  input: { accountId: string; workspaceId: string },
+  signal: AbortSignal,
+  timeoutMs: number
+): Promise<{ workspaceId: string; genesisHash: string }> {
+  signal.throwIfAborted();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      readIdentity(input),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new HostIdentityReadTimeoutError()), timeoutMs);
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
 }
 
 /**
@@ -94,8 +148,10 @@ function isMissingHostIdentity(error: unknown): boolean {
  * holds no encrypted identity for the workspace. Renderer storage can be cleared
  * while native or IndexedDB custody survives; the host's verified identity then
  * outranks the server, and its genesis is retained as the sticky marker.
- * Missing identity is the only answer that permits plaintext; any other host
- * failure leaves the workspace unclassified, never plaintext.
+ * Missing identity is the only answer that permits plaintext. Transient host
+ * states are asked again with backoff while the workspace stays unclassified;
+ * `deadlineMs` bounds that wait (null: until `signal` aborts) and its timeout
+ * keeps the last host error as its cause. Other host failures are rethrown.
  */
 export async function assertNoRetainedEncryptedIdentity(input: {
   runtime: Pick<E2eeWorkspaceRuntime, 'readIdentity'> | undefined;
@@ -103,21 +159,35 @@ export async function assertNoRetainedEncryptedIdentity(input: {
   accountId: string;
   workspaceId: string;
   descriptor: WorkspaceAdmissionDescriptor;
+  signal: AbortSignal;
+  deadlineMs: number | null;
 }): Promise<void> {
-  const { runtime, descriptor } = input;
+  const { runtime, descriptor, signal } = input;
   if ('contentMode' in descriptor && descriptor.contentMode === 'e2ee') return;
   // Without a device host this platform cannot retain an encrypted identity.
   if (!runtime) return;
   if (!runtime.readIdentity) throw new Error('e2ee_identity_check_unavailable');
-  let identity: { workspaceId: string; genesisHash: string };
-  try {
-    identity = await runtime.readIdentity({
-      accountId: input.accountId,
-      workspaceId: input.workspaceId,
-    });
-  } catch (error) {
-    if (isMissingHostIdentity(error)) return;
-    throw error;
+  const readIdentity = runtime.readIdentity.bind(runtime);
+  const deadline = input.deadlineMs === null ? null : Date.now() + input.deadlineMs;
+  let identity: { workspaceId: string; genesisHash: string } | undefined;
+  for (let failures = 0; !identity; failures += 1) {
+    const remaining = deadline === null ? HOST_IDENTITY_READ_TIMEOUT_MS : deadline - Date.now();
+    try {
+      identity = await readHostIdentityOnce(
+        readIdentity,
+        { accountId: input.accountId, workspaceId: input.workspaceId },
+        signal,
+        Math.max(0, Math.min(HOST_IDENTITY_READ_TIMEOUT_MS, remaining))
+      );
+    } catch (error) {
+      signal.throwIfAborted();
+      if (isMissingHostIdentity(error)) return;
+      if (!isTransientHostIdentityError(error)) throw error;
+      const wait = getConvexAuthRecoveryDelayMs(failures);
+      if (deadline !== null && Date.now() + wait >= deadline)
+        throw new WorkspaceModeAdmissionTimeoutError({ cause: error });
+      await delay(wait, signal);
+    }
   }
   if (identity.workspaceId !== input.workspaceId) throw new WorkspaceModeMismatchError();
   try {
