@@ -303,6 +303,7 @@
   "e2ee.members.rotateFailed": "The member was removed, but the key was not replaced yet. The workspace stays usable; finish the key update in the encryption console later.",
   "e2ee.members.transfer": "Transfer ownership",
   "e2ee.members.transferTitle": "Transfer ownership to {{name}}?",
+  "e2ee.members.transferLead": "After the transfer:",
   "e2ee.members.transferEffectOwner": "{{name}} becomes the owner and can transfer ownership and manage administrators.",
   "e2ee.members.transferEffectYou": "You become an administrator and can still invite and remove members.",
   "e2ee.members.transferEffectRecord": "The transfer is added to the change history every member can see.",

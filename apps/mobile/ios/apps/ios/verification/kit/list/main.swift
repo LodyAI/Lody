@@ -751,33 +751,43 @@ assert(LodyFlatRows.separatorLeading(textLeading: 46, isLast: true) == nil, "The
 assert(LodyFlatRows.minHeight(hasSubtitle: false) == 44 && LodyFlatRows.minHeight(hasSubtitle: true) == 52, "Flat rows keep 44 / 52 pt minimums")
 print("PASS: flat system rows place icons on the rail and hairlines under the text column")
 
-// Workspace selection is a native button menu, with full titles and system state.
+// Workspace selection opens WorkspaceSwitcherPanel: names stay on one line and fade out when too long.
 let capsule = LodyMenuButton()
 let capsuleButton = capsule.subviews.compactMap { $0 as? UIButton }.first!
 capsule.accessibilityIdentifier = "workspace-menu"
-let longWorkspace = "Workspace with a name longer than the native menu can display in one line"
+let longWorkspace = "Workspace with a name longer than the panel can display in one line"
 capsule.setItems([
   LodyMenuItem(id: "current", title: longWorkspace, selected: true, monogram: "W"),
   LodyMenuItem(id: "other", title: "Other", monogram: "O"),
 ])
-assert(capsuleButton.showsMenuAsPrimaryAction)
-assert(capsuleButton.menu!.title.isEmpty)
-capsule.setAccountEmail("preview@example.test")
-assert(capsuleButton.menu!.title == "preview@example.test")
-capsule.setAccountEmail("changed@example.test")
-assert(capsuleButton.menu!.title == "changed@example.test")
-capsule.setAccountEmail("  ")
-assert(capsuleButton.menu!.title.isEmpty, "Clearing account identity removes the menu heading without changing workspaces")
-let menuActions = capsuleButton.menu!.children.compactMap { $0 as? UIAction }
-assert(menuActions.map(\.title) == [longWorkspace, "Other"])
-assert(menuActions.map(\.state) == [.on, .off])
-assert(menuActions.allSatisfy { $0.image?.size == CGSize(width: 24, height: 24) })
-capsule.setItems([LodyMenuItem(id: "other", title: "Renamed", selected: true)])
-let updatedAction = capsuleButton.menu!.children.first as! UIAction
-assert(updatedAction.title == "Renamed" && updatedAction.state == .on)
-capsule.setItems([])
-assert(capsuleButton.menu == nil)
-print("PASS: workspace menus preserve full names, avatars and selection, refresh on catalog changes and clear when empty")
+assert(capsuleButton.menu == nil && !capsuleButton.showsMenuAsPrimaryAction, "The capsule presents the switcher panel")
+assert(capsuleButton.accessibilityIdentifier == "workspace-menu", "The capsule's identifier is on its control")
+
+func switcherViews<T: UIView>(_ root: UIView, _ type: T.Type) -> [T] {
+  root.subviews.flatMap { child -> [T] in (child as? T).map { [$0] } ?? switcherViews(child, type) }
+}
+let switcher = WorkspaceSwitcherPanel(items: [
+  LodyMenuItem(id: "current", title: longWorkspace, selected: true, monogram: "W"),
+  LodyMenuItem(id: "other", title: "Other", monogram: "O"),
+], accountEmail: "preview@example.test", maxWidth: 280) { _ in }
+switcher.view.frame = CGRect(origin: .zero, size: switcher.preferredContentSize)
+switcher.view.layoutIfNeeded()
+assert(switcher.preferredContentSize.width <= 280, "The panel never grows past the available width")
+let switcherLabels = switcherViews(switcher.view, UILabel.self)
+assert(switcherLabels.contains { $0.text == "preview@example.test" }, "The account email heads the panel")
+assert(switcherLabels.filter { $0.text == longWorkspace || $0.text == "Other" }.allSatisfy { $0.numberOfLines == 1 }, "Workspace names stay on one line")
+let fades = switcherViews(switcher.view, LodyFadingLabel.self)
+fades.forEach { $0.layoutIfNeeded() }
+assert(fades.first { $0.text == longWorkspace }?.layer.mask != nil, "A long workspace name fades out at the trailing edge")
+assert(fades.first { $0.text == "Other" }?.layer.mask == nil, "A short workspace name is not faded")
+let rows = switcherViews(switcher.view, UIControl.self).filter { $0.accessibilityIdentifier?.hasPrefix("workspace-row:") == true }
+assert(rows.map(\.accessibilityLabel) == [longWorkspace, "Other"], "Rows keep full names for VoiceOver")
+assert(rows[0].accessibilityTraits.contains(.selected) && !rows[1].accessibilityTraits.contains(.selected), "VoiceOver reads the current workspace as selected")
+switcher.update(items: [LodyMenuItem(id: "other", title: "Renamed", selected: true)], accountEmail: "")
+switcher.view.layoutIfNeeded()
+assert(!switcherViews(switcher.view, UILabel.self).contains { $0.text == "preview@example.test" }, "Clearing account identity removes the heading")
+assert(switcherViews(switcher.view, LodyFadingLabel.self).map(\.text) == ["Renamed"], "Catalog changes refresh the panel")
+print("PASS: the workspace switcher keeps names on one line with a trailing fade, full VoiceOver names and selection")
 
 // Chat renders this shared cached photo at 36 pt. A 3x display needs 108 real pixels.
 let retinaFormat = UIGraphicsImageRendererFormat()

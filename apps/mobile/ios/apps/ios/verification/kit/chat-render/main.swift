@@ -1039,6 +1039,8 @@ liveOperation.operationCLIType = "custom"
 liveOperation.detail = ""
 operationCell.configure(liveOperation)
 operationCell.layoutIfNeeded()
+precondition(operationCell.openButton.isHidden && operationCell.bodyButton.frame.width == operationCell.bounds.width,
+  "Created receipts open from the body, without a trailing arrow")
 precondition(operationCell.conversation.glyph.kind == .live && operationCell.conversation.glyph.isHidden, "Running rows show the Home working grid")
 precondition(operationCell.conversation.agentView.image != nil, "Custom agents keep their terminal mark")
 operationCell.configure(operationRow)

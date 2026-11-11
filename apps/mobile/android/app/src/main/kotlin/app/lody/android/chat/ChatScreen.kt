@@ -84,6 +84,21 @@ data class ChatContext(
     val repositories: List<String> = emptyList(),
     val machineName: String = "",
     val machineKind: app.lody.android.create.CreateSessionModel.MachineKind = app.lody.android.create.CreateSessionModel.MachineKind.Laptop,
+    /** The computer's iOS Simulator support (`available` / `upgrade-required`; darwin only), null without it. */
+    val machineSimulator: String? = null,
+    /** The computer advertises the Android Emulator preview. */
+    val machineEmulator: Boolean = false,
+)
+
+/** The More menu's preview entries; null labels hide an entry. */
+internal data class PreviewMenu(
+    val browserLabel: String? = null,
+    val browserActive: Boolean = false,
+    val browserBusy: Boolean = false,
+    val onBrowser: () -> Unit = {},
+    val onStopBrowser: () -> Unit = {},
+    val deviceLabel: String? = null,
+    val onDevice: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,6 +111,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     // The latest user turn's run config, from the session snapshot (iOS `composerJSON`).
     var usage by remember(id, scope) { mutableStateOf<app.lody.android.runtime.SessionUsage?>(null) }
     var snapshotChoice by remember(id, scope) { mutableStateOf<RunChoice?>(null) }
+    // The session's managed web preview candidate (runtime session `preview`).
+    var browserCandidate by remember(id, scope) { mutableStateOf<BrowserPreview?>(null) }
     var entries by remember(id, scope) { mutableStateOf(emptyList<ChatEntry>()) }
     // Turns this page sent that the transcript has not shown yet (optimistic, never resent).
     var outgoing by remember(id, scope) { mutableStateOf(emptyList<Outgoing>()) }
@@ -183,6 +200,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 }
                 messages = snapshot.messages
                 snapshotChoice = snapshot.composer
+                browserCandidate = snapshot.preview
                 usage = snapshot.usage
                 status = snapshot.status
                 if (snapshot.messages.any { it.streaming }) delay(33)
@@ -581,6 +599,88 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             ) { linkedPullRequest = null }
         }
     }
+    // Remote previews. Each device platform keeps its own state for this conversation; the page's
+    // scope runs it, so leaving stops polling and the next visit resumes through `status`.
+    val iosPreview = remember(scope, id) { DevicePreviewSession(DevicePlatform.IOS, { repository.deviceControl(scope, DevicePlatform.IOS, id, it) }, coroutines) }
+    val androidPreview = remember(scope, id) { DevicePreviewSession(DevicePlatform.ANDROID, { repository.deviceControl(scope, DevicePlatform.ANDROID, id, it) }, coroutines) }
+    DisposableEffect(iosPreview, androidPreview) { onDispose { iosPreview.close(); androidPreview.close() } }
+    var devicePage by remember(scope, id) { mutableStateOf<DevicePlatform?>(null) }
+    var choosingDevice by remember(scope, id) { mutableStateOf(false) }
+    var simulatorUpgrade by remember(scope, id) { mutableStateOf(false) }
+    var browserPage by remember(scope, id) { mutableStateOf<String?>(null) }
+    var browserBusy by remember(scope, id) { mutableStateOf(false) }
+    var dismissedRequests by remember(scope, id) { mutableStateOf(emptySet<String>()) }
+    val devicePlatforms = buildList {
+        if (context.machineSimulator != null) add(DevicePlatform.IOS)
+        if (context.machineEmulator) add(DevicePlatform.ANDROID)
+    }
+    val openDevice: (DevicePlatform) -> Unit = { platform ->
+        if (platform == DevicePlatform.IOS && context.machineSimulator == "upgrade-required") { simulatorUpgrade = true }
+        else { devicePage = platform }
+    }
+    val previewTexts = PreviewTexts(
+        stringResource(R.string.preview_unsupported), stringResource(R.string.preview_unauthorized), stringResource(R.string.preview_generic),
+        stringResource(R.string.preview_stopped), stringResource(R.string.preview_stop_failed), stringResource(R.string.preview_failed),
+    )
+    val browserAction: (Boolean) -> Unit = browserAction@{ revoke ->
+        if (browserBusy) return@browserAction
+        browserBusy = true
+        coroutines.launch {
+            val message = try {
+                val reply = repository.browserPreview(scope, id, revoke)
+                when {
+                    reply.error != null -> previewTexts.error(reply.error, reply.message)
+                    revoke -> { browserPage = null; previewTexts.stopped }
+                    PreviewUrls.origin(reply.url) == null -> previewTexts.generic
+                    else -> { browserPage = reply.url; null }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { if (revoke) previewTexts.stopFailed else previewTexts.failed }
+            finally { browserBusy = false }
+            if (message != null) snackbar.showSnackbar(message)
+        }
+    }
+    val previewMenu = PreviewMenu(
+        browserLabel = browserCandidate?.let { stringResource(R.string.preview_open_label, it.label) },
+        browserActive = browserCandidate?.active == true,
+        browserBusy = browserBusy,
+        onBrowser = { browserAction(false) },
+        onStopBrowser = { browserAction(true) },
+        deviceLabel = when {
+            devicePlatforms.size > 1 -> stringResource(R.string.preview_device)
+            devicePlatforms.firstOrNull() == DevicePlatform.IOS -> stringResource(R.string.preview_ios)
+            devicePlatforms.firstOrNull() == DevicePlatform.ANDROID -> stringResource(R.string.preview_android)
+            else -> null
+        },
+        onDevice = { if (devicePlatforms.size > 1) { choosingDevice = true } else { devicePlatforms.firstOrNull()?.let(openDevice) } },
+    )
+    // The agent asked to show a device preview (catalog request id): offered until opened or dismissed.
+    val previewRequest = session?.let { current ->
+        current.iosSimulatorPreviewRequestId?.takeIf { context.machineSimulator == "available" && it !in dismissedRequests && !iosPreview.running }
+            ?.let { DevicePlatform.IOS to it }
+            ?: current.androidEmulatorPreviewRequestId?.takeIf { context.machineEmulator && it !in dismissedRequests && !androidPreview.running }
+                ?.let { DevicePlatform.ANDROID to it }
+    }
+    if (choosingDevice) DevicePreviewChooser(onPick = { choosingDevice = false; openDevice(it) }, onDismiss = { choosingDevice = false })
+    if (simulatorUpgrade) AlertDialog(
+        onDismissRequest = { simulatorUpgrade = false },
+        text = { Text(stringResource(R.string.preview_ios_upgrade, context.machineName)) },
+        confirmButton = { TextButton(onClick = { simulatorUpgrade = false }) { Text(stringResource(R.string.preview_ok)) } },
+    )
+    devicePage?.let { platform ->
+        DevicePreviewPage(if (platform == DevicePlatform.IOS) iosPreview else androidPreview) { devicePage = null }
+    }
+    browserPage?.let { url ->
+        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+        val copied = stringResource(R.string.preview_link_copied)
+        BrowserPreviewPage(browserCandidate?.label.orEmpty(), url, browserBusy,
+            onStop = { browserAction(true) },
+            onCopy = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(url))
+                android.widget.Toast.makeText(appContext, copied, android.widget.Toast.LENGTH_SHORT).show()
+            },
+            onClose = { browserPage = null })
+    }
     val prompts = SessionInfoBar.Prompts(
         stringResource(R.string.bar_prompt_createPrOrigin), stringResource(R.string.bar_prompt_createDraftPrOrigin),
         stringResource(R.string.bar_prompt_createPr), stringResource(R.string.bar_prompt_createDraftPr),
@@ -619,7 +719,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     ) }
                 }
                 ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine,
-                    onBrowseFiles = if (ProjectFiles.browsable(context.session, creationUnconfirmed)) ({ browsingFiles = true }) else null)
+                    onBrowseFiles = if (ProjectFiles.browsable(context.session, creationUnconfirmed)) ({ browsingFiles = true }) else null,
+                    previews = previewMenu.takeIf { context.session?.isTabClosed != true && !creationUnconfirmed })
                 if (creationNotice != null) {
                     Text(creationNotice,
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = top).padding(horizontal = TranscriptMargin),
@@ -643,10 +744,17 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     ) { scrollToLatest++ }
                 }
             }
+            if (previewRequest != null && context.session?.isTabClosed != true) {
+                PreviewRequestBanner(previewRequest.first,
+                    onShow = { dismissedRequests = dismissedRequests + previewRequest.second; openDevice(previewRequest.first) },
+                    onDismiss = { dismissedRequests = dismissedRequests + previewRequest.second })
+            }
             if (bar != null && context.session?.isTabClosed != true) {
                 ChatActionBar(
                     bar,
                     writing = writing,
+                    // `writing` changes with every begin/finish, so this read recomposes with it.
+                    pullRequestBusy = writing != null && bar.pullRequest?.let(prUpdates::writes) == true,
                     pullRequestPanel = pullRequestPanel,
                     panelFor = panelFor,
                     relations = if (hasRelations) ({ SessionRelationsChip(id, context.relatedSessions, onSelectTab) }) else null,
@@ -771,7 +879,7 @@ private val RunningStatuses = setOf("running", "initializing", "processing", "in
 
 /** Floating header: title over the tappable machine subtitle, with conditional Tabs and More. */
 @Composable
-internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit, machine: String = "", machineOnline: Boolean? = null, loadMachine: suspend () -> MachinePanelData = { MachinePanelData() }, onBrowseFiles: (() -> Unit)? = null) {
+internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit, machine: String = "", machineOnline: Boolean? = null, loadMachine: suspend () -> MachinePanelData = { MachinePanelData() }, onBrowseFiles: (() -> Unit)? = null, previews: PreviewMenu? = null) {
     var expanded by remember(currentId) { mutableStateOf(false) }
     var history by remember(currentId) { mutableStateOf(false) }
     var restoringId by remember(currentId) { mutableStateOf<String?>(null) }
@@ -825,6 +933,17 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
                 DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
                     if (onBrowseFiles != null) DropdownMenuItem(text = { Text(stringResource(R.string.files_title)) },
                         leadingIcon = { Icon(LodyIcons.Folder, null) }, onClick = { more = false; onBrowseFiles() })
+                    if (previews != null) {
+                        previews.browserLabel?.let { label ->
+                            DropdownMenuItem(text = { Text(label) }, enabled = !previews.browserBusy,
+                                leadingIcon = { Icon(LodyIcons.ExternalLink, null) }, onClick = { more = false; previews.onBrowser() })
+                            if (previews.browserActive) DropdownMenuItem(text = { Text(stringResource(R.string.preview_stop)) }, enabled = !previews.browserBusy,
+                                leadingIcon = { Icon(LodyIcons.Stop, null) }, onClick = { more = false; previews.onStopBrowser() })
+                        }
+                        previews.deviceLabel?.let { label ->
+                            DropdownMenuItem(text = { Text(label) }, leadingIcon = { Icon(LodyIcons.Machine, null) }, onClick = { more = false; previews.onDevice() })
+                        }
+                    }
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_tab)) }, enabled = !creating && busy == null,
                         leadingIcon = { Icon(LodyIcons.Plus, null) }, onClick = { more = false; onNewTab() })
                     if (closedTabs.isNotEmpty()) DropdownMenuItem(text = { Text(stringResource(R.string.chat_closed_tabs)) },
@@ -1202,6 +1321,8 @@ internal fun ChatActionBar(
     onAction: (SessionInfoBar.Action) -> Unit,
     onCopied: (String) -> Unit,
     writing: SessionInfoBar.Action? = null,
+    /** A merge or Ready for review on the bar's PR is in flight: a spinner replaces its mark. */
+    pullRequestBusy: Boolean = false,
     relations: (@Composable () -> Unit)? = null,
     pullRequestPanel: PullRequestPanel? = null,
     /** The PR panel for any PR; a Project group member's PR opens with its own. */
@@ -1214,7 +1335,7 @@ internal fun ChatActionBar(
         Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             relations?.invoke()
             if (bar.group != null) GroupContextItem(bar, bar.group, diffDot, onCopied, panelFor)
-            else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel)
+            else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel, busy = pullRequestBusy)
         }
     }
     @Composable fun Action() {
@@ -1334,7 +1455,14 @@ private fun MachineItem(name: String, online: Boolean?, load: suspend () -> Mach
  * capsule (a dot when space is short; the counts then lead the menu). CI trouble tints the glyph.
  */
 @Composable
-private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String) -> Unit, panel: PullRequestPanel?, modifier: Modifier = Modifier) {
+private fun ContextItem(
+    bar: SessionInfoBar,
+    diffDot: Boolean,
+    onCopied: (String) -> Unit,
+    panel: PullRequestPanel?,
+    modifier: Modifier = Modifier,
+    busy: Boolean = false,
+) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -1359,7 +1487,8 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
             onLongClick = if (pr != null) ({ open = true }) else null,
         ) {
             if (showsContext) {
-                if (pr != null) app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci)
+                if (pr != null && busy) CircularProgressIndicator(Modifier.size(LodyIconSize.sm), strokeWidth = 2.dp, color = colors.iconSecondary)
+                else if (pr != null) app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci)
                 else Icon(LodyIcons.Branch, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
                 Text(label, style = type.subhead, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                     // Not weighted: the fitting probe measures unbounded, where a weight would read as zero.
@@ -1915,5 +2044,17 @@ private fun PullRequestSheet(
                 }
             }
         }
+    }
+}
+
+/** Preview copy resolved in composition, for messages raised from coroutines. */
+private class PreviewTexts(
+    val unsupported: String, val unauthorized: String, val generic: String,
+    val stopped: String, val stopFailed: String, val failed: String,
+) {
+    fun error(code: String, message: String?): String = when (code) {
+        "unsupported" -> unsupported
+        "unauthorized", "backend_rejected" -> unauthorized
+        else -> message?.takeIf { it.isNotBlank() } ?: generic
     }
 }

@@ -31,6 +31,11 @@
       "result": "AgentRoleSnapshot",
       "timeoutMs": 45000
     },
+    "androidEmulatorControl": {
+      "params": "AndroidEmulatorControlParams",
+      "result": "AndroidEmulatorControlResult",
+      "timeoutMs": 100000
+    },
     "archiveSession": {
       "params": "ArchiveSessionParams",
       "result": "Empty",
@@ -70,11 +75,6 @@
       "params": "CreationOptionsParams",
       "result": "CreationOptions",
       "timeoutMs": 45000
-    },
-    "decideProposal": {
-      "params": "DecideProposalParams",
-      "result": "DecideProposalResult",
-      "timeoutMs": 75000
     },
     "deleteSession": {
       "params": "DeleteSessionParams",
@@ -1068,6 +1068,129 @@
         }
       ]
     },
+    "AndroidEmulatorControlParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string" },
+        "command": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": { "action": { "type": "string", "const": "list" } },
+              "required": ["action"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "start" },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_.-]{1,200}$"
+                },
+                "quality": {
+                  "type": "string",
+                  "enum": ["saver", "balanced", "clear"]
+                }
+              },
+              "required": ["action", "id"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "status" },
+                "operationId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["action"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "stop" },
+                "operationId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["action", "operationId"]
+            }
+          ]
+        }
+      },
+      "required": ["workspaceId", "sessionId", "userId", "command"]
+    },
+    "AndroidEmulatorControlResult": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "success": { "type": "boolean" },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "name": { "type": "string" },
+              "runtime": { "type": "string" },
+              "deviceType": { "type": "string" },
+              "state": { "type": "string" },
+              "available": { "type": "boolean" },
+              "unavailableReason": { "type": "string" },
+              "occupancy": {
+                "type": "string",
+                "enum": ["available", "this-session", "other-session"]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "runtime",
+              "deviceType",
+              "state",
+              "available",
+              "occupancy"
+            ]
+          }
+        },
+        "preview": {
+          "type": "object",
+          "properties": {
+            "operationId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "preparing",
+                "booting",
+                "connecting",
+                "ready",
+                "closed",
+                "failed"
+              ]
+            },
+            "transport": { "type": "string", "enum": ["local", "remote"] },
+            "viewerUrl": { "type": "string", "minLength": 1 },
+            "message": { "type": "string" }
+          },
+          "required": ["operationId", "id", "phase", "transport"]
+        },
+        "error": { "type": "string" },
+        "status": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "message": { "type": "string" },
+        "capabilities": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
     "ArchiveSessionParams": {
       "type": "object",
       "properties": {
@@ -1465,28 +1588,6 @@
         "agentConfigId": { "type": "string", "minLength": 1 }
       },
       "required": ["workspaceId"]
-    },
-    "DecideProposalParams": {
-      "type": "object",
-      "properties": {
-        "workspaceId": { "type": "string", "minLength": 1 },
-        "sessionId": { "type": "string", "minLength": 1 },
-        "entryId": { "type": "string", "minLength": 1 },
-        "itemId": { "type": "string", "minLength": 1 },
-        "decision": { "type": "string", "enum": ["accept", "dismiss"] }
-      },
-      "required": ["workspaceId", "sessionId", "entryId", "itemId", "decision"]
-    },
-    "DecideProposalResult": {
-      "type": "object",
-      "properties": {
-        "outcome": {
-          "type": "string",
-          "enum": ["saved", "created", "dismissed"]
-        },
-        "scheduleId": { "type": "string" }
-      },
-      "required": ["outcome"]
     },
     "DeleteSessionParams": {
       "type": "object",

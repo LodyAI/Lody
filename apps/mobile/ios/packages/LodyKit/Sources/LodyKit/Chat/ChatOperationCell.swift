@@ -64,9 +64,10 @@ final class ChatOperationCell: UICollectionViewCell {
     titleLabel.text = row.text
     detailLabel.text = row.detail
     statusLabel.text = conversation.glyph.kind == .none ? row.operation?.statusLabel : nil
-    openButton.isHidden = row.operation == nil
-    openButton.isEnabled = row.actionable
     let hasReply = row.operation?.kind == "reply" && row.operation?.reply?.isEmpty == false
+    // The body already opens the conversation; a separate arrow is only needed when the body opens a reply.
+    openButton.isHidden = !hasReply
+    openButton.isEnabled = row.actionable
     bodyButton.isEnabled = row.actionable || hasReply
     if row.kind == "operationHeader", row.actionable {
       titleLabel.text = (row.disclosed ? "⌄ " : "› ") + row.text
@@ -94,7 +95,7 @@ final class ChatOperationCell: UICollectionViewCell {
           cliType: peer.cliType, agentType: peer.agentType, current: peer.current)
         item.opensReply = card.kind == "reply" && card.reply?.isEmpty == false
         item.enabled = peer.actionable || item.opensReply
-        item.separateOpen = true
+        item.separateOpen = item.opensReply
         item.openEnabled = peer.actionable
         switch card.status {
         case "running", "active", "pending": item.glyph = .live
@@ -132,11 +133,11 @@ final class ChatOperationCell: UICollectionViewCell {
     super.layoutSubviews()
     guard let row else { return }
     let width = contentView.bounds.width
-    let end: CGFloat = row.operation == nil ? 0 : 44
+    let end: CGFloat = openButton.isHidden ? 0 : 44
     conversation.frame = CGRect(x: 0, y: 0, width: max(0, width - end), height: bounds.height)
     let indent: CGFloat = row.treeChild ? 24 : 0
     tabStrip.frame = CGRect(x: indent, y: 0, width: max(0, width - indent), height: bounds.height)
-    bodyButton.frame = CGRect(x: 0, y: 0, width: width - (row.operation == nil ? 0 : 44), height: bounds.height)
+    bodyButton.frame = CGRect(x: 0, y: 0, width: width - end, height: bounds.height)
     openButton.frame = CGRect(x: width - 44, y: 0, width: 44, height: max(44, bounds.height))
   }
 }

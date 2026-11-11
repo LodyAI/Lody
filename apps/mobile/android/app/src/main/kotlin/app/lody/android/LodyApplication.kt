@@ -40,6 +40,7 @@ open class LodyApplication : Application() {
         private set
     private var prepared: Pair<RuntimeScope, ShortLivedGrant>? = null
     private val shortcutCloud by lazy { app.lody.android.cloud.PromptShortcutCloud() }
+    private val previewTokens by lazy { app.lody.android.cloud.PreviewTokens() }
     protected open fun createRuntime(scope: RuntimeScope): CloudRuntime {
         val ready = prepared?.takeIf { it.first == scope }
         if (ready != null) {
@@ -49,6 +50,8 @@ open class LodyApplication : Application() {
                 catch (error: AuthFailure) { throw app.lody.android.runtime.RuntimeException(RuntimeFault(error.code, if (error.code == "network_unavailable") RuntimeErrorCategory.NETWORK else RuntimeErrorCategory.AUTH)) }
             }, app.lody.android.runtime.ShortcutCloudProvider { key, operation, args ->
                 account.withVerifiedAccount(key) { credential -> shortcutCloud.call(credential, key.workspaceId, operation, args) }
+            }, app.lody.android.runtime.PreviewTokenProvider { key, intent ->
+                account.withVerifiedAccount(key) { credential -> previewTokens.mint(credential, key, intent) }
             })
         }
         return createOfflineRuntime(scope)

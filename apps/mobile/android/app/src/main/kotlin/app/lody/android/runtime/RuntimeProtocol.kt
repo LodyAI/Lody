@@ -101,7 +101,7 @@ internal object RuntimeProtocol {
                     agentRoleId = field("agentRoleId"), roleKnown = value.has("agentRoleId"),
                 )
             }
-            RuntimeEvent.SessionUpdated(SessionSnapshot(message.text("sessionId"), envelope.text("status"), entries, composer, SessionUsageJson.parse(envelope.optJSONObject("usage"))))
+            RuntimeEvent.SessionUpdated(SessionSnapshot(message.text("sessionId"), envelope.text("status"), entries, composer, SessionUsageJson.parse(envelope.optJSONObject("usage")), PreviewJson.summary(envelope.optJSONObject("preview"))))
         }
         "catalog" -> {
             val catalog = JSONObject(message.get("catalog") as String)
@@ -111,7 +111,7 @@ internal object RuntimeProtocol {
             val sessions = catalog.getJSONArray("sessions").objects().map {
                 CatalogJson.session(CatalogSession(it.text("id"), it.text("machineId"), it.text("projectId"), it.text("title"), it.text("status"), it.get("archived") as Boolean, it.get("pinned") as Boolean, it.text("createdAt")), it)
             }
-            RuntimeEvent.CatalogUpdated(CatalogSnapshot(message.nonnegative("revision"), projects, sessions, strings(catalog.getJSONArray("machineIds")), CatalogJson.machineNames(catalog), CatalogJson.machineOs(catalog), ProviderUsageJson.parse(catalog)))
+            RuntimeEvent.CatalogUpdated(CatalogSnapshot(message.nonnegative("revision"), projects, sessions, strings(catalog.getJSONArray("machineIds")), CatalogJson.machineNames(catalog), CatalogJson.machineOs(catalog), ProviderUsageJson.parse(catalog), CatalogJson.machineSimulators(catalog), CatalogJson.machineEmulators(catalog)))
         }
         "synced" -> {
             val count = message.nonnegative("streams"); require(count <= Int.MAX_VALUE)
@@ -124,6 +124,7 @@ internal object RuntimeProtocol {
         "networkStatus" -> RuntimeEvent.SyncFailed(if (message.optString("status") == "authorization_required") "grant_expired" else "network_unavailable")
         "grant" -> RuntimeEvent.GrantRequested
         "shortcutCloud" -> RuntimeEvent.ShortcutCloudRequested(message.getString("requestId"), message.getString("operation"), message.getString("args"))
+        "previewToken" -> RuntimeEvent.PreviewTokenRequested(message.getString("requestId"), message.getString("intent"))
         else -> null
     }
     fun schema(message: JSONObject): RuntimeResult.Schema {

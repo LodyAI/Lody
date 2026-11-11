@@ -644,12 +644,15 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
         rowCount: model?.rows.count ?? 0,
         placeholder: self?.placeholderText ?? ""
       )
-      let emptyLeadingHeader = index == 0
-        && (model?.header ?? "").isEmpty
+      let emptyHeader = (model?.header ?? "").isEmpty
         && (model?.headerValue ?? "").isEmpty
         && (model?.headerStatus ?? "").isEmpty
         && (model?.headerActionId ?? "").isEmpty
-      configuration.headerMode = outline || emptyLeadingHeader ? .none : .supplementary
+      // A flat rail group without a label gets the group gap, not a blank header
+      // band whose padding would make its spacing differ from labelled groups.
+      let flatRailGroup = flatSystem && !(self?.chatStyle ?? false)
+      let blankFlatHeader = flatRailGroup && emptyHeader
+      configuration.headerMode = outline || (index == 0 && emptyHeader) || blankFlatHeader ? .none : .supplementary
       let emptyFlatFooter = flatSystem && (model?.footer ?? "").isEmpty
       configuration.footerMode = outline || hideEmptyFooter || emptyFlatFooter ? .none : .supplementary
       configuration.leadingSwipeActionsConfigurationProvider = { indexPath in
@@ -661,7 +664,9 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
       // Plain lists pin headers by default; a clear header would float over rows.
       for item in section.boundarySupplementaryItems { item.pinToVisibleBounds = false }
-      if flat, !flatSystem, index > 0, outline {
+      if blankFlatHeader, index > 0 {
+        section.contentInsets.top = LodyDesign.Rail.groupGap
+      } else if flat, !flatSystem, index > 0, outline {
         section.contentInsets.top = LodyDesign.Rail.bandGap
       } else if flat, !flatSystem, index > 0 {
         section.contentInsets.top = model?.gap == .group ? LodyDesign.Rail.groupGap : LodyDesign.Rail.sectionGap

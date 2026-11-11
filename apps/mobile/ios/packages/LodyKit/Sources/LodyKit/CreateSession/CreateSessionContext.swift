@@ -62,6 +62,8 @@ struct CreatePanel: Equatable {
   var branch: CreatePicker?
   var note = ""
   var noteWarning = false
+  /// The note reads "Tap to retry": tapping it reads the creation options again.
+  var noteRetry = false
 }
 
 enum CreateSessionContext {
@@ -119,8 +121,10 @@ enum CreateSessionContext {
     } else if !form.deferUnresolved, let message = page.unavailableMessage {
       panel.note = message
       panel.noteWarning = true
+      panel.noteRetry = page.retriesOptions
     } else if page.failed {
       panel.note = text("create.machineConfig.retry")
+      panel.noteRetry = true
     }
     return panel
   }
@@ -307,6 +311,7 @@ final class CreatePanelState: ObservableObject {
   @Published var openInSheet: String?
   var onPick: (String, String) -> Void = { _, _ in }
   var onWorktree: (Bool) -> Void = { _ in }
+  var onRetry: () -> Void = {}
 }
 
 // MARK: - Page panel
@@ -327,10 +332,14 @@ struct CreateContextPanel: View {
           }
           if state.panel.worktree != nil || state.panel.branch != nil { branchLine }
           if !state.panel.note.isEmpty {
-            Text(state.panel.note)
-              .lodyTextStyle(.footnote)
-              .foregroundStyle(state.panel.noteWarning ? LodyColor.warningDefault : LodyColor.textTertiary)
-              .padding(.horizontal, LodySpacing.xs)
+            if state.panel.noteRetry {
+              Button { state.onRetry() } label: {
+                note.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+              }
+              .buttonStyle(.plain)
+            } else {
+              note
+            }
           }
         }
         .padding(.horizontal, LodyLayout.screenPaddingX)
@@ -343,6 +352,13 @@ struct CreateContextPanel: View {
       .scrollBounceBehavior(.basedOnSize)
       .defaultScrollAnchor(.bottom)
     }
+  }
+
+  private var note: some View {
+    Text(state.panel.note)
+      .lodyTextStyle(.footnote)
+      .foregroundStyle(state.panel.noteWarning ? LodyColor.warningDefault : LodyColor.textTertiary)
+      .padding(.horizontal, LodySpacing.xs)
   }
 
   private var branchLine: some View {

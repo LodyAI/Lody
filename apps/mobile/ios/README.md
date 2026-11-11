@@ -142,14 +142,18 @@ precise openers never fall back to provenance-only root IDs. Archived and side-p
 sessions are excluded; closed Tabs appear only when current. The tree does not
 change archive ownership or read additional transcripts.
 
-The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, like
-conversation More. UIKit owns presentation, width, height, scrolling and title
-truncation; there is no six-row limit or custom fade. Actions retain full names,
-circular avatars and native selected state. Selecting the current workspace is a
-no-op; catalog changes refresh the menu. The root menu title displays the account
-email in UIKit’s heading style, projected explicitly through the session source
-and chrome model. Empty email removes the heading; synthetic sources never fall
-back to the live account. Workspace management stays in Settings.
+The workspace switcher is `Chrome/WorkspaceSwitcherPanel`, a popover anchored to
+the capsule that never adapts into a sheet. A `UIMenu` wraps long titles onto
+several lines and offers no fade, so the panel draws its own menu-style rows:
+leading checkmark, circular avatar, and the name on one line that fades out at the
+trailing edge (`LodyFadingLabel`, mirrored for right-to-left) instead of wrapping or
+showing an ellipsis. Rows keep full names and the selected trait for VoiceOver; up
+to eight rows show before the list scrolls, and the width stays between 240 and
+320 pt within the window. Selecting the current workspace is a no-op; catalog
+changes refresh the open panel. The account email heads the panel, projected
+explicitly through the session source and chrome model. Empty email removes the
+heading; synthetic sources never fall back to the live account. Workspace
+management stays in Settings.
 
 Conversation Back, title/machine, Tabs and More controls belong to the page, so
 UIKit’s interactive pop moves them with its content instead of separately animating
@@ -269,6 +273,7 @@ them yet.
 
 - **Preview Chip**: When an agent reports a local dev server, a chip above the composer opens it through the machine's Lody Quick Tunnel. Long-press copies the share link, opens it in Safari, or stops sharing. The control proof is signed natively with the Keychain credential; only short-lived tunnel links reach the app.
 - **Native Simulator Viewer**: A [baguette](https://github.com/tddworks/baguette) server behind the tunnel opens a pushed native page. Native WebRTC DataChannels carry H.264/MJPEG frames, touches and hardware controls, with automatic WebSocket fallback for older CLI versions or failed connections. H.264 decodes into `AVSampleBufferDisplayLayer`; the device frame and side buttons are drawn natively. Quick Tunnel is still required for signaling and artwork. Hardware actions (Home, lock, rotate, shake, volume, screenshot) sit in the navigation bar.
+- **Android Emulator Viewer**: The same gateway and native viewer stream an AVD from any computer whose Lody offers Android Emulator preview. It is H.264 only without device artwork, with Back, Home, Recents, rotation, appearance, pasted text and a Data Saver / Balanced / Clear quality choice. iOS and Android previews keep separate state and may run together; see [`SimulatorStream/README.md`](packages/LodyKit/Sources/LodyKit/SimulatorStream/README.md#android-emulator).
 
 ### Offscreen WASM CRDT Data Sync Engine
 

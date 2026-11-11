@@ -22,6 +22,8 @@ import { ProbeSchemaParams, ProbeSchemaReport } from './debug.ts';
 import { GitHubMentionsParams, GitHubMentionsResult } from './github.ts';
 import { MentionCatalog, MentionCatalogParams } from './mentions.ts';
 import {
+  AndroidEmulatorControlParams,
+  AndroidEmulatorControlResult,
   IosSimulatorControlParams,
   IosSimulatorControlResult,
   SessionPreviewParams,
@@ -120,8 +122,6 @@ import {
   ConversationMarkdownParams,
   ConversationMarkdownResult,
   RespondPermissionParams,
-  DecideProposalParams,
-  DecideProposalResult,
   RespondPermissionResult,
   SendTurnParams,
   SendTurnResult,
@@ -262,6 +262,11 @@ export const runtimeCalls = {
     result: IosSimulatorControlResult,
     timeoutMs: 100_000,
   },
+  androidEmulatorControl: {
+    params: AndroidEmulatorControlParams,
+    result: AndroidEmulatorControlResult,
+    timeoutMs: 100_000,
+  },
   itemDetail: {
     params: ItemDetailParams,
     result: ItemDetail,
@@ -360,11 +365,6 @@ export const runtimeCalls = {
     params: RespondPermissionParams,
     result: RespondPermissionResult,
     timeoutMs: 45_000,
-  },
-  decideProposal: {
-    params: DecideProposalParams,
-    result: DecideProposalResult,
-    timeoutMs: 75_000,
   },
   probeSchema: {
     params: ProbeSchemaParams,

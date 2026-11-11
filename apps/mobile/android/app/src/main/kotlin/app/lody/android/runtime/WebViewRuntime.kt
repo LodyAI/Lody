@@ -169,6 +169,16 @@ open class WebViewRuntime internal constructor(
             call("controlTurn", JSONArray().put(command.sessionId).put(command.machineId).put(command.turnId), CommandDeadline.WRITE)
             RuntimeResult.Accepted
         }
+        // The runtime's own 330 s / 100 s budgets end first; these deadlines only fence a lost reply.
+        is RuntimeCommand.SessionPreview -> {
+            val value = call("sessionPreview", JSONArray().put(command.sessionId).put(if (command.revoke) "revoke" else "create"), CommandDeadline.PREVIEW)
+            RuntimeResult.Preview(PreviewJson.browser(value as? JSONObject ?: JSONObject()))
+        }
+        is RuntimeCommand.DeviceControl -> {
+            val args = JSONArray().put(command.sessionId).put(PreviewJson.command(command.platform, command.command))
+            val value = call(command.platform.method, args, CommandDeadline.DEVICE_CONTROL)
+            RuntimeResult.Device(PreviewJson.reply(command.platform, value as? JSONObject ?: JSONObject()))
+        }
         RuntimeCommand.Ping -> RuntimeResult.Pong(call("ping") as? Boolean ?: throw RuntimeException(runtimeFault("invalid_ping_reply")))
         RuntimeCommand.InspectSchema -> {
             val value = call("probeSchema", deadline = CommandDeadline.QUERY)

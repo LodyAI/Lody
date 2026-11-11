@@ -28,13 +28,13 @@ final class SessionPreviewController: SessionController {
           "type": .string("terminal_output"), "output": .string("Native session tool detail"),
         ])], truncated: false)
       }, observe: { _ in {} }),
-      simulator: .init(call: { command in
+      simulator: .ios { command in
         if case .stop = command { return .init(success: true) }
         if case .list = command {
           return .init(success: true, devices: [.init(udid: "native-fixture-phone", name: "Fixture Phone", runtime: "iOS 27", deviceType: "iPhone", state: "Booted", available: true, occupancy: .available)])
         }
         return .init(success: true, preview: .init(operationId: "native-fixture", udid: "native-fixture-phone", phase: .ready, transport: .remote, viewerUrl: "lody-simulator-fixture://stream"))
-      }),
+      },
       pullRequest: { reference, _ in PullRequestPreviewController(params: scenario.hasPrefix("bar-") ? ["state": reference.status, "reference": reference] : [:]) },
       browser: { _, _ in .init(url: "https://native-fixture.trycloudflare.com") }
     )

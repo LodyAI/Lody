@@ -160,22 +160,6 @@ function projectRef(
   };
 }
 
-/** A machine as schedules see it: owner, clock and schedule protocol support. */
-export function scheduleMachine(meta: Flock, machineId: string) {
-  const fields = machineMeta(meta, `machine-${machineId}`);
-  const capabilities = fields.protocolCapabilities;
-  const version =
-    capabilities && typeof capabilities === 'object'
-      ? Number((capabilities as Record<string, unknown>).schedules)
-      : 0;
-  return {
-    name: text(fields.name) || undefined,
-    owner: text(fields.ownerUserId),
-    timeZone: text(fields.timeZone) || undefined,
-    supported: version >= SCHEDULES_PROMPT_PROTOCOL_VERSION,
-  };
-}
-
 export function registerSchedules(ctx: RuntimeContext) {
   const { channel, state, getGrant } = ctx;
 
@@ -197,7 +181,20 @@ export function registerSchedules(ctx: RuntimeContext) {
     };
   };
 
-  const machine = scheduleMachine;
+  const machine = (meta: Flock, machineId: string) => {
+    const fields = machineMeta(meta, `machine-${machineId}`);
+    const capabilities = fields.protocolCapabilities;
+    const version =
+      capabilities && typeof capabilities === 'object'
+        ? Number((capabilities as Record<string, unknown>).schedules)
+        : 0;
+    return {
+      name: text(fields.name) || undefined,
+      owner: text(fields.ownerUserId),
+      timeZone: text(fields.timeZone) || undefined,
+      supported: version >= SCHEDULES_PROMPT_PROTOCOL_VERSION,
+    };
+  };
 
   const agents = (meta: Flock) =>
     creationOptions(
