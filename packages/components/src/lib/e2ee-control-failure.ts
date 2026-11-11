@@ -78,7 +78,23 @@ function serverCode(error: unknown): string | null {
     : null;
 }
 
-/** Classify a control-page failure. Unknown errors are treated as transport failures. */
+/** A portable host's typed failure says what failed; only `network` and `closed` are
+ * availability. Anything else shown as "offline" would hide a real error. */
+const portableKinds: Partial<Record<string, E2eeControlFailureKind>> = {
+  // Data handed to the host (normally a server reply) failed its strict validation.
+  'invalid-input': 'server',
+  corrupt: 'local-identity',
+  storage: 'local-identity',
+  'protection-unavailable': 'local-identity',
+  'restart-required': 'local-identity',
+  unsupported: 'upgrade',
+  unauthorized: 'auth',
+  'scope-mismatch': 'auth',
+  revoked: 'approval-required',
+};
+
+/** Classify a control-page failure. Unknown untyped errors are treated as transport
+ * failures; typed portable-host failures keep their own kind. */
 export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
   // Inspect only a direct typed custody failure. A mixed close/operation Cause
   // retains its owner and cannot be flattened into a recoverable display hint.
@@ -99,6 +115,12 @@ export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
   if (portable === 'history-conflict') return { kind: 'progress-conflict', code: portable };
   if (portable === 'identity-lost' || portable === 'approval-required')
     return { kind: 'approval-required', code: portable };
+  const portableKind = portable === undefined ? undefined : portableKinds[portable];
+  if (portableKind)
+    return {
+      kind: portableKind,
+      code: portableKind === 'local-identity' ? `e2ee_${portable}` : portable!,
+    };
   const message = error instanceof Error ? error.message : '';
   // Main erased only this device's identity; the member pairs a new device key.
   if (/\be2ee_device_revoked$/.test(message))
