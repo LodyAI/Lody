@@ -177,6 +177,10 @@ export const ReadOnlyNonOwnerDark: Story = {
   globals: { theme: 'dark' },
 };
 
+/** A synthetic photo, so the panel shows a pictured member next to initials. */
+const bobPhoto = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" fill="#7aa2d6"/><circle cx="20" cy="16" r="7" fill="#f3d9c4"/><path d="M6 40a14 12 0 0 1 28 0z" fill="#2f4b7c"/></svg>'
+)}`;
 const memberState = {
   ...teamState,
   visibility: 'private' as const,
@@ -185,7 +189,7 @@ const memberState = {
   memberUserIds: ['bob'],
   availableMembers: [
     { userId: 'alice', name: 'Alice Chen' },
-    { userId: 'bob', name: 'Bob Li' },
+    { userId: 'bob', name: 'Bob Li', image: bobPhoto },
     { userId: 'carol', name: 'Carol Wang' },
   ],
   setMemberReadAccess: fn(),
@@ -196,6 +200,10 @@ export const PersonalReadOnly: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
   },
+};
+export const PersonalReadOnlyChinese: Story = {
+  ...PersonalReadOnly,
+  globals: { locale: 'zh_CN' },
 };
 export const PersonalReadOnlyNonowner: Story = {
   args: { state: { ...memberState, canManage: false } },
