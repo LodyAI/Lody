@@ -34,6 +34,7 @@ import { AlertDialog, Dialog } from '@/ui/dialog';
 import { toast } from '@/lib/toast';
 import { Tabs } from '@lody/ui/tabs';
 import { shareSurface } from './sharing/surface';
+import { UserAvatar } from './user-avatar';
 
 export type SessionSharingTranslator = (
   key: string,
@@ -204,14 +205,6 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
 
-/** The watermark arrives from the corner it is cropped by, turning a little as it lands.
- * It ends on the opacity it rests at (0.07, below): a keyframe that ended on 1 would
- * flash the mark dark until the animation finished. */
-const markIn = stylex.keyframes({
-  from: { opacity: 0, transform: 'translate(8px, 6px) rotate(-8deg) scale(0.92)' },
-  to: { opacity: 0.07, transform: 'none' },
-});
-
 /** The next view arrives from the side it lives on, and the way back reverses it. */
 const enterFromRight = stylex.keyframes({
   from: { opacity: 0, transform: 'translateX(14px)' },
@@ -226,8 +219,8 @@ const accessPanel = stylex.create({
   /**
    * Height follows the content with a small overshoot, so the panel settles into
    * each view instead of snapping. The wrapper's inset is given back by a negative
-   * margin: the clip then lands on the popup's own edge, so the watermark is still
-   * cropped by the panel and a focus ring at the content's edge is not.
+   * margin: the clip then lands on the popup's own edge, so a focus ring at the
+   * content's edge is not cropped.
    */
   elastic: {
     margin: `calc(-1 * ${space[2]})`,
@@ -254,30 +247,13 @@ const accessPanel = stylex.create({
   /** The publish view's header: the way back, and what this view is. */
   publishHead: { display: 'flex', alignItems: 'center', gap: space[1], paddingBottom: space[3] },
 
-  /** The panel's own box: the watermark is placed against it and cropped by the popup. */
   root: { position: 'relative', display: 'flex', flexDirection: 'column' },
-  /** A faint mark of how far the conversation reaches. Decoration, so it takes no pointer. */
-  watermark: {
-    position: 'absolute',
-    top: '-2px',
-    right: '-6px',
-    width: '52px',
-    height: '52px',
-    color: colors.label,
-    opacity: 0.07,
-    pointerEvents: 'none',
-    animationName: { default: markIn, [REDUCED_MOTION]: 'none' },
-    animationDuration: '550ms',
-    animationTimingFunction: ease.standard,
-  },
-  /** Sits above the watermark; the right gutter keeps text off it. */
   head: {
     position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
     paddingInline: space[1],
-    paddingRight: space[8],
   },
   title: {
     margin: 0,
@@ -400,6 +376,7 @@ function SessionAccessMembers({
       )}
       {ids.map((userId) => (
         <div key={userId} {...stylex.props(memberStyles.row)}>
+          <UserAvatar user={{ id: userId, ...directory.get(userId) }} size="small" />
           <span
             {...stylex.props(memberStyles.name)}
             aria-busy={!!state.membersLoading && !directory.has(userId)}
@@ -471,7 +448,13 @@ function SessionAccessMembers({
   );
 }
 const memberStyles = stylex.create({
-  notice: { display: 'flex', alignItems: 'center', gap: space[2], fontSize: text.captionSize, color: colors.secondaryLabel },
+  notice: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+  },
   section: { display: 'flex', flexDirection: 'column', gap: space[1], marginTop: space[2] },
   heading: {
     margin: 0,
@@ -619,7 +602,6 @@ export function SessionAccessControl({
           </>
         ) : (
           <div {...stylex.props(accessPanel.root)}>
-            <Icon key={level} {...stylex.props(accessPanel.watermark)} aria-hidden="true" />
             <div {...stylex.props(accessPanel.head)}>
               <p {...stylex.props(accessPanel.title)}>{t('sessions.access.teamAccess')}</p>
               <p {...stylex.props(accessPanel.description)}>{caption}</p>
