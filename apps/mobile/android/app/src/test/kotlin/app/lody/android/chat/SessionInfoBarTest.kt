@@ -1,6 +1,9 @@
 package app.lody.android.chat
 
 import app.lody.android.chat.SessionInfoBar.Action
+import app.lody.android.runtime.CatalogJson
+import app.lody.android.runtime.CatalogProjectMember
+import app.lody.android.runtime.CatalogProjectRun
 import app.lody.android.runtime.CatalogPullRequest
 import app.lody.android.runtime.CatalogSession
 import app.lody.android.auth.Credential
@@ -182,5 +185,60 @@ class SessionInfoBarTest {
         assertEquals("lody/zed #7 https://github.com/lody/zed/pull/7 feat/bar", bar.prompt(Action.FixCi, prompts))
         assertEquals("o\n\nc\n\nu", bar.prompt(Action.CreatePr, prompts))
         assertTrue(bar.hasContext)
+    }
+
+    @Test fun aSingleRepositoryShowsOnlyItsOwnLatestPr() {
+        val other = pr().copy(repository = "lody/other", number = 9)
+        val bar = SessionInfoBar.of(session(pr = pr()).let { it.copy(pullRequests = it.pullRequests + other) }, "lody/zed", busy = false)
+        assertEquals(7, bar.pullRequest?.number)
+    }
+
+    private fun member(
+        id: String, repo: String?, diff: Int? = null, dirty: Boolean = false, pr: CatalogPullRequest? = null, access: String? = null,
+    ) = CatalogProjectMember(
+        id, id, if (repo == null) "local" else "github", repoFullName = repo, branch = "lody/$id", access = access,
+        diffAdded = diff, diffRemoved = diff?.let { 0 }, dirty = dirty, pullRequest = pr,
+    )
+
+    private fun group(vararg members: CatalogProjectMember, dirty: Boolean = false, added: Int = 0) =
+        session(dirty = dirty, added = added).copy(projectId = "group:g", projectRun = CatalogProjectRun("g", "Platform", members.toList()))
+
+    @Test fun aProjectGroupListsMembersAndKeepsOnlyConversationWideActions() {
+        val apiPr = pr(ci = "f", merge = "c").copy(repository = "acme/api")
+        // Every changed member has an open PR: no Create PR, and PR-bound repairs stay on the member's panel.
+        val covered = group(member("api", "acme/api", diff = 3, pr = apiPr), member("docs", null, access = "additional"))
+        val bar = SessionInfoBar.of(covered, "", busy = false)
+        assertEquals("Platform", bar.group?.name)
+        assertNull(bar.pullRequest)
+        assertTrue(bar.hasContext)
+        assertEquals(emptyList<Action>(), bar.actions)
+        // Another changed repository without a PR still needs one; unpublished work leads once PRs exist.
+        val uncovered = group(member("api", "acme/api", dirty = true, pr = apiPr), member("web", "acme/web", diff = 2))
+        assertEquals(listOf(Action.CommitAndPush, Action.CreatePr, Action.CreateDraftPr), actions(uncovered, repository = ""))
+        // Without per-member reports, the conversation totals decide, as for one repository.
+        assertEquals(listOf(Action.CreatePr, Action.CreateDraftPr, Action.CommitAndPush),
+            actions(group(member("api", "acme/api"), dirty = true), repository = ""))
+        assertEquals(emptyList<Action>(), actions(uncovered, busy = true, repository = ""))
+    }
+
+    @Test fun projectGroupPromptsPublishEveryChangedMember() {
+        val bar = SessionInfoBar.of(group(member("api", "acme/api", diff = 1)), "", busy = false)
+        val prompts = SessionInfoBar.Prompts("o", "do", "c", "dc", "u", "cp", "", "")
+        assertEquals("o\n\nc\n\nu\n\n${SessionInfoBar.PROJECT_GROUP_SCOPE}", bar.prompt(Action.CreatePr, prompts))
+        assertEquals("cp\n\n${SessionInfoBar.PROJECT_GROUP_SCOPE}", bar.prompt(Action.CommitAndPush, prompts))
+    }
+
+    @Test fun projectGroupSnapshotsSurviveTheCatalogCache() {
+        val run = CatalogProjectRun("g", "Platform", listOf(
+            member("api", "acme/api", diff = 2, dirty = true, pr = pr().copy(repository = "acme/api")),
+            member("proto", "acme/proto").copy(depth = 1, submodule = true),
+            member("docs", null, access = "link"),
+        ))
+        val saved = CatalogJson.putSession(JSONObject(), group().copy(projectRun = run))
+        val restored = CatalogJson.session(session(), JSONObject(saved.toString()))
+        assertEquals(run, restored.projectRun)
+        // A malformed member is skipped, never the session.
+        saved.getJSONObject("projectRun").getJSONArray("members").put(JSONObject().put("id", "broken"))
+        assertEquals(3, CatalogJson.session(session(), saved).projectRun?.members?.size)
     }
 }

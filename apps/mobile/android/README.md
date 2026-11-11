@@ -236,8 +236,23 @@ write retry identity handling are unchanged. Open last chat uses Home navigation
 ## Settings
 
 Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
-Agent settings, Agent Roles, prompt shortcuts, GitHub and sign-out. There is no Machines, Published shares or
+Agent settings, Agent Roles, prompt shortcuts, GitHub, Projects and sign-out. There is no Machines, Published shares or
 Agent conversation sync destination. Other unfinished settings destinations show an explicit placeholder.
+
+### Project groups
+
+Project groups are desktop's multi-repository projects. Android shows them as iOS does
+but does not create or edit them yet.
+
+- Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups from a fresh
+  `projectGroups` read and opens a read-only page with the group's computer, creator and
+  members. Local project visibility is not on Android yet.
+- Catalog sessions carry the group run's members (`CatalogProjectRun`, cached with the
+  catalog). In a group conversation the context capsule summarises repositories, PRs and
+  the group-wide diff, and opens a sheet listing every member with its branch, ±diff and
+  PR. A member's PR opens the PR panel, whose Merge and Delete branch then act on that PR.
+- The bar's own actions stay Create PR / Draft and Commit & Push, sent with web's
+  Project group scope (`SessionInfoBarTest`).
 
 Preferences follows iOS: language and notifications open the system pages for this
 app, then the queued-message behaviour (`AppPreferences`). Steer applies only when

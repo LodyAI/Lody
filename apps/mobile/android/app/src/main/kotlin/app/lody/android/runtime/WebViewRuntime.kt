@@ -61,7 +61,14 @@ open class WebViewRuntime internal constructor(
                     group.getString("id"), group.optString("name"),
                     group.optString("machineId").takeIf { !group.isNull("machineId") && it.isNotEmpty() },
                     group.optBoolean("conflict"),
-                    (0 until members.length()).map { members.getJSONObject(it).optString("label") },
+                    (0 until members.length()).map { members.getJSONObject(it) }.map { member ->
+                        ProjectGroupMember(
+                            member.optString("id"), member.optString("kind"), member.optString("label"), member.optString("path"),
+                            member.optString("repoFullName").takeIf { it.isNotEmpty() },
+                            member.optString("machineId").takeIf { it.isNotEmpty() },
+                        )
+                    },
+                    group.optString("ownerUserId"),
                 )
             })
         }
