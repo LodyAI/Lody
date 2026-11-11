@@ -467,7 +467,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     // conversation is live; a trigger at the caret opens the panel docked on the keyboard.
     LaunchedEffect(scope, id, status == "live", session?.cliType, session?.agentType) {
         if (session == null || status != "live") return@LaunchedEffect
-        mentions.load { category -> repository.mentions(scope, category, session) }
+        mentions.load(scope) { category -> repository.mentions(scope, category, session) }
     }
     val resolver = appContext.contentResolver
     val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
