@@ -1,6 +1,6 @@
 # 加密工作区 RPC 经 iroh 传输
 
-Status: proposed
+Status: implemented
 Translation: current
 Date: 2026-11-10
 
@@ -12,7 +12,9 @@ Date: 2026-11-10
 2026-11-10 把 iroh 定为首选通道：桌面主进程和 CLI 按每个工作区账本设备密钥各开一个
 iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams RPC 和持久派发
 仍作为回退。可达性不需要控制面：拨号方用全部 Lody 中继寻址目标，因此不发布任何
-地址，Convex 不变。延迟、打洞成功率、Windows 防火墙行为和安装包加载尚未测量。
+地址，Convex 不变。在一次干净的脚本化桌面运行中，发送到 handler 启动的中位数经 iroh
+为 112.5 ms，经 Streams 回退为 733 ms；模拟器上 iOS 中位数 184 ms，Android 562.5 ms。
+打洞成功率、实体手机、Windows 防火墙行为和安装包加载仍未测量。
 
 ## 问题
 
@@ -32,7 +34,10 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
   32 条并发流。
 - **路径顺序。** iroh → 加密 Streams RPC → 持久派发。已有到目标的存活连接时只走
   iroh；没有时先走 Streams RPC，同时在后台建连。iroh 失败时把同一份原件重投到
-  Streams；共用的 claim 对两条路径上的到达去重。
+  Streams；共用的 claim 对两条路径上的到达去重。渲染进程给每次等待设上限，iroh 不会
+  拖住同一请求改走 Streams：就绪检查 100 ms；调用自带截止时间（派发 800 ms，feature
+  请求用其请求超时）。桌面主进程在调用前最多等账户锁 250 ms。每次回退都记录
+  `iroh-fallback` 及原因（`not-ready`、`call-failed` 或 `unverified`）。
 - **身份与密钥保管。** custody 只在把设备种子导入为不可导出的 WebCrypto key 时
   短暂持有它，而 iroh 没有外接签名器的接口，因此 node custody 新增一个用途受限的
   操作：解密种子并交给原生打开函数。原生层立即擦除 JavaScript buffer，Endpoint
@@ -64,6 +69,11 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
   该模块。
 - **原生代码。** `packages/iroh-native` 包含与平台无关的 `lody-iroh` crate 和一个
   napi-rs 绑定。移动端使用同一 crate 的 UniFFI 绑定（`uniffi/`），只拨号，关闭端口映射。
+  所有 Endpoint 都关闭 UDP 分段卸载（GSO）：iroh 1.4.1 在创建发送器时缓存 socket 的
+  分段上限，网卡拒绝一次分段发送后，已打开的连接仍持续发送失败的批次
+  （[iroh #4555](https://github.com/n0-computer/iroh/issues/4555)，修复待合入
+  [#4645](https://github.com/n0-computer/iroh/pull/4645)）。RPC 帧很小，批量发送省不了
+  什么；只有在按次读取上限的版本上才重新开启。
 - **移动端种子交接。** 移动 App 在 WebView 里运行 portable host，它本来就持有设备种子。
   `BrowserDevice.withTransportSeed` 每个会话把一份副本交给一个原生插件一次（打开、
   状态、发送、接收），插件从不回传种子。Capacitor 会序列化参数，因此会留下一份无法
@@ -127,15 +137,29 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
 - `packages/components/tests/encrypted-dispatch-legacy.test.ts` 覆盖路径选择：有存活
   连接时走 iroh；没有连接、调用失败或没有可验证回复时用同一原件改走 Streams；分块
   原件留在 Streams。
-- 2026-11-10 本地探索式验收（macOS arm64，HTTPS/h2 本地栈，云端桌面 test-build，内嵌
-  CLI，n0 公共中继，head `39e57c00`）：同一加密会话的 3 条消息各执行一次，且每条都有
-  对应的 CLI `[e2ee-iroh] request` 和渲染进程 `iroh-reply`；agent 改文件后能看到真实
-  diff 和文件预览；能力刷新（一个 feature 请求）经 iroh 回复；去掉模块后 CLI 退回
-  Streams 且只执行一次。这不是干净的脚本化运行，也没有证明 diff/预览内容本身经 iroh。
-- 该运行发现并在本 PR 修复了两个缺陷：macOS 上 Cargo 的 strip 步骤生成了 Node 和
-  Electron 拒绝加载的 dylib（`mis-aligned LINKEDIT string pool`）；在只能经 HTTP 代理
-  出网的网络里，Endpoint 不走代理就连不上中继（直连 `iroh_connect_timeout`；经
-  `127.0.0.1:1087` 两端都 online，约 937 ms 收到回复）。
-- 尚未验证：桌面客户端连接已部署的中继；直连、只走中继和 Streams 三种路径的发送
-  到实际启动延迟；打洞成功率；监听机器上的 Windows 防火墙弹窗；各平台安装包里原生
-  模块的加载和 macOS 签名。
+- `packages/components/tests/encrypted-dispatch-legacy.test.ts` 还固定了调用预算：
+  宿主卡住 iroh 调用时，Streams 追加不会晚于 800 ms。
+- 2026-11-11 干净的脚本化验收（macOS arm64，HTTPS/h2 本地栈，云端桌面 test-build，内嵌
+  CLI，n0 公共中继经 HTTP 代理；harness 为私有仓库的 `local-stack/desktop/iroh-journey.mjs`）：
+  4 条消息（含一次 agent 改文件）都经 iroh，各执行一次；发送到 handler 启动分别为 266、
+  111、114、109 ms（中位数 112.5 ms）。真实 diff、文件预览和一个 feature 请求经 iroh
+  回复。去掉模块后，一条消息以 `not-ready` 回退，经 Streams 733 ms 到达 handler 启动。
+  在上一轮收尾前发出的消息会成为排队输入，由机器自行消费，不走任何 RPC 路径。
+- 2026-11-12 模拟器验收（Mac 主机，带原生插件的私有移动 App，同一本地栈和中继）：每个
+  平台 3 条消息经 iroh，CLI request 与渲染 `iroh-reply` 一一对应，各执行一次。发送到
+  handler 启动在 iOS 模拟器为 184、169、204 ms；Android 模拟器为 1034、461.5、562.5 ms，
+  其中 `call` 到流结束经直连为 186、145、129 ms，首条包含路由准备。不带插件的 iOS
+  构建经 Streams 回退，194 ms。
+- 探索式运行发现了四个塑造现有代码的缺陷：
+  - macOS 上 Cargo 的 strip 步骤生成了 Node 和 Electron 拒绝加载的 dylib
+    （`mis-aligned LINKEDIT string pool`）。
+  - 在只能经 HTTP 代理出网的网络里，Endpoint 不走代理就连不上中继（直连
+    `iroh_connect_timeout`）。
+  - 桌面 iroh 调用无截止地等待账户锁，拖住派发改走 Streams；250 ms 锁预算和渲染进程
+    截止时间修复了它。
+  - Android 模拟器网卡以 `EIO` 拒绝分段 UDP 发送；开启 GSO 时 28 次移动端调用有 27 次
+    超过 800 ms 截止并回退到 Streams。关闭 GSO 后错误消失。
+- 尚未验证：任何客户端连接已部署的 Lody 中继；直连与只走中继各自的延迟（测量的运行经
+  代理走中继）；打洞成功率；iOS 和 Android 实体设备，包括 Android 蜂窝网络
+  （[iroh #4647](https://github.com/n0-computer/iroh/issues/4647)）；监听机器上的
+  Windows 防火墙弹窗；各平台安装包里原生模块的加载和 macOS 签名。

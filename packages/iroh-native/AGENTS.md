@@ -5,7 +5,7 @@
 These rules bind the CLI machine listener (`apps/cli/src/lib/e2ee/iroh-listener.ts`)
 and the desktop client (`apps/electron/src/main/services/e2ee-iroh.mts`) as well as
 this package. Intent: [foundations Spec](../../specs/e2ee-foundations.md#preferred-route-iroh);
-rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2026-11-10-e2ee-iroh-transport.md).
+rationale: [iroh transport decision](../../.agents/notes/implemented/architecture/2026-11-10-e2ee-iroh-transport.md).
 
 - This package moves opaque `{id, frame}` envelopes only. It never parses, verifies
   or authorizes a frame, and it exposes no signing, key export or frame inspection.

@@ -1,6 +1,6 @@
 # Encrypted-workspace RPC over iroh
 
-Status: proposed
+Status: implemented
 Translation: current
 Date: 2026-11-10
 
@@ -14,8 +14,11 @@ the desktop main process and the CLI open one iroh endpoint per workspace ledger
 device key, and carry the same signed frames on ALPN `lody/e2ee-rpc/1`, while
 Streams RPC and durable dispatch remain as fallbacks. Reachability needs no
 control plane: a dialer addresses the target with every Lody relay, so no address
-is published and Convex is unchanged. Latency, hole-punching rate, Windows firewall
-behavior and packaged-platform loading are not yet measured.
+is published and Convex is unchanged. In a clean scripted desktop run, send to
+handler start took a median of 112.5 ms over iroh and 733 ms on the Streams
+fallback; on simulators the median was 184 ms on iOS and 562.5 ms on Android.
+Hole-punching rate, physical phones, Windows firewall behavior and
+packaged-platform loading remain unmeasured.
 
 ## Problem
 
@@ -40,7 +43,12 @@ encrypted workspaces once all platforms can use a device-to-device route.
   connection to the target, the request goes over iroh only. Without one, the
   request goes over Streams RPC while the connection is prepared in the background.
   An iroh failure retries the same original over Streams; the shared claim
-  deduplicates arrivals on both routes.
+  deduplicates arrivals on both routes. The renderer bounds every wait so iroh
+  never holds a request back from Streams: 100 ms for the readiness check, and its
+  own deadline on the call (800 ms for dispatch, the request timeout for feature
+  requests). On desktop, main also waits at most 250 ms for the account lock before
+  the call. Each fallback logs `iroh-fallback` with its reason (`not-ready`,
+  `call-failed` or `unverified`).
 - **Identity and key custody.** Custody holds the device seed only transiently while
   importing it as a non-extractable WebCrypto key, and iroh has no external-signer
   hook. Node custody therefore gains one purpose-limited operation that decrypts
@@ -81,7 +89,13 @@ encrypted workspaces once all platforms can use a device-to-device route.
   CLI. The public desktop and the standalone npm CLI ship no module.
 - **Native code.** `packages/iroh-native` holds the platform-neutral `lody-iroh`
   crate and a napi-rs binding. Mobile uses a UniFFI binding of the same crate
-  (`uniffi/`), dial-only with port mapping disabled.
+  (`uniffi/`), dial-only with port mapping disabled. Every endpoint turns UDP
+  segmentation offload (GSO) off: iroh 1.4.1 caches the socket's segment limit when
+  it creates the sender, so after a NIC refuses a segmented send, open connections
+  keep sending batches that fail
+  ([iroh #4555](https://github.com/n0-computer/iroh/issues/4555), fix pending in
+  [#4645](https://github.com/n0-computer/iroh/pull/4645)). RPC frames are small, so
+  batching saves nothing; re-enable it only on a release that reads the limit per send.
 - **Mobile seed handoff.** The mobile app runs the portable host in its WebView, which
   already holds the device seed. `BrowserDevice.withTransportSeed` passes a copy once
   per session to one native plugin (open, status, send, receive), which never returns
@@ -155,19 +169,40 @@ External facts:
 - `packages/components/tests/encrypted-dispatch-legacy.test.ts` covers route
   selection: iroh with a live connection, Streams with the same original after no
   connection, a failed call or no verifiable reply, and chunked originals.
-- Exploratory local acceptance on 2026-11-10 (macOS arm64, local stack over HTTPS/h2,
-  cloud desktop test-build, embedded CLI, n0 public relays, head `39e57c00`): three
-  messages in one encrypted session each executed once and each had a matching CLI
-  `[e2ee-iroh] request` and renderer `iroh-reply`; an agent edit produced a real
-  diff and file preview; capability refresh (a feature request) answered over iroh;
-  without the module the CLI fell back to Streams and executed once. Not a clean
-  scripted run, and diff/preview content was not shown to travel over iroh.
-- That run found two defects fixed in this PR: Cargo's macOS strip step produced a
-  dylib Node and Electron refused ("mis-aligned LINKEDIT string pool"), and on a
-  network that reaches the internet only through an HTTP proxy the endpoint never
-  connected to a relay until it used the proxy (direct: `iroh_connect_timeout`;
-  via `127.0.0.1:1087`: both endpoints online, reply in about 937 ms).
-- Not yet verified: the desktop client against a deployed relay; send-to-actual-start
-  latency over direct, relay-only and Streams routes; hole-punching rate; Windows
-  firewall prompts on the listening machine; native module loading and macOS signing
-  in packaged installers on every platform.
+- `packages/components/tests/encrypted-dispatch-legacy.test.ts` also pins the call
+  budget: a host that holds the iroh call does not delay the Streams append past
+  800 ms.
+- Clean scripted acceptance on 2026-11-11 (macOS arm64, local stack over HTTPS/h2,
+  cloud desktop test-build, embedded CLI, n0 public relays through an HTTP proxy;
+  harness `local-stack/desktop/iroh-journey.mjs` in the private repository): four
+  messages, including one agent file edit, each went over iroh and executed once.
+  Send to handler start took 266, 111, 114 and 109 ms (median 112.5 ms). A real
+  diff, file preview and a feature request answered over iroh. Without the module,
+  one message fell back with `not-ready` and reached handler start in 733 ms over
+  Streams. A message sent before the previous turn finalized becomes queued input
+  that the machine drains itself; it uses neither RPC route.
+- Simulator acceptance on 2026-11-12 (Mac host, private mobile app with the native
+  plugin, same local stack and relays): three messages per platform went over iroh,
+  each with a matching CLI request and renderer `iroh-reply` and executed once.
+  Send to handler start took 184, 169 and 204 ms on the iOS simulator, and 1034,
+  461.5 and 562.5 ms on the Android emulator, where `call` to stream end took 186,
+  145 and 129 ms over a direct path and the first send includes route preparation.
+  An iOS build without the plugin fell back to Streams in 194 ms.
+- Exploratory runs found four defects that shaped the current code:
+  - Cargo's macOS strip step produced a dylib that Node and Electron refused to
+    load ("mis-aligned LINKEDIT string pool").
+  - On a network that reaches the internet only through an HTTP proxy, the endpoint
+    never connected to a relay until it used the proxy (direct:
+    `iroh_connect_timeout`).
+  - The desktop iroh call waited on the account lock with no deadline, holding
+    dispatch back from Streams. The 250 ms lock budget and the renderer deadline
+    fix this.
+  - The Android emulator NIC refused segmented UDP sends with `EIO`; with GSO on,
+    27 of 28 mobile calls missed the 800 ms deadline and fell back to Streams.
+    Turning GSO off removed the errors.
+- Not yet verified: any client against a deployed Lody relay; separate direct and
+  relay-only latency (the measured run used relays through a proxy); hole-punching
+  rate; physical iOS and Android devices, including Android cellular
+  ([iroh #4647](https://github.com/n0-computer/iroh/issues/4647)); Windows firewall
+  prompts on the listening machine; native module loading and macOS signing in
+  packaged installers on every platform.
