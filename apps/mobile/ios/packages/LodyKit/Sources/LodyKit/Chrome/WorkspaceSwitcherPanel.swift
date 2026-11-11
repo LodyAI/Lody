@@ -82,7 +82,7 @@ final class WorkspaceSwitcherPanel: UIViewController, UIPopoverPresentationContr
         self?.rebuild()
       }
       row.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
-      row.addAction(UIAction { [weak self] _ in self?.choose(item.id) }, for: .primaryActionTriggered)
+      row.addAction(UIAction { [weak self] _ in self?.choose(item.id) }, for: .touchUpInside)
       stack.addArrangedSubview(row)
     }
     resize()
