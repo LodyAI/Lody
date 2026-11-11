@@ -29,3 +29,30 @@ export const Isolation: Story = {
 \`\`\``,
   },
 };
+
+export const Controls: Story = {
+  args: {
+    text: `\`\`\`html title="Controls"
+${counter}
+<p><input placeholder="Text field"><input disabled value="Disabled"></p>
+<p><textarea placeholder="Notes"></textarea><select><option>First option</option><option>Second option</option></select></p>
+<p><label><input type="checkbox" checked> Enabled</label><label><input type="radio" name="choice" checked> Choice</label><input type="checkbox" disabled></p>
+<button disabled>Disabled button</button>
+\`\`\``,
+  },
+};
+
+export const AuthoredOverrides: Story = {
+  args: {
+    text: `\`\`\`html title="Author overrides"
+<!doctype html><html><head><style>
+@layer author { * { border-radius: 0; } button { background: gold; color: black; box-shadow: none; } html { color-scheme: light; } }
+.custom { background: navy; color: white; font-family: monospace; }
+</style></head><body>
+${counter}
+<button class="custom">Class override</button>
+<button style="background: purple; color: white; border-radius: 24px">Inline override</button>
+</body></html>
+\`\`\``,
+  },
+};

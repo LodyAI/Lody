@@ -2,13 +2,26 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { useTranslation } from 'react-i18next';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { control, radius, space } from '@lody/ui/tokens/scales.stylex';
 // A fetched document owns its CSP; inlining it as a data URL would inherit the host's.
 import frameUrl from './markdown-html-frame.htm?url&no-inline';
 import { CodeBlockBody, CodeBlockCopyButton } from '../markdown-code-block';
 
 const styles = stylex.create({
-  host: { width: '100%', marginBlock: space[3] },
+  host: {
+    width: '100%',
+    marginBlock: space[3],
+    '--preview-raised': colors.raisedBackground,
+    '--preview-well': colors.wellBackground,
+    '--preview-accent': colors.accent,
+    '--preview-hover': colors.hoverFill,
+    '--preview-shadow': shadow.raised,
+    '--preview-inset': shadow.inset,
+    '--preview-radius': radius.medium,
+    '--preview-height': control.medium,
+    '--preview-space': space[2],
+  },
   dialog: {
     position: 'static',
     display: 'block',
@@ -120,7 +133,25 @@ function documentSource(code: string, id: string, dark: boolean, theme: string) 
       schedule();
     });
   })();<\/script>`;
-  return `<!doctype html><html style="color-scheme:${dark ? 'dark' : 'light'}"><head><meta charset="utf-8"><style>:root{${theme}}body{background:hsl(var(--background));color:hsl(var(--foreground));font-family:var(--preview-font)}</style>${script}</head><body>${code}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+@layer lody-preview-fallback {
+  :where(:root) { ${theme} color-scheme: ${dark ? 'dark' : 'light'}; }
+  :where(body) { background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: var(--preview-font); font-size: var(--preview-font-size); }
+  :where(button, input, textarea, select) { font: inherit; color: inherit; accent-color: var(--preview-accent); }
+  :where(button, input:is([type="button"], [type="submit"], [type="reset"])) {
+    background: var(--preview-raised); border: 0; box-shadow: var(--preview-shadow);
+    border-radius: var(--preview-radius); min-height: var(--preview-height); padding: var(--preview-space); cursor: pointer;
+  }
+  :where(button, input:is([type="button"], [type="submit"], [type="reset"])):where(:hover:not(:disabled)) { background: var(--preview-hover); }
+  :where(input:not([type]), input:is([type="text"], [type="email"], [type="password"], [type="search"], [type="url"], [type="tel"], [type="number"]), textarea, select) {
+    box-sizing: border-box; background: var(--preview-well); border: 0; box-shadow: var(--preview-inset);
+    border-radius: var(--preview-radius); min-height: var(--preview-height); padding: var(--preview-space);
+  }
+  :where(input:is([type="checkbox"], [type="radio"])) { cursor: pointer; }
+  :where(button, input, textarea, select):where(:focus-visible) { outline: 2px solid var(--preview-accent); outline-offset: 2px; }
+  :where(button, input, textarea, select):where(:disabled) { opacity: 0.5; cursor: not-allowed; }
+}
+</style>${script}</head><body>${code}</body></html>`;
 }
 
 export const MarkdownHtmlBlock = memo(function MarkdownHtmlBlock({
@@ -159,9 +190,12 @@ export const MarkdownHtmlBlock = memo(function MarkdownHtmlBlock({
     setMounted(true);
     const update = () => {
       setDark(document.documentElement.classList.contains('dark'));
-      const css = getComputedStyle(document.documentElement);
+      const css = getComputedStyle(host.current ?? document.documentElement);
       setTheme(
-        `--background:${css.getPropertyValue('--background')};--foreground:${css.getPropertyValue('--foreground')};--preview-font:${css.fontFamily};`
+        ['raised', 'well', 'accent', 'hover', 'shadow', 'inset', 'radius', 'height', 'space']
+          .map((name) => `--preview-${name}:${css.getPropertyValue(`--preview-${name}`)};`)
+          .join('') +
+          `--background:${css.getPropertyValue('--background')};--foreground:${css.getPropertyValue('--foreground')};--preview-font:${css.fontFamily};--preview-font-size:${css.fontSize};`
       );
     };
     update();

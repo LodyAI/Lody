@@ -42,8 +42,13 @@ the reasoning behind those rules.
   raw HTML cannot grant execution. Each preview has an opaque-origin
   `allow-scripts` sandbox and accepts only bootstrap confirmation and height/error
   reports from its current window and instance. It exposes no host actions.
-  Source and fullscreen keep the
-  same iframe; reload, content changes and theme changes create a new document.
+  Unstyled native controls inherit the host font and sampled `@lody/ui` semantic
+  colors, shadows, radius, control height and spacing. Theme and control defaults
+  live in the first CSS fallback layer with zero-specificity selectors, so authored
+  class, universal, inline and later-layer styles override them. Storybook
+  `Controls` and `AuthoredOverrides` expose both cases with the original counter.
+  Source and fullscreen keep the same iframe; reload, content changes and theme
+  changes create a new document.
   Previews load within 800px of the scroll container, reserve 120px, clip above
   480px until expanded, and cap reported height at 10,000px. A bounded 500-entry
   memory of seen source/heights accelerates virtual remounts without preserving
