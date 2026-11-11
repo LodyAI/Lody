@@ -91,6 +91,8 @@ extension SessionController {
       "menuTitle": bar.repository.isEmpty ? (projectName ?? "") : bar.repository,
       "repository": bar.repository,
       "prStatus": bar.pullRequest?.status ?? "", "prCI": bar.pullRequest?.ci ?? "",
+      // A PR write in flight: the mark spins until GitHub answers, then shows the real status.
+      "busy": bar.pullRequest != nil && githubOperation != nil,
     ]
   }
 

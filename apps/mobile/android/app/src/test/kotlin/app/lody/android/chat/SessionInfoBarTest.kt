@@ -15,16 +15,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionInfoBarTest {
-    @Test fun pendingWritesProjectImmediatelyAndRollBackOnFailure() {
+    @Test fun pendingWritesKeepTheCatalogStatusUntilGitHubAcknowledges() {
         val updates = SessionPullRequestUpdates()
         val draft = pr("draft")
         val stale = session(pr = draft)
         updates.begin(draft, merged = false)
-        assertEquals("open", updates.apply(stale).pullRequests.last().status)
+        assertTrue(updates.writes(draft))
+        assertEquals("draft", updates.apply(stale).pullRequests.last().status)
         updates.finish(success = false)
         assertEquals("draft", updates.apply(stale).pullRequests.last().status)
         updates.begin(draft, merged = true)
-        assertEquals("merged", updates.apply(stale).pullRequests.last().status)
+        assertEquals("draft", updates.apply(stale).pullRequests.last().status)
         updates.finish(success = true)
         assertEquals("merged", updates.apply(stale).pullRequests.last().status)
     }

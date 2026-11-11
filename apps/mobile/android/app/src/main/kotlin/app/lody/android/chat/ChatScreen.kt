@@ -645,6 +645,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 ChatActionBar(
                     bar,
                     writing = writing,
+                    // `writing` changes with every begin/finish, so this read recomposes with it.
+                    pullRequestBusy = writing != null && bar.pullRequest?.let(prUpdates::writes) == true,
                     pullRequestPanel = pullRequestPanel,
                     panelFor = panelFor,
                     relations = if (hasRelations) ({ SessionRelationsChip(id, context.relatedSessions, onSelectTab) }) else null,
@@ -1200,6 +1202,8 @@ internal fun ChatActionBar(
     onAction: (SessionInfoBar.Action) -> Unit,
     onCopied: (String) -> Unit,
     writing: SessionInfoBar.Action? = null,
+    /** A merge or Ready for review on the bar's PR is in flight: a spinner replaces its mark. */
+    pullRequestBusy: Boolean = false,
     relations: (@Composable () -> Unit)? = null,
     pullRequestPanel: PullRequestPanel? = null,
     /** The PR panel for any PR; a Project group member's PR opens with its own. */
@@ -1212,7 +1216,7 @@ internal fun ChatActionBar(
         Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             relations?.invoke()
             if (bar.group != null) GroupContextItem(bar, bar.group, diffDot, onCopied, panelFor)
-            else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel)
+            else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel, busy = pullRequestBusy)
         }
     }
     @Composable fun Action() {
@@ -1332,7 +1336,14 @@ private fun MachineItem(name: String, online: Boolean?, load: suspend () -> Mach
  * capsule (a dot when space is short; the counts then lead the menu). CI trouble tints the glyph.
  */
 @Composable
-private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String) -> Unit, panel: PullRequestPanel?, modifier: Modifier = Modifier) {
+private fun ContextItem(
+    bar: SessionInfoBar,
+    diffDot: Boolean,
+    onCopied: (String) -> Unit,
+    panel: PullRequestPanel?,
+    modifier: Modifier = Modifier,
+    busy: Boolean = false,
+) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -1357,7 +1368,8 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
             onLongClick = if (pr != null) ({ open = true }) else null,
         ) {
             if (showsContext) {
-                if (pr != null) app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci)
+                if (pr != null && busy) CircularProgressIndicator(Modifier.size(LodyIconSize.sm), strokeWidth = 2.dp, color = colors.iconSecondary)
+                else if (pr != null) app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci)
                 else Icon(LodyIcons.Branch, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
                 Text(label, style = type.subhead, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                     // Not weighted: the fitting probe measures unbounded, where a weight would read as zero.
