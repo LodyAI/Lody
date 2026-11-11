@@ -21,7 +21,11 @@ export type E2eeAccountPairingErrorCode =
   /** The service refuses new requests for this account until its hourly limit resets. */
   | 'pairing-rate-limited'
   /** The native host cannot preserve the automatic exchange's original deadline. */
-  | 'pairing-update-required';
+  | 'pairing-update-required'
+  /** The entered code differs from this device's; the error carries `attemptsLeft`. */
+  | 'pairing-code-mismatch'
+  /** Too many wrong codes: this device ended the request; the new device must request again. */
+  | 'pairing-code-locked';
 
 const ERROR_CODES: readonly E2eeAccountPairingErrorCode[] = [
   'pairing-tampered',
@@ -31,6 +35,8 @@ const ERROR_CODES: readonly E2eeAccountPairingErrorCode[] = [
   'pairing-unavailable',
   'pairing-rate-limited',
   'pairing-update-required',
+  'pairing-code-mismatch',
+  'pairing-code-locked',
 ];
 /** Reads the typed refusal from a host error; anything else is an ordinary failure. */
 export function accountPairingErrorCode(error: unknown): E2eeAccountPairingErrorCode | null {
@@ -119,8 +125,12 @@ export type E2eeAutomaticPairingState = {
   comparisonCode: string | null;
   phase: 'preparing' | 'waiting' | 'syncing' | 'joined' | 'declined' | 'expired' | 'cancelled';
 };
-/** A host-authenticated, current-workspace-only approval preview. */
-export type E2eeAutomaticPairingReview = E2eeAutomaticPairingState & { requestId: string };
+/** A host-authenticated, current-workspace-only approval preview. It carries no
+ * comparison code: the person types the code the new device shows, and the host
+ * compares it locally. `deviceName` is the requester's own, unverified label. */
+export type E2eeAutomaticPairingReview = Omit<E2eeAutomaticPairingState, 'comparisonCode'> & {
+  requestId: string;
+};
 /** Optional real runtime capability. Discovery alone never grants access. */
 export interface E2eeAutomaticPairingRuntime {
   /** Optional push hints; verification still occurs through the ordinary runtime reads. */
@@ -134,6 +144,9 @@ export interface E2eeAutomaticPairingRuntime {
     input: { expectedLookupId: string }
   ): Promise<E2eeAutomaticPairingState>;
   pendingAutomaticPairing?(): Promise<E2eeAutomaticPairingReview[]>;
-  approveAutomaticPairing?(id: string): Promise<void>;
+  /** Signs only when `enteredCode` equals this device's derived code. A mismatch refuses
+   * with `pairing-code-mismatch`; the last allowed mismatch ends the request with
+   * `pairing-code-locked`. The code never leaves this device. */
+  approveAutomaticPairing?(id: string, enteredCode: string): Promise<void>;
   declineAutomaticPairing?(id: string): Promise<void>;
 }

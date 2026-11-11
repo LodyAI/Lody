@@ -69,6 +69,8 @@ export const RemoteMachineStatusSchema = z
     ]),
     expiresAt: z.number().int().positive().safe(),
     material: LocalE2eePrepareResponseSchema.nullable(),
+    /** True when the session ended before any admission was reserved. With `conflict`
+     * it means another machine claimed the same command first, so it was cancelled. */
     noAdmissionReserved: z.boolean().optional(),
     location: z
       .object({ country: z.string().max(80).nullable(), city: z.string().max(80).nullable() })
