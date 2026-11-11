@@ -265,9 +265,21 @@ Agent conversation sync destination, and archived chats live behind the Chats vi
 Project groups are desktop's multi-repository projects. Android shows them as iOS does
 but does not create or edit them yet.
 
-- Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups from a fresh
-  `projectGroups` read and opens a read-only page with the group's computer, creator and
-  members. Local project visibility is not on Android yet.
+- Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups (the last accepted
+  list first, from the `project-groups` settings snapshot) from a fresh `projectGroups` read and opens a read-only page with the group's computer, creator and
+  members.
+- Above the groups, the same page shows local project visibility per computer (its header
+  adds Online / Offline from the creation options' online computers while the catalog is live), as iOS
+  (`ProjectVisibility.kt`, mirroring `WorkspaceSettingsCloud` / `ProjectVisibilitySections`).
+  Catalog projects list at once; the `localProjects:listVisibleLocalProjects` registrations
+  (the last accepted read for the scope first: process memory, then the `project-visibility`
+  settings snapshot in `AtomicCatalogStore`, display only) only add each project's
+  Shared / Private state. Like desktop, `machines:listVisibleMachines` identifies the user's
+  own computers: their unregistered projects read as Private and can be shared, those on
+  other members' computers stay hidden, and if the machine read fails they read as Unknown.
+  Only the owner changes a project, only from a live read, through
+  `localProjects:setLocalProjectSharedWithTeam` with a one-shot client; the change counts once
+  a fresh read shows it, and a failed or unknown write locks the page until it is reloaded.
 - Catalog sessions carry the group run's members (`CatalogProjectRun`, cached with the
   catalog). In a group conversation the context capsule summarises repositories, PRs and
   the group-wide diff, and opens a sheet listing every member with its branch, ±diff and

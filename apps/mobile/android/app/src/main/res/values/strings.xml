@@ -818,6 +818,16 @@
         <item quantity="one">%d repository or folder</item>
         <item quantity="other">%d repositories or folders</item>
     </plurals>
+    <string name="project_visibility_hint">Choose who in this workspace can see each project.</string>
+    <string name="project_visibility_footer">Doesn’t delete files or history.</string>
+    <string name="project_visibility_empty">No registered local projects in this workspace.</string>
+    <string name="project_visibility_shared">Shared with workspace</string>
+    <string name="project_visibility_shared_short">Shared</string>
+    <string name="project_visibility_private">Private</string>
+    <string name="project_visibility_unknown">Unknown</string>
+    <string name="project_visibility_others">Owned by another member</string>
+    <string name="project_visibility_load_failed">Couldn’t load project visibility. Changes are off until it loads.</string>
+    <string name="project_visibility_unconfirmed">The change could not be confirmed. Reload to see the current visibility.</string>
     <string name="project_groups_header">Project groups</string>
     <string name="project_groups_empty">No project groups in this workspace yet.</string>
     <string name="project_groups_untitled">Untitled group</string>

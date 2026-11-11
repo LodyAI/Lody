@@ -200,6 +200,7 @@ fun ChatListScreen(
     /** Last accepted settings-page reads (display only). */
     settingsCache: SettingsSnapshotStore? = null,
     githubSettings: GitHubSettingsService? = null,
+    projectVisibility: ProjectVisibilityService? = null,
     scope: app.lody.android.runtime.RuntimeScope? = null,
     /** Opens a conversation by id (a schedule's last run). */
     onOpenSession: (String) -> Unit = {},
@@ -288,7 +289,7 @@ fun ChatListScreen(
         return
     }
     if (projectsOpen) {
-        ProjectGroupsScreen(state, creation, scope, onBack = { projectsOpen = false })
+        ProjectGroupsScreen(state, creation, scope, projectVisibility, settingsCache, onBack = { projectsOpen = false })
         return
     }
     if (rolesOpen) {
