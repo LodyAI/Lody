@@ -6,6 +6,7 @@ import {
   readDaemonLossAuthority,
 } from './client-loss-observer';
 import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
+import { openSqliteMachineSharingStore } from '@lody/e2ee-machine-sharing/sqlite';
 import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
 import { getScheduleIdFromRoomId, type ScheduleAuthorizationRequest } from '@lody/shared';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
@@ -790,11 +791,8 @@ async function openWorkspaceOwned(
           : undefined,
       });
       sharing = yield* makeLazyMachineSharingHost({
-        filename: join(
-          directory,
-          'runtime',
-          hex(device.publicKey.toBytes()),
-          'machine-sharing.sqlite'
+        store: openSqliteMachineSharingStore(
+          join(directory, 'runtime', hex(device.publicKey.toBytes()), 'machine-sharing.sqlite')
         ),
         workspaceId: options.workspaceId,
         genesisHash: binding.genesisHash,
