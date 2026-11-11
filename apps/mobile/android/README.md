@@ -275,10 +275,11 @@ but does not create or edit them yet.
 - The bar's own actions stay Create PR / Draft and Commit & Push, sent with web's
   Project group scope (`SessionInfoBarTest`).
 
-Preferences follows iOS: language and notifications open the system pages for this
-app, then the queued-message behaviour (`AppPreferences`). Steer applies only when
+Preferences follows iOS: a General group whose language and notifications open the
+system pages for this app, then Chat Behavior with the queued-message behaviour
+(`AppPreferences`). Steer applies only when
 the conversation's agent advertises `steer`; otherwise a message sent while it works
-queues. Android has no alternate app icon.
+queues. Android has no alternate app icon, so there is no Appearance group.
 
 Agent Roles (`RolesScreen`, runtime `agentRoleSettings`) list your Roles and those
 shared by teammates with their emoji, and create, edit and delete your own (emoji

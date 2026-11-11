@@ -735,6 +735,7 @@
     <string name="settings_agent_scan_extensions">扫描 Pi 扩展</string>
     <string name="settings_agent_api_key_short">API 密钥</string>
     <string name="settings_agent_sorbet_unavailable">Sorbet 连接管理需要此原生客户端尚未支持的加密功能传输。</string>
+    <string name="preferences_general">通用</string>
     <string name="preferences_language">语言</string>
     <string name="preferences_notifications">通知</string>
     <string name="preferences_chat">会话行为</string>

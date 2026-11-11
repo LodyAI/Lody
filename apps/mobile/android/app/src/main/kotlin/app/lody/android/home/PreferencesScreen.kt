@@ -46,18 +46,16 @@ internal fun PreferencesScreen(onBack: () -> Unit) {
         }
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
+            // iOS #2575: General holds Language and Notifications; Chat Behavior follows. Android has
+            // no alternate app icon, so there is no Appearance group.
             item {
-                SettingsGroup {
+                SettingsGroup(stringResource(R.string.preferences_general)) {
                     val language = locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
                     SettingsLine(stringResource(R.string.preferences_language), LodyIcons.Info, language, onClick = {
                         open(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
                             Intent(Settings.ACTION_APP_LOCALE_SETTINGS, Uri.fromParts("package", context.packageName, null))
                         else Intent(Settings.ACTION_LOCALE_SETTINGS))
                     })
-                }
-            }
-            item {
-                SettingsGroup {
                     SettingsLine(stringResource(R.string.preferences_notifications), LodyIcons.Bell, onClick = {
                         open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
                     })
