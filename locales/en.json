@@ -1545,6 +1545,7 @@
   "joinRequest.verify": "Verify {{email}} before submitting your request.",
   "joinRequest.verifyAction": "Verify email",
   "joinRequest.rejected": "Your previous request was not approved. You may submit a new reason.",
+  "joinRequest.formDescription": "Request access. The workspace owner reviews every request.",
   "joinRequest.reasonLabel": "Why do you want to join?",
   "joinRequest.reasonPlaceholder": "Share context for the workspace owner…",
   "joinRequest.identity": "Submitting as {{email}}",
