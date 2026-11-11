@@ -422,6 +422,9 @@ export async function boot(
         browserClientWriter({
           accountId: recoveryAccount ?? 'account',
           workspaceId: offer.workspaceId,
+          // Controlled-close boots move every timer by hand; their in-tab calls keep the
+          // no-wait conflict, so only the close budget waits on the injected clock.
+          ...(controlledClose ? { queueTimeout: 0 } : {}),
         })
       ).pipe(Layer.provide(ws));
       const platform = PersonalHostPlatform.of({

@@ -39,7 +39,7 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
   The first outbox ciphertext per recipient/epoch is immutable and re-sent on every
   revision; Recovery devices never send. Capacity blocks new tasks, never deletes.
   Recipients' round trips may overlap, but installed-key reads stay one at a time:
-  a single-writer custody refuses a concurrent holder rather than queueing it.
+  the custody writer contract lets a busy writer fail conflict rather than queue.
 
 - `EpochPublisher` candidates use `CandidateProtector`, never installed-key
   protection, and authenticate purpose/context/original record/envelope digest.

@@ -152,9 +152,9 @@ the exact bytes, not that the recipient installed them. A full journal fails new
 tasks with `task-limit`; acknowledging frees capacity without deleting history.
 Different recipients are scheduled and delivered concurrently (at most eight at
 once); one recipient's steps stay in order. Installed-key reads are the exception
-and run one at a time: a single-writer custody, such as the browser's Web Lock,
-refuses a concurrent holder instead of queueing it, so overlapping reads would
-block every recipient but one each round. Outcomes are still checked in
+and run one at a time: the custody writer contract lets a busy single writer fail
+conflict instead of queueing (the browser adapter queues only within one tab), so
+overlapping reads could block every recipient but one each round. Outcomes are still checked in
 recipient/task order: a blocked recipient never blocks the others, and storage
 damage fails the batch.
 
