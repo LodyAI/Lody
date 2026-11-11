@@ -141,8 +141,8 @@ there" pins this; it fails on the textarea and passes on the editor.
     menu, chip deletion, newline, paste and long-press selection across a chip.
   - The Electron app's chat composer passed pinyin composition beside a chip,
     chip arrows and deletion, click placement under overflow, the mention menu,
-    no undo after sending, and the sent message with its mention.
+    undo and redo of text typed or pasted after a chip, no undo after sending, and
+    the sent message with its mention.
 - **Not verified:** macOS's built-in pinyin in Electron (automation typed Latin
   letters; a third-party pinyin IME passed), a selection started by long-press
-  alone on iOS, iPhone landscape, and undo after a committed chip in the Electron
-  app itself (the spec above covers the same code path). The plain-text composers are unchanged.
+  alone on iOS, and iPhone landscape. The plain-text composers are unchanged.

@@ -60,5 +60,5 @@ Translation: current
 - **设备（2026-11-11）**：
   - iOS Safari 配系统拼音键盘：中英混排、组字期间不写入调用方、紧贴 chip 组字、方向键跨 chip 和删除 chip、撤销（包括清空之后）、粘贴、换行、占位符颜色、两个宽度下的点击落光标、用选择手柄跨 chip 选择均通过。
   - Android Chrome 配 Gboard：拼音输入、点击落光标、mention 菜单、删除 chip、换行、粘贴、长按跨 chip 选择均通过。
-  - Electron 应用的聊天输入框：紧贴 chip 拼音组字、方向键跨 chip 和删除 chip、溢出时点击落光标、mention 菜单、发送后不能撤销找回、发出的消息及其 mention 显示均通过。
-- **尚未验证**：Electron 里 macOS 自带拼音（自动化输入落成拉丁字母；第三方拼音输入法通过）、iOS 上仅靠长按开始的选择、iPhone 横屏，以及在 Electron 应用里复测提交 chip 之后的撤销（上面的测试覆盖同一代码路径）。纯文本 composer 没有改动。
+  - Electron 应用的聊天输入框：紧贴 chip 拼音组字、方向键跨 chip 和删除 chip、溢出时点击落光标、mention 菜单、chip 之后输入或粘贴的文字可撤销和重做、发送后不能撤销找回、发出的消息及其 mention 显示均通过。
+- **尚未验证**：Electron 里 macOS 自带拼音（自动化输入落成拉丁字母；第三方拼音输入法通过）、iOS 上仅靠长按开始的选择，以及 iPhone 横屏。纯文本 composer 没有改动。
