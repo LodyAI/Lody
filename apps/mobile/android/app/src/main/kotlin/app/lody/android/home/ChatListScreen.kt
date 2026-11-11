@@ -248,15 +248,23 @@ fun ChatListScreen(
     val selectScope = { next: HomeScope -> homeScope = next; HomeGroupings.saveScope(context, next) }
     var idleExpanded by rememberSaveable { mutableStateOf(false) }
     val owner = state.userId.takeIf { homeScope == HomeScope.Mine }
+    val archivedDone = stringResource(R.string.home_archived_done)
+    val archiveFailed = stringResource(R.string.home_archive_failed)
     val unarchived = stringResource(R.string.home_unarchived)
     val unarchiveFailed = stringResource(R.string.home_unarchive_failed)
-    // One write per tap, never retried; the catalog then moves the row out of the archived list.
-    val unarchive: ((ChatItem) -> Unit)? = onSetArchived?.let { write -> { chat: ChatItem ->
+    // Long-press Archive / Unarchive (iOS row actions): one write per tap, never retried; the
+    // catalog then moves the row between the open and archived lists.
+    val setArchived: ((ChatItem, Boolean) -> Unit)? = onSetArchived?.let { write -> { chat: ChatItem, value: Boolean ->
         notices.launch {
-            val ok = try { write(chat.id, false); true }
+            val ok = try { write(chat.id, value); true }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { false }
-            snackbar.showSnackbar(if (ok) unarchived else unarchiveFailed)
+            snackbar.showSnackbar(when {
+                value && ok -> archivedDone
+                value -> archiveFailed
+                ok -> unarchived
+                else -> unarchiveFailed
+            })
         }
         Unit
     } }
@@ -357,7 +365,8 @@ fun ChatListScreen(
                 ChatListModel.searchTimeline(if (archived && tab == HomeTab.Chats) archivedTimeline else state.timeline, query).map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) },
                 details, padding, empty = stringResource(R.string.home_search_empty, query.trim()).takeIf { query.isNotBlank() },
                 pinsLabels = false, onOpenChat = onOpenChat,
-                onUnarchive = unarchive.takeIf { archived && tab == HomeTab.Chats },
+                onSetArchived = setArchived,
+                archivedList = archived && tab == HomeTab.Chats,
                 owners = state.members.takeIf { homeScope == HomeScope.Team },
             )
             // A project header already names the project, so rows drop it from their detail line.
@@ -373,7 +382,8 @@ fun ChatListScreen(
                 idleExpanded = idleExpanded,
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
-                onUnarchive = unarchive.takeIf { archived },
+                onSetArchived = setArchived,
+                archivedList = archived,
             )
             else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onGitHub = { githubOpen = true }, onProjects = { projectsOpen = true }, onDeferred = { notice(deferredMessage) })
         }
@@ -767,8 +777,9 @@ internal fun HomeList(
     owners: Map<String, WorkspaceMember>? = null,
     pinsLabels: Boolean = true,
     projectIndex: Boolean = false,
-    /** Archived lists only: a long press offers Unarchive (iOS archived rows' only action). */
-    onUnarchive: ((ChatItem) -> Unit)? = null,
+    /** A long press offers Archive, or in an [archivedList] Unarchive only (iOS row actions). */
+    onSetArchived: ((ChatItem, Boolean) -> Unit)? = null,
+    archivedList: Boolean = false,
     onOpenChat: (ChatItem) -> Unit,
 ) {
     if (sections.isEmpty()) {
@@ -813,7 +824,8 @@ internal fun HomeList(
                         owner = owners?.let { it[chat.ownerId] ?: WorkspaceMember(chat.ownerId.orEmpty(), "") },
                         expanded = if (chat.treeParent) chat.id !in folded else null,
                         onToggle = { toggleOpener(chat.id) },
-                        onUnarchive = onUnarchive?.let { action -> { action(chat) } },
+                        archived = archivedList,
+                        onSetArchived = onSetArchived?.let { action -> { action(chat, !archivedList) } },
                     ) { onOpenChat(chat) }
                 }
                 if (section.folds) {
@@ -1051,7 +1063,9 @@ private fun ChatRow(
     owner: WorkspaceMember? = null,
     expanded: Boolean? = null,
     onToggle: () -> Unit = {},
-    onUnarchive: (() -> Unit)? = null,
+    /** Whether the row is in the archived list: its long-press action is then Unarchive. */
+    archived: Boolean = false,
+    onSetArchived: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val colors = LodyTheme.colors
@@ -1071,18 +1085,18 @@ private fun ChatRow(
             .drawBehind { if (nested) drawRail(rail, chat.lastChild, if (twoLine) LodySpacing.sm.toPx() + titleHeight / 2 else size.height / 2) },
     ) {
         // A popup: it takes no space in the column and anchors to this row.
-        if (onUnarchive != null) DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = colors.bgOverlay) {
+        if (onSetArchived != null) DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = colors.bgOverlay) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.home_unarchive), style = LodyTheme.typography.body, color = colors.textPrimary) },
+                text = { Text(stringResource(if (archived) R.string.home_unarchive else R.string.home_archive), style = LodyTheme.typography.body, color = colors.textPrimary) },
                 leadingIcon = { Glyph(LodyIcons.Inbox, colors.iconSecondary, LodyIconSize.sm) },
-                onClick = { menu = false; onUnarchive() },
+                onClick = { menu = false; onSetArchived() },
             )
         }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = if (nested) LodySize.controlMd else LodySize.listRow)
-                .combinedClickable(onClick = onClick, onLongClick = onUnarchive?.let { { menu = true } })
+                .combinedClickable(onClick = onClick, onLongClick = onSetArchived?.let { { menu = true } })
                 .padding(horizontal = LodyLayout.screenPaddingX)
                 .padding(vertical = if (twoLine) LodySpacing.sm else 0.dp),
             verticalAlignment = Alignment.CenterVertically,

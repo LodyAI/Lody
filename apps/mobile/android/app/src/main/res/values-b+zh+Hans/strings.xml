@@ -17,6 +17,9 @@
     <string name="home_view_details">显示</string>
     <string name="home_view_archived">已归档</string>
     <string name="home_archived_empty">没有已归档的对话</string>
+    <string name="home_archive">归档</string>
+    <string name="home_archived_done">已归档</string>
+    <string name="home_archive_failed">暂时无法归档，请重试。</string>
     <string name="home_unarchive">取消归档</string>
     <string name="home_unarchived">已取消归档</string>
     <string name="home_unarchive_failed">暂时无法取消归档，请重试。</string>

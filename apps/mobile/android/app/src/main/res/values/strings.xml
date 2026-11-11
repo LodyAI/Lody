@@ -17,6 +17,9 @@
     <string name="home_view_details">Display</string>
     <string name="home_view_archived">Archived</string>
     <string name="home_archived_empty">No archived chats</string>
+    <string name="home_archive">Archive</string>
+    <string name="home_archived_done">Archived</string>
+    <string name="home_archive_failed">Could not archive. Try again.</string>
     <string name="home_unarchive">Unarchive</string>
     <string name="home_unarchived">Unarchived</string>
     <string name="home_unarchive_failed">Could not unarchive. Try again.</string>
