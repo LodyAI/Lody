@@ -91,6 +91,20 @@
     <string name="chat_empty">No text messages yet</string>
     <string name="chat_offline">Messages unavailable</string>
     <string name="chat_retry">Retry</string>
+    <string name="chat_image_label">Image, %1$s</string>
+    <string name="chat_image_page">%1$d of %2$d</string>
+    <string name="chat_image_open">Open image</string>
+    <string name="chat_image_next">Next image</string>
+    <string name="chat_image_previous">Previous image</string>
+    <string name="chat_image_failed">Couldn\'t load the image. Tap to retry.</string>
+    <string name="chat_image_close">Close image</string>
+    <string name="chat_image_share">Share</string>
+    <string name="chat_image_copy">Copy</string>
+    <string name="chat_image_save">Save to gallery</string>
+    <string name="chat_image_copied">Image copied</string>
+    <string name="chat_image_saved">Saved to Pictures/Lody</string>
+    <string name="chat_image_save_failed">Couldn\'t save the image</string>
+    <string name="chat_image_unavailable">The image isn\'t available yet</string>
 
     <!-- New session -->
     <string name="create_title">New session</string>

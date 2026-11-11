@@ -133,6 +133,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var imageWorkspace = ""
   var imageSession = ""
   weak var imagePreview: ChatImagePreview?
+  /// Each image stack's top image, kept across cell reuse and preview paging.
+  var imageStackTops: [String: String] = [:]
   var mentionRepository = "" {
     didSet {
       guard oldValue != mentionRepository else { return }
@@ -348,6 +350,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     }
     collection.register(ChatMessageAttachmentsCell.self, forCellWithReuseIdentifier: "attachments")
     collection.register(ChatImageCell.self, forCellWithReuseIdentifier: "image")
+    collection.register(ChatImageStackCell.self, forCellWithReuseIdentifier: "image-stack")
     collection.register(ChatHistoryHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "history")
     collection.register(ChatErrorCell.self, forCellWithReuseIdentifier: "error")
     collection.register(ChatOperationCell.self, forCellWithReuseIdentifier: "operation")
@@ -431,6 +434,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
           }
           self.openAttachment(attachment)
         }
+        return cell
+      }
+      if row.kind == "imageStack" {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "image-stack", for: index) as! ChatImageStackCell
+        cell.configure(row, topID: self.imageStackTops[row.id], workspace: self.imageWorkspace, session: self.imageSession)
+        cell.onTopChange = { [weak self] top in self?.imageStackTops[row.id] = top }
         return cell
       }
       if row.image != nil {

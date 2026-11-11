@@ -197,6 +197,9 @@ data class SessionMessage(
  * One item of a turn, after upstream's session entry summary. Assistant turns render these as
  * prose, folded thought / tool groups and never-folded plans and notices (web `MessageContent`).
  */
+/** One session image: read with the account bearer from the Worker's session-images endpoint. */
+data class TurnImage(val id: String, val fileName: String, val storageSessionId: String?, val width: Int?, val height: Int?)
+
 sealed interface TurnItem {
     val id: String
 
@@ -223,6 +226,11 @@ sealed interface TurnItem {
     data class ProposedPlan(override val id: String, val markdown: String) : TurnItem
     /** The agent's checklist (`plan`); never folded. */
     data class Checklist(override val id: String, val entries: List<Pair<String, String>>) : TurnItem
+    /**
+     * Images the agent sent (`image` / `image_group`); never folded. Consecutive ones (only tool
+     * work between them) merge into one fanned stack in [app.lody.android.chat.TurnLayout].
+     */
+    data class Images(override val id: String, val images: List<TurnImage>) : TurnItem
     /** A failure or notice the turn ended with; never folded. */
     data class Notice(override val id: String, val text: String, val failure: Boolean) : TurnItem
     /**
