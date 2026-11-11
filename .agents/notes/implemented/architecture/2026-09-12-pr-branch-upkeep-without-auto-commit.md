@@ -16,6 +16,8 @@ probed flags became the fallback: a turn ending with unpublished work raises
 so the risk is an agent ignoring it — the ranking makes that visible rather than
 silently corrected.
 
+Correction (2026-11-11): the Create PR prompt no longer carries the upkeep instruction; the Info Bar ranking is now the only fallback. See [agent prompts without workflow](../simplification/2026-11-11-agent-prompts-without-workflow.md).
+
 ## Decisions
 
 - **Commit & Push outranks conflict repair, CI repair and Merge**: all three act on

@@ -12,6 +12,8 @@ prompt，消耗 token 并提交用户未决定保留的工作。该义务改由 
 对话覆盖），两个标志兜底：仍有未发布工作时 Info Bar 把 `Commit & Push` 排最前。提示
 弱于钩子，风险是 Agent 忽略它；排序让这种情况可见而非被静默纠正。
 
+更正（2026-11-11）：Create PR 提示词已不再包含 upkeep 指令，信息栏排序是唯一兜底。见 [Agent 提示词不带工作流程](../simplification/2026-11-11-agent-prompts-without-workflow.zh.md)。
+
 ## 决策
 
 - **Commit & Push 优先于冲突修复、CI 修复与 Merge**：三者都作用于已推送的 head，

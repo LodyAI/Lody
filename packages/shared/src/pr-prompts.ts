@@ -1,39 +1,17 @@
-/** Prompts for the manual pull request and commit quick actions. */
-
 /**
- * Standing instruction appended to the PR-creation prompts.
+ * Prompts for the manual pull request and commit quick actions. They carry the
+ * user's request and facts the agent cannot discover on its own, never a workflow:
+ * Lody provides the tools and the agent decides how to use them (root AGENTS.md).
  *
- * Opening a PR is what makes "is the branch pushed?" matter: from that moment a
- * reviewer reads the PR head as the author's latest work. The machine used to
- * enforce that by auto-prompting the agent to commit+push at the end of every
- * turn, which surprised users who had not asked for a commit. The enforcement
- * now lives here instead — an instruction the agent follows and the user can
- * override in conversation — with the Info Bar's `Commit & Push` action as the
- * visible fallback when a turn still ends with unpublished work.
- *
- * Exported separately from the two prompts so the UI can compose it from its own
- * i18n key. Inlining it into each localized prompt would put the same paragraph
- * in five places with nothing to catch a wording change that misses one.
+ * The `gh` fact stays because sandboxed agents otherwise fail to authenticate and
+ * ask the user to log in again.
  */
-export const PR_BRANCH_UPKEEP_PROMPT = [
-  'After the PR exists, keep it current: at the end of every turn in this conversation,',
-  'commit any outstanding changes and push them to the PR branch before you finish, so',
-  'the PR head always matches your latest work. Treat this as the default rather than',
-  'something to ask about each time. Skip it only when the user interrupts you or asks',
-  'for something that overrides it — in that case say so instead of pushing silently.',
-].join(' ');
+const GH_AUTH_FACT =
+  '`gh` uses the GitHub login saved on this machine, which sandboxed commands usually cannot read.';
 
-/**
- * Why the PR prompts send `gh` outside the sandbox. The user reads this text in
- * their own chat, so it names the reason (the saved GitHub login) instead of
- * asking for "elevated permissions", which read like an injected instruction.
- */
-const GH_AUTH_INSTRUCTION =
-  'Use `gh` from the current PATH. `gh` signs in with the GitHub login saved on this machine, which sandboxed commands usually cannot read, so run the `gh` commands that talk to GitHub outside the sandbox (request approval if your tool requires it). Ask the user to log in only if authentication still fails there. Verify that the pushed commit matches the PR head, then report the PR URL.';
+export const CREATE_PR_BASE_PROMPT = `Create a PR (not a draft) for the current worktree. ${GH_AUTH_FACT}`;
 
-export const CREATE_PR_BASE_PROMPT = `Create a PR for the current worktree (a regular PR, not a draft). ${GH_AUTH_INSTRUCTION}`;
-
-export const CREATE_DRAFT_PR_BASE_PROMPT = `Create a draft PR for the current worktree. ${GH_AUTH_INSTRUCTION}`;
+export const CREATE_DRAFT_PR_BASE_PROMPT = `Create a draft PR for the current worktree. ${GH_AUTH_FACT}`;
 
 /**
  * Lead lines the Info Bar puts before its PR prompts, so a user scrolling back
@@ -48,37 +26,11 @@ export const CREATE_DRAFT_PR_ORIGIN_PROMPT = '(Sent by the **Create Draft PR** b
 export const withQuickActionOrigin = (origin: string, prompt: string): string =>
   `${origin}\n\n${prompt}`;
 
-/** Joins a PR-creation prompt to the standing upkeep instruction. */
-export const withPrBranchUpkeep = (basePrompt: string, upkeep: string): string =>
-  `${basePrompt}\n\n${upkeep}`;
-
-/** Applies a PR or Commit & Push quick action to the conversation's Project group. */
+/** Adds the Project group facts to a PR or Commit & Push quick action. */
 export const withProjectGroupPrScope = (prompt: string): string =>
   `${prompt}\n\n${[
-    'Project group scope:',
-    '- Apply the requested action to each member repository with changes or unpublished commits. Use the member inventory in this conversation and run Git in each member directory; the Project group directory itself is not a Git repository.',
-    '- Process submodules before their parents, recursively: commit and push each changed submodule first, then update and commit its gitlink in the parent repository and push the parent branch.',
-    '- If this action requests PRs, create or update one PR per changed repository. Open submodule PRs before parent PRs, preserve the requested draft or regular status, and link all related PRs in each PR body once their URLs are available.',
-    '- If this action only requests Commit & Push, do not open PRs. If PR upkeep was requested, apply it to each repository with a PR.',
-    '- If publishing a child fails, report the failure and do not publish a parent gitlink pointing to that unpublished commit. Report results and any PR URLs per repository.',
-  ].join('\n')}`;
+    'This conversation is a Project group: its directory is not a Git repository, and its member repositories are listed in this conversation.',
+    'The request applies to each member repository with changes or unpublished commits.',
+  ].join(' ')}`;
 
-/** Composed form for callers without i18n. */
-export const CREATE_PR_PROMPT = withPrBranchUpkeep(CREATE_PR_BASE_PROMPT, PR_BRANCH_UPKEEP_PROMPT);
-
-export const CREATE_DRAFT_PR_PROMPT = withPrBranchUpkeep(
-  CREATE_DRAFT_PR_BASE_PROMPT,
-  PR_BRANCH_UPKEEP_PROMPT
-);
-
-export const COMMIT_AND_PUSH_PROMPT = [
-  'Publish the current branch: commit anything uncommitted, then push to the remote branch.',
-  '',
-  'Instructions:',
-  '- Generate a concise, descriptive commit message based on the changes',
-  '- Stage all changes (git add -A)',
-  '- Commit with the generated message',
-  '- If the working tree is already clean, skip the commit — the branch may simply',
-  '  hold commits that were never pushed',
-  '- Push to the current branch, and report it if the push fails',
-].join('\n');
+export const COMMIT_AND_PUSH_PROMPT = 'Commit the uncommitted changes and push the current branch.';

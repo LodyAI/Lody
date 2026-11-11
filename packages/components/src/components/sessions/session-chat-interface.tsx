@@ -305,8 +305,6 @@ import {
   CREATE_DRAFT_PR_ORIGIN_PROMPT,
   CREATE_PR_BASE_PROMPT,
   CREATE_PR_ORIGIN_PROMPT,
-  PR_BRANCH_UPKEEP_PROMPT,
-  withPrBranchUpkeep,
   withProjectGroupPrScope,
   withQuickActionOrigin,
 } from './create-pr-prompt';
@@ -5460,29 +5458,19 @@ export const SessionChatInterface = memo(
       [conversationView]
     );
 
-    // Composed, not two fully-inlined strings: the upkeep paragraph then lives in
-    // one key per language instead of being repeated inside both prompts.
-    const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
     // The origin line tells the user, reading back, that this message came from
     // the button rather than from something they typed.
-    // A Project group conversation publishes every repository it changed, the
-    // submodules before their parents, so the same actions carry that scope.
+    // A Project group conversation publishes every repository it changed, so the
+    // same actions carry the group facts.
     const scopeToProjectGroup = (prompt: string) =>
       session.projectRun ? withProjectGroupPrScope(prompt) : prompt;
     const createPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
-      scopeToProjectGroup(
-        withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
-      )
+      scopeToProjectGroup(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT))
     );
     const createDraftPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createDraftPrOrigin', CREATE_DRAFT_PR_ORIGIN_PROMPT),
-      scopeToProjectGroup(
-        withPrBranchUpkeep(
-          t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
-          prBranchUpkeep
-        )
-      )
+      scopeToProjectGroup(t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT))
     );
     const commitAndPushPrompt = scopeToProjectGroup(
       t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT)
@@ -5573,8 +5561,10 @@ export const SessionChatInterface = memo(
       workspaceDirty,
     ]);
 
+    // The CI verdict already comes from Session metadata, so the action sends only
+    // the PR identity; the agent reads the failing checks itself.
     const handleFixCiErrors = useCallback(async () => {
-      if (isPrActionPending) return;
+      if (isPrActionPending || !latestPr?.url) return;
       const targetSessionId = session.id;
       setPrActionPendingSessionId(targetSessionId);
       captureSessionEvent('session/quick_action_selected', {
@@ -5583,31 +5573,20 @@ export const SessionChatInterface = memo(
         workspace_dirty: workspaceDirty,
       });
       try {
-        const refreshed = await refreshActivePrCheckRuns();
-        if (!refreshed) {
-          toast.error(t('sessions.fixCiErrors.fetchError', 'Failed to load the failed CI checks'));
-          return;
-        }
-        const prompt = buildFixCiErrorsPrompt(
-          {
-            repoFullName: latestPrRepoFullName,
-            pullRequest: refreshed.pullRequest,
-            checkRuns: refreshed.checkRuns,
-          },
-          t
+        const accepted = await dispatchPrompt(
+          buildFixCiErrorsPrompt(
+            {
+              repoFullName: latestPrRepoFullName,
+              prNumber: latestPrNumber,
+              prUrl: latestPr.url,
+            },
+            t
+          ),
+          executionTurnConfigOverrides
         );
-        if (!prompt) {
-          toast.info(t('sessions.fixCiErrors.noFailures', 'No failing CI checks were found'));
-          return;
-        }
-        const accepted = await dispatchPrompt(prompt, executionTurnConfigOverrides);
         if (!accepted) {
           toast.error(t('sessions.fixCiErrors.sendError', 'Failed to send the CI fix request'));
         }
-      } catch (error) {
-        toast.error(t('sessions.fixCiErrors.fetchError', 'Failed to load the failed CI checks'), {
-          description: getErrorMessage(error),
-        });
       } finally {
         setPrActionPendingSessionId((current) => (current === targetSessionId ? null : current));
       }
@@ -5616,8 +5595,9 @@ export const SessionChatInterface = memo(
       dispatchPrompt,
       executionTurnConfigOverrides,
       isPrActionPending,
+      latestPr,
+      latestPrNumber,
       latestPrRepoFullName,
-      refreshActivePrCheckRuns,
       session.id,
       t,
       workspaceDirty,
