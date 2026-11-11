@@ -110,9 +110,7 @@ export class McpCatalogEditingPage {
   }
 
   private emptyCatalogMessage(settings: Locator): Locator {
-    return settings.getByText(
-      /^(No MCP servers are configured for this workspace\.|此工作区还没有配置 MCP 服务器。)$/u
-    );
+    return settings.getByText(/^(No MCP servers yet|还没有 MCP 服务器)$/u);
   }
 
   private async openMcpSettings(): Promise<Locator> {

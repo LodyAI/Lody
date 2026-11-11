@@ -71,26 +71,33 @@ const storyRole: AgentRole = {
 };
 
 // A read-only catalog fixture: no transport or real workspace writes.
-const rolesStoryRuntime = {
-  workspaceId: 'settings-story-workspace',
-  workspaceSlug: 'lody',
-  repo: {
-    openFlockDoc: async () => ({
-      flock: {
-        scan: (options?: { prefix?: readonly unknown[] }) =>
-          options?.prefix?.[0] === 'agentRole'
-            ? [{ key: workspaceFlockKeys.agentRole(storyRole.id), value: storyRole }]
-            : [],
-        subscribe: () => () => {},
-      },
-      joinRoom: async () => ({ unsubscribe: () => {}, firstSyncedWithRemote: Promise.resolve() }),
-    }),
-  },
-} as unknown as WorkspaceRuntime;
+const rolesStoryRuntime = (roles: readonly AgentRole[]) =>
+  ({
+    workspaceId: 'settings-story-workspace',
+    workspaceSlug: 'lody',
+    repo: {
+      openFlockDoc: async () => ({
+        flock: {
+          scan: (options?: { prefix?: readonly unknown[] }) =>
+            options?.prefix?.[0] === 'agentRole'
+              ? roles.map((role) => ({ key: workspaceFlockKeys.agentRole(role.id), value: role }))
+              : [],
+          subscribe: () => () => {},
+        },
+        joinRoom: async () => ({ unsubscribe: () => {}, firstSyncedWithRemote: Promise.resolve() }),
+      }),
+    },
+  }) as unknown as WorkspaceRuntime;
 
-function RolesCatalogFixture({ children }: { children: ReactNode }) {
+function RolesCatalogFixture({
+  roles,
+  children,
+}: {
+  roles: readonly AgentRole[];
+  children: ReactNode;
+}) {
   useHydrateAtoms([
-    [runtimeAtom, rolesStoryRuntime],
+    [runtimeAtom, rolesStoryRuntime(roles)],
     [userAtom, { id: storyRole.ownerUserId, name: 'Example user', email: 'user@example.com' }],
   ]);
   return <>{children}</>;
@@ -317,7 +324,13 @@ function MachinesCatalogFixture() {
   );
 }
 
-function SettingsModalStory({ tab }: { tab: SettingsTabId }) {
+function SettingsModalStory({
+  tab,
+  roles = [storyRole],
+}: {
+  tab: SettingsTabId;
+  roles?: readonly AgentRole[];
+}) {
   return (
     <SettingsStoryProviders
       multiMember={tab === 'machines'}
@@ -332,7 +345,7 @@ function SettingsModalStory({ tab }: { tab: SettingsTabId }) {
           <Provider>
             <OpenModalAt tab={tab}>
               {tab === 'agent-roles' ? (
-                <RolesCatalogFixture>
+                <RolesCatalogFixture roles={roles}>
                   <DesktopSettingsModal />
                 </RolesCatalogFixture>
               ) : (
@@ -370,13 +383,18 @@ export const KeyboardShortcutsTab: Story = {
   render: () => <SettingsModalStory tab="keyboard-shortcuts" />,
 };
 
-/** An empty catalog: the list's own card with one quiet line. */
+/** An empty catalog: what is missing, what a server is for, and the add action. */
 export const McpEmptyTab: Story = {
   render: () => <SettingsModalStory tab="mcp" />,
 };
 
 export const AgentRolesTab: Story = {
   render: () => <SettingsModalStory tab="agent-roles" />,
+};
+
+/** No Roles yet: the list names what is missing, what a Role is for, and the add action. */
+export const AgentRolesEmptyTab: Story = {
+  render: () => <SettingsModalStory tab="agent-roles" roles={[]} />,
 };
 
 export const DarkModePreferencesTab: Story = {

@@ -227,9 +227,12 @@ was:
 - About: version, channel, build date and commits are one row with the update
   check beside them; the two download rows are one row with two destinations.
 - Catalogs (MCP, Agent Roles, Prompt Shortcuts): the add action moved into the
-  page header, a section heading that repeated the page title went, the empty
-  state no longer repeats the add button, and a private record is no longer
-  badged on every row (only shared ones are).
+  page header, a section heading that repeated the page title went, and a
+  private record is no longer badged on every row (only shared ones are). The
+  add action is never offered twice. Since 2026-11-11 (owner request: the
+  one-line empty card read as an empty input), an empty catalog uses
+  `SettingsEmptyState` (a title, what a record is for, and the add action) and
+  the header add button is hidden until the first record exists.
 - Projects: a machine or GitHub owner section is titled by its name with its
   state underneath; GitHub rows no longer repeat the owner. The project window
   dropped the Machine and Visibility rows its header already states, and the
