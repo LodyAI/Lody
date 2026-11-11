@@ -7,6 +7,10 @@
 
 **Before dispatch/sync read context/message-flow.md; before catalog/Fleet changes read [E2EE rules](e2ee/AGENTS.md).** WS/DO is deprecated; do not extend it.
 
+Credential JSON publication creates an exclusive 0600 temporary file and atomically
+replaces its destination on POSIX. New state roots use 0700; existing custom
+directories keep their permissions. Windows retains direct file writes.
+
 ## Composition and transports
 
 - Bound ordinary daemon owners read history and manage Session metadata locally; other accounts and remote targets still require cloud authorization.

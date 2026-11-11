@@ -7,7 +7,7 @@ the reasoning behind those rules.
 
 - `file-preview-service.ts` — resolves the workspace, authorizes the path, reads,
   classifies text vs binary, encodes, and answers.
-- `file-preview-path-policy.ts` — CLI default allowed roots and the shared
+- `file-preview-path-policy.ts` — re-exports the shared
   `@lody/shared/node/file-preview-path-policy` resolver, also used by Electron.
   The shared resolver preserves symlink, case/NFC and failure classification rules.
 - `file-preview-path-policy.test.ts` — exercises the fold walk through an injected
@@ -53,7 +53,10 @@ Half a PNG is a corrupt file and half a JSON is a syntax error.
 
 ## Local resolution and resource IO are separate
 
-Remote preview uses MessageHandler's read-only workspace resolver. A chat
+Remote preview uses MessageHandler's read-only workspace resolver. Only the resolved
+session workspace and its registered file roots authorize remote reads, including
+Markdown link resolution and download chunks. Global temp/chat directories and
+`LODY_FILE_PREVIEW_EXTRA_ROOTS` no longer expand that boundary. A chat
 whose runtime has been evicted resolves from its durable metadata to the existing
 `<LodyDataDir>/chats/<ownerSessionId>` directory. Child tabs share their parent's
 directory. Missing or invalid owner metadata and unavailable project/worktree
