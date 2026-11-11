@@ -181,9 +181,9 @@ class SessionInfoBarTest {
 
     @Test fun promptsCarryThePullRequest() {
         val bar = SessionInfoBar.of(session(pr = pr(ci = "f", merge = "d")), "lody/zed", busy = false)
-        val prompts = SessionInfoBar.Prompts("o", "do", "c", "dc", "u", "cp", "%1\$s %2\$s %3\$s", "%1\$s #%2\$d %3\$s %4\$s")
+        val prompts = SessionInfoBar.Prompts("o", "do", "c", "dc", "u", "cp", "%1\$s %2\$s %3\$s", "%1\$s %2\$s %3\$s fix")
         assertEquals("lody/zed #7 https://github.com/lody/zed/pull/7", bar.prompt(Action.ResolveConflicts, prompts))
-        assertEquals("lody/zed #7 https://github.com/lody/zed/pull/7 feat/bar", bar.prompt(Action.FixCi, prompts))
+        assertEquals("lody/zed #7 https://github.com/lody/zed/pull/7 fix", bar.prompt(Action.FixCi, prompts))
         assertEquals("o\n\nc\n\nu", bar.prompt(Action.CreatePr, prompts))
         assertTrue(bar.hasContext)
     }
