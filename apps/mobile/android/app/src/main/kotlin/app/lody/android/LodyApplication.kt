@@ -25,6 +25,9 @@ open class LodyApplication : Application() {
     lateinit var pullRequestDetails: app.lody.android.chat.PullRequestDetailsReader
     lateinit var attachments: app.lody.android.chat.AttachmentUploader
         private set
+    /** Reads agent images in conversations with the verified account. */
+    lateinit var sessionImages: app.lody.android.chat.SessionImageReader
+        private set
     lateinit var members: WorkspaceMembers
         private set
     /** The Projects tab's "+": add a local folder or a GitHub repository. */
@@ -83,6 +86,10 @@ open class LodyApplication : Application() {
         val uploads = app.lody.android.chat.SessionAttachmentUploads(contentResolver)
         attachments = app.lody.android.chat.AttachmentUploader { scope, sessionId, items ->
             account.withVerifiedAccount(scope) { credential -> uploads.upload(credential.token, scope.workspaceId, sessionId, items) }
+        }
+        val imageReads = app.lody.android.chat.SessionImageHttp()
+        sessionImages = app.lody.android.chat.SessionImageReader { scope, sessionId, image, width ->
+            account.withVerifiedAccount(scope) { credential -> imageReads.read(credential.token, scope.workspaceId, image.storageSessionId ?: sessionId, image.id, width) }
         }
         account = AccountController(CloudAuthHttp(OkHttpAuthTransport()), KeystoreCredentialStore(this), applicationScope, cache) {
             if (::notifications.isInitialized) notifications.clear()

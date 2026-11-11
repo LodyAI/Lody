@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "763403859b3bb32a1cb6bc34c16abb21a05b7323",
+  "commit": "4477100161b7ef8fa73b92bbe6f77d5e5d003f63",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 763403859b3bb32a1cb6bc34c16abb21a05b7323 apps/mobile/ios/packages/cloud-runtime",
-  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 041760cf, the catalog carries each Project group conversation's members (`projectRun`: placement order, branch, diff, publish state and the current PR per repository) and `projectGroups` returns each group's `ownerUserId`. Dependencies and licenses unchanged."
+  "export": "git archive 4477100161b7ef8fa73b92bbe6f77d5e5d003f63 apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 76340385, `listDir` lists the conversation's own folder through the machine's `file/list-dir` (capability `sessionDirectoryListing`) and keeps the local-project listing for machines without it. Dependencies and licenses unchanged."
 }

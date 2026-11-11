@@ -12,6 +12,10 @@ the reasoning behind those rules.
   The shared resolver preserves symlink, case/NFC and failure classification rules.
 - `file-preview-path-policy.test.ts` — exercises the fold walk through an injected
   `FilePreviewDirectoryReader`.
+- `session-directory-listing.ts` — `file/list-dir`: resolves the same session
+  workspace as preview and lists one folder with the local-project lister's
+  containment and gitignore rules. Like preview it never activates Code Collab and
+  answers every domain failure as a typed error.
 
 ## Why resolution folds case but authorization does not
 

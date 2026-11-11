@@ -620,18 +620,21 @@ let assistantImages = """
 ]}]
 """
 var uploadedTranscript = ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].self, from: Data(assistantImages.utf8)))
-let liveImageRows = uploadedTranscript.rows().filter { $0.image != nil }
-precondition(liveImageRows.compactMap { $0.image?.id } == ["one", "two", "three"])
-precondition(liveImageRows.first?.image?.storageSessionId == "source")
+let liveImageRows = ChatImageGallery.items(from: uploadedTranscript.rows())
+precondition(liveImageRows.map(\.image.id) == ["one", "two", "three"])
+precondition(liveImageRows.map(\.id) == ["upload:photos:image:0", "upload:photos:image:1", "upload:last:image:0"],
+  "Stacked images keep their own preview ids")
+precondition(liveImageRows.first?.image.storageSessionId == "source")
 uploadedTranscript.entries[0].finished = true
-precondition(uploadedTranscript.rows().filter { $0.image != nil } == liveImageRows,
+precondition(ChatImageGallery.items(from: uploadedTranscript.rows()) == liveImageRows,
   "Completion must preserve every uploaded image and its row identity")
-precondition(uploadedTranscript.rows().map(\.kind) == ["summary", "image", "image", "text", "image", "meta"])
+precondition(uploadedTranscript.rows().map(\.kind) == ["summary", "imageStack", "text", "image", "meta"],
+  "Consecutive images fan into one stack; a lone image keeps its own row")
 precondition(uploadedTranscript.rows(processEntryID: "upload").map(\.kind) == ["tool_call"],
   "Uploaded images belong in the conversation, not the collapsed process")
-precondition(ChatTranscript.previewRows(from: assistantImages).filter { $0.image != nil } == liveImageRows)
+precondition(ChatImageGallery.items(from: ChatTranscript.previewRows(from: assistantImages)) == liveImageRows)
 uploadedTranscript.entries[0].items.removeAll { !$0.isImage }
-precondition(uploadedTranscript.rows().map(\.kind) == ["image", "image", "image", "meta"],
+precondition(uploadedTranscript.rows().map(\.kind) == ["imageStack", "meta"],
   "Standalone MCP uploads must render without a tool or final text")
 print("MCP images: multiple images, completion, standalone upload and cache restore passed")
 

@@ -412,6 +412,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         [weak self] _ in self?.openWorkspaceChanges()
       })
     }
+    if browsable {
+      // Browse the local project and open a file (Markdown renders; Source toggles the text).
+      changes.append(UIAction(title: String(localized: "session.action.projectFiles", bundle: .lody), image: UIImage(systemName: "folder")) {
+        [weak self] _ in self?.openProjectFiles(title: String(localized: "files.title", bundle: .lody))
+      })
+    }
     var children: [UIMenuElement] = changes
     children.append(UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
       self?.find(query: "", keyboard: true)
