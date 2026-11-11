@@ -1545,6 +1545,7 @@
   "joinRequest.verify": "提交申请前，请先验证 {{email}}。",
   "joinRequest.verifyAction": "验证邮箱",
   "joinRequest.rejected": "上一次申请未获批准，你可以填写新理由后再次提交。",
+  "joinRequest.formDescription": "申请加入后，由工作区所有者审核。",
   "joinRequest.reasonLabel": "为什么想加入？",
   "joinRequest.reasonPlaceholder": "向工作区所有者说明相关背景…",
   "joinRequest.identity": "将使用 {{email}} 提交",
