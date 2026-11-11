@@ -194,6 +194,7 @@ class HomeActivity : ComponentActivity() {
                                 agentProviders = remember { RuntimeAgentProviderService(app.runtimeOwner) },
                                 roleSettings = remember { RuntimeRoleSettingsService(app.runtimeOwner) },
                                 shortcutSettings = remember { RuntimeShortcutSettingsService(app.runtimeOwner) },
+                                settingsCache = app.settingsCache,
                                 githubSettings = remember { LiveGitHubSettingsService(app.account) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },

@@ -41,14 +41,18 @@ internal object ShortcutSettingsJson {
         value.toString(),
     )
 
+    /** An entry or body back from the settings cache (their `raw` JSON), parsed as the live read is. */
+    fun cachedEntry(raw: String): ShortcutEntry = entry(JSONObject(raw))
+    fun cachedBody(raw: String): ShortcutBody = body(JSONObject(raw))
+
+    private fun body(value: JSONObject) = ShortcutBody(value.optString("prompt"),
+        scopeSimple(value.optJSONObject("scope")) && (value.optJSONArray("mentions")?.length() ?: 0) == 0, value.toString())
+
     fun result(value: JSONObject): ShortcutSettingsResult {
         if (value.has("error")) throw RuntimeException(RuntimeFault(value.getString("error"), RuntimeErrorCategory.BUSINESS))
         return when (value.optString("action")) {
             "list" -> ShortcutSettingsResult.Listed(value.getJSONArray("entries").let { rows -> (0 until rows.length()).map { entry(rows.getJSONObject(it)) } })
-            "read" -> value.getJSONObject("shortcut").let { body ->
-                ShortcutSettingsResult.Read(ShortcutBody(body.optString("prompt"),
-                    scopeSimple(body.optJSONObject("scope")) && (body.optJSONArray("mentions")?.length() ?: 0) == 0, body.toString()))
-            }
+            "read" -> ShortcutSettingsResult.Read(body(value.getJSONObject("shortcut")))
             "save" -> ShortcutSettingsResult.Saved(entry(value.getJSONObject("entry")))
             else -> throw RuntimeException(RuntimeFault("invalid_shortcut", RuntimeErrorCategory.BUSINESS))
         }

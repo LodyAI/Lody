@@ -192,6 +192,8 @@ fun ChatListScreen(
     agentProviders: AgentProviderService? = null,
     roleSettings: RoleSettingsService? = null,
     shortcutSettings: ShortcutSettingsService? = null,
+    /** Last accepted settings-page reads (display only). */
+    settingsCache: SettingsSnapshotStore? = null,
     githubSettings: GitHubSettingsService? = null,
     scope: app.lody.android.runtime.RuntimeScope? = null,
     /** Opens a conversation by id (a schedule's last run). */
@@ -250,7 +252,7 @@ fun ChatListScreen(
         return
     }
     if (shortcutsOpen) {
-        ShortcutsScreen(state, shortcutSettings, scope, onBack = { shortcutsOpen = false })
+        ShortcutsScreen(state, shortcutSettings, scope, settingsCache, onBack = { shortcutsOpen = false })
         return
     }
     if (githubOpen) {
