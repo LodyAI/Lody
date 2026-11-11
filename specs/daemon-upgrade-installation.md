@@ -166,11 +166,23 @@ downgrade additionally requires data compatibility. Freeze the chosen release on
 
 Default new daemons to managed installation. npm CLI may remain a convenience
 installer/controller; its global package is no longer the daemon update destination.
-Every existing npm daemon requires an explicit first migration; do not claim its
-old runner can execute SEA. Keep the real JavaScript npm bin so old `node <bin>`
-launches remain valid. An explicit installer stops the identified old service,
-installs the fixed entry and registers its stable path. Broken or unreachable old
-updaters likewise need a local installer run. Preserve identity, pairing,
+An npm daemon whose runner predates the relay below requires an explicit first
+migration; do not claim its old runner can execute SEA. Keep the real JavaScript npm
+bin so old `node <bin>` launches remain valid. An explicit installer stops the
+identified old service, installs the fixed entry and registers its stable path.
+Broken or unreachable old updaters likewise need a local installer run.
+
+A POSIX npm runner that includes the relay may be migrated by the same owner-only,
+server-verified remote update. It prepares and verifies the managed release exactly
+as a managed runner would, without modifying the npm installation, and switches only
+after its Worker drained. It then installs the fixed entry, releases the Host lease
+and starts the managed service. The npm installation is published as superseded only
+after the managed daemon reports ready at the exact target version; until then npm
+either keeps ownership or takes it back and keeps running, recording a rollback. If
+ownership cannot be reclaimed, the runner reports a blocked outcome instead of
+starting a second daemon. User-owned autostart definitions are never rewritten: once
+published, the npm `daemon start` launcher forwards to the managed fixed entry.
+Windows npm daemons keep the explicit migration until Windows containment exists. Preserve identity, pairing,
 data and options. Migrate an identified external service explicitly or give actionable
 instructions; never silently rewrite arbitrary scripts or start a second daemon.
 Container and package-manager-owned deployments declare external update ownership.
@@ -194,6 +206,6 @@ Architectural references:
 - [Tailscale update policy](https://tailscale.com/kb/1067/update/): preserve external installation-channel ownership.
 - [Raft Computer build](https://github.com/botiverse/raft-source/blob/main/packages/computer/scripts/native/build.mjs): official Node SEA carrier, bundled assets and gzip transport; [native installer](https://github.com/botiverse/raft-computer-installer/blob/main/rust/runner.rs) delegates the update transaction to K separately from the product runtime.
 
-The implementation covers managed POSIX updates; Windows containment and encrypted
+The implementation covers managed POSIX updates and the POSIX npm relay; Windows containment and encrypted
 lifecycle authorization remain unsupported. Native acceptance is platform-specific
 and does not establish the entire matrix above.
