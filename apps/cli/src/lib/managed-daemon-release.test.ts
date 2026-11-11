@@ -5,6 +5,10 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import {
+  installFixedServiceEntry,
+  npmMigrationTrust,
+  publishManagedInstallation,
+  resolvePublishedManagedService,
   prepareManagedRelease,
   readManagedOperation,
   readSelectedInstallation,
@@ -104,6 +108,62 @@ describe('checksummed managed daemon installation', () => {
     await prepareManagedRelease(context, '1.2.3');
     expect(downloads.filter((url) => url.endsWith('/node.gz'))).toHaveLength(1);
     expect(await fs.readdir(dir)).toEqual(['daemon-managed']);
+  });
+  it('an npm daemon without a SEA context downloads only its own product and channel distribution', async () => {
+    await fixture();
+    const urls: string[] = [];
+    const cloudNext = {
+      ...release,
+      product: 'lody-cloud',
+      distribution: 'lody-cloud-next-daemon',
+      channel: 'next',
+    };
+    let served: unknown = cloudNext;
+    vi.stubGlobal('fetch', async (url: string) => {
+      urls.push(url);
+      return new Response(
+        url.endsWith('.json') ? manifestJson(served) : new Uint8Array(compressed)
+      );
+    });
+    const trust = npmMigrationTrust('lody-cloud', 'next');
+    const prepared = await prepareManagedRelease(trust, '1.2.3');
+    expect(prepared.release.version).toBe('1.2.3');
+    expect(urls[0]).toContain(`/api/runtimes/lody-cloud-next-daemon/1.2.3/${release.platform}/`);
+    served = { ...cloudNext, distribution: 'lody-cloud-daemon' };
+    await expect(prepareManagedRelease(trust, '1.2.3')).rejects.toThrow(/mismatch/);
+  });
+  it('an npm launcher starts the managed service only after its installation is published', async () => {
+    const { dir } = await fixture();
+    const capsule = path.join(dir, 'downloaded-capsule');
+    await fs.writeFile(capsule, bytes);
+    expect(resolvePublishedManagedService('lody-oss')).toBeNull();
+    const service = await installFixedServiceEntry(capsule);
+    expect(await fs.readFile(service)).toEqual(bytes);
+    // Installed but unpublished: a failed relay must leave `daemon start` on npm.
+    expect(resolvePublishedManagedService('lody-oss')).toBeNull();
+    await publishManagedInstallation('lody-oss', service);
+    expect(resolvePublishedManagedService('lody-oss')).toBe(service);
+    // Another product's launcher never forwards to this service.
+    expect(resolvePublishedManagedService('lody-cloud')).toBeNull();
+    // A record naming any path other than the fixed entry is not followed.
+    await publishManagedInstallation('lody-oss', capsule);
+    expect(resolvePublishedManagedService('lody-oss')).toBeNull();
+    await publishManagedInstallation('lody-oss', service);
+    await fs.rm(service);
+    expect(resolvePublishedManagedService('lody-oss')).toBeNull();
+  });
+  it('a fixed-entry install left locked by a crashed installer recovers, but a live installer still excludes', async () => {
+    const { dir } = await fixture();
+    const capsule = path.join(dir, 'downloaded-capsule');
+    await fs.writeFile(capsule, bytes);
+    const lock = path.join(dir, 'daemon-managed', 'install.lock');
+    await fs.mkdir(path.dirname(lock), { recursive: true });
+    await fs.writeFile(lock, String(process.pid));
+    await expect(installFixedServiceEntry(capsule)).rejects.toThrow(/EEXIST|in progress/);
+    // A pid that cannot exist (above the Linux and macOS pid ceilings).
+    await fs.writeFile(lock, '99999999');
+    expect(await fs.readFile(await installFixedServiceEntry(capsule))).toEqual(bytes);
+    await expect(fs.access(lock)).rejects.toThrow();
   });
   it.each(['compressed', 'extracted'] as const)(
     'a bad %s SHA never publishes an executable or a successful update record',

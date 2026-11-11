@@ -52,7 +52,7 @@ export type SessionTurn = {
   readonly e2eeIntent?: string;
   readonly fileDiff?: readonly unknown[];
   readonly status?: SessionTurnStatus;
-  readonly cancellationReason?: 'user_stop';
+  readonly cancellationReason?: 'user_stop' | 'machine_update';
   readonly inputConfig?: unknown;
   readonly startedAt?: number;
   readonly endedAt?: number;
@@ -78,7 +78,7 @@ export interface SessionTurnWritableValues {
   tokenUsage: SessionTurnTokenUsage | undefined;
   fileDiff: readonly unknown[] | undefined;
   status: SessionTurnStatus | undefined;
-  cancellationReason: 'user_stop' | undefined;
+  cancellationReason: 'user_stop' | 'machine_update' | undefined;
   inputConfig: unknown;
   startedAt: number | undefined;
   endedAt: number | undefined;
@@ -135,7 +135,7 @@ export type SessionDirectoryScalars = {
   readonly status?: SessionTurnStatus;
   /** Legacy dispatch eligibility, read without materializing the body. */
   readonly read?: boolean;
-  readonly cancellationReason?: 'user_stop';
+  readonly cancellationReason?: 'user_stop' | 'machine_update';
   readonly finished?: boolean;
   readonly endedAt?: number;
   readonly sendStatus?: 'timeout';

@@ -80,6 +80,20 @@ export const resolveMachineLifecycleCapability = (
   };
 };
 
+/**
+ * An update replaces the binary that holds every hosted workspace's custody,
+ * including encrypted ones, and encrypted lifecycle authorization is not
+ * implemented. Any hosted encrypted workspace therefore disables remote update
+ * machine-wide. Restart keeps the same binary and is unaffected.
+ */
+export const withMachineEncryption = (
+  capability: MachineLifecycleCapability,
+  hostsEncryptedWorkspace: boolean
+): MachineLifecycleCapability =>
+  hostsEncryptedWorkspace && capability.canRemoteUpgrade
+    ? { ...capability, canRemoteUpgrade: false, reason: 'unsupported_install' }
+    : capability;
+
 const MachineLifecycleVerifyResponseSchema = z
   .object({
     valid: z.literal(true),

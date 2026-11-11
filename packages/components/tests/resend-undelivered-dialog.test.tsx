@@ -148,4 +148,37 @@ describe('UserMessageRowView undelivered resend dialog', () => {
       { id: missingTurnId, blocks: buildResendInputBlocks(undeliveredMessage) },
     ]);
   });
+  it('a turn interrupted by a forced machine update offers Continue, which resends after confirmation', async () => {
+    const submissions: unknown[] = [];
+    const interrupted = {
+      ...undeliveredMessage,
+      id: 'user-turn-interrupted-by-update',
+      status: 'canceled',
+      read: true,
+      cancellationReason: 'machine_update',
+    } as unknown as SessionHistoryParsed;
+    await renderRow(async (id, blocks) => {
+      submissions.push({ id, blocks });
+      return true;
+    }, interrupted);
+    expect(document.body.textContent).not.toContain('Not delivered');
+    await click(queryBodyButton('Interrupted by update'));
+    expect(document.body.textContent).toContain('machine update interrupted');
+    expect(submissions).toEqual([]);
+    await click(queryBodyButton('Continue'));
+    expect(submissions).toEqual([
+      { id: 'user-turn-interrupted-by-update', blocks: buildResendInputBlocks(interrupted) },
+    ]);
+  });
+
+  it('a manual Stop is not presented as an update interruption', async () => {
+    await renderRow(async () => true, {
+      ...undeliveredMessage,
+      id: 'user-turn-stopped',
+      status: 'canceled',
+      read: true,
+      cancellationReason: 'user_stop',
+    } as unknown as SessionHistoryParsed);
+    expect(document.body.textContent).not.toContain('Interrupted by update');
+  });
 });

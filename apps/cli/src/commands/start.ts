@@ -9,7 +9,7 @@ import { Effect } from 'effect';
 import { requestManagedPreparation } from '@/lib/managed-daemon-ipc';
 import {
   pauseMachineTurnsIfIdle,
-  pauseMachineTurns,
+  pauseMachineTurnsForUpdate,
   resumeMachineTurns,
 } from '@/session/machine-turn-admission';
 import { closeLoginShellApplicationLegacy } from '@/agent/login-shell-env';
@@ -885,7 +885,8 @@ async function startAgentService(
         setTimeout(() => void switchWhenIdle(), 1000);
         return;
       }
-      if (action.action === 'upgrade' && action.switchPolicy === 'immediate') pauseMachineTurns();
+      if (action.action === 'upgrade' && action.switchPolicy === 'immediate')
+        pauseMachineTurnsForUpdate();
       try {
         if (action.action === 'upgrade' && action.revalidate && !(await action.revalidate())) {
           resumeMachineTurns();

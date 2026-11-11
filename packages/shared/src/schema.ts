@@ -717,7 +717,7 @@ export const sessionHistorySchema = schema.LoroMap({
   /** Encrypted only: the signed execution intent record, written in the same commit
    * as the content it covers. See `e2ee-execution-intent.ts`. */
   e2eeIntent: schema.String({ required: false }),
-  cancellationReason: schema.String<'user_stop'>({ required: false }),
+  cancellationReason: schema.String<'user_stop' | 'machine_update'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**
    * @deprecated Use `status` instead.
