@@ -97,3 +97,9 @@ to the configured Convex Site origin and exact installation callback contract.
 Preserve the error and fragment through desktop handoff, and fence late OAuth
 completion against navigation and workspace changes. Session replay omits URL
 fragments; controls containing the capability stay outside replay capture.
+
+The workspace-independent `/settings/github` landing waits for the signed-in
+user's live member-workspace list. It selects an active workspace only from that
+list, otherwise using the existing member-list preference. Unsigned callback
+parameters never select the workspace or a desktop target. Anonymous returns use
+the existing login flow; retry capabilities are never placed in its redirect query.
