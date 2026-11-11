@@ -420,12 +420,17 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 snackbar.showSnackbar(uploadFailed)
                 return@launch
             }
+            val request = SendTextRequest(
+                id, turnId, text, session.machineId, session.cliType!!, session.agentType!!, session.resume, queue = queue,
+                modelId = choice.first, modeId = choice.second, effort = choice.third, explicitChoice = explicit, attachments = blocks,
+                role = role, agentConfigId = session.agentConfigId, configOptionValues = switches, guide = guide,
+            )
             val result = try {
-                repository.send(scope, SendTextRequest(
-                    id, turnId, text, session.machineId, session.cliType!!, session.agentType!!, session.resume, queue = queue,
-                    modelId = choice.first, modeId = choice.second, effort = choice.third, explicitChoice = explicit, attachments = blocks,
-                    role = role, agentConfigId = session.agentConfigId, configOptionValues = switches, guide = guide,
-                )).state
+                var sent = repository.send(scope, request)
+                // An earlier Roost input still awaits its owner and nothing was written. The runtime
+                // bounds each wait, so keep the message sending with the same identity, as Web does.
+                while (sent.state == "not_sent" && sent.reason == PREVIOUS_INPUT_PENDING) sent = repository.send(scope, request)
+                sent.state
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { "unknown" }
             val delivery = when (result) {
@@ -906,6 +911,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     }
 }
 
+/** Runtime `not_sent` reason: an earlier Roost input awaits its owner and nothing was written. */
+private const val PREVIOUS_INPUT_PENDING = "previous_input_pending"
 private const val RUN_ROLE = "role"
 private const val RUN_ROLE_NONE = "__none__"
 private const val RUN_AGENT = "agent"

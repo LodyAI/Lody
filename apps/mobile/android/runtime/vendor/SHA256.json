@@ -7,7 +7,7 @@
   "LICENSE": "a388c33a8a0a231d5ed6f975f85fa7b133d4f2d17756117c618ebac7f3236afc",
   "licenses/acp-extension-dsh-LICENSE.txt": "9432aee17dee8dc0a8d415fc5e61b7db02f88125a8d328cef2375c6dea50f66a",
   "package.json": "6fd26c6aa9d96bdbbc93b49bddec5f62aea5376806a2eaae70798b824b896f43",
-  "README.md": "ec4792fcb99e7707a3bf26dd0fd6e7e9c35ff9ecdaf94c7f93d5d1a11da3e762",
+  "README.md": "5c3b26f7a456fe080412660a239bf35aa64950aef839506c02cb44f920df22c9",
   "scripts/build.mjs": "52600bbfffc26f7c8264d964d946f50286226167a9c5935da40cb0ea7a3ea281",
   "scripts/contract-swift.mjs": "56bd7a0b5bdebad44faafbd0cf712c0c5981a8afbaf5c5958d83345db6a6af44",
   "scripts/contract.mjs": "d393d98565db65f7738a6a786b6d8764131f914fc60d8fd70c550d34928e208b",

@@ -343,6 +343,12 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     (dispatcher, store, _) = await harness([record("s1")], network)
     precondition(phases(store) == ["unknown"] && network.alerts.isEmpty, "an unreadable ACK is ambiguous, not failed")
     print("PASS: session_not_ready waits again, definite rejections fail with an alert, ambiguous replies become unknown")
+
+    network = Network()
+    network.send = { _ in #"{"state":"not_sent","reason":"previous_input_pending"}"# }
+    (dispatcher, store, _) = await harness([record("s1")], network)
+    precondition(network.sent.count == 1 && phases(store) == ["waiting"] && network.alerts.isEmpty)
+    print("PASS: a background send behind an unconfirmed Roost input stays waiting without an alert")
     _ = dispatcher
   }
 
@@ -386,6 +392,15 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     await settle()
     precondition(network.sent.count == 2 && network.sent[1]["id"] == network.sent[0]["id"])
     print("PASS: page failures keep the draft, unknown results never replay, and an explicit retry reuses the identity")
+
+    network = Network()
+    var behind = [#"{"state":"not_sent","reason":"previous_input_pending"}"#, #"{"state":"queued"}"#]
+    network.send = { _ in behind.removeFirst() }
+    (dispatcher, store, _) = await harness([record("s1")], network, inputs: page(), foreground: "s1")
+    await settle()
+    precondition(network.sent.count == 2 && network.sent[1]["id"] == network.sent[0]["id"])
+    precondition(phases(store) == ["queued"] && network.alerts.isEmpty)
+    print("PASS: a page send behind an unconfirmed Roost input keeps waiting and continues with the same identity")
 
     network = Network()
     network.create = { _ in #"{"state":"created","session":{"id":"s1","machineId":"m1"}}"# }

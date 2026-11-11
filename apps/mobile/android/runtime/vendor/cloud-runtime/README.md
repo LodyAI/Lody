@@ -49,7 +49,8 @@ fence. Queued inputs use the shared control-document queue and wait behind earli
 Roost inputs. That wait depends on the owner, so it does not hold the session:
 Stop, steer and edits stay available, and only later sends of the same session
 wait behind it. It ends before the host's send deadline with
-`previous_input_pending` and writes nothing. A queue item remains in the control document until its guide input
+`previous_input_pending` and writes nothing; both hosts keep the message pending
+and send it again with the same identity, as Web keeps waiting. A queue item remains in the control document until its guide input
 is saved. The mobile runtime uploads the human-input receipt before the owner
 handoff and retries a failed upload with the same input identity. A user can
 retry the original input from the transcript after a failure, or cancel a pending

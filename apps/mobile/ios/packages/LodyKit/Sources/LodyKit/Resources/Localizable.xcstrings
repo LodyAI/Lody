@@ -4401,23 +4401,6 @@
         }
       }
     },
-    "send.error.previousInputPending": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上一条消息还在等待机器确认，这条尚未发送。请稍后重试。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The previous message is still waiting for the machine to confirm it, so this one was not sent. Try again shortly."
-          }
-        }
-      }
-    },
     "send.error.draftSaveShort": {
       "extractionState": "manual",
       "localizations": {
