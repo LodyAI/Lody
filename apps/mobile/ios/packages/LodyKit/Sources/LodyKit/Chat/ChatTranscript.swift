@@ -787,6 +787,7 @@ struct ChatTranscript {
           row.proposal = item.proposal
           row.text = item.proposal?.headline ?? ""
           row.actionable = false
+        case "system_notice" where item.isChatFailure:
           row.kind = "chat_failed"
           row.text = ChatFailure.title(item.meta)
           row.symbol = "exclamationmark.circle"

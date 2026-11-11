@@ -76,7 +76,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   /// Decisions in flight or failed, by `entryId/itemId`.
   var proposalStates: [String: ChatProposalState] = [:]
   /// The signed-in user: a Role proposal is decided only by the member who asked for it.
-  var proposalUserID = 
+  var proposalUserID = ""
   var planDecisionState: ChatPlanDecisionState?
   var errorRetryState: ChatErrorRetryState?
   var onActivityPress: ([String: Any]) -> Void = { _ in }
