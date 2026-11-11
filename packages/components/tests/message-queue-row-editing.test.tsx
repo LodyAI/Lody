@@ -505,7 +505,7 @@ describe('queued message images', () => {
     expect(container!.querySelector('[aria-label="Continue sending"]')).toBeTruthy();
   });
 
-  it('shows why a queued send failed and leaves the failure once it is retried', async () => {
+  it('shows why a queued send failed and gives visible feedback while it is retried', async () => {
     const store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);
     const reason = "Lody on this computer couldn't prepare this attachment (request_timeout).";
@@ -523,6 +523,11 @@ describe('queued message images', () => {
       } as unknown as PendingSessionSend,
     ];
     const listeners = new Set<() => void>();
+    const publish = (error: string | undefined) => {
+      records = records.map((send) => ({ ...send, error }));
+      listeners.forEach((listener) => listener());
+    };
+    let attempts = 0;
     store.set(runtimeAtom, {
       workspaceId: 'workspace-test',
       pendingSends: {
@@ -531,38 +536,53 @@ describe('queued message images', () => {
           listeners.add(listener);
           return () => listeners.delete(listener);
         },
-        retry: (id: string) => {
-          records = records.map((send) => (send.id === id ? { ...send, error: undefined } : send));
-          listeners.forEach((listener) => listener());
+        // The cause persists: the retried attempt fails again at once.
+        retry: () => {
+          attempts += 1;
+          publish(undefined);
+          publish(reason);
         },
       },
     } as unknown as WorkspaceRuntime);
-    await act(async () =>
-      root?.render(
-        createElement(
-          Provider,
-          { store },
-          createElement(MessageQueueDisplay, {
-            sessionId: 'session-test' as SessionId,
-            items: [],
-            onRemove: () => undefined,
-            onReorder: () => undefined,
-            onEditStart: () => undefined,
-            onEditCancel: () => undefined,
-            onEditSave: () => undefined,
-            onSteer: () => undefined,
-          })
+    vi.useFakeTimers();
+    try {
+      await act(async () =>
+        root?.render(
+          createElement(
+            Provider,
+            { store },
+            createElement(MessageQueueDisplay, {
+              sessionId: 'session-test' as SessionId,
+              items: [],
+              onRemove: () => undefined,
+              onReorder: () => undefined,
+              onEditStart: () => undefined,
+              onEditCancel: () => undefined,
+              onEditSave: () => undefined,
+              onSteer: () => undefined,
+            })
+          )
         )
-      )
-    );
-    const row = () => container!.querySelector<HTMLElement>('[data-pending-queue-row="held"]')!;
-    expect(row().querySelector('[role="alert"]')?.textContent).toBe(reason);
+      );
+      const row = () => container!.querySelector<HTMLElement>('[data-pending-queue-row="held"]')!;
+      const retryButton = () =>
+        row().querySelector<HTMLButtonElement>('[aria-label="Continue sending"]');
+      expect(row().querySelector('[role="alert"]')?.textContent).toBe(reason);
 
-    await act(async () =>
-      row().querySelector<HTMLButtonElement>('[aria-label="Continue sending"]')!.click()
-    );
-    expect(row().getAttribute('data-pending-queue-state')).toBe('sending');
-    expect(row().textContent).not.toContain(reason);
+      await act(async () => retryButton()!.click());
+      expect(attempts).toBe(1);
+      // The click is acknowledged even though the attempt already failed again.
+      expect(retryButton()).toBeNull();
+      expect(row().querySelector('[role="alert"]')).toBeNull();
+      expect(row().querySelector('[role="status"]')?.textContent).toBe('Sending');
+
+      await act(async () => vi.advanceTimersByTime(600));
+      expect(row().querySelector('[role="alert"]')?.textContent).toBe(reason);
+      await act(async () => retryButton()!.click());
+      expect(attempts).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('opens the full-size image in the viewer without editing the row', async () => {

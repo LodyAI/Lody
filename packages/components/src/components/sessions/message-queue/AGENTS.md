@@ -34,7 +34,9 @@ prepare render here as local rows (`pending-queue-row.tsx`) after the real items
 never in `mq` and never in the conversation stream. They are display-only (retry
 and cancel only; no drag, edit or steer) and are hidden by `userTurnId` once the
 real item exists. A failed local row shows its failure reason under its text, so
-the sender can see what failed and what to do before choosing Continue sending; a
+the sender can see what failed and what to do before choosing Continue sending.
+Continue sending replaces the button with a loading status for at least a short
+interval, so a retry that fails again at once still visibly registers; a
 same-machine preparation failure names that step and the local agent, without
 falling back to a cloud transfer. Upload progress is subscribed only inside the sheet; the page
 reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
