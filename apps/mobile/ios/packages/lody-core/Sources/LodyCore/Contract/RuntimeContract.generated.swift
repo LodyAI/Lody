@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","deleteSession","editSession","ensureSession","fileDiff","forkSession","hello","iosSimulatorControl","itemDetail","listDir","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forkSession","hello","iosSimulatorControl","itemDetail","listDir","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
 
   public struct AgentProviderAuthParamsStart: Codable, Sendable, Equatable {
     public var workspaceId: String
@@ -2456,6 +2456,67 @@ extension RuntimeContract {
       try c.encode(self.workspaceId, forKey: Key("workspaceId"))
       try c.encodeIfPresent(self.projectId, forKey: Key("projectId"))
       try c.encodeIfPresent(self.agentConfigId, forKey: Key("agentConfigId"))
+    }
+  }
+
+  public enum DecideProposalParamsDecision: String, Codable, Sendable, Equatable, CaseIterable {
+    case accept = "accept"
+    case dismiss = "dismiss"
+  }
+
+  public struct DecideProposalParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public var entryId: String
+    public var itemId: String
+    public var decision: DecideProposalParamsDecision
+    public init(workspaceId: String, sessionId: String, entryId: String, itemId: String, decision: DecideProposalParamsDecision) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+      self.entryId = entryId
+      self.itemId = itemId
+      self.decision = decision
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.entryId = try c.decode(String.self, forKey: Key("entryId"))
+      self.itemId = try c.decode(String.self, forKey: Key("itemId"))
+      self.decision = try c.decode(DecideProposalParamsDecision.self, forKey: Key("decision"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encode(self.entryId, forKey: Key("entryId"))
+      try c.encode(self.itemId, forKey: Key("itemId"))
+      try c.encode(self.decision, forKey: Key("decision"))
+    }
+  }
+
+  public enum DecideProposalResultOutcome: String, Codable, Sendable, Equatable, CaseIterable {
+    case saved = "saved"
+    case created = "created"
+    case dismissed = "dismissed"
+  }
+
+  public struct DecideProposalResult: Codable, Sendable, Equatable {
+    public var outcome: DecideProposalResultOutcome
+    public var scheduleId: String?
+    public init(outcome: DecideProposalResultOutcome, scheduleId: String? = nil) {
+      self.outcome = outcome
+      self.scheduleId = scheduleId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.outcome = try c.decode(DecideProposalResultOutcome.self, forKey: Key("outcome"))
+      self.scheduleId = try c.decodeIfPresent(String.self, forKey: Key("scheduleId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.outcome, forKey: Key("outcome"))
+      try c.encodeIfPresent(self.scheduleId, forKey: Key("scheduleId"))
     }
   }
 
@@ -8369,6 +8430,16 @@ extension RuntimeContract {
         return nil
       }
     }
+    public enum DecideProposal: RuntimeCall {
+      public typealias Params = RuntimeContract.DecideProposalParams
+      public typealias Result = RuntimeContract.DecideProposalResult
+      public static let method = "decideProposal"
+      public static let timeout: Double = 75
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .decideProposal(let result) = value { return result }
+        return nil
+      }
+    }
     public enum DeleteSession: RuntimeCall {
       public typealias Params = RuntimeContract.DeleteSessionParams
       public typealias Result = RuntimeContract.DeleteSessionResult
@@ -8783,6 +8854,7 @@ extension RuntimeContract {
     case createSession(RuntimeContract.CreateSessionResult)
     case createTab(RuntimeContract.CreateSessionResult)
     case creationOptions(RuntimeContract.CreationOptions)
+    case decideProposal(RuntimeContract.DecideProposalResult)
     case deleteSession(RuntimeContract.DeleteSessionResult)
     case editSession(RuntimeContract.EditSessionResult)
     case ensureSession(RuntimeContract.Empty)
@@ -8898,6 +8970,7 @@ extension RuntimeContract {
         case "createSession": message = .result(id: id, .createSession(try c.decode(RuntimeContract.CreateSessionResult.self, forKey: Key("payload"))))
         case "createTab": message = .result(id: id, .createTab(try c.decode(RuntimeContract.CreateSessionResult.self, forKey: Key("payload"))))
         case "creationOptions": message = .result(id: id, .creationOptions(try c.decode(RuntimeContract.CreationOptions.self, forKey: Key("payload"))))
+        case "decideProposal": message = .result(id: id, .decideProposal(try c.decode(RuntimeContract.DecideProposalResult.self, forKey: Key("payload"))))
         case "deleteSession": message = .result(id: id, .deleteSession(try c.decode(RuntimeContract.DeleteSessionResult.self, forKey: Key("payload"))))
         case "editSession": message = .result(id: id, .editSession(try c.decode(RuntimeContract.EditSessionResult.self, forKey: Key("payload"))))
         case "ensureSession": message = .result(id: id, .ensureSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))

@@ -71,6 +71,11 @@
       "result": "CreationOptions",
       "timeoutMs": 45000
     },
+    "decideProposal": {
+      "params": "DecideProposalParams",
+      "result": "DecideProposalResult",
+      "timeoutMs": 75000
+    },
     "deleteSession": {
       "params": "DeleteSessionParams",
       "result": "DeleteSessionResult",
@@ -1460,6 +1465,28 @@
         "agentConfigId": { "type": "string", "minLength": 1 }
       },
       "required": ["workspaceId"]
+    },
+    "DecideProposalParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "entryId": { "type": "string", "minLength": 1 },
+        "itemId": { "type": "string", "minLength": 1 },
+        "decision": { "type": "string", "enum": ["accept", "dismiss"] }
+      },
+      "required": ["workspaceId", "sessionId", "entryId", "itemId", "decision"]
+    },
+    "DecideProposalResult": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["saved", "created", "dismissed"]
+        },
+        "scheduleId": { "type": "string" }
+      },
+      "required": ["outcome"]
     },
     "DeleteSessionParams": {
       "type": "object",
