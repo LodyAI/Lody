@@ -139,7 +139,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 entries = withContext(Dispatchers.Default) {
                     val next = snapshot.messages.map { message ->
                         rendered[message.id]?.takeIf { it.first == message }?.second ?: when (message.role) {
-                            "system" -> ChatEntry.Operations(message.id, message.operations)
+                            "system" -> ChatEntry.Operations(message.id, message.operations, message.proposals)
                             "user" -> ChatEntry.User(
                                 message.id, message.text,
                                 TurnIdentity("", time = turnTime(message.timestamp)),
@@ -614,6 +614,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                         navigateSession = { target -> if (SessionRelations.target(target, context.relatedSessions) != null) onSelectTab(target) },
                         loadDetail = { entryId, itemId -> repository.detail(scope, id, entryId, itemId) },
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
+                        meId = context.me?.id,
+                        decideProposal = { card, accept -> repository.decideProposal(scope, id, card.entryId, card.itemId, accept) },
                     ) }
                 }
                 ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine,

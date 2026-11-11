@@ -11,6 +11,7 @@ import {providerCommands} from './provider-commands.mjs';
 import {roleCommands} from './role-commands.mjs';
 import {shortcutCommands} from './shortcut-commands.mjs';
 import {scheduleCommands} from './schedule-commands.mjs';
+import {proposalCommands} from './proposal-commands.mjs';
 const emit=message=>globalThis.webkit.messageHandlers.dataRuntime.postMessage(message);
 const access=createReadAccess(globalThis.fetch.bind(globalThis),emit);
 globalThis.fetch=access.fetch;
@@ -46,5 +47,5 @@ const sendWithReferences = args => sendTurn(args, async text => {
  });
  return {text:expanded,spans:referenceSpans(expanded,items)};
 });
-globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...providerCommands(runtime,()=>identity),...roleCommands(runtime,()=>identity),...shortcutCommands(runtime,()=>identity),...detail});
-emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings']});
+globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...proposalCommands(runtime,()=>identity),...providerCommands(runtime,()=>identity),...roleCommands(runtime,()=>identity),...shortcutCommands(runtime,()=>identity),...detail});
+emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand','decideProposal','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings']});

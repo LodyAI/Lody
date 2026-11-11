@@ -1,6 +1,6 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` is a 118-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `4477100161b7ef8fa73b92bbe6f77d5e5d003f63` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
+`runtime/vendor/cloud-runtime` is a 120-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `c27a0a100cdf8dee8ffdf13f9e24067cde74842e` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
 
 For an intentional update:
 
@@ -42,6 +42,11 @@ folder, its worktree when it has one, through the machine's `file/list-dir` (cap
 `sessionDirectoryListing`), so the list matches what `readFile` opens. Machines without the
 capability, and encrypted workspaces whose machines answer `unsupported_protocol`, keep the
 local-project listing.
+
+The snapshot at `c27a0a10` projects Agent Role and schedule proposal notices (`proposal`) and
+agent file `mimeType` into the transcript, and adds `decideProposal`: Save writes the Role through
+the Agent Roles settings path, Create saves the schedule under the proposal id, and both record the
+outcome in the notice. An unconfirmed upload keeps the proposal undecided for an explicit retry.
 
 The snapshot at `76340385` adds each Project group conversation's members to the catalog
 (`projectRun`: placement order, branch, diff, publish state and the current PR per repository,

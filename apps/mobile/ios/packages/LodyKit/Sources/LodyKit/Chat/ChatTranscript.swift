@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LodyCore
 
 struct ChatFileDiff: Decodable, Equatable {
   let path: String
@@ -72,6 +73,7 @@ struct ChatMessageAttachment: Decodable, Equatable {
   var storageSessionId: String? = nil
   var transport: String? = nil
   var sizeBytes: Int? = nil
+  var mimeType: String? = nil
 }
 
 struct ChatTextReference: Decodable, Equatable {
@@ -178,6 +180,8 @@ struct ChatItem: Decodable {
   struct NoticeMeta: Decodable, Equatable { let reason: String?; let code: String?; let message: String? }
   var operation: ChatOperationPresentation? = nil
   var meta: NoticeMeta? = nil
+  /// An Agent's Role or schedule proposal carried by a `system_notice` (web proposal notices).
+  var proposal: ChatProposal? = nil
   var isChatFailure: Bool { type == "system_notice" && name == "chat_failed" }
   let itemId: String
   let type: String
@@ -200,7 +204,7 @@ struct ChatItem: Decodable {
   var isBackgrounded: Bool? = nil
   var skipTranscript: Bool? = nil
   var processDurationMs: Int? = nil
-  var isProcess: Bool { operation == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
+  var isProcess: Bool { operation == nil && proposal == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
   var hidesFromTranscript: Bool {
     if let operation { return operation.cards.isEmpty && operation.notices.isEmpty }
     if type == "proposed_plan" {
@@ -250,6 +254,10 @@ struct ChatRow: Equatable {
   var imageAsset = ""
   var subagent: ChatSubagentCard? = nil
   var operation: ChatOperationCard? = nil
+  var proposal: ChatProposal? = nil
+  /// The signed-in user may decide this proposal (a Role proposal binds its requester).
+  var proposalDecidable = false
+  var proposalState: ChatProposalState? = nil
   var operationCurrent = false
   var operationPeers: [ChatOperationPeer] = []
   var operationCLIType: String? = nil
@@ -774,7 +782,11 @@ struct ChatTranscript {
           running: entry.isRunning && item.status == "in_progress", attention: attention,
           streaming: entry.isRunning && item.itemId == entry.textTailID)
         switch item.type {
-        case "system_notice" where item.isChatFailure:
+        case "system_notice" where item.proposal != nil:
+          row.kind = "proposal"
+          row.proposal = item.proposal
+          row.text = item.proposal?.headline ?? ""
+          row.actionable = false
           row.kind = "chat_failed"
           row.text = ChatFailure.title(item.meta)
           row.symbol = "exclamationmark.circle"
@@ -1212,4 +1224,49 @@ enum ChatOperationGrouping {
     }
     return result
   }
+}
+
+/// web `AgentRoleProposalMeta` / `ScheduleProposalMeta` as the runtime presents them.
+struct ChatProposal: Decodable, Equatable {
+  struct Fields: Decodable, Equatable {
+    var name: String? = nil
+    var description: String? = nil
+    var promptPrefix: String? = nil
+  }
+  let kind: String
+  var action: String? = nil
+  var roleId: String? = nil
+  var requesterUserId: String? = nil
+  var fields: Fields? = nil
+  var before: Fields? = nil
+  var outcome: String? = nil
+  var proposalId: String? = nil
+  var title: String? = nil
+  var prompt: String? = nil
+  var rule: RuntimeContract.ScheduleRule? = nil
+  var destination: String? = nil
+  var scheduleId: String? = nil
+
+  var isRole: Bool { kind == "agent_role" }
+  var decided: Bool { outcome != nil }
+
+  /// The card's heading: the question while open, the receipt once decided.
+  var headline: String {
+    let key: String
+    switch (kind, outcome, action) {
+    case (_, "dismissed"?, _): key = "native.chat.proposal.dismissed"
+    case ("agent_role", "saved"?, _): key = "native.chat.proposal.role.saved"
+    case ("agent_role", _, "update"?): key = "native.chat.proposal.role.update"
+    case ("agent_role", _, _): key = "native.chat.proposal.role.create"
+    case (_, "created"?, _): key = "native.chat.proposal.schedule.created"
+    default: key = "native.chat.proposal.schedule.title"
+    }
+    return String(localized: String.LocalizationValue(key), bundle: .lody)
+  }
+}
+
+/// A decision in flight or its failure, kept by the chat view per proposal row.
+struct ChatProposalState: Equatable {
+  var pending = false
+  var message = ""
 }

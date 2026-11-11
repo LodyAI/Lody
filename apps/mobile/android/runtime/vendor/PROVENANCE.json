@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "4477100161b7ef8fa73b92bbe6f77d5e5d003f63",
+  "commit": "c27a0a100cdf8dee8ffdf13f9e24067cde74842e",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 4477100161b7ef8fa73b92bbe6f77d5e5d003f63 apps/mobile/ios/packages/cloud-runtime",
-  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 76340385, `listDir` lists the conversation's own folder through the machine's `file/list-dir` (capability `sessionDirectoryListing`) and keeps the local-project listing for machines without it. Dependencies and licenses unchanged."
+  "export": "git archive c27a0a100cdf8dee8ffdf13f9e24067cde74842e apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 44771001, system notices carry well-formed Agent Role and schedule proposals (`proposal`), file items carry `mimeType`, and `decideProposal` saves the Role or creates the schedule a proposal describes and records the outcome in session history; it also includes the upstream mention prompts as references (#2559). Dependencies and licenses unchanged."
 }
