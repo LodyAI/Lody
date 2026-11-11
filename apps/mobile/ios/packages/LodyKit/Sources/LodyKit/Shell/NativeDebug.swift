@@ -10,7 +10,9 @@ enum NativeDebug {
       catch { preconditionFailure("Invalid offline fixture: \(error)") }
     }
     let root: UIViewController
-    if LodyUIVerify.has("--ui-review-list") {
+    if _isDebugAssertConfiguration(), let review = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-review-cards=") }) {
+      root = SessionPreviewController(scenario: "cards-" + String(review.dropFirst("--ui-review-cards=".count)))
+    } else if LodyUIVerify.has("--ui-review-list") {
       root = ChatListPreviewController()
     } else if LodyUIVerify.has("--ui-review-mentions") {
       root = SessionPreviewController(scenario: "mentions")
@@ -116,7 +118,7 @@ enum NativeDebug {
       }
       content = page
     }
-    if scenario.hasPrefix("session-preview-bar-") || scenario.hasPrefix("session-preview-usage") {
+    if scenario.hasPrefix("session-preview-bar-") || scenario.hasPrefix("session-preview-usage") || scenario.hasPrefix("session-preview-cards-") {
       LodyShell.shared.pushRootNative(content, title: "")
       return
     }
