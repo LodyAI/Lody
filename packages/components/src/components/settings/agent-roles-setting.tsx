@@ -38,7 +38,7 @@ import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
-import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import {
   AgentRoleEditorDialog,
@@ -174,6 +174,12 @@ export function AgentRolesSetting() {
   };
 
   const addLabel = t('settings.agentRoles.add');
+  const addButton = (
+    <Button size="small" variant="secondary" onClick={openAdd}>
+      <Plus {...stylex.props(catalog.icon)} />
+      {addLabel}
+    </Button>
+  );
 
   return (
     <div {...stylex.props(surface.container)}>
@@ -186,14 +192,15 @@ export function AgentRolesSetting() {
             {t('settings.agentRoles.syncing')}
           </span>
         ) : null}
-        <Button size="small" variant="secondary" onClick={openAdd}>
-          <Plus {...stylex.props(catalog.icon)} />
-          {addLabel}
-        </Button>
+        {rows.length > 0 ? addButton : null}
       </SettingsPageActions>
 
       {rows.length === 0 ? (
-        <SettingsEmptyList>{t('settings.agentRoles.empty')}</SettingsEmptyList>
+        <SettingsEmptyState
+          title={t('settings.agentRoles.empty')}
+          description={t('settings.agentRoles.emptyHint')}
+          action={addButton}
+        />
       ) : (
         // One provider: after the first machine note opens, the next opens at once.
         <Tooltip.Provider delay={250}>

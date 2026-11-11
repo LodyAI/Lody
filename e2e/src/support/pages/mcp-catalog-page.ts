@@ -143,11 +143,7 @@ export class McpCatalogPage {
     await expect(settings.getByText(this.fixture.serverName, { exact: true })).toBeHidden({
       timeout: 30_000,
     });
-    await expect(
-      settings.getByText(
-        /^(No MCP servers are configured for this workspace\.|此工作区还没有配置 MCP 服务器。)$/u
-      )
-    ).toBeVisible();
+    await expect(settings.getByText(/^(No MCP servers yet|还没有 MCP 服务器)$/u)).toBeVisible();
     await this.closeSettings(settings);
   }
 
