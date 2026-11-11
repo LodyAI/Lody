@@ -38,6 +38,9 @@ export function E2eeMemberActions(props: {
   member: LedgerMemberOverview;
   name: string;
   management: E2eeMemberManagement;
+  /** Reports the key update that followed a confirmed removal. The removal reloads the
+   * list and drops this row, so the caller owns what a failed update leaves on screen. */
+  onRotationSettled: (replaced: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [confirming, setConfirming] = useState(false);
@@ -45,7 +48,6 @@ export function E2eeMemberActions(props: {
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
   const [rotateAfter, setRotateAfter] = useState(true);
-  const [rotateFailed, setRotateFailed] = useState(false);
   const { member, management } = props;
   if (member.role === 'owner') return null;
   const mayRemove = management.actorRole === 'owner' || member.role !== 'admin';
@@ -124,11 +126,6 @@ export function E2eeMemberActions(props: {
       {failed && !confirming && (
         <Alert.Root tone="warning">
           <Alert.Description>{t('e2ee.members.failed')}</Alert.Description>
-        </Alert.Root>
-      )}
-      {rotateFailed && (
-        <Alert.Root tone="warning">
-          <Alert.Description>{t('e2ee.members.rotateFailed')}</Alert.Description>
         </Alert.Root>
       )}
       <Dialog.Root
@@ -222,15 +219,16 @@ export function E2eeMemberActions(props: {
               onClick={() => {
                 void run(async () => {
                   await management.remove(member.membershipId);
-                  setRotateFailed(false);
                   if (!rotateAfter || !management.rotate) return;
                   // The removal already committed; a failed key update must not
                   // read as a failed removal. It stays a retryable key update.
+                  let replaced = true;
                   try {
                     await management.rotate();
                   } catch {
-                    setRotateFailed(true);
+                    replaced = false;
                   }
+                  props.onRotationSettled(replaced);
                 });
               }}
             >
