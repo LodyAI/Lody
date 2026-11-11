@@ -1,3 +1,4 @@
+import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import {
   useLegacyWorkspaceAction,
   useLegacyWorkspaceMutation,
@@ -90,6 +91,7 @@ function MobileCloudIntegrationsSettings() {
   const refreshPersonalGitHubProfile = useLegacyWorkspaceAction(
     cloudOperations.github.refreshPersonalGitHubProfile
   );
+  const [installNeedsAuthorization, setInstallNeedsAuthorization] = useState(false);
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
   const [updatingPersonalPreference, setUpdatingPersonalPreference] = useState(false);
   const [authorizingPersonalGitHub, setAuthorizingPersonalGitHub] = useState(false);
@@ -165,6 +167,12 @@ function MobileCloudIntegrationsSettings() {
       return;
     }
 
+    if (personalOperationSettings === undefined) return;
+    if (personalAuthorizationState !== 'authorized') {
+      setInstallNeedsAuthorization(true);
+      return;
+    }
+    setInstallNeedsAuthorization(false);
     const githubAppName = import.meta.env.VITE_GITHUB_APP_NAME || 'lodyai';
     const isElectron = isElectronRenderer();
     const popup = isElectron ? null : window.open('', '_blank');
@@ -213,6 +221,8 @@ function MobileCloudIntegrationsSettings() {
     currentWorkspaceId,
     currentWorkspaceSlug,
     getConvexErrorMessage,
+    personalAuthorizationState,
+    personalOperationSettings,
     t,
   ]);
 
@@ -293,7 +303,9 @@ function MobileCloudIntegrationsSettings() {
     try {
       if (authorizeInBrowser) {
         const opened = await openExternalUrl(
-          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!)
+          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!, {
+            installation: installNeedsAuthorization,
+          })
         );
         if (!opened) {
           throw new Error(
@@ -317,12 +329,21 @@ function MobileCloudIntegrationsSettings() {
     authedWorkspaceId,
     authorizeInBrowser,
     canAuthorizePersonalGitHub,
+    installNeedsAuthorization,
     currentWorkspaceSlug,
     t,
   ]);
 
   return (
     <div id="github" className={cn('flex flex-col', fold ? 'h-full min-h-0' : 'pb-6 pt-1')}>
+      <GitHubInstallationNotice
+        needsAuthorization={
+          installNeedsAuthorization && personalAuthorizationState !== 'authorized'
+        }
+        authorized={personalAuthorizationState === 'authorized'}
+        onAuthorize={() => void handleAuthorizePersonalGitHub()}
+        disabled={!workspaceAuthReady || authorizingPersonalGitHub}
+      />
       <MobileSettingsFoldPanels
         upper={
           <>

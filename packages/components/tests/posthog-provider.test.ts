@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { POSTHOG_OPTIONS } from '../src/providers/posthog-options';
@@ -138,4 +140,24 @@ describe('PostHog provider options', () => {
       expect(event).toMatchObject({ properties: { error_code: 'redacted_exception' } });
     }
   });
+});
+
+it('keeps GitHub installation retry capabilities out of the locked SDK replay URL metadata', () => {
+  const require = createRequire(import.meta.url);
+  const sdkRoot = dirname(require.resolve('posthog-js/package.json'));
+  // Exercise the real locked recorder URL masking boundary without starting replay timers.
+  const { LazyLoadedSessionRecording } = require(
+    join(sdkRoot, 'lib/src/extensions/replay/external/lazy-loaded-session-recorder.js')
+  );
+  const recorder = Object.assign(Object.create(LazyLoadedSessionRecording.prototype), {
+    _instance: { config: { ...POSTHOG_OPTIONS } },
+  }) as {
+    _instance: { config: { disable_capture_url_hashes?: boolean } };
+    _maskReplayUrl: (url: string) => string;
+  };
+  const capability =
+    'https://lody.example/team/settings/github#github-install-retry=SIGNED_INSTALL_STATE_SECRET';
+  expect(recorder._maskReplayUrl(capability)).toBe('https://lody.example/team/settings/github');
+  recorder._instance.config.disable_capture_url_hashes = false;
+  expect(recorder._maskReplayUrl(capability)).toContain('SIGNED_INSTALL_STATE_SECRET');
 });

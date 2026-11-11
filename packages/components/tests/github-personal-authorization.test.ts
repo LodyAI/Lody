@@ -59,4 +59,22 @@ describe('personal GitHub browser proof', () => {
       expect(sessionStorage.length).toBe(0);
     }
   );
+  it('retains the same installation retry capability across personal OAuth without putting it in the callback query', () => {
+    vi.stubEnv('VITE_CONVEX_SITE_URL', 'https://synthetic.convex.site');
+    const retry =
+      'https://synthetic.convex.site/api/github/callback?installation_id=42&setup_action=update&state=installation-state';
+    const recovery = `?github_install_error=authorization_required#github-install-retry=${encodeURIComponent(retry)}`;
+    window.history.replaceState(null, '', `/team/settings/github${recovery}`);
+    storePersonalGitHubProof('oauth-state', 'secret-verifier');
+    callback({ state: 'oauth-state', code: 'temporary-code' });
+    expect(takePersonalGitHubCallback()).toEqual({
+      state: 'oauth-state',
+      code: 'temporary-code',
+      verifier: 'secret-verifier',
+      installationRecovery: recovery,
+    });
+    expect(window.location.search).not.toContain('installation-state');
+    expect(sessionStorage.length).toBe(0);
+    vi.unstubAllEnvs();
+  });
 });

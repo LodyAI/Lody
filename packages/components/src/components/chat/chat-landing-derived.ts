@@ -649,6 +649,8 @@ export function buildChatLandingPreSelectionKey({
 
 /** Search-parameter contract of the `/$workspaceName/chat` route. */
 export type ChatLandingSearch = {
+  /** Installation advice survives the desktop settings route-to-modal handoff. */
+  github_install_error?: string;
   context?: 'local' | 'github' | 'chat' | 'group';
   machine?: string;
   project?: string;
@@ -659,6 +661,8 @@ export type ChatLandingSearch = {
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
   return {
+    github_install_error:
+      typeof search.github_install_error === 'string' ? search.github_install_error : undefined,
     context:
       search.context === 'local' ||
       search.context === 'github' ||

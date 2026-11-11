@@ -24,12 +24,15 @@ import type { MobileWorkspaceTab } from '@/components/mobile/mobile-workspace-ta
 
 type SettingsSearch = {
   from?: string;
+  github_install_error?: string;
 };
 
 export const Route = createFileRoute('/$workspaceName/_auth/settings')({
   component: SettingsLayoutComponent,
   validateSearch: (search: Record<string, unknown>): SettingsSearch => ({
     from: typeof search.from === 'string' ? search.from : undefined,
+    github_install_error:
+      typeof search.github_install_error === 'string' ? search.github_install_error : undefined,
   }),
 });
 
@@ -131,14 +134,28 @@ export function SettingsLayoutComponent() {
     );
     setSettingsModalOpen(true);
     // OAuth returns through this route before the desktop GitHub settings modal mounts.
-    const hash = window.location.hash.startsWith('#github-personal=')
-      ? window.location.hash.slice(1)
-      : undefined;
+    const hash =
+      window.location.hash.startsWith('#github-personal=') ||
+      window.location.hash.startsWith('#github-install-retry=')
+        ? window.location.hash.slice(1)
+        : undefined;
+    const githubInstallError =
+      new URLSearchParams(window.location.search).get('github_install_error') ?? undefined;
+    const search = (prev: Record<string, unknown>) => ({
+      ...prev,
+      github_install_error: githubInstallError,
+    });
     const closeTo = resolveSettingsCloseTo(settingsFrom);
     if (closeTo) {
-      void navigate({ to: closeTo, replace: true, hash });
+      void navigate({ to: closeTo, replace: true, hash, search });
     } else {
-      void navigate({ to: '/$workspaceName/chat', params: { workspaceName }, replace: true, hash });
+      void navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName },
+        replace: true,
+        hash,
+        search,
+      });
     }
   }, [
     isMobile,

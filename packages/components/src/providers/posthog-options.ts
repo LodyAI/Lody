@@ -140,6 +140,8 @@ function isResizeObserverLoopPostHogEvent(event: {
 export const POSTHOG_OPTIONS: PostHogOptions = {
   ...(POSTHOG_HOST ? { api_host: POSTHOG_HOST } : {}),
   defaults: '2026-01-30',
+  // OAuth and installation retry fragments carry capabilities, including in replay URL metadata.
+  disable_capture_url_hashes: true,
   autocapture: false,
   // The deferred controller records pageviews and pageleave itself so routes
   // visited before `posthog.init` retain their original timestamps, and a short
@@ -213,4 +215,3 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
     return event;
   },
 };
-

@@ -6611,5 +6611,18 @@
   "settings.machines.batchUpdate.immediate": "立即更新（中断对话）",
   "settings.machines.batchUpdate.confirmImmediate": "{{count}} 个正在运行的对话会被中断，更新后可以在每个对话里点“继续”。",
   "settings.machines.batchUpdate.confirmInterrupt": "中断并更新",
-  "settings.machines.batchUpdate.start": "更新 {{count}} 台机器"
+  "settings.machines.batchUpdate.start": "更新 {{count}} 台机器",
+  "settings.integrations.github.installErrors.authorizationRequired": "请先授权你的个人 GitHub 账号，再连接 GitHub App。这不会更改“以你的身份操作”偏好。",
+  "settings.integrations.github.installErrors.temporarilyUnavailable": "暂时无法连接 GitHub。请重试同一次安装。",
+  "settings.integrations.github.installErrors.installationNotVisible": "你的 GitHub 账号无法访问此安装。请检查账号和仓库访问权限后重试。",
+  "settings.integrations.github.installErrors.linkedElsewhere": "此安装已连接到另一个工作区。请先在那里断开连接。",
+  "settings.integrations.github.installErrors.suspended": "此 GitHub 安装已暂停。请在 GitHub 中恢复后重试。",
+  "settings.integrations.github.installErrors.encryptedWorkspace": "加密工作区不支持连接 GitHub App。",
+  "settings.integrations.github.installErrors.repositoriesTooMany": "此安装的仓库过多，无法完成验证。请在 GitHub 中减少所选仓库后重试。",
+  "settings.integrations.github.installErrors.invalidState": "本次安装已过期或已完成。请重新开始连接。",
+  "settings.integrations.github.installErrors.forbidden": "只有工作区当前的所有者或管理员可以连接此安装。",
+  "settings.integrations.github.installErrors.deletionInProgress": "此账号或工作区正在删除，无法连接安装。",
+  "settings.integrations.github.installErrors.unknown": "无法连接此安装。请重新开始连接或联系支持。",
+  "settings.integrations.github.retryInstallation": "重试安装",
+  "desktopGithubInstall.failedDescription": "安装未连接。请打开 Lody 桌面端查看错误并重试。"
 }
