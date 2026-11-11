@@ -128,6 +128,7 @@
   "e2ee.team.linkReady": "加入链接已创建。",
   "e2ee.team.loadFailed": "暂时无法加载申请。联网后重试；已有成员可继续工作。",
   "e2ee.team.retryOriginal": "结果尚未确认，联网后可继续重试已保存的申请。",
+  "e2ee.team.memberLimit": "免费工作区成员已满，升级后才能批准更多成员。",
   "e2ee.team.upgrade": "请更新 Lody 桌面版以管理加密团队邀请。",
   "e2ee.team.join": "加入加密工作区",
   "e2ee.team.joinTitle": "加入 {{workspace}}",

@@ -128,6 +128,7 @@
   "e2ee.team.linkReady": "Join link created.",
   "e2ee.team.loadFailed": "Unable to load requests. Reconnect or retry; existing members can continue working.",
   "e2ee.team.retryOriginal": "The result is not confirmed. Retry the saved request after reconnecting.",
+  "e2ee.team.memberLimit": "This free workspace is full. Upgrade to approve more members.",
   "e2ee.team.upgrade": "Update Lody Desktop to manage encrypted team invitations.",
   "e2ee.team.join": "Join encrypted workspace",
   "e2ee.team.joinTitle": "Join {{workspace}}",
