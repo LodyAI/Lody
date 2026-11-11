@@ -59,9 +59,7 @@ enum LodyNativePages {
     "agent-roles-preview": { _ in AgentRolesPreviewController() },
     "settings": { _ in SettingsController() },
     "settings-baseline": { params in SettingsBaselineController(scenario: params["scenario"] as? String ?? "live") },
-    "archived-sessions": { _ in ArchivedSessionsController() },
     "workspace-editor": { params in WorkspaceEditorController(params: params) },
-    "archived-sessions-preview": { _ in ArchivedSessionsPreviewController() },
     "session": { params in SessionController(params: params) },
     "session-permission": { params in
       let sessionId = params["sessionId"] as! String
@@ -72,12 +70,6 @@ enum LodyNativePages {
     "session-preview": { params in SessionPreviewController(scenario: params["scenario"] as? String ?? "live") },
     "send-preview": { params in SendPreviewController(params: params) },
     "agent-error-preview": { _ in AgentErrorPreviewController() },
-    "published-shares": { params in PublishedSharesController(scope: .live(params)) },
-    "published-shares-preview": { _ in PublishedSharesPreviewController() },
-    "published-shares-empty": { _ in PublishedSharesPreviewController(state: "empty") },
-    "published-shares-denied": { _ in PublishedSharesPreviewController(state: "denied") },
-    "published-shares-readonly": { _ in PublishedSharesPreviewController(state: "readonly") },
-    "published-shares-readback-denied": { _ in PublishedSharesPreviewController(state: "readback-denied") },
     "machine-settings": { params in RemoteSettingsController(kind: "machine", scope: .live(params)) },
     "agent-settings": { params in AgentProvidersController(scope: .live(params)) },
     "settings-preview": { _ in SettingsPreviewController() },

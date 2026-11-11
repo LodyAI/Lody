@@ -56,7 +56,6 @@ class SettingsController: UIViewController {
     let workspacePages = [
       "agent-roles": "agent-roles", "prompt-shortcuts": "prompt-shortcuts", "project-visibility": "project-visibility",
       "github-settings": "github-settings", "ai-usage": "ai-usage",
-      "published-shares": "published-shares",
     ]
     let remote = ["remote-agent": "agent"]
     if let page = native[id] {
@@ -75,8 +74,6 @@ class SettingsController: UIViewController {
       )
     } else if id == "account", state.account != nil {
       LodyShell.shared.pushNative(AccountController(source: source), title: String(localized: "account.title", bundle: .lody), from: self)
-    } else if id == "archived", workspace != nil {
-      push("archived-sessions", title: String(localized: "settings.archived.title", bundle: .lody))
     } else if id == "diagnostics" {
       push("diagnostics", title: String(localized: "diagnostics.title", bundle: .lody))
     } else if id == "connection", workspace != nil, state.connection.state == "offline" {
@@ -98,7 +95,6 @@ class SettingsController: UIViewController {
       "preferences": "preferences.title", "about": "section.about",
       "agent-roles": "roles.title", "prompt-shortcuts": "shortcuts.title", "project-visibility": "projects.title",
       "github-settings": "github.title", "ai-usage": "aiUsage.title",
-      "published-shares": "shares.title",
     ]
     return keys[id].map(text) ?? ""
   }

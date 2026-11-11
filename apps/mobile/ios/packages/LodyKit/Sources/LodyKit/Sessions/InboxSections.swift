@@ -108,6 +108,14 @@ enum InboxSections {
     return [section(pinnedId, header: String(localized: "inbox.section.pinned", bundle: .lody), rows: home.rows(pinned))] + sections
   }
 
+  /// The view menu's Archived switch: only archived chats, in activity buckets, newest first.
+  /// No Pinned group; rows offer unarchive as their swipe action.
+  static func archived(_ catalog: SessionCatalog, owner: String? = nil, now: Double = LodyRelativeTime.now()) -> [LodyListSection] {
+    var catalog = catalog
+    if let owner { catalog.sessions = owned(catalog.sessions, by: owner) }
+    return timeline(HomeRows(catalog, now: now, archived: true))
+  }
+
   /// Keep complete families containing the owner's chats, including parent context.
   static func owned(_ sessions: [SessionItem], by owner: String) -> [SessionItem] {
     let indexed = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -196,14 +204,15 @@ enum InboxSections {
     var families: [SessionRows.Family]
     let attention: [String: SessionRows.ListAttention]
 
-    init(_ catalog: SessionCatalog, now: Double) {
+    /// `archived` lists only archived chats (the view menu's Archived switch) instead of open ones.
+    init(_ catalog: SessionCatalog, now: Double, archived: Bool = false) {
       let indexed = Dictionary(catalog.sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
       attention = SessionRows.conversationAttention(catalog.sessions, indexed: indexed)
       self.now = now
       names = InboxSections.projectNames(catalog)
       repositories = Dictionary(catalog.projects.compactMap { project in project.repoFullName.map { (project.id, $0) } }, uniquingKeysWith: { first, _ in first })
       repos = Set(catalog.projects.filter { !($0.repoFullName ?? "").isEmpty }.map(\.id))
-      let visible = catalog.sessions.filter { !$0.archived }.sorted { $0.activityAt > $1.activityAt }
+      let visible = catalog.sessions.filter { $0.archived == archived }.sorted { $0.activityAt > $1.activityAt }
       families = SessionRows.tree(visible, indexed: indexed)
     }
 

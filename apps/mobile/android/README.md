@@ -224,8 +224,8 @@ write retry identity handling are unchanged. Open last chat uses Home navigation
 ## Settings
 
 Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
-Agent settings, Agent Roles, prompt shortcuts, GitHub and sign-out. There is no Machines or Agent conversation
-sync destination. Other unfinished settings destinations show an explicit placeholder.
+Agent settings, Agent Roles, prompt shortcuts, GitHub and sign-out. There is no Machines, Published shares or
+Agent conversation sync destination. Other unfinished settings destinations show an explicit placeholder.
 
 Preferences follows iOS: language and notifications open the system pages for this
 app, then the queued-message behaviour (`AppPreferences`). Steer applies only when

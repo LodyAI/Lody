@@ -34,6 +34,19 @@ enum HomeScope: String, CaseIterable, Sendable {
   }
 }
 
+/// The view menu's Archived switch: while on, Chats lists only archived chats on a darker,
+/// greyer page. Kept in memory, so every launch opens on the open chats.
+enum HomeArchive {
+  /// Read and written only from the main thread (view menus and list rendering).
+  nonisolated(unsafe) private(set) static var shown = false
+
+  static func set(_ value: Bool) {
+    guard value != shown else { return }
+    shown = value
+    NotificationCenter.default.post(name: .lodyHomeGroupingChanged, object: nil)
+  }
+}
+
 /// "By status" groups, most pressing first. Mirrors web `lib/home-now.ts`: every chat lands in
 /// exactly one group, under the first reason that applies.
 enum HomeStatusGroup: String, CaseIterable, Sendable {

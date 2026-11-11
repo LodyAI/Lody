@@ -41,4 +41,6 @@
 
 - Relation and receipt rows express containment through layout, without auxiliary Tab/current/directory labels. Mark only the current exact target with a subtle background and accessible selection. Keep status descriptions accessible, use icons instead of redundant visible status words, and preserve reply text, truncation/error notices and action labels.
 
+- Archived chats have no Settings page. The Chats view menu (iPhone and iPad) carries an Archived switch (`HomeArchive`, in memory, so each launch opens on open chats). While on, the list and search show only archived chats in activity buckets (`InboxSections.archived`, honouring My tasks, no Pinned group or project index) on the darker, greyer `bgArchived` page with grey titles (iPad sidebar rows dim to `LodyOpacity.muted`). Archived rows swipe left only to Unarchive, have no pin swipe, and their context menu offers Unarchive, Share and Delete.
+
 - Archiving from conversation More immediately returns to the list while its write outlives the page. Success is silent; failure warns only in the original active Home/account/workspace scope, fenced by logout generation. Home clears only that conversation’s detail. Unarchive retains its page and feedback.

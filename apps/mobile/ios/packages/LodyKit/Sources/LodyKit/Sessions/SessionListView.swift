@@ -33,6 +33,8 @@ final class SessionListView: UIView {
   var sidebarScrollView: UIScrollView { sidebar.scrollView }
   func setOwners(_ value: [String: WorkspaceMember]) { grouped.owners = value }
   func setContentStyle(_ value: Bool) {}
+  /// Archived mode restyles both layouts: darker, greyer page and grey rows.
+  func setArchivedStyle(_ value: Bool) { grouped.archivedStyle = value; sidebar.archivedStyle = value }
   func setPreviewUserId(_ value: String) { sidebar.previewUserId = value }
   func setPreviewWorkspaceId(_ value: String) { sidebar.previewWorkspaceId = value }
   /// Home pins the current group's label; search results keep labels in the flow.

@@ -22,7 +22,7 @@ CHAT = ROOT / 'apps/ios/verification/kit/chat'
 BATCHES = {
     'pages': ['onboarding', 'home', 'home-grouping-crash', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
     'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
-    'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
+    'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'],
 }
 SUITES = {
     'settings-workspace': BATCHES['settings'],
@@ -42,15 +42,12 @@ PREVIEW = {
     'role-mention-chat': 'mention-chat',
     'role-mention-sheet': 'mention-sheet',
     'agent-roles': 'agent-roles-preview',
-    'archived-sessions': 'archived-sessions-preview',
     'session-native': 'session-preview-live',
     'session-simulator': 'session-preview-live',
     'permission-native': 'permission-native-preview',
     'native-diff': 'file-diff-preview',
     'native-workspace-changes': 'workspace-changes-preview',
     'native-file-content': 'file-content-preview',
-    'published-shares': 'published-shares-preview',
-    'published-share-states': 'published-shares-readonly',
     'ai-usage': 'ai-usage-preview',
     'github-settings': 'github-settings-preview',
     'project-visibility': 'project-visibility-preview',
@@ -160,15 +157,12 @@ READY = {
     'toast': 'session-preview-probe',
     'role-mention-sheet': 'create-session-input',
     'agent-roles': 'list-unavailable-action',
-    'archived-sessions': 'archived-preview-writes',
     'session-native': 'session-preview-probe',
     'session-simulator': 'session-preview-probe',
     'permission-native': 'permission-preview-probe',
     'native-diff': 'diff-preview:changes:docs/superpowers/.diff-check.md',
     'native-workspace-changes': 'file:src/greeting.ts',
     'native-file-content': 'file:report.md',
-    'published-shares': 'list-unavailable-action',
-    'published-share-states': 'share:own',
     'ai-usage': 'list-unavailable-action',
     'github-settings': 'list-unavailable-action',
     'project-visibility': 'visibility:m1:same',
@@ -526,9 +520,9 @@ try:
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:
                     script = Path(__file__).with_name('devices.py')
-                if case in ('diagnostics', 'directory', 'project', 'activity', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'published-shares', 'published-share-states', 'agent-roles'):
+                if case in ('diagnostics', 'directory', 'project', 'activity', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'):
                     script = Path(__file__).with_name(f'{case}.py')
-                if case in ('archived-sessions', 'session-native', 'session-simulator', 'permission-native', 'native-diff', 'native-workspace-changes', 'native-file-content'):
+                if case in ('session-native', 'session-simulator', 'permission-native', 'native-diff', 'native-workspace-changes', 'native-file-content'):
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'file-selection':
                     script = Path(__file__).with_name('file-selection.py')
@@ -600,7 +594,7 @@ try:
                 if case == 'native-file-content':
                     # Source, links, HTML navigation and three feedback outcomes share this case.
                     check_timeout = 300
-                if case in ('agent-roles', 'published-shares', 'published-share-states'):
+                if case == 'agent-roles':
                     check_timeout = 420
                 if case in ('settings', 'agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods'):
                     # These cases visit several Settings contexts or editors; settings reaches ~300s under load.
