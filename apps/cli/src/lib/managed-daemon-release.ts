@@ -11,6 +11,8 @@ import { gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { resolveRuntimeArtifactsBaseUrl } from '@lody/platform';
+import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
+import { toShared } from '@/platform/process-options';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -65,14 +67,6 @@ function fixedServicePath(): string {
  * publish the installation: until `publishManagedInstallation`, launchers keep
  * starting whatever installation they already own.
  */
-const isProcessAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return !(error instanceof Error && 'code' in error && error.code === 'ESRCH');
-  }
-};
 /**
  * The lock names its holder's pid. A lock whose holder no longer exists was left
  * by a crashed install and is taken over once; a live holder keeps exclusion.
@@ -87,7 +81,7 @@ async function acquireInstallLock(lockPath: string): Promise<fs.FileHandle> {
       if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST') || attempt > 0)
         throw error;
       const holder = Number.parseInt(await fs.readFile(lockPath, 'utf8').catch(() => ''), 10);
-      if (!Number.isInteger(holder) || holder <= 0 || isProcessAlive(holder))
+      if (!Number.isInteger(holder) || holder <= 0 || isPidAliveSyncLegacy(holder, toShared()))
         throw new Error(`Managed install in progress (${lockPath}): ${error.message}`);
       await fs.rm(lockPath, { force: true });
     }
