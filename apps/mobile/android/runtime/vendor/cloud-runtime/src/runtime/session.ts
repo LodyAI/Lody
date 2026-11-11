@@ -1602,3 +1602,72 @@ export async function respondPermission(args: {
   if (active === state) scheduleEmit(state, 'live');
   return { state: 'accepted' as const };
 }
+
+/** A `system_notice` in the open session, read for an action on it. */
+export function noticeAt(args: {
+  sessionId: string;
+  entryId: string;
+  itemId: string;
+}): { name: string; meta: unknown } | undefined {
+  const state = active;
+  if (!state || state.id !== args.sessionId || !state.ready)
+    throw new Error('session_not_ready');
+  const item = locateItem(args.entryId, args.itemId);
+  if (!item) return undefined;
+  const raw: any = item.toJSON();
+  if (raw?.type !== 'system_notice' || typeof raw.name !== 'string')
+    return undefined;
+  return { name: raw.name, meta: raw.meta };
+}
+
+/**
+ * Record a decision in a notice's meta (web writes the whole turn back with the
+ * changed item). Only the fields given change; the upload is never replayed: a
+ * failed append keeps the local version so an explicit retry re-exports it.
+ */
+export async function writeNoticeMeta(args: {
+  sessionId: string;
+  entryId: string;
+  itemId: string;
+  name: string;
+  patch: Record<string, unknown>;
+}) {
+  const state = active;
+  if (!state || state.id !== args.sessionId || !state.ready)
+    throw new Error('session_not_ready');
+  const item = locateItem(args.entryId, args.itemId);
+  if (!item || scalar(item.get('type')) !== 'system_notice')
+    throw new Error('proposal_unavailable');
+  if (scalar(item.get('name')) !== args.name)
+    throw new Error('proposal_unavailable');
+  const key = `${args.entryId}/${args.itemId}/notice`;
+  const meta = item.get('meta');
+  const current: Record<string, unknown> =
+    meta instanceof LoroMap
+      ? (meta.toJSON() as Record<string, unknown>)
+      : meta && typeof meta === 'object'
+        ? (meta as Record<string, unknown>)
+        : {};
+  const applied = Object.entries(args.patch).every(
+    ([field, value]) => current[field] === value,
+  );
+  if (applied && !state.unsent.has(key)) return;
+  const before = state.unsent.get(key)?.version ?? state.doc.version();
+  if (!applied) {
+    if (meta instanceof LoroMap)
+      for (const [field, value] of Object.entries(args.patch))
+        meta.set(field, value);
+    else item.set('meta', { ...current, ...args.patch });
+    state.doc.commit();
+  }
+  state.unsent.set(key, { version: before, outcome: args.patch });
+  const result = await state.client.append({
+    part: {
+      contentType: 'application/octet-stream',
+      body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
+    },
+  });
+  if (!result.ok) throw new Error('upload_failed');
+  state.unsent.delete(key);
+  if (active === state) scheduleEmit(state, 'live');
+}
