@@ -59,6 +59,17 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       rebuildProjectIndex()
     }
   }
+  /// Archived mode: a darker, greyer page and grey titles, so the archive never reads as the inbox.
+  var archivedStyle = false {
+    didSet {
+      guard archivedStyle != oldValue else { return }
+      backgroundColor = archivedStyle ? LodyUIColor.bgArchived : LodyUIColor.bgBase
+      topBackdrop.archived = archivedStyle
+      var snapshot = dataSource.snapshot()
+      snapshot.reconfigureItems(snapshot.itemIdentifiers)
+      dataSource.apply(snapshot, animatingDifferences: false)
+    }
+  }
   private lazy var projectIndex = InboxProjectIndex(scroll: collection)
   private var applyingSections = false
   private var sectionGeneration = 0
@@ -346,6 +357,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 
   private func configure(_ cell: UICollectionViewListCell, _ item: Item) {
     guard let entry = entries[item] else { return }
+    let muted = archivedStyle
     let emit: (String) -> Void = { [weak self] action in
       self?.forwarded?("rowAction", ["id": entry.row.id, "actionId": action])
     }
@@ -355,7 +367,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       case .link: GroupHeader(row: entry.row, expanded: nil, canToggle: false, onAction: emit)
       case .session:
         ChatRowContent(
-          row: entry.row, details: details, owner: owners[entry.row.id], expanded: entry.canToggle ? entry.expanded : nil,
+          row: entry.row, details: details, owner: owners[entry.row.id], muted: muted,
+          expanded: entry.canToggle ? entry.expanded : nil,
           onToggle: { [weak self] in self?.toggleOpener(entry.row.id) }
         )
       case .more: MoreRowContent(title: entry.row.title)
@@ -365,9 +378,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     .minSize(height: entry.kind == .session && !entry.row.parentId.isEmpty ? LodySize.controlMd : LodySize.listRow)
     cell.accessories = []
     // iOS highlights rows on press; Android uses ripple.
+    // The archived page is already as grey as fill.pressed, so it highlights with a translucent fill.
+    let pressed = archivedStyle ? LodyUIColor.fillSelected : LodyUIColor.fillPressed
     cell.configurationUpdateHandler = { cell, state in
       var background = UIBackgroundConfiguration.clear()
-      background.backgroundColor = state.isHighlighted || state.isSelected ? LodyUIColor.fillPressed : .clear
+      background.backgroundColor = state.isHighlighted || state.isSelected ? pressed : .clear
       cell.backgroundConfiguration = background
     }
   }
@@ -428,6 +443,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 private final class ChatHeaderBackdrop: UIView {
   private let base = ChatBlurLayer(intensity: 0.2)
   private let upper = ChatBlurLayer(intensity: 0.75)
+  var archived = false { didSet { if archived != oldValue { updateTone() } } }
 
   init() {
     super.init(frame: .zero)
@@ -445,8 +461,17 @@ private final class ChatHeaderBackdrop: UIView {
 
   private func updateTone() {
     let dark = traitCollection.userInterfaceStyle == .dark
-    base.contentView.backgroundColor = dark ? LodyUIColor.bgBase.withAlphaComponent(0.1) : .clear
-    upper.contentView.backgroundColor = dark ? LodyUIColor.bgBase.withAlphaComponent(0.3) : .clear
+    // Dark mode keeps its page tint; light mode tints only the archived page's grey.
+    let page = archived ? LodyUIColor.bgArchived : LodyUIColor.bgBase
+    let (baseAlpha, upperAlpha): (CGFloat, CGFloat) = if dark {
+      (0.1, 0.3)
+    } else if archived {
+      (0.3, 0.6)
+    } else {
+      (0, 0)
+    }
+    base.contentView.backgroundColor = baseAlpha > 0 ? page.withAlphaComponent(baseAlpha) : .clear
+    upper.contentView.backgroundColor = upperAlpha > 0 ? page.withAlphaComponent(upperAlpha) : .clear
   }
 
   override func layoutSubviews() {
@@ -642,6 +667,8 @@ private struct ChatRowContent: View {
   let row: LodyListRow
   let details: ChatRowDetails
   var owner: WorkspaceMember?
+  /// Archived list: the title drops to grey ink so every row reads as archived.
+  var muted = false
   /// Set on a row with nested chats: whether they are shown. A "⌄ 4 opened chats" line below the
   /// row heads the family; both parent and child status marks stay trailing.
   var expanded: Bool?
@@ -709,7 +736,7 @@ private struct ChatRowContent: View {
           Text(row.title)
             .lodyTextStyle(nested ? .callout : row.unread ? .bodyEmphasis : .body)
             .fontWeight(nested && row.unread ? .semibold : nil)
-            .foregroundStyle(LodyColor.textPrimary)
+            .foregroundStyle(muted ? LodyColor.textTertiary : LodyColor.textPrimary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
           // The text inside sets the stack's baseline, so the PR mark centres on the age.

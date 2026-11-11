@@ -13,11 +13,6 @@ enum SettingsSections {
     if account != nil {
       sections.append(remote(workspace, connection: state.connection, now: now))
     }
-    if workspace != nil {
-      sections.append(section("sessions", header: text("section.sessions"), rows: [
-        row("archived", text("archived.title"), image: "archivebox"),
-      ]))
-    }
     sections.append(section("other", header: text("section.additional"), rows: [
       row("about", text("section.about"), subtitle: text("about.subtitle"), image: "info.circle"),
       row("diagnostics", String(localized: "diagnostics.title", bundle: .lody), image: "waveform.path.ecg"),

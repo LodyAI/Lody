@@ -74,8 +74,6 @@ class SettingsController: UIViewController {
       )
     } else if id == "account", state.account != nil {
       LodyShell.shared.pushNative(AccountController(source: source), title: String(localized: "account.title", bundle: .lody), from: self)
-    } else if id == "archived", workspace != nil {
-      push("archived-sessions", title: String(localized: "settings.archived.title", bundle: .lody))
     } else if id == "diagnostics" {
       push("diagnostics", title: String(localized: "diagnostics.title", bundle: .lody))
     } else if id == "connection", workspace != nil, state.connection.state == "offline" {

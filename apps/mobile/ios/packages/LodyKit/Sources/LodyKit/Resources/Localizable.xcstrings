@@ -4656,57 +4656,6 @@
         }
       }
     },
-    "settings.section.sessions": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "会话与记录"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Conversations & History"
-          }
-        }
-      }
-    },
-    "settings.archived.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已归档会话"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Archived Sessions"
-          }
-        }
-      }
-    },
-    "settings.archived.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有已归档的会话"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No archived sessions"
-          }
-        }
-      }
-    },
     "settings.section.developer": {
       "extractionState": "manual",
       "localizations": {
@@ -20695,6 +20644,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "范围"
+          }
+        }
+      }
+    },
+    "home.view.archived": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archived"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已归档"
+          }
+        }
+      }
+    },
+    "home.archived.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No archived chats"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有已归档的对话"
           }
         }
       }
