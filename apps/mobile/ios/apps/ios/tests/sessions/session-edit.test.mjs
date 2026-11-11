@@ -198,3 +198,78 @@ test('edit RPC leaves history server-owned, preserves failed drafts and never au
     fixture.close();
   }
 });
+
+test('editing a Roost session uses its owner history and the edit RPC', async () => {
+  const requests = [];
+  const fixture = await openTestSession({
+    target: {
+      backend: 'roost',
+      machineId: 'm1',
+      acceptsInput: true,
+      dispatchesInput: true,
+    },
+    async onRpc(request, runtime, signal) {
+      if (request.method === 'session/edit-and-resend') {
+        requests.push(request);
+        return { result: { success: true } };
+      }
+      if (request.method === 'session/history-watch')
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          ),
+        );
+      return {
+        result: await runtime.sealPayload('s1', {
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyRevision: 1,
+          historyCount: 1,
+          result: {
+            checkpoint: 'c1',
+            startPosition: 0,
+            totalCount: 1,
+            rows: [{ position: 0, state: 'ready', turnId: 'original' }],
+            hasMoreOlder: false,
+            cursor: null,
+          },
+          pageTurns: [{ ...original, timestamp: '2026-01-01' }],
+        }),
+      };
+    },
+  });
+  try {
+    const base = {
+      sessionId: 's1',
+      userId: 'u1',
+      expectedUserTurnId: 'original',
+    };
+    assert.equal(
+      (await fixture.runtime.editSession({ ...base, action: 'read' }, meta))
+        .state,
+      'ready',
+    );
+    assert.equal(
+      (
+        await fixture.runtime.editSession(
+          {
+            ...base,
+            action: 'send',
+            id: 'replacement',
+            text: 'Changed',
+            retainedIds: [],
+          },
+          meta,
+        )
+      ).state,
+      'accepted',
+    );
+    assert.equal(requests[0].params.expectedUserTurnId, 'original');
+    assert.deepEqual(fixture.server.toJSON().history ?? [], []);
+  } finally {
+    fixture.close();
+  }
+});

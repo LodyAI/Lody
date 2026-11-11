@@ -17,18 +17,15 @@ test('a lost send acknowledgement is reported without replay',async()=>{
 });
 test('only advertised models can be sent',async()=>{const {c,calls}=fixture();await assert.rejects(c.createAndSend({...input,modelId:'invented'}),/invalid_model/);assert.equal(calls.length,0);});
 test('the local project reference carries an explicit worktree choice',async()=>{
- const {readFile}=await import('node:fs/promises');
- const source=await readFile(new URL('../vendor/cloud-runtime/src/runtime/create-session.ts',import.meta.url),'utf8');
- const {transform}=await import('esbuild');const vm=await import('node:vm');
- const start=source.indexOf('export async function createSession(');
- const code=(await transform(source.slice(start).replace(/^export /gm,''),{loader:'ts'})).code;
+ const {build}=await import('esbuild'); const {Flock}=await import('@loro-dev/flock-wasm/base64');
+ const bundle=await build({stdin:{contents:"export { createSession } from './create-session.ts'",resolveDir:new URL('../vendor/cloud-runtime/src/runtime/',import.meta.url).pathname,loader:'ts'},bundle:true,format:'esm',platform:'browser',write:false,
+  plugins:[{name:'stream-fixture',setup(b){b.onResolve({filter:/^@loro-dev\/streams-client$/},()=>({path:'mock',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export class StreamsClient { async create(){return {ok:true,result:{}}} }'}));}}]});
+ const {createSession}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+ const flock=new Flock('android-create-fixture');const replica={flock,client:{append:async()=>({ok:true,result:{}})}};
  for(const worktree of [false,true]) {
-  let meta;
-  class Flock {set(key,value){if(key[0]==='m')meta=value}commit(){}exportJson(){return {}}}
-  const context={Flock,crypto,Date,TextEncoder,attempted:new Set(),quotaReason:()=>undefined,workspaceSessionCount:()=>0,encodeFrame:x=>x,clientFor:async()=>({create:async()=>({ok:true})})};
-  vm.runInNewContext(code+';globalThis.create=createSession',context);
-  const result=await context.create({workspaceId:'w',sessionId:input.sessionId,machineId:'m',agentConfigId:'a',userId:'u',title:'hello',projectId:'m:local:p',useWorktree:worktree},{agents:[{id:'a',machineId:'m',cliType:'builtin',agentType:'codex'}],project:{id:'m:local:p'}},{flock:{get(){},scan(){return []},importJson(){}},client:{append:async()=>({ok:true})}},()=>{});
-  assert.equal(result.state,'created');assert.equal(meta.project.useWorktree===true,worktree);
+  const sessionId=crypto.randomUUID();
+  const result=await createSession({workspaceId:'w',sessionId,machineId:'m',agentConfigId:'a',userId:'u',title:'hello',projectId:'m:local:p',useWorktree:worktree},{agents:[{id:'a',machineId:'m',cliType:'builtin',agentType:'codex'}],project:{id:'m:local:p'}},replica,async()=>({token:'synthetic',gatewayBaseUrl:'https://example.invalid'}));
+  assert.equal(result.state,'created');assert.equal(flock.get(['m',`session-${sessionId}`]).project.useWorktree===true,worktree);
  }
 });
 test('models from another provider of the same type cannot be used',async()=>{

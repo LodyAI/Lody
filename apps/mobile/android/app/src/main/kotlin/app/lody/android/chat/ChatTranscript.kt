@@ -45,6 +45,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +57,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import app.lody.android.runtime.TurnItem
 import app.lody.android.runtime.StepDetail
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -73,12 +77,14 @@ import app.lody.android.designsystem.LodyLayout
 import app.lody.android.designsystem.LodyRadius
 import app.lody.android.designsystem.LodySpacing
 import app.lody.android.designsystem.LodyTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /** Who wrote a turn and when, for its header: avatar (or agent mark), name, time. */
 data class TurnIdentity(val name: String, val image: String? = null, val time: String = "")
 
 /** A user turn's delivery as web's `UserMessageSendStatus` shows it. */
-enum class Delivery { Sending, Sent, Queued, Seen, Failed }
+enum class Delivery { Sending, Sent, Queued, Seen, Failed, Unknown }
 
 /** A transcript entry. Assistant replies render as Markdown blocks; user turns as plain text. */
 sealed interface ChatEntry {
@@ -136,6 +142,12 @@ fun ChatTranscript(
     contentPadding: PaddingValues = PaddingValues(),
     state: LazyListState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE),
     scrollToLatest: Int = 0,
+    historyHasMore: Boolean = false,
+    historyLoading: Boolean = false,
+    loadEarlier: (suspend () -> Unit)? = null,
+    onForgetPending: ((String) -> Unit)? = null,
+    onRetryPending: ((String) -> Unit)? = null,
+    retryablePendingIds: Set<String> = emptySet(),
     actions: MessageActionState = MessageActionState(),
     relatedSessions: List<app.lody.android.runtime.CatalogSession> = emptyList(),
     navigateSession: (String) -> Unit = {},
@@ -151,10 +163,21 @@ fun ChatTranscript(
     // Only an actual drag leaves follow mode. Programmatic positioning and IME layout
     // changes must not look like the reader scrolled away from the end.
     var following by remember(state) { mutableStateOf(true) }
+    val canLoadEarlier by rememberUpdatedState(historyHasMore && !historyLoading)
+    val requestEarlier by rememberUpdatedState(loadEarlier)
+    val historyScope = rememberCoroutineScope()
     LaunchedEffect(state) {
         state.interactionSource.interactions.collect { interaction ->
             if (interaction is DragInteraction.Start) following = false
         }
+    }
+    LaunchedEffect(state) {
+        snapshotFlow { !following && canLoadEarlier && state.firstVisibleItemIndex <= 2 }
+            .collect { shouldLoad ->
+                if (shouldLoad) try { requestEarlier?.invoke() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { }
+            }
     }
     LaunchedEffect(state) {
         snapshotFlow { state.isScrollInProgress to state.canScrollForward }
@@ -228,7 +251,27 @@ fun ChatTranscript(
     }
     LazyColumn(modifier, state = state, contentPadding = contentPadding) content@{
         keys.reset()
-        with(KeyRecorder(this@content, keys)) { transcriptRows(entries, open, toggle, details, openTasks, openFiles, actions, relatedSessions, navigateSession, meId, decideProposal) }
+        if (historyHasMore || historyLoading) {
+            keys.add("history-earlier")
+            item(key = "history-earlier", contentType = "history") {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    if (historyLoading) CircularProgressIndicator(Modifier.size(LodyIconSize.md))
+                    else TextButton(onClick = { historyScope.launch {
+                        try { requestEarlier?.invoke() }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { }
+                    } }) {
+                        Text(stringResource(R.string.chat_load_earlier))
+                    }
+                }
+            }
+        }
+        with(KeyRecorder(this@content, keys)) {
+            transcriptRows(
+                entries, open, toggle, details, openTasks, openFiles, actions,
+                relatedSessions, navigateSession, onForgetPending, onRetryPending, retryablePendingIds, meId, decideProposal,
+            )
+        }
         // A small stable end anchor avoids enormous scroll offsets and measuring the
         // whole final Markdown block merely to discover its bottom.
         item(key = "transcript-end", contentType = "end") { Spacer(Modifier.height(LodySpacing.xxs)) }
@@ -280,6 +323,9 @@ private fun LazyListScope.transcriptRows(
     actions: MessageActionState,
     relatedSessions: List<app.lody.android.runtime.CatalogSession>,
     navigateSession: (String) -> Unit,
+    onForgetPending: ((String) -> Unit)?,
+    onRetryPending: ((String) -> Unit)?,
+    retryablePendingIds: Set<String>,
     meId: String?,
     decideProposal: ProposalDecider?,
 ) {
@@ -291,7 +337,9 @@ private fun LazyListScope.transcriptRows(
                         ProposalCards(entry.proposals, meId, decideProposal, Modifier.animateItem().padding(bottom = LodySpacing.md))
                     }
                 }
-                is ChatEntry.User -> item(key = entry.id, contentType = "user") { UserTurn(entry, actions) }
+                is ChatEntry.User -> item(key = entry.id, contentType = "user") {
+                    UserTurn(entry, actions, onForgetPending, onRetryPending?.takeIf { entry.id in retryablePendingIds })
+                }
                 is ChatEntry.Assistant -> {
                     val layout = entry.layout
                     if (layout.folded) {
@@ -329,7 +377,7 @@ val TranscriptMargin = LodySpacing.lg
  * rounded bubble, with the sender's avatar beside the bubble's top.
  */
 @Composable
-private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
+private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState, onForgetPending: ((String) -> Unit)?, onRetryPending: ((String) -> Unit)?) {
     val colors = LodyTheme.colors
     var expanded by androidx.compose.runtime.saveable.rememberSaveable(entry.id) { mutableStateOf(false) }
     var overflowing by remember(entry.text) { mutableStateOf(false) }
@@ -350,8 +398,19 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
                 horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
             ) {
                 DeliveryMark(entry.delivery)
+                if (entry.delivery == Delivery.Unknown) Text(stringResource(R.string.chat_delivery_unknown), style = LodyTheme.typography.footnote, color = colors.textTertiary, maxLines = 1)
                 if (entry.who.time.isNotEmpty()) Text(entry.who.time, style = LodyTheme.typography.footnote, color = colors.textTertiary, maxLines = 1)
                 Text(entry.who.name, style = LodyTheme.typography.footnote, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (onRetryPending != null) {
+                androidx.compose.material3.TextButton(onClick = { onRetryPending(entry.id) }) {
+                    Text(stringResource(R.string.chat_retry), style = LodyTheme.typography.footnote)
+                }
+            }
+            if (entry.delivery == Delivery.Unknown && onForgetPending != null) {
+                androidx.compose.material3.TextButton(onClick = { onForgetPending(entry.id) }) {
+                    Text(stringResource(R.string.chat_forget_action), style = LodyTheme.typography.footnote)
+                }
             }
             // Attachments sit above the bubble, trailing-aligned, one chip each (name + kind glyph).
             if (entry.attachments.isNotEmpty()) {
@@ -440,12 +499,14 @@ private fun DeliveryMark(delivery: Delivery) {
             Delivery.Queued -> R.string.chat_delivery_queued
             Delivery.Seen -> R.string.chat_delivery_seen
             Delivery.Failed -> R.string.chat_delivery_failed
+            Delivery.Unknown -> R.string.chat_delivery_unknown
         },
     )
     val mark = Modifier.size(size).semantics { contentDescription = label }
     when (delivery) {
         Delivery.Sending -> app.lody.android.designsystem.LodyLoadingIndicator(mark.padding(LodySpacing.xxs), color = colors.iconTertiary)
         Delivery.Seen -> Icon(LodyIcons.StateDone, contentDescription = label, tint = colors.accentDefault, modifier = Modifier.size(size))
+        Delivery.Unknown -> Icon(LodyIcons.Alert, contentDescription = label, tint = colors.iconTertiary, modifier = Modifier.size(size))
         Delivery.Failed -> Icon(LodyIcons.Alert, contentDescription = label, tint = colors.dangerDefault, modifier = Modifier.size(size))
         Delivery.Queued -> Icon(LodyIcons.StateWaiting, contentDescription = label, tint = colors.iconTertiary, modifier = Modifier.size(size))
         Delivery.Sent -> Box(mark.padding(LodySpacing.xxs).border(1.dp, colors.iconTertiary, CircleShape))

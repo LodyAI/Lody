@@ -6,7 +6,7 @@ import WebKit
 public enum RuntimeDocument {
   public static func makeWebView(handler: any WKScriptMessageHandler, delegate: any WKNavigationDelegate) -> WKWebView {
     let configuration = WKWebViewConfiguration()
-    configuration.websiteDataStore = .nonPersistent()
+    configuration.websiteDataStore = .default()
     configuration.userContentController.add(handler, name: "dataRuntime")
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = delegate

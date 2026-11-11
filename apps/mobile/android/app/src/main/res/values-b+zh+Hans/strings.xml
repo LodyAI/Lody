@@ -25,6 +25,7 @@
     <string name="home_bucket_week">一周内</string>
     <string name="home_bucket_month">一个月内</string>
     <string name="home_bucket_older">更早</string>
+    <string name="chat_load_earlier">加载更早的消息</string>
 
     <!-- Home: grouping -->
     <string name="home_tree_expand">展开子对话</string>
@@ -148,8 +149,13 @@
     <string name="chat_delivery_sent">已发送</string>
     <string name="chat_delivery_queued">已排队</string>
     <string name="chat_delivery_seen">已读</string>
+    <string name="chat_delivery_unknown">发送状态未确认</string>
     <string name="chat_delivery_failed">未发送</string>
     <string name="chat_send_failed">消息未发送</string>
+    <string name="chat_forget_title">移除未确认的消息？</string>
+    <string name="chat_forget_message">这会移除本地待确认消息，电脑仍可能收到或处理该消息。</string>
+    <string name="chat_forget_action">本地移除</string>
+    <string name="chat_forget_failed">无法移除待确认消息，请重试。</string>
     <string name="chat_member">成员</string>
     <string name="chat_worked_for">工作了 %1$s</string>
     <string name="chat_composer_placeholder">回复…</string>
@@ -597,6 +603,10 @@
     <string name="settings_personal">个人</string>
     <string name="settings_preferences">偏好设置</string>
     <string name="settings_preferences_hint">语言、通知与会话行为</string>
+    <string name="settings_developer">开发者</string>
+    <string name="settings_developer_mode">开发者模式</string>
+    <string name="settings_roost_history">Roost 历史记录（测试）</string>
+    <string name="settings_roost_history_hint">新会话在所选电脑支持时使用 Roost；已有会话保留原有历史记录。</string>
     <string name="settings_workspace_named">工作区 · %1$s</string>
     <string name="settings_workspace_general">通用</string>
     <string name="settings_workspace_hint">工作区设置与切换</string>

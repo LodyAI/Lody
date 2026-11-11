@@ -30,6 +30,7 @@ export const CreateTabParams = z
     workspaceId,
     sessionId: z.string().uuid(),
     parentSessionId: z.string().min(1),
+    preferRoost: z.boolean().optional(),
     title: z.string().min(1).max(200),
   })
   .meta({ id: 'CreateTabParams' });
@@ -42,6 +43,7 @@ export const CreateSessionParams = z
     machineId: z.string(),
     agentConfigId: z.string(),
     userId: z.string(),
+    preferRoost: z.boolean().optional(),
     title: z.string(),
     branch: z.string().optional(),
     /** Provenance only (web): the Role this session starts as, frozen at its revision. */
@@ -159,6 +161,10 @@ export const CheckTurnQuotaResult = z
     z.object({ state: z.literal('not_sent'), reason: QuotaReason }),
   ])
   .meta({ id: 'CheckTurnQuotaResult' });
+
+export const ForgetPendingInputParams = z
+  .object({ sessionId, inputId: z.string().min(1).max(256) })
+  .meta({ id: 'ForgetPendingInputParams' });
 
 export const SendTurnParams = z
   .object({

@@ -7,6 +7,7 @@ import { keepRepos, projectRows } from '../protocol/catalog.ts';
 import { mergeAgentQuotas } from '../protocol/agent-usage.ts';
 import {
   reservedSessionIds,
+  resumeAcceptedInputs,
   retainedSessionIds,
   setSessionTraceSink,
   setSessionUsageReader,
@@ -360,8 +361,11 @@ function watch(mode: string) {
         let pages = 0;
         while (!signal.aborted) {
           if (upToDate) {
-            if (mode === 'meta') state.metaReplica = { flock, client };
-            else machineReplicas.set(mode, flock);
+            if (mode === 'meta') {
+              const first = !state.metaReplica;
+              state.metaReplica = { flock, client };
+              if (first) resumeAcceptedInputs();
+            } else machineReplicas.set(mode, flock);
             unhealthy.delete(mode);
             catalogs.set(mode, projectRows(flock.scan(), mode));
             publish();

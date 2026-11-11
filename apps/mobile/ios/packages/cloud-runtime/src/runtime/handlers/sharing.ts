@@ -7,6 +7,8 @@ import {
   revokePreview,
 } from '../preview';
 import { sessionDoc } from '../session';
+import { sessionActionMeta } from '../fork-session';
+import { createMobileRoostSessionData } from '../upstream-roost-history';
 import { readShareHistory } from '../sharing/history.ts';
 import { createSharingRuntime } from '../sharing/runtime.ts';
 import { machineFor, type RuntimeContext } from './context.ts';
@@ -15,8 +17,42 @@ export function registerSharing(ctx: RuntimeContext) {
   const { channel, state, getGrant } = ctx;
   const shareRuntime = createSharingRuntime({
     sessions: () => state.catalogs.get('meta')?.sessions ?? [],
-    history: (id, signal) =>
-      readShareHistory(state.workspace, id, getGrant, signal),
+    history: async (id, signal) => {
+      const flock = state.metaReplica?.flock;
+      if (!flock || state.unhealthy.has('meta'))
+        throw new Error('metadata_not_ready');
+      const room = `session-${id}`;
+      const meta = sessionActionMeta(
+        flock.get(['m', room]),
+        flock.scan({ prefix: ['m', room] }),
+        flock.get(['e', room]),
+      );
+      if (!meta) throw new Error('session_not_ready');
+      if (meta.historyBackend === undefined || meta.historyBackend === 'loro')
+        return readShareHistory(state.workspace, id, getGrant, signal);
+      if (
+        meta.historyBackend !== 'roost' ||
+        typeof meta.machineId !== 'string' ||
+        !meta.machineId
+      )
+        throw new Error('history_backend_unsupported');
+      const workspace = state.workspace;
+      const user = state.userId;
+      const session = createMobileRoostSessionData({
+        accountId: user,
+        workspaceId: workspace,
+        machineId: meta.machineId,
+        sessionId: id,
+        getGrant,
+        signal,
+        isCurrent: () => state.workspace === workspace && state.userId === user,
+      });
+      try {
+        return (await session.snapshots.capture()).history;
+      } finally {
+        session.dispose();
+      }
+    },
     progress: (progress) => channel.emit('shareProgress', progress),
     broker: ctx.broker,
   });

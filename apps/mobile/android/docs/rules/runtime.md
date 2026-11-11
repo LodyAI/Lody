@@ -6,7 +6,7 @@ Read before changing the WebView runtime, its owner and lifecycle, the `CloudRun
 
 - Keep watchdog deadlines outside JavaScript, fence callbacks by runtime generation, bound automatic restarts, suspend deadlines in background, and never replay writes after recovery. Long-lived credentials stay native; only short-lived grants may enter the runtime. A machine ACK is delivery, not completion.
 
-- The vendored cloud-runtime source is an unchanged, provenance-tracked snapshot of `../ios/packages/cloud-runtime` (`docs/runtime-snapshot.md`). Bridge code lives in `runtime/src`; when Android needs a protocol field, add it to the iOS runtime and re-snapshot instead of patching the snapshot at bundle time. Retain dependency licenses and reproducible asset generation.
+- The vendored cloud-runtime source is an unchanged, provenance-tracked snapshot of `../ios/packages/cloud-runtime` ([snapshot rules](../runtime-snapshot.md)). Keep the Roost authoring source and generator in iOS. Snapshot the verified browser module and licenses for Android. Bridge code lives in `runtime/src`; when Android needs a protocol field, add it to the iOS runtime and re-snapshot instead of patching the snapshot at bundle time. Retain dependency licenses and reproducible asset generation.
 
 - `LodyApplication` owns `RuntimeOwner`; pages never create or destroy a runtime. Tie foreground/background to ProcessLifecycleOwner, not Activity callbacks. Every operation supplies its expected account/workspace scope; switching/logout cancels the old lease and observers.
 

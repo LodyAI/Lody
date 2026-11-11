@@ -77,7 +77,7 @@ open class LodyApplication : Application() {
         mergeStates = app.lody.android.chat.PullRequestMergeReader { scope, repo, number ->
             account.withVerifiedAccount(scope) { credential -> writes.mergeState(credential, scope.workspaceId, repo, number) }
         }
-        branches = object : app.lody.android.chat.PullRequestBranches {
+        this.branches = object : app.lody.android.chat.PullRequestBranches {
             override suspend fun exists(scope: RuntimeScope, repository: String, number: Int) =
                 account.withVerifiedAccount(scope) { credential -> writes.headBranchExists(credential, scope.workspaceId, repository, number) }
             override suspend fun delete(scope: RuntimeScope, repository: String, number: Int) =

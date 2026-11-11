@@ -23,7 +23,7 @@ class DevicePreviewsTest {
                 DeviceCommand.Devices -> DeviceControlReply(true, devices = listOf(pixel))
                 else -> error("no writes on resume")
             }
-        }, backgroundScope)
+        }, this)
         session.open()
         advanceUntilIdle()
         assertEquals("ready", session.phase)
@@ -39,7 +39,7 @@ class DevicePreviewsTest {
                 is DeviceCommand.Start -> { starts++; assertEquals("balanced", command.quality); DeviceControlReply(false, error = "unsupported") }
                 else -> DeviceControlReply(true, devices = listOf(pixel))
             }
-        }, backgroundScope)
+        }, this)
         session.start(pixel)
         advanceUntilIdle()
         assertEquals("failed", session.phase)
@@ -57,7 +57,7 @@ class DevicePreviewsTest {
                 is DeviceCommand.Stop -> DeviceControlReply(true)
                 DeviceCommand.Devices -> DeviceControlReply(true, devices = listOf(pixel))
             }
-        }, backgroundScope)
+        }, this)
         session.start(pixel)
         advanceUntilIdle()
         assertEquals("ready", session.phase)

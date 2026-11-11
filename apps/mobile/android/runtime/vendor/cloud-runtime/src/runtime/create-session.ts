@@ -18,6 +18,7 @@ import { isThoughtLevel, validConfigValue } from '../protocol/capability';
 import { encodeFrame } from '../frames';
 import type { CreateSessionResult } from '../contract/methods.ts';
 import { clientFor } from './session';
+import { resolveNewSessionHistoryBackend } from './upstream-roost.js';
 import {
   quotaReason,
   workspaceSessionCount,
@@ -31,6 +32,7 @@ export type CreateSessionArgs = {
   machineId: string;
   agentConfigId: string;
   userId: string;
+  preferRoost?: boolean;
   title: string;
   branch?: string;
   /** Local projects: start in a new git worktree (web `project.useWorktree`). */
@@ -454,6 +456,12 @@ export async function createSession(
     title: args.title.trim(),
     titleSource: 'draft',
     status: { type: 'idle' },
+    historyBackend: resolveNewSessionHistoryBackend(
+      machineMeta(replica.flock, agent.machineId) as {
+        protocolCapabilities?: Record<string, number>;
+      },
+      { preferred: args.preferRoost ? 'roost' : 'loro' },
+    ),
     isArchived: false,
     createdAt: new Date().toISOString(),
     cliType: agent.cliType,

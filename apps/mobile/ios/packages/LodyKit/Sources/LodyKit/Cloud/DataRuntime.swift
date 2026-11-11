@@ -232,6 +232,9 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     sessionId = id
     dispatch(RuntimeContract.Calls.OpenSession.self, .init(sessionId: id))
   }
+  func loadOlderSession(_ id: String) {
+    dispatch(RuntimeContract.Calls.LoadOlderSession.self, .init(sessionId: id))
+  }
   func watchSession(_ id: String) {
     sessionWatchers.retain(id)
     openSession(id)

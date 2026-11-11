@@ -16,7 +16,7 @@ extension DataRuntime {
       }
       guard self.inWorkspace(payload, sink: sink) else { return }
       self.callJSON(RuntimeContract.Calls.CreateSession.self, payload: payload,
-        inject: ["billingEntitlement": entitlement ?? NSNull()], sink: sink)
+        inject: ["billingEntitlement": entitlement ?? NSNull(), "preferRoost": LodyPreferences.roostHistoryEnabled], sink: sink)
     }
   }
   func controlTurn(_ payload: String, sink: ReplySink) {

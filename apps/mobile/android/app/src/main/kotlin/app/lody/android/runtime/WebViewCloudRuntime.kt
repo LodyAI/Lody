@@ -21,6 +21,7 @@ class WebViewCloudRuntime internal constructor(
 ) : RuntimeBackend {
     constructor(context: Context) : this(context, "DataRuntime.html")
     private val context = context.applicationContext
+    internal val preferRoost: Boolean get() = RoostPreferences.enabled(context)
     private val handler = Handler(Looper.getMainLooper())
     private val health = RuntimeHealth()
     private var view: WebView? = null
@@ -113,7 +114,7 @@ class WebViewCloudRuntime internal constructor(
                 javaScriptEnabled = true
                 allowFileAccess = false
                 allowContentAccess = false
-                domStorageEnabled = false
+                domStorageEnabled = true
                 cacheMode = WebSettings.LOAD_NO_CACHE
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 javaScriptCanOpenWindowsAutomatically = false

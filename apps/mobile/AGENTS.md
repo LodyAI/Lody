@@ -18,5 +18,6 @@ both platform indexes link them.
 
 - Backend origins come from `backend-config.mjs`: optional ignored `.env.local`,
   process environment overrides, production defaults. Both platforms must use
-  the same resolver and endpoint-tuple storage namespace. Never inject secrets
+  the same resolver and endpoint-tuple storage namespace, including persistent
+  Roost history and pending inputs. Never inject secrets
   or disable TLS validation. See README.md#backend-configuration.
