@@ -220,6 +220,60 @@ describe('encrypted team joining', () => {
     expect(container.textContent).toContain('e2ee.team.ready');
     expect(button('e2ee.team.openWorkspace')).toBeDefined();
   });
+  it.each([
+    ['confirmed', true],
+    ['still waiting for its key', false],
+  ] as const)(
+    'shows a reopened join the host reports as joined at once, then follows its one claim (%s)',
+    async (_label, installed) => {
+      let claims = 0;
+      let answer!: (result: { state: string; ready: boolean }) => void;
+      const runtime = {
+        pendingMemberJoin: async () => ({ offer, requestId: 'original', joined: true }),
+        prepareMemberJoin: async () => {
+          throw new Error('must not submit another request');
+        },
+        claimMemberJoin: () => {
+          claims++;
+          return new Promise<{ state: string; ready: boolean }>((resolve) => {
+            answer = resolve;
+          });
+        },
+      };
+      await render(
+        <E2eeMemberJoin
+          offer={offer}
+          runtime={runtime}
+          accountId="account"
+          emailVerified
+          preview={{ status: 'unavailable' }}
+          onSignInRequested={() => {}}
+          onEmailVerificationRequested={() => {}}
+          onWorkspaceRequested={() => {}}
+          onHomeRequested={() => {}}
+        />
+      );
+      await settle();
+      // Joined before the confirming claim answers: no approval wait, no new request.
+      expect(container.textContent).toContain('e2ee.team.ready');
+      expect(container.textContent).not.toContain('e2ee.team.waitingApproval');
+      expect(button('e2ee.team.openWorkspace')).toBeDefined();
+      expect(button('e2ee.team.submit')).toBeUndefined();
+      expect(claims).toBe(1);
+      await act(async () => answer({ state: 'committed', ready: installed }));
+      await settle();
+      if (installed) {
+        expect(container.textContent).toContain('e2ee.team.ready');
+        await act(async () => vi.advanceTimersByTime(30_000));
+        await settle();
+        expect(claims).toBe(1);
+      } else {
+        // The claim's answer replaces the hint: the page waits for the key as usual.
+        expect(container.textContent).toContain('e2ee.team.waitingKey');
+        expect(button('e2ee.team.openWorkspace')).toBeUndefined();
+      }
+    }
+  );
   it('shows saved request progress after a lost submit response without another consent request', async () => {
     let saved = false;
     const runtime = {
