@@ -40,7 +40,6 @@ internal fun SettingsHome(state: ChatListUiState, padding: PaddingValues, onSele
                 SettingsLine(stringResource(R.string.settings_projects), LodyIcons.Folder, onClick = onDeferred)
                 SettingsLine(stringResource(R.string.settings_github), LodyIcons.Github, onClick = onGitHub)
                 SettingsLine(stringResource(R.string.settings_usage), LodyIcons.StateRunning, onClick = onDeferred)
-                SettingsLine(stringResource(R.string.settings_shares), LodyIcons.Link, onClick = onDeferred)
             }
         }
         item {
