@@ -193,9 +193,10 @@ export class KeyDistributor extends Context.Service<
       const journal = own(yield* DistributionJournal);
       const publications = own(yield* EpochPublicationSource);
       const gate = yield* makeCloseGuard(() => fail('closed'));
-      // One installed-key read at a time. A single-writer custody (the browser's Web Lock)
-      // refuses a concurrent holder instead of queueing it, so overlapping reads blocked
-      // every recipient but one per round. Network round trips still overlap.
+      // One installed-key read at a time. The custody writer contract lets a busy writer
+      // fail conflict instead of queueing (the browser adapter queues only within a tab),
+      // so overlapping reads could block every recipient but one per round. Network round
+      // trips still overlap.
       const protection = yield* Semaphore.make(1);
       const org = keyId(anchor.toBytes()),
         self = keyId(signer.publicKey.toBytes());

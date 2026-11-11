@@ -239,11 +239,14 @@ WebKit 测试不能替代 iOS 16.4 实机或断电验收，也不保证浏览器
 
 ## 浏览器保管与安装
 
-`browserClientWriter({ accountId, workspaceId })` 在 `WorkspaceScope` 下提供
+`browserClientWriter({ accountId, workspaceId, queueTimeout? })` 在 `WorkspaceScope` 下提供
 `ClientCustodyWriter`。宿主先进入 `writer.run` 再分配安装，持有到有限的本地保护/
 存储工作真正结束，网络等待前释放。Web Lock 按 origin 内账号/工作区/genesis 跨
-标签页和 Worker 互斥，不按数据库名或设备分锁。忙时 conflict，不排队、不抢占。
-仅持锁的同一 fiber 可重入；子 fiber 必须自己拿物理锁，父 fiber 持有期间返回 conflict。
+标签页和 Worker 互斥，不按数据库名或设备分锁。同一标签页的调用先按顺序排队再申请锁，
+内容读取不会和同标签页的密钥轮撞上；等待上限为 `queueTimeout`（默认 15 秒，`0` 表示
+不等待），超时、被中断或写者关闭时结束，以 conflict 失败。其他标签页遇到锁忙立即
+conflict。任何情况下都不抢占持有者，也不对持有者计时。
+仅持锁的同一 fiber 可重入；子 fiber 必须自己拿物理锁，父 fiber 持有期间立即返回 conflict。
 关闭阻止新调用，等待实际原生调用结束。
 
 `indexedDbClientInstallationStore(options)` 先捕获稳定作用域，再由宿主读取身份。
