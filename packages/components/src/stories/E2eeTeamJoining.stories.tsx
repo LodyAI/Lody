@@ -11,6 +11,7 @@ const offer: E2eeMemberOffer = {
   token: '33'.repeat(32),
   mode: 'email',
   expiresAt: Date.parse('2026-10-30T12:00:00Z'),
+  signature: '66'.repeat(64),
 };
 const request = {
   id: 'synthetic-request',
@@ -22,6 +23,7 @@ const request = {
   source: 'email' as const,
   state: 'pending' as const,
   expiresAt: offer.expiresAt,
+  offer,
 };
 const meta = {
   title: 'Components/E2eeTeamJoining',

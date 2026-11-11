@@ -3,7 +3,14 @@ import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-err
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFile, mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
+import {
+  createCipheriv,
+  createDecipheriv,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+  sign
+} from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -32,6 +39,7 @@ import { makeOfflineAuthIdentityCache } from '../auth-storage.ts'
 import * as electronIpc from '../../../../../packages/shared/src/electron-ipc.ts'
 import { isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
 import * as memberJoining from './e2ee-member-join.mts'
+import { memberOfferSigningBytes } from '@lody/e2ee-client/member'
 import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
 import { desktopE2eeFailure, rememberDesktopE2eeFailure } from './e2ee-diagnostics.mts'
 import { createDesktopQuitBarrier, drainMainProcessQuitResources } from './desktop-shutdown.ts'
@@ -5196,11 +5204,18 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
     readGroup: (key) => Effect.succeed(groups.get(key.recordHash) ?? null),
     deleteGroup: () => Effect.void
   })
-  const offer = await owner.api.withDesktopE2eeAccount(
-    (account) => account.host.memberOffer('team', 'email', 9_000_000_000_000),
-    'team',
-    false
-  )
+  // The relay keeps each invitation it was given and returns it with the request it answers.
+  const offers = new Map()
+  const invite = async () => {
+    const minted = await owner.api.withDesktopE2eeAccount(
+      (account) => account.host.memberOffer('team', 'email', 9_000_000_000_000),
+      'team',
+      false
+    )
+    offers.set(minted.token, minted)
+    return minted
+  }
+  const offer = await invite()
   const ownerPort = await port(offer.endorser)
   let memberPort
   const relayed = (device, name, value) =>
@@ -5256,7 +5271,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
   const memberCloudFor = (accountId, mailboxPort) => ({
     accountId,
     client: {
-      memberSubmit: ({ keyPackageHex }) =>
+      memberSubmit: ({ token, keyPackageHex }) =>
         relayed('member', 'memberSubmit', () => {
           const proof = memberJoining.decodeMemberKeyPackage(keyPackageHex)
           const requestId = hexOf(proof.request.requestId.toBytes())
@@ -5269,7 +5284,8 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
             requestId,
             source: 'email',
             state: 'pending',
-            expiresAt: 9_000_000_000_000
+            expiresAt: 9_000_000_000_000,
+            offer: offers.get(token)
           }
           requests.set(requestId, request)
           return { ...request }
@@ -5343,8 +5359,13 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
       memberPort = await port(submitted.signingPublicKey)
       return submitted
     },
-    /** Another account's member, joining through the same relay. */
-    async addMember(accountId, senderId) {
+    invite,
+    offers,
+    requests,
+    records,
+    /** Another account's member, joining through the same relay with its own invitation
+     * unless `invitation` names one. */
+    async addMember(accountId, senderId, invitation) {
       const fixture = await nativeAccountFixture(t)
       fixture.identity.userId = accountId
       let ownPort
@@ -5353,7 +5374,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
         memberCloudFor(accountId, () => ownPort),
         senderId
       )
-      const submitted = await other.prepareMemberJoin(offer)
+      const submitted = await other.prepareMemberJoin(invitation ?? (await invite()))
       ownPort = await port(submitted.signingPublicKey)
       return { ipc: other, submitted }
     }
@@ -5391,6 +5412,123 @@ void test(
     ])
     assert.ok(f.logs.every(([, fields]) => /^[0-9a-f]{12}$/.test(fields.request)))
     assert.ok(!JSON.stringify(f.logs).includes(submitted.requestId))
+  }
+)
+
+/** An invitation the relay signs with a key of its own, as a forging relay would. */
+const relaySignedOffer = (genuine, changes = {}) => {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+  const endorser = Buffer.from(publicKey.export({ format: 'jwk' }).x, 'base64url').toString('hex')
+  const unsigned = { ...genuine, ...changes, endorser }
+  delete unsigned.signature
+  const signature = sign(null, memberOfferSigningBytes(unsigned), privateKey).toString('hex')
+  return { ...unsigned, signature }
+}
+void test(
+  'a relay-forged email request is never admitted unattended and waits for explicit approval',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const submitted = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    const stored = f.requests.get(submitted.requestId)
+    const genuine = stored.offer
+    const before = f.records.length
+    // `source: 'email'` alone, an invitation signed by the relay's own key, and a genuine
+    // signature over different pins: none is an invitation this approver can verify.
+    for (const forged of [
+      undefined,
+      relaySignedOffer(genuine),
+      { ...genuine, expiresAt: genuine.expiresAt - 1 }
+    ]) {
+      stored.offer = forged
+      await assert.rejects(
+        f.approver.approveMemberJoin('team', submitted.requestId, 'automatic'),
+        /e2ee_conflict/
+      )
+      assert.equal(f.records.length, before)
+    }
+    // The applicant stays listed, and an administrator's explicit approval still admits it.
+    assert.equal(
+      JSON.stringify(
+        (await f.approver.memberJoinRequests('team')).items.map((item) => item.requestId)
+      ),
+      JSON.stringify([submitted.requestId])
+    )
+    assert.equal(
+      (await f.approver.approveMemberJoin('team', submitted.requestId, 'explicit')).admitted,
+      true
+    )
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+  }
+)
+void test(
+  'an email invitation admits one applicant: another account presenting its token is refused as used',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const first = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    const before = f.records.length
+    // The relay replays the same invitation for another account's keys.
+    const other = await f.addMember('thr', 3, f.offer)
+    assert.equal(other.submitted.requestId, first.requestId)
+    await assert.rejects(
+      f.approver.approveMemberJoin('team', other.submitted.requestId, 'automatic'),
+      /e2ee_member_invitation_used/
+    )
+    assert.equal(f.records.length, before)
+  }
+)
+void test(
+  'invitations from an admin who was later demoted are no longer admitted unattended',
+  { timeout: 40_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const admin = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', admin.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', admin.requestId)).ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    await f.approver.setMemberRole('team', admin.requestId, 'admin')
+    await f.joiner.open('team')
+    await f.joiner.refresh('team', { installKeys: false })
+    const mint = async () => {
+      const minted = await f.memberApi.withDesktopE2eeAccount(
+        (account) => account.host.memberOffer('team', 'email', 9_000_000_000_000),
+        'team',
+        false
+      )
+      f.offers.set(minted.token, minted)
+      return minted
+    }
+    const early = await mint()
+    const late = await mint()
+    // While the endorser is an admin its invitation is admitted unattended.
+    const accepted = await f.addMember('acc3', 3, early)
+    await f.approver.memberJoinRequests('team')
+    assert.equal(
+      (await f.approver.approveMemberJoin('team', accepted.submitted.requestId, 'automatic'))
+        .admitted,
+      true
+    )
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    await f.approver.setMemberRole('team', admin.requestId, 'member')
+    const waiting = await f.addMember('acc4', 4, late)
+    // Listed and pinned like any applicant: only the endorser's current role refuses it.
+    await f.approver.memberJoinRequests('team')
+    const before = f.records.length
+    await assert.rejects(
+      f.approver.approveMemberJoin('team', waiting.submitted.requestId, 'automatic'),
+      /e2ee_conflict/
+    )
+    assert.equal(f.records.length, before)
   }
 )
 

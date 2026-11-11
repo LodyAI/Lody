@@ -639,6 +639,43 @@ void test('management ledger transport preserves the original record and refuses
   )
 })
 
+void test('the relay copy of a member invitation reaches the approving host intact for verification', async () => {
+  // Automatic email admission verifies this copy itself; dropping it here would silently
+  // turn every genuine email invitation into an explicit approval.
+  const offer = {
+    version: 1,
+    workspaceId: access.workspaceId,
+    genesisHash: '11'.repeat(32),
+    genesisRecordHex: 'abcd',
+    endorser: '22'.repeat(32),
+    token: '33'.repeat(32),
+    mode: 'email',
+    expiresAt: 9_000_000_000_000,
+    signature: '44'.repeat(64)
+  }
+  const reply = {
+    id: 'synthetic-request',
+    workspaceId: access.workspaceId,
+    accountId: 'synthetic-account',
+    keyPackageHex: 'abcd',
+    signingPublicKey: '55'.repeat(32),
+    requestId: '66'.repeat(16),
+    source: 'email',
+    state: 'pending',
+    expiresAt: 9_000_000_000_000,
+    offer
+  }
+  const read = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () => response(reply)),
+        (client) => client.memberRead({ ...access, requestId: reply.requestId })
+      )
+    )
+  )
+  assert.deepEqual(read.offer, offer)
+})
+
 void test('only exact authenticated member removal or device revocation carries a terminal signal', async () => {
   for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
     await Effect.runPromise(

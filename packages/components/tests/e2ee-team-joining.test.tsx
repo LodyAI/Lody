@@ -43,6 +43,7 @@ const offer: E2eeMemberOffer = {
   token: '33'.repeat(32),
   mode: 'link',
   expiresAt: 2000,
+  signature: '66'.repeat(64),
 };
 const application = (
   id: string,
@@ -57,6 +58,7 @@ const application = (
   source,
   state: 'pending',
   expiresAt: 2000,
+  offer,
   applicantName: id,
   applicantEmail: `${id}@synthetic.test`,
 });

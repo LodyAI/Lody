@@ -122,6 +122,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
+    | 'member_invitation_used'
     | 'device_revoked'
     | 'missing-binding'
     | 'conflict'
@@ -191,6 +192,7 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
       if (reason === 'key-update-required') return fail('key-update-required')
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
+      if (reason === 'member_invitation_used') return fail('member_invitation_used')
       if (reason === 'invalid-input') return fail('invalid-input')
       return fail(
         reason === 'local-evidence-conflict' || reason === 'rollback'
@@ -1890,10 +1892,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.memberApprovals.offer(mode, expiresAt)
           )
         ),
-      prepareMemberAdmission: (workspaceId: string, keyPackageHex: string) =>
+      prepareMemberAdmission: (
+        workspaceId: string,
+        keyPackageHex: string,
+        automatic?: { offer: unknown; now: number }
+      ) =>
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>
-            entry.memberApprovals.prepare(keyPackageHex)
+            entry.memberApprovals.prepare(keyPackageHex, automatic)
           )
         ),
       inspectMemberAdmission: (workspaceId: string, keyPackageHex: string) =>

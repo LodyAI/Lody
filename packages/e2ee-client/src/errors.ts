@@ -17,7 +17,9 @@ export class PersonalHostError extends Data.TaggedError('PersonalHostError')<{
     | 'storage'
     | 'network'
     | 'restart-required'
-    | 'unauthorized';
+    | 'unauthorized'
+    /** An email invitation's single membership is already admitted for another applicant. */
+    | 'invitation-used';
   readonly cause?: unknown;
 }> {}
 export const fail = (code: PersonalHostError['code'], cause?: unknown) =>

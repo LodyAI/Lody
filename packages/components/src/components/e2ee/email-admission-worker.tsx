@@ -52,6 +52,8 @@ export function startEmailAdmissionWorker(
       const requests = await runtime.memberJoinRequests(workspaceId);
       for (const request of requests.items) {
         if (stopped) break;
+        // `source` only skips link requests early. The host signs only an invitation it
+        // verifies itself; anything else is refused and stays for explicit approval.
         if (request.source !== 'email') continue;
         try {
           await runtime.approveMemberJoin(workspaceId, request.requestId, 'automatic');

@@ -813,6 +813,7 @@ function publicE2eeFailure(error: unknown): Error {
     'pairing-expired',
     'pairing-used',
     'member_removed',
+    'member_invitation_used',
     'device_revoked',
     'conflict',
     'local-evidence-conflict',

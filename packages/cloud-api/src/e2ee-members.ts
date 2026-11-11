@@ -1,6 +1,8 @@
 import type { E2eeDeviceAccess } from './e2ee-device';
 
-/** Public invitation pins transferred with the email/link, independently of the relay. */
+/** Public invitation pins transferred with the email/link, independently of the relay.
+ * `signature` is the endorser device's Ed25519 signature over the pins
+ * (`lody-e2ee/member-offer/v1`); only clients verify it, against their verified ledger. */
 export type E2eeMemberOffer = {
   version: 1;
   workspaceId: string;
@@ -10,6 +12,7 @@ export type E2eeMemberOffer = {
   token: string;
   mode: 'email' | 'link';
   expiresAt: number;
+  signature: string;
 };
 
 /** A signed core JoinRequest plus its exact device-credential binding; never secret keys. */
@@ -31,6 +34,9 @@ export type E2eeMemberRequest = {
   source: 'email' | 'link';
   state: 'pending' | 'admitting' | 'committed' | 'rejected' | 'cancelled';
   expiresAt: number;
+  /** The relay's copy of the invitation this request answered. Approvers trust it only
+   * after verifying its endorsement signature; `source` is a display label. */
+  offer: E2eeMemberOffer;
 };
 
 export type E2eeMemberRequests = {

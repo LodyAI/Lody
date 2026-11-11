@@ -17,6 +17,7 @@ import type {
   E2eeAccountPairingRequests,
   E2eeDeviceAccess,
   E2eeJoinRequests,
+  E2eeMemberOffer,
   E2eeMemberRequests,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
@@ -161,7 +162,10 @@ const memberRequest = z.object({
   requestId: z.string().regex(/^[0-9a-f]{32}$/),
   source: z.enum(['email', 'link']),
   state: z.enum(['pending', 'admitting', 'committed', 'rejected', 'cancelled']),
-  expiresAt: nonnegative
+  expiresAt: nonnegative,
+  // Passed through unparsed: the host verifies the endorsement itself, and a malformed
+  // relay copy must only cost automatic admission, never explicit approval.
+  offer: z.custom<E2eeMemberOffer>(() => true)
 })
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 const raw = (value: string) => new Uint8Array(Buffer.from(value, 'hex'))

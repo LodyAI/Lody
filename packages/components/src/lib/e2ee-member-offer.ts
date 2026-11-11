@@ -18,7 +18,9 @@ export function parseMemberOffer(input: string, token?: string): E2eeMemberOffer
       !/^(?:[0-9a-f]{2})+$/.test(value.genesisRecordHex) ||
       !['email', 'link'].includes(value.mode) ||
       !Number.isSafeInteger(value.expiresAt) ||
-      value.expiresAt < 0
+      value.expiresAt < 0 ||
+      typeof value.signature !== 'string' ||
+      !/^[0-9a-f]{128}$/.test(value.signature)
     )
       return null;
     return {
@@ -30,6 +32,7 @@ export function parseMemberOffer(input: string, token?: string): E2eeMemberOffer
       token: value.token,
       mode: value.mode,
       expiresAt: value.expiresAt,
+      signature: value.signature,
     };
   } catch {
     return null;
