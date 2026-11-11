@@ -1,7 +1,15 @@
-# Native machine-sharing host
+# Machine-sharing host
 
-Root rules apply. This package is host-only; renderers use the narrow platform
-methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
+Root rules apply. The host core is platform-neutral: it imports no Node API, and
+SQLite lives only in the `./sqlite` subpath (desktop and CLI); browsers and webviews
+use the `./indexeddb` subpath. It still runs only inside trusted host composition;
+renderers use the narrow platform methods. Policy crypto remains in e2ee-core. DTOs
+remain in cloud-api.
+
+- Storage goes through the `MachineSharingStore` port. Every store step runs its
+  decision synchronously inside one transaction against committed state, and an update
+  resolves only after its write is durable. Pin and request decisions stay in the host,
+  not in a store, so every store enforces the same rules.
 
 - Keep complete originals and request identity before any commit. Unknown results
   reconcile the original request before retrying; confirmed conflicts never rebase.

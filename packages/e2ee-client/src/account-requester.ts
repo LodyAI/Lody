@@ -330,10 +330,10 @@ export interface AccountPairingKeyDeliveryEvent {
   /** Public `e2ee_*` code; never a cause, key or token. */
   readonly code?: string;
 }
-/** The desktop's member delivery backoff: 10 s doubling to a 5 min cap, eight retries. */
 /** One ledger catch-up. Timing out cancels it and the round still runs. */
 export const ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS = 30_000;
-const KEY_DELIVERY_RETRY_DELAYS = [
+/** The desktop's member delivery backoff: 10 s doubling to a 5 min cap, eight retries. */
+export const KEY_DELIVERY_RETRY_DELAYS = [
   10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000,
 ] as const;
 /** Causes after which this device can never deliver; retrying would only repeat them. */

@@ -178,6 +178,8 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       if panelState.panel != panel { panelState.panel = panel }
       let rows = CreateSessionContext.runConfig(form)
       if panelState.runConfig != rows { panelState.runConfig = rows }
+      let recents = CreateSessionContext.recents(form)
+      if panelState.recents != recents { panelState.recents = recents }
     }
     renderComposer()
   }
@@ -189,7 +191,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     view.endEditing(true)
     panelState.openInSheet = nil
     let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: panelState))
-    var contentHeight = CGFloat(panelState.runConfig.count) * (LodySize.controlMd + LodySpacing.xs * 2)
+    var contentHeight = CGFloat(panelState.runConfig.count + panelState.recents.count) * (LodySize.controlMd + LodySpacing.xs * 2)
       + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
     sheet.rootView = CreateRunConfigSheet(state: panelState, onHeightChange: { [weak sheet] height in
       guard height > 0, abs(contentHeight - height) > 1 else { return }
@@ -243,6 +245,11 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     case ("role", _):
       form.selectRole(option == CreateSessionContext.roleNoneOption ? nil : option)
       changed()
+    case (CreateSessionContext.recentRow, _):
+      form.selectRecent(option)
+      changed()
+      // A recent entry is a terminal "run it like this" choice (web closes its menu).
+      runConfigSheet?.dismiss(animated: true)
     default:
       break
     }
@@ -527,6 +534,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       return false
     }
     form.updateChoice(form.current.choice)
+    if draft != nil { form.recordRecent() }
     if let value = form.prefs { onPrefs?(value) }
     sending = true
     renderComposer()

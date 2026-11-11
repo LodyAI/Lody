@@ -30,6 +30,8 @@ export function parseMemberOffer(input: string, token?: string): E2eeMemberOffer
       token: value.token,
       mode: value.mode,
       expiresAt: value.expiresAt,
+      // No endorsement: joining never relies on it, and desktop builds that predate signed
+      // offers parse deep-link offers strictly. Approvers read it from the relay's request.
     };
   } catch {
     return null;

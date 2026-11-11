@@ -146,6 +146,7 @@ const listen = (server: http.Server, preferredPort: number): Promise<number> =>
 
 export function createMcpHttpServer(token: string, logger: Logger): http.Server {
   const server = http.createServer((req, res) => {
+    logRequestOutcome(req, res, logger);
     void handleRequest(req, res, token, logger).catch((error: unknown) => {
       logger.error(`[mcp-http-host] request failed: ${formatErrorMessage(error)}`);
       if (!res.headersSent) {
@@ -169,6 +170,30 @@ export function createMcpHttpServer(token: string, logger: Logger): http.Server 
   server.maxConnections = MAX_CONNECTIONS;
   return server;
 }
+
+/**
+ * One line per request in this host's own log. An agent that reports a status
+ * this host never logged got it from something in between — typically a proxy
+ * that intercepted loopback. Failures are warnings; successes stay at debug.
+ */
+const logRequestOutcome = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  logger: Logger
+): void => {
+  const startedAtMs = Date.now();
+  res.once('close', () => {
+    const sessionId = SessionIdSchema.safeParse(singleHeader(req, MCP_HTTP_SESSION_ID_HEADER));
+    const line = `[mcp-http-host] ${req.method ?? '?'} ${
+      res.writableFinished ? res.statusCode : 'aborted'
+    } ${Date.now() - startedAtMs}ms session=${sessionId.success ? sessionId.data : '-'}`;
+    if (res.writableFinished && res.statusCode < 400) {
+      logger.debug(line);
+    } else {
+      logger.warn(line);
+    }
+  });
+};
 
 const timingSafeTokenEqual = (provided: string, expected: string): boolean => {
   // Hash both sides so the comparison is constant-time regardless of length.

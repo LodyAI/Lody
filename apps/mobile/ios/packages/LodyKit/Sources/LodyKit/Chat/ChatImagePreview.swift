@@ -611,7 +611,8 @@ private enum ChatImageSaver {
         return
       }
       do {
-        try await PHPhotoLibrary.shared().performChanges {
+        // Photos invokes this block on its own queue; do not inherit MainActor isolation.
+        try await PHPhotoLibrary.shared().performChanges { @Sendable in
           PHAssetChangeRequest.creationRequestForAsset(from: image)
         }
         LodyToastOverlay.shared.show(message: String(localized: "native.chat.image.saved", bundle: .lody), kind: .success)

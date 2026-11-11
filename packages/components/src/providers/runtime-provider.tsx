@@ -27,6 +27,7 @@ import {
   WorkspaceKeyReceptionNotice,
   type KeyReceptionWait,
 } from '../components/workspace-key-reception-notice';
+import { WorkspaceHostIdentityNotice } from '../components/workspace-host-identity-notice';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
@@ -94,7 +95,9 @@ import {
   type WorkspaceModeEvidence,
 } from '@/lib/e2ee-workspace-storage';
 import {
+  assertNoRetainedEncryptedIdentity,
   describeAuthenticatedWorkspace,
+  type HostIdentityStall,
   waitForWorkspaceContentAdmission,
   isWorkspaceModeRejection,
   WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
@@ -157,6 +160,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [snapshotRecoveryWorkspace, setSnapshotRecoveryWorkspace] = useState<string | null>(null);
   const [keyUpdateWorkspace, setKeyUpdateWorkspace] = useState<string | null>(null);
   const [keyReceptionWait, setKeyReceptionWait] = useState<KeyReceptionWait | null>(null);
+  // Non-terminal: the workspace stays open and unclassified while the host is re-asked.
+  const [hostIdentityWait, setHostIdentityWait] = useState<
+    (Omit<HostIdentityStall, 'error'> & { workspaceId: string }) | null
+  >(null);
   const retryKeyUpdateRef = useRef<() => void>(() => {});
   // Use workspaceSlug for runtime initialization (available immediately from URL)
   // Use workspaceId for WebSocket connections (requires server response)
@@ -591,6 +598,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
     setKeyUpdateWorkspace(null);
     setKeyReceptionWait(null);
+    setHostIdentityWait(null);
     setSnapshotRecoveryWorkspace(null);
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
@@ -884,6 +892,25 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           if (disposed) return;
           if (descriptor.workspaceId !== effectiveWorkspaceId)
             throw new WorkspaceModeMismatchError();
+          // Background verification keeps asking a transiently unavailable host
+          // until this initialization ends; the workspace stays unclassified meanwhile.
+          await assertNoRetainedEncryptedIdentity({
+            runtime: encryptedRuntime,
+            storage: localStorage,
+            accountId: accountId!,
+            workspaceId: effectiveWorkspaceId,
+            descriptor,
+            signal: initializationAbort.signal,
+            deadlineMs: null,
+            onStall: ({ code, retry }) => {
+              if (!disposed)
+                setHostIdentityWait({ workspaceId: effectiveWorkspaceId, code, retry });
+            },
+            onRecover: () => {
+              if (!disposed) setHostIdentityWait(null);
+            },
+          });
+          if (disposed) return;
           if (isEncryptedDescriptor(descriptor)) {
             // Never keep the plaintext data plane for an encrypted workspace:
             // retire it first, then record the mode synchronously as sticky
@@ -971,6 +998,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               signal: initializationAbort.signal,
             }));
           if (disposed) return;
+          if (!storedDescriptor) {
+            await assertNoRetainedEncryptedIdentity({
+              runtime: encryptedRuntime,
+              storage: localStorage,
+              accountId: accountId!,
+              workspaceId: effectiveWorkspaceId,
+              descriptor,
+              signal: initializationAbort.signal,
+              deadlineMs: WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
+            });
+            if (disposed) return;
+          }
           admit(descriptor);
           admitting = false;
           if (isEncryptedDescriptor(descriptor)) {
@@ -1317,6 +1356,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             </button>
           </div>
         )}
+      {hostIdentityWait?.workspaceId === effectiveWorkspaceId && (
+        <WorkspaceHostIdentityNotice
+          code={hostIdentityWait.code}
+          onRetry={hostIdentityWait.retry}
+        />
+      )}
       {snapshotRecoveryWorkspace !== null &&
         (snapshotRecoveryWorkspace === runtime?.workspaceId ||
           snapshotRecoveryWorkspace === workspaceId) && (

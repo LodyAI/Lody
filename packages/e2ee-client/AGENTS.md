@@ -64,12 +64,28 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   the session's own credential. A listed key package is pinned per session; approval
   signs only that pinned package through the session's ledger journal, never re-signs on
   a lost reply, and key delivery afterwards never holds or undoes the admission.
+  A delivery short of mailbox evidence retries on the desktop's bounded backoff, holding
+  the reader only during an attempt and never opening one; only an exhausted schedule or
+  an ineligible sender ends it `failed` for a manual retry. Its task stays in the core
+  distribution journal, so any later key round on this device also sends it.
+  Automatic approval never trusts the relay's `source`: it signs only after
+  `verifyAutomaticMemberAdmission` accepts the endorser-signed email offer against the
+  verified ledger (eligible endorser now, unexpired, token-derived request id, unused).
+  Desktop uses the same verifier; a refusal keeps its precise code and leaves the
+  request for explicit approval. Only that verifier requires the signature: retained
+  joins, links and lists read offers without it, and a retained join keeps its signed
+  request id rather than re-deriving one.
 - Joining a team on the portable runtime prepares this workspace's identity for
   `memberPairingOffer`, whose request id is the admitted membership and the pairing
   session of the credential binding. The key package is retained before submission and
   resubmitted unchanged on retry. The relay's `committed` is a hint: only this device's
   admission in the verified full signed history is accepted, as a history approval.
+  The retained join reports `joined` once that approval original exists, so a reopened
+  join page shows it joined before its confirming claim; the hint grants nothing.
 - A new invitation after an ended join first retires the old request through the relay;
   only `cancelled` writes the terminal receipt that settles it. The old credential is
   pinned to that membership, so the new one gets a replacement identity, activated only
   after its own verified admission. An admitted or still-live join keeps refusing.
+- Automatic pairing approval signs only after the person types the code the new
+  device shows and it equals this device's derived code. Reviews never expose that
+  code, and the third wrong entry ends the request on the approver before any signing.

@@ -767,7 +767,7 @@ describe('automatic pairing product flow', () => {
     expect(opened).toBe(true);
     expect(text()).toContain('e2ee.auto.syncing.title');
   });
-  it('retains a deferred approval behind the visible device requests entry and reopens the same code', async () => {
+  it('retains a deferred approval behind the device requests entry and authorizes only after the new device code is typed', async () => {
     const { E2eeAutomaticPairingInbox, E2eeDeviceRequestsButton } =
       await import('../src/components/pages/e2ee-automatic-pairing');
     const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
@@ -786,13 +786,18 @@ describe('automatic pairing product flow', () => {
       workspaceName: 'Synthetic team',
       deviceName: 'Phone',
       expiresAt: Date.now() + 600_000,
-      comparisonCode: '123456',
       phase: 'waiting' as const,
     };
     const runtime = {
       pendingAutomaticPairing: async () => (authorized ? [] : [review]),
-      approveAutomaticPairing: async (id: string) => {
+      // The host compares against its own derived code; the UI never receives it.
+      approveAutomaticPairing: async (id: string, code: string) => {
         if (id !== review.id) throw Error('wrong request');
+        if (code !== '123456')
+          throw Object.assign(Error('mismatch'), {
+            code: 'pairing-code-mismatch',
+            attemptsLeft: 2,
+          });
         authorized = true;
       },
       declineAutomaticPairing: async () => {},
@@ -809,24 +814,114 @@ describe('automatic pairing product flow', () => {
           </E2eeAutomaticPairingInbox>
         )
       );
-      expect(document.body.textContent).toContain('123 456');
+      const codeInput = () =>
+        document.querySelector<HTMLInputElement>('[data-testid="e2ee-approval-code"]')!;
+      const authorize = () =>
+        document.querySelector<HTMLButtonElement>('[data-testid="e2ee-approval-authorize"]')!;
+      const type = async (value: string) =>
+        act(async () => {
+          const input = codeInput();
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+            input,
+            value
+          );
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      expect(codeInput()).not.toBeNull();
+      expect(document.body.textContent).toContain('e2ee.auto.deviceNameUnverified');
       expect(replay()).toBeNull();
       await act(async () => find('e2ee.auto.later').click());
       expect(container.textContent).toContain('e2ee.auto.inbox');
-      expect(document.body.textContent).not.toContain('123 456');
+      expect(codeInput()).toBeNull();
       expect(replay()).not.toBeNull();
       await act(async () => find('e2ee.auto.inbox').click());
       expect(document.body.textContent).toContain('Synthetic team');
       expect(replay()).toBeNull();
       await act(async () => find('e2ee.auto.review').click());
-      expect(document.body.textContent).toContain('123 456');
-      await act(async () => find('e2ee.auto.authorize').click());
+      expect(authorize().disabled).toBe(true);
+      await type('654321');
+      await act(async () => authorize().click());
+      expect(authorized).toBe(false);
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+        'e2ee.auto.codeMismatch'
+      );
+      expect(codeInput().value).toBe('');
+      await type('123 456');
+      expect(codeInput().value).toBe('123456');
+      await act(async () => authorize().click());
       await tick(2000);
       expect(authorized).toBe(true);
       expect(container.textContent).toBe('');
       expect(replay()).not.toBeNull();
     } finally {
       removeTelemetryScope();
+      focus.mockRestore();
+    }
+  });
+  it('keeps a partly typed approval code across a poll that briefly omits the request, and accepts full-width digits', async () => {
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const review = {
+      id: 'request',
+      requestId: 'native-request',
+      workspaceId: 'w1',
+      workspaceName: 'Synthetic team',
+      deviceName: 'Phone',
+      expiresAt: Date.now() + 600_000,
+      phase: 'waiting' as const,
+    };
+    let rows = [review];
+    const approved: string[] = [];
+    const runtime = {
+      pendingAutomaticPairing: async () => rows,
+      approveAutomaticPairing: async (_id: string, code: string) => {
+        if (code !== '123456')
+          throw Object.assign(Error('mismatch'), {
+            code: 'pairing-code-mismatch',
+            attemptsLeft: 2,
+          });
+        approved.push(code);
+      },
+      declineAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    const codeInput = () =>
+      document.querySelector<HTMLInputElement>('[data-testid="e2ee-approval-code"]');
+    const type = async (value: string) =>
+      act(async () => {
+        const input = codeInput()!;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+          input,
+          value
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    try {
+      await act(async () =>
+        root.render(
+          <E2eeAutomaticPairingInbox runtime={runtime}>
+            <div />
+          </E2eeAutomaticPairingInbox>
+        )
+      );
+      // A full-width IME entry is read as the same digits.
+      await type('１２３');
+      expect(codeInput()!.value).toBe('123');
+      // One discovery round transiently fails for this request, then it returns.
+      rows = [];
+      await tick(2000);
+      expect(codeInput()).toBeNull();
+      rows = [review];
+      await tick(2000);
+      expect(codeInput()!.value).toBe('123');
+      await type('１２３４５６');
+      await act(async () =>
+        document
+          .querySelector<HTMLButtonElement>('[data-testid="e2ee-approval-authorize"]')!
+          .click()
+      );
+      expect(approved).toEqual(['123456']);
+    } finally {
       focus.mockRestore();
     }
   });

@@ -38,7 +38,7 @@ reports `unavailable` and preserves the last provider selection; it never silent
 falls back. Build properties never override that choice. The OneSignal external
 identity is the original verified user ID, unchanged.
 
-OneSignal uses public app ID `e383bf31-7c8e-4641-b3f6-3486e77b9a82`; override with
+OneSignal uses public app ID `930dcd5c-3534-46aa-805d-f279f008f80b`; override with
 Gradle property `LODY_ONESIGNAL_APP_ID` for a separately provisioned app. Its
 OneSignal dashboard must have Android/FCM credentials configured for this client.
 For direct FCM, supply these **public client options** as Gradle properties from

@@ -403,6 +403,24 @@ export function retainWorkspaceModeProof(
   return true;
 }
 
+/** The device host retains a verified encrypted identity for this workspace while
+ * this renderer has no record of it. Its genesis becomes the sticky learned-mode
+ * marker, so a later restart waits for encrypted admission instead of opening
+ * provisionally. Readable conflicting evidence is never replaced.
+ */
+export function retainHostEncryptedEvidence(
+  storage: Storage,
+  accountId: string,
+  workspaceId: string,
+  genesisHash: string
+): void {
+  if (!/^[0-9a-f]{64}$/.test(genesisHash)) throw corrupt('Invalid encrypted evidence');
+  const known = storage.getItem(knownEncryptedKey(accountId, workspaceId));
+  if (known === genesisHash) return;
+  if (known !== null) throw conflict('Workspace mode conflicts with encrypted evidence');
+  storage.setItem(knownEncryptedKey(accountId, workspaceId), genesisHash);
+}
+
 /** History-only entry learns that a workspace is encrypted without assigning a slug. */
 export function retainEncryptedWorkspaceMode(
   storage: Storage,
