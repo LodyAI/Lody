@@ -231,6 +231,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     prepareSimulator(state, session)
     startFeed(state)
     chat.setAttachmentContext(Self.json(["workspaceId": state.workspaceId, "sessionId": sessionId]))
+    if chat.proposalUserID != state.userId {
+      chat.proposalUserID = state.userId
+      chat.applyRows()
+    }
     chat.showsThoughts = session.cliType == "builtin" && session.agentType == "deepseek"
     chat.setNavigationTitle(session.title)
     let tabs = DirectoryTabs.sessions(current: session, all: state.catalog.sessions)

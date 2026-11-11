@@ -120,6 +120,14 @@ retain the creating turn's status and refresh titles and provider marks from the
 Progress-linked successes are hidden, while errors, cancellations and uncertain or
 incomplete result batches remain visible. Reply cards open the saved Markdown reply;
 shortened receipts say so, and a separate button opens the exact conversation or Tab.
+Agent Role and schedule proposals (`lody_agent_role_create` / `_update`,
+`lody_schedule_propose`) render as `ChatProposalCell` cards from the runtime's
+`proposal` projection: the proposed fields (Before/After for an update, the rule in
+`ScheduleFormat` words), then Dismiss and Save / Create through `decideProposal`.
+Only the requesting member decides a Role proposal; a decided proposal is a receipt,
+and a created schedule opens Schedules. Failures stay on the card for an explicit
+retry. See the [decision](../../../.agents/notes/implemented/feature/2026-11-11-mobile-proposal-cards.md). Files the Agent shares (`lody_upload_files`) use `ChatFileCardCell` and open
+like attachments.
 The related-conversations icon above the composer opens a live native tree, with
 each conversation and its contained Tabs sharing one horizontally scrolling row.
 Scrollbars stay hidden; edge fades indicate more targets in either direction.

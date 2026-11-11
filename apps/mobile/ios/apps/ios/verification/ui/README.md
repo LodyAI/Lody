@@ -90,6 +90,18 @@ For visual/interaction requirement alignment only, export a finished run with
 `acceptance-round.py` and ingest its claims through the acceptance tool. Ordinary
 regression runs remain programmatic gates and are not ingested.
 
+### Conversation proposal and file cards
+
+`proposal-cards` uses Debug-only synthetic transcript scenes for Role creation,
+updates, owner-only actions, saved/dismissed receipts, schedule creation/Open,
+failed and pending decisions, and agent-shared PDF/Markdown files. The runner
+captures light/dark appearances and exercises the fixture's decision transitions
+through production card controls. It does not verify cloud persistence or file downloads.
+
+```sh
+pnpm verify:ui --case proposal-cards --require-video --app /absolute/path/to/Lody.app
+```
+
 ### Conversation usage
 
 `session-preview-usage` renders the production conversation with a synthetic 42%

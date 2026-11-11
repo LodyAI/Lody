@@ -19,6 +19,11 @@ extension SessionController {
         }
       }
     }
+    chat.onProposalDecision = { [weak self] row, accept in self?.decideProposal(row, accept: accept) }
+    chat.onProposalOpenSchedule = { [weak self] _ in
+      guard let self else { return }
+      LodyShell.shared.pushNative("schedules", title: String(localized: "native.chat.proposal.schedules", bundle: .lody), from: self)
+    }
     chat.onEditMessage = { [weak self] body in
       guard let self, let entryId = body["entryId"] as? String, !entryId.isEmpty, entryId == chat.editableMessageID else { return }
       let editor = EditMessageController(sessionId: sessionId, entryId: entryId)
@@ -40,6 +45,42 @@ extension SessionController {
         }
       }
     }
+  }
+
+  /// Save / create or dismiss an Agent's proposal (`decideProposal`); never retried on its own.
+  /// The transcript carries the outcome once recorded, so success only clears the pending state.
+  func decideProposal(_ row: ChatRow, accept: Bool) {
+    let (entryId, itemId) = (row.entryID, row.itemID)
+    let workspaceId = source.state.workspaceId, sessionId = self.sessionId
+    chat.setProposalState(entryId: entryId, itemId: itemId, ChatProposalState(pending: true))
+    Task { [weak self] in
+      var failure: String?
+      do {
+        guard let runtime = DataRuntime.current, runtime.sessionId == sessionId, runtime.workspace == workspaceId else {
+          throw OutboxError.scopeExpired
+        }
+        _ = try await runtime.perform(RuntimeContract.Calls.DecideProposal.self, .init(
+          workspaceId: workspaceId, sessionId: sessionId, entryId: entryId, itemId: itemId,
+          decision: accept ? .accept : .dismiss
+        ))
+      } catch {
+        failure = Self.proposalFailure(error)
+      }
+      guard let self, self.sessionId == sessionId else { return }
+      self.chat.setProposalState(entryId: entryId, itemId: itemId, failure.map { ChatProposalState(message: $0) })
+    }
+  }
+
+  static let proposalCodes = [
+    "proposal_not_requester", "proposal_unavailable", "role_duplicate", "role_read_only", "role_forbidden",
+    "role_target_unavailable", "schedule_target_unavailable", "schedule_not_owner", "schedule_machine_unsupported",
+    "schedule_trigger_invalid",
+  ]
+
+  static func proposalFailure(_ error: Error) -> String {
+    let description = error.localizedDescription
+    let code = proposalCodes.first { description.contains($0) } ?? "failed"
+    return String(localized: String.LocalizationValue("native.chat.proposal.error." + code), bundle: .lody)
   }
 
   var decisionsEnabled: (plan: Bool, retry: Bool) {

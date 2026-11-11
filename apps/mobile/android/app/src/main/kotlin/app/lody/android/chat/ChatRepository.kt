@@ -125,6 +125,11 @@ class ChatRepository(
         owner.use(scope) { it.execute(RuntimeCommand.StopTurn(sessionId, machineId, turnId)) }
     }
 
+    /** Saves / creates or dismisses an Agent's proposal; a write, never retried (failures throw their code). */
+    suspend fun decideProposal(scope: RuntimeScope, sessionId: String, entryId: String, itemId: String, accept: Boolean) {
+        owner.use(scope) { it.execute(RuntimeCommand.DecideProposal(sessionId, entryId, itemId, accept)) }
+    }
+
     /** Sends one text turn on the scope's lease. Never retried: an uncertain write is `unknown`. */
     suspend fun send(scope: RuntimeScope, request: SendTextRequest): RuntimeResult.Sent =
         owner.use(scope) { it.execute(RuntimeCommand.SendText(request)) as RuntimeResult.Sent }

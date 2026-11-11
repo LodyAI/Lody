@@ -71,7 +71,7 @@ enum PullRequestMergeSettle {
     return mergeable == false ? "d" : nil
   }
 
-  static func run(attempts: Int = attempts, read: () async throws -> String?, sleep: () async throws -> Void) async -> String? {
+  static func run(isolation: isolated (any Actor)? = #isolation, attempts: Int = attempts, read: () async throws -> String?, sleep: () async throws -> Void) async -> String? {
     for attempt in 0..<attempts {
       do {
         if attempt > 0 { try await sleep() }
