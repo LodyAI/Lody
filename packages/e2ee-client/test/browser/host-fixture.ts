@@ -59,6 +59,7 @@ import {
   sealHistoryPacket,
   getCommittedEpochStagingKey,
   type EpochStagedGroup,
+  envelopeRouting,
 } from '@lody/e2ee-core/protocol';
 import {
   DeviceIdentity,
@@ -153,15 +154,16 @@ let offer: PersonalPairingOffer,
   mode: 'create-or-open' | 'open-existing',
   events: string[] = [],
   // Envelopes this device stored for other devices; refused attempts are kept too.
-  putAttempts: { id: string; frame: string; stored: boolean }[] = [],
+  putAttempts: { id: string; frame: string; recipient: string; stored: boolean }[] = [],
   refusePuts = false,
-  // The one recipient whose slot reflects stores made from `watchedFrom` on; every other
-  // slot keeps reporting an installed key.
-  watchedRecipient: string | undefined,
+  // The recipients whose slots reflect their own stores made from `watchedFrom` on;
+  // every other slot keeps reporting an installed key.
+  watched = new Set<string>(),
   watchedFrom = 0,
   // Backoffs the runtime's member key delivery waited; `holdDeliveryRetry` never ends one.
   deliverySleeps: number[] = [],
   holdDeliveryRetry = false,
+  putMark = 0,
   failKeys = false,
   foreign = false;
 let databasePrefix = 'personal';
@@ -318,10 +320,11 @@ export async function boot(
   events = [];
   putAttempts = [];
   refusePuts = false;
-  watchedRecipient = undefined;
+  watched = new Set();
   watchedFrom = 0;
   deliverySleeps = [];
   holdDeliveryRetry = false;
+  putMark = 0;
   session = undefined;
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -632,8 +635,10 @@ export async function boot(
                   ...slot,
                   revision: 0,
                   status:
-                    slot.recipient !== watchedRecipient ||
-                    putAttempts.slice(watchedFrom).some((item) => item.stored)
+                    !watched.has(slot.recipient) ||
+                    putAttempts
+                      .slice(watchedFrom)
+                      .some((item) => item.stored && item.recipient === slot.recipient)
                       ? ('InstallationReported' as const)
                       : ('NeedsEnvelope' as const),
                 }),
@@ -692,7 +697,12 @@ export async function boot(
                 }),
               put: (id, frame) =>
                 Effect.suspend(() => {
-                  putAttempts.push({ id, frame: toHex(frame), stored: !refusePuts });
+                  putAttempts.push({
+                    id,
+                    frame: toHex(frame),
+                    recipient: Result.getOrThrow(envelopeRouting(frame)).recipient,
+                    stored: !refusePuts,
+                  });
                   if (refusePuts)
                     return Effect.fail(
                       new BackendError({
@@ -1231,7 +1241,7 @@ export async function invoke(action: string) {
             // device in the background. The first store is refused; the approver's own due
             // retry stores the journaled envelope under the same id, with no other call.
             refusePuts = true;
-            watchedRecipient = toHex(fresh.publicKey.toBytes());
+            watched = new Set([toHex(fresh.publicKey.toBytes())]);
             watchedFrom = putAttempts.length;
             if (!workspace!.deliverKeys) return { delivery: 'not-scheduled' };
             yield* workspace!.deliverKeys(fresh.publicKey.toBytes(), signed.requestId);
@@ -2277,7 +2287,7 @@ export async function runtimeInvoke(action: string) {
       // The mailbox refuses every envelope; only the applicant's slot reports its stores.
       case 'memberRefuseKeys':
         refusePuts = true;
-        watchedRecipient = memberRelay.item!.signingPublicKey;
+        watched = new Set([memberRelay.item!.signingPublicKey]);
         watchedFrom = putAttempts.length;
         value = true;
         break;
@@ -2287,13 +2297,30 @@ export async function runtimeInvoke(action: string) {
         break;
       case 'memberAcceptKeys':
         refusePuts = false;
+        putMark = putAttempts.length;
         value = true;
+        break;
+      // A further applicant; the earlier one stays admitted and is no longer listed.
+      case 'memberNextApplicant':
+        memberRelay.item = await Effect.runPromise(memberApplicant(43, 0x53));
+        watched.add(memberRelay.item.signingPublicKey);
+        value = memberRelay.item.requestId;
         break;
       case 'memberDeliveries':
         value = {
           items: (await runtime.memberKeyDeliveries!(offer.workspaceId)).items,
           sleeps: deliverySleeps,
-          envelopes: putAttempts.slice(watchedFrom).map((item) => item.stored),
+          envelopes: putAttempts
+            .slice(watchedFrom)
+            .filter((item) => watched.has(item.recipient))
+            .map((item) => item.stored),
+          // Watched recipients whose envelope was stored since the mailbox accepted them.
+          storedSinceAccept: new Set(
+            putAttempts
+              .slice(putMark)
+              .filter((item) => item.stored && watched.has(item.recipient))
+              .map((item) => item.recipient)
+          ).size,
         };
         break;
       case 'memberRecordCount':
