@@ -427,7 +427,10 @@ private fun WorkspaceCapsule(state: ChatListUiState, onSelect: (Workspace) -> Un
                 modifier = Modifier.widthIn(max = LodyLayout.trailingMetaMaxWidth),
             )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = colors.bgOverlay) {
+        // A menu-width panel (iOS #2574 / #2586): 200–260 dp, each name on one line fading out at
+        // its trailing edge, never wrapping.
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = colors.bgOverlay,
+            modifier = Modifier.widthIn(min = 200.dp, max = 260.dp)) {
             if (state.workspaces.isEmpty()) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.home_no_workspaces), style = LodyTheme.typography.body, color = colors.textSecondary) },
@@ -437,7 +440,7 @@ private fun WorkspaceCapsule(state: ChatListUiState, onSelect: (Workspace) -> Un
             }
             state.workspaces.forEach { workspace ->
                 DropdownMenuItem(
-                    text = { Text(workspace.name, style = LodyTheme.typography.body, color = colors.textPrimary) },
+                    text = { app.lody.android.designsystem.LodyFadingText(workspace.name, LodyTheme.typography.body, colors.textPrimary, Modifier.fillMaxWidth()) },
                     leadingIcon = { Avatar(workspace.image, workspace.name, LodyIconSize.lg) },
                     trailingIcon = { if (workspace.id == state.workspaceId) Glyph(LodyIcons.Check, colors.accentFg, LodyIconSize.sm) },
                     onClick = { open = false; if (workspace.id != state.workspaceId) onSelect(workspace) },
