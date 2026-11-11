@@ -19,7 +19,7 @@ import {
   type ManagedInstallation,
 } from '@/lib/managed-daemon-release';
 import { ManagedPrepareRequestSchema } from '@/lib/managed-daemon-ipc';
-import { relayToManagedService } from '@/lib/managed-daemon-migration';
+import { canRelayNpmInstallation, relayToManagedService } from '@/lib/managed-daemon-migration';
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import path from 'node:path';
 import { runCommandTextLegacy } from '@lody/shared/node/process';
@@ -268,7 +268,7 @@ export const daemonRunnerCommand = new Command('daemon-runner')
     const sea = getSeaContext();
     // A POSIX npm installation speaks the managed Worker protocol so a remote
     // update can relay it to the managed service. Windows lacks containment.
-    const npmMigration = !sea && process.platform !== 'win32';
+    const npmMigration = !sea && canRelayNpmInstallation(process.env, process.platform);
     const npmProduct = getCliPlatformKind() === 'cloud' ? 'lody-cloud' : 'lody-oss';
     const releaseTrust = (upgrade?: ManagedDaemonUpgradeOptions): ReleaseTrust =>
       sea ?? npmMigrationTrust(npmProduct, upgrade?.channel ?? 'stable');

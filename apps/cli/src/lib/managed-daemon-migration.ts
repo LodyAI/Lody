@@ -6,6 +6,22 @@
  * it back; the installation is published (so launchers forward to the managed
  * service) only after that readiness. See specs/daemon-upgrade-installation.md.
  */
+/**
+ * A relay leaves the managed runner as a detached child of the exiting npm
+ * watchdog. When a service manager owns the watchdog (systemd unit, launchd
+ * job), stopping that unit kills the managed runner too, and a clean exit does
+ * not restart it. Such installations keep the explicit migration.
+ */
+export function canRelayNpmInstallation(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform
+): boolean {
+  if (platform === 'win32') return false;
+  if (env.INVOCATION_ID) return false;
+  if (env.XPC_SERVICE_NAME && env.XPC_SERVICE_NAME !== '0') return false;
+  return true;
+}
+
 export type RelayLaunchResult = { status: 'ready' } | { status: string; message?: string };
 
 export type RelayDeps = {

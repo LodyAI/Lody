@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { relayToManagedService, type RelayDeps } from './managed-daemon-migration';
+import {
+  canRelayNpmInstallation,
+  relayToManagedService,
+  type RelayDeps,
+} from './managed-daemon-migration';
 
 /**
  * An npm daemon migrating to the managed service must never strand the machine:
@@ -92,5 +96,18 @@ describe('npm to managed relay migration', () => {
     expect(await relayToManagedService(deps)).toEqual({ kind: 'restored', reason: 'disk full' });
     expect(events).toEqual(['phase:failed']);
     expect(owned()).toBe(true);
+  });
+});
+
+describe('npm relay eligibility', () => {
+  it('relays only POSIX npm watchdogs that no service manager owns', () => {
+    expect(canRelayNpmInstallation({}, 'linux')).toBe(true);
+    expect(canRelayNpmInstallation({}, 'darwin')).toBe(true);
+    expect(canRelayNpmInstallation({}, 'win32')).toBe(false);
+    // systemd would kill the detached managed runner with the npm unit's cgroup.
+    expect(canRelayNpmInstallation({ INVOCATION_ID: 'abc' }, 'linux')).toBe(false);
+    // launchd likewise owns the job's processes.
+    expect(canRelayNpmInstallation({ XPC_SERVICE_NAME: 'com.example.lody' }, 'darwin')).toBe(false);
+    expect(canRelayNpmInstallation({ XPC_SERVICE_NAME: '0' }, 'darwin')).toBe(true);
   });
 });
