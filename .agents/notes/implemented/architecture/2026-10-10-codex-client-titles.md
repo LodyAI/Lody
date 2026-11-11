@@ -30,6 +30,18 @@ conversation's model or permissions. Full access is limited to the isolated titl
 session's configuration; its existing temporary working directory and client-side
 permission handling are unchanged.
 
+After the isolated ACP session starts, Codex title configuration and prompting have a
+five-minute deadline. A stalled model response can otherwise retain an independent ACP
+process beyond ordinary Session GC. On expiry the title owner aborts its work, attempts
+the existing bounded process-tree termination, and returns the prompt-derived fallback;
+a late configuration response cannot issue another prompt. Termination failures remain
+logged and unconfirmed, not proof that descendants exited. Startup keeps its existing
+budgets, and the deadline does not apply to other Providers or the main conversation.
+The longer budget limits unnecessary fallbacks for slow providers without retaining a
+stalled title indefinitely. ACP startup, configuration and teardown remain Promise
+boundaries in the L3–L5 ownership migration; wrapping them in Effect would not complete
+that unit.
+
 The adapter retains explicit native names and fallback previews but removes its title
 model turn, capability advertisement, and obsolete generation lifecycle. Deployment
 must include the updated adapter; older adapter binaries can still generate their own
@@ -42,6 +54,10 @@ explicit overrides and defaults at the isolated prompt boundary, unavailable opt
 Codex versus other-provider dispatch, native title events, and adapter lifecycle.
 No real model request is needed to verify configuration and ownership; live account
 availability of the default model is not established by these tests.
+The title lifecycle suite exercises stalled configuration and prompts against the real
+process-tree cleanup with simulated Windows and POSIX process tables, and checks exit of
+a real local subprocess. Native Windows termination and the user's original network
+failure are not reproduced by that test.
 
 Validation completed: 372 scoped tests passed, along with shared/CLI/components/Codex
 typechecks, adapter builds, scoped lint (warnings only), and the public-boundary check.
