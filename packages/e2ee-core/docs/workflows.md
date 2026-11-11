@@ -151,7 +151,10 @@ devices receive keys but never send them. `Observed` means the mailbox returned
 the exact bytes, not that the recipient installed them. A full journal fails new
 tasks with `task-limit`; acknowledging frees capacity without deleting history.
 Different recipients are scheduled and delivered concurrently (at most eight at
-once); one recipient's steps stay in order. Outcomes are still checked in
+once); one recipient's steps stay in order. Installed-key reads are the exception
+and run one at a time: a single-writer custody, such as the browser's Web Lock,
+refuses a concurrent holder instead of queueing it, so overlapping reads would
+block every recipient but one each round. Outcomes are still checked in
 recipient/task order: a blocked recipient never blocks the others, and storage
 damage fails the batch.
 

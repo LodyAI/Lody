@@ -529,6 +529,7 @@ type Deliveries = {
   items: { requestId: string; state: string; code?: string }[];
   sleeps: number[];
   envelopes: boolean[];
+  storedSinceAccept: number;
 };
 
 // The approval's first key round ends with the applicant's slot still NeedsEnvelope. The
@@ -541,7 +542,9 @@ it('a member key delivery that fails its first round is retried and delivered wi
     const opened = await approvedWhileMailboxRefuses(directory, false);
     context = opened.context;
     await expect
-      .poll(async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items)
+      .poll(async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items, {
+        timeout: 30_000,
+      })
       .toEqual([{ requestId: opened.requestId, state: 'delivered' }]);
     const settled = (await good(opened.page, 'memberDeliveries')) as Deliveries;
     // One bounded backoff, the first step of the desktop schedule, then the stored envelope.
@@ -566,7 +569,8 @@ it('a later key round on the approving device delivers to a member its approval 
     // The approval's own round has ended with the applicant's slot still empty.
     await expect
       .poll(
-        async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items[0]?.code
+        async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items[0]?.code,
+        { timeout: 30_000 }
       )
       .toBe('e2ee_key_not_sent');
     expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes).not.toContain(
@@ -1639,3 +1643,31 @@ it.each(['chromium', 'webkit'] as const)(
     }
   }
 );
+
+// Several recipients wait at the same epoch. Each delivery borrows the installed epoch key,
+// and the browser custody refuses a second concurrent holder instead of queueing it, so
+// one key round must still send every waiting envelope, not just the one that won.
+it('one key round sends every envelope waiting at the current epoch', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-batch-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    const page = opened.page;
+    const second = await good(page, 'memberNextApplicant');
+    expect(await good(page, 'memberList')).toEqual([second]);
+    expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
+    // Both approvals' own rounds ended with nothing stored.
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).sleeps, {
+        timeout: 30_000,
+      })
+      .toEqual([10_000, 10_000]);
+    await good(page, 'memberAcceptKeys');
+    await good(page, 'receive');
+    expect(((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept).toBe(2);
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
