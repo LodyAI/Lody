@@ -11,7 +11,7 @@ import { postHogPrivacy, setTelemetryRouteTarget } from '@/lib/posthog-privacy';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type FunctionReference } from 'convex/server';
+import { getFunctionName, type FunctionReference } from 'convex/server';
 import type {
   PlatformProvider,
   E2eeRuntimeFactory,
@@ -39,6 +39,10 @@ const fixture = vi.hoisted(() => ({
       }
     | undefined,
   cloudClient: {
+    watchQuery: (_reference: FunctionReference<'query'>, _args: unknown) => ({
+      onUpdate: (_changed: () => void) => () => {},
+      localQueryResult: (): unknown => undefined,
+    }),
     query: async (_reference: FunctionReference<'query'>, _args: unknown): Promise<unknown> => {
       throw new Error('unexpected query');
     },
@@ -205,6 +209,69 @@ describe('CloudPlatformProvider', () => {
     );
     expect(seen.at(-1)!.identity.session.get()).toEqual({ status: 'unauthenticated' });
     expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
+  });
+
+  it('subscribes to only the scoped ledger head, delivers cached state and fences late values', async () => {
+    refetch('A');
+    const initial = {
+      workspaceId: 'workspace-a',
+      genesisHash: '11'.repeat(32),
+      checkpoint: { length: 1, headHash: '11'.repeat(32) },
+    };
+    let value: unknown = initial;
+    let changed!: () => void;
+    let active = false;
+    const originalWatch = fixture.cloudClient.watchQuery;
+    fixture.cloudClient.watchQuery = (reference, args) => {
+      expect(getFunctionName(reference)).toBe('e2eeWorkspaces:ledgerHead');
+      expect(args).toEqual({ workspaceId: 'workspace-a' });
+      return {
+        onUpdate: (callback) => {
+          changed = callback;
+          active = true;
+          return () => {
+            active = false;
+          };
+        },
+        localQueryResult: () => {
+          if (value instanceof Error) throw value;
+          return value;
+        },
+      };
+    };
+    try {
+      await render();
+      const observed: unknown[] = [];
+      const errors: unknown[] = [];
+      const stop = seen.at(-1)!.e2eeWorkspaces!.subscribeLedgerHead!(
+        { workspaceId: 'workspace-a' },
+        (head) => observed.push(head),
+        (error) => errors.push(error)
+      );
+      expect(active).toBe(true);
+      expect(observed).toEqual([initial]);
+      value = { ...initial, checkpoint: { length: 2, headHash: '22'.repeat(32) } };
+      changed();
+      expect(observed).toHaveLength(2);
+      value = { ...initial, workspaceId: 'other-workspace' };
+      changed();
+      expect(observed).toHaveLength(2);
+      value = new Error('subscription unavailable');
+      changed();
+      expect(errors).toEqual([value]);
+      refetch('Other account');
+      (fixture.session.data as { user: { id: string } }).user.id = 'account-other';
+      await render();
+      value = initial;
+      changed();
+      expect(observed).toHaveLength(2);
+      stop();
+      expect(active).toBe(false);
+      changed();
+      expect(observed).toHaveLength(2);
+    } finally {
+      fixture.cloudClient.watchQuery = originalWatch;
+    }
   });
 
   it('keeps Electron IPC as the runtime owner when a browser factory is supplied', async () => {
