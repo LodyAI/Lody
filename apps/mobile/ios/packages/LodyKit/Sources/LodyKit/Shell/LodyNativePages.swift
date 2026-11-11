@@ -59,9 +59,7 @@ enum LodyNativePages {
     "agent-roles-preview": { _ in AgentRolesPreviewController() },
     "settings": { _ in SettingsController() },
     "settings-baseline": { params in SettingsBaselineController(scenario: params["scenario"] as? String ?? "live") },
-    "archived-sessions": { _ in ArchivedSessionsController() },
     "workspace-editor": { params in WorkspaceEditorController(params: params) },
-    "archived-sessions-preview": { _ in ArchivedSessionsPreviewController() },
     "session": { params in SessionController(params: params) },
     "session-permission": { params in
       let sessionId = params["sessionId"] as! String

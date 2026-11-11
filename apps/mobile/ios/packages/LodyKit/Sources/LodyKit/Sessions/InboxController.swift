@@ -124,18 +124,26 @@ final class InboxController: UIViewController {
     }, uniquingKeysWith: { _, new in new }) : [:]
     list.setOwners(owners)
     loadViews(state)
-    list.setProjectIndexEnabled(!state.userId.isEmpty && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    list.setProjectIndexEnabled(!state.userId.isEmpty && !HomeArchive.shown && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && traitCollection.horizontalSizeClass != .regular && HomeGrouping.stored == .project)
     guard !state.userId.isEmpty else {
       list.setSections([])
       return
     }
-    let catalog = state.catalog.viewed(views)
+    let archived = HomeArchive.shown
+    list.setArchivedStyle(archived)
+    var catalog = state.catalog.viewed(views)
+    // The Archived switch narrows every view, search included, to archived chats.
+    if archived { catalog.sessions = catalog.sessions.filter(\.archived) }
     list.setPreviewUserId(state.userId)
     list.setPreviewWorkspaceId(state.workspaceId)
     list.setPinsGroupLabels(term.isEmpty)
     guard term.isEmpty else {
       renderSearch(term, state: state, catalog: catalog)
+      return
+    }
+    if archived {
+      list.setSections(InboxSections.archived(catalog, owner: HomeScope.stored == .mine ? state.userId : nil))
       return
     }
     // iPhone Home groups by the view menu's choice (time / project / status).
@@ -225,7 +233,8 @@ final class InboxController: UIViewController {
   private func listPlaceholder(_ state: SessionListState) -> String {
     if state.loading { return String(localized: "sessions.placeholder.loading", bundle: .lody) }
     if !state.connected { return String(localized: "sessions.placeholder.offline", bundle: .lody) }
-    return String(localized: "sessions.placeholder.empty", bundle: .lody)
+    let empty = HomeArchive.shown ? "home.archived.empty" : "sessions.placeholder.empty"
+    return String(localized: String.LocalizationValue(empty), bundle: .lody)
   }
 
   private func pinOrder(_ state: SessionListState, catalog: SessionCatalog) -> [String] {
