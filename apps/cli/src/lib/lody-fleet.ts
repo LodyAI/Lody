@@ -51,6 +51,7 @@ import {
   type LocalWorkspaceCatalogSnapshot,
 } from '@/lib/local-workspace-catalog';
 import { Lody } from '@/lib/lody';
+import { E2eeModeConflictError, findRetainedE2eeModeConflict } from '@/lib/e2ee/retained-binding';
 import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
 import type { MachineProcessLifecycleAction } from '@/lib/machine-lifecycle';
 import { loadPrPollerConfig } from '@/lib/pr-poller/pr-poller-config';
@@ -245,6 +246,7 @@ export class LodyFleet {
   // one-off reconcile failure (e.g. a catalog write error) could leave the fleet
   // permanently un-reconciled / un-attached.
   private lastValidWorkspaceListResult: AuthorizedWorkspaceList | null = null;
+  private modeConflictWorkspaceIds = new Set<string>();
   private reconcileRetryTimer: NodeJS.Timeout | null = null;
   private reconcileRetryDelayMs = 0;
 
@@ -530,7 +532,9 @@ export class LodyFleet {
     }
 
     this.logger.debug(`[fleet] Bootstrapping ${workspaces.length} workspace(s) from local catalog`);
-    await this.applyWorkspaceList(workspaces.map(localCatalogWorkspaceToWorkspaceListItem));
+    await this.applyWorkspaceList(
+      this.refuseModeDowngrades(workspaces.map(localCatalogWorkspaceToWorkspaceListItem))
+    );
   }
 
   private async startWorkspaceSubscription(options: { waitForInitial: boolean }): Promise<void> {
@@ -592,6 +596,8 @@ export class LodyFleet {
             );
           }
           this.runtimeStateReporter.clearIssue('workspace_subscription_error');
+          // Screen before anything stores, caches, attaches or starts this list.
+          result = { ...result, workspaces: this.refuseModeDowngrades(result.workspaces) };
           this.lastValidWorkspaceListResult = result;
           this.workspaceListConfirmedAt = this.authorityClock();
           this.endRemoteBridgeOutage();
@@ -790,6 +796,43 @@ export class LodyFleet {
     await this.cloudPort.dispose();
 
     this.terminalPtyService.closeAll();
+  }
+
+  /**
+   * The server's mode field cannot downgrade a workspace this machine holds an
+   * encrypted pairing binding for. Such rows are withheld from every consumer, so
+   * no plaintext runtime starts and a running encrypted one is never relabelled;
+   * the binding and encrypted data stay untouched until a consistent list returns.
+   */
+  private refuseModeDowngrades<
+    T extends { id: string; contentMode?: string; genesisHash?: string },
+  >(workspaces: readonly T[]): T[] {
+    const accepted: T[] = [];
+    const conflicts = new Set<string>();
+    for (const workspace of workspaces) {
+      const conflict = findRetainedE2eeModeConflict(this.userId, workspace);
+      if (!conflict) {
+        accepted.push(workspace);
+        continue;
+      }
+      conflicts.add(workspace.id);
+      this.reportModeConflict(conflict);
+    }
+    for (const workspaceId of this.modeConflictWorkspaceIds)
+      if (!conflicts.has(workspaceId))
+        this.runtimeStateReporter.clearIssue(`e2ee_mode_conflict:${workspaceId}`);
+    this.modeConflictWorkspaceIds = conflicts;
+    return accepted;
+  }
+
+  private reportModeConflict(conflict: E2eeModeConflictError): void {
+    this.logger.error(`[fleet] ${conflict.message}`);
+    this.runtimeStateReporter.upsertIssue({
+      code: `e2ee_mode_conflict:${conflict.workspaceId}`,
+      severity: 'error',
+      recoverable: true,
+      message: conflict.message,
+    });
   }
 
   private async applyWorkspaceList(
@@ -1326,6 +1369,12 @@ export class LodyFleet {
       }
     })()
       .catch((error: unknown) => {
+        if (error instanceof E2eeModeConflictError) {
+          // Retrying cannot change local evidence; a consistent list restarts it.
+          this.modeConflictWorkspaceIds.add(workspace.id);
+          this.reportModeConflict(error);
+          return;
+        }
         if (
           workspace.contentMode === 'e2ee' &&
           error instanceof Error &&

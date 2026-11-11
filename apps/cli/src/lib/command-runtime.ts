@@ -70,6 +70,7 @@ import {
   runWithEncryptedCommandAccess,
   type EncryptedCommandAccess,
 } from './session-command-environment';
+import { findRetainedE2eeModeConflict } from './e2ee/retained-binding';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
 import {
   makeLocalWorkspaceCatalog,
@@ -519,6 +520,8 @@ export async function withWorkspaceManager<T>(
     workspace.contentMode !== 'e2ee'
   )
     throw new Error('workspace_mode_unsupported');
+  const modeConflict = findRetainedE2eeModeConflict(auth.userId, workspace);
+  if (modeConflict) throw modeConflict;
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (auth !== environment.auth || workspace.id !== environment.workspace.id)

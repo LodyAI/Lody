@@ -1,12 +1,19 @@
-import type { PlatformE2eeWorkspaces, PlatformIdentity } from '@lody/platform';
+import type { WorkspaceAdmissionDescriptor } from '@lody/cloud-api';
+import type {
+  E2eeWorkspaceRuntime,
+  PlatformE2eeWorkspaces,
+  PlatformIdentity,
+} from '@lody/platform';
 import { isConvexUnauthenticatedError } from '@lody/shared';
 import {
   getConvexAuthRecoveryDelayMs,
   isTransientConvexQueryError,
 } from '@/lib/authed-convex-query';
+import { personalHostFailureCode } from '@/lib/e2ee-control-failure';
 import {
   E2eeLocalEvidenceConflictError,
   E2eeLocalEvidenceCorruptError,
+  retainHostEncryptedEvidence,
 } from '@/lib/e2ee-workspace-storage';
 import {
   E2eeAccountUnavailableError,
@@ -74,6 +81,61 @@ export function isWorkspaceModeRejection(error: unknown): boolean {
     error instanceof WorkspaceModeMismatchError ||
     (error instanceof Error && error.message === 'e2ee_workspace_mode_unavailable')
   );
+}
+
+/** The host has no identity record at all for this account and workspace. */
+function isMissingHostIdentity(error: unknown): boolean {
+  if (personalHostFailureCode(error) === 'approval-required') return true;
+  return error instanceof Error && /\be2ee_missing-binding\b/.test(error.message);
+}
+
+/**
+ * A server answer other than encrypted is accepted only when this device's host
+ * holds no encrypted identity for the workspace. Renderer storage can be cleared
+ * while native or IndexedDB custody survives; the host's verified identity then
+ * outranks the server, and its genesis is retained as the sticky marker.
+ * Missing identity is the only answer that permits plaintext; any other host
+ * failure leaves the workspace unclassified, never plaintext.
+ */
+export async function assertNoRetainedEncryptedIdentity(input: {
+  runtime: Pick<E2eeWorkspaceRuntime, 'readIdentity'> | undefined;
+  storage: Storage;
+  accountId: string;
+  workspaceId: string;
+  descriptor: WorkspaceAdmissionDescriptor;
+}): Promise<void> {
+  const { runtime, descriptor } = input;
+  if ('contentMode' in descriptor && descriptor.contentMode === 'e2ee') return;
+  // Without a device host this platform cannot retain an encrypted identity.
+  if (!runtime) return;
+  if (!runtime.readIdentity) throw new Error('e2ee_identity_check_unavailable');
+  let identity: { workspaceId: string; genesisHash: string };
+  try {
+    identity = await runtime.readIdentity({
+      accountId: input.accountId,
+      workspaceId: input.workspaceId,
+    });
+  } catch (error) {
+    if (isMissingHostIdentity(error)) return;
+    throw error;
+  }
+  if (identity.workspaceId !== input.workspaceId) throw new WorkspaceModeMismatchError();
+  try {
+    retainHostEncryptedEvidence(
+      input.storage,
+      input.accountId,
+      input.workspaceId,
+      identity.genesisHash
+    );
+  } catch (error) {
+    if (
+      error instanceof E2eeLocalEvidenceConflictError ||
+      error instanceof E2eeLocalEvidenceCorruptError
+    )
+      throw error;
+    // A full storage quota loses only the marker; this answer is still refused.
+  }
+  throw new E2eeLocalEvidenceConflictError('Workspace mode conflicts with encrypted evidence');
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {

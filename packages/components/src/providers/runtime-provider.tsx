@@ -94,6 +94,7 @@ import {
   type WorkspaceModeEvidence,
 } from '@/lib/e2ee-workspace-storage';
 import {
+  assertNoRetainedEncryptedIdentity,
   describeAuthenticatedWorkspace,
   waitForWorkspaceContentAdmission,
   isWorkspaceModeRejection,
@@ -884,6 +885,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           if (disposed) return;
           if (descriptor.workspaceId !== effectiveWorkspaceId)
             throw new WorkspaceModeMismatchError();
+          await assertNoRetainedEncryptedIdentity({
+            runtime: encryptedRuntime,
+            storage: localStorage,
+            accountId: accountId!,
+            workspaceId: effectiveWorkspaceId,
+            descriptor,
+          });
+          if (disposed) return;
           if (isEncryptedDescriptor(descriptor)) {
             // Never keep the plaintext data plane for an encrypted workspace:
             // retire it first, then record the mode synchronously as sticky
@@ -971,6 +980,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               signal: initializationAbort.signal,
             }));
           if (disposed) return;
+          if (!storedDescriptor) {
+            await assertNoRetainedEncryptedIdentity({
+              runtime: encryptedRuntime,
+              storage: localStorage,
+              accountId: accountId!,
+              workspaceId: effectiveWorkspaceId,
+              descriptor,
+            });
+            if (disposed) return;
+          }
           admit(descriptor);
           admitting = false;
           if (isEncryptedDescriptor(descriptor)) {

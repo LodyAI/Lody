@@ -36,6 +36,7 @@ import { traceAsync } from '@/utils/trace-span';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
 import type { WorkspaceWatchCoordinatorApi } from '@/lib/code-collab/workspace-watch-coordinator';
 import type { CloudPort } from '@lody/platform';
+import { findRetainedE2eeModeConflict } from '@/lib/e2ee/retained-binding';
 import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
@@ -133,6 +134,14 @@ export class Lody {
       options.contentMode !== 'e2ee'
     )
       throw new Error('workspace_mode_unsupported');
+    // Every runtime start re-checks the retained pairing binding, so neither a
+    // listing nor a stale cached row can open an encrypted workspace as plaintext.
+    const modeConflict = findRetainedE2eeModeConflict(options.userId, {
+      id: options.workspaceId,
+      contentMode: options.contentMode,
+      genesisHash: options.genesisHash,
+    });
+    if (modeConflict) throw modeConflict;
     const encrypted = options.contentMode === 'e2ee';
     let e2ee: CliE2eeWorkspaceLegacy | undefined;
     let resolveRemovalOwner: (value: Lody | null) => void = () => {};

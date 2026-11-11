@@ -945,6 +945,132 @@ describe('LodyFleet local E2EE pairing during startup', () => {
   });
 });
 
+// The server's mode field is not authority over a workspace this machine has paired
+// into: a listing that downgrades it must never start a plaintext runtime.
+describe('LodyFleet encrypted mode downgrade', () => {
+  type Snapshot = Parameters<Parameters<CloudPort['access']['watchWorkspaceAccess']>[0]>[0];
+  const genesisHash = 'ab'.repeat(32);
+  const encrypted = {
+    id: 'ws-paired',
+    name: 'Private',
+    slug: 'private',
+    role: 'owner',
+    contentMode: 'e2ee',
+    genesisHash,
+  };
+  const ordinary = { id: 'ws-ordinary', name: 'Ordinary', slug: null, role: 'owner' };
+  const pairHere = async () => {
+    vi.stubEnv('LODY_DATA_DIR', await mkdtemp(join(tmpdir(), 'fleet-e2ee-downgrade-')));
+    const root = join(
+      getLodyDataDir(),
+      'e2ee',
+      createHash('sha256').update('user-1').digest('hex'),
+      encrypted.id
+    );
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      join(root, 'binding.json'),
+      JSON.stringify({ workspaceId: encrypted.id, genesisHash, genesisRecordHex: 'aa' })
+    );
+  };
+  const issueCodes = (reporter: ReturnType<typeof createRuntimeStateReporter>) => {
+    const issues = new Set<string>();
+    reporter.upsertIssue.mockImplementation((issue) => {
+      issues.add(issue.code);
+    });
+    reporter.clearIssue.mockImplementation((code) => {
+      issues.delete(code);
+    });
+    return issues;
+  };
+
+  it.each([
+    ['plaintext', { ...encrypted, contentMode: 'plaintext', genesisHash: undefined }],
+    ['without a mode', { ...encrypted, contentMode: undefined, genesisHash: undefined }],
+    ['with another genesis', { ...encrypted, genesisHash: 'cd'.repeat(32) }],
+  ] as const)(
+    'refuses a paired workspace listed %s until a consistent list returns',
+    async (_, downgraded) => {
+      await pairHere();
+      try {
+        let push: (snapshot: Snapshot) => void = () => {};
+        const {
+          fleet: harness,
+          started,
+          runtimeStateReporter,
+        } = createFleetHarness(
+          createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
+          createTestCloudPort((onValue) => {
+            push = onValue;
+            return () => {};
+          })
+        );
+        const issues = issueCodes(runtimeStateReporter);
+        const fleet = harness as unknown as typeof harness & {
+          startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
+          applyRemoteWorkspaceList: (result: { workspaces: (typeof encrypted)[] }) => Promise<void>;
+          applyWorkspaceList: (next: (typeof encrypted)[]) => Promise<void>;
+          readWorkspaceAccess: (workspaceId: string) => { status: string };
+        };
+        let applied = Promise.resolve();
+        fleet.applyRemoteWorkspaceList = (result) =>
+          (applied = fleet.applyWorkspaceList([...result.workspaces]));
+        await fleet.startWorkspaceSubscription({ waitForInitial: false });
+
+        push({
+          status: 'authorized',
+          userId: 'user-1',
+          workspaces: [ordinary, downgraded],
+        } as Snapshot);
+        await applied;
+        expect(started).toEqual([ordinary.id]);
+        // Daemon commands cannot reach it under the server's label either.
+        expect(fleet.readWorkspaceAccess(encrypted.id).status).toBe('revoked');
+        expect(issues.has(`e2ee_mode_conflict:${encrypted.id}`)).toBe(true);
+
+        push({ status: 'authorized', userId: 'user-1', workspaces: [ordinary, encrypted] });
+        await applied;
+        expect(started).toContain(encrypted.id);
+        expect(issues.has(`e2ee_mode_conflict:${encrypted.id}`)).toBe(false);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
+  );
+
+  it('refuses a stale ordinary cache row offline and at runtime start', async () => {
+    await pairHere();
+    try {
+      const { fleet, started, runtimeStateReporter } = createFleetHarness(
+        createCatalogStub(() =>
+          Effect.succeed(
+            catalogSnapshot({
+              workspaces: [
+                activeWorkspace(ordinary.id, ordinary.name, null, 'owner'),
+                activeWorkspace(encrypted.id, encrypted.name, encrypted.slug, 'owner'),
+              ],
+            })
+          )
+        )
+      );
+      const issues = issueCodes(runtimeStateReporter);
+      await fleet.bootstrapFromLocalCatalog();
+      expect(started).toEqual([ordinary.id]);
+      expect(issues.has(`e2ee_mode_conflict:${encrypted.id}`)).toBe(true);
+      // Every other opener reaches the same check before choosing a data plane.
+      await expect(
+        Lody.create({
+          userId: 'user-1',
+          workspaceId: encrypted.id,
+          contentMode: 'plaintext',
+        } as Parameters<typeof Lody.create>[0])
+      ).rejects.toMatchObject({ name: 'E2eeModeConflictError' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
 // A revoked machine identity is not a removed member: the account keeps the
 // workspace and re-enrols this machine, while a real removal still drops it.
 describe('LodyFleet encrypted access loss', () => {
