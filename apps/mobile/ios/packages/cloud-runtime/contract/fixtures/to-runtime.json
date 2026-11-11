@@ -271,19 +271,6 @@
     "v": 1,
     "gen": 3,
     "kind": "request",
-    "id": "req-shares",
-    "method": "publishedShares",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "userId": "user-1",
-      "action": "list",
-      "cursor": "cursor-1"
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
     "id": "req-mentions",
     "method": "mentionCatalog",
     "payload": {

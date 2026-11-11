@@ -50,7 +50,6 @@ enum SettingsSections {
     rows += [
       github,
       row("ai-usage", text("aiUsage.title"), image: "chart.bar.xaxis"),
-      row("published-shares", text("shares.title"), image: "link"),
     ]
     // Only trouble needs a footer; a live workspace stays quiet.
     var footer = ""
