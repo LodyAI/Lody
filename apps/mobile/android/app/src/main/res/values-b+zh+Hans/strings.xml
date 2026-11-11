@@ -604,7 +604,6 @@
     <string name="github_settings_partial">部分 GitHub 设置无法验证，刷新成功前不可修改。</string>
     <string name="github_settings_unconfirmed">无法确认是否修改成功，请刷新查看当前设置。</string>
     <string name="settings_usage">AI 用量</string>
-    <string name="settings_shares">已发布分享</string>
     <string name="settings_sessions">对话</string>
     <string name="settings_archived">已归档对话</string>
     <string name="settings_additional">其他</string>

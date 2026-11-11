@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","iosSimulatorControl","itemDetail","listDir","loadOlderSession","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","publishedShares","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","iosSimulatorControl","itemDetail","listDir","loadOlderSession","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
 
   public struct AgentProviderAuthParamsStart: Codable, Sendable, Equatable {
     public var workspaceId: String
@@ -5728,336 +5728,6 @@ extension RuntimeContract {
     }
   }
 
-  public struct PublishedSharesParamsList: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var userId: String
-    public var cursor: String?
-    public init(workspaceId: String, userId: String, cursor: String? = nil) {
-      self.workspaceId = workspaceId
-      self.userId = userId
-      self.cursor = cursor
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-      self.cursor = try c.decodeIfPresent(String.self, forKey: Key("cursor"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.userId, forKey: Key("userId"))
-      try c.encodeIfPresent(self.cursor, forKey: Key("cursor"))
-    }
-  }
-
-  public struct PublishedSharesParamsDetail: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var shareId: String
-    public var rootSessionId: String
-    public var expectedRevision: Int?
-    public var userId: String
-    public init(workspaceId: String, shareId: String, rootSessionId: String, expectedRevision: Int? = nil, userId: String) {
-      self.workspaceId = workspaceId
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.expectedRevision = expectedRevision
-      self.userId = userId
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.expectedRevision = try c.decodeIfPresent(Int.self, forKey: Key("expectedRevision"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encodeIfPresent(self.expectedRevision, forKey: Key("expectedRevision"))
-      try c.encode(self.userId, forKey: Key("userId"))
-    }
-  }
-
-  public struct PublishedSharesParamsCopy: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var shareId: String
-    public var rootSessionId: String
-    public var expectedRevision: Int?
-    public var userId: String
-    public init(workspaceId: String, shareId: String, rootSessionId: String, expectedRevision: Int? = nil, userId: String) {
-      self.workspaceId = workspaceId
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.expectedRevision = expectedRevision
-      self.userId = userId
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.expectedRevision = try c.decodeIfPresent(Int.self, forKey: Key("expectedRevision"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encodeIfPresent(self.expectedRevision, forKey: Key("expectedRevision"))
-      try c.encode(self.userId, forKey: Key("userId"))
-    }
-  }
-
-  public struct PublishedSharesParamsOpen: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var shareId: String
-    public var rootSessionId: String
-    public var expectedRevision: Int?
-    public var userId: String
-    public init(workspaceId: String, shareId: String, rootSessionId: String, expectedRevision: Int? = nil, userId: String) {
-      self.workspaceId = workspaceId
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.expectedRevision = expectedRevision
-      self.userId = userId
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.expectedRevision = try c.decodeIfPresent(Int.self, forKey: Key("expectedRevision"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encodeIfPresent(self.expectedRevision, forKey: Key("expectedRevision"))
-      try c.encode(self.userId, forKey: Key("userId"))
-    }
-  }
-
-  public struct PublishedSharesParamsRevoke: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var shareId: String
-    public var rootSessionId: String
-    public var expectedRevision: Int?
-    public var userId: String
-    public init(workspaceId: String, shareId: String, rootSessionId: String, expectedRevision: Int? = nil, userId: String) {
-      self.workspaceId = workspaceId
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.expectedRevision = expectedRevision
-      self.userId = userId
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.expectedRevision = try c.decodeIfPresent(Int.self, forKey: Key("expectedRevision"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encodeIfPresent(self.expectedRevision, forKey: Key("expectedRevision"))
-      try c.encode(self.userId, forKey: Key("userId"))
-    }
-  }
-
-  public enum PublishedSharesParams: Codable, Sendable, Equatable {
-    case list(PublishedSharesParamsList)
-    case detail(PublishedSharesParamsDetail)
-    case copy(PublishedSharesParamsCopy)
-    case `open`(PublishedSharesParamsOpen)
-    case revoke(PublishedSharesParamsRevoke)
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      let tag = try c.decode(String.self, forKey: Key("action"))
-      switch tag {
-      case "list": self = .list(try PublishedSharesParamsList(from: decoder))
-      case "detail": self = .detail(try PublishedSharesParamsDetail(from: decoder))
-      case "copy": self = .copy(try PublishedSharesParamsCopy(from: decoder))
-      case "open": self = .`open`(try PublishedSharesParamsOpen(from: decoder))
-      case "revoke": self = .revoke(try PublishedSharesParamsRevoke(from: decoder))
-      default: throw DecodingError.dataCorruptedError(forKey: Key("action"), in: c, debugDescription: "Unknown action \(tag)")
-      }
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      switch self {
-      case .list(let value):
-        try c.encode("list", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .detail(let value):
-        try c.encode("detail", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .copy(let value):
-        try c.encode("copy", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .`open`(let value):
-        try c.encode("open", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .revoke(let value):
-        try c.encode("revoke", forKey: Key("action"))
-        try value.encode(to: encoder)
-      }
-    }
-  }
-
-  public enum PublishedSharesResultPagePageItemStatus: String, Codable, Sendable, Equatable, CaseIterable {
-    case active = "active"
-    case revoked = "revoked"
-  }
-
-  public struct PublishedSharesResultPagePageItem: Codable, Sendable, Equatable {
-    public var shareId: String
-    public var rootSessionId: String
-    public var publisherUserId: String
-    public var status: PublishedSharesResultPagePageItemStatus
-    public var title: String
-    public var revision: Int
-    public var credentialVersion: Int
-    public var createdAt: Int
-    public var updatedAt: Int
-    public var totalBytes: Int?
-    public var conversationCount: Int?
-    public var canManage: Bool
-    public var canRevoke: Bool
-    public var hasLocalLink: Bool
-    public init(shareId: String, rootSessionId: String, publisherUserId: String, status: PublishedSharesResultPagePageItemStatus, title: String, revision: Int, credentialVersion: Int, createdAt: Int, updatedAt: Int, totalBytes: Int? = nil, conversationCount: Int? = nil, canManage: Bool, canRevoke: Bool, hasLocalLink: Bool) {
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.publisherUserId = publisherUserId
-      self.status = status
-      self.title = title
-      self.revision = revision
-      self.credentialVersion = credentialVersion
-      self.createdAt = createdAt
-      self.updatedAt = updatedAt
-      self.totalBytes = totalBytes
-      self.conversationCount = conversationCount
-      self.canManage = canManage
-      self.canRevoke = canRevoke
-      self.hasLocalLink = hasLocalLink
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.publisherUserId = try c.decode(String.self, forKey: Key("publisherUserId"))
-      self.status = try c.decode(PublishedSharesResultPagePageItemStatus.self, forKey: Key("status"))
-      self.title = try c.decode(String.self, forKey: Key("title"))
-      self.revision = try c.decode(Int.self, forKey: Key("revision"))
-      self.credentialVersion = try c.decode(Int.self, forKey: Key("credentialVersion"))
-      self.createdAt = try c.decode(Int.self, forKey: Key("createdAt"))
-      self.updatedAt = try c.decode(Int.self, forKey: Key("updatedAt"))
-      self.totalBytes = try c.decodeIfPresent(Int.self, forKey: Key("totalBytes"))
-      self.conversationCount = try c.decodeIfPresent(Int.self, forKey: Key("conversationCount"))
-      self.canManage = try c.decode(Bool.self, forKey: Key("canManage"))
-      self.canRevoke = try c.decode(Bool.self, forKey: Key("canRevoke"))
-      self.hasLocalLink = try c.decode(Bool.self, forKey: Key("hasLocalLink"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encode(self.publisherUserId, forKey: Key("publisherUserId"))
-      try c.encode(self.status, forKey: Key("status"))
-      try c.encode(self.title, forKey: Key("title"))
-      try c.encode(self.revision, forKey: Key("revision"))
-      try c.encode(self.credentialVersion, forKey: Key("credentialVersion"))
-      try c.encode(self.createdAt, forKey: Key("createdAt"))
-      try c.encode(self.updatedAt, forKey: Key("updatedAt"))
-      try c.encodeIfPresent(self.totalBytes, forKey: Key("totalBytes"))
-      try c.encodeIfPresent(self.conversationCount, forKey: Key("conversationCount"))
-      try c.encode(self.canManage, forKey: Key("canManage"))
-      try c.encode(self.canRevoke, forKey: Key("canRevoke"))
-      try c.encode(self.hasLocalLink, forKey: Key("hasLocalLink"))
-    }
-  }
-
-  public struct PublishedSharesResultPage: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var userId: String
-    public var page: [PublishedSharesResultPagePageItem]
-    public var isDone: Bool
-    public var continueCursor: String
-    public init(workspaceId: String, userId: String, page: [PublishedSharesResultPagePageItem], isDone: Bool, continueCursor: String) {
-      self.workspaceId = workspaceId
-      self.userId = userId
-      self.page = page
-      self.isDone = isDone
-      self.continueCursor = continueCursor
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-      self.page = try c.decode([PublishedSharesResultPagePageItem].self, forKey: Key("page"))
-      self.isDone = try c.decode(Bool.self, forKey: Key("isDone"))
-      self.continueCursor = try c.decode(String.self, forKey: Key("continueCursor"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.userId, forKey: Key("userId"))
-      try c.encode(self.page, forKey: Key("page"))
-      try c.encode(self.isDone, forKey: Key("isDone"))
-      try c.encode(self.continueCursor, forKey: Key("continueCursor"))
-    }
-  }
-
-  public struct PublishedSharesResultFailed: Codable, Sendable, Equatable {
-    public var error: String
-    public init(error: String) {
-      self.error = error
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.error = try c.decode(String.self, forKey: Key("error"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.error, forKey: Key("error"))
-    }
-  }
-
-  public enum PublishedSharesResult: Codable, Sendable, Equatable {
-    case page(PublishedSharesResultPage)
-    case failed(PublishedSharesResultFailed)
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      let tag = try c.decode(String.self, forKey: Key("outcome"))
-      switch tag {
-      case "page": self = .page(try PublishedSharesResultPage(from: decoder))
-      case "failed": self = .failed(try PublishedSharesResultFailed(from: decoder))
-      default: throw DecodingError.dataCorruptedError(forKey: Key("outcome"), in: c, debugDescription: "Unknown outcome \(tag)")
-      }
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      switch self {
-      case .page(let value):
-        try c.encode("page", forKey: Key("outcome"))
-        try value.encode(to: encoder)
-      case .failed(let value):
-        try c.encode("failed", forKey: Key("outcome"))
-        try value.encode(to: encoder)
-      }
-    }
-  }
-
   public enum QuotaReason: String, Codable, Sendable, Equatable, CaseIterable {
     case workspacePaymentRequired = "workspace_payment_required"
     case freeSessionLimitReached = "free_session_limit_reached"
@@ -8029,199 +7699,12 @@ extension RuntimeContract {
     }
   }
 
-  public struct ShareRequestParamsManagementArgsList: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var cursor: String?
-    public init(workspaceId: String, cursor: String?) {
-      self.workspaceId = workspaceId
-      self.cursor = cursor
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.cursor = try c.decode(String?.self, forKey: Key("cursor"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.cursor, forKey: Key("cursor"))
-    }
-  }
-
-  public struct ShareRequestParamsManagementArgsDetail: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var shareId: String
-    public var rootSessionId: String
-    public var expectedRevision: Int?
-    public init(workspaceId: String, shareId: String, rootSessionId: String, expectedRevision: Int? = nil) {
-      self.workspaceId = workspaceId
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.expectedRevision = expectedRevision
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.expectedRevision = try c.decodeIfPresent(Int.self, forKey: Key("expectedRevision"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encodeIfPresent(self.expectedRevision, forKey: Key("expectedRevision"))
-    }
-  }
-
-  public struct ShareRequestParamsManagementArgsCopy: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var shareId: String
-    public var rootSessionId: String
-    public var expectedRevision: Int?
-    public init(workspaceId: String, shareId: String, rootSessionId: String, expectedRevision: Int? = nil) {
-      self.workspaceId = workspaceId
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.expectedRevision = expectedRevision
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.expectedRevision = try c.decodeIfPresent(Int.self, forKey: Key("expectedRevision"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encodeIfPresent(self.expectedRevision, forKey: Key("expectedRevision"))
-    }
-  }
-
-  public struct ShareRequestParamsManagementArgsOpen: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var shareId: String
-    public var rootSessionId: String
-    public var expectedRevision: Int?
-    public init(workspaceId: String, shareId: String, rootSessionId: String, expectedRevision: Int? = nil) {
-      self.workspaceId = workspaceId
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.expectedRevision = expectedRevision
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.expectedRevision = try c.decodeIfPresent(Int.self, forKey: Key("expectedRevision"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encodeIfPresent(self.expectedRevision, forKey: Key("expectedRevision"))
-    }
-  }
-
-  public struct ShareRequestParamsManagementArgsRevoke: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var shareId: String
-    public var rootSessionId: String
-    public var expectedRevision: Int?
-    public init(workspaceId: String, shareId: String, rootSessionId: String, expectedRevision: Int? = nil) {
-      self.workspaceId = workspaceId
-      self.shareId = shareId
-      self.rootSessionId = rootSessionId
-      self.expectedRevision = expectedRevision
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.shareId = try c.decode(String.self, forKey: Key("shareId"))
-      self.rootSessionId = try c.decode(String.self, forKey: Key("rootSessionId"))
-      self.expectedRevision = try c.decodeIfPresent(Int.self, forKey: Key("expectedRevision"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.shareId, forKey: Key("shareId"))
-      try c.encode(self.rootSessionId, forKey: Key("rootSessionId"))
-      try c.encodeIfPresent(self.expectedRevision, forKey: Key("expectedRevision"))
-    }
-  }
-
-  public enum ShareRequestParamsManagementArgs: Codable, Sendable, Equatable {
-    case list(ShareRequestParamsManagementArgsList)
-    case detail(ShareRequestParamsManagementArgsDetail)
-    case copy(ShareRequestParamsManagementArgsCopy)
-    case `open`(ShareRequestParamsManagementArgsOpen)
-    case revoke(ShareRequestParamsManagementArgsRevoke)
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      let tag = try c.decode(String.self, forKey: Key("action"))
-      switch tag {
-      case "list": self = .list(try ShareRequestParamsManagementArgsList(from: decoder))
-      case "detail": self = .detail(try ShareRequestParamsManagementArgsDetail(from: decoder))
-      case "copy": self = .copy(try ShareRequestParamsManagementArgsCopy(from: decoder))
-      case "open": self = .`open`(try ShareRequestParamsManagementArgsOpen(from: decoder))
-      case "revoke": self = .revoke(try ShareRequestParamsManagementArgsRevoke(from: decoder))
-      default: throw DecodingError.dataCorruptedError(forKey: Key("action"), in: c, debugDescription: "Unknown action \(tag)")
-      }
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      switch self {
-      case .list(let value):
-        try c.encode("list", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .detail(let value):
-        try c.encode("detail", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .copy(let value):
-        try c.encode("copy", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .`open`(let value):
-        try c.encode("open", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .revoke(let value):
-        try c.encode("revoke", forKey: Key("action"))
-        try value.encode(to: encoder)
-      }
-    }
-  }
-
-  public struct ShareRequestParamsManagement: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var args: ShareRequestParamsManagementArgs
-    public init(workspaceId: String, args: ShareRequestParamsManagementArgs) {
-      self.workspaceId = workspaceId
-      self.args = args
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.args = try c.decode(ShareRequestParamsManagementArgs.self, forKey: Key("args"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.args, forKey: Key("args"))
-    }
-  }
-
   public enum ShareRequestParams: Codable, Sendable, Equatable {
     case api(ShareRequestParamsApi)
     case saveSecret(ShareRequestParamsSaveSecret)
     case readSecret(ShareRequestParamsReadSecret)
     case image(ShareRequestParamsImage)
     case previewToken(ShareRequestParamsPreviewToken)
-    case management(ShareRequestParamsManagement)
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       let tag = try c.decode(String.self, forKey: Key("operation"))
@@ -8231,7 +7714,6 @@ extension RuntimeContract {
       case "readSecret": self = .readSecret(try ShareRequestParamsReadSecret(from: decoder))
       case "image": self = .image(try ShareRequestParamsImage(from: decoder))
       case "previewToken": self = .previewToken(try ShareRequestParamsPreviewToken(from: decoder))
-      case "management": self = .management(try ShareRequestParamsManagement(from: decoder))
       default: throw DecodingError.dataCorruptedError(forKey: Key("operation"), in: c, debugDescription: "Unknown operation \(tag)")
       }
     }
@@ -8252,9 +7734,6 @@ extension RuntimeContract {
         try value.encode(to: encoder)
       case .previewToken(let value):
         try c.encode("previewToken", forKey: Key("operation"))
-        try value.encode(to: encoder)
-      case .management(let value):
-        try c.encode("management", forKey: Key("operation"))
         try value.encode(to: encoder)
       }
     }
@@ -9109,16 +8588,6 @@ extension RuntimeContract {
         return nil
       }
     }
-    public enum PublishedShares: RuntimeCall {
-      public typealias Params = RuntimeContract.PublishedSharesParams
-      public typealias Result = RuntimeContract.PublishedSharesResult
-      public static let method = "publishedShares"
-      public static let timeout: Double = 70
-      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
-        if case .publishedShares(let result) = value { return result }
-        return nil
-      }
-    }
     public enum ReadFile: RuntimeCall {
       public typealias Params = RuntimeContract.ReadFileParams
       public typealias Result = RuntimeContract.FileContent
@@ -9383,7 +8852,6 @@ extension RuntimeContract {
     case probeSchema(RuntimeContract.ProbeSchemaReport)
     case projectGroups(RuntimeContract.ProjectGroupsResult)
     case promptShortcuts(RuntimeContract.PromptShortcutsResult)
-    case publishedShares(RuntimeContract.PublishedSharesResult)
     case readFile(RuntimeContract.FileContent)
     case releaseReserve(RuntimeContract.Empty)
     case remoteSettings(RuntimeContract.RemoteSettingsResult)
@@ -9502,7 +8970,6 @@ extension RuntimeContract {
         case "probeSchema": message = .result(id: id, .probeSchema(try c.decode(RuntimeContract.ProbeSchemaReport.self, forKey: Key("payload"))))
         case "projectGroups": message = .result(id: id, .projectGroups(try c.decode(RuntimeContract.ProjectGroupsResult.self, forKey: Key("payload"))))
         case "promptShortcuts": message = .result(id: id, .promptShortcuts(try c.decode(RuntimeContract.PromptShortcutsResult.self, forKey: Key("payload"))))
-        case "publishedShares": message = .result(id: id, .publishedShares(try c.decode(RuntimeContract.PublishedSharesResult.self, forKey: Key("payload"))))
         case "readFile": message = .result(id: id, .readFile(try c.decode(RuntimeContract.FileContent.self, forKey: Key("payload"))))
         case "releaseReserve": message = .result(id: id, .releaseReserve(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "remoteSettings": message = .result(id: id, .remoteSettings(try c.decode(RuntimeContract.RemoteSettingsResult.self, forKey: Key("payload"))))

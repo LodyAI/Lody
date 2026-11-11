@@ -59,8 +59,6 @@ import {
   RemoteSettingsResult,
 } from './settings.ts';
 import {
-  PublishedSharesParams,
-  PublishedSharesResult,
   SessionSharingParams,
   SessionSharingResult,
   ShareProgressEvent,
@@ -217,11 +215,6 @@ export const runtimeCalls = {
     params: AgentRolesParams,
     result: AgentRoleSnapshot,
     timeoutMs: 45_000,
-  },
-  publishedShares: {
-    params: PublishedSharesParams,
-    result: PublishedSharesResult,
-    timeoutMs: 70_000,
   },
   mentionCatalog: {
     params: MentionCatalogParams,

@@ -613,7 +613,6 @@
     <string name="github_settings_partial">Some GitHub settings couldn’t be verified. Changes are off until a refresh succeeds.</string>
     <string name="github_settings_unconfirmed">Couldn’t confirm the change. Refresh to check the current setting.</string>
     <string name="settings_usage">AI usage</string>
-    <string name="settings_shares">Published shares</string>
     <string name="settings_sessions">Conversations</string>
     <string name="settings_archived">Archived conversations</string>
     <string name="settings_additional">Additional</string>
