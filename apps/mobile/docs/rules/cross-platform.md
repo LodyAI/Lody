@@ -1,0 +1,17 @@
+# Cross-platform rules (iOS and Android)
+
+Read before changing repository identity, PR marks, the new-chat permission face, creation keyboard handling or the conversation Tab panel on either client. Both clients follow these rules identically unless a rule names the difference. These rules bind every caller of the area, not only files in its directory.
+
+- Repository identity uses the GitHub owner avatar (web sidebar GitHubOwnerIcon), with cached rounded-square images, saturation 0.55, opacity 0.6 in chat rows / 0.8 in project cards and pickers, and a GitHub glyph fallback. Keep repository full name separate from the project display name; do not apply this treatment to member or workspace avatars.
+
+- PR marks use shared `LodyPullRequestIcon` from the design system in lists, composer context and its PR action. Match Web SessionPrIcon: four Lucide status shapes, PR colour independent of CI, s check / f,e cross / p solid dot / x circle-dot, including merged/closed when CI is provided. Keep the 14/16 base, 10/16 verdict and transparent circular cutout; do not replace the whole mark with a CI tint.
+
+- The compact new-chat permission face uses a neutral shield for agent/default (a mobile override of web); unknown modes are hidden, read-only/edit/plan use icons, full-access modes use the warning shield, and auto uses the short `Auto` label. Full permission names stay in the picker and accessibility label.
+
+- On the creation page, tapping outside the composer or opening/selecting a context option dismisses the keyboard. Picker search fields must still accept focus, and a dismissal tap must not swallow the option action. Opening run configuration also clears composer focus. A blank-area tap also closes the expanded context picker; controls and search fields retain their own tap handling.
+
+- Creation picker search (computer/project/branch) owns the keyboard space: keep the composer covered beneath the keyboard and let the context list reach its top. Composer editing still lifts the composer above the keyboard; focus changes and dismissal restore the normal layout without losing the draft.
+
+- Opening a conversation from a list restores its last visited open Tab, persisted locally per account/workspace/root conversation. Explicit Tab selections, new/forked Tabs, notification/deep links and search hits retain their exact target. Missing/closed/archived saved Tabs fall back to an open Tab. Visiting records a message-time watermark only while the page is foreground-visible; the Tab panel consumes that watermark, clears unread dots for viewed output and keeps running/permission status. Later output in an inactive Tab remains unread.
+
+- The conversation Tab panel supports left-swipe Close (reveal, then tap; no full-swipe dismissal) and a secondary Closed conversations entry. iOS also offers New Tab in the panel; Android puts creation in More. Closed conversations slides within the same panel with Back and per-row Restore. Share `SessionMeta.isTabClosed` through `setTabClosed`; closing is independent of archive, agent execution and child tabs. A close selects the next open neighbour, right then left; with none, show a composer-free empty state with New/Restore available from the title. Restore selects only for the initiating viewer. Failed/unconfirmed writes leave the row available and show a result-check message. Native caches preserve the flag and closed conversations suppress unread badges.

@@ -9,6 +9,12 @@ export const MANAGED_BROWSER_STATE_MESSAGE_TYPE = 'LODY_MANAGED_BROWSER_STATE' a
 export const MANAGED_BROWSER_READY_MESSAGE_TYPE = 'LODY_MANAGED_BROWSER_READY' as const;
 export const MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE =
   'LODY_MANAGED_BROWSER_NAVIGATION_REQUEST' as const;
+/**
+ * Sent by a static-document runtime on `pagehide`: page script replaced the
+ * policy-owned srcdoc (for example `location.assign`). Carries no page data.
+ */
+export const MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE =
+  'LODY_MANAGED_BROWSER_DOCUMENT_UNLOAD' as const;
 
 export type ManagedBrowserCommand = 'back' | 'forward' | 'reload' | 'stop';
 

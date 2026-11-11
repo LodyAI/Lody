@@ -1,6 +1,6 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` is a 118-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `763403859b3bb32a1cb6bc34c16abb21a05b7323` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
+`runtime/vendor/cloud-runtime` is a 118-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `4477100161b7ef8fa73b92bbe6f77d5e5d003f63` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
 
 For an intentional update:
 
@@ -36,6 +36,12 @@ answers `cmd` mention reads from the runtime's last shortcut listing while readi
 one, and reports a listing with an unreadable or pending owner index as incomplete rather
 than empty. The `promptShortcuts` list action (Settings and `shortcutBody`) lists what is
 readable; send-time `/shortcut:` expansion keeps the strict listing.
+
+The snapshot at `44771001` makes `listDir` (Project files) list the conversation's own
+folder, its worktree when it has one, through the machine's `file/list-dir` (capability
+`sessionDirectoryListing`), so the list matches what `readFile` opens. Machines without the
+capability, and encrypted workspaces whose machines answer `unsupported_protocol`, keep the
+local-project listing.
 
 The snapshot at `76340385` adds each Project group conversation's members to the catalog
 (`projectRun`: placement order, branch, diff, publish state and the current PR per repository,

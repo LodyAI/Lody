@@ -80,8 +80,13 @@ encrypted workspaces once all platforms can use a device-to-device route.
   there and passes `LODY_IROH_NATIVE_PATH` and the relay settings to the embedded
   CLI. The public desktop and the standalone npm CLI ship no module.
 - **Native code.** `packages/iroh-native` holds the platform-neutral `lody-iroh`
-  crate and a napi-rs binding. Mobile later adds a UniFFI binding of the same crate
-  with port mapping disabled.
+  crate and a napi-rs binding. Mobile uses a UniFFI binding of the same crate
+  (`uniffi/`), dial-only with port mapping disabled.
+- **Mobile seed handoff.** The mobile app runs the portable host in its WebView, which
+  already holds the device seed. `BrowserDevice.withTransportSeed` passes a copy once
+  per session to one native plugin (open, status, send, receive), which never returns
+  it. Capacitor serializes the argument, so one unwipeable JavaScript string of the
+  seed lives until garbage collection; the owner accepted that cost (2026-11-10).
 
 ## Evidence
 
@@ -121,6 +126,10 @@ External facts:
   no switch exposed.
 - **Browser iroh.** It is relay-only and has no official package, so it is out of
   scope by owner decision.
+- **iroh compiled to WebAssembly inside the mobile WebView.** A spike (iroh 1.4.1,
+  `tls-ring`, 0.97 MB gzip) completed relay-only round trips in WebKit (355 ms) and
+  Chromium (319 ms) and kept the seed out of any bridge, but stays relay-only with no
+  direct paths. The owner chose the native plugin for direct connectivity.
 
 ## Consequences
 

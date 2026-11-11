@@ -101,6 +101,36 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     fetch(thumbnail, fallback: original)
   }
 
+  /// The original image for copy / save / share: the preview shows a 768 px thumbnail first,
+  /// so remote images are re-read at full size; whatever is on screen is the fallback.
+  func fullImage(_ completion: @escaping @MainActor @Sendable (UIImage?) -> Void) {
+    let shown = photo.image
+    guard let item else { completion(shown); return }
+    if let uri = item.localURI, let url = URL(string: uri), url.isFileURL {
+      completion(UIImage(contentsOfFile: url.path) ?? shown)
+      return
+    }
+    let url: URL?
+    if let remote = item.remoteURL {
+      url = remote
+    } else if !workspace.isEmpty, !session.isEmpty, !item.image.id.isEmpty {
+      url = SessionAttachments.imageDownloadURL(
+        workspace: workspace, session: item.image.storageSessionId ?? session, imageId: item.image.id
+      )
+    } else {
+      url = nil
+    }
+    guard let url, let token = try? AuthKeychain.read() else { completion(shown); return }
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue("image/*,*/*", forHTTPHeaderField: "Accept")
+    URLSession.shared.dataTask(with: request) { data, response, _ in
+      let valid = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
+      let image = valid ? data.flatMap(UIImage.init(data:)) : nil
+      DispatchQueue.main.async { completion(image ?? shown) }
+    }.resume()
+  }
+
   func resetZoom() {
     scroll.zoomScale = 1
     centerPhoto()

@@ -93,6 +93,10 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Optional `memberProfiles` is a display directory scoped to the live account and
   workspace. Resolve its crypto user IDs through verified ledger members; it cannot
   grant permissions, pin keys, identify the creator, or block ledger availability.
+- Optional `subscribeLedgerHead` belongs to an open control reader. Its values are
+  refresh hints, never verified checkpoints or permission grants; callers fetch
+  and verify original suffixes and unsubscribe when their scope closes. Absence or
+  failure preserves verified reads and manual refresh, without a new polling loop.
 - Account-only machine-policy display reads return opaque ciphertext and untrusted
   metadata. They never replace device-authenticated execution freshness, and a
   server removal tombstone never substitutes for a verified latest-policy pin.

@@ -283,7 +283,7 @@ describe.each([getEffectiveSessionActivitySummary, getTaskActivitySummary])(
   }
 );
 
-test('My rows retain transferred sessions on my machines and exclude unrelated team sessions', () => {
+test('My rows exclude other members even on my machines', () => {
   const rows = buildSessionListRows(
     [
       makeSession({ id: 'assigned', userId: 'me', machineId: 'other' as MachineId }),
@@ -294,8 +294,7 @@ test('My rows retain transferred sessions on my machines and exclude unrelated t
       scope: 'my',
       currentUserId: 'me',
       defaultTitle: 'Chat',
-      ownedMachineIds: new Set([machineId]),
     }
   );
-  expect(rows.map((row) => row.sessionId)).toEqual(['assigned', 'transferred']);
+  expect(rows.map((row) => row.sessionId)).toEqual(['assigned']);
 });

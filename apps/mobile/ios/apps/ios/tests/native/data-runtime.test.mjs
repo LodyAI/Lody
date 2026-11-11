@@ -13,6 +13,7 @@ test('persistent runtime applies live increments to the existing replica and adv
     {
       name: 'Synthetic Mac',
       localProjects: { p1: { name: 'app', rootPath: '/a' } },
+      protocolCapabilities: { sessionDirectoryListing: 1 },
     },
     1,
   );
@@ -143,6 +144,10 @@ test('persistent runtime applies live increments to the existing replica and adv
                 reason: ctx.ownerSessionId, message: args.sessionId,
               });
               export const listDir = () => ({ entries: [], truncated: false });
+              export const listSessionDir = (ctx, args) => ({
+                entries: [{ name: ctx.ownerSessionId + ':' + args.sessionId, type: 'file' }],
+                truncated: false,
+              });
             `,
           }));
           build.onResolve({ filter: /^@loro-dev\/streams-client$/ }, () => ({
@@ -285,9 +290,11 @@ test('persistent runtime applies live increments to the existing replica and adv
     relativePath: '',
     userId: '',
   });
-  assert.deepEqual(listing.error, {
-    code: 'project_unavailable',
-    retryable: false,
+  // The machine lists session folders, so even a non-local-project session lists its own
+  // workspace, under the parent's owner key (as readFile reads it).
+  assert.deepEqual(listing.payload, {
+    entries: [{ name: 'parent:s1', type: 'file' }],
+    truncated: false,
   });
   const detail = await call('itemDetail', {
     sessionId: 's1',

@@ -40,6 +40,13 @@ sealed interface RuntimeCommand {
     data class ItemDetail(val sessionId: String, val entryId: String, val itemId: String) : RuntimeCommand
     /** One changed file's diff for one turn, from the session's computer. Read only. */
     data class TurnDiff(val sessionId: String, val entryId: String, val path: String) : RuntimeCommand
+    /**
+     * One folder of the session's local project ([relativePath] from the project root, "" for the
+     * root), from the session's computer (upstream `listDir`). Read only.
+     */
+    data class ListDir(val sessionId: String, val relativePath: String) : RuntimeCommand
+    /** One file's contents (upstream `readFile`, at most 2 MiB), from the session's computer. Read only. */
+    data class ReadFile(val sessionId: String, val path: String) : RuntimeCommand
     /** One mention category for the composer's @ panel (upstream `mentionCatalog`). Read only. */
     data class MentionCatalog(val category: String, val source: MentionSource) : RuntimeCommand
     /**
@@ -89,6 +96,8 @@ sealed interface RuntimeResult {
     data object Accepted : RuntimeResult
     data class Detail(val value: StepDetail) : RuntimeResult
     data class Diff(val value: FileDiff) : RuntimeResult
+    data class Directory(val value: DirectoryListing) : RuntimeResult
+    data class File(val value: FileContent) : RuntimeResult
     data class Pong(val healthy: Boolean) : RuntimeResult
     data class Schema(val machineIds: Set<String>, val creationTrials: Map<String, String>) : RuntimeResult
 }
@@ -197,6 +206,9 @@ data class SessionMessage(
  * One item of a turn, after upstream's session entry summary. Assistant turns render these as
  * prose, folded thought / tool groups and never-folded plans and notices (web `MessageContent`).
  */
+/** One session image: read with the account bearer from the Worker's session-images endpoint. */
+data class TurnImage(val id: String, val fileName: String, val storageSessionId: String?, val width: Int?, val height: Int?)
+
 sealed interface TurnItem {
     val id: String
 
@@ -223,6 +235,11 @@ sealed interface TurnItem {
     data class ProposedPlan(override val id: String, val markdown: String) : TurnItem
     /** The agent's checklist (`plan`); never folded. */
     data class Checklist(override val id: String, val entries: List<Pair<String, String>>) : TurnItem
+    /**
+     * Images the agent sent (`image` / `image_group`); never folded. Consecutive ones (only tool
+     * work between them) merge into one fanned stack in [app.lody.android.chat.TurnLayout].
+     */
+    data class Images(override val id: String, val images: List<TurnImage>) : TurnItem
     /** A failure or notice the turn ended with; never folded. */
     data class Notice(override val id: String, val text: String, val failure: Boolean) : TurnItem
     /**
@@ -351,6 +368,19 @@ data class FileDiff(
     val removed: Int? = null,
     val unavailable: String? = null,
 )
+
+/** One folder of a local project (upstream `DirectoryListing`): folders first, then files, by name. */
+data class DirectoryListing(val entries: List<DirectoryEntry>, val truncated: Boolean)
+data class DirectoryEntry(val name: String, val directory: Boolean)
+
+/** One file read from the session's computer (upstream `FileContent`). */
+sealed interface FileContent {
+    val path: String
+    data class Text(override val path: String, val text: String, val bytes: Long) : FileContent
+    data class Binary(override val path: String, val bytes: Long) : FileContent
+    /** The computer's refusal (`file_not_found`, `too_large`, `permission_denied`, …). */
+    data class Failed(override val path: String, val code: String) : FileContent
+}
 
 /** One mention candidate (upstream `MentionCatalog` item); [insertText] defaults to `@path`. */
 data class MentionCandidate(

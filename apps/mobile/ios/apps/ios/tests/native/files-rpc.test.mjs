@@ -281,6 +281,56 @@ test('listDir goes through local-project/control and sorts directories first', a
   assert.equal(calls[0].params.request.requestedByUserId, 'u1');
 });
 
+test('listSessionDir lists the session folder through the owner envelope', async () => {
+  const calls = machine(async () => ({
+    result: {
+      status: 'ok',
+      v: 3,
+      path: 'docs',
+      entries: [
+        { name: 'b.md', type: 'file' },
+        { name: 'guides', type: 'directory' },
+      ],
+      truncated: true,
+    },
+  }));
+  const result = await runtime.listSessionDir(ctx(), {
+    sessionId: 'child',
+    relativePath: 'docs',
+  });
+  assert.deepEqual(result, {
+    entries: [
+      { name: 'guides', type: 'directory' },
+      { name: 'b.md', type: 'file' },
+    ],
+    truncated: true,
+  });
+  assert.equal(calls[0].method, 'file/list-dir');
+  assert.deepEqual(calls[0].params, {
+    v: 3,
+    sessionId: 'child',
+    path: 'docs',
+    limit: 2000,
+  });
+});
+
+test('listSessionDir yields to the project listing only when the machine cannot list', async () => {
+  machine(async () => ({
+    result: { status: 'error', v: 3, code: 'unsupported_protocol' },
+  }));
+  assert.equal(
+    await runtime.listSessionDir(ctx(), { sessionId: 's1', relativePath: '' }),
+    null,
+  );
+  machine(async () => ({
+    result: { status: 'error', v: 3, code: 'path_not_allowed' },
+  }));
+  await assert.rejects(
+    runtime.listSessionDir(ctx(), { sessionId: 's1', relativePath: 'escape' }),
+    /path_not_allowed/,
+  );
+});
+
 test('real file mentions use the owning project RPC, preserve spaces, and reject escaped paths', async () => {
   const calls = machine(async (_method, params) => ({
     result: {

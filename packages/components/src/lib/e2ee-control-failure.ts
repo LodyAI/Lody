@@ -65,6 +65,8 @@ const identityConflicts = new Set([
 
 const stickyCorruption = new Set(['Invalid genesis pin', 'Invalid encrypted evidence']);
 
+/** Backend codes that mean "temporarily unavailable", never "records disagree". */
+const transientServerCodes = new Set(['e2ee_ledger_unavailable']);
 function serverCode(error: unknown): string | null {
   if (typeof error !== 'object' || error === null || !('data' in error)) return null;
   const data = (error as { data?: unknown }).data;
@@ -147,9 +149,11 @@ export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
     return { kind: 'mode', code: 'not-encrypted' };
   if (error instanceof Error && error.message === 'e2ee_workspace_mode_unavailable')
     return { kind: 'mode', code: error.message };
-  if (error instanceof Error && error.message.startsWith('e2ee_'))
-    return { kind: 'server', code: error.message };
-  const code = serverCode(error);
+  // The backend's ledger storage being briefly unreachable is an availability problem,
+  // not records that failed verification: it clears on its own and a refresh retries.
+  const code =
+    error instanceof Error && error.message.startsWith('e2ee_') ? error.message : serverCode(error);
+  if (code && transientServerCodes.has(code)) return { kind: 'network', code };
   if (code) return { kind: 'server', code };
   return { kind: 'network', code: error instanceof Error ? error.name : typeof error };
 }

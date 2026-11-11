@@ -33,7 +33,7 @@ vi.mock('../src/hooks/use-visible-session-metas', async () => {
     }),
   };
 });
-const workspaceBadgeAtom = createWorkspaceBadgeAtom('owner', new Set());
+const workspaceBadgeAtom = createWorkspaceBadgeAtom('owner');
 vi.mock('../src/lib/electron', () => ({ isElectronRenderer: () => true }));
 vi.mock('../src/lib/electron-ipc-client', () => ({
   getIpcServices: () => ({
@@ -153,14 +153,14 @@ describe('workspace badge reconciliation', () => {
     expect(dock).toBe('');
   });
 
-  it('keeps a transferred session on my machine in My badge counts', () => {
+  it('excludes transferred sessions on my machine from My badge counts', () => {
     const owned = new Set(['machine' as import('@lody/shared').MachineId]);
     store.set(bridge.ownedMachinesAtom, owned);
     setSessions(
       session('transferred', { userId: 'colleague' }),
       session('foreign', { userId: 'colleague', machineId: 'other' as never })
     );
-    expect(store.get(createWorkspaceBadgeAtom('owner', owned))).toEqual({ unread: 1, waiting: 0 });
+    expect(store.get(createWorkspaceBadgeAtom('owner'))).toEqual({ unread: 0, waiting: 0 });
   });
 
   it('rolls child and side-chat unread/waiting into one closed parent row', async () => {
