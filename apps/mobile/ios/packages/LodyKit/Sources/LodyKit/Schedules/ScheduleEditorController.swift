@@ -58,7 +58,12 @@ final class ScheduleEditorController: LodyFormController {
   private lazy var projectButton = picker("schedule-project")
   private lazy var destinationButton = picker("schedule-destination")
   private lazy var frequencyButton = picker("schedule-frequency")
-  private lazy var everyButton = picker("schedule-every")
+  private lazy var everyButton: UIButton = {
+    let button = picker("schedule-every")
+    button.showsMenuAsPrimaryAction = false
+    button.addAction(UIAction { [weak self] _ in self?.pickEvery() }, for: .primaryActionTriggered)
+    return button
+  }()
   private lazy var branchField = LodyFormField(id: "schedule-branch", label: text("branch"), text: nil, limit: 200)
   private let timePicker = UIDatePicker()
   private let oncePicker = UIDatePicker()
@@ -599,18 +604,7 @@ final class ScheduleEditorController: LodyFormController {
       button.accessibilityTraits = on ? [.button, .selected] : [.button]
       button.isEnabled = !locked
     }
-    let steps = rule.kind == .hours ? [1, 2, 3, 4, 6, 8, 12] : [5, 10, 15, 20, 30]
-    let every = rule.every ?? steps[0]
     everyButton.configuration?.title = ScheduleFormat.summary(rule, zone: zone)
-    everyButton.menu = menu(steps.map { step -> (String, Bool, String) in
-      var sample = rule
-      sample.every = step
-      return (ScheduleFormat.summary(sample, zone: zone), step == every, String(step))
-    }) { [weak self] id in
-      guard let self, let step = Int(id) else { return }
-      self.rule.every = step
-      self.touchedRule()
-    }
     monthDays.rootView = AnyView(ScheduleMonthDaysView(selected: Set(rule.days ?? []), enabled: !locked) { [weak self] day in
       self?.toggleMonthDay(day)
     })
@@ -714,6 +708,30 @@ final class ScheduleEditorController: LodyFormController {
       ruleTouched = true
     }
     edited(rebuild: true)
+  }
+
+  /// "Every N hours / minutes" turns a wheel in a short sheet; each turn applies at once.
+  private func pickEvery() {
+    guard !locked, rule.kind == .hours || rule.kind == .minutes else { return }
+    let hours = rule.kind == .hours
+    let kind = rule.kind
+    let picker = ScheduleEveryPicker(
+      title: text("repeat.every"),
+      values: hours ? ScheduleEveryPicker.hours : ScheduleEveryPicker.minutes,
+      selected: rule.every ?? 1,
+      label: { [weak self] step in
+        guard let self else { return String(step) }
+        var sample = self.rule
+        sample.every = step
+        return ScheduleFormat.summary(sample, zone: self.zone)
+      },
+      picked: { [weak self] step in
+        guard let self, self.rule.kind == kind, !self.locked else { return }
+        self.rule.every = step
+        self.touchedRule()
+      }
+    )
+    present(picker, animated: true)
   }
 
   private func replaceRule() {

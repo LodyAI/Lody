@@ -65,8 +65,9 @@ data class ScheduleForm(
         const val OWN_SESSION = "own_session"
         const val EXISTING_SESSION = "existing_session"
         const val GITHUB_PREFIX = "github:"
-        val HOUR_STEPS = listOf(1, 2, 3, 4, 6, 8, 12)
-        val MINUTE_STEPS = listOf(5, 10, 15, 20, 30)
+        /** Wheel ranges for "every N hours / minutes"; 60 minutes is offered as 1 hour. */
+        val EVERY_HOURS = 1..24
+        val EVERY_MINUTES = 1..59
         /** Monday–Friday (Sunday = 0). */
         val WORKWEEK = setOf(1, 2, 3, 4, 5)
     }
