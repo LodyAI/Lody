@@ -84,14 +84,26 @@ export async function openTestSession({
       locks: {
         request(name, { signal }, work) {
           const previous = locks.get(name) ?? Promise.resolve();
+          let granted = false;
           const current = previous
             .catch(() => {})
             .then(() => {
               signal.throwIfAborted();
+              granted = true;
               return work();
             });
           locks.set(name, current);
-          return current;
+          // As in Web Locks, aborting rejects a request that is still queued.
+          return new Promise((resolve, reject) => {
+            const abort = () => {
+              if (!granted)
+                reject(new DOMException('Lock request aborted', 'AbortError'));
+            };
+            signal.addEventListener('abort', abort, { once: true });
+            current
+              .then(resolve, reject)
+              .finally(() => signal.removeEventListener('abort', abort));
+          });
         },
       },
     },

@@ -1536,6 +1536,163 @@ for (const accepted of [true, false, 'inactive', 'storage-failed']) {
   );
 }
 
+test(
+  'a queued Roost send waiting on a slow owner leaves the session usable',
+  { timeout: 5000 },
+  async (t) => {
+    const turn = (id, extra) => ({
+      id,
+      role: 'assistant',
+      timestamp: '2026-01-01',
+      finished: false,
+      items: [],
+      ...extra,
+    });
+    let releaseOwner;
+    const ownerReplied = new Promise((resolve) => {
+      releaseOwner = resolve;
+    });
+    let acceptedEntry;
+    const cancels = [];
+    const fixture = await openTestSession({
+      target: {
+        backend: 'roost',
+        machineId: 'm1',
+        acceptsInput: true,
+        dispatchesInput: true,
+      },
+      async onRpc(request, runtime, signal) {
+        if (request.method === 'session/history-watch')
+          return new Promise((_resolve, reject) =>
+            signal.addEventListener(
+              'abort',
+              () => reject(new Error('cancelled')),
+              { once: true },
+            ),
+          );
+        if (request.method === 'session/cancel') {
+          cancels.push(request.params.turnId);
+          return { result: { success: true } };
+        }
+        if (request.method === 'session/steer')
+          return { result: { applied: true } };
+        const params = await runtime.openPayload(request.params);
+        let result;
+        if (params.operation === 'accept_input') {
+          // The owner is slow: its receipt arrives only when the test allows it.
+          await ownerReplied;
+          acceptedEntry = params.payload.entry;
+          result = {
+            status: 'accepted',
+            turnId: params.payload.entry.id,
+            active: true,
+          };
+        } else if (params.operation === 'apply_action')
+          result = { matched: true };
+        else if (params.query?.kind === 'inputAcceptance')
+          result = { status: 'unobserved' };
+        else if (
+          params.query?.kind === 'readTurn' &&
+          params.query.turnId !== 'running'
+        )
+          result = { state: 'ready', turn: acceptedEntry };
+        else
+          result = {
+            checkpoint: 'c1',
+            startPosition: 0,
+            totalCount: 1,
+            rows: [{ position: 0, state: 'ready', turnId: 'running' }],
+            hasMoreOlder: false,
+            cursor: null,
+          };
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: params.operation
+              ? 'session/history-write_response'
+              : 'session/history-read_response',
+            sessionId: 's1',
+            success: true,
+            historyRevision: 1,
+            historyCount: 1,
+            ...(params.operation ? { operation: params.operation } : {}),
+            result,
+            ...(!params.operation && params.query?.kind !== 'inputAcceptance'
+              ? { pageTurns: [turn('running')] }
+              : {}),
+          }),
+        };
+      },
+    });
+    const send = (text, extra) =>
+      fixture.runtime.sendTurn({
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        cliType: 'builtin',
+        agentType: 'codex',
+        text,
+        ...extra,
+      });
+    const stop = () =>
+      fixture.runtime.controlTurn({
+        action: 'stop',
+        sessionId: 's1',
+        machineId: 'm1',
+        turnId: 'running',
+      });
+    // Event-loop turns only: the queued send holds the session until it starts waiting.
+    const stopOnceReleased = async () => {
+      for (let turns = 0; turns < 500; turns++) {
+        try {
+          return await stop();
+        } catch (error) {
+          if (error.message !== 'session_not_ready') throw error;
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      throw new Error('the waiting send kept the session locked');
+    };
+    try {
+      // A guide is accepted by the owner first; the owner does not answer yet.
+      const guide = await send('Guide', { guide: true });
+      assert.equal(guide.state, 'uploaded');
+
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const queued = send('Queued later', { queue: true });
+      assert.deepEqual(await stopOnceReleased(), { state: 'stopped' });
+      assert.deepEqual(cancels, ['running']);
+      // A later send still waits behind the queued one, so order is kept.
+      assert.deepEqual(await send('Third', { queue: true }), {
+        state: 'not_sent',
+        reason: 'session_not_ready',
+      });
+      assert.deepEqual(fixture.server.toJSON().mq ?? [], []);
+
+      // Past the wait budget the send gives up before the host deadline and writes nothing.
+      t.mock.timers.tick(fixture.runtime.QUEUED_SEND_BUDGET_MS);
+      const gaveUp = await queued;
+      assert.equal(gaveUp.state, 'not_sent');
+      assert.equal(gaveUp.reason, 'previous_input_pending');
+      assert.deepEqual(fixture.server.toJSON().mq ?? [], []);
+
+      // Once the owner confirms the earlier input, the same message can be queued.
+      releaseOwner();
+      const retried = await send('Queued later', {
+        queue: true,
+        id: gaveUp.id,
+      });
+      assert.equal(retried.state, 'queued');
+      assert.deepEqual(
+        fixture.server.toJSON().mq.map((item) => item.userTurnId),
+        [gaveUp.id],
+      );
+    } finally {
+      t.mock.timers.reset();
+      fixture.close();
+    }
+  },
+);
+
 test('Roost input is refused before writes when the owner lacks dispatch capability', async () => {
   const requests = [];
   let current = true;

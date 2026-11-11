@@ -39,6 +39,7 @@ import type {
   SessionRuntimeEvent,
   SessionTrace,
 } from '../contract/methods.ts';
+import { runtimeCalls } from '../contract/methods.ts';
 import {
   editableUserTurn,
   editAttachments,
@@ -78,6 +79,11 @@ type ResolveSessionTarget = (() => SessionTarget | undefined) & {
   legacyFallbackAllowed?: () => boolean;
 };
 export const MAX_BACKGROUND_SESSION_SYNCS = 3;
+/**
+ * How long a queued Roost send may wait for earlier inputs, measured from the call.
+ * It leaves the host's sendTurn deadline room for the queue write itself.
+ */
+export const QUEUED_SEND_BUDGET_MS = runtimeCalls.sendTurn.timeoutMs - 15_000;
 type SessionState = {
   id: string;
   workspace: string;
@@ -97,6 +103,8 @@ type SessionState = {
   sending: boolean;
   working?: boolean;
   sendingId?: string;
+  /** A queued Roost send waiting for earlier inputs; it orders later sends only. */
+  queueWaitId?: string;
   steerReceipts?: Map<string, SteerReceipt>;
   backgroundWork?: { id: string; turnId: string; guide?: boolean };
   status: string;
@@ -1304,7 +1312,8 @@ export async function sendTurn(
   )
     // The local entry may come from a lost append ACK. Never replay its write.
     return { id: args.id, state: 'unknown', reason: 'turn_already_exists' };
-  if (state.sending) return { state: 'not_sent', reason: 'session_not_ready' };
+  if (state.sending || state.queueWaitId)
+    return { state: 'not_sent', reason: 'session_not_ready' };
   const quota = checkTurnQuota(args);
   if (quota.state === 'not_sent') return quota;
   if (typeof args.text !== 'string')
@@ -1375,9 +1384,11 @@ export async function sendTurn(
     return { state: 'not_sent', reason: 'invalid_message' };
   const id = args.id ?? crypto.randomUUID(),
     timestamp = new Date().toISOString();
+  const startedAt = Date.now();
   reserved.add(state.id);
   state.sending = true;
   state.sendingId = id;
+  let holdsSession = true;
   let uploaded = false;
   let writeStarted = false;
   try {
@@ -1636,12 +1647,32 @@ export async function sendTurn(
         if (!owner)
           return { id, state: 'not_sent', reason: 'input_storage_unavailable' };
         const predecessors = await owner.capturePredecessors(state.id);
-        return await owner.afterInputs(
-          state.id,
-          predecessors,
-          state.controller.signal,
-          writeQueue,
+        // Earlier inputs wait for their owner, which can be slow or offline. Stop,
+        // steer and edits must stay usable meanwhile, so only later sends of this
+        // session wait behind this one. The wait ends before the host's call
+        // deadline, so nothing is written after the host has given up on it.
+        holdsSession = false;
+        state.sending = false;
+        state.queueWaitId = id;
+        const waitEnded = new AbortController();
+        const timer = setTimeout(
+          () => waitEnded.abort(),
+          Math.max(0, QUEUED_SEND_BUDGET_MS - (Date.now() - startedAt)),
         );
+        try {
+          return await owner.afterInputs(
+            state.id,
+            predecessors,
+            AbortSignal.any([state.controller.signal, waitEnded.signal]),
+            writeQueue,
+          );
+        } catch (error) {
+          if (!writeStarted && waitEnded.signal.aborted)
+            return { id, state: 'not_sent', reason: 'previous_input_pending' };
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
       }
       return await writeQueue();
     }
@@ -1791,8 +1822,10 @@ export async function sendTurn(
       reason: error instanceof Error ? error.message : 'send_failed',
     };
   } finally {
-    state.sending = false;
-    state.sendingId = undefined;
+    // A released session may already belong to a later control or edit.
+    if (holdsSession) state.sending = false;
+    if (state.sendingId === id) state.sendingId = undefined;
+    if (state.queueWaitId === id) state.queueWaitId = undefined;
   }
 }
 
