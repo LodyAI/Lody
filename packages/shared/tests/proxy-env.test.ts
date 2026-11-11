@@ -28,4 +28,13 @@ describe('withLoopbackNoProxy', () => {
     expect(env.NO_PROXY).toBe('corp.internal,localhost,127.0.0.1,::1');
     expect(env.no_proxy).toBe('corp.internal,localhost,127.0.0.1,::1');
   });
+
+  it('bypasses loopback even when the environment carries no proxy variable', () => {
+    // The agent may apply a proxy Lody never sees (its own settings file, or
+    // the OS proxy read by its HTTP client). Its requests to the loopback MCP
+    // host must still go direct, or the proxy answers in the host's place.
+    const env = withLoopbackNoProxy<NodeJS.ProcessEnv>({ PATH: '/usr/bin' });
+    expect(env.NO_PROXY).toBe('localhost,127.0.0.1,::1');
+    expect(env.no_proxy).toBe('localhost,127.0.0.1,::1');
+  });
 });
