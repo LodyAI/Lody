@@ -78,7 +78,7 @@ class AgentSettingsProbeActivity : ComponentActivity() {
                     initial = "E", sync = HomeSyncState.Live, timeline = emptyList(), snapshot = null, userId = "fixture",
                     projects = emptyList(), placeholder = "", workspaces = emptyList(), workspaceId = "workspace")
                 if (agents) AgentSettingsScreen(home, service, RuntimeScope("fixture", "workspace")) { agents = false }
-                else SettingsHome(home, PaddingValues(), {}, {}, { agents = true }, {}, {}, {}, {})
+                else SettingsHome(home, PaddingValues(), {}, {}, { agents = true }, {}, {}, {}, {}, {})
             }
         }
     }

@@ -61,6 +61,9 @@ class ProjectVisibilityController: UIViewController {
   private func sync(force: Bool = false) {
     let next = fixed ?? .current
     let scopeChanged = next.key != workspace.key
+    // Catalog events arrive every few seconds (sessions, presence); re-rendering an unchanged
+    // projection reconfigures every row and makes their values blink.
+    guard force || scopeChanged || next != workspace else { return }
     workspace = next
     guard force || scopeChanged else { return render() }
     snapshot = nil
@@ -173,7 +176,7 @@ class ProjectVisibilityController: UIViewController {
     case "rowAction":
       guard let id = body["id"] as? String, let action = body["actionId"] as? String,
             ["shared", "private"].contains(action), live, !busy, !failed, !unconfirmed, !mutating,
-            let row = snapshot?.rows.first(where: { $0.id == id }), row.ownerUserId == snapshot?.userId,
+            let row = snapshot?.effectiveRows(catalog: workspace.catalog).first(where: { $0.id == id }), row.ownerUserId == snapshot?.userId,
             row.sharedWithTeam != (action == "shared") else { return }
       write(row, shared: action == "shared")
     default:

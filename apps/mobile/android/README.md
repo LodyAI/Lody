@@ -224,7 +224,7 @@ write retry identity handling are unchanged. Open last chat uses Home navigation
 ## Settings
 
 Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
-Agent settings, Agent Roles, prompt shortcuts and sign-out. There is no Machines or Agent conversation
+Agent settings, Agent Roles, prompt shortcuts, GitHub and sign-out. There is no Machines or Agent conversation
 sync destination. Other unfinished settings destinations show an explicit placeholder.
 
 Preferences follows iOS: language and notifications open the system pages for this
@@ -249,6 +249,14 @@ the same payload so the only next step is retrying that save. The runtime's
 `activateDocument`) reach `PromptShortcutCloud`, which calls `promptShortcuts:*` on Convex
 with the verified account and the native workspace; mutations use a one-shot client.
 This also lets the composer's `/` shortcuts load their bodies.
+
+GitHub (`GitHubSettingsScreen`) mirrors iOS Settings › GitHub: personal identity with an
+"Act as you" switch (turning it on needs a live authorization), Manage GitHub App for owners
+and admins (the App's install page in the browser; the page re-reads on return), then the
+workspace repositories with owner logos, Material switches and a search field. `GitHubSettingsCloud`
+ports iOS `WorkspaceSettingsCloud.github` over Convex with the verified account: writes check the
+row first, are never retried, and count only after a read back. A flipped switch shows at once;
+a failed or unknown write rolls it back and locks writes until a fresh read (`GitHubSettingsTest`).
 
 Agent settings select one machine above its provider list (online and own machines
 first); the top bar's "+" adds a provider to it, and the last list shows from process

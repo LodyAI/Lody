@@ -18,7 +18,12 @@ private final class GitHubSettingsFixture {
   private var data = GitHubSettings(
     canManage: true,
     roleKnown: true,
-    repositories: [GitHubRepository(repoFullName: "LodyAI/Lody", name: "Lody", repositoryId: 1, private: false, enabled: true)],
+    repositories: [
+      GitHubRepository(repoFullName: "LodyAI/Lody", name: "Lody", repositoryId: 1, private: false, enabled: true),
+      GitHubRepository(repoFullName: "LodyAI/lody-ios", name: "lody-ios", repositoryId: 2, private: true, enabled: false),
+      GitHubRepository(repoFullName: "loro-dev/loro", name: "loro", repositoryId: 3, private: false, enabled: true),
+      GitHubRepository(repoFullName: "octo-fixture/sandbox", name: "sandbox", repositoryId: 4, private: true, enabled: false),
+    ],
     personal: GitHubPersonal(enabled: true, authorization: GitHubAuthorization(state: .expired, githubAccountId: "fixture")),
     errors: []
   )
@@ -37,7 +42,9 @@ private final class GitHubSettingsFixture {
         failWrite = false
         throw CocoaError(.fileWriteUnknown)
       }
-      data.repositories?[0].enabled = enabled
+      if let index = data.repositories?.firstIndex(where: { $0.repoFullName == request.repoFullName }) {
+        data.repositories?[index].enabled = enabled
+      }
     }
     if request.action == "preference", let enabled = request.enabled { data.personal?.enabled = enabled }
     return .settings(data)

@@ -18390,13 +18390,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "操作时使用个人身份"
+            "value": "以个人身份操作"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Use personal identity for operations"
+            "value": "Act as you"
           }
         }
       }
@@ -18407,13 +18407,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "个人身份与工作区 GitHub App 相互独立。请在 Lody 网页端授权或续期后，在此刷新。"
+            "value": "以你的身份创建 PR、评论和合并，而不是使用工作区 GitHub App。授权或续期请在 Lody 网页端完成。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Personal identity is separate from the workspace GitHub App. Authorize or renew your identity in Lody web, then refresh here."
+            "value": "Act as you for PRs, comments, and merges instead of the workspace GitHub App. Authorize or renew in Lody web."
           }
         }
       }
@@ -18441,13 +18441,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "启用的仓库可供工作区功能使用。仅所有者或管理员可修改，修改后会重新读取确认。"
+            "value": "开启的仓库可供工作区功能使用。仅工作区所有者和管理员可以修改。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enabled repositories are available to workspace features. Changes require a workspace owner or admin and are verified by readback."
+            "value": "Workspace features can use the repositories that are on. Only workspace owners and admins can change this."
           }
         }
       }
@@ -18492,13 +18492,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "私有仓库"
+            "value": "私有"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Private repository"
+            "value": "Private"
           }
         }
       }
@@ -18509,13 +18509,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "公开仓库"
+            "value": "公开"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Public repository"
+            "value": "Public"
           }
         }
       }
@@ -18560,13 +18560,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在浏览器管理 GitHub App"
+            "value": "管理 GitHub App"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manage GitHub App in browser"
+            "value": "Manage GitHub App"
           }
         }
       }
@@ -18577,13 +18577,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "官方安装流程返回网页端。完成后回到 App 刷新以确认变化；取消操作不会连接账号。"
+            "value": "在 GitHub 中添加仓库或调整访问范围。完成后返回此页下拉刷新。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The official installation flow returns to the web. Come back to this app and refresh to verify changes. Cancelling does not connect an account."
+            "value": "Opens GitHub to add repositories or change access. Come back and pull down to refresh."
           }
         }
       }
@@ -30155,104 +30155,106 @@
         }
       }
     },
-    "send.forget.hint": {
+    "settings.github.search": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tap to remove"
+            "value": "Search repositories"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "轻点移除"
+            "value": "搜索仓库"
           }
         }
       }
     },
-    "send.forget.failed": {
+    "settings.github.noMatches": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Could not remove the pending message. Try again."
+            "value": "No repositories match “%@”."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "无法移除待确认消息，请重试。"
+            "value": "没有与“%@”匹配的仓库。"
+          }
+        }
+      },
+      "comment": "1: search text"
+    },
+    "settings.github.enabledCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld of %2$lld on"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已开启 %1$lld/%2$lld"
+          }
+        }
+      },
+      "comment": "1: enabled repositories, 2: all repositories"
+    },
+    "settings.github.missingHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Authorize in Lody web to act as you"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Lody 网页端授权后即可以你的身份操作"
           }
         }
       }
     },
-    "settings.on": {
+    "settings.github.expiredHint": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "On"
+            "value": "Renew in Lody web, then refresh here"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "开启"
+            "value": "请在 Lody 网页端续期后回到这里刷新"
           }
         }
       }
     },
-    "send.forget.action": {
+    "settings.github.authorizedHint": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Remove locally"
+            "value": "Connected"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本地移除"
-          }
-        }
-      }
-    },
-    "settings.betaFeatures": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Beta Features"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "测试功能"
-          }
-        }
-      }
-    },
-    "settings.roostHistory": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Roost History"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Roost 历史记录"
+            "value": "已连接"
           }
         }
       }
@@ -30274,36 +30276,19 @@
         }
       }
     },
-    "send.forget.message": {
+    "settings.betaFeatures": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This removes the local pending message. The computer may still receive or process it."
+            "value": "Beta Features"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这会移除本地待确认消息，电脑仍可能收到或处理该消息。"
-          }
-        }
-      }
-    },
-    "settings.off": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Off"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "关闭"
+            "value": "测试功能"
           }
         }
       }
@@ -30325,6 +30310,57 @@
         }
       }
     },
+    "send.forget.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not remove the pending message. Try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法移除待确认消息，请重试。"
+          }
+        }
+      }
+    },
+    "send.forget.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap to remove"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "轻点移除"
+          }
+        }
+      }
+    },
+    "send.forget.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This removes the local pending message. The computer may still receive or process it."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这会移除本地待确认消息，电脑仍可能收到或处理该消息。"
+          }
+        }
+      }
+    },
     "settings.developerMode": {
       "extractionState": "manual",
       "localizations": {
@@ -30338,6 +30374,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "开发者模式"
+          }
+        }
+      }
+    },
+    "settings.on": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启"
+          }
+        }
+      }
+    },
+    "settings.roostHistory": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Roost History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Roost 历史记录"
+          }
+        }
+      }
+    },
+    "send.forget.action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove locally"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地移除"
+          }
+        }
+      }
+    },
+    "settings.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭"
           }
         }
       }
