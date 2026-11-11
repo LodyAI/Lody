@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canRelayNpmInstallation,
+  npmInstallationChannel,
   relayToManagedService,
   type RelayDeps,
 } from './managed-daemon-migration';
@@ -100,14 +101,61 @@ describe('npm to managed relay migration', () => {
 });
 
 describe('npm relay eligibility', () => {
+  const desktopShell =
+    '0::/user.slice/user-1000.slice/user@1000.service/app.slice/vte-spawn-1.scope\n';
   it('relays only POSIX npm watchdogs that no service manager owns', () => {
-    expect(canRelayNpmInstallation({}, 'linux')).toBe(true);
-    expect(canRelayNpmInstallation({}, 'darwin')).toBe(true);
-    expect(canRelayNpmInstallation({}, 'win32')).toBe(false);
-    // systemd would kill the detached managed runner with the npm unit's cgroup.
-    expect(canRelayNpmInstallation({ INVOCATION_ID: 'abc' }, 'linux')).toBe(false);
-    // launchd likewise owns the job's processes.
-    expect(canRelayNpmInstallation({ XPC_SERVICE_NAME: 'com.example.lody' }, 'darwin')).toBe(false);
-    expect(canRelayNpmInstallation({ XPC_SERVICE_NAME: '0' }, 'darwin')).toBe(true);
+    expect(canRelayNpmInstallation({}, 'linux', desktopShell)).toBe(true);
+    expect(canRelayNpmInstallation({}, 'darwin', null)).toBe(true);
+    expect(canRelayNpmInstallation({}, 'win32', null)).toBe(false);
+    // A systemd unit's stop would kill the detached managed runner with its cgroup.
+    expect(
+      canRelayNpmInstallation({ INVOCATION_ID: 'abc' }, 'linux', '0::/system.slice/lody.service\n')
+    ).toBe(false);
+    // launchd jobs carry their label; GUI terminals carry `application.*` or `0`.
+    expect(canRelayNpmInstallation({ XPC_SERVICE_NAME: 'com.example.lody' }, 'darwin', null)).toBe(
+      false
+    );
+  });
+  it('does not mistake an ordinary desktop terminal for a service', () => {
+    expect(canRelayNpmInstallation({ XPC_SERVICE_NAME: '0' }, 'darwin', null)).toBe(true);
+    expect(
+      canRelayNpmInstallation(
+        { XPC_SERVICE_NAME: 'application.com.googlecode.iterm2.1234' },
+        'darwin',
+        null
+      )
+    ).toBe(true);
+    // Terminal shells may inherit INVOCATION_ID from their user service.
+    expect(canRelayNpmInstallation({ INVOCATION_ID: 'abc' }, 'linux', desktopShell)).toBe(true);
+  });
+});
+
+describe('npm installation channel', () => {
+  it('derives the channel from the running npm version so batch never crosses channels', () => {
+    expect(npmInstallationChannel('1.2.3')).toBe('stable');
+    expect(npmInstallationChannel('1.3.0-next.4')).toBe('next');
+    expect(npmInstallationChannel('1.3.0-nightly.20261111')).toBe('nightly');
+  });
+});
+
+describe('relay cancellation and occupancy', () => {
+  it('a stop requested before the switch keeps npm ownership and records failure', async () => {
+    const { deps, events, owned } = harness(async () => ({ status: 'ready' }));
+    const stop = new AbortController();
+    stop.abort();
+    expect(await relayToManagedService(deps, stop.signal)).toEqual({
+      kind: 'restored',
+      reason: 'Daemon stop requested',
+    });
+    expect(events).not.toContain('release');
+    expect(events.at(-1)).toBe('phase:failed');
+    expect(owned()).toBe(true);
+  });
+  it('another healthy host taking the machine is a failed update, not a blocked recovery', async () => {
+    const { deps, events } = harness(async () => ({ status: 'occupied' }), {
+      reclaimOwnership: async () => false,
+    });
+    expect((await relayToManagedService(deps)).kind).toBe('blocked');
+    expect(events.at(-1)).toBe('phase:failed');
   });
 });

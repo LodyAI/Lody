@@ -107,12 +107,18 @@ export async function publishManagedInstallation(
     service,
   });
 }
-/** The published fixed service entry, or null when this profile has none. */
-export function resolvePublishedManagedService(): string | null {
+/**
+ * This product's published fixed service entry, or null. Only the fixed path of
+ * this profile is ever followed, so a record cannot redirect launchers elsewhere.
+ */
+export function resolvePublishedManagedService(
+  product: SeaContext['metadata']['product']
+): string | null {
   try {
     const record = InstallationRecordSchema.parse(
       JSON.parse(readFileSync(path.join(managedDaemonRoot(), 'installation.json'), 'utf8'))
     );
+    if (record.product !== product || record.service !== fixedServicePath()) return null;
     return existsSync(record.service) ? record.service : null;
   } catch {
     return null;

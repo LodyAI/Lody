@@ -8,18 +8,43 @@
  */
 /**
  * A relay leaves the managed runner as a detached child of the exiting npm
- * watchdog. When a service manager owns the watchdog (systemd unit, launchd
+ * watchdog. When a service manager owns the watchdog (a systemd unit, a launchd
  * job), stopping that unit kills the managed runner too, and a clean exit does
- * not restart it. Such installations keep the explicit migration.
+ * not restart it. Such installations keep the explicit migration. Detection is
+ * best-effort: other supervisors (pm2, supervisord, runit, containers) are not
+ * recognised.
  */
 export function canRelayNpmInstallation(
   env: Readonly<Record<string, string | undefined>>,
-  platform: NodeJS.Platform
+  platform: NodeJS.Platform,
+  /** Contents of /proc/self/cgroup on Linux; null when unavailable. */
+  cgroup: string | null
 ): boolean {
   if (platform === 'win32') return false;
-  if (env.INVOCATION_ID) return false;
-  if (env.XPC_SERVICE_NAME && env.XPC_SERVICE_NAME !== '0') return false;
+  if (platform === 'darwin') {
+    // GUI terminals inherit `application.<bundle>` (or `0` from Terminal.app);
+    // a launchd job carries its own label.
+    const label = env.XPC_SERVICE_NAME;
+    return !label || label === '0' || label.startsWith('application.');
+  }
+  if (platform === 'linux' && cgroup) {
+    // Desktop shells live in app-*.scope / vte-spawn-*.scope; a unit ends in `.service`.
+    const unified = cgroup
+      .split('\n')
+      .find((line) => line.startsWith('0::'))
+      ?.slice(3)
+      .trim();
+    const leaf = unified?.split('/').at(-1) ?? '';
+    return !leaf.endsWith('.service');
+  }
   return true;
+}
+
+/** An npm install has no managed channel record; its version's prerelease tag names it. */
+export function npmInstallationChannel(version: string): 'stable' | 'next' | 'nightly' {
+  const prerelease = /^\d+\.\d+\.\d+-([0-9A-Za-z.-]+)/.exec(version)?.[1];
+  if (!prerelease) return 'stable';
+  return prerelease.startsWith('nightly') ? 'nightly' : 'next';
 }
 
 export type RelayLaunchResult = { status: 'ready' } | { status: string; message?: string };
@@ -49,7 +74,11 @@ export type RelayOutcome =
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-export async function relayToManagedService(deps: RelayDeps): Promise<RelayOutcome> {
+export async function relayToManagedService(
+  deps: RelayDeps,
+  /** Aborted when the daemon is asked to stop; checked before ownership moves. */
+  signal?: AbortSignal
+): Promise<RelayOutcome> {
   let service: string;
   try {
     service = await deps.installFixedEntry();
@@ -60,6 +89,10 @@ export async function relayToManagedService(deps: RelayDeps): Promise<RelayOutco
     return { kind: 'restored', reason: message(error) };
   }
 
+  if (signal?.aborted) {
+    await deps.recordPhase('failed');
+    return { kind: 'restored', reason: 'Daemon stop requested' };
+  }
   await deps.releaseOwnership();
   let launched: RelayLaunchResult;
   try {
@@ -82,6 +115,8 @@ export async function relayToManagedService(deps: RelayDeps): Promise<RelayOutco
     await deps.recordPhase('rolled-back');
     return { kind: 'restored', reason };
   }
-  await deps.recordPhase('blocked');
+  // Another healthy host took the machine: the update failed, but nothing is
+  // stuck, so the record must not block later updates.
+  await deps.recordPhase(launched.status === 'occupied' ? 'failed' : 'blocked');
   return { kind: 'blocked', reason: `${reason}; ownership could not be reclaimed` };
 }

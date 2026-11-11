@@ -5,6 +5,7 @@ import {
   resolvePublishedManagedService,
 } from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
+import { getCliPlatformKind } from '@/lib/cli-platform';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -332,7 +333,11 @@ export async function spawnDaemonRunnerAndAwaitReady(
       ? null
       : sea
         ? path.join(managedDaemonRoot(), process.platform === 'win32' ? 'service.exe' : 'service')
-        : resolvePublishedManagedService());
+        : process.platform === 'win32'
+          ? null
+          : resolvePublishedManagedService(
+              getCliPlatformKind() === 'cloud' ? 'lody-cloud' : 'lody-oss'
+            ));
   if (fixedService && !fs.existsSync(fixedService))
     throw new Error('Run daemon install before starting the managed service.');
   const env: NodeJS.ProcessEnv = {

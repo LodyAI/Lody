@@ -58,14 +58,15 @@ describe('update-all dialog keeps per-machine progress for the whole run', () =>
     open: boolean;
     machines: BatchUpdateMachine[];
     probe: (id: string) => Promise<{ lifecycle: MachineLifecycleCapability }>;
+    requestUpgrade?: () => Promise<void>;
   }) => {
     await act(async () => {
       root.render(
         createElement(MachineBatchUpdateDialog, {
-          ...props,
           onOpenChange: () => {},
           latestVersion: '1.1.0',
           requestUpgrade: async () => {},
+          ...props,
         })
       );
     });
@@ -111,5 +112,20 @@ describe('update-all dialog keeps per-machine progress for the whole run', () =>
       vi.advanceTimersByTime(30_000);
     });
     expect(probe.mock.calls.length).toBe(calls);
+  });
+  it('a machine that went offline before its request was accepted still times out', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    let accept: () => void = () => {};
+    const requestUpgrade = () => new Promise<void>((resolve) => (accept = resolve));
+    const probe = async () => ({ lifecycle: daemon });
+    await render({ open: true, machines: [studio(true)], probe, requestUpgrade });
+    await act(async () => button('Update 1 machines')?.click());
+    await render({ open: true, machines: [studio(false, 0)], probe, requestUpgrade });
+    await act(async () => accept());
+    await flush();
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60_000 + 3_000);
+    });
+    expect(document.body.textContent).toContain('Not back online after 5 minutes');
   });
 });

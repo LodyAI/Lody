@@ -222,8 +222,17 @@ export function MachineBatchUpdateDialog({
     );
     for (const row of updatable) {
       void requestUpgrade(row.machineId, row.targetVersion, policy).then(
-        () =>
-          setRequests((current) => new Map(current).set(row.machineId, { request: 'accepted' })),
+        () => {
+          // A machine already offline at acceptance has started its switch.
+          const offline = !machinesRef.current.find((entry) => entry.id === row.machineId)
+            ?.isOnline;
+          setRequests((current) =>
+            new Map(current).set(row.machineId, {
+              request: 'accepted',
+              ...(offline ? { offlineSinceMs: Date.now() } : {}),
+            })
+          );
+        },
         (error: unknown) =>
           setRequests((current) =>
             new Map(current).set(row.machineId, {

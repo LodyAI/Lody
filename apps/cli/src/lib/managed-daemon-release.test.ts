@@ -136,15 +136,21 @@ describe('checksummed managed daemon installation', () => {
     const { dir } = await fixture();
     const capsule = path.join(dir, 'downloaded-capsule');
     await fs.writeFile(capsule, bytes);
-    expect(resolvePublishedManagedService()).toBeNull();
+    expect(resolvePublishedManagedService('lody-oss')).toBeNull();
     const service = await installFixedServiceEntry(capsule);
     expect(await fs.readFile(service)).toEqual(bytes);
     // Installed but unpublished: a failed relay must leave `daemon start` on npm.
-    expect(resolvePublishedManagedService()).toBeNull();
+    expect(resolvePublishedManagedService('lody-oss')).toBeNull();
     await publishManagedInstallation('lody-oss', service);
-    expect(resolvePublishedManagedService()).toBe(service);
+    expect(resolvePublishedManagedService('lody-oss')).toBe(service);
+    // Another product's launcher never forwards to this service.
+    expect(resolvePublishedManagedService('lody-cloud')).toBeNull();
+    // A record naming any path other than the fixed entry is not followed.
+    await publishManagedInstallation('lody-oss', capsule);
+    expect(resolvePublishedManagedService('lody-oss')).toBeNull();
+    await publishManagedInstallation('lody-oss', service);
     await fs.rm(service);
-    expect(resolvePublishedManagedService()).toBeNull();
+    expect(resolvePublishedManagedService('lody-oss')).toBeNull();
   });
   it.each(['compressed', 'extracted'] as const)(
     'a bad %s SHA never publishes an executable or a successful update record',

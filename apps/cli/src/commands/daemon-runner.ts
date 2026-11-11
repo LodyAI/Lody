@@ -19,7 +19,21 @@ import {
   type ManagedInstallation,
 } from '@/lib/managed-daemon-release';
 import { ManagedPrepareRequestSchema } from '@/lib/managed-daemon-ipc';
-import { canRelayNpmInstallation, relayToManagedService } from '@/lib/managed-daemon-migration';
+import {
+  canRelayNpmInstallation,
+  npmInstallationChannel,
+  relayToManagedService,
+} from '@/lib/managed-daemon-migration';
+import { readFileSync } from 'node:fs';
+
+const readOwnCgroup = (platform: NodeJS.Platform): string | null => {
+  if (platform !== 'linux') return null;
+  try {
+    return readFileSync('/proc/self/cgroup', 'utf8');
+  } catch {
+    return null;
+  }
+};
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import path from 'node:path';
 import { runCommandTextLegacy } from '@lody/shared/node/process';
@@ -268,14 +282,21 @@ export const daemonRunnerCommand = new Command('daemon-runner')
     const sea = getSeaContext();
     // A POSIX npm installation speaks the managed Worker protocol so a remote
     // update can relay it to the managed service. Windows lacks containment.
-    const npmMigration = !sea && canRelayNpmInstallation(process.env, process.platform);
+    const npmMigration =
+      !sea &&
+      canRelayNpmInstallation(process.env, process.platform, readOwnCgroup(process.platform));
     const npmProduct = getCliPlatformKind() === 'cloud' ? 'lody-cloud' : 'lody-oss';
     const releaseTrust = (upgrade?: ManagedDaemonUpgradeOptions): ReleaseTrust =>
       sea ?? npmMigrationTrust(npmProduct, upgrade?.channel ?? 'stable');
     let installation: ManagedInstallation | undefined = sea
       ? await readSelectedInstallation(sea)
       : npmMigration
-        ? { version, bin: resolveLodyBin(), node: getCliNodeExecutable() }
+        ? {
+            version,
+            channel: npmInstallationChannel(version),
+            bin: resolveLodyBin(),
+            node: getCliNodeExecutable(),
+          }
         : undefined;
     let previousInstallation = installation;
     let drainConfirmed = false;
@@ -311,7 +332,12 @@ export const daemonRunnerCommand = new Command('daemon-runner')
     };
     let hostShutdownRequested = false;
     let hostShutdownHandler: (() => void) | null = null;
+    // A stop during an npm relay must not race it: the relay checks this before
+    // moving ownership, and `finish` waits for the bounded relay to settle.
+    const relayStop = new AbortController();
+    let relayTask: Promise<unknown> | undefined;
     const requestHostShutdown = () => {
+      relayStop.abort();
       if (hostShutdownRequested) return;
       hostShutdownRequested = true;
       hostShutdownHandler?.();
@@ -430,6 +456,8 @@ export const daemonRunnerCommand = new Command('daemon-runner')
     const finish = async (code: number) => {
       if (terminating) return;
       terminating = true;
+      relayStop.abort();
+      await relayTask?.catch(() => {});
       removePidFile(pidRecord);
       const lease = hostLease;
       hostLease = null;
@@ -724,48 +752,57 @@ export const daemonRunnerCommand = new Command('daemon-runner')
           message: `Prepared release is unusable; npm daemon keeps running: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
-      const outcome = await relayToManagedService({
-        installFixedEntry: () =>
-          installFixedServiceEntry(
-            path.join(releaseDir, process.platform === 'win32' ? 'daemon.exe' : 'daemon')
-          ),
-        selectRelease: () =>
-          writeManagedRecord(path.join(managedDaemonRoot(), 'selected.json'), {
-            format: 1,
-            digest: operation.releaseDigest,
-          }),
-        recordPhase: (phase) => saveManagedOperation({ ...operation, phase }),
-        releaseOwnership: async () => {
-          removePidFile(pidRecord);
-          const lease = hostLease;
-          hostLease = null;
-          await lease?.close();
+      const relay = relayToManagedService(
+        {
+          installFixedEntry: () =>
+            installFixedServiceEntry(
+              path.join(releaseDir, process.platform === 'win32' ? 'daemon.exe' : 'daemon')
+            ),
+          selectRelease: () =>
+            writeManagedRecord(path.join(managedDaemonRoot(), 'selected.json'), {
+              format: 1,
+              digest: operation.releaseDigest,
+            }),
+          recordPhase: (phase) => saveManagedOperation({ ...operation, phase }),
+          releaseOwnership: async () => {
+            removePidFile(pidRecord);
+            const lease = hostLease;
+            hostLease = null;
+            await lease?.close();
+          },
+          reclaimOwnership: async () => {
+            const result = await acquireLocalCliHostLease({
+              instanceId: supervisorIdentity.instanceId,
+              mode: 'daemon',
+              shutdownControl: {
+                token: supervisorIdentity.token,
+                onRequest: () => requestHostShutdown(),
+              },
+            });
+            if (result.status === 'occupied') return false;
+            hostLease = result.lease;
+            pidRecord = writePidFile(
+              process.pid,
+              supervisorIdentity.instanceId,
+              supervisorIdentity.token
+            );
+            return true;
+          },
+          launch: (service) =>
+            spawnDaemonRunnerAndAwaitReady(passthroughArgs, {
+              service,
+              expectedVersion: targetVersion,
+            }),
+          publish: (service) =>
+            publishManagedInstallation(npmProduct, service).catch((error: unknown) => {
+              logger.error('Managed installation was not published; npm launchers keep npm', error);
+              throw error;
+            }),
         },
-        reclaimOwnership: async () => {
-          const result = await acquireLocalCliHostLease({
-            instanceId: supervisorIdentity.instanceId,
-            mode: 'daemon',
-            shutdownControl: {
-              token: supervisorIdentity.token,
-              onRequest: () => requestHostShutdown(),
-            },
-          });
-          if (result.status === 'occupied') return false;
-          hostLease = result.lease;
-          pidRecord = writePidFile(
-            process.pid,
-            supervisorIdentity.instanceId,
-            supervisorIdentity.token
-          );
-          return true;
-        },
-        launch: (service) =>
-          spawnDaemonRunnerAndAwaitReady(passthroughArgs, {
-            service,
-            expectedVersion: targetVersion,
-          }),
-        publish: (service) => publishManagedInstallation(npmProduct, service),
-      });
+        relayStop.signal
+      );
+      relayTask = relay;
+      const outcome = await relay;
       if (outcome.kind === 'migrated') {
         logger.info(`Relayed to managed daemon ${targetVersion}; npm watchdog exiting.`);
         return { action: 'stop', message: 'Migrated to the managed daemon service' };
