@@ -46,6 +46,10 @@ have accepted it. The native transcript opens at the latest page and requests
 older pages when needed. The Android runtime test exercises the bundled production
 session module with a synthetic Streams peer.
 
+Roost proposal decisions write the outcome through the owner's shared
+`replaceTurn` command, as on Web. The Loro path continues to append the notice
+update to its session document.
+
 References: https://github.com/advisories/GHSA-mrhx-c7xc-m3w5 and https://zod.dev/v4/changelog. Audit evidence is retained separately for each phase.
 
 Bridge protocol 2 adds an explicit command capability handshake, `$cancel`, native command deadlines, and ordered message chunks. It wraps the original JS runtime; it does not change the upstream cloud protocol. Fixtures use synthetic catalog data matching the vendored event shapes, not captured user data. The offline document exposes `ping`, `setActive`, and `probeSchema`. The network document additionally advertises `connect`, `grant`, `watchSession`, `closeSession`, `creationOptions`, and `createAndSend`, used through the native scoped runtime. Session reads reuse the upstream Loro projection and emit typed text messages to Compose. Both network gates restrict reads and the creation/dispatch writes described below to the current workspace; returning to the list stops the session subscription.
@@ -75,6 +79,11 @@ folder, its worktree when it has one, through the machine's `file/list-dir` (cap
 `sessionDirectoryListing`), so the list matches what `readFile` opens. Machines without the
 capability, and encrypted workspaces whose machines answer `unsupported_protocol`, keep the
 local-project listing.
+
+The snapshot at `2d1971eb` projects Agent Role and schedule proposal notices (`proposal`) and
+agent file `mimeType` into the transcript, and adds `decideProposal`: Save writes the Role through
+the Agent Roles settings path, Create saves the schedule under the proposal id, and both record the
+outcome in the notice. An unconfirmed upload keeps the proposal undecided for an explicit retry.
 
 The snapshot at `76340385` adds each Project group conversation's members to the catalog
 (`projectRun`: placement order, branch, diff, publish state and the current PR per repository,

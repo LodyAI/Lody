@@ -70,6 +70,13 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onSteer: ([String: Any]) -> Void = { _ in }
   var onErrorRetry: ([String: Any]) -> Void = { _ in }
   var onPlanDecision: ([String: Any]) -> Void = { _ in }
+  /// Accept (`true`) or dismiss an Agent's proposal row; the owner reports back through `setProposalState`.
+  var onProposalDecision: (_ row: ChatRow, _ accept: Bool) -> Void = { _, _ in }
+  var onProposalOpenSchedule: (String) -> Void = { _ in }
+  /// Decisions in flight or failed, by `entryId/itemId`.
+  var proposalStates: [String: ChatProposalState] = [:]
+  /// The signed-in user: a Role proposal is decided only by the member who asked for it.
+  var proposalUserID = ""
   var planDecisionState: ChatPlanDecisionState?
   var errorRetryState: ChatErrorRetryState?
   var onActivityPress: ([String: Any]) -> Void = { _ in }
@@ -357,6 +364,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     collection.register(ChatImageStackCell.self, forCellWithReuseIdentifier: "image-stack")
     collection.register(ChatHistoryHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "history")
     collection.register(ChatErrorCell.self, forCellWithReuseIdentifier: "error")
+    collection.register(ChatProposalCell.self, forCellWithReuseIdentifier: "proposal")
+    collection.register(ChatFileCardCell.self, forCellWithReuseIdentifier: "file-card")
     collection.register(ChatOperationCell.self, forCellWithReuseIdentifier: "operation")
     collection.register(ChatSubagentCell.self, forCellWithReuseIdentifier: "subagent")
     collection.register(ChatCell.self, forCellWithReuseIdentifier: "message")
@@ -370,6 +379,18 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         cell.configure(row)
         cell.onDetail = { [weak self] in self?.onActivityPress(["entryId": row.entryID, "itemId": row.itemID]) }
         cell.onRetry = { [weak self] in self?.onErrorRetry(["entryId": row.entryID, "itemId": row.itemID, "id": UUID().uuidString.lowercased()]) }
+        return cell
+      }
+      if row.kind == "proposal" {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "proposal", for: index) as! ChatProposalCell
+        cell.configure(row)
+        cell.onDecision = { [weak self] accept in self?.onProposalDecision(row, accept) }
+        cell.onOpenSchedule = { [weak self] id in self?.onProposalOpenSchedule(id) }
+        return cell
+      }
+      if row.kind == "file", row.file != nil {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "file-card", for: index) as! ChatFileCardCell
+        cell.configure(row)
         return cell
       }
       if row.kind.hasPrefix("operation") {

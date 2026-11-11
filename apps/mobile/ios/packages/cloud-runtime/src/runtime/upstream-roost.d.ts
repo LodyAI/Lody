@@ -112,6 +112,10 @@ export function createRemoteRoostSessionDataFactory(options: {
   };
   commands: {
     applyHistoryAction(action: Record<string, unknown>): Promise<unknown>;
+    replaceTurn(
+      turnId: string,
+      turn: { id: string; [key: string]: unknown },
+    ): Promise<void>;
     respondPermission(
       requestId: string,
       outcome: Record<string, unknown>,

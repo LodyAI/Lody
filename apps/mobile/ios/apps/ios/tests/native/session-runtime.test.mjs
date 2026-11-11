@@ -902,6 +902,91 @@ test('Roost permission decisions use the owner, and a lost send acknowledgement 
   }
 });
 
+test('Roost proposal outcomes replace the owner turn and preserve its other items', async () => {
+  const original = {
+    id: 'proposal',
+    role: 'system',
+    timestamp: '2026-01-01T00:00:00Z',
+    items: [
+      { type: 'text', text: 'Existing content' },
+      {
+        type: 'system_notice',
+        name: 'agent_role_proposal',
+        meta: { requesterUserId: 'u1', roleId: 'role-1' },
+      },
+    ],
+  };
+  let stored = original;
+  const fixture = await openTestSession({
+    target: { backend: 'roost', machineId: 'm1' },
+    async onRpc(request, runtime) {
+      const params = await runtime.openPayload(request.params);
+      const read = request.method === 'session/history-read';
+      if (!read) {
+        assert.equal(request.method, 'session/history-write');
+        assert.equal(params.operation, 'replace');
+        assert.equal(params.payload.turnId, original.id);
+        stored = params.payload.entry;
+      }
+      const response = read
+        ? {
+            type: 'session/history-read_response',
+            sessionId: 's1',
+            success: true,
+            historyRevision: 1,
+            historyCount: 1,
+            result: {
+              checkpoint: 'c1',
+              startPosition: 0,
+              totalCount: 1,
+              rows: [{ position: 0, state: 'ready', turnId: original.id }],
+              hasMoreOlder: false,
+              cursor: null,
+            },
+            pageTurns: [stored],
+          }
+        : {
+            type: 'session/history-write_response',
+            sessionId: 's1',
+            success: true,
+            operation: 'replace',
+            result: true,
+          };
+      return { result: await runtime.sealPayload('s1', response) };
+    },
+  });
+  try {
+    const args = {
+      sessionId: 's1',
+      entryId: original.id,
+      itemId: 'idx:proposal:1',
+    };
+    const notice = await fixture.runtime.noticeAt(args);
+    assert.deepEqual(notice, {
+      name: original.items[1].name,
+      meta: original.items[1].meta,
+    });
+    await fixture.runtime.writeNoticeMeta({
+      ...args,
+      name: notice.name,
+      patch: { outcome: 'saved' },
+    });
+    assert.deepEqual(stored, {
+      ...original,
+      items: [
+        original.items[0],
+        {
+          ...original.items[1],
+          meta: { ...original.items[1].meta, outcome: 'saved' },
+        },
+      ],
+    });
+    assert.deepEqual(fixture.server.toJSON().history ?? [], []);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('Roost exports the full history before paging and leaves the shared queue on the control document', async () => {
   const requests = [];
   const dispatches = [];
@@ -2532,6 +2617,7 @@ test('MCP files retain their download target and update when local upload comple
     type: 'file',
     fileId: 'clip',
     fileName: 'clip.mp4',
+    mimeType: 'video/mp4',
     storageSessionId: 'source',
     transport: 'local',
     sizeBytes: 1024,
@@ -2548,6 +2634,7 @@ test('MCP files retain their download target and update when local upload comple
   assert.deepEqual(uploaded.file, {
     id: 'clip',
     fileName: 'clip.mp4',
+    mimeType: 'video/mp4',
     storageSessionId: 'source',
     transport: 'r2',
     sizeBytes: 1024,

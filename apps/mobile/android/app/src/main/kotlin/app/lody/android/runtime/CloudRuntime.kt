@@ -74,6 +74,11 @@ sealed interface RuntimeCommand {
     data class SessionPreview(val sessionId: String, val revoke: Boolean = false) : RuntimeCommand
     /** One iOS Simulator / Android Emulator lifecycle call for the session (list / start / status / stop). */
     data class DeviceControl(val platform: DevicePlatform, val sessionId: String, val command: DeviceCommand) : RuntimeCommand
+    /**
+     * Save / create ([accept]) or dismiss an Agent's proposal in the watched session (upstream
+     * `decideProposal`); the outcome is recorded in history. A write, never retried here.
+     */
+    data class DecideProposal(val sessionId: String, val entryId: String, val itemId: String, val accept: Boolean) : RuntimeCommand
     data object Ping : RuntimeCommand
     data object InspectSchema : RuntimeCommand
 }
@@ -97,6 +102,8 @@ sealed interface RuntimeResult {
     data class Schedule(val value: app.lody.android.runtime.ScheduleDetail) : RuntimeResult
     /** The schedule a command wrote. */
     data class ScheduleWritten(val scheduleId: String) : RuntimeResult
+    /** A proposal's recorded outcome (`saved` / `created` / `dismissed`). */
+    data class ProposalDecided(val outcome: String, val scheduleId: String? = null) : RuntimeResult
     data class Created(val value: CreationReceipt) : RuntimeResult
     /** Upstream send state (`sent` / `queued` / `not_sent` / `unknown`); a machine ACK is delivery only. */
     data class Sent(val state: String, val reason: String? = null) : RuntimeResult
@@ -217,6 +224,8 @@ data class SessionMessage(
     val attachments: List<MessageAttachment> = emptyList(),
     val operations: List<OperationEvent> = emptyList(),
     val inputRetryable: Boolean = false,
+    /** An Agent's Role or schedule proposals (system entries), decided with [RuntimeCommand.DecideProposal]. */
+    val proposals: List<ProposalCard> = emptyList(),
 )
 
 /**
@@ -257,6 +266,11 @@ sealed interface TurnItem {
      * work between them) merge into one fanned stack in [app.lody.android.chat.TurnLayout].
      */
     data class Images(override val id: String, val images: List<TurnImage>) : TurnItem
+    /**
+     * A file the agent shared (`lody_upload_files`, web `SessionFileCard`): its name, type and
+     * size; never folded.
+     */
+    data class File(override val id: String, val fileName: String, val mimeType: String? = null, val sizeBytes: Long? = null) : TurnItem
     /** A failure or notice the turn ended with; never folded. */
     data class Notice(override val id: String, val text: String, val failure: Boolean) : TurnItem
     /**

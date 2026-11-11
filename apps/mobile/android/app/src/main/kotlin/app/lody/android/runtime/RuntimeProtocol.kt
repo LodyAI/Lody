@@ -26,8 +26,9 @@ internal object RuntimeProtocol {
                 val rawItems = entry.getJSONArray("items").objects()
                 if (role == "system") {
                     val operations = rawItems.flatMap(OperationEvents::parse)
-                    return@mapNotNull if (operations.isEmpty()) null else SessionMessage(
-                        id = entry.text("id"), role = role, text = "", streaming = false, operations = operations,
+                    val proposals = rawItems.mapNotNull { ProposalEvents.parse(entry.text("id"), it) }
+                    return@mapNotNull if (operations.isEmpty() && proposals.isEmpty()) null else SessionMessage(
+                        id = entry.text("id"), role = role, text = "", streaming = false, operations = operations, proposals = proposals,
                     )
                 }
                 val text = rawItems.mapNotNull { item ->
@@ -275,6 +276,14 @@ internal object RuntimeProtocol {
                     fun size(key: String) = (image.opt(key) as? Number)?.toInt()?.takeIf { it > 0 }
                     TurnImage(imageId, image.optString("fileName").ifBlank { "image" }, (image.opt("storageSessionId") as? String)?.takeIf { it.isNotBlank() }, size("width"), size("height"))
                 }.takeIf { it.isNotEmpty() }?.let { TurnItem.Images(id, it) }
+            }
+            "file" -> item.optJSONObject("file")?.let { file ->
+                TurnItem.File(
+                    id,
+                    fileName = file.optString("fileName").ifBlank { "file" },
+                    mimeType = (file.opt("mimeType") as? String)?.takeIf { it.isNotBlank() },
+                    sizeBytes = (file.opt("sizeBytes") as? Number)?.toLong()?.takeIf { it >= 0 },
+                )
             }
             "system_notice" -> {
                 val name = item.optString("name")

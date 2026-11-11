@@ -8,6 +8,14 @@ extension LodyChatView {
     applyRows()
   }
 
+  /// A proposal decision's progress or failure (`nil` clears it once the transcript carries the outcome).
+  func setProposalState(entryId: String, itemId: String, _ state: ChatProposalState?) {
+    let key = entryId + "/" + itemId
+    guard proposalStates[key] != state else { return }
+    proposalStates[key] = state
+    applyRows()
+  }
+
   func setErrorRetryState(_ json: String) {
     let next = try? JSONDecoder().decode(ChatErrorRetryState.self, from: Data(json.utf8))
     guard next != errorRetryState else { return }
@@ -259,6 +267,13 @@ extension LodyChatView {
       if let state = planDecisionState, state.entryId == projected[index].entryID, state.itemId == projected[index].itemID {
         projected[index].planDecision = state
       }
+    }
+    for index in projected.indices where projected[index].kind == "proposal" {
+      let row = projected[index]
+      projected[index].proposalState = proposalStates[row.entryID + "/" + row.itemID]
+      let requester = row.proposal?.requesterUserId
+      projected[index].proposalDecidable = !proposalUserID.isEmpty
+        && (row.proposal?.isRole != true || requester == proposalUserID)
     }
     for index in projected.indices where projected[index].kind == "chat_failed" {
       if let state = errorRetryState, state.entryId == projected[index].entryID, state.itemId == projected[index].itemID {

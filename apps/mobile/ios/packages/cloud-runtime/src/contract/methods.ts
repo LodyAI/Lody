@@ -123,6 +123,8 @@ import {
   ConversationMarkdownParams,
   ConversationMarkdownResult,
   RespondPermissionParams,
+  DecideProposalParams,
+  DecideProposalResult,
   RespondPermissionResult,
   SendTurnParams,
   SendTurnResult,
@@ -381,6 +383,11 @@ export const runtimeCalls = {
     params: RespondPermissionParams,
     result: RespondPermissionResult,
     timeoutMs: 45_000,
+  },
+  decideProposal: {
+    params: DecideProposalParams,
+    result: DecideProposalResult,
+    timeoutMs: 75_000,
   },
   probeSchema: {
     params: ProbeSchemaParams,

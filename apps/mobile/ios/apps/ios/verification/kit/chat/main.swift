@@ -836,6 +836,7 @@ print("Reading column: wide hosts keep a 768 pt column inside a full-bleed scrol
 let failureJSON = """
 [{"id":"error","role":"assistant","status":"completed","finished":true,"items":[
 {"itemId":"text","type":"text","text":"Completed answer"},
+{"itemId":"proposal","type":"system_notice","name":"agent_role_proposal","proposal":{"kind":"agent_role","action":"create","fields":{"name":"Reviewer"}}},
 {"itemId":"failure","type":"system_notice","name":"chat_failed","meta":{"reason":"future_reason","message":"raw error"}}
 ]}]
 """
@@ -843,6 +844,7 @@ let failureRows = ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].s
 precondition(failureRows.contains { $0.kind == "text" && $0.text == "Completed answer" })
 precondition(failureRows.contains { $0.kind == "chat_failed" && !$0.actionable && $0.attention })
 precondition(!failureRows.contains { $0.kind == "summary" })
+precondition(failureRows.contains { $0.kind == "proposal" && $0.proposal?.fields?.name == "Reviewer" && !$0.attention })
 
 precondition(ChatFailure.hasDetail(failureRows.first { $0.kind == "chat_failed" }?.errorMeta))
 precondition(!ChatFailure.hasDetail(nil))

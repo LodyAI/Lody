@@ -30,7 +30,7 @@ import {
 } from './upstream-roost.js';
 import { retrySessionRead } from './session-read';
 import { resolveTurnRole, type TurnRole } from './agent-roles';
-import { roleRunConfigApplied } from '../protocol/agent-roles';
+import { record, roleRunConfigApplied } from '../protocol/agent-roles';
 import type {
   CheckTurnQuotaResult,
   ControlTurnResult,
@@ -2404,4 +2404,126 @@ export async function respondPermission(args: {
   state.unsent.delete(key);
   if (active === state) scheduleEmit(state, 'live');
   return { state: 'accepted' as const };
+}
+
+type NoticeTarget = {
+  sessionId: string;
+  entryId: string;
+  itemId: string;
+};
+
+async function readRoostNotice(state: SessionState, args: NoticeTarget) {
+  const data = state.roostReader?.sessionData;
+  if (!data || !targetIsCurrent(state)) throw new Error('session_not_ready');
+  const read = await data.history.readTurn(args.entryId);
+  if (active !== state || !targetIsCurrent(state))
+    throw new Error('session_not_ready');
+  const turn = read.turn;
+  if (
+    read.state !== 'ready' ||
+    !record(turn) ||
+    turn.id !== args.entryId ||
+    !Array.isArray(turn.items)
+  )
+    return undefined;
+  const index = turn.items.findIndex(
+    (_, index) => args.itemId === `idx:${args.entryId}:${index}`,
+  );
+  const item: unknown = turn.items[index];
+  if (
+    !record(item) ||
+    item.type !== 'system_notice' ||
+    typeof item.name !== 'string'
+  )
+    return undefined;
+  return { data, turn, items: turn.items, index, item, name: item.name };
+}
+
+/** A `system_notice` in the open session, read for an action on it. */
+export async function noticeAt(args: NoticeTarget) {
+  const state = active;
+  if (!state || state.id !== args.sessionId || !state.ready)
+    throw new Error('session_not_ready');
+  if (state.target?.backend === 'roost') {
+    const notice = await readRoostNotice(state, args);
+    return notice && { name: notice.name, meta: notice.item.meta };
+  }
+  const item = locateItem(args.entryId, args.itemId);
+  if (!item) return undefined;
+  const raw: any = item.toJSON();
+  if (raw?.type !== 'system_notice' || typeof raw.name !== 'string')
+    return undefined;
+  return { name: raw.name, meta: raw.meta };
+}
+
+/**
+ * Record a decision in a notice's meta (web writes the whole turn back with the
+ * changed item). Only the fields given change; the upload is never replayed: a
+ * failed append keeps the local version so an explicit retry re-exports it.
+ */
+export async function writeNoticeMeta(
+  args: NoticeTarget & {
+    name: string;
+    patch: Record<string, unknown>;
+  },
+) {
+  const state = active;
+  if (!state || state.id !== args.sessionId || !state.ready)
+    throw new Error('session_not_ready');
+  if (state.target?.backend === 'roost') {
+    const notice = await readRoostNotice(state, args);
+    if (!notice || notice.name !== args.name)
+      throw new Error('proposal_unavailable');
+    const current = record(notice.item.meta) ? notice.item.meta : {};
+    if (
+      Object.entries(args.patch).every(([key, value]) => current[key] === value)
+    )
+      return;
+    const items = [...notice.items];
+    items[notice.index] = {
+      ...notice.item,
+      meta: { ...current, ...args.patch },
+    };
+    await notice.data.commands.replaceTurn(args.entryId, {
+      ...notice.turn,
+      id: args.entryId,
+      items,
+    });
+    return;
+  }
+  const item = locateItem(args.entryId, args.itemId);
+  if (!item || scalar(item.get('type')) !== 'system_notice')
+    throw new Error('proposal_unavailable');
+  if (scalar(item.get('name')) !== args.name)
+    throw new Error('proposal_unavailable');
+  const key = `${args.entryId}/${args.itemId}/notice`;
+  const meta = item.get('meta');
+  const current: Record<string, unknown> =
+    meta instanceof LoroMap
+      ? (meta.toJSON() as Record<string, unknown>)
+      : meta && typeof meta === 'object'
+        ? (meta as Record<string, unknown>)
+        : {};
+  const applied = Object.entries(args.patch).every(
+    ([field, value]) => current[field] === value,
+  );
+  if (applied && !state.unsent.has(key)) return;
+  const before = state.unsent.get(key)?.version ?? state.doc.version();
+  if (!applied) {
+    if (meta instanceof LoroMap)
+      for (const [field, value] of Object.entries(args.patch))
+        meta.set(field, value);
+    else item.set('meta', { ...current, ...args.patch });
+    state.doc.commit();
+  }
+  state.unsent.set(key, { version: before, outcome: args.patch });
+  const result = await state.client.append({
+    part: {
+      contentType: 'application/octet-stream',
+      body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
+    },
+  });
+  if (!result.ok) throw new Error('upload_failed');
+  state.unsent.delete(key);
+  if (active === state) scheduleEmit(state, 'live');
 }

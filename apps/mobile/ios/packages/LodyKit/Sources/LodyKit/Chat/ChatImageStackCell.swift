@@ -195,10 +195,7 @@ final class ChatImageStackCell: UICollectionViewCell, UIGestureRecognizerDelegat
   override func accessibilityDecrement() { move(-1, animated: false) }
 
   override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-    guard let pan = gestureRecognizer as? UIPanGestureRecognizer, pan.view === contentView else {
-      return super.gestureRecognizerShouldBegin(gestureRecognizer)
-    }
-    guard items.count > 1 else { return false }
+    guard let pan = gestureRecognizer as? UIPanGestureRecognizer, items.count > 1 else { return false }
     let velocity = pan.velocity(in: contentView)
     // Vertical drags keep scrolling the conversation.
     return abs(velocity.x) > abs(velocity.y) * 1.2

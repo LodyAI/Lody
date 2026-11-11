@@ -113,7 +113,7 @@ object TurnLayout {
         item is TurnItem.Thought || (item is TurnItem.Tool && item.kind != "switch_mode")
 
     private fun neverFolded(item: TurnItem): Boolean =
-        item is TurnItem.ProposedPlan || item is TurnItem.Checklist || item is TurnItem.Notice || item is TurnItem.Images ||
+        item is TurnItem.ProposedPlan || item is TurnItem.Checklist || item is TurnItem.Notice || item is TurnItem.Images || item is TurnItem.File ||
             (item is TurnItem.Tool && item.kind == "switch_mode")
 
     /** Web `getFinalTextRunStart`: skip the never-folded tail, then walk back over adjacent text. */

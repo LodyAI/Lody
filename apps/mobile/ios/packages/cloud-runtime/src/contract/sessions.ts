@@ -324,6 +324,27 @@ export const RespondPermissionResult = z
   .object({ state: z.enum(['accepted', 'stale', 'conflict']) })
   .meta({ id: 'RespondPermissionResult' });
 
+/**
+ * Accept or dismiss an Agent's proposal notice (`agent_role_proposal` saves the
+ * Role, `schedule_proposal` creates the schedule) and record the outcome in history.
+ */
+export const DecideProposalParams = z
+  .object({
+    workspaceId,
+    sessionId,
+    entryId: z.string().min(1),
+    itemId: z.string().min(1),
+    decision: z.enum(['accept', 'dismiss']),
+  })
+  .meta({ id: 'DecideProposalParams' });
+
+export const DecideProposalResult = z
+  .object({
+    outcome: z.enum(['saved', 'created', 'dismissed']),
+    scheduleId: z.string().optional(),
+  })
+  .meta({ id: 'DecideProposalResult' });
+
 export type BillingEntitlement = z.infer<typeof BillingEntitlement>;
 export type CreateSessionResult = z.input<typeof CreateSessionResult>;
 export type CheckTurnQuotaResult = z.input<typeof CheckTurnQuotaResult>;

@@ -7,7 +7,7 @@ export function contractBridge(runtime, emit) {
  function call(method,payload={}) {
   const id=`android-${++serial}`;
   return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>{pending.delete(id);reject(Error('runtime_timeout'));},method==='agentProviderOperation' ? 355000 : method==='agentProviderAuth' ? 65000 : method==='agentProviderProbe' || method==='agentProviders' ? 140000 : method==='editSession' || method==='forkSession' || method==='promptShortcuts' ? 130000 : method==='scheduleCommand' ? 75000 : method==='sessionPreview' ? 335000 : method==='iosSimulatorControl' || method==='androidEmulatorControl' ? 105000 : 45000);
+   const timer=setTimeout(()=>{pending.delete(id);reject(Error('runtime_timeout'));},method==='agentProviderOperation' ? 355000 : method==='agentProviderAuth' ? 65000 : method==='agentProviderProbe' || method==='agentProviders' ? 140000 : method==='editSession' || method==='forkSession' || method==='promptShortcuts' || method==='decideProposal' ? 130000 : method==='scheduleCommand' ? 75000 : method==='sessionPreview' ? 335000 : method==='iosSimulatorControl' || method==='androidEmulatorControl' ? 105000 : 45000);
    pending.set(id,{resolve,reject,timer,method});
    receive({v:1,gen:1,kind:'request',id,method,payload});
   });
@@ -102,6 +102,8 @@ export function contractBridge(runtime, emit) {
   sessionPreview:args=>invoke('sessionPreview',args),
   iosSimulatorControl:args=>invoke('iosSimulatorControl',args),
   androidEmulatorControl:args=>invoke('androidEmulatorControl',args),
+  // An Agent's Role or schedule proposal: save / create or dismiss it and record the outcome.
+  decideProposal:args=>invoke('decideProposal',args),
   shortcutCloud,
   previewToken,
   grant(value){for(const e of grants.values())receive(value?{...e,kind:'result',payload:value}:{...e,kind:'error',payload:undefined,error:{code:'grant_unavailable',retryable:true}});grants.clear();return true;},

@@ -1,4 +1,8 @@
 import {
+  proposalOf,
+  type ProposalPresentation,
+} from '../protocol/proposals.ts';
+import {
   operationPresentation,
   type OperationPresentation,
 } from './operation-presentation.ts';
@@ -43,6 +47,8 @@ export type ItemSummary =
       type: 'system_notice';
       name: string;
       meta?: SystemNoticeMeta;
+      /** `agent_role_proposal` / `schedule_proposal`, when well-formed. */
+      proposal?: ProposalPresentation;
     }
   | { itemId: string; rev: number; type: 'text'; text: string }
   | { itemId: string; rev: number; type: 'thought'; text: string }
@@ -238,12 +244,14 @@ function summarizeItem(
       message:
         typeof raw.meta?.message === 'string' ? raw.meta.message : undefined,
     };
+    const proposal = proposalOf(name, raw.meta);
     return {
       itemId,
-      rev: bump(projection, key, JSON.stringify({ name, meta })),
+      rev: bump(projection, key, JSON.stringify({ name, meta, proposal })),
       type,
       name,
       meta,
+      ...(proposal ? { proposal } : {}),
     };
   }
 
@@ -311,6 +319,10 @@ function summarizeItem(
     const file = {
       id: String(raw.fileId ?? ''),
       fileName: String(raw.fileName ?? '附件'),
+      mimeType:
+        typeof raw.mimeType === 'string' && raw.mimeType.length <= 255
+          ? raw.mimeType
+          : undefined,
       transport: typeof raw.transport === 'string' ? raw.transport : undefined,
       sizeBytes: Number.isSafeInteger(raw.sizeBytes)
         ? raw.sizeBytes
@@ -469,6 +481,14 @@ function summarizeEntry(
           itemId = identityAt(items, i);
         if (item?.type === 'tool_call' && typeof item.toolCallId === 'string')
           itemId = item.toolCallId;
+        // A proposal decision whose upload is unconfirmed stays undecided, so it can be retried.
+        if (
+          item?.type === 'system_notice' &&
+          pendingOutcomes.has(`${id}/${itemId}/notice`)
+        ) {
+          const { outcome: _outcome, ...meta } = item.meta ?? {};
+          return { ...item, meta };
+        }
         const key = `${id}/${itemId}/${request?.requestId}`;
         if (
           !pendingOutcomes.has(key) ||
