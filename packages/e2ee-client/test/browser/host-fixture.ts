@@ -164,6 +164,11 @@ let offer: PersonalPairingOffer,
   deliverySleeps: number[] = [],
   holdDeliveryRetry = false,
   putMark = 0,
+  // The open's background key round waits on this gate; diagnostics it reported.
+  openRoundSleeps: number[] = [],
+  openRoundGate: Promise<void> = new Promise(() => {}),
+  releaseOpenRound: () => void = () => {},
+  runtimeDiagnostics: string[] = [],
   failKeys = false,
   foreign = false;
 let databasePrefix = 'personal';
@@ -325,6 +330,11 @@ export async function boot(
   deliverySleeps = [];
   holdDeliveryRetry = false;
   putMark = 0;
+  openRoundSleeps = [];
+  openRoundGate = new Promise((resolve) => {
+    releaseOpenRound = resolve;
+  });
+  runtimeDiagnostics = [];
   session = undefined;
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -1708,6 +1718,17 @@ export async function bootRuntime(withSharing = false) {
                 .slice(checked.historyStart, checked.length)
                 .map((record, index) => ({ position: checked.historyStart + index, record }))
         ),
+      // The open's background round waits until a test releases it; it never runs by time.
+      openKeyRound: {
+        sleep: (ms) =>
+          Effect.suspend(() => {
+            openRoundSleeps.push(ms);
+            return Effect.promise(() => openRoundGate);
+          }),
+      },
+      diagnostics: (scope) => {
+        runtimeDiagnostics.push(scope);
+      },
       // Only the injected backoff moves: the mailbox recovers while the retry waits.
       keyDeliveryRetry: {
         sleep: (ms) =>
@@ -2299,6 +2320,13 @@ export async function runtimeInvoke(action: string) {
         refusePuts = false;
         putMark = putAttempts.length;
         value = true;
+        break;
+      case 'openRoundRelease':
+        releaseOpenRound();
+        value = true;
+        break;
+      case 'openRound':
+        value = { sleeps: openRoundSleeps, diagnostics: runtimeDiagnostics };
         break;
       // A further applicant; the earlier one stays admitted and is no longer listed.
       case 'memberNextApplicant':

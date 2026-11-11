@@ -1671,3 +1671,53 @@ it('one key round sends every envelope waiting at the current epoch', async () =
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// The approval page closed before its delivery succeeded. When the workspace opens again on
+// this owner device, a background key round sends the waiting envelope without anyone
+// approving or retrying, and a further open within the interval adds no round.
+it('reopening the workspace on the approving device delivers a key its closed approval page did not', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-reopen-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    const page = opened.page;
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).items[0]?.code, {
+        timeout: 30_000,
+      })
+      .toBe('e2ee_key_not_sent');
+    // The approval page closes. The next open returns at once; its background round waits.
+    await good(page, 'close');
+    await good(page, 'memberAcceptKeys');
+    expect(await good(page, 'open')).toMatchObject({ hasCurrentKey: true });
+    expect(await good(page, 'openRound')).toEqual({ sleeps: [30_000], diagnostics: [] });
+    // That page closes too before the round starts: the round finds no reader, opens none,
+    // and only reports it.
+    await good(page, 'close');
+    await good(page, 'openRoundRelease');
+    await expect
+      .poll(
+        async () => ((await good(page, 'openRound')) as { diagnostics: string[] }).diagnostics,
+        { timeout: 30_000 }
+      )
+      .toEqual(['e2ee-open-key-round']);
+    expect(((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept).toBe(0);
+    // Opening the workspace again sends the waiting envelope with no approval or retry.
+    await good(page, 'open');
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept, {
+        timeout: 30_000,
+      })
+      .toBe(1);
+    // Within the interval another open starts no round.
+    await good(page, 'open');
+    expect(await good(page, 'openRound')).toEqual({
+      sleeps: [30_000, 30_000],
+      diagnostics: ['e2ee-open-key-round'],
+    });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
