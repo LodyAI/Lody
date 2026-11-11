@@ -682,6 +682,7 @@ function MembersSection(props: {
   overview: LedgerOverview;
   names: ReturnType<typeof useMemberNames>;
   management?: E2eeMemberManagement;
+  onRotationSettled: (replaced: boolean) => void;
 }) {
   const { t } = useTranslation();
   const { names } = props;
@@ -730,7 +731,12 @@ function MembersSection(props: {
                 {t('e2ee.control.deviceCount', { count: member.devices.length })}
               </span>
               {props.management && (
-                <E2eeMemberActions member={member} name={name} management={props.management} />
+                <E2eeMemberActions
+                  member={member}
+                  name={name}
+                  management={props.management}
+                  onRotationSettled={props.onRotationSettled}
+                />
               )}
             </li>
           );
@@ -799,6 +805,29 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
     props.memberRole === 'owner' ||
     props.memberRole === 'admin';
   const tabLabel = (id: E2eeConsoleTab) => t(`e2ee.console.tabs.${id}`);
+  // A key update that failed after a removal. It lives here, not in the member's row:
+  // the removal reloads the list, which unmounts every row's actions and drops the
+  // removed member's row for good.
+  const [keyUpdate, setKeyUpdate] = useState<{
+    readonly workspaceId: string;
+    readonly state: 'failed' | 'retrying' | 'retryFailed';
+  } | null>(null);
+  const keyUpdateState = keyUpdate?.workspaceId === props.workspaceId ? keyUpdate.state : null;
+  const settleRotation = (replaced: boolean) =>
+    setKeyUpdate(replaced ? null : { workspaceId: props.workspaceId, state: 'failed' });
+  const rotate = props.memberManagement?.rotate;
+  const retryKeyUpdate = async (update: () => Promise<void>) => {
+    const workspaceId = props.workspaceId;
+    const settle = (next: typeof keyUpdate) =>
+      setKeyUpdate((current) => (current?.workspaceId === workspaceId ? next : current));
+    settle({ workspaceId, state: 'retrying' });
+    try {
+      await update();
+      settle(null);
+    } catch {
+      settle({ workspaceId, state: 'retryFailed' });
+    }
+  };
 
   const statusNotices = (
     <>
@@ -846,7 +875,29 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           {t('e2ee.control.loading')}
         </p>
       )}
-      {history?.view.inspectState().epoch.rotationRequired && (
+      {keyUpdateState && (
+        <Alert.Root tone="warning" data-testid="e2ee-member-rotate-failed">
+          <Alert.Description>
+            {t(
+              keyUpdateState === 'retryFailed'
+                ? 'e2ee.members.rotateRetryFailed'
+                : 'e2ee.members.rotateFailed'
+            )}
+          </Alert.Description>
+          <Alert.Actions>
+            <Button
+              data-testid="e2ee-member-rotate-retry"
+              disabled={!rotate || keyUpdateState === 'retrying'}
+              onClick={() => {
+                if (rotate) void retryKeyUpdate(rotate);
+              }}
+            >
+              {t('e2ee.members.rotateRetry')}
+            </Button>
+          </Alert.Actions>
+        </Alert.Root>
+      )}
+      {!keyUpdateState && history?.view.inspectState().epoch.rotationRequired && (
         <Alert.Root tone="warning">
           <Alert.Description>{t('e2ee.members.rotationHint')}</Alert.Description>
         </Alert.Root>
@@ -1076,7 +1127,12 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           </Alert.Root>
         )}
         {history && overview && (
-          <MembersSection overview={overview} names={names} management={props.memberManagement} />
+          <MembersSection
+            overview={overview}
+            names={names}
+            management={props.memberManagement}
+            onRotationSettled={settleRotation}
+          />
         )}
         {sections.get('members')}
       </>
