@@ -1,3 +1,4 @@
+import LodyCore
 import UIKit
 
 @MainActor
@@ -18,6 +19,13 @@ class ProjectVisibilityController: UIViewController {
   private var live = false
   private var version = 0
   private var observer: NSObjectProtocol?
+  private var groupObserver: NSObjectProtocol?
+  /// The workspace's Project groups; previews with a fixed workspace list none.
+  private var groups: [RuntimeContract.ProjectGroupItem] {
+    let store = ProjectGroupStore.shared
+    guard fixed == nil, store.scope == workspace.key else { return [] }
+    return store.groups
+  }
   /// The account/workspace-scoped last accepted registrations; previews with a fixed workspace keep none.
   private var store: SettingsSnapshotStore<VisibilitySnapshot>? {
     guard fixed == nil else { return nil }
@@ -41,6 +49,7 @@ class ProjectVisibilityController: UIViewController {
 
   isolated deinit {
     if let observer { NotificationCenter.default.removeObserver(observer) }
+    if let groupObserver { NotificationCenter.default.removeObserver(groupObserver) }
   }
 
   override func viewDidLoad() {
@@ -53,6 +62,10 @@ class ProjectVisibilityController: UIViewController {
     if fixed == nil {
       observer = NotificationCenter.default.addObserver(forName: .lodyCatalogDidChange, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.sync() }
+      }
+      groupObserver = NotificationCenter.default.addObserver(forName: .lodyProjectGroupsDidChange, object: nil, queue: .main) {
+        [weak self] _ in
+        MainActor.assumeIsolated { self?.render() }
       }
     }
     sync(force: true)
@@ -74,6 +87,9 @@ class ProjectVisibilityController: UIViewController {
     live = false
     version += 1
     let id = version, store = store
+    if fixed == nil, !next.key.isEmpty {
+      ProjectGroupStore.shared.refresh(userId: next.userId, workspaceId: next.workspaceId)
+    }
     render()
     Task { [weak self] in
       // The last accepted registrations show at once; the live read replaces them.
@@ -145,7 +161,8 @@ class ProjectVisibilityController: UIViewController {
   // each project's sharing state, so a slow, failed or empty registration read never blanks the page.
   private func render() {
     let catalog = workspace.catalog
-    let hasData = snapshot?.rows.isEmpty == false || !catalog.projects.isEmpty
+    let groupSection = ProjectGroupSections.section(groups, machineNames: catalog.machineNames)
+    let hasData = snapshot?.rows.isEmpty == false || !catalog.projects.isEmpty || groupSection != nil
     let state = LodyListState.make(
       title: String(localized: "settings.unavailable.projects", bundle: .lody), hasData: hasData, loading: busy, failed: failed,
       offline: !workspace.connected, unconfirmed: unconfirmed, syncedAt: loadedAt
@@ -160,9 +177,11 @@ class ProjectVisibilityController: UIViewController {
       snapshot, catalog: catalog, enabled: live && !busy && !failed && !unconfirmed,
       presence: workspace.connected ? workspace.presence : .unknown
     )
+    // Project groups follow the folders they hold; visibility sharing applies to folders only.
     list.setSections(
       [SettingsText.footer("scope", ProjectVisibilitySections.text("hintShort"))] + rows
         + [SettingsText.footer("footer", ProjectVisibilitySections.text("footer"))]
+        + (groupSection.map { [$0] } ?? [])
     )
   }
 
@@ -170,7 +189,14 @@ class ProjectVisibilityController: UIViewController {
     switch name {
     case "refresh":
       pulled = true
+      if fixed == nil, !workspace.key.isEmpty {
+        ProjectGroupStore.shared.refresh(userId: workspace.userId, workspaceId: workspace.workspaceId)
+      }
       read()
+    case "rowPress":
+      guard let id = body["id"] as? String, id.hasPrefix(ProjectGroupSections.rowPrefix),
+            let group = groups.first(where: { ProjectGroupSections.rowPrefix + $0.id == id }) else { return }
+      LodyShell.shared.pushNative(ProjectGroupController(group: group, scope: workspace.key), title: group.name, from: self)
     case "noticeAction", "unavailableAction":
       read()
     case "rowAction":

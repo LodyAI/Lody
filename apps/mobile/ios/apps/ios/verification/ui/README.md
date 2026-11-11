@@ -48,7 +48,7 @@ per batch, then launches a fresh app for each case. Run English only (`en`,
 | `core-home` / `core-send`               | The corresponding halves of core                                                                                                                        |
 | `pages` batch                           | Home/workspaces, creation/model memory, project/branch/history/directory, activity, notifications, diagnostics and preferences (including the app icon) |
 | `send` batch                            | Text send, queued/guide/interrupt turns, rounds, scroll behavior, session tools, permissions, editing, sharing, agent errors and native diffs/files     |
-| `settings-workspace` / `settings` batch | Agents, prompt shortcuts, project visibility, GitHub, usage, agent roles and archived sessions                                                          |
+| `settings-workspace` / `settings` batch | Agents, prompt shortcuts, project visibility, GitHub, usage and agent roles                                                                             |
 | Individual iPad cases                   | Adaptive split, creation, chrome, sidebar, devices, search, deletion and wide panels                                                                    |
 | `toast`                                 | Archive/restore completion, archive failure, warning and copy notifications: localized accessibility labels, rendered glyph colors and dismissal        |
 

@@ -152,7 +152,6 @@ final class NativeDebugController: UIViewController {
       ("settings-baseline-live", "Settings baseline", "gearshape.2"),
       ("ai-usage-preview", "AI usage", "chart.bar"),
       ("agent-roles-preview", String(localized: "debug.native.agent.role.verification", bundle: .lody), "person.crop.square"),
-      ("archived-sessions-preview", "Archived sessions", "archivebox"),
       ("session-preview-live", "Native session", "bubble.left"),
       ("machine-settings-preview", String(localized: "debug.native.machine.settings.verification", bundle: .lody), "desktopcomputer"),
       ("preferences-preview", String(localized: "debug.native.preferences.verification", bundle: .lody), "slider.horizontal.3"),

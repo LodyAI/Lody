@@ -51,7 +51,7 @@ const load = async (category) => ({
 const text = '@src/file.ts $auth @session:s2 @role:reviewer #11 #12 /compact';
 // OSS mention-skill/session/agent-role-source prompt formats, not copied tables.
 const expected =
-  '@src/file.ts use /auth [Skill Path](/home/My Skills/auth\\)/SKILL.md) use lody mcp to query session[id: s2] history use lody mcp to create a session with agent role[id: reviewer, name: Reviewer] #11 #12 /compact';
+  '@src/file.ts use /auth [Skill Path](/home/My Skills/auth\\)/SKILL.md) [@Other conversation](lody://session/s2) [Agent Role: Reviewer (agentRoleId: reviewer)] #11 #12 /compact';
 
 test('send expansion matches OSS prompts; paths, GitHub references and commands remain verbatim', async () => {
   assert.equal(await mentions.expandMentions(text, load), expected);
@@ -131,7 +131,7 @@ test('workspace sessions exclude self, prefer unarchived entries, and retain sta
     mentions.expandMentionText('@session:active', [
       { ...result.items[0], name: 'Renamed' },
     ]),
-    'use lody mcp to query session[id: active] history',
+    '[@Renamed](lody://session/active)',
   );
   assert.equal(mentions.sessionMentions([], []).items.length, 0);
   assert.equal(

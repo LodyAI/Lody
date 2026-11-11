@@ -2,13 +2,47 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
-import { Quote } from 'lucide-react';
+import { Dialog } from '@lody/ui/dialog';
+import { Popover } from '@lody/ui/popover';
+import { Textarea } from '@lody/ui/textarea';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { ArrowUp, Quote } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
+import { isImeComposingKeyboardEvent } from '@/lib/ime';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { useSafeAreaCollisionPadding } from '@/hooks/use-safe-area-insets';
 import { selectedMessageMarkdown } from './message-quote-markdown';
 
-const styles = stylex.create({ floating: { position: 'fixed', zIndex: 80 } });
+const styles = stylex.create({
+  floating: { position: 'fixed', zIndex: 80 },
+  reply: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    width: 'min(360px, calc(100vw - 32px))',
+  },
+  actions: { display: 'flex', justifyContent: 'flex-end', gap: space[2] },
+  excerpt: {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 3,
+    overflow: 'hidden',
+    whiteSpace: 'pre-wrap',
+    color: colors.secondaryLabel,
+    fontSize: textScale.footnoteSize,
+    lineHeight: textScale.footnoteLeading,
+  },
+});
+
+export type MessageQuoteOptions = {
+  /** The question asked about the quote, appended right after it. */
+  comment?: string;
+  /** Send the composer once the quote and comment are in it. */
+  send?: boolean;
+};
+type Reply = { markdown: string; anchor: Capture['anchor'] };
 type Capture = {
   text: string;
   range: Range;
@@ -58,7 +92,7 @@ export function MessageQuoteAction({
 }: {
   root: HTMLElement | null;
   enabled: boolean;
-  onQuote: (text: string) => boolean;
+  onQuote: (text: string, options?: MessageQuoteOptions) => boolean;
 }) {
   const { t } = useTranslation();
   const {
@@ -68,6 +102,10 @@ export function MessageQuoteAction({
     left: safeLeft,
   } = useSafeAreaCollisionPadding();
   const [capture, setCapture] = useState<Capture | null>(null);
+  const [reply, setReply] = useState<Reply | null>(null);
+  const [comment, setComment] = useState('');
+  const replyInputRef = useRef<HTMLTextAreaElement>(null);
+  const isMobile = useIsMobile();
   const actionRef = useRef<HTMLDivElement>(null);
   const onQuoteRef = useRef(onQuote);
   onQuoteRef.current = onQuote;
@@ -86,6 +124,7 @@ export function MessageQuoteAction({
   }, [capture]);
   useEffect(() => {
     setCapture(null);
+    setReply(null);
     if (!root || !enabled) return undefined;
     const doc = root.ownerDocument;
     const win = doc.defaultView;
@@ -199,7 +238,124 @@ export function MessageQuoteAction({
       win.visualViewport?.removeEventListener('scroll', schedule);
     };
   }, [enabled, root, safeBottom, safeLeft, safeRight, safeTop]);
-  if (!capture || !root || !enabled) return null;
+  if (!root || !enabled) return null;
+  const closeReply = () => {
+    setReply(null);
+    setComment('');
+  };
+  const submitReply = (send: boolean) => {
+    if (!reply) return;
+    const question = comment.trim();
+    if (send && !question) return;
+    if (onQuoteRef.current(reply.markdown, { comment: question, send })) {
+      root.ownerDocument.getSelection()?.removeAllRanges();
+      closeReply();
+    }
+  };
+  if (reply) {
+    const field = (
+      <Textarea
+        ref={replyInputRef}
+        rows={isMobile ? 3 : 2}
+        resize="none"
+        value={comment}
+        aria-label={t('composer.messageQuoteReplyLabel', 'Question about the quote')}
+        placeholder={t('composer.messageQuoteReplyPlaceholder', 'Ask about this quote…')}
+        onChange={(event) => setComment(event.target.value)}
+        onKeyDown={(event) => {
+          // A phone keyboard's return key writes a line; the button sends.
+          if (
+            isMobile ||
+            event.key !== 'Enter' ||
+            event.shiftKey ||
+            isImeComposingKeyboardEvent(event)
+          )
+            return;
+          event.preventDefault();
+          submitReply(false);
+        }}
+      />
+    );
+    const actions = (
+      <div {...stylex.props(styles.actions)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          data-testid="message-quote-send"
+          disabled={!comment.trim()}
+          onClick={() => submitReply(true)}
+        >
+          <ArrowUp size={14} />
+          {t('composer.messageQuoteSend', 'Send')}
+        </Button>
+        <Button
+          type="button"
+          size="small"
+          data-testid="message-quote-add"
+          onClick={() => submitReply(false)}
+        >
+          {t('composer.messageQuoteAddToComposer', 'Add to message')}
+        </Button>
+      </div>
+    );
+    if (isMobile)
+      return (
+        <Dialog.Root
+          open
+          onOpenChange={(open) => {
+            if (!open) closeReply();
+          }}
+        >
+          <Dialog.Content initialFocus={replyInputRef} finalFocus={false}>
+            <Dialog.Header>
+              <Dialog.Title>{t('composer.quoteMessage', 'Quote')}</Dialog.Title>
+              <Dialog.Description {...stylex.props(styles.excerpt)}>
+                {reply.markdown}
+              </Dialog.Description>
+            </Dialog.Header>
+            {field}
+            <Dialog.Footer>{actions}</Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Root>
+      );
+    const { anchor } = reply;
+    return (
+      <Popover.Root
+        open
+        onOpenChange={(open) => {
+          if (!open) closeReply();
+        }}
+      >
+        <Popover.Content
+          side="top"
+          collisionPadding={{ top: safeTop, right: safeRight, bottom: safeBottom, left: safeLeft }}
+          anchor={{
+            getBoundingClientRect: () =>
+              ({
+                x: anchor.center,
+                y: anchor.top,
+                left: anchor.center,
+                right: anchor.center,
+                top: anchor.top,
+                bottom: anchor.bottom,
+                width: 0,
+                height: anchor.bottom - anchor.top,
+                toJSON: () => ({}),
+              }) as DOMRect,
+          }}
+          initialFocus={replyInputRef}
+          finalFocus={false}
+        >
+          <div {...stylex.props(styles.reply)} data-testid="message-quote-reply">
+            {field}
+            {actions}
+          </div>
+        </Popover.Content>
+      </Popover.Root>
+    );
+  }
+  if (!capture) return null;
   return createPortal(
     <div ref={actionRef} {...stylex.props(styles.floating)}>
       <Button
@@ -259,10 +415,9 @@ export function MessageQuoteAction({
             );
             return;
           }
-          if (onQuoteRef.current(markdown)) {
-            root.ownerDocument.getSelection()?.removeAllRanges();
-            setCapture(null);
-          }
+          setComment('');
+          setReply({ markdown, anchor: capture.anchor });
+          setCapture(null);
         }}
       >
         <Quote size={14} />

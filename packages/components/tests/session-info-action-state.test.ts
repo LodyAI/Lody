@@ -64,7 +64,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         prStatus: 'draft',
         prMergeState: 'd',
         prCiState: 'f',
-        prReadiness: 'y',
       })
     ).toEqual(['commit-and-push', 'ready-for-review']);
   });
@@ -81,7 +80,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...existingPr,
         prMergeState: 'd',
         prCiState: 'f',
-        prReadiness: 'n',
       })
     ).toEqual(['resolve-conflicts', 'fix-ci-errors']);
     expect(
@@ -89,17 +87,31 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...existingPr,
         prMergeState: 'c',
         prCiState: 'f',
-        prReadiness: 'n',
       })
-    ).toEqual(['fix-ci-errors']);
+    ).toEqual(['fix-ci-errors', 'merge']);
     expect(
       resolveSessionInfoBarGitHubActionIds({
         ...existingPr,
         prMergeState: 'c',
         prCiState: 's',
-        prReadiness: 'y',
       })
     ).toEqual(['merge']);
+  });
+
+  it('offers Merge whenever GitHub would accept it, including while CI runs', () => {
+    const openPr = { ...BASE_INPUT, hasExistingPr: true, prStatus: 'open' as const };
+    expect(
+      resolveSessionInfoBarGitHubActionIds({ ...openPr, prMergeState: 'u', prCiState: 'p' })
+    ).toEqual(['merge']);
+    expect(
+      resolveSessionInfoBarGitHubActionIds({ ...openPr, prMergeState: 'u', prCiState: 'f' })
+    ).toEqual(['fix-ci-errors', 'merge']);
+    for (const prMergeState of ['b', 'h', 'd'] as const) {
+      expect(
+        resolveSessionInfoBarGitHubActionIds({ ...openPr, prMergeState, prCiState: 'p' })
+      ).not.toContain('merge');
+    }
+    expect(resolveSessionInfoBarGitHubActionIds({ ...openPr, prCiState: 'p' })).toEqual([]);
   });
 
   it('puts Commit & Push ahead of conflict repair, CI repair, and merge on a dirty PR', () => {
@@ -119,7 +131,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...dirtyPr,
         prMergeState: 'd',
         prCiState: 'f',
-        prReadiness: 'n',
       })
     ).toEqual(['commit-and-push', 'resolve-conflicts', 'fix-ci-errors']);
     expect(
@@ -127,7 +138,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...dirtyPr,
         prMergeState: 'c',
         prCiState: 's',
-        prReadiness: 'y',
       })
     ).toEqual(['commit-and-push', 'merge']);
   });
@@ -147,7 +157,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         prStatus: 'open',
         prMergeState: 'c',
         prCiState: 's',
-        prReadiness: 'y',
       })
     ).toEqual(['commit-and-push', 'merge']);
   });
@@ -159,7 +168,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         hasExistingPr: true,
         workspaceDirty: true,
         prStatus: 'merged',
-        prReadiness: 'y',
       })
     ).toEqual([]);
   });
@@ -218,7 +226,6 @@ it('keeps local agent repair actions without offering unavailable hosted mutatio
       canMutatePr: false,
       hasExistingPr: true,
       prStatus: 'open',
-      prReadiness: 'y',
       prCiState: 'f',
     })
   ).toEqual(['fix-ci-errors']);

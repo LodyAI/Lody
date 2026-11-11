@@ -9,6 +9,7 @@ class GitHubSettingsController: UIViewController {
   private let open: @MainActor (URL) async -> Void
   private var scope = ""
   private var workspace = ""
+  private var userId = ""
   private var value: GitHubSettings?
   private var busy = true
   private var failed = false
@@ -24,6 +25,13 @@ class GitHubSettingsController: UIViewController {
   /// The switch the user just flipped, shown at its new position until the write reads back;
   /// a failed or unconfirmed write drops it, so the row returns to the last read value.
   private var pending: (id: String, enabled: Bool)?
+  /// The account/workspace-scoped last complete read, shown at once while a live read refreshes
+  /// it; previews with a fixed workspace keep none. The list rarely changes, so its switches work
+  /// straight away: every write re-reads the role and repository list natively and reads back.
+  private var store: SettingsSnapshotStore<GitHubSettings>? {
+    guard fixedWorkspace == nil else { return nil }
+    return SettingsSnapshotStore(kind: "github", userId: userId, workspaceId: workspace)
+  }
 
   init(
     workspace: String? = nil,
@@ -87,13 +95,21 @@ class GitHubSettingsController: UIViewController {
     guard key != scope else { return }
     scope = key
     workspace = next
+    userId = fixedWorkspace == nil ? current.userId : ""
     value = nil
     pending = nil
     failed = false
     unconfirmed = false
     pulled = false
     loadedAt = nil
-    read()
+    version += 1
+    let id = version, store = store
+    Task { [weak self] in
+      let cached = await store?.read()
+      guard let self, self.version == id else { return }
+      if let cached, cached.valid, self.value == nil { self.value = cached }
+      self.read()
+    }
   }
 
   private func returned() {
@@ -119,9 +135,8 @@ class GitHubSettingsController: UIViewController {
       let result = try? await service(GitHubSettingsRequest(workspaceId: workspace, action: "list"))
       guard let self, self.version == id else { return }
       if case .settings(let next) = result {
-        self.value = next
+        self.accept(next)
         self.unconfirmed = false
-        self.loadedAt = LodyRelativeTime.now()
       } else {
         self.failed = true
       }
@@ -131,8 +146,17 @@ class GitHubSettingsController: UIViewController {
     }
   }
 
+  /// Only a complete read is remembered; a partial one would lock the cached page on reopen.
+  private func accept(_ next: GitHubSettings) {
+    value = next
+    loadedAt = LodyRelativeTime.now()
+    if next.errors.isEmpty { store?.write(next) }
+  }
+
+  /// A write may start while a background refresh is still reading: it supersedes that read
+  /// (its result is dropped) and its own read back becomes the page.
   private func perform(_ request: GitHubSettingsRequest, showing shown: (id: String, enabled: Bool)? = nil) {
-    guard !writing, !busy else { return }
+    guard !writing else { return }
     pending = shown
     writing = true
     busy = true
@@ -150,7 +174,7 @@ class GitHubSettingsController: UIViewController {
           self.opening = true
           await self.open(url)
         case .settings(let next):
-          self.value = next
+          self.accept(next)
           self.changed()
         case nil:
           self.unconfirmed = true
@@ -176,7 +200,7 @@ class GitHubSettingsController: UIViewController {
     list.setLoading(state.loading)
     list.setNotice(state.notice)
     list.setUnavailable(state.unavailable)
-    list.setSections(shown.map { GitHubSettingsSections.make($0, enabled: !busy && !blocked, query: query) } ?? [])
+    list.setSections(shown.map { GitHubSettingsSections.make($0, enabled: !writing && !blocked, query: query) } ?? [])
   }
 
   /// The last read value with the in-flight switch applied.

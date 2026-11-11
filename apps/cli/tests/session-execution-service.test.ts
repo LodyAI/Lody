@@ -12970,7 +12970,7 @@ describe('Operation Inbox execution boundary', () => {
             userTurnId: batch.inputId,
             acpSessionConfig: {
               ...config,
-              prompt: 'Review attached completed results',
+              prompt: 'The results returned by delegated work follow.',
               chainDepth: batch.chainDepth,
             },
           },

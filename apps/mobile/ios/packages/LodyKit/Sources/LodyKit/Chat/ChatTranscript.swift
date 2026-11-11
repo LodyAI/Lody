@@ -240,6 +240,9 @@ struct ChatRow: Equatable {
   var streaming = false
   var localImageURI: String? = nil
   var image: ChatImage? = nil
+  /// An `imageStack` row: the consecutive images it fans together, each keeping its own
+  /// single-image row id so the preview, sharing and zoom sources address it individually.
+  var stack: [ChatImagePreviewItem] = []
   var file: ChatMessageAttachment? = nil
   var fileDiff: ChatFileDiff? = nil
   var fileDiffs: [ChatFileDiff] = []
@@ -844,12 +847,54 @@ struct ChatTranscript {
           result.append(ChatRow(id: entry.id + ":meta", entryID: entry.id, kind: "meta", text: finishedAt))
         }
       }
-      return result
+      return Self.stackImages(result)
     }
   }
 }
 
 extension ChatTranscript {
+  /// Images of one turn that only tool work separates (an agent uploading several images, one
+  /// image group, or repeated upload calls) become ONE fanned `imageStack` row instead of a long
+  /// column of photos. The stack sits where its first image was; the process rows between its
+  /// images follow it. Prose or any other row ends the stack. The stack's id derives from its
+  /// first image, so it stays stable while later images join; a lone image keeps its `image` row.
+  static func stackImages(_ rows: [ChatRow]) -> [ChatRow] {
+    let transparent: Set<String> = ["summary", "tool_call", "thought"]
+    var result: [ChatRow] = []
+    var run: [ChatRow] = []
+    var between: [ChatRow] = []
+    func flush() {
+      defer { run = []; between = [] }
+      guard let first = run.first else { result += between; return }
+      if run.count == 1 {
+        result.append(first)
+      } else {
+        var row = ChatRow(id: first.id + ":stack", entryID: first.entryID, kind: "imageStack", text: "", itemID: first.itemID)
+        row.stack = run.compactMap { image in
+          image.image.map { ChatImagePreviewItem(id: image.id, image: $0, localURI: image.localImageURI) }
+        }
+        result.append(row)
+      }
+      result += between
+    }
+    for row in rows {
+      let isImage = row.kind == "image" && row.image != nil
+      if isImage, let first = run.first, first.entryID == row.entryID {
+        run.append(row)
+      } else if isImage {
+        flush()
+        run.append(row)
+      } else if !run.isEmpty, transparent.contains(row.kind), row.entryID == run[0].entryID {
+        between.append(row)
+      } else {
+        flush()
+        result.append(row)
+      }
+    }
+    flush()
+    return result
+  }
+
   /// Web `getFinalTextRunStart`: the answer is the final contiguous run of text before the
   /// never-folded tail (plans, attachments, failures, sub-tasks, plan approvals), not just the
   /// last text item. Empty when the turn ends in work.

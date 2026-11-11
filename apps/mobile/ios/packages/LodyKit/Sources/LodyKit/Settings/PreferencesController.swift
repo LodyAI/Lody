@@ -58,13 +58,11 @@ final class PreferencesController: UIViewController {
     var roost = LodyListRow.item("roost-history", text("roostHistory"), value: text(LodyPreferences.roostHistoryExperimentEnabled ? "on" : "off"), image: "externaldrive")
     roost.options = ["off", "on"].map { option($0, text($0), selected: ($0 == "on") == LodyPreferences.roostHistoryExperimentEnabled) }
     var sections: [LodyListSection] = [
-      .group("language-section", [
+      .group("general", header: text("preferences.general"), [
         .item(
           "language", text("preferences.language"), value: language, image: "globe", disclosure: true,
           accessibilityValue: language
         ),
-      ]),
-      .group("notifications-section", [
         .item("notifications", text("notifications.title"), image: "bell", disclosure: true, navigates: true),
       ]),
       .group("chat", header: text("preferences.chat"), [
@@ -75,7 +73,7 @@ final class PreferencesController: UIViewController {
     if LodyPreferences.developerModeEnabled {
       sections.append(.group("beta", header: text("betaFeatures"), footer: text("roostHistoryHint"), [roost]))
     }
-    sections.append(.group("app-icon-section", [appIconRow()]))
+    sections.append(.group("appearance", header: text("preferences.appearance"), [appIconRow()]))
     list.setSections(sections)
   }
 

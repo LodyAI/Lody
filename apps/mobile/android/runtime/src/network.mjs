@@ -21,6 +21,8 @@ const core={ping:()=>runtime.ping(),probeSchema:()=>runtime.probeSchema(),setAct
 const cloud=cloudCommands(runtime,access,stopSessions);
 // Native answers a shortcutCloud request it received as an event.
 cloud.shortcutCloudReply=(requestId,reply)=>runtime.shortcutCloud(requestId,reply);
+// Native answers a previewToken request (a preview proof's request token) it received as an event.
+cloud.previewTokenReply=(requestId,reply)=>runtime.previewToken(requestId,reply);
 let identity;
 const connect=cloud.connect;cloud.connect=(workspaceId,gateway,userId)=>{const result=connect(workspaceId,gateway,userId);identity={workspaceId,userId};return result;};
 // A tool step's detail (command, output, diff) reads the watched session's local replica only.
@@ -31,7 +33,19 @@ const detail={
   const args={...input,workspaceId:identity.workspaceId,userId:identity.userId};
   return kind==='edit' ? runtime.editSession(args) : runtime.forkSession(args);
  },
- createTab:(parentSessionId,sessionId,title,preferRoost)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.createTab({workspaceId:scope.workspaceId,parentSessionId,sessionId,title,preferRoost:preferRoost===true});},loadOlderSession:sessionId=>runtime.loadOlderSession({sessionId}),retryPendingInput:(sessionId,inputId)=>runtime.retryPendingInput({sessionId,inputId}),forgetPendingInput:(sessionId,inputId)=>runtime.forgetPendingInput({sessionId,inputId}),itemDetail:(sessionId,entryId,itemId)=>itemDetail({sessionId,entryId,itemId}),turnDiff:(sessionId,entryId,path)=>runtime.turnDiff({sessionId,entryId,path}),
+ createTab:(parentSessionId,sessionId,title,preferRoost)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.createTab({workspaceId:scope.workspaceId,parentSessionId,sessionId,title,preferRoost:preferRoost===true});},
+ loadOlderSession:sessionId=>runtime.loadOlderSession({sessionId}),
+ retryPendingInput:(sessionId,inputId)=>runtime.retryPendingInput({sessionId,inputId}),
+ forgetPendingInput:(sessionId,inputId)=>runtime.forgetPendingInput({sessionId,inputId}),
+ itemDetail:(sessionId,entryId,itemId)=>itemDetail({sessionId,entryId,itemId}),turnDiff:(sessionId,entryId,path)=>runtime.turnDiff({sessionId,entryId,path}),
+ // Browse files: a folder of the session's local project (relative to its root) and a file's contents (relative to the session's directory). Reads only.
+ listDir:(sessionId,relativePath)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.listDir({workspaceId:scope.workspaceId,sessionId,relativePath,userId:scope.userId});},
+ readFile:(sessionId,path)=>runtime.readFile({sessionId,path}),
+ // Previews of a session, always for the verified identity: the managed web preview (`create` /
+ // `revoke`) and the iOS Simulator / Android Emulator lifecycle (list / start / status / stop).
+ sessionPreview:(sessionId,action)=>{const scope=identity;if(!scope)throw Error('not_connected');if(!['create','revoke'].includes(action))throw Error('invalid_action');return runtime.sessionPreview({sessionId,userId:scope.userId,action});},
+ iosSimulatorControl:(sessionId,command)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.iosSimulatorControl({workspaceId:scope.workspaceId,sessionId,userId:scope.userId,command});},
+ androidEmulatorControl:(sessionId,command)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.androidEmulatorControl({workspaceId:scope.workspaceId,sessionId,userId:scope.userId,command});},
  // Stops the watched session's running turn; a write, never retried.
  controlTurn:async(sessionId,machineId,turnId)=>{const result=await controlTurn({action:'stop',sessionId,machineId,turnId});return {state:result?.state??'unknown'};}};
 const sendWithReferences = args => sendTurn(args, async text => {
@@ -44,4 +58,4 @@ const sendWithReferences = args => sendTurn(args, async text => {
  return {text:expanded,spans:referenceSpans(expanded,items)};
 });
 globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...providerCommands(runtime,()=>identity),...roleCommands(runtime,()=>identity),...shortcutCommands(runtime,()=>identity),...detail});
-emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings']});
+emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings','sessionPreview','iosSimulatorControl','androidEmulatorControl','previewTokenReply']});

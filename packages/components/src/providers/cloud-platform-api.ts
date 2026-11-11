@@ -77,6 +77,26 @@ export function useCloudPlatformClient() {
   const client = useConvex();
   return useMemo(
     () => ({
+      /** Deliver cached query values without issuing another query per notification. */
+      subscribeValue: <Args, Result>(
+        operation: CloudQuery<Args, Result>,
+        args: Args,
+        changed: (value: Result) => void,
+        failed: (error: unknown) => void
+      ) => {
+        const query = client.watchQuery(queryReference(operation), args as never);
+        const emit = () => {
+          try {
+            const value = query.localQueryResult();
+            if (value !== undefined) changed(value as Result);
+          } catch (error) {
+            failed(error);
+          }
+        };
+        const unsubscribe = query.onUpdate(emit);
+        emit();
+        return unsubscribe;
+      },
       /** Keep an optional app-owned query live; imperative reads then reuse its cache. */
       subscribe: <Args, Result>(
         operation: CloudQuery<Args, Result>,

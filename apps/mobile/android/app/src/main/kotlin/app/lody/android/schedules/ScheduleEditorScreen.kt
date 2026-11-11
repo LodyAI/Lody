@@ -1,6 +1,7 @@
 // A schedule's page: stored status and quick actions, then Task, When and Run with cards. New schedules and owners' own schedules are editable; others are read only.
 package app.lody.android.schedules
 
+import android.widget.NumberPicker
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,6 +62,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.viewinterop.AndroidView
 import app.lody.android.R
 import app.lody.android.create.CreationService
 import app.lody.android.designsystem.LodyIconButton
@@ -360,15 +362,11 @@ private fun Timing(form: ScheduleForm, zone: java.time.ZoneId, zoneId: String, e
             }
             Frequency.Hours -> {
                 Divider()
-                Choice(stringResource(R.string.schedules_every), everyHours(form.everyHours), ScheduleForm.HOUR_STEPS.map { it to everyHours(it) }, enabled) {
-                    edit(form.editRule { copy(everyHours = it) })
-                }
+                Action(stringResource(R.string.schedules_every), everyHours(form.everyHours), enabled) { picking = "every" }
             }
             Frequency.Minutes -> {
                 Divider()
-                Choice(stringResource(R.string.schedules_every), everyMinutes(form.everyMinutes), ScheduleForm.MINUTE_STEPS.map { it to everyMinutes(it) }, enabled) {
-                    edit(form.editRule { copy(everyMinutes = it) })
-                }
+                Action(stringResource(R.string.schedules_every), everyMinutes(form.everyMinutes), enabled) { picking = "every" }
             }
             Frequency.Once -> {
                 val at = form.onceAt
@@ -389,6 +387,41 @@ private fun Timing(form: ScheduleForm, zone: java.time.ZoneId, zoneId: String, e
     }
     val context = LocalContext.current
     when (picking) {
+        "every" -> {
+            val hours = form.frequency == Frequency.Hours
+            val range = if (hours) ScheduleForm.EVERY_HOURS else ScheduleForm.EVERY_MINUTES
+            val labels = range.map { if (hours) everyHours(it) else everyMinutes(it) }
+            var chosen by remember { mutableStateOf((if (hours) form.everyHours else form.everyMinutes).coerceIn(range)) }
+            AlertDialog(
+                onDismissRequest = { picking = null },
+                containerColor = colors.bgOverlay,
+                title = { Text(stringResource(R.string.schedules_every)) },
+                text = {
+                    // A wheel over the whole range; a step that does not divide the clock runs as an anchored interval.
+                    AndroidView(
+                        modifier = Modifier.fillMaxWidth(),
+                        factory = { context ->
+                            NumberPicker(context).apply {
+                                minValue = range.first
+                                maxValue = range.last
+                                displayedValues = labels.toTypedArray()
+                                wrapSelectorWheel = false
+                                descendantFocusability = NumberPicker.FOCUS_BLOCK_DESCENDANTS
+                                value = chosen
+                                setOnValueChangedListener { _, _, next -> chosen = next }
+                            }
+                        },
+                    )
+                },
+                confirmButton = {
+                    LodyTextButton(onClick = {
+                        picking = null
+                        edit(form.editRule { if (hours) copy(everyHours = chosen) else copy(everyMinutes = chosen) })
+                    }) { Text(stringResource(android.R.string.ok)) }
+                },
+                dismissButton = { LodyTextButton(onClick = { picking = null }) { Text(stringResource(R.string.schedules_cancel)) } },
+            )
+        }
         "time", "onceTime" -> {
             val local = form.onceAt?.let { ScheduleForms.local(it, zone) }
             val once = picking == "onceTime"

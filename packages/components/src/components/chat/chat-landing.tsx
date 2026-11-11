@@ -9,7 +9,7 @@ import {
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
-import { bindAgentRoleTarget, getSessionGroupTitle, snapshotAgentRole } from '@lody/shared';
+import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -716,7 +716,7 @@ function WorkspaceChatLanding({
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
-  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
+  const { currentUserId: myAccountId } = useMySessionScope();
   const visibleMachineIndex = useVisibleMachineMetas({
     machineFlockFamilies: CHAT_LANDING_MACHINE_FLOCK_FAMILIES,
   });
@@ -4979,8 +4979,7 @@ function WorkspaceChatLanding({
     };
     return sourceSessions
       .filter((session) => {
-        if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId, ownedMachineIds))
-          return false;
+        if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId)) return false;
         if (chatExcludedMachines.has(session.machineId)) return false;
         return true;
       })
@@ -5038,7 +5037,7 @@ function WorkspaceChatLanding({
         }
         return {
           id: session.id,
-          title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
+          title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
           kind,
           branchName: session.branchName?.trim() || null,
           prNumber: prInfo.number,
@@ -5117,7 +5116,6 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
-    ownedMachineIds,
     myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
@@ -5337,7 +5335,6 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
-    ownedMachineIds,
     myAccountId,
     chatViewMode,
     mobileHomeMachines,
@@ -5911,8 +5908,7 @@ function WorkspaceChatLanding({
       return activity;
     };
     const projectScopedSessions = sourceSessions.filter((session) => {
-      if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId, ownedMachineIds))
-        return false;
+      if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId)) return false;
       if (mobileProjectContext.kind === 'local') {
         if (session.machineId !== mobileProjectContext.machineId) return false;
         const key = getSessionLocalProjectKey(session);
@@ -5963,7 +5959,7 @@ function WorkspaceChatLanding({
         }
         return {
           id: session.id,
-          title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
+          title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
           kind,
           branchName: session.branchName?.trim() || null,
           prNumber: prInfo.number,
@@ -6008,7 +6004,6 @@ function WorkspaceChatLanding({
       });
   }, [
     chatScope,
-    ownedMachineIds,
     myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
@@ -6151,7 +6146,6 @@ function WorkspaceChatLanding({
     chatExcludedPr,
     chatExcludedRunning,
     chatScope,
-    ownedMachineIds,
     myAccountId,
     mobileHomeMachines,
     mobileProjectContext,

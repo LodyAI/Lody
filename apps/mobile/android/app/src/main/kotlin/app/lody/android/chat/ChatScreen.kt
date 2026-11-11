@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.border
@@ -79,8 +80,25 @@ data class ChatContext(
     val closedTabs: List<CatalogSession> = emptyList(),
     val relatedSessions: List<CatalogSession> = emptyList(),
     val repository: String = "",
+    /** Every GitHub repository whose PRs belong to the project (a multi-repository project's members). */
+    val repositories: List<String> = emptyList(),
     val machineName: String = "",
     val machineKind: app.lody.android.create.CreateSessionModel.MachineKind = app.lody.android.create.CreateSessionModel.MachineKind.Laptop,
+    /** The computer's iOS Simulator support (`available` / `upgrade-required`; darwin only), null without it. */
+    val machineSimulator: String? = null,
+    /** The computer advertises the Android Emulator preview. */
+    val machineEmulator: Boolean = false,
+)
+
+/** The More menu's preview entries; null labels hide an entry. */
+internal data class PreviewMenu(
+    val browserLabel: String? = null,
+    val browserActive: Boolean = false,
+    val browserBusy: Boolean = false,
+    val onBrowser: () -> Unit = {},
+    val onStopBrowser: () -> Unit = {},
+    val deviceLabel: String? = null,
+    val onDevice: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,6 +113,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     // The latest user turn's run config, from the session snapshot (iOS `composerJSON`).
     var usage by remember(id, scope) { mutableStateOf<app.lody.android.runtime.SessionUsage?>(null) }
     var snapshotChoice by remember(id, scope) { mutableStateOf<RunChoice?>(null) }
+    // The session's managed web preview candidate (runtime session `preview`).
+    var browserCandidate by remember(id, scope) { mutableStateOf<BrowserPreview?>(null) }
     var entries by remember(id, scope) { mutableStateOf(emptyList<ChatEntry>()) }
     // Turns this page sent that the transcript has not shown yet (optimistic, never resent).
     var outgoing by remember(id, scope) { mutableStateOf(emptyList<Outgoing>()) }
@@ -115,6 +135,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     val meName = context.me?.name.orEmpty()
     // Resolved in composition: the transcript is built off the main thread.
     val application = appContext.applicationContext as app.lody.android.LodyApplication
+    // Agent images in this conversation, read with the verified account (iOS `ChatImageCell`).
+    val sessionImages = remember(scope, id) { SessionImageSource(application.sessionImages, scope, id) }
     val accountState by application.account.state.collectAsState()
     var members by remember(scope) { mutableStateOf(emptyMap<String, app.lody.android.auth.WorkspaceMember>()) }
     LaunchedEffect(scope, accountState.verified) {
@@ -182,6 +204,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 }
                 messages = snapshot.messages
                 snapshotChoice = snapshot.composer
+                browserCandidate = snapshot.preview
                 usage = snapshot.usage
                 historyHasMore = snapshot.historyHasMore
                 historyLoading = snapshot.historyLoading
@@ -473,7 +496,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         SessionInfoBar.of(prUpdates.apply(it), context.repository, busy = running || !canSend)
     }
     // Merge / Ready for review go straight to GitHub, one at a time, never retried.
-    var merging by remember(id) { mutableStateOf(false) }
+    // The PR whose merge method sheet is open: the bar's PR or one opened from a link.
+    var mergeTarget by remember(id) { mutableStateOf<CatalogPullRequest?>(null) }
+    // A project PR opened from a link in the transcript, shown in the PR panel.
+    var linkedPullRequest by remember(id) { mutableStateOf<PullRequestLink?>(null) }
     var writing by remember(scope, id) { mutableStateOf<SessionInfoBar.Action?>(null) }
     val prefs = remember { appContext.getSharedPreferences("lody.chat", android.content.Context.MODE_PRIVATE) }
     val writeTexts = WriteTexts(
@@ -482,8 +508,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         WriteErrors.associateWith { code -> stringResource(writeErrorText(code)) },
     )
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val writePullRequest: (String?) -> Unit = write@{ method ->
-        val pr = bar?.pullRequest ?: return@write
+    val writePullRequest: (CatalogPullRequest, String?) -> Unit = write@{ pr, method ->
         if (writing != null) return@write
         prUpdates.begin(pr, merged = method != null)
         writing = if (method != null) SessionInfoBar.Action.Merge else SessionInfoBar.Action.ReadyForReview
@@ -523,15 +548,15 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             }
         }
     }
-    if (merging && bar?.pullRequest != null) {
+    mergeTarget?.let { target ->
         MergeSheet(
-            "${bar.pullRequest.repository} #${bar.pullRequest.number}",
+            "${target.repository} #${target.number}",
             preferred = prefs.getString("prMergeMethod", "merge") ?: "merge",
-            onDismiss = { merging = false },
+            onDismiss = { mergeTarget = null },
             onMerge = { method ->
-                merging = false
+                mergeTarget = null
                 prefs.edit().putString("prMergeMethod", method).apply()
-                writePullRequest(method)
+                writePullRequest(target, method)
             },
         )
     }
@@ -540,11 +565,11 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         stringResource(R.string.pr_error_delete_unknown), stringResource(R.string.pr_error_branch_protected),
     )
     // The PR panel (web's PR tab on mobile): Merge while open, Delete branch once merged.
-    val pullRequestPanel = bar?.pullRequest?.let { pr ->
+    val panelFor: (CatalogPullRequest) -> PullRequestPanel = { pr ->
         PullRequestPanel(
             canMerge = pr.status == "open" && writing == null,
             merging = writing == SessionInfoBar.Action.Merge,
-            onMerge = { if (writing == null) merging = true },
+            onMerge = { if (writing == null) mergeTarget = pr },
             branchExists = { repository.headBranchExists(scope, pr.repository, pr.number) },
             deleteBranch = { done ->
                 // Outlives the sheet; one request, never retried.
@@ -569,6 +594,121 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 }
             },
         )
+    }
+    val pullRequestPanel = bar?.pullRequest?.let(panelFor)
+    // Transcript links to a PR of this project (a multi-repository project's members included)
+    // open the PR panel; other links go to the browser. iOS `openPullRequestLink`.
+    val browser = androidx.compose.ui.platform.LocalUriHandler.current
+    val repositories = context.repositories
+    val transcriptLinks = remember(browser, repositories) {
+        object : androidx.compose.ui.platform.UriHandler {
+            override fun openUri(uri: String) {
+                val link = PullRequestLink.inProject(uri, repositories)
+                if (link != null) linkedPullRequest = link else browser.openUri(uri)
+            }
+        }
+    }
+    var browsingFiles by remember(id) { mutableStateOf(false) }
+    if (browsingFiles) ProjectFilesSheet(
+        listDir = { path -> repository.listDir(scope, id, path) },
+        readFile = { path -> repository.readFile(scope, id, path) },
+        openExternal = { uri -> runCatching { browser.openUri(uri) } },
+        onDismiss = { browsingFiles = false },
+    )
+    linkedPullRequest?.let { link ->
+        val own = bar?.pullRequest?.takeIf { it.number == link.number && it.repository.equals(link.repository, ignoreCase = true) }
+        if (bar != null && own != null) {
+            PullRequestSheet(PullRequestView.of(bar, own), ciVerdict(own.ci), { coroutines.launch { snackbar.showSnackbar(it) } }, pullRequestPanel) { linkedPullRequest = null }
+        } else {
+            LinkedPullRequestSheet(
+                link, context.session?.pullRequests.orEmpty(),
+                load = { repository.pullRequestDetails(scope, link.repository, link.number) },
+                onCopied = { coroutines.launch { snackbar.showSnackbar(it) } },
+                panelFor = panelFor,
+            ) { linkedPullRequest = null }
+        }
+    }
+    // Remote previews. Each device platform keeps its own state for this conversation; the page's
+    // scope runs it, so leaving stops polling and the next visit resumes through `status`.
+    val iosPreview = remember(scope, id) { DevicePreviewSession(DevicePlatform.IOS, { repository.deviceControl(scope, DevicePlatform.IOS, id, it) }, coroutines) }
+    val androidPreview = remember(scope, id) { DevicePreviewSession(DevicePlatform.ANDROID, { repository.deviceControl(scope, DevicePlatform.ANDROID, id, it) }, coroutines) }
+    DisposableEffect(iosPreview, androidPreview) { onDispose { iosPreview.close(); androidPreview.close() } }
+    var devicePage by remember(scope, id) { mutableStateOf<DevicePlatform?>(null) }
+    var choosingDevice by remember(scope, id) { mutableStateOf(false) }
+    var simulatorUpgrade by remember(scope, id) { mutableStateOf(false) }
+    var browserPage by remember(scope, id) { mutableStateOf<String?>(null) }
+    var browserBusy by remember(scope, id) { mutableStateOf(false) }
+    var dismissedRequests by remember(scope, id) { mutableStateOf(emptySet<String>()) }
+    val devicePlatforms = buildList {
+        if (context.machineSimulator != null) add(DevicePlatform.IOS)
+        if (context.machineEmulator) add(DevicePlatform.ANDROID)
+    }
+    val openDevice: (DevicePlatform) -> Unit = { platform ->
+        if (platform == DevicePlatform.IOS && context.machineSimulator == "upgrade-required") { simulatorUpgrade = true }
+        else { devicePage = platform }
+    }
+    val previewTexts = PreviewTexts(
+        stringResource(R.string.preview_unsupported), stringResource(R.string.preview_unauthorized), stringResource(R.string.preview_generic),
+        stringResource(R.string.preview_stopped), stringResource(R.string.preview_stop_failed), stringResource(R.string.preview_failed),
+    )
+    val browserAction: (Boolean) -> Unit = browserAction@{ revoke ->
+        if (browserBusy) return@browserAction
+        browserBusy = true
+        coroutines.launch {
+            val message = try {
+                val reply = repository.browserPreview(scope, id, revoke)
+                when {
+                    reply.error != null -> previewTexts.error(reply.error, reply.message)
+                    revoke -> { browserPage = null; previewTexts.stopped }
+                    PreviewUrls.origin(reply.url) == null -> previewTexts.generic
+                    else -> { browserPage = reply.url; null }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { if (revoke) previewTexts.stopFailed else previewTexts.failed }
+            finally { browserBusy = false }
+            if (message != null) snackbar.showSnackbar(message)
+        }
+    }
+    val previewMenu = PreviewMenu(
+        browserLabel = browserCandidate?.let { stringResource(R.string.preview_open_label, it.label) },
+        browserActive = browserCandidate?.active == true,
+        browserBusy = browserBusy,
+        onBrowser = { browserAction(false) },
+        onStopBrowser = { browserAction(true) },
+        deviceLabel = when {
+            devicePlatforms.size > 1 -> stringResource(R.string.preview_device)
+            devicePlatforms.firstOrNull() == DevicePlatform.IOS -> stringResource(R.string.preview_ios)
+            devicePlatforms.firstOrNull() == DevicePlatform.ANDROID -> stringResource(R.string.preview_android)
+            else -> null
+        },
+        onDevice = { if (devicePlatforms.size > 1) { choosingDevice = true } else { devicePlatforms.firstOrNull()?.let(openDevice) } },
+    )
+    // The agent asked to show a device preview (catalog request id): offered until opened or dismissed.
+    val previewRequest = session?.let { current ->
+        current.iosSimulatorPreviewRequestId?.takeIf { context.machineSimulator == "available" && it !in dismissedRequests && !iosPreview.running }
+            ?.let { DevicePlatform.IOS to it }
+            ?: current.androidEmulatorPreviewRequestId?.takeIf { context.machineEmulator && it !in dismissedRequests && !androidPreview.running }
+                ?.let { DevicePlatform.ANDROID to it }
+    }
+    if (choosingDevice) DevicePreviewChooser(onPick = { choosingDevice = false; openDevice(it) }, onDismiss = { choosingDevice = false })
+    if (simulatorUpgrade) AlertDialog(
+        onDismissRequest = { simulatorUpgrade = false },
+        text = { Text(stringResource(R.string.preview_ios_upgrade, context.machineName)) },
+        confirmButton = { TextButton(onClick = { simulatorUpgrade = false }) { Text(stringResource(R.string.preview_ok)) } },
+    )
+    devicePage?.let { platform ->
+        DevicePreviewPage(if (platform == DevicePlatform.IOS) iosPreview else androidPreview) { devicePage = null }
+    }
+    browserPage?.let { url ->
+        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+        val copied = stringResource(R.string.preview_link_copied)
+        BrowserPreviewPage(browserCandidate?.label.orEmpty(), url, browserBusy,
+            onStop = { browserAction(true) },
+            onCopy = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(url))
+                android.widget.Toast.makeText(appContext, copied, android.widget.Toast.LENGTH_SHORT).show()
+            },
+            onClose = { browserPage = null })
     }
     val prompts = SessionInfoBar.Prompts(
         stringResource(R.string.bar_prompt_createPrOrigin), stringResource(R.string.bar_prompt_createDraftPrOrigin),
@@ -596,7 +736,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     }
                 } else {
                     // The transcript scrolls under the floating header.
-                    ChatTranscript(
+                    CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides transcriptLinks, LocalSessionImages provides sessionImages) { ChatTranscript(
                         all, Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top + if (creationNotice != null) LodySize.controlLg else LodySpacing.none, bottom = LodySpacing.md), state = listState, scrollToLatest = scrollToLatest,
                         historyHasMore = historyHasMore, historyLoading = historyLoading,
                         loadEarlier = { repository.loadOlder(scope, id) },
@@ -614,9 +754,11 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                         navigateSession = { target -> if (SessionRelations.target(target, context.relatedSessions) != null) onSelectTab(target) },
                         loadDetail = { entryId, itemId -> repository.detail(scope, id, entryId, itemId) },
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
-                    )
+                    ) }
                 }
-                ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine)
+                ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine,
+                    onBrowseFiles = if (ProjectFiles.browsable(context.session, creationUnconfirmed)) ({ browsingFiles = true }) else null,
+                    previews = previewMenu.takeIf { context.session?.isTabClosed != true && !creationUnconfirmed })
                 if (creationNotice != null) {
                     Text(creationNotice,
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = top).padding(horizontal = TranscriptMargin),
@@ -640,18 +782,26 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     ) { scrollToLatest++ }
                 }
             }
+            if (previewRequest != null && context.session?.isTabClosed != true) {
+                PreviewRequestBanner(previewRequest.first,
+                    onShow = { dismissedRequests = dismissedRequests + previewRequest.second; openDevice(previewRequest.first) },
+                    onDismiss = { dismissedRequests = dismissedRequests + previewRequest.second })
+            }
             if (bar != null && context.session?.isTabClosed != true) {
                 ChatActionBar(
                     bar,
                     writing = writing,
+                    // `writing` changes with every begin/finish, so this read recomposes with it.
+                    pullRequestBusy = writing != null && bar.pullRequest?.let(prUpdates::writes) == true,
                     pullRequestPanel = pullRequestPanel,
+                    panelFor = panelFor,
                     relations = if (hasRelations) ({ SessionRelationsChip(id, context.relatedSessions, onSelectTab) }) else null,
                     onAction = { action ->
                         // Only while still offered, so a menu left open cannot act for a state that moved on.
                         when {
                             writing != null || action !in bar.actions -> Unit
-                            action == SessionInfoBar.Action.Merge -> merging = true
-                            action == SessionInfoBar.Action.ReadyForReview -> writePullRequest(null)
+                            action == SessionInfoBar.Action.Merge -> mergeTarget = bar.pullRequest
+                            action == SessionInfoBar.Action.ReadyForReview -> bar.pullRequest?.let { writePullRequest(it, null) }
                             else -> sendText(bar.prompt(action, prompts), emptyList())
                         }
                     },
@@ -767,7 +917,7 @@ private val RunningStatuses = setOf("running", "initializing", "processing", "in
 
 /** Floating header: title over the tappable machine subtitle, with conditional Tabs and More. */
 @Composable
-internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit, machine: String = "", machineOnline: Boolean? = null, loadMachine: suspend () -> MachinePanelData = { MachinePanelData() }) {
+internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit, machine: String = "", machineOnline: Boolean? = null, loadMachine: suspend () -> MachinePanelData = { MachinePanelData() }, onBrowseFiles: (() -> Unit)? = null, previews: PreviewMenu? = null) {
     var expanded by remember(currentId) { mutableStateOf(false) }
     var history by remember(currentId) { mutableStateOf(false) }
     var restoringId by remember(currentId) { mutableStateOf<String?>(null) }
@@ -819,6 +969,19 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
                     Icon(LodyIcons.More, stringResource(R.string.bar_more), tint = colors.iconPrimary, modifier = Modifier.size(LodyIconSize.md))
                 }
                 DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                    if (onBrowseFiles != null) DropdownMenuItem(text = { Text(stringResource(R.string.files_title)) },
+                        leadingIcon = { Icon(LodyIcons.Folder, null) }, onClick = { more = false; onBrowseFiles() })
+                    if (previews != null) {
+                        previews.browserLabel?.let { label ->
+                            DropdownMenuItem(text = { Text(label) }, enabled = !previews.browserBusy,
+                                leadingIcon = { Icon(LodyIcons.ExternalLink, null) }, onClick = { more = false; previews.onBrowser() })
+                            if (previews.browserActive) DropdownMenuItem(text = { Text(stringResource(R.string.preview_stop)) }, enabled = !previews.browserBusy,
+                                leadingIcon = { Icon(LodyIcons.Stop, null) }, onClick = { more = false; previews.onStopBrowser() })
+                        }
+                        previews.deviceLabel?.let { label ->
+                            DropdownMenuItem(text = { Text(label) }, leadingIcon = { Icon(LodyIcons.Machine, null) }, onClick = { more = false; previews.onDevice() })
+                        }
+                    }
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_tab)) }, enabled = !creating && busy == null,
                         leadingIcon = { Icon(LodyIcons.Plus, null) }, onClick = { more = false; onNewTab() })
                     if (closedTabs.isNotEmpty()) DropdownMenuItem(text = { Text(stringResource(R.string.chat_closed_tabs)) },
@@ -1198,16 +1361,21 @@ internal fun ChatActionBar(
     onAction: (SessionInfoBar.Action) -> Unit,
     onCopied: (String) -> Unit,
     writing: SessionInfoBar.Action? = null,
+    /** A merge or Ready for review on the bar's PR is in flight: a spinner replaces its mark. */
+    pullRequestBusy: Boolean = false,
     relations: (@Composable () -> Unit)? = null,
     pullRequestPanel: PullRequestPanel? = null,
+    /** The PR panel for any PR; a Project group member's PR opens with its own. */
+    panelFor: ((CatalogPullRequest) -> PullRequestPanel)? = null,
 ) {
-    val context = bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
+    val context = bar.group != null || bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
     if (!context && !diff && bar.actions.isEmpty() && relations == null) return
     @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
         Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             relations?.invoke()
-            if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel)
+            if (bar.group != null) GroupContextItem(bar, bar.group, diffDot, onCopied, panelFor)
+            else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel, busy = pullRequestBusy)
         }
     }
     @Composable fun Action() {
@@ -1327,21 +1495,20 @@ private fun MachineItem(name: String, online: Boolean?, load: suspend () -> Mach
  * capsule (a dot when space is short; the counts then lead the menu). CI trouble tints the glyph.
  */
 @Composable
-private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String) -> Unit, panel: PullRequestPanel?, modifier: Modifier = Modifier) {
+private fun ContextItem(
+    bar: SessionInfoBar,
+    diffDot: Boolean,
+    onCopied: (String) -> Unit,
+    panel: PullRequestPanel?,
+    modifier: Modifier = Modifier,
+    busy: Boolean = false,
+) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var open by remember { mutableStateOf(false) }
     val pr = bar.pullRequest
-    val ci = pr?.ci
-    val verdict = when (ci) {
-        "s" -> stringResource(R.string.bar_ci_s)
-        "f" -> stringResource(R.string.bar_ci_f)
-        "e" -> stringResource(R.string.bar_ci_e)
-        "p" -> stringResource(R.string.bar_ci_p)
-        "x" -> stringResource(R.string.home_ci_expected)
-        else -> null
-    }
+    val verdict = ciVerdict(pr?.ci)
     val label = pr?.let { "#${it.number}" } ?: bar.branch.ifEmpty { bar.repository.substringAfterLast('/') }
     val copied = stringResource(R.string.bar_branch_copied)
     val diff = bar.added + bar.removed > 0
@@ -1350,7 +1517,7 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
     val description = listOfNotNull(bar.repository, bar.branch, label, verdict, counts.takeIf { diff })
         .filter { it.isNotEmpty() }.distinct().joinToString(", ")
     var sheet by remember { mutableStateOf(false) }
-    if (sheet && pr != null) PullRequestSheet(bar, pr, verdict, onCopied, panel) { sheet = false }
+    if (sheet && pr != null) PullRequestSheet(PullRequestView.of(bar, pr), verdict, onCopied, panel) { sheet = false }
     Box(modifier.barCapsule(colors)) {
         // Always choose a destination before opening the PR or inspecting changes.
         BarCell(
@@ -1360,7 +1527,8 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
             onLongClick = if (pr != null) ({ open = true }) else null,
         ) {
             if (showsContext) {
-                if (pr != null) app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci)
+                if (pr != null && busy) CircularProgressIndicator(Modifier.size(LodyIconSize.sm), strokeWidth = 2.dp, color = colors.iconSecondary)
+                else if (pr != null) app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci)
                 else Icon(LodyIcons.Branch, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
                 Text(label, style = type.subhead, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                     // Not weighted: the fitting probe measures unbounded, where a weight would read as zero.
@@ -1425,6 +1593,144 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
                     onClick = { open = false },
                     enabled = false,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * A Project group's context: the repository and PR counts with the group-wide ±diff; tapping opens
+ * a sheet listing every member with its branch, ±diff and current PR (web `SessionProjectMembersChip`,
+ * without a hidden selected member). A member's PR opens the PR panel, where Merge acts on that PR.
+ * iOS: `GroupMembersPopover`.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GroupContextItem(
+    bar: SessionInfoBar,
+    run: CatalogProjectRun,
+    diffDot: Boolean,
+    onCopied: (String) -> Unit,
+    panelFor: ((CatalogPullRequest) -> PullRequestPanel)?,
+) {
+    val colors = LodyTheme.colors
+    val type = LodyTheme.typography
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val copied = stringResource(R.string.bar_branch_copied)
+    var open by remember { mutableStateOf(false) }
+    var memberId by remember { mutableStateOf<String?>(null) }
+    val prs = run.pullRequests
+    val repositories = androidx.compose.ui.res.pluralStringResource(R.plurals.bar_group_repositories, run.members.size, run.members.size)
+    val prCount = androidx.compose.ui.res.pluralStringResource(R.plurals.bar_group_pull_requests, prs.size, prs.size)
+    val label = if (prs.isEmpty()) repositories else "$repositories · $prCount"
+    // A failing check anywhere is the one thing worth colour on the capsule.
+    val failing = prs.any { (it.status == "open" || it.status == "draft") && (it.ci == "f" || it.ci == "e") }
+    val diff = bar.added + bar.removed > 0
+    val description = listOf(run.name, label, if (diff) "+${bar.added} −${bar.removed}" else "").filter { it.isNotEmpty() }.joinToString(", ")
+    val member = run.members.firstOrNull { it.id == memberId }
+    val memberPr = member?.pullRequest
+    if (member != null && memberPr != null) {
+        val view = PullRequestView(
+            memberPr, member.branch.orEmpty(), member.diffAdded ?: 0, member.diffRemoved ?: 0,
+            memberPr.url ?: "https://github.com/${memberPr.repository}/pull/${memberPr.number}",
+        )
+        PullRequestSheet(view, ciVerdict(memberPr.ci), onCopied, panelFor?.invoke(memberPr)) { memberId = null }
+    }
+    Box(Modifier.barCapsule(colors)) {
+        BarCell(description, onClick = { open = true }, Modifier.padding(horizontal = LodySpacing.xs)) {
+            Icon(LodyIcons.ProjectGroup, contentDescription = null,
+                tint = if (failing) colors.dangerDefault else colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
+            Text(label, style = type.subhead, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp))
+            if (diff && !diffDot) {
+                val style = type.subhead.copy(fontFeatureSettings = "tnum")
+                Text("+${bar.added}", style = style, color = colors.diffAddedText, maxLines = 1)
+                Text("−${bar.removed}", style = style, color = colors.diffRemovedText, maxLines = 1)
+            }
+            Icon(LodyIcons.Expand, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
+        }
+    }
+    if (open) ModalBottomSheet(onDismissRequest = { open = false }, containerColor = colors.bgBase) {
+        Column(Modifier.padding(bottom = LodySpacing.xl)) {
+            Column(Modifier.padding(horizontal = LodySpacing.lg).padding(bottom = LodySpacing.sm)) {
+                Text(run.name, style = type.headline, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val members = androidx.compose.ui.res.pluralStringResource(R.plurals.create_group_members, run.members.size, run.members.size)
+                Text(if (prs.isEmpty()) members else "$members · $prCount", style = type.footnote, color = colors.textSecondary)
+            }
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(run.members, key = { it.id }) { item ->
+                    GroupMemberRow(
+                        item,
+                        onOpen = { open = false; memberId = item.id },
+                        onCopyBranch = { branch ->
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(branch))
+                            onCopied(copied)
+                        },
+                    )
+                }
+            }
+            if (diff) {
+                // Display only until Android has a workspace changes page, as the single-repository menu.
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg, vertical = LodySpacing.sm),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
+                ) {
+                    Icon(LodyIcons.Diff, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+                    Text(stringResource(R.string.bar_group_all_changes), style = type.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                    val style = type.body.copy(fontFeatureSettings = "tnum")
+                    Text("+${bar.added}", style = style, color = colors.diffAddedText)
+                    Text("−${bar.removed}", style = style, color = colors.diffRemovedText)
+                }
+            }
+        }
+    }
+}
+
+/** One member: identity, path · branch (or the in-place note) and ±diff, then its PR or a copy-branch button. */
+@Composable
+private fun GroupMemberRow(member: CatalogProjectMember, onOpen: () -> Unit, onCopyBranch: (String) -> Unit) {
+    val colors = LodyTheme.colors
+    val type = LodyTheme.typography
+    val pr = member.pullRequest
+    val detail = listOfNotNull(
+        member.path.takeIf { it != member.identity },
+        if (member.inPlace) stringResource(R.string.bar_group_in_place) else member.branch,
+    ).joinToString(" · ")
+    Row(
+        Modifier.fillMaxWidth()
+            .then(if (pr != null) Modifier.clickable(role = Role.Button, onClickLabel = stringResource(R.string.bar_view_pr), onClick = onOpen) else Modifier)
+            .heightIn(min = 56.dp)
+            .padding(start = LodySpacing.lg + (member.depth * 14).dp, end = LodySpacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
+    ) {
+        when {
+            member.submodule -> Icon(LodyIcons.Branch, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+            member.kind == "github" && member.repoFullName != null -> app.lody.android.home.RepositoryIcon(member.repoFullName, LodyIconSize.md)
+            else -> Icon(LodyIcons.Folder, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(member.identity, style = type.subhead.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+            Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs), verticalAlignment = Alignment.CenterVertically) {
+                if (detail.isNotEmpty()) {
+                    Text(detail, style = type.footnote, color = colors.textSecondary, maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f, fill = false))
+                }
+                if (member.diffAdded != null && member.diffRemoved != null) {
+                    val style = type.footnote.copy(fontFeatureSettings = "tnum")
+                    Text("+${member.diffAdded}", style = style, color = colors.diffAddedText)
+                    Text("−${member.diffRemoved}", style = style, color = colors.diffRemovedText)
+                }
+            }
+        }
+        if (pr != null) {
+            app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci)
+            Text("#${pr.number}", style = type.subhead.copy(fontFeatureSettings = "tnum"), color = colors.textSecondary)
+        } else if (member.branch != null && !member.inPlace) {
+            IconButton(onClick = { onCopyBranch(member.branch) }) {
+                Icon(LodyIcons.Copy, contentDescription = stringResource(R.string.bar_copy_branch),
+                    tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
             }
         }
     }
@@ -1580,6 +1886,65 @@ private fun MergeSheet(title: String, preferred: String, onDismiss: () -> Unit, 
     }
 }
 
+/** What the PR panel shows: the PR, its head branch and ±lines, the URL it opens, and a [note] while its state is unknown. */
+internal data class PullRequestView(
+    val pr: CatalogPullRequest,
+    val branch: String,
+    val added: Int,
+    val removed: Int,
+    val url: String,
+    val note: String? = null,
+) {
+    companion object {
+        /** The session's own PR, described by the action bar. */
+        fun of(bar: SessionInfoBar, pr: CatalogPullRequest) = PullRequestView(pr, bar.branch, bar.added, bar.removed, pr.url ?: bar.pullRequestUrl)
+    }
+}
+
+@Composable
+private fun ciVerdict(ci: String?): String? = when (ci) {
+    "s" -> stringResource(R.string.bar_ci_s)
+    "f" -> stringResource(R.string.bar_ci_f)
+    "e" -> stringResource(R.string.bar_ci_e)
+    "p" -> stringResource(R.string.bar_ci_p)
+    "x" -> stringResource(R.string.home_ci_expected)
+    else -> null
+}
+
+/**
+ * The PR panel for a project PR opened from a transcript link that is not the action bar's PR:
+ * what the catalog knows at once (any PR the session reported), then GitHub's state, branch and
+ * ±lines from a read. Merge and Delete branch appear only once that state is known.
+ */
+@Composable
+private fun LinkedPullRequestSheet(
+    link: PullRequestLink,
+    known: List<CatalogPullRequest>,
+    load: suspend () -> PullRequestDetails,
+    onCopied: (String) -> Unit,
+    panelFor: (CatalogPullRequest) -> PullRequestPanel,
+    onDismiss: () -> Unit,
+) {
+    val reference = remember(link, known) { link.reference(known) }
+    var details by remember(link) { mutableStateOf<PullRequestDetails?>(null) }
+    var failed by remember(link) { mutableStateOf(false) }
+    LaunchedEffect(link) {
+        try { details = load() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { failed = true }
+    }
+    val current = details
+    // Until GitHub answers, the catalog's entry (status empty when the session never reported it).
+    val pr = current?.let { reference.copy(status = it.status, merge = it.merge) } ?: reference
+    val note = when {
+        current != null || reference.status.isNotEmpty() -> null
+        failed -> stringResource(R.string.pr_load_failed)
+        else -> stringResource(R.string.pr_loading)
+    }
+    val view = PullRequestView(pr, current?.branch.orEmpty(), current?.added ?: 0, current?.removed ?: 0, reference.url ?: link.url, note)
+    PullRequestSheet(view, ciVerdict(reference.ci), onCopied, if (current != null) panelFor(pr) else null, onDismiss)
+}
+
 /**
  * What the PR panel may do, from the conversation (web's mobile PR tab): Merge while the PR is
  * open — [onMerge] opens [MergeSheet], whose method choice is the confirmation — and, once
@@ -1602,8 +1967,7 @@ internal class PullRequestPanel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PullRequestSheet(
-    bar: SessionInfoBar,
-    pr: CatalogPullRequest,
+    view: PullRequestView,
     verdict: String?,
     onCopied: (String) -> Unit,
     panel: PullRequestPanel?,
@@ -1614,14 +1978,14 @@ private fun PullRequestSheet(
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val copied = stringResource(R.string.bar_branch_copied)
-    val state = stringResource(
-        when (pr.status) {
-            "merged" -> R.string.home_pr_merged
-            "closed" -> R.string.home_pr_closed
-            "draft" -> R.string.home_pr_draft
-            else -> R.string.home_pr_open
-        },
-    )
+    val pr = view.pr
+    val state = when (pr.status) {
+        "merged" -> R.string.home_pr_merged
+        "closed" -> R.string.home_pr_closed
+        "draft" -> R.string.home_pr_draft
+        "open" -> R.string.home_pr_open
+        else -> null // not read yet: [PullRequestView.note] says why
+    }?.let { stringResource(it) }
     // Web probes the head branch only once merged; unknown keeps Delete branch hidden.
     var branchExists by remember(pr.repository, pr.number) { mutableStateOf<Boolean?>(null) }
     var deleting by remember(pr.repository, pr.number) { mutableStateOf(false) }
@@ -1632,7 +1996,7 @@ private fun PullRequestSheet(
     if (confirmingDelete && panel != null) AlertDialog(
         onDismissRequest = { confirmingDelete = false },
         title = { Text(stringResource(R.string.pr_delete_branch_title)) },
-        text = { Text(stringResource(R.string.pr_delete_branch_message, bar.branch)) },
+        text = { Text(stringResource(R.string.pr_delete_branch_message, view.branch)) },
         confirmButton = {
             TextButton(onClick = {
                 confirmingDelete = false
@@ -1651,18 +2015,18 @@ private fun PullRequestSheet(
                 app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci, size = LodyIconSize.lg)
                 Column(Modifier.weight(1f)) {
                     Text("${pr.repository} #${pr.number}", style = type.headline, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(listOfNotNull(state, verdict, if (pr.merge == "d") stringResource(R.string.bar_conflicts) else null).joinToString(" · "),
+                    Text(view.note ?: listOfNotNull(state, verdict, if (pr.merge == "d") stringResource(R.string.bar_conflicts) else null).joinToString(" · "),
                         style = type.footnote, color = colors.textSecondary)
                 }
             }
-            if (bar.branch.isNotEmpty() || bar.added + bar.removed > 0) {
+            if (view.branch.isNotEmpty() || view.added + view.removed > 0) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
                     Icon(LodyIcons.Branch, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
-                    Text(bar.branch, style = type.subhead, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
-                    if (bar.added + bar.removed > 0) {
+                    Text(view.branch, style = type.subhead, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
+                    if (view.added + view.removed > 0) {
                         val style = type.subhead.copy(fontFeatureSettings = "tnum")
-                        Text("+${bar.added}", style = style, color = colors.diffAddedText)
-                        Text("−${bar.removed}", style = style, color = colors.diffRemovedText)
+                        Text("+${view.added}", style = style, color = colors.diffAddedText)
+                        Text("−${view.removed}", style = style, color = colors.diffRemovedText)
                     }
                 }
             }
@@ -1680,7 +2044,7 @@ private fun PullRequestSheet(
                     Icon(LodyIcons.Expand, contentDescription = null, modifier = Modifier.size(LodyIconSize.sm))
                 }
             }
-            if (panel != null && pr.status == "merged" && bar.branch.isNotEmpty() && (branchExists == true || deleting)) {
+            if (panel != null && pr.status == "merged" && view.branch.isNotEmpty() && (branchExists == true || deleting)) {
                 Button(
                     onClick = { confirmingDelete = true },
                     enabled = !deleting,
@@ -1695,7 +2059,7 @@ private fun PullRequestSheet(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
                 Button(
-                    onClick = { onDismiss(); uri.openUri(bar.pullRequestUrl) },
+                    onClick = { onDismiss(); uri.openUri(view.url) },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.fillSecondary, contentColor = colors.textPrimary),
                     modifier = Modifier.weight(1f),
                 ) {
@@ -1703,10 +2067,10 @@ private fun PullRequestSheet(
                     Spacer(Modifier.width(LodySpacing.xs))
                     Text(stringResource(R.string.bar_open_github), style = type.subhead)
                 }
-                if (bar.branch.isNotEmpty()) {
+                if (view.branch.isNotEmpty()) {
                     Button(
                         onClick = {
-                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(bar.branch))
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(view.branch))
                             onCopied(copied)
                             onDismiss()
                         },
@@ -1720,5 +2084,17 @@ private fun PullRequestSheet(
                 }
             }
         }
+    }
+}
+
+/** Preview copy resolved in composition, for messages raised from coroutines. */
+private class PreviewTexts(
+    val unsupported: String, val unauthorized: String, val generic: String,
+    val stopped: String, val stopFailed: String, val failed: String,
+) {
+    fun error(code: String, message: String?): String = when (code) {
+        "unsupported" -> unsupported
+        "unauthorized", "backend_rejected" -> unauthorized
+        else -> message?.takeIf { it.isNotBlank() } ?: generic
     }
 }

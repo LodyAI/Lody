@@ -1,5 +1,5 @@
 import { isSessionInMyScope } from '@/lib/session-visibility';
-import { getSessionGroupTitle, resolveSessionPrimaryPullRequest } from '@lody/shared';
+import { resolveSessionPrimaryPullRequest } from '@lody/shared';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
   LocalProjectHistoryProvider,
@@ -46,7 +46,6 @@ export type BuildSessionListRowsOptions = {
   defaultTitle: string;
   /** Set of online machine IDs - sessions with machines not in this set are considered offline */
   onlineMachineIds?: ReadonlySet<MachineId>;
-  ownedMachineIds?: ReadonlySet<MachineId>;
   /** Workspace members for resolving owner info (used in team scope) */
   members?: WorkspaceMember[];
   lineChangeScope?: LineChangeScope;
@@ -286,7 +285,7 @@ export function mapSessionMetaToSessionListRow(
    */
   resolveOpenerRowId?: (openerSessionId: string | null | undefined) => string | null
 ): SessionListRow {
-  const title = getSessionGroupTitle(session) || defaultTitle;
+  const title = normalizeString(session.title) || defaultTitle;
   // Align with the info bar (`getSessionGitHubState`): the GitHub repo identity
   // lives on `session.project` for current writes; the legacy top-level
   // `repoFullName` is only a fallback. Reading just the legacy field
@@ -463,9 +462,7 @@ export function buildSessionListRows(
       return [];
     }
     return sessions
-      .filter((session) =>
-        isSessionInMyScope(session, currentUserId, options.ownedMachineIds ?? new Set<MachineId>())
-      )
+      .filter((session) => isSessionInMyScope(session, currentUserId))
       .map((session) => mapAndAggregate(session));
   }
 

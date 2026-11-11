@@ -1,5 +1,6 @@
 import { machineRpc } from '../machine-rpc';
 import {
+  androidEmulatorControl,
   createPreview,
   iosSimulatorControl,
   previewTarget,
@@ -94,18 +95,39 @@ export function registerSharing(ctx: RuntimeContext) {
       ? revokePreview(control)
       : createPreview({ ...control, target });
   });
+  function machineCapabilities(machineId: string) {
+    const room = `machine-${machineId}`;
+    const meta = state.metaReplica!.flock;
+    return (meta.get(['m', room, 'protocolCapabilities']) ??
+      (meta.get(['m', room]) as Record<string, unknown>)
+        ?.protocolCapabilities) as Record<string, number> | undefined;
+  }
   channel.handle('iosSimulatorControl', async (args) => {
     if (args.workspaceId !== state.workspace)
       throw new Error('metadata_not_ready');
     const control = previewControl(args.sessionId, args.userId);
-    const room = `machine-${control.machineId}`;
-    const meta = state.metaReplica!.flock;
-    const capabilities = (meta.get(['m', room, 'protocolCapabilities']) ??
-      (meta.get(['m', room]) as Record<string, unknown>)
-        ?.protocolCapabilities) as Record<string, number> | undefined;
+    const capabilities = machineCapabilities(control.machineId);
     // Older CLIs drop unknown methods without replying.
     if (!((capabilities?.iosSimulator ?? 0) >= 1))
       return { error: 'unsupported', capabilities };
     return iosSimulatorControl({ ...control, command: args.command });
+  });
+  channel.handle('androidEmulatorControl', async (args) => {
+    if (args.workspaceId !== state.workspace)
+      throw new Error('metadata_not_ready');
+    const control = previewControl(args.sessionId, args.userId);
+    const capabilities = machineCapabilities(control.machineId);
+    if (!((capabilities?.androidEmulator ?? 0) >= 1))
+      return { error: 'unsupported', capabilities };
+    let command = args.command;
+    // The CLI's strict schema rejects `quality` unless it advertises the preset.
+    if (
+      command.action === 'start' &&
+      !((capabilities?.androidEmulatorQuality ?? 0) >= 1)
+    ) {
+      const { quality: _quality, ...rest } = command;
+      command = rest;
+    }
+    return androidEmulatorControl({ ...control, command });
   });
 }

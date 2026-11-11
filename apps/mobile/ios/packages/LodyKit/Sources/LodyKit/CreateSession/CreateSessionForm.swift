@@ -40,16 +40,21 @@ struct CreateSessionSelection: Equatable {
     return machines.first { $0.id == machineId }
   }
   var unavailableMessage: String? {
-    if failed { return String(localized: "create.devices.failed", bundle: .lody) }
-    if options?.availability == "unknown" { return String(localized: "devices.unknown", bundle: .lody) }
+    unavailableKey.map { String(localized: String.LocalizationValue($0), bundle: .lody) }
+  }
+  /// The read failed, or listed no assistant: the page note ("Tap to retry") reads the options again.
+  var retriesOptions: Bool { unavailableKey == "create.devices.failed" || unavailableKey == "create.devices.noAgents" }
+  private var unavailableKey: String? {
+    if failed { return "create.devices.failed" }
+    if options?.availability == "unknown" { return "devices.unknown" }
     if !machineId.isEmpty && machine == nil {
-      return String(localized: String.LocalizationValue(!chat && !github ? "create.devices.projectOffline" : "create.devices.selectedOffline"), bundle: .lody)
+      return !chat && !github ? "create.devices.projectOffline" : "create.devices.selectedOffline"
     }
     if options?.availability == "offline" {
-      return String(localized: String.LocalizationValue(!chat && !github ? "create.devices.projectOffline" : "create.devices.offline"), bundle: .lody)
+      return !chat && !github ? "create.devices.projectOffline" : "create.devices.offline"
     }
-    if !agents.isEmpty && agent == nil { return String(localized: "create.devices.chooseAgent", bundle: .lody) }
-    if options != nil && agent == nil { return String(localized: "create.devices.noAgents", bundle: .lody) }
+    if !agents.isEmpty && agent == nil { return "create.devices.chooseAgent" }
+    if options != nil && agent == nil { return "create.devices.noAgents" }
     return nil
   }
   var agents: [CreationAgent] { (options?.agents ?? []).filter { $0.machineId == machine?.id } }

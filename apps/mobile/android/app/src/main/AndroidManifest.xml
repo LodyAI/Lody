@@ -15,6 +15,14 @@
         <service android:name="app.lody.android.notifications.LodyMessagingService" android:exported="false">
             <intent-filter android:priority="10"><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
         </service>
+        <!-- Conversation images handed to Copy and Share; see res/xml/shared_images.xml. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.images"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/shared_images" />
+        </provider>
         <activity
             android:name="app.lody.android.auth.AuthCallbackActivity"
             android:exported="true"

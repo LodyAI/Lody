@@ -448,6 +448,30 @@ describe('encrypted workspace recovery classification', () => {
     expect(paged.view).toBe(first.view);
   });
 
+  it('treats a briefly unavailable ledger store as unreachable, not as records that failed verification', () => {
+    // Seen on a local stack whose storage database went down: the members tab said the
+    // records did not match. The workspace is only unreachable for now.
+    const convexError = Object.assign(new Error('[CONVEX] Uncaught ConvexError'), {
+      data: { code: 'e2ee_ledger_unavailable' },
+    });
+    expect(classifyE2eeControlFailure(convexError)).toEqual({
+      kind: 'network',
+      code: 'e2ee_ledger_unavailable',
+    });
+    expect(classifyE2eeControlFailure(new Error('e2ee_ledger_unavailable'))).toEqual({
+      kind: 'network',
+      code: 'e2ee_ledger_unavailable',
+    });
+    // Records that genuinely fail verification still stop management.
+    expect(
+      classifyE2eeControlFailure(
+        Object.assign(new Error('[CONVEX] Uncaught ConvexError'), {
+          data: { code: 'e2ee_invalid_record' },
+        })
+      )
+    ).toEqual({ kind: 'server', code: 'e2ee_invalid_record' });
+  });
+
   it('separates identity conflicts, rollbacks and invalid server history', () => {
     const fixture = historyFixture();
     expect(classifyE2eeControlFailure(new Error('e2ee_conflict'))).toEqual({

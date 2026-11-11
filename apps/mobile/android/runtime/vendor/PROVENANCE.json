@@ -1,10 +1,10 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "cd303023f2b3f7e3dda4d7c5441afed32150e855",
+  "commit": "78b0e5776a6f9e7940d3289f882c63c6639ffc07",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive cd303023f2b3f7e3dda4d7c5441afed32150e855 apps/mobile/ios/packages/cloud-runtime",
-  "note": "Reviewed runtime snapshot based on the recorded source commit, with the Roost integration described by roostHistory. Android carries the iOS runtime source and generated Roost browser module unchanged; the Roost authoring source and generator remain in iOS. Dependencies and licenses are unchanged.",
+  "export": "git archive 78b0e5776a6f9e7940d3289f882c63c6639ffc07 apps/mobile/ios/packages/cloud-runtime",
+  "note": "Android mirrors the iOS runtime source, generated Roost browser module and licenses. The Roost authoring source and generator remain in iOS. The changes from the recorded main commit are listed in roostHistory.",
   "roostHistory": {
     "files": [
       "README.md",

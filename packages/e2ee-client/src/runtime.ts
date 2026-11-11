@@ -980,6 +980,19 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           | 'acceptFeatureRpcResponse'
         >)
       : {}),
+    ...(host.capabilities.iroh
+      ? ({
+          // Route resolution runs inside the session; network waits run after it.
+          irohReady: (id, target) =>
+            run(withSession(id, (session) => session.irohRoute(target)))
+              .then((route) => route.ready())
+              .catch(() => false),
+          irohCall: (id, target, envelope, timeoutMs) =>
+            run(withSession(id, (session) => session.irohRoute(target))).then((route) =>
+              route.call(envelope, timeoutMs)
+            ),
+        } satisfies Pick<E2eeWorkspaceRuntime, 'irohReady' | 'irohCall'>)
+      : {}),
     ...(host.capabilities.machineSharing
       ? ({
           readMachineSharing: (id, machine) =>

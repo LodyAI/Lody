@@ -1,3 +1,4 @@
+import LodyDesignSystem
 import UIKit
 
 private struct SidebarItemID: Hashable {
@@ -291,6 +292,17 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
 
   func setPlaceholder(_ value: String) { placeholder.text = value }
 
+  /// Archived mode: a darker, greyer sidebar with dimmed rows, matching the iPhone archived list.
+  var archivedStyle = false {
+    didSet {
+      guard archivedStyle != oldValue else { return }
+      backgroundColor = archivedStyle ? LodyUIColor.bgArchived : .lodySidebar
+      collection.backgroundColor = backgroundColor
+      // Outline section snapshots own expansion; restyle visible cells in place instead of reapplying.
+      updateVisibleRows()
+    }
+  }
+
   private func updateVisibleRows() {
     for index in collection.indexPathsForVisibleItems {
       guard let cell = collection.cellForItem(at: index) as? UICollectionViewListCell,
@@ -322,6 +334,7 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
       cell.contentConfiguration = content
       cell.accessibilityLabel = content.accessibilityLabel
     }
+    cell.contentView.alpha = archivedStyle && !project ? LodyOpacity.muted : 1
     cell.isAccessibilityElement = true
     cell.indentationWidth = 0
     cell.accessibilityIdentifier = row.id

@@ -14,6 +14,7 @@ internal class ReadOnlyCloudRuntime(
     initialGrant: ShortLivedGrant,
     private val provider: GrantProvider,
     private val shortcutCloud: ShortcutCloudProvider? = null,
+    private val previewTokens: PreviewTokenProvider? = null,
 ) : CloudRuntime {
     private val access = StreamAccess(scope.workspaceId, initialGrant.gatewayBaseUrl)
     private val runtime = WebViewRuntime(scope, WebViewCloudRuntime(context, "NetworkRuntime.html", access))
@@ -35,6 +36,7 @@ internal class ReadOnlyCloudRuntime(
                 val requested = event.event
                 if (requested == RuntimeEvent.GrantRequested) refresh()
                 else if (requested is RuntimeEvent.ShortcutCloudRequested) answer(requested, event.generation)
+                else if (requested is RuntimeEvent.PreviewTokenRequested) mint(requested, event.generation)
                 else mutableEvents.emit(event)
             }
         }
@@ -91,6 +93,29 @@ internal class ReadOnlyCloudRuntime(
             }
             if (state.value.generation != generation) return@launch
             runCatching { runtime.call("shortcutCloudReply", JSONArray().put(request.requestId).put(value ?: JSONObject.NULL)) }
+        }
+    }
+    /**
+     * Answers a previewToken request exactly once: `{value: token}`, `{value: {status}}` for an HTTP
+     * refusal, or null on any failure, a foreign workspace or the deadline (under JS's 60 s).
+     */
+    private fun mint(request: RuntimeEvent.PreviewTokenRequested, generation: Long) {
+        val tokens = previewTokens
+        lifetime?.launch {
+            val value: JSONObject? = if (tokens == null) null else withTimeoutOrNull(55_000) {
+                try {
+                    val intent = JSONObject(request.intent)
+                    if (intent.optString("workspaceId") != scope.workspaceId) return@withTimeoutOrNull null
+                    when (val minted = tokens.mint(scope, intent)) {
+                        is String -> JSONObject().put("value", minted)
+                        is Int -> JSONObject().put("value", JSONObject().put("status", minted))
+                        else -> null
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+            }
+            if (state.value.generation != generation) return@launch
+            runCatching { runtime.call("previewTokenReply", JSONArray().put(request.requestId).put(value ?: JSONObject.NULL)) }
         }
     }
     override suspend fun setActive(active: Boolean) = withContext(Dispatchers.Main.immediate) {

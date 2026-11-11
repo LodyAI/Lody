@@ -291,6 +291,15 @@ object LodyIcons {
         )
     }
 
+    val Download: ImageVector by lazy {
+        lodyIcon(
+            "Download",
+            "M12 15V3",
+            "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",
+            "m7 10 5 5 5-5",
+        )
+    }
+
     val Link: ImageVector by lazy {
         lodyIcon(
             "Link",

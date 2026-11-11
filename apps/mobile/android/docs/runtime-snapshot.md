@@ -3,7 +3,8 @@
 `runtime/vendor/cloud-runtime` snapshots this monorepo's `apps/mobile/ios/packages/cloud-runtime`
 verbatim. `vendor/PROVENANCE.json` records the base commit and reviewed updates.
 `vendor/SHA256.json` records every mirrored file. Each asset build checks the
-snapshot for changed, added or missing files and symlinks.
+snapshot for changed, added or missing files and symlinks. The drift test modifies
+a disposable copy.
 
 For Roost, snapshot the generated `src/runtime/upstream-roost.js` and the runtime
 licenses. Keep `vendor/upstream-roost/` and `scripts/build-upstream-roost.mjs` in
@@ -32,9 +33,9 @@ coordinator and storage packaged in the browser module. With Developer Mode and
 the Roost History beta preference enabled, new conversations and Tabs use Roost
 on compatible owners and Loro on other owners. Session metadata stores the choice.
 
-Roost sessions use the owner machine's encrypted v3 history RPC while Loro carries
+Roost sessions use the owner machine's encrypted history RPC while Loro carries
 the control document and queue. The upstream coordinator persists pending inputs
-in IndexedDB under the account and workspace, recovers the original input after
+in IndexedDB under the backend, account and workspace, recovers the original input after
 restart, and serializes inputs for a session. Sign-out does not clear the pending
 input database. Queue-to-guide conversion preserves the queue item when local input
 saving fails. Archiving or deleting a Roost session cancels its pending inputs before changing metadata.
@@ -61,6 +62,31 @@ answers `cmd` mention reads from the runtime's last shortcut listing while readi
 one, and reports a listing with an unreadable or pending owner index as incomplete rather
 than empty. The `promptShortcuts` list action (Settings and `shortcutBody`) lists what is
 readable; send-time `/shortcut:` expansion keeps the strict listing.
+
+The snapshot at `6308c98c` adds `androidEmulatorControl`: the signed `android-emulator/control`
+lifecycle call (list/start/status/stop, with `quality` sent only to hosts advertising
+`androidEmulatorQuality`), whose viewer URL arrives encrypted to a per-request key exactly as
+`iosSimulatorControl`'s does. The catalog adds `machineEmulators` (any OS whose CLI advertises
+`androidEmulator`) and each session's `androidEmulatorPreviewRequestId`. It also carries main's
+mention-expansion wording.
+
+The snapshot at `44771001` makes `listDir` (Project files) list the conversation's own
+folder, its worktree when it has one, through the machine's `file/list-dir` (capability
+`sessionDirectoryListing`), so the list matches what `readFile` opens. Machines without the
+capability, and encrypted workspaces whose machines answer `unsupported_protocol`, keep the
+local-project listing.
+
+The snapshot at `76340385` adds each Project group conversation's members to the catalog
+(`projectRun`: placement order, branch, diff, publish state and the current PR per repository,
+for the group context capsule) and the group's `ownerUserId` to `projectGroups` (Settings ›
+Projects).
+
+The snapshot at `041760cf` adds catalog `Project.repositories` for multi-repository projects
+(their `projectRun` GitHub members), which the conversation uses to open its members' PR links
+in the native PR panel. It also carries the runtime's prompt shortcut caches (access directory
+for 30 s, grants, bodies; forgotten when the account or workspace changes): Settings lists with
+`fresh`, while the composer's `shortcutBody` may use the recent directory. The unused
+`publishedShares` call is gone.
 
 ## Android text creation
 
@@ -132,3 +158,12 @@ null → `shortcut_unavailable`, 60-second native deadline); `shortcut-commands.
 `shortcutSettings` (list / read / save). Both gates permit read, create and append of
 `shortcut-index:<workspace>:<owner>:<visibility>` and `shortcut-body:<id>`, whose
 stream-specific tokens come from `getStreamToken`.
+
+## Previews
+
+The bridge forwards `sessionPreview`, `iosSimulatorControl` and `androidEmulatorControl` to the
+snapshot unchanged, with the verified identity, and answers the runtime's `shareRequest`
+`previewToken` host call through native (`previewToken` event, `previewTokenReply`); other
+share-request operations stay unsupported. The network gates need no new streams: the preview calls
+use the existing machine RPC request and response streams. See [Remote previews](rules/previews.md).
+

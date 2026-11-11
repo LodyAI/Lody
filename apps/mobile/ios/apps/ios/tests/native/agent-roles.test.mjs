@@ -430,7 +430,10 @@ test('fresh v2 role references reach durable history and queue with an explicit 
     const result = await f.runtime.sendTurn(args, expand);
     assert.equal(result.state, 'accepted');
     const prompt = calls[0].params.inputConfig.prompt;
-    assert.match(prompt, /id: multi, agentRoleMachineId: m2, name: Latest/);
+    assert.equal(
+      prompt,
+      '[Agent Role: Latest (agentRoleId: multi, agentRoleMachineId: m2)] Review changes',
+    );
     assert.equal(
       prompt.includes('LATEST INSTRUCTIONS'),
       false,

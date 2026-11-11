@@ -95,22 +95,33 @@ enum SessionAttachments {
       var responseStage: StaticString = kind == "image" ? "image_upload" : "file_upload"
       var result: [String: Any]
       if kind == "image" {
-        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? ""
+        // The server checks the bytes against the declared type, so classify the content
+        // rather than the name: an edited Photos asset keeps its original `.PNG` name
+        // while its rendered data is JPEG or HEIC.
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+          throw error(String(localized: "native.attachment.error.imageRead", bundle: .lody))
+        }
+        let mime = (CGImageSourceGetType(source) as String?).flatMap { UTType($0)?.preferredMIMEType } ?? ""
         var bytes: Data
         var fileName = name
         var contentType = mime
+        let converted: Bool
         if ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mime), count <= 5 * 1024 * 1024 {
           bytes = try Data(contentsOf: url)
+          converted = false
+          if UTType(filenameExtension: (name as NSString).pathExtension)?.preferredMIMEType != mime,
+             let ext = UTType(mimeType: mime)?.preferredFilenameExtension {
+            fileName = (name as NSString).deletingPathExtension + "." + ext
+          }
         } else {
-          guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+          guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceThumbnailMaxPixelSize: 2048,
                   kCGImageSourceCreateThumbnailWithTransform: true,
                 ] as CFDictionary), let jpeg = UIImage(cgImage: image).jpegData(compressionQuality: 0.85) else {
             throw error(String(localized: "native.attachment.error.imageRead", bundle: .lody))
           }
-          bytes = jpeg; contentType = "image/jpeg"
+          bytes = jpeg; contentType = "image/jpeg"; converted = true
           fileName = (name as NSString).deletingPathExtension + ".jpg"
         }
         DiagnosticsStore.shared.record("attachment", "image_prepared", fields: [
@@ -118,7 +129,7 @@ enum SessionAttachments {
           "sourceType": DiagnosticsStore.attachmentMediaType(mime),
           "uploadType": DiagnosticsStore.attachmentMediaType(contentType),
           "sourceBytes": String(count), "imageBytes": String(bytes.count),
-          "converted": String(contentType != mime || count > 5 * 1024 * 1024),
+          "converted": String(converted),
         ])
         guard bytes.count <= 5 * 1024 * 1024 else { throw error(String(localized: "native.attachment.error.imageTooLarge", bundle: .lody)) }
         let boundary = UUID().uuidString

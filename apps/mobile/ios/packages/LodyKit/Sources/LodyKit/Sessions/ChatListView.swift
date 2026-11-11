@@ -33,6 +33,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   private var dataSource: UICollectionViewDiffableDataSource<String, Item>!
   private var entries: [Item: Entry] = [:]
   private var titles: [String: String] = [:]
+  /// Repository of each project group's label (project grouping), drawn as its logo.
+  private var titleRepositories: [String: String] = [:]
   private let placeholder = UILabel()
   private let topBackdrop = ChatHeaderBackdrop()
   private var placeholderText = ""
@@ -57,6 +59,17 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       guard projectIndexEnabled != oldValue else { return }
       projectIndex.cancel()
       rebuildProjectIndex()
+    }
+  }
+  /// Archived mode: a darker, greyer page and grey titles, so the archive never reads as the inbox.
+  var archivedStyle = false {
+    didSet {
+      guard archivedStyle != oldValue else { return }
+      backgroundColor = archivedStyle ? LodyUIColor.bgArchived : LodyUIColor.bgBase
+      topBackdrop.archived = archivedStyle
+      var snapshot = dataSource.snapshot()
+      snapshot.reconfigureItems(snapshot.itemIdentifiers)
+      dataSource.apply(snapshot, animatingDifferences: false)
     }
   }
   private lazy var projectIndex = InboxProjectIndex(scroll: collection)
@@ -112,9 +125,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
       elementKind: UICollectionView.elementKindSectionHeader
     ) { [weak self] view, _, path in
-      let title = self?.dataSource.sectionIdentifier(for: path.section).flatMap { self?.titles[$0] } ?? ""
+      let id = self?.dataSource.sectionIdentifier(for: path.section)
+      let title = id.flatMap { self?.titles[$0] } ?? ""
+      let repository = id.flatMap { self?.titleRepositories[$0] } ?? ""
       view.contentConfiguration = UIHostingConfiguration {
-        SectionTitle(text: title)
+        SectionTitle(text: title, repository: repository)
       }
       .margins(.all, 0)
       view.backgroundConfiguration = .clear()
@@ -184,10 +199,16 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     var snapshot = NSDiffableDataSourceSnapshot<String, Item>()
     var next: [Item: Entry] = [:]
     var nextTitles: [String: String] = [:]
+    var nextRepositories: [String: String] = [:]
     for section in sections where !section.rows.isEmpty {
       snapshot.appendSections([section.id])
       // Only flat sections (inbox buckets, search) carry a text header; groups use their parent row.
       nextTitles[section.id] = section.rows.first?.parent == true ? "" : section.header
+      // Project grouping: the root row keeps its raw repository, never a cross-project child's.
+      if section.id.hasPrefix("group:"), section.id != "group:\(InboxSections.chatId)",
+         let repository = section.rows.first?.repository, !repository.isEmpty {
+        nextRepositories[section.id] = repository
+      }
       let children = section.rows.contains { !$0.parent }
       for row in section.rows {
         let item = Item(section: section.id, row: row.id)
@@ -222,6 +243,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     }
     entries = next
     titles = nextTitles
+    titleRepositories = nextRepositories
     snapshot.reloadItems(Array(actionsChanged))
     snapshot.reconfigureItems(Array(changed.subtracting(actionsChanged)))
     dataSource.apply(snapshot, animatingDifferences: window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
@@ -346,6 +368,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 
   private func configure(_ cell: UICollectionViewListCell, _ item: Item) {
     guard let entry = entries[item] else { return }
+    let muted = archivedStyle
     let emit: (String) -> Void = { [weak self] action in
       self?.forwarded?("rowAction", ["id": entry.row.id, "actionId": action])
     }
@@ -355,7 +378,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       case .link: GroupHeader(row: entry.row, expanded: nil, canToggle: false, onAction: emit)
       case .session:
         ChatRowContent(
-          row: entry.row, details: details, owner: owners[entry.row.id], expanded: entry.canToggle ? entry.expanded : nil,
+          row: entry.row, details: details, owner: owners[entry.row.id], muted: muted,
+          expanded: entry.canToggle ? entry.expanded : nil,
           onToggle: { [weak self] in self?.toggleOpener(entry.row.id) }
         )
       case .more: MoreRowContent(title: entry.row.title)
@@ -365,9 +389,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     .minSize(height: entry.kind == .session && !entry.row.parentId.isEmpty ? LodySize.controlMd : LodySize.listRow)
     cell.accessories = []
     // iOS highlights rows on press; Android uses ripple.
+    // The archived page is already as grey as fill.pressed, so it highlights with a translucent fill.
+    let pressed = archivedStyle ? LodyUIColor.fillSelected : LodyUIColor.fillPressed
     cell.configurationUpdateHandler = { cell, state in
       var background = UIBackgroundConfiguration.clear()
-      background.backgroundColor = state.isHighlighted || state.isSelected ? LodyUIColor.fillPressed : .clear
+      background.backgroundColor = state.isHighlighted || state.isSelected ? pressed : .clear
       cell.backgroundConfiguration = background
     }
   }
@@ -428,6 +454,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 private final class ChatHeaderBackdrop: UIView {
   private let base = ChatBlurLayer(intensity: 0.2)
   private let upper = ChatBlurLayer(intensity: 0.75)
+  var archived = false { didSet { if archived != oldValue { updateTone() } } }
 
   init() {
     super.init(frame: .zero)
@@ -445,8 +472,17 @@ private final class ChatHeaderBackdrop: UIView {
 
   private func updateTone() {
     let dark = traitCollection.userInterfaceStyle == .dark
-    base.contentView.backgroundColor = dark ? LodyUIColor.bgBase.withAlphaComponent(0.1) : .clear
-    upper.contentView.backgroundColor = dark ? LodyUIColor.bgBase.withAlphaComponent(0.3) : .clear
+    // Dark mode keeps its page tint; light mode tints only the archived page's grey.
+    let page = archived ? LodyUIColor.bgArchived : LodyUIColor.bgBase
+    let (baseAlpha, upperAlpha): (CGFloat, CGFloat) = if dark {
+      (0.1, 0.3)
+    } else if archived {
+      (0.3, 0.6)
+    } else {
+      (0, 0)
+    }
+    base.contentView.backgroundColor = baseAlpha > 0 ? page.withAlphaComponent(baseAlpha) : .clear
+    upper.contentView.backgroundColor = upperAlpha > 0 ? page.withAlphaComponent(upperAlpha) : .clear
   }
 
   override func layoutSubviews() {
@@ -642,6 +678,8 @@ private struct ChatRowContent: View {
   let row: LodyListRow
   let details: ChatRowDetails
   var owner: WorkspaceMember?
+  /// Archived list: the title drops to grey ink so every row reads as archived.
+  var muted = false
   /// Set on a row with nested chats: whether they are shown. A "⌄ 4 opened chats" line below the
   /// row heads the family; both parent and child status marks stay trailing.
   var expanded: Bool?
@@ -709,7 +747,7 @@ private struct ChatRowContent: View {
           Text(row.title)
             .lodyTextStyle(nested ? .callout : row.unread ? .bodyEmphasis : .body)
             .fontWeight(nested && row.unread ? .semibold : nil)
-            .foregroundStyle(LodyColor.textPrimary)
+            .foregroundStyle(muted ? LodyColor.textTertiary : LodyColor.textPrimary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
           // The text inside sets the stack's baseline, so the PR mark centres on the age.
@@ -848,19 +886,27 @@ private struct MoreRowContent: View {
 
 private struct SectionTitle: View {
   let text: String
+  var repository = ""
 
   var body: some View {
     if text.isEmpty {
       Color.clear.frame(height: LodySpacing.sm)
     } else {
-      Text(text)
-        .lodyTextStyle(.groupLabel)
-        .foregroundStyle(LodyColor.textTertiary)
-        .padding(.horizontal, LodyLayout.listEdgeX)
-        .padding(.top, LodySpacing.xs)
-        .padding(.bottom, LodySpacing.xs)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityAddTraits(.isHeader)
+      HStack(spacing: LodySpacing.xs) {
+        if !repository.isEmpty {
+          // The project's logo in its original colours, unlike the muted row marks.
+          RepositoryIcon(repository: repository, muted: false)
+        }
+        Text(text)
+          .lodyTextStyle(.groupLabel)
+          .foregroundStyle(LodyColor.textTertiary)
+      }
+      .padding(.horizontal, LodyLayout.listEdgeX)
+      .padding(.top, LodySpacing.xs)
+      .padding(.bottom, LodySpacing.xs)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+      .accessibilityAddTraits(.isHeader)
     }
   }
 }

@@ -31,7 +31,7 @@ extension LodyChatView {
   func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
     guard let id = dataSource.itemIdentifier(for: indexPath), let row = rows[id] else { return false }
     if let cell = collectionView.cellForItem(at: indexPath) as? ChatCell, cell.expandable && !cell.expanded { return true }
-    return row.actionable || row.image != nil
+    return row.actionable || row.image != nil || row.kind == "imageStack"
   }
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -44,6 +44,10 @@ extension LodyChatView {
     if let cell = collectionView.cellForItem(at: indexPath) as? ChatImageCell,
        let id = dataSource.itemIdentifier(for: indexPath) {
       openImageGallery(id: id, source: cell)
+      return
+    }
+    if let cell = collectionView.cellForItem(at: indexPath) as? ChatImageStackCell, let id = cell.topID {
+      openImageGallery(id: id, source: cell.topCard)
       return
     }
     guard let id = dataSource.itemIdentifier(for: indexPath), let row = rows[id], row.actionable else { return }
@@ -102,10 +106,19 @@ extension LodyChatView {
     ChatImageGallery.items(from: dataSource.snapshot().itemIdentifiers.compactMap { rows[$0] })
   }
 
-  func imageCell(id: String) -> ChatImageCell? {
+  /// `reveal` brings a stacked image to its stack's top, so the preview zooms back into it.
+  func imageCell(id: String, reveal: Bool = false) -> ChatImageCell? {
     if let index = dataSource.indexPath(for: id),
        let cell = collection.cellForItem(at: index) as? ChatImageCell {
       return cell
+    }
+    if let row = rows.values.first(where: { $0.kind == "imageStack" && $0.stack.contains { $0.id == id } }) {
+      guard let index = dataSource.indexPath(for: row.id),
+        let cell = collection.cellForItem(at: index) as? ChatImageStackCell else {
+        if reveal { imageStackTops[row.id] = id }
+        return nil
+      }
+      return reveal ? cell.reveal(id: id) : cell.card(id: id)
     }
     guard let row = rows.values.first(where: {
       $0.kind == "attachments" && id.hasPrefix($0.entryID + ":attachment:")
@@ -132,7 +145,7 @@ extension LodyChatView {
       session: imageSession,
       placeholders: placeholders,
       sourceView: { [weak self] pageId in
-        guard let cell = self?.imageCell(id: pageId), cell.window != nil else { return nil }
+        guard let cell = self?.imageCell(id: pageId, reveal: true), cell.window != nil else { return nil }
         return cell.zoomSource
       }
     )
@@ -419,6 +432,7 @@ extension LodyChatView {
       let height = ChatImageCell.size(image, width: width).height
       return height
     }
+    if row.kind == "imageStack" { return ChatImageStackCell.height(row, width: width) }
     let textWidth = ChatCell.textWidth(row, width: width)
     if row.kind == "text" || row.kind == "thought" {
       return store.height(id: row.id, text: row.text, secondary: row.kind == "thought", streaming: row.streaming, width: textWidth)
@@ -481,6 +495,7 @@ extension LodyChatView {
     if row.subagent != nil { return ChatSubagentCell.height(row, width: width, traits: traitCollection) }
     if row.kind.hasPrefix("operation") { return ChatOperationCell.height(row, traits: traitCollection) }
     if row.kind == "meta" { return 44 }
+    if row.kind == "imageStack" { return ChatImageStackCell.height(row, width: width) }
     if row.kind == "duration" { return ChatCell.processHeight(for: row, width: width, traits: traitCollection) }
     if row.kind == "changesHeader" { return ChatFileCell.headerHeight }  // Same height as the tasks row without a step.
     let measured = measure(row, width: width)
