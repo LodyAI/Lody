@@ -172,7 +172,8 @@ bin so old `node <bin>` launches remain valid. An explicit installer stops the
 identified old service, installs the fixed entry and registers its stable path.
 Broken or unreachable old updaters likewise need a local installer run.
 
-A POSIX npm runner that includes the relay may be migrated by the same owner-only,
+A POSIX npm runner that includes the relay and is not owned by a service manager
+(whose unit stop would also kill a detached managed runner) may be migrated by the same owner-only,
 server-verified remote update. It prepares and verifies the managed release exactly
 as a managed runner would, without modifying the npm installation, and switches only
 after its Worker drained. It then installs the fixed entry, releases the Host lease
@@ -182,7 +183,7 @@ either keeps ownership or takes it back and keeps running, recording a rollback.
 ownership cannot be reclaimed, the runner reports a blocked outcome instead of
 starting a second daemon. User-owned autostart definitions are never rewritten: once
 published, the npm `daemon start` launcher forwards to the managed fixed entry.
-Windows npm daemons keep the explicit migration until Windows containment exists. Preserve identity, pairing,
+Windows and service-manager-owned npm daemons keep the explicit migration. Preserve identity, pairing,
 data and options. Migrate an identified external service explicitly or give actionable
 instructions; never silently rewrite arbitrary scripts or start a second daemon.
 Container and package-manager-owned deployments declare external update ownership.
