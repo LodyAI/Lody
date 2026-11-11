@@ -53,14 +53,7 @@ internal object RuntimeProtocol {
                     val path = file.optString("path").takeIf { it.isNotBlank() } ?: return@mapNotNull null
                     FileChange(path, file.optInt("add"), file.optInt("del"))
                 }.orEmpty()
-                val attachments = if (role != "user") emptyList() else rawItems.flatMap { item ->
-                    when (item.optString("type")) {
-                        "image" -> listOfNotNull(item.optJSONObject("image"))
-                        "image_group" -> item.optJSONArray("images")?.objects().orEmpty()
-                        else -> emptyList()
-                    }.map { MessageAttachment(it.optString("fileName").ifBlank { "image" }, image = true) } +
-                        listOfNotNull(item.optJSONObject("file")?.takeIf { item.optString("type") == "file" }?.let { MessageAttachment(it.optString("fileName").ifBlank { "file" }, image = false) })
-                }
+                val attachments = if (role != "user") emptyList() else attachments(rawItems)
                 // An assistant turn may so far be only steps; a user turn needs its text or attachments.
                 if (text.isBlank() && (if (role == "user") attachments.isEmpty() else items.isEmpty() && files.isEmpty())) null else SessionMessage(
                     id = entry.text("id"),
@@ -91,6 +84,24 @@ internal object RuntimeProtocol {
                     attachments = attachments,
                 )
             }
+            // Locally durable inputs are not owner history. Show their uncertainty
+            // until the authoritative turn arrives; never turn them into a send.
+            val existing = entries.map { it.id }.toSet()
+            val pending = envelope.optJSONArray("pendingRoostInputs")?.objects().orEmpty().mapNotNull { entry ->
+                val id = entry.optString("id").takeIf { it.isNotBlank() && it !in existing } ?: return@mapNotNull null
+                val items = entry.optJSONArray("items")?.objects().orEmpty()
+                val text = items.filter { it.optString("type") == "text" }.joinToString("\n\n") { it.optString("text") }
+                val attachments = attachments(items)
+                if (text.isBlank() && attachments.isEmpty()) null else SessionMessage(
+                    id = id, role = "user", text = text, streaming = false, timestamp = (entry.opt("timestamp") as? String),
+                    status = when (entry.optString("inputState")) {
+                        "unknown" -> "delivery_unknown"
+                        "confirmed" -> "pending"
+                        else -> "sending"
+                    }, userId = (entry.opt("userId") as? String), attachments = attachments,
+                    inputRetryable = entry.optBoolean("inputRetryable"),
+                )
+            }
             val composer = envelope.optJSONObject("composer")?.let { value ->
                 fun field(key: String) = (value.opt(key) as? String)?.takeIf { it.isNotBlank() }
                 val options = value.optJSONObject("configOptionValues")?.let { values ->
@@ -101,7 +112,16 @@ internal object RuntimeProtocol {
                     agentRoleId = field("agentRoleId"), roleKnown = value.has("agentRoleId"),
                 )
             }
-            RuntimeEvent.SessionUpdated(SessionSnapshot(message.text("sessionId"), envelope.text("status"), entries, composer, SessionUsageJson.parse(envelope.optJSONObject("usage")), PreviewJson.summary(envelope.optJSONObject("preview"))))
+            RuntimeEvent.SessionUpdated(SessionSnapshot(
+                id = message.text("sessionId"),
+                status = envelope.text("status"),
+                messages = entries + pending,
+                composer = composer,
+                usage = SessionUsageJson.parse(envelope.optJSONObject("usage")),
+                preview = PreviewJson.summary(envelope.optJSONObject("preview")),
+                historyHasMore = envelope.optBoolean("historyHasMore"),
+                historyLoading = envelope.optBoolean("historyLoading"),
+            ))
         }
         "catalog" -> {
             val catalog = JSONObject(message.get("catalog") as String)
@@ -274,6 +294,14 @@ internal object RuntimeProtocol {
             }
             else -> null
         }
+    }
+    private fun attachments(items: List<JSONObject>) = items.flatMap { item ->
+        when (item.optString("type")) {
+            "image" -> listOfNotNull(item.optJSONObject("image"))
+            "image_group" -> item.optJSONArray("images")?.objects().orEmpty()
+            else -> emptyList()
+        }.map { MessageAttachment(it.optString("fileName").ifBlank { "image" }, image = true) } +
+            listOfNotNull(item.optJSONObject("file")?.takeIf { item.optString("type") == "file" }?.let { MessageAttachment(it.optString("fileName").ifBlank { "file" }, image = false) })
     }
     private fun JSONObject.text(key: String) = get(key) as String
     private fun JSONObject.nonnegative(key: String): Long {

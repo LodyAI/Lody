@@ -129,8 +129,12 @@ export type Envelope = {
   status: string;
   reason?: string;
   revision: number;
-  billableTurnCount: number;
+  billableTurnCount?: number;
   usage?: SessionUsage;
+  historyHasMore?: boolean;
+  historyLoading?: boolean;
+  /** Locally persisted owner inputs whose delivery is still being reconciled. */
+  pendingRoostInputs?: readonly Record<string, unknown>[];
   awaitingUserSince?: number;
   preview?: { label: string; active: boolean };
   composer?: {
@@ -450,14 +454,20 @@ function summarizeItem(
 
 function summarizeEntry(
   projection: Projection,
-  history: LoroList,
+  history: LoroList | undefined,
   entry: any,
   index: number,
   pendingOutcomes?: ReadonlyMap<string, unknown>,
 ) {
-  const id = String(entry?.id ?? identityAt(history, index));
+  const id = String(
+    entry?.id ?? (history ? identityAt(history, index) : `idx:${index}`),
+  );
+  const fallbackItemId = (itemIndex: number) => {
+    if (history) return `idx:${index}:${itemIndex}`;
+    return `idx:${id}:${itemIndex}`;
+  };
   if (pendingOutcomes?.size && Array.isArray(entry?.items)) {
-    const container = history.get(index) as LoroMap | undefined;
+    const container = history?.get(index) as LoroMap | undefined;
     const items =
       container && typeof container.get === 'function'
         ? (container.get('items') as LoroList)
@@ -466,7 +476,7 @@ function summarizeEntry(
       ...entry,
       items: entry.items.map((item: any, i: number) => {
         const request = item?.permissionRequest;
-        let itemId = `idx:${index}:${i}`;
+        let itemId = fallbackItemId(i);
         if (items && typeof items.getIdAt === 'function')
           itemId = identityAt(items, i);
         if (item?.type === 'tool_call' && typeof item.toolCallId === 'string')
@@ -492,7 +502,7 @@ function summarizeEntry(
   const fingerprint = JSON.stringify(entry);
   const cached = projection.entries.get(id);
   if (cached && cached.fingerprint === fingerprint) return cached.value;
-  const container = history.get(index) as LoroMap | undefined;
+  const container = history?.get(index) as LoroMap | undefined;
   const items =
     container && typeof (container as any).get === 'function'
       ? ((container as any).get('items') as LoroList | undefined)
@@ -507,7 +517,7 @@ function summarizeEntry(
       id,
       items && typeof items.getIdAt === 'function'
         ? identityAt(items, i)
-        : `idx:${index}:${i}`,
+        : fallbackItemId(i),
     ),
   );
   const fileDiffs = (Array.isArray(entry?.fileDiff) ? entry.fileDiff : [])
@@ -555,14 +565,28 @@ function summarizeEntry(
   return value;
 }
 
+/** Use the ordinary transcript projection for locally pending upstream inputs. */
+export function projectPendingInputs(
+  doc: LoroDoc,
+  entries: readonly unknown[],
+) {
+  return entries.map((entry, index) =>
+    summarizeEntry(projectionFor(doc), undefined, entry, index),
+  );
+}
+
 export function projectSession(
   doc: LoroDoc,
   status: string,
   reason?: string,
   pendingOutcomes?: ReadonlyMap<string, unknown>,
   steerReceipts?: ReadonlyMap<string, SteerReceipt>,
+  historyOverride?: readonly unknown[],
+  historyMetadata?: readonly Record<string, unknown>[],
 ): Envelope {
-  const history = doc.getList('history') as LoroList;
+  const history = historyOverride
+    ? undefined
+    : (doc.getList('history') as LoroList);
   const links = doc.getMap('lodySteerLinks').toJSON() as Record<string, any>;
   const configFor = (id: string, input: any) => {
     const link = links[id];
@@ -579,11 +603,15 @@ export function projectSession(
       _lodySteerMode: link.mode,
     };
   };
-  const raw = (history.toJSON() as any[]).map((entry) => ({
-    ...entry,
-    inputConfig: configFor(entry.id, entry.inputConfig),
-  }));
-  const input = raw.findLast((entry) => entry?.role === 'user')?.inputConfig;
+  const raw = ((historyOverride ?? history!.toJSON()) as any[]).map(
+    (entry) => ({
+      ...entry,
+      inputConfig: configFor(entry.id, entry.inputConfig),
+    }),
+  );
+  const input =
+    raw.findLast((entry) => entry?.role === 'user')?.inputConfig ??
+    historyMetadata?.findLast((entry) => entry.role === 'user')?.inputConfig;
   const options =
     input?.configOptionValues && typeof input.configOptionValues === 'object'
       ? input.configOptionValues

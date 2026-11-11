@@ -2651,18 +2651,20 @@ export const SessionChatInterface = memo(
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
     const liveSessionStatus = liveSessionPresence?.status ?? null;
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
-    const automationSupported =
-      !!runtime &&
-      workspaceSupports(
-        { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
-        'automations'
-      );
+    const automationContent = {
+      mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext',
+    } as const;
+    const automationSupported = !!runtime && workspaceSupports(automationContent, 'automations');
     const continuation = useLocalSessionContinuation(
       automationSupported &&
         workspaceId &&
         session.machineId &&
         (isLocalSession ||
-          (!!localMachineId && !!getAutomationProofIssuer() && currentUser?.id === session.userId))
+          // Remote control rides workspace Machine RPC; encrypted workspaces withhold it.
+          (!!localMachineId &&
+            !!getAutomationProofIssuer() &&
+            workspaceSupports(automationContent, 'rpc') &&
+            currentUser?.id === session.userId))
         ? {
             workspaceId,
             machineId: session.machineId,

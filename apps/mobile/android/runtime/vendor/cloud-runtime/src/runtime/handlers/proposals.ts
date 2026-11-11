@@ -266,9 +266,12 @@ export function registerProposals(ctx: RuntimeContext) {
     if (!host.supported) throw new Error('schedule_machine_unsupported');
 
     // The conversation's run config only carries over to the same Agent.
-    const history = readyHistory(sessionId);
-    const latest =
-      history.findLast((entry) => entry?.role === 'user')?.inputConfig ?? {};
+    const history = await readyHistory(sessionId);
+    check();
+    const input = history.findLast(
+      (entry) => entry.role === 'user',
+    )?.inputConfig;
+    const latest = record(input) ? input : {};
     let run: {
       modeId?: string;
       modelId?: string;
@@ -364,7 +367,8 @@ export function registerProposals(ctx: RuntimeContext) {
     const decision: Decision = args.decision;
     try {
       const { meta, userId, check, scopedGrant } = scope(args.workspaceId);
-      const notice = noticeAt(args);
+      const notice = await noticeAt(args);
+      check();
       if (!notice) throw new Error('proposal_unavailable');
       const target = {
         sessionId: args.sessionId,
@@ -387,6 +391,7 @@ export function registerProposals(ctx: RuntimeContext) {
             scopedGrant,
             check,
           );
+        check();
         const outcome = decision === 'accept' ? 'saved' : 'dismissed';
         await writeNoticeMeta({ ...target, patch: { outcome } });
         return { outcome };
@@ -414,6 +419,7 @@ export function registerProposals(ctx: RuntimeContext) {
           scopedGrant,
           check,
         );
+        check();
         await writeNoticeMeta({
           ...target,
           patch: { outcome: 'created', scheduleId },

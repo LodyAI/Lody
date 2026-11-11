@@ -12,6 +12,8 @@ struct SessionEnvelope: Sendable {
   var overflow = false
   var entriesJSON = "[]"
   var billableTurnCount: Int?
+  var historyHasMore = false
+  var historyLoading = false
   var composerJSON: String?
   var usageJSON: String?
   var preview: SessionBrowserPreview?
@@ -30,12 +32,19 @@ struct SessionEnvelope: Sendable {
       envelope.usageJSON = String(decoding: data, as: UTF8.self)
     }
     envelope.billableTurnCount = (object["billableTurnCount"] as? NSNumber)?.intValue
+    envelope.historyHasMore = object["historyHasMore"] as? Bool == true
+    envelope.historyLoading = object["historyLoading"] as? Bool == true
     if let composer = object["composer"] as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: composer) {
       envelope.composerJSON = String(decoding: data, as: UTF8.self)
     }
     guard let entries = object["entries"] as? [[String: Any]] else { return envelope }
     envelope.transcript = SessionTranscriptFacts(entries: entries)
-    let augmented = entries.map { entry in entry.merging(["fileDiffs": changedFiles(entry)]) { _, new in new } }
+    let ids = Set(entries.compactMap { $0["id"] as? String })
+    let pending = (object["pendingRoostInputs"] as? [[String: Any]] ?? []).filter {
+      guard let id = $0["id"] as? String else { return false }
+      return !ids.contains(id)
+    }
+    let augmented = (entries + pending).map { entry in entry.merging(["fileDiffs": changedFiles(entry)]) { _, new in new } }
     if let data = try? JSONSerialization.data(withJSONObject: augmented) {
       envelope.entriesJSON = String(decoding: data, as: UTF8.self)
     }

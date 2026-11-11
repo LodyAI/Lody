@@ -1356,7 +1356,7 @@ export class LodyFleet {
               hasUncertainLegacyQuota: schedules.hasUncertainLegacyQuota,
               workspace,
               logger: workspaceLogger,
-              verifyRemoteControl: this.cloudPort.remoteAutomation?.verifyControl,
+              verifyRemoteControl: this.remoteAutomationVerifier(workspace),
               auth: {
                 token: this.cliToken,
                 userId: this.userId,
@@ -1518,6 +1518,16 @@ export class LodyFleet {
     this.refreshRuntimeState();
   }
 
+  /** Remote automation control rides workspace Machine RPC, so it follows that policy. */
+  private remoteAutomationVerifier(workspace: WorkspaceRuntimeState['workspace']) {
+    return workspaceSupports(
+      { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'rpc'
+    )
+      ? this.cloudPort.remoteAutomation?.verifyControl
+      : undefined;
+  }
+
   private ensureAutomations(state: WorkspaceRuntimeState): Promise<AutomationWorkspaceHandle> {
     if (
       !workspaceSupports(
@@ -1534,7 +1544,7 @@ export class LodyFleet {
       hasUncertainLegacyQuota: state.schedules.hasUncertainLegacyQuota,
       workspace: state.workspace,
       logger: this.logger,
-      verifyRemoteControl: this.cloudPort.remoteAutomation?.verifyControl,
+      verifyRemoteControl: this.remoteAutomationVerifier(state.workspace),
       auth: {
         token: this.cliToken,
         userId: this.userId,

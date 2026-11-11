@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { runtimeCalls } from '../../../../packages/cloud-runtime/src/contract/methods.ts';
 
 test('persistent runtime applies live increments to the existing replica and advances the cursor', async () => {
+  const previousBroadcastChannel = globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel = undefined;
   const flock = new Flock('synthetic');
   flock.set(['e', 'session-s1'], true, 1);
   flock.set(['e', 'machine-m1'], true, 1);
@@ -34,11 +37,14 @@ test('persistent runtime applies live increments to the existing replica and adv
   const envelopes = [];
   const replies = new Map();
   let respond;
+  const machineBootstrap = Promise.withResolvers();
+  const pickerReady = Promise.withResolvers();
   globalThis.__runtimeTestClient = class {
     constructor({ url }) {
       this.isMeta = decodeURIComponent(url).endsWith(':meta');
     }
     async bootstrap() {
+      if (!this.isMeta) await machineBootstrap.promise;
       return {
         ok: true,
         result: {
@@ -83,6 +89,11 @@ test('persistent runtime applies live increments to the existing replica and adv
                 }),
               ),
             );
+          if (
+            message.kind === 'event' &&
+            message.method === 'creationOptionsChanged'
+          )
+            pickerReady.resolve();
           if (message.kind === 'event' && message.method === 'catalog')
             nextEvent?.(message.payload);
         },
@@ -221,6 +232,15 @@ test('persistent runtime applies live increments to the existing replica and adv
     knownRepos: { 'm1:local:p1': 'Afilmory/afilmory' },
   });
   assert.equal(started.kind, 'result');
+  await pickerReady.promise;
+  assert.equal(
+    envelopes.some(
+      (event) =>
+        event.kind === 'event' && ['catalog', 'synced'].includes(event.method),
+    ),
+    false,
+  );
+  machineBootstrap.resolve();
   const initial = JSON.parse((await first).catalog);
   assert.equal(initial.sessions[0].title, 'Before');
   assert.equal(
@@ -420,6 +440,7 @@ test('persistent runtime applies live increments to the existing replica and adv
   delete globalThis.webkit;
   delete globalThis.__runtimeTestClient;
   delete globalThis.dataRuntime;
+  globalThis.BroadcastChannel = previousBroadcastChannel;
 });
 
 // Exercise the production contract channel and handlers. Only remote provider
@@ -431,6 +452,7 @@ async function providerHandlerFixture(t) {
         export {createChannel} from './packages/cloud-runtime/src/runtime/channel.ts';
         export {registerSettings} from './packages/cloud-runtime/src/runtime/handlers/settings.ts';
         export {registerLifecycle} from './packages/cloud-runtime/src/runtime/handlers/lifecycle.ts';
+        export {stopAcceptedInputs, stopSessions} from './packages/cloud-runtime/src/runtime/session.ts';
       `,
       resolveDir: new URL('../../../../', import.meta.url).pathname,
       loader: 'ts',
@@ -464,7 +486,13 @@ async function providerHandlerFixture(t) {
       },
     ],
   });
-  const { createChannel, registerSettings, registerLifecycle } = await import(
+  const {
+    createChannel,
+    registerSettings,
+    registerLifecycle,
+    stopAcceptedInputs,
+    stopSessions,
+  } = await import(
     `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
   );
   const state = {
@@ -557,7 +585,9 @@ async function providerHandlerFixture(t) {
     services.push(service);
     return service;
   };
-  t.after(() => {
+  t.after(async () => {
+    stopSessions();
+    await stopAcceptedInputs();
     delete globalThis.__providerBoundaryFactory;
   });
   registerSettings(ctx);

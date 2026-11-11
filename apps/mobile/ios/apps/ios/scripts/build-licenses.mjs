@@ -28,6 +28,12 @@ const workspacePackages = ['apps/ios', 'packages/cloud-runtime'];
  */
 const nativeComponents = [
   {
+    name: 'acp-extension-dsh',
+    license: 'Apache-2.0',
+    url: 'https://github.com/LodyAI/acp-extension-dsh',
+    file: '../../packages/cloud-runtime/licenses/acp-extension-dsh-LICENSE.txt',
+  },
+  {
     name: 'libdatachannel',
     license: 'MPL-2.0',
     url: 'https://github.com/paullouisageneau/libdatachannel',

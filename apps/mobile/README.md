@@ -21,6 +21,9 @@ additional sections; unfinished detail pages remain explicitly unavailable.
 Neither native client exposes a standalone Machines entry, MCP server management,
 Memory, or a separate Appearance page in settings. Agents keeps machine selection
 inside its own page, above the selected machine's provider list.
+Both clients can opt into Roost for new conversations through Developer Mode in
+Preferences when the selected machine supports it. Existing conversations retain
+their history backend.
 
 The clients are under active development. This source import does not establish
 an App Store, Play Store, or TestFlight release for this repository. The mobile
@@ -88,6 +91,8 @@ After changes, regenerate/build iOS (`pnpm prebuild` from `ios/`) or rebuild
 Android with Gradle. Endpoint tuples select separate credential/cache namespaces;
 the production tuple retains existing production data. These values are built
 into the app, not read from the developer machine when the app launches.
+Roost history caches and pending inputs use the same endpoint namespace in
+addition to the account and workspace.
 Provider callback registrations must permit the selected auth origin; changing
 client endpoints does not configure OAuth providers or the backend itself.
 

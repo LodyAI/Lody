@@ -23,10 +23,13 @@ import { expandMentions } from '../mention-expansion';
 import { expandShortcuts, shortcutAccess } from '../prompt-shortcuts';
 import {
   checkTurnQuota,
+  cancelRoostInputs,
   controlTurn,
+  actOnPendingInput,
   editSession,
   sessionDoc,
   readyHistory,
+  sessionHistory,
   releaseDeletedSessions,
   respondPermission,
   sendTurn,
@@ -62,6 +65,16 @@ export function registerSessions(
     ctx.publish();
   }
   const forkAttempts = new Map<string, 'created' | 'rejected' | 'unknown'>();
+  channel.handle('forgetPendingInput', async ({ sessionId, inputId }) => {
+    if (!state.workspace || !state.userId) throw new Error('workspace_changed');
+    await actOnPendingInput(sessionId, inputId, 'forget');
+    return {};
+  });
+  channel.handle('retryPendingInput', async ({ sessionId, inputId }) => {
+    if (!state.workspace || !state.userId) throw new Error('workspace_changed');
+    await actOnPendingInput(sessionId, inputId, 'retry');
+    return {};
+  });
   channel.handle('forkSession', async (args) => {
     const replica = metaWrite(args, true);
     if (!state.userId) return { state: 'rejected' };
@@ -77,9 +90,8 @@ export function registerSessions(
         .get(meta.machineId)
         ?.get(['acpCapability', meta.agentConfigId]) as
         Record<string, any> | undefined);
-    const history = sessionDoc(args.sourceSessionId)
-      ?.getList('history')
-      .toJSON() as Record<string, any>[] | undefined;
+    const history = sessionHistory(args.sourceSessionId) as
+      Record<string, any>[] | undefined;
     if (
       !meta ||
       !history ||
@@ -154,6 +166,7 @@ export function registerSessions(
           machineId: agent.machineId,
           agentConfigId: agent.id,
           userId: state.userId,
+          preferRoost: args.preferRoost,
           title: args.title,
           tabContext: {
             parentSessionId: owner.id,
@@ -227,16 +240,38 @@ export function registerSessions(
       creating = false;
     }
   });
+  function cancelLifecycleInputs(workspaceId: string, replica: MetaReplica) {
+    const userId = state.userId;
+    return async (ids: string[]) => {
+      await cancelRoostInputs(ids);
+      if (
+        state.workspace !== workspaceId ||
+        state.userId !== userId ||
+        state.metaReplica !== replica
+      )
+        throw new Error('workspace_changed');
+    };
+  }
   channel.handle('deleteSession', async (args) => {
     const replica = metaWrite(args, true);
-    const sessionIds = await deleteSession(args, replica);
+    const sessionIds = await deleteSession(
+      args,
+      replica,
+      cancelLifecycleInputs(args.workspaceId, replica),
+    );
     if (state.metaReplica === replica) releaseDeletedSessions(sessionIds);
     republish(replica);
     return { sessionIds };
   });
   channel.handle('archiveSession', async (args) => {
     const replica = metaWrite(args);
-    await archiveSession(args, replica, state.machineReplicas, getGrant);
+    await archiveSession(
+      args,
+      replica,
+      state.machineReplicas,
+      getGrant,
+      cancelLifecycleInputs(args.workspaceId, replica),
+    );
     republish(replica);
     return {};
   });
@@ -318,11 +353,11 @@ export function registerSessions(
       }),
     };
   });
-  channel.handle('conversationMarkdown', (args) => {
+  channel.handle('conversationMarkdown', async (args) => {
     const { flock } = metaWrite(args);
     const meta = metaOf(flock, `session-${args.sessionId}`);
     if (!meta) throw new Error('session_not_found');
-    const history = readyHistory(args.sessionId);
+    const history = await readyHistory(args.sessionId);
     if (!history.length) return { state: 'empty' as const };
     const project = (meta.project ?? {}) as Record<string, unknown>;
     // Web `conversationCopySource`: `owner/repo · branch` provenance for the header.

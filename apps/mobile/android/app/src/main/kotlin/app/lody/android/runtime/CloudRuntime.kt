@@ -35,6 +35,9 @@ sealed interface RuntimeCommand {
     data class CreateAndSend(val request: CreateRequest) : RuntimeCommand
     data class SendText(val request: SendTextRequest) : RuntimeCommand
     data class WatchSession(val id: String) : RuntimeCommand
+    data class LoadOlderSession(val id: String) : RuntimeCommand
+    data class RetryPendingInput(val sessionId: String, val inputId: String) : RuntimeCommand
+    data class ForgetPendingInput(val sessionId: String, val inputId: String) : RuntimeCommand
     data class CloseSession(val id: String) : RuntimeCommand
     /** One step's detail from the watched session (command, output, diff). Read only. */
     data class ItemDetail(val sessionId: String, val entryId: String, val itemId: String) : RuntimeCommand
@@ -220,6 +223,7 @@ data class SessionMessage(
     /** A user turn's attachments (images and files), by display name, in order. */
     val attachments: List<MessageAttachment> = emptyList(),
     val operations: List<OperationEvent> = emptyList(),
+    val inputRetryable: Boolean = false,
     /** An Agent's Role or schedule proposals (system entries), decided with [RuntimeCommand.DecideProposal]. */
     val proposals: List<ProposalCard> = emptyList(),
 )
@@ -338,7 +342,16 @@ data class RunChoice(
     val agentRoleId: String? = null, val roleKnown: Boolean = false,
 )
 /** [preview]: the session's managed web preview candidate, null without one. */
-data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null, val preview: BrowserPreview? = null)
+data class SessionSnapshot(
+    val id: String,
+    val status: String,
+    val messages: List<SessionMessage>,
+    val composer: RunChoice? = null,
+    val usage: SessionUsage? = null,
+    val preview: BrowserPreview? = null,
+    val historyHasMore: Boolean = false,
+    val historyLoading: Boolean = false,
+)
 sealed interface RuntimeEvent {
     data class ProvidersChanged(val machineId: String) : RuntimeEvent
     data class ProviderProgress(val machineId: String, val id: String, val status: String, val percent: Float?) : RuntimeEvent

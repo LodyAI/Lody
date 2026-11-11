@@ -220,11 +220,14 @@ final class OutboxDispatcher {
       let result = try Self.parse(await services.sendSessionTurn(Self.turn(record, userId: userId, plan: plan)))
       let state = result["state"]?.string ?? ""
       if state == "not_sent" {
-        if plan == nil, result["reason"]?.string == "session_not_ready" {
+        let reason = result["reason"]?.string
+        // An earlier Roost input still awaits its owner and nothing was written. Keep the send
+        // pending and continue with the same identity, as Web does, instead of failing it.
+        if reason == "previous_input_pending" || (plan == nil && reason == "session_not_ready") {
           try await store.put(record.with(phase: "waiting")).value
           return
         }
-        await fail(record, store: store, reason: quotaError(result["reason"]?.string, fallback: "send.error.notSent"))
+        await fail(record, store: store, reason: quotaError(reason, fallback: "send.error.notSent"))
         return
       }
       var next = record.with(phase: ["accepted", "uploaded", "queued"].contains(state) ? state : "unknown")
@@ -244,6 +247,7 @@ final class OutboxDispatcher {
 
   func quotaError(_ reason: String?, fallback: String) -> String {
     let keys = [
+      "input_storage_unavailable": "send.error.draftSaveFailed",
       "shortcut_unavailable": "send.error.shortcut",
       "mcp_catalog_unavailable": "send.error.mcpCatalog",
       "mcp_connection_missing": "send.error.mcpConnection",

@@ -13,7 +13,7 @@ open class WebViewRuntime internal constructor(
     override val scope: RuntimeScope,
     internal val backend: WebViewCloudRuntime,
 ) : CloudRuntime {
-    constructor(context: Context, scope: RuntimeScope) : this(scope, WebViewCloudRuntime(context))
+    constructor(context: Context, scope: RuntimeScope) : this(scope, WebViewCloudRuntime(context, "DataRuntime.html"))
     private val mutableState = MutableStateFlow(backend.status)
     override val state: StateFlow<RuntimeStatus> = mutableState.asStateFlow()
     private val mutableEvents = MutableSharedFlow<RuntimeEmission>(extraBufferCapacity = 64)
@@ -48,7 +48,7 @@ open class WebViewRuntime internal constructor(
             RuntimeResult.Accepted
         }
         is RuntimeCommand.CreateTab -> {
-            val value = call("createTab", JSONArray().put(command.parentId).put(command.id).put(command.title), CommandDeadline.WRITE) as JSONObject
+            val value = call("createTab", JSONArray().put(command.parentId).put(command.id).put(command.title).put(backend.preferRoost), CommandDeadline.WRITE) as JSONObject
             RuntimeResult.Created(CreationReceipt(command.id, value.getString("state")))
         }
         is RuntimeCommand.GetCreationOptions -> RuntimeResult.Options(CreationJson.options(call("creationOptions", JSONArray().put(command.projectId ?: JSONObject.NULL).put(command.agentConfigId ?: JSONObject.NULL), CommandDeadline.QUERY) as JSONObject))
@@ -114,7 +114,7 @@ open class WebViewRuntime internal constructor(
             ))
         }
         is RuntimeCommand.CreateAndSend -> {
-            val value = call("createAndSend", JSONArray().put(CreationJson.request(command.request)), CommandDeadline.WRITE) as JSONObject
+            val value = call("createAndSend", JSONArray().put(CreationJson.request(command.request).put("preferRoost", backend.preferRoost)), CommandDeadline.WRITE) as JSONObject
             RuntimeResult.Created(CreationReceipt(value.getString("sessionId"), value.getString("state")))
         }
         is RuntimeCommand.SendText -> {
@@ -142,6 +142,18 @@ open class WebViewRuntime internal constructor(
         }
         is RuntimeCommand.WatchSession -> {
             call("watchSession", JSONArray().put(command.id), CommandDeadline.QUERY)
+            RuntimeResult.Accepted
+        }
+        is RuntimeCommand.RetryPendingInput -> {
+            call("retryPendingInput", JSONArray().put(command.sessionId).put(command.inputId), CommandDeadline.WRITE)
+            RuntimeResult.Accepted
+        }
+        is RuntimeCommand.ForgetPendingInput -> {
+            call("forgetPendingInput", JSONArray().put(command.sessionId).put(command.inputId), CommandDeadline.WRITE)
+            RuntimeResult.Accepted
+        }
+        is RuntimeCommand.LoadOlderSession -> {
+            call("loadOlderSession", JSONArray().put(command.id), CommandDeadline.QUERY)
             RuntimeResult.Accepted
         }
         is RuntimeCommand.CloseSession -> {

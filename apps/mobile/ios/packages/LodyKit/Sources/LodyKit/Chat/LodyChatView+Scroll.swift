@@ -83,6 +83,18 @@ extension LodyChatView {
       openAttachment(file)
       return
     }
+    if let pendingSend, pendingSend.phase == "unknown", id == pendingSend.id + ":delivery" {
+      onRetrySend(["forget": true])
+      return
+    }
+    if id == row.entryID + ":retryPending" {
+      onRetrySend(["retryPending": true, "id": row.entryID])
+      return
+    }
+    if id == row.entryID + ":delivery", transcript.entries.contains(where: { $0.id == row.entryID && $0.inputState == "unknown" }) {
+      onRetrySend(["forget": true, "id": row.entryID])
+      return
+    }
     if let pendingSend, id == pendingSend.id + ":pending", pendingSend.failed == true {
       onRetrySend([:])
       return

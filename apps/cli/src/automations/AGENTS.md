@@ -42,5 +42,7 @@
   including terminal PRs, under existing quota/fairness gates. Actions denial cools
   only Actions reads. Source data belongs in this ledger, not poller scheduling state.
   Revalidate owner metadata before publishing.
-- Fleet uses the shared workspace content policy to withhold Automations from encrypted
-  workspaces until their automation channel is implemented, including control and retry paths.
+- Encrypted workspaces run Automations locally. Session actions sign their queued input
+  as this machine before the write, and encrypted admission refuses automation input
+  without that signature. Remote control follows the shared `rpc` content verdict: Fleet
+  installs the remote verifier, and the renderer offers remote controls, only where it holds.

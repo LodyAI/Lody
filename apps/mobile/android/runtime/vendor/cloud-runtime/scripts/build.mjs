@@ -6,10 +6,13 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 export async function buildDataRuntime(
   output,
-  workerOrigin = defaults.CF_WORKER_URL,
+  backends = { ...defaults, STORAGE_SUFFIX: '' },
 ) {
   const result = await build({
-    define: { LODY_MOBILE_WORKER_URL: JSON.stringify(workerOrigin) },
+    define: {
+      LODY_MOBILE_WORKER_URL: JSON.stringify(backends.CF_WORKER_URL),
+      LODY_MOBILE_STORAGE_SUFFIX: JSON.stringify(backends.STORAGE_SUFFIX),
+    },
     plugins: [
       {
         name: 'bundled-loro-wasm',

@@ -70,6 +70,18 @@ class ChatRepository(
     suspend fun readFile(scope: RuntimeScope, sessionId: String, path: String): FileContent =
         owner.use(scope) { (it.execute(RuntimeCommand.ReadFile(sessionId, path)) as RuntimeResult.File).value }
 
+    suspend fun retryPendingInput(scope: RuntimeScope, sessionId: String, inputId: String) {
+        owner.use(scope) { it.execute(RuntimeCommand.RetryPendingInput(sessionId, inputId)) }
+    }
+
+    suspend fun forgetPendingInput(scope: RuntimeScope, sessionId: String, inputId: String) {
+        owner.use(scope) { it.execute(RuntimeCommand.ForgetPendingInput(sessionId, inputId)) }
+    }
+
+    suspend fun loadOlder(scope: RuntimeScope, sessionId: String) {
+        owner.use(scope) { it.execute(RuntimeCommand.LoadOlderSession(sessionId)) }
+    }
+
     /** A direct GitHub write from the action bar; never retried (see [GitHubPullRequestWrites]). */
     suspend fun mergePullRequest(scope: RuntimeScope, repository: String, number: Int, method: String) =
         pullRequests.write(scope, repository, number, method)

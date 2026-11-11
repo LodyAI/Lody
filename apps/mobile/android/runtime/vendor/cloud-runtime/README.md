@@ -18,9 +18,57 @@ Run `pnpm --filter @lody/cloud-runtime typecheck`. Existing behavioral fixtures
 under `apps/ios/tests` now load these shared production sources, retaining
 protocol, write ordering, uncertain delivery and recovery checks.
 
+## Roost sessions
+
+The Developer Mode / Roost History beta preference selects Roost for new sessions
+only when the owner advertises `sessionHistory` v3, using the pinned upstream
+`resolveNewSessionHistoryBackend` policy. The preference is off by default;
+unsupported machines create Loro sessions. The resulting backend is written in
+session metadata and never changed by this preference. New Tabs use the same
+selection policy.
+
+The session's metadata selects its history backend. For Roost, the runtime waits
+for the owner and its `sessionHistory` v3 capability, and negotiates incremental
+reads, watches and patches separately. An existing nonempty Loro history can open
+without metadata after control-stream catchup; an explicitly Roost session or a
+retired Roost cursor never takes that fallback. The pinned upstream Roost bridge
+and history cache read and observe history, capture sharing snapshots, and submit
+permission responses through the encrypted owner RPC. The control document
+carries the shared queue and human-input receipts.
+
+The iOS runtime package holds the authoring source in `vendor/upstream-roost`.
+The iOS asset build verifies the generated `src/runtime/upstream-roost.js` against
+that source. Android's runtime snapshot carries the verified module and licenses.
+Ready Roost inputs use the same workspace input coordinator as Lody and its
+account/workspace-scoped IndexedDB storage. It persists the exact input before
+handoff, orders inputs by session and checks the owner after an uncertain
+acceptance. If the owner reports the input unobserved, the coordinator may submit
+the same immutable entry again. Guide delivery uses the upstream delivery code
+and its durable delivery-started fence; it does not repeat a guide after that
+fence. Queued inputs use the shared control-document queue and wait behind earlier
+Roost inputs. That wait depends on the owner, so it does not hold the session:
+Stop, steer and edits stay available, and only later sends of the same session
+wait behind it. It ends before the host's send deadline with
+`previous_input_pending` and writes nothing; both hosts keep the message pending
+and send it again with the same identity, as Web keeps waiting. A queue item remains in the control document until its guide input
+is saved. The mobile runtime uploads the human-input receipt before the owner
+handoff and retries a failed upload with the same input identity. A user can
+retry the original input from the transcript after a failure, or cancel a pending
+input while its session is syncing; an owner may already
+have accepted it. Archiving or deleting a Roost session cancels its pending inputs through the shared
+coordinator before changing metadata. Signing out does not erase pending input data.
+
+The transcript opens with the latest owner page and requests older pages as the
+reader scrolls. The full history directory is read in the background for send
+configuration and turn counts. The upstream bridge applies negotiated patches,
+repairs bodies at the owner checkpoint, and resumes observation from its local
+cache. Both mobile runtime WebViews allow persistent browser storage for the
+upstream cache and pending-input database. Sharing takes an authoritative owner
+snapshot rather than exporting the loaded transcript window.
+
 ## Host contract
 
-The host (iOS today, a future Android host) talks to the runtime only through
+The host (iOS and Android) talks to the runtime only through
 versioned JSON envelopes: `{v, gen, kind, id?, method, payload | error}` with
 `kind` one of `request`, `result`, `error`, `event`. Every host↔runtime method
 is on the contract; there is no other bridge. The runtime's only global is

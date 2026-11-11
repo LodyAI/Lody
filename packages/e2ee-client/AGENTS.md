@@ -67,7 +67,10 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   A delivery short of mailbox evidence retries on the desktop's bounded backoff, holding
   the reader only during an attempt and never opening one; only an exhausted schedule or
   an ineligible sender ends it `failed` for a manual retry. Its task stays in the core
-  distribution journal, so any later key round on this device also sends it.
+  distribution journal, so any later key round on this device also sends it. An open on
+  a device that can send (active member, non-recovery, usable key) schedules one delayed
+  background key round, at most one in flight and spaced by an interval; it borrows the
+  reader only while it runs, never opens one, and only reports failure.
   Automatic approval never trusts the relay's `source`: it signs only after
   `verifyAutomaticMemberAdmission` accepts the endorser-signed email offer against the
   verified ledger (eligible endorser now, unexpired, token-derived request id, unused).
