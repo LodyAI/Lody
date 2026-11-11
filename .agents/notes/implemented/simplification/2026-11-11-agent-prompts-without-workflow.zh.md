@@ -24,7 +24,8 @@ results…” 开头；Fix CI 先在客户端拉取失败检查，再规定读�
 - Fix CI 和 Resolve Conflicts 只写仓库和 PR。CI 结论已来自 Session 元数据，客户端不再
   先拉取检查结果。
 - `@Role` 提及改写为引用 `[Agent Role: 名称 (agentRoleId: …)]`，而不是
-  “use lody mcp to create a session…”：用户自己的话决定怎么用这个 Role。消息保存了
+  “use lody mcp to create a session…”：用户自己的话决定怎么用这个 Role。Lody MCP 服务说明描述了这个格式，并说明
+  `lody_session_create` 接受这些 id，与会话提及的做法一致。消息保存了
   显示 span，原生客户端照常显示标签；它们的旧文本语法只用于没有 span 的消息。
 - Project group 只追加事实：组目录不是 Git 仓库，成员列在对话里。
 - 约束规则在根 `AGENTS.md`；Inbox 专属规则在 `apps/cli/src/orchestration/AGENTS.md`。

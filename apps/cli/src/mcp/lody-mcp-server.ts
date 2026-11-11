@@ -4712,6 +4712,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         'Session mentions use [@Title](lody://session/<sessionId>?workspace=<workspaceId>); old transcripts may use session://<sessionId>.',
         'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',
+        'Agent Role mentions use [Agent Role: <name> (agentRoleId: <id>)], plus agentRoleMachineId for a Role on several machines; lody_session_create accepts these ids to run a Session with that Role.',
         LODY_HELP_INSTRUCTIONS,
         SESSION_COLLABORATION_GUIDANCE,
         LODY_SKILL_INSTRUCTIONS,

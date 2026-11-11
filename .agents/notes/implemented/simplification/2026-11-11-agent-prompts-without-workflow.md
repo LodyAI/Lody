@@ -31,7 +31,8 @@ finalization does not commit and the user asked for a PR that tracks the work
   comes from Session metadata, so the client no longer fetches check runs first.
 - An `@Role` mention becomes a reference, `[Agent Role: Name (agentRoleId: …)]`, not
   "use lody mcp to create a session…": the user's own words say what to do with the
-  Role. Messages persist display spans, so native clients still render the chip;
+  Role. The Lody MCP server instructions describe this format and say that
+  `lody_session_create` accepts the ids, as they already do for Session mentions. Messages persist display spans, so native clients still render the chip;
   their legacy text grammar applies only to span-less messages.
 - A Project group adds only its facts: the group directory is not a Git repository
   and the members are listed in the conversation.
