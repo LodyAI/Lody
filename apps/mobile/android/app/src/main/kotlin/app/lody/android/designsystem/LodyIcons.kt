@@ -554,6 +554,25 @@ object LodyIcons {
         )
     }
 
+    /** Lucide `fold-vertical`: squash and merge. */
+    val Squash: ImageVector by lazy {
+        lodyIcon(
+            "Squash",
+            "M12 22v-6", "M12 8V2", "M4 12H2", "M10 12H8", "M16 12h-2", "M22 12h-2",
+            "m15 19-3-3-3 3", "m15 5-3 3-3-3",
+        )
+    }
+
+    /** Lucide `layers`: rebase and merge. */
+    val Rebase: ImageVector by lazy {
+        lodyIcon(
+            "Rebase",
+            "M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z",
+            "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65",
+            "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65",
+        )
+    }
+
     val Merge: ImageVector by lazy {
         lodyIcon(
             "Merge",
