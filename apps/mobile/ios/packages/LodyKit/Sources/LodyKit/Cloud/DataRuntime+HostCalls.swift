@@ -60,13 +60,7 @@ extension DataRuntime {
     let user = userId
     shareTasks[id] = Task { [weak self] in
       var value: RuntimeContract.JSONValue?
-      if let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user, useLink: { action, url in
-        if action == "copy" {
-          UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: url.absoluteString]], options: [.localOnly: true])
-        } else if action == "open" {
-          guard await UIApplication.shared.open(url) else { throw SessionSharing.ManagementFailure(code: "shares_link_failed") }
-        }
-      }) {
+      if let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user) {
         value = try? RuntimeJSON.decode(RuntimeContract.JSONValue.self, from: result)
       }
       guard !Task.isCancelled, let self, self.channel === channel else { return }
