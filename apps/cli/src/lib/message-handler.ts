@@ -1,6 +1,7 @@
 import type { MachineStatusResponse } from '@lody/shared';
 import { readManagedOperation } from './managed-daemon-release';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
+import type { SessionDirectoryListRequest } from '@lody/shared';
 import {
   sessionHistoryWriteIntentDigest,
   SessionHistoryReadResponseSchema,
@@ -403,7 +404,9 @@ import {
 import {
   FilePreviewService,
   type FilePreviewLocalWorkspaceResolver,
+  type FilePreviewWorkspaceResolver,
 } from '@/lib/file-preview/file-preview-service';
+import { listSessionDirectory } from '@/lib/file-preview/session-directory-listing';
 import {
   CodeCollabV2DiffStore,
   type CodeCollabV2DiffStoreEvent,
@@ -914,6 +917,21 @@ export class MessageHandler {
   private operationCoordinator: LodyOperationCoordinator;
   private turnPostProcessingService: TurnPostProcessingService;
   private localProjectControlService: LocalProjectControlService;
+  /** The session's own workspace (its worktree), shared by `file/preview` and `file/list-dir`. */
+  private readonly resolveFilePreviewWorkspace: FilePreviewWorkspaceResolver = async (
+    sessionId,
+    rootId
+  ) => {
+    const resolved = await this.resolveCodeCollabV2Workspace(sessionId, { rootId });
+    return resolved.ok
+      ? {
+          ok: true,
+          ownerSessionId: resolved.ownerSessionId,
+          workspaceRoot: resolved.workspaceRoot,
+          fileRoots: resolved.fileRoots,
+        }
+      : { ok: false, code: resolved.code, message: resolved.message };
+  };
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
   private encryptedQueryServer: LoroStreamsMachineRpcServer | null = null;
@@ -3359,17 +3377,7 @@ export class MessageHandler {
       canDownloadLargeFiles,
       onDiagnostic: (event) => this.logger.debug(`[file-preview] ${JSON.stringify(event)}`),
       resolveLocalWorkspace: this.resolveLocalFilePreviewWorkspace,
-      resolveWorkspace: async (sessionId, rootId) => {
-        const resolved = await this.resolveCodeCollabV2Workspace(sessionId, { rootId });
-        return resolved.ok
-          ? {
-              ok: true,
-              ownerSessionId: resolved.ownerSessionId,
-              workspaceRoot: resolved.workspaceRoot,
-              fileRoots: resolved.fileRoots,
-            }
-          : { ok: false, code: resolved.code, message: resolved.message };
-      },
+      resolveWorkspace: this.resolveFilePreviewWorkspace,
     });
     this.diffBlobStoreReader = new CodeCollabV2DiffStore(this.workspaceId, { readOnly: true });
     this.diffBlobReader = new CodeCollabV2Service({
@@ -4014,6 +4022,25 @@ export class MessageHandler {
           ? this.resolveEncryptedCodeCollabOwnerSessionId
           : this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await fileReader.previewFile(request),
+        // Ordinary workspaces only; an encrypted reader has no folder listing yet, so the
+        // server answers `unsupported_protocol` there.
+        ...(this.encryptedFileReader
+          ? {}
+          : {
+              listSessionDirectory: async (request: SessionDirectoryListRequest) =>
+                await listSessionDirectory(
+                  {
+                    resolveWorkspace: this.resolveFilePreviewWorkspace,
+                    listDirectory: async (rootPath, relativePath, limit) =>
+                      await this.localProjectControlService.listProjectDirectory(
+                        rootPath,
+                        relativePath,
+                        { limit }
+                      ),
+                  },
+                  request
+                ),
+            }),
         downloadFileChunk: async (request) => {
           if (
             request.attachment?.machineId !== undefined &&

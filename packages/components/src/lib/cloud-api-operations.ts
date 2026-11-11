@@ -57,6 +57,8 @@ export type WorkspaceJoinLinkPreview =
     };
 
 export interface WorkspaceJoinOwnerState {
+  /** Optional roster change marker; older servers omit it. Not a permission grant. */
+  membershipVersion?: string;
   activeLink: null | { id: string; token: string; expiresAt: number };
   pendingRequests: Array<{
     id: string;
@@ -189,6 +191,7 @@ export const cloudOperations = {
     ),
   },
   e2eeWorkspaces: {
+    ledgerHead: query<ConvexApi['e2eeWorkspaces']['ledgerHead']>('e2eeWorkspaces:ledgerHead'),
     memberProfiles: query<ConvexApi['e2eeWorkspaces']['memberProfiles']>(
       'e2eeWorkspaces:memberProfiles'
     ),

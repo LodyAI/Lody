@@ -70,6 +70,7 @@ export function E2eeTeamSettings(props: {
   members?: Member[];
   onOpenBilling?: () => void;
   onRefreshBilling?: () => Promise<unknown>;
+  onMembersChanged?: () => Promise<void>;
 }) {
   return <TeamSession key={props.workspaceId} {...props} />;
 }
@@ -80,6 +81,7 @@ function TeamSession({
   members,
   onOpenBilling,
   onRefreshBilling,
+  onMembersChanged,
 }: {
   runtime: Runtime;
   workspaceId: string;
@@ -87,6 +89,7 @@ function TeamSession({
   members?: Member[];
   onOpenBilling?: () => void;
   onRefreshBilling?: () => Promise<unknown>;
+  onMembersChanged?: () => Promise<void>;
 }) {
   const { t, i18n } = useTranslation();
   // Product language, not the OS locale.
@@ -339,6 +342,7 @@ function TeamSession({
                         setMessage(
                           t(result.admitted ? 'e2ee.team.admitted' : 'e2ee.team.reconciling')
                         );
+                      if (result.admitted && current()) await onMembersChanged?.();
                     } finally {
                       if (current()) setApproving(null);
                     }
@@ -521,6 +525,9 @@ export function E2eeTeamSettingsHost(props: {
   onRefreshBilling?: () => Promise<unknown>;
   labels?: ReadonlyMap<string, string>;
   profiles?: ReadonlyMap<string, { name: string | null }>;
+  onMembersChanged?: () => Promise<void>;
+  /** Supplied by a live verified ledger owner; replaces this host's ledger polling. */
+  ledgerVersion?: string;
 }) {
   return <TeamHostSession key={`${props.accountId}:${props.workspaceId}`} {...props} />;
 }
@@ -531,6 +538,8 @@ function TeamHostSession({
   profiles,
   onOpenBilling,
   onRefreshBilling,
+  onMembersChanged,
+  ledgerVersion,
 }: {
   runtime: E2eeWorkspaceRuntime;
   workspaceId: string;
@@ -538,8 +547,11 @@ function TeamHostSession({
   profiles?: ReadonlyMap<string, { name: string | null }>;
   onOpenBilling?: () => void;
   onRefreshBilling?: () => Promise<unknown>;
+  onMembersChanged?: () => Promise<void>;
+  ledgerVersion?: string;
 }) {
   const { t } = useTranslation();
+  const [revision, setRevision] = useState(0);
   const [state, setState] = useState<{
     runtime: E2eeWorkspaceRuntime;
     role: string;
@@ -579,7 +591,7 @@ function TeamHostSession({
       } catch {
         if (!stopped) setState(null);
       } finally {
-        if (!stopped) timer = setTimeout(() => void read(), 10_000);
+        if (!stopped && ledgerVersion === undefined) timer = setTimeout(() => void read(), 10_000);
       }
     };
     void read();
@@ -587,7 +599,7 @@ function TeamHostSession({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [runtime, workspaceId, labels, profiles, t]);
+  }, [runtime, workspaceId, labels, profiles, t, revision, ledgerVersion]);
   return state?.runtime === runtime ? (
     <E2eeTeamSettings
       runtime={runtime}
@@ -596,6 +608,10 @@ function TeamHostSession({
       members={state.members}
       onOpenBilling={onOpenBilling}
       onRefreshBilling={onRefreshBilling}
+      onMembersChanged={async () => {
+        setRevision((value) => value + 1);
+        await onMembersChanged?.();
+      }}
     />
   ) : null;
 }

@@ -25,6 +25,8 @@ rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2
   only with the same original envelope.
 - Keep the iroh floor at 1.4.1 or later and follow upstream security advisories.
   Mobile bindings must disable port mapping and `fast-apple-datapath`.
+  `Cargo.lock` holds `libc` at 0.2.189: 0.2.190 limits `in6_ifreq` to macOS, which
+  breaks `netdev`'s Darwin code on iOS. Raise it only after an iOS build passes.
 - `uniffi/` is the mobile binding (dial-only, port mapping always off), built by
   `scripts/build-mobile.mjs`. On mobile the WebView portable host is the trusted
   host: it hands the seed once, through `BrowserDevice.withTransportSeed`, to one

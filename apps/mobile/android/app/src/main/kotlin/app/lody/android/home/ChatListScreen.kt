@@ -309,7 +309,13 @@ fun ChatListScreen(
                 HomeBottomBar(
                     selected = tab,
                     collapsed = tab == HomeTab.Chats && barCollapsed,
-                    onSelect = { tab = it },
+                    onSelect = { next ->
+                        // The compact bar shows only the selected tab; tapping it restores the full bar.
+                        if (next == tab && barCollapsed) {
+                            barScroll.expand()
+                            barCollapsed = false
+                        } else tab = next
+                    },
                     adds = adds,
                     onCreate = { if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
                 )

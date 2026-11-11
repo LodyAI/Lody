@@ -217,7 +217,53 @@ export async function listDir(
     ctx.signal,
   );
   if (!Array.isArray(result.entries)) throw new Error('invalid_directory');
-  const entries = (result.entries as DirectoryEntry[])
+  return {
+    entries: sortEntries(result.entries as DirectoryEntry[]),
+    truncated: !!result.truncated,
+  };
+}
+
+type SessionListResponse =
+  | {
+      status: 'ok';
+      path: string;
+      entries: DirectoryEntry[];
+      truncated: boolean;
+    }
+  | { status: 'error'; code: string; message?: string };
+
+/**
+ * One folder of the session's own workspace (its worktree when it has one) through
+ * the machine's `file/list-dir` (capability `sessionDirectoryListing`): the same root
+ * and owner envelope `readFile` uses, so a listed file always opens. Null when the
+ * machine answers `unsupported_protocol` (an encrypted workspace's reader).
+ */
+export async function listSessionDir(
+  ctx: FileContext,
+  args: { sessionId: string; relativePath: string },
+): Promise<{ entries: DirectoryEntry[]; truncated: boolean } | null> {
+  const response = (await sealedRpc(
+    ctx.workspaceId,
+    ctx.machineId,
+    'file/list-dir',
+    ctx.ownerSessionId,
+    { v: 3, sessionId: args.sessionId, path: args.relativePath, limit: 2000 },
+    ctx.getGrant,
+    ctx.signal,
+  )) as SessionListResponse;
+  if (response.status !== 'ok') {
+    if (response.code === 'unsupported_protocol') return null;
+    throw new Error(response.code || 'invalid_directory');
+  }
+  if (!Array.isArray(response.entries)) throw new Error('invalid_directory');
+  return {
+    entries: sortEntries(response.entries),
+    truncated: !!response.truncated,
+  };
+}
+
+function sortEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
+  return entries
     .filter(
       (entry) =>
         entry &&
@@ -229,7 +275,6 @@ export async function listDir(
       if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
-  return { entries, truncated: !!result.truncated };
 }
 
 export const READ_FILE_MAX_BYTES = 2 * 1024 * 1024;
