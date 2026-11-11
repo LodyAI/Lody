@@ -134,6 +134,11 @@ when migration facts change.
 - Keep edits traceable to the request and preserve unrelated work. Prefer explicit
   contracts over hidden fallbacks; remove only unused code. Update the nearest
   public `AGENTS.md` when an invariant or boundary changes.
+- Lody provides tools. Text it sends to agents (quick-action and synthetic prompts,
+  receipts, MCP descriptions and replies, skills, examples) carries the user's request
+  and facts the agent cannot discover. Never add workflow steps or review, verify,
+  re-check or commit instructions, or their negations, that the user did not ask for:
+  each delivery would steer or repeat agent work.
 
 ## Code Review Rules
 

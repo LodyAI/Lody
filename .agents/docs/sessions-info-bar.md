@@ -129,8 +129,12 @@ labelClassName`) so the stage diffstat never clips. Wired from
   and promotes Merge against a stale remote head. `workspaceDirty` alone still gates
   the no-PR `Commit & Push`, where there is no remote branch to be behind. Below it, conflicts show
   `Resolve Conflicts` (an immediate agent prompt), failed/error CI shows
-  `Fix CI Errors` (refresh details, include a bounded failed-check snapshot, then send
-  an agent prompt), and any merge state GitHub would accept (clean, or unstable:
+  `Fix CI Errors` (an immediate agent prompt naming only the PR; the agent reads the
+  failing checks itself). Quick-action prompts carry only the request and facts
+  ([decision](../notes/implemented/simplification/2026-11-11-agent-prompts-without-workflow.md));
+  Create PR keeps a one-sentence per-turn upkeep instruction, with the Commit & Push
+  ranking as its fallback
+  ([why](../notes/implemented/architecture/2026-09-12-pr-branch-upkeep-without-auto-commit.md)), and any merge state GitHub would accept (clean, or unstable:
   checks still running or failing but not required) shows the shared Merge
   split-button, so it appears while CI runs; blocked, behind, conflicting or unknown
   states do not. List "ready to merge" indicators keep the stricter readiness. Its

@@ -126,9 +126,9 @@ export function getMessageQuoteEditDraft(items: MessageContent[]): {
 /**
  * Span kinds that are copied as what the user wrote, not as what the agent read.
  *
- * Only `agent_role`. Its rewritten region is an instruction addressed to the
- * agent ("use lody mcp to create a session with agent role[...]") that means
- * nothing outside this conversation, while the chip on screen says `@Reviewer` —
+ * Only `agent_role`. Its rewritten region is a reference addressed to the
+ * agent ("[Agent Role: … (agentRoleId: …)]") that means nothing outside this
+ * conversation, while the chip on screen says `@Reviewer` —
  * so copying the bubble has to produce the latter.
  *
  * The other kinds stay expanded on purpose: a pasted-text span IS the content
