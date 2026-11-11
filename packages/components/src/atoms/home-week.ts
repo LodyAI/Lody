@@ -1,4 +1,3 @@
-import type { MachineId } from '@lody/shared';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { resolveSessionPullRequests } from '@lody/shared';
 import { atom } from 'jotai';
@@ -28,10 +27,7 @@ function toMs(value: string | number | undefined): number | null {
  * metadata the sidebar already holds. Structurally stable: a running agent rewrites its
  * session metadata constantly, but the rows change only when a number the page shows does.
  */
-export const createHomeWeekInputAtom = (
-  userId: string | null,
-  ownedMachineIds: ReadonlySet<MachineId>
-) =>
+export const createHomeWeekInputAtom = (userId: string | null) =>
   atom((get) => {
     // Until the session metadata has loaded, a partial cache would show half a week; the
     // tiles read zero instead, and roll up to the real numbers once they are in.
@@ -43,8 +39,7 @@ export const createHomeWeekInputAtom = (
     const activity = new Map<string, number>();
 
     for (const session of Object.values(get(sessionMetaCacheAtom))) {
-      if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds))
-        continue;
+      if (session.parentSessionId || !isSessionInMyScope(session, userId)) continue;
       const createdAt = toMs(session.createdAt);
       if (createdAt == null) continue;
       const lastAt = toMs(session.lastMessageAt) ?? createdAt;
