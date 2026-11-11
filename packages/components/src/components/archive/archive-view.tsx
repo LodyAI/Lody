@@ -58,7 +58,6 @@ import { MobileArchiveScreen } from '@/components/mobile/mobile-archive-screen';
 import { WebArchiveScreen } from './web-archive-screen';
 import {
   getMachineFlockLocalProjects,
-  getSessionGroupTitle,
   getSessionLaunchConfigLegacyFields,
   type MachineId,
   type PrStatus,
@@ -606,7 +605,7 @@ function sessionActivityTime(session: SessionMeta): number {
 }
 
 function sessionTitle(session: SessionMeta): string {
-  return getSessionGroupTitle(session) || 'Untitled session';
+  return session.title?.trim() || 'Untitled session';
 }
 
 function sortArchivedSessions(

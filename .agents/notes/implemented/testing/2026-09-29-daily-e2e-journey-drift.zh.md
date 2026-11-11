@@ -49,7 +49,7 @@ Role Page Object 现从名为“机器”的 tablist 中选择唯一机器标签
 
 [11 月 8 日 Daily 运行](https://github.com/LodyAI/Lody/actions/runs/42463860106) 在 macOS 和 Windows 通过 24 个旅程中的 21 个，Linux 通过 20 个。两个项目旅程仍等待空本地项目出现在侧栏，但侧栏现在只显示有会话行的项目。旅程改为通过选择器选择空项目、通过设置移除项目，保留原目录安全和 catalog 身份检查。重新打开旅程同时验证空项目不出现在侧栏、但在选择器中恰好出现一次。registry 的操作、检查点、指纹和生成的覆盖表同步更新。
 
-Session 管理暴露了产品遗漏：侧栏改名写入 `groupTitle`，Archive 却仍显示根 tab 的 `title`。[组标题说明](../architecture/2026-11-05-session-group-titles.zh.md) 现在包含 Archive 的显示、搜索与排序，现有重命名标题断言保持不变。
+Session 管理暴露了产品遗漏：侧栏改名写入独立的对话组标题，Archive 却仍显示根 tab 的 `title`。独立组标题之后已被撤销，侧栏与 Archive 的显示、搜索和排序都重新读取根 `title`，现有重命名标题断言保持不变。
 
 Linux 还出现点击 assistant 分叉按钮后菜单未打开。Page Object 现在等待选定按钮完整进入视口、并提供已启用的菜单角色后再点击，保留真实菜单操作和剪贴板断言。另外，`ubuntu-latest` 已升级到 Ubuntu 26.04，Playwright 1.58 的 FFmpeg 安装器不支持该主机。Daily 固定使用 Ubuntu 24.04，并按 `runner.os` 分支；只读运行器和 macOS 产物作为权威证据的策略保持不变。
 

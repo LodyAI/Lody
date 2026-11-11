@@ -1,12 +1,7 @@
 import type { MachineId } from '@lody/shared';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { atom } from 'jotai';
-import {
-  findFreshSessionPresenceState,
-  getSessionGroupTitle,
-  type SessionMeta,
-  type SessionStatus,
-} from '@lody/shared';
+import { findFreshSessionPresenceState, type SessionMeta, type SessionStatus } from '@lody/shared';
 import {
   getEffectiveSessionActivitySummary,
   getLatestPullRequestInfo,
@@ -90,7 +85,7 @@ export const createHomeNowInputAtom = (
       if (!activity.isWorking && !activity.isWaitingPermission && lastAt < horizon) continue;
       rows.push({
         id: session.id,
-        title: getSessionGroupTitle(session) || null,
+        title: session.title?.trim() || null,
         cliType: session.cliType,
         agentType: session.agentType,
         lastAt,

@@ -414,11 +414,6 @@ Other isolated title sessions retain the Provider's current model unless a title
 was explicitly saved. Catalog order does not define a model preference; inferred safe
 mode and reasoning options remain independent of the model choice.
 
-Every generated or agent-pushed title names one tab. A root Session's sidebar title is
-the separate `groupTitle`: the first generated root title is copied into it once, and
-later titles never replace it. See the
-[group title decision](../../../../.agents/notes/implemented/architecture/2026-11-05-session-group-titles.md).
-
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;
 when a final-answer stream exists, it takes precedence over unphased text. Both
