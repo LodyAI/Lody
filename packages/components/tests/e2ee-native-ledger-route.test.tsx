@@ -152,6 +152,9 @@ import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
 import { E2eeWorkspaceConsole } from '../src/components/pages/e2ee-workspace-console';
 import { writePreferredWorkspaceSlug } from '../src/lib/workspace';
 import { useE2eeAccountId } from '../src/lib/e2ee-account';
+import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
+// The portable host's own strict page capture: what a Web or mobile runtime accepts.
+import { capturePage } from '../../e2ee-client/src/runtime-input';
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -495,6 +498,69 @@ it('opens the local ledger with an expired renderer snapshot and offline main id
   await act(async () => window.dispatchEvent(new Event('online')));
   expect(container.textContent).toBe('1');
 });
+
+it.each([
+  ['a page carrying backend-only fields', [] as string[], '1'],
+  ['records that fail local validation', ['zz'], 'failed'],
+] as const)(
+  'catches up through the cloud boundary on %s without reporting the console offline',
+  async (_label, recordsHex, shown) => {
+    const ingested: unknown[] = [];
+    fixture.port = createCloudE2eeWorkspaces({
+      session: () => fixture.session as never,
+      refreshWorkspaces: async () => {},
+      remote: {
+        create: async () => {
+          throw new Error('unused');
+        },
+        describe: async () => ({
+          workspaceId,
+          contentMode: 'e2ee',
+          contentModeVersion: 1,
+          genesisHash,
+          cryptoOrgId: genesisHash,
+          activation: 'control-only',
+        }),
+        // The hosted backend's real reply also reports its storage capacity.
+        history: async () =>
+          ({
+            workspaceId,
+            genesisHash,
+            checkpoint: { headHash: genesisHash, length: 1 },
+            startIndex: 1,
+            recordsHex: [...recordsHex],
+            position: local.status.position!,
+            nextCursor: null,
+            ledgerCapacity: {
+              limitBytes: 1_000_000,
+              observedBytes: 512,
+              observedLength: 1,
+              nearLimit: false,
+            },
+          }) as E2eeWorkspaceHistoryPage,
+      },
+      runtime: {
+        account: async () => ({ userId: 'account', source: 'network' }),
+        recordCreated: async () => {},
+        open: async () => local.status,
+        close: async () => {},
+        status: async () => local.status,
+        ledgerView: async () => local,
+        ingestLedgerRecords: async (_id, page) => {
+          const captured = capturePage(page);
+          if (Result.isFailure(captured)) throw captured.failure;
+          ingested.push(captured.success);
+          return local.status;
+        },
+      },
+    });
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    expect(container.textContent).not.toContain('sessions.offline');
+    expect(container.querySelector('[data-control-state]')?.textContent).toBe(shown);
+    if (shown === '1') expect(ingested).toHaveLength(1);
+  }
+);
 
 it('keeps E2EE identity IPC dormant for an ordinary workspace even while auth is loading', async () => {
   fixture.session.status = 'loading';

@@ -216,7 +216,17 @@ export function createCloudE2eeWorkspaces(input: {
       });
       assertAccount(owner);
       if (result.workspaceId !== workspaceId) throw new Error('e2ee_history_scope_mismatch');
-      return result;
+      // Pass on exactly the cloud-api page. A hosted backend may add fields of its own
+      // (such as storage capacity); hosts capture the page strictly and refuse unknown keys.
+      return {
+        workspaceId: result.workspaceId,
+        genesisHash: result.genesisHash,
+        checkpoint: { headHash: result.checkpoint.headHash, length: result.checkpoint.length },
+        startIndex: result.startIndex,
+        recordsHex: [...result.recordsHex],
+        position: result.position,
+        nextCursor: result.nextCursor,
+      };
     },
   };
 }

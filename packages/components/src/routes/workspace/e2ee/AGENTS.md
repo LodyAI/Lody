@@ -29,3 +29,9 @@ route scope. They cannot publish into a replacement account, workspace or reader
 Explicit recovery, reconnect and identity changes retain the existing retirement
 and drain rules. Never relax native reader admission or authorization to make a
 passive read succeed.
+
+The cloud boundary hands the reader exactly the cloud-api history page; a hosted
+backend's extra fields never reach the host's strict capture, and record validation
+is never relaxed to admit them. Only an availability failure (untyped transport
+errors, or a portable `network`/`closed`) leaves the verified view offline; a typed
+validation, local or authorization failure shows its failure instead.
