@@ -70,15 +70,19 @@ export function expandMentionText(
   );
 }
 
+// Web's mention references (`[@Title](lody://session/…)`, `[Agent Role: …]`):
+// they name what the user mentioned, never an action for the agent to take.
+const linkLabel = (name: string) => name.replace(/[\\\]]/g, (c) => `\\${c}`);
+
 export function mentionPrompt(item: MentionItem): string {
   if (item.kind === 'session')
-    return `use lody mcp to query session[id: ${item.path}] history`;
+    return `[@${linkLabel(item.name)}](lody://session/${item.path})`;
   if (item.kind === 'role') {
     const [id, machineId] = item.path.split('@');
     const name = item.roleName ?? item.name;
     if (machineId)
-      return `use lody mcp to create a session with agent role[id: ${id}, agentRoleMachineId: ${machineId}, name: ${name}]`;
-    return `use lody mcp to create a session with agent role[id: ${id}, name: ${name}]`;
+      return `[Agent Role: ${name} (agentRoleId: ${id}, agentRoleMachineId: ${machineId})]`;
+    return `[Agent Role: ${name} (agentRoleId: ${id})]`;
   }
   if (item.kind === 'skill') {
     const destination = item.path.replace(/\\/g, '\\\\').replace(/\)/g, '\\)');

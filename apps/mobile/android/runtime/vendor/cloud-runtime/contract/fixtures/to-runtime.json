@@ -414,6 +414,23 @@
     "v": 1,
     "gen": 3,
     "kind": "request",
+    "id": "req-emulator",
+    "method": "androidEmulatorControl",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "userId": "user-1",
+      "command": {
+        "action": "start",
+        "id": "Pixel_8",
+        "quality": "balanced"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
     "id": "req-item-detail",
     "method": "itemDetail",
     "payload": {
