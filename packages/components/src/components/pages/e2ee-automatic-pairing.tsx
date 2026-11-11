@@ -552,9 +552,7 @@ export function E2eeAutomaticPairingInbox({
           document.hasFocus() &&
           !document.querySelector('[role="dialog"]:not([hidden])')
         ) {
-          const next = rows.find(
-            (row) => row.phase === 'waiting' && !deferred.current.has(row.id)
-          );
+          const next = rows.find((row) => row.phase === 'waiting' && !deferred.current.has(row.id));
           if (next) setSelected(next.id);
         }
       } catch {
@@ -679,12 +677,12 @@ export function E2eeAutomaticPairingInbox({
               </>
             )}
             {current && (
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{t('e2ee.auto.newRequest')}</span>
-              <Button variant="ghost" onClick={later}>
-                {t('e2ee.auto.later')}
-              </Button>
-            </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{t('e2ee.auto.newRequest')}</span>
+                <Button variant="ghost" onClick={later}>
+                  {t('e2ee.auto.later')}
+                </Button>
+              </div>
             )}
             {current && (
               <>
@@ -693,7 +691,9 @@ export function E2eeAutomaticPairingInbox({
                 </Dialog.Title>
                 <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
                 <p className="mt-2 text-sm font-medium">{current.deviceName}</p>
-                <p className="text-xs text-muted-foreground">{t('e2ee.auto.deviceNameUnverified')}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t('e2ee.auto.deviceNameUnverified')}
+                </p>
                 <form
                   className="my-5"
                   onSubmit={(event) => {

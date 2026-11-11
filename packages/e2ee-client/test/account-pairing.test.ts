@@ -600,21 +600,21 @@ describe('portable account pairing workflow', () => {
             if (command.terminal) terminalWrites += 1;
             const held = command.terminal ? terminalHold : undefined;
             const write = () =>
-            relayOutage
-              ? Effect.fail(new Error('synthetic relay outage'))
-              : Effect.sync(() => {
-                  let row = contexts.get(command.id);
-                  if (!row) {
-                    if (!command.context) throw new Error('missing discovery original');
-                    row = { context: structuredClone(command.context), state: 'pending' };
-                    contexts.set(command.id, row);
-                  }
-                  if (command.commitment) row.commitment ??= structuredClone(command.commitment);
-                  if (command.requesterKey) row.requesterKey ??= command.requesterKey;
-                  if (command.reveal) row.reveal ??= structuredClone(command.reveal);
-                  if (command.terminal) row.state = command.terminal;
-                  return structuredClone(row);
-                });
+              relayOutage
+                ? Effect.fail(new Error('synthetic relay outage'))
+                : Effect.sync(() => {
+                    let row = contexts.get(command.id);
+                    if (!row) {
+                      if (!command.context) throw new Error('missing discovery original');
+                      row = { context: structuredClone(command.context), state: 'pending' };
+                      contexts.set(command.id, row);
+                    }
+                    if (command.commitment) row.commitment ??= structuredClone(command.commitment);
+                    if (command.requesterKey) row.requesterKey ??= command.requesterKey;
+                    if (command.reveal) row.reveal ??= structuredClone(command.reveal);
+                    if (command.terminal) row.state = command.terminal;
+                    return structuredClone(row);
+                  });
             return held ? Effect.promise(() => held).pipe(Effect.flatMap(write)) : write();
           },
         };

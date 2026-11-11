@@ -373,7 +373,14 @@ describe('remote encrypted machine approval', () => {
     };
     const view = () =>
       state === 'claimed'
-        ? { pairingSessionId, summary, material, status: state, expiresAt: 2_000_000, location: null }
+        ? {
+            pairingSessionId,
+            summary,
+            material,
+            status: state,
+            expiresAt: 2_000_000,
+            location: null,
+          }
         : {
             pairingSessionId,
             summary: null,
@@ -385,7 +392,10 @@ describe('remote encrypted machine approval', () => {
           };
     let admitted = false;
     const runtime = {
-      beginRemoteMachinePairing: async () => ({ ...view(), command: 'lody machine pair --offer x' }),
+      beginRemoteMachinePairing: async () => ({
+        ...view(),
+        command: 'lody machine pair --offer x',
+      }),
       inspectRemoteMachinePairing: async () => view(),
       // The host rechecks the session before signing and refuses the cancelled command.
       approveRemoteMachinePairing: async () => {

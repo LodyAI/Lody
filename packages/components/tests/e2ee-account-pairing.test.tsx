@@ -877,7 +877,10 @@ describe('automatic pairing product flow', () => {
       pendingAutomaticPairing: async () => rows,
       approveAutomaticPairing: async (_id: string, code: string) => {
         if (code !== '123456')
-          throw Object.assign(Error('mismatch'), { code: 'pairing-code-mismatch', attemptsLeft: 2 });
+          throw Object.assign(Error('mismatch'), {
+            code: 'pairing-code-mismatch',
+            attemptsLeft: 2,
+          });
         approved.push(code);
       },
       declineAutomaticPairing: async () => {},
@@ -913,7 +916,9 @@ describe('automatic pairing product flow', () => {
       expect(codeInput()!.value).toBe('123');
       await type('１２３４５６');
       await act(async () =>
-        document.querySelector<HTMLButtonElement>('[data-testid="e2ee-approval-authorize"]')!.click()
+        document
+          .querySelector<HTMLButtonElement>('[data-testid="e2ee-approval-authorize"]')!
+          .click()
       );
       expect(approved).toEqual(['123456']);
     } finally {
