@@ -1,5 +1,6 @@
 import { verifySnapshot } from './snapshot.mjs';
 import { buildMarkdownRepair } from './src/markdown-repair.mjs';
+import { buildMermaidRender } from './src/mermaid-render.mjs';
 import { loadBackendConfig } from '../../backend-config.mjs';
 await verifySnapshot();
 import { build } from 'esbuild';
@@ -47,6 +48,8 @@ await writeFile(path.join(licenses,'dependencies.json'),JSON.stringify(inventory
 // Streaming-Markdown repair for the chat renderer (QuickJS). Its remend license is in the inventory above.
 const markdown=path.join(output,'main/markdown');await mkdir(markdown,{recursive:true});
 await writeFile(path.join(markdown,'MarkdownRepair.js'),await buildMarkdownRepair());
+// Mermaid diagrams for the chat renderer (QuickJS, Pele). Its license is in the inventory above.
+await writeFile(path.join(markdown,'MermaidRender.js'),await buildMermaidRender());
 console.log('Generated release and debug runtime assets with dependency licenses.');
 
 await writeFile(path.join(output,'debug/runtime/MismatchRuntime.html'),`<!doctype html><script>LodyHost.postMessage(JSON.stringify({type:'hostReady',protocol:2,capabilities:['ping']}))</script>`);

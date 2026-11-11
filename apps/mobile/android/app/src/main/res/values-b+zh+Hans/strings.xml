@@ -98,6 +98,8 @@
     <string name="chat_image_previous">上一张</string>
     <string name="chat_image_failed">图片加载失败，轻点重试</string>
     <string name="chat_image_close">关闭图片</string>
+    <string name="chat_mermaid_open">全屏查看</string>
+    <string name="chat_mermaid_close">关闭图表</string>
     <string name="chat_image_share">分享</string>
     <string name="chat_image_copy">复制</string>
     <string name="chat_image_save">保存到相册</string>

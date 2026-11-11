@@ -99,6 +99,8 @@
     <string name="chat_image_previous">Previous image</string>
     <string name="chat_image_failed">Couldn\'t load the image. Tap to retry.</string>
     <string name="chat_image_close">Close image</string>
+    <string name="chat_mermaid_open">View full screen</string>
+    <string name="chat_mermaid_close">Close diagram</string>
     <string name="chat_image_share">Share</string>
     <string name="chat_image_copy">Copy</string>
     <string name="chat_image_save">Save to gallery</string>
