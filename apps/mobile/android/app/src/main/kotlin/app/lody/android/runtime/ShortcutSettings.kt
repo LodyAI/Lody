@@ -55,7 +55,8 @@ internal object ShortcutSettingsJson {
     }
 
     fun request(action: ShortcutSettingsAction): JSONObject = when (action) {
-        ShortcutSettingsAction.List -> JSONObject().put("action", "list")
+        // Settings re-reads the access directory, as iOS; the composer may use the runtime's recent copy.
+        ShortcutSettingsAction.List -> JSONObject().put("action", "list").put("fresh", true)
         is ShortcutSettingsAction.Read -> JSONObject().put("action", "read").put("entry", JSONObject(action.entry.raw))
         is ShortcutSettingsAction.Save -> JSONObject(action.payload)
     }

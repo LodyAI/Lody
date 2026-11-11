@@ -4,32 +4,8 @@ export type Project = {
   name: string;
   rootPath: string;
   repoFullName?: string;
-};
-/** One repository or folder of a multi-repository (Project group) conversation. */
-export type ProjectRunMember = {
-  id: string;
-  /** Path under the conversation's directory, e.g. `api/proto`. */
-  path: string;
-  kind: 'github' | 'local';
-  /** Nesting depth in the placement forest; roots are 0. */
-  depth: number;
-  submodule: boolean;
-  /** `additional` / `link`: a local folder used in place, with no branch or PR. */
-  access?: 'worktree' | 'additional' | 'link';
-  repoFullName?: string;
-  branch?: string;
-  diff?: { add: number; del: number };
-  dirty?: boolean;
-  unpushed?: boolean;
-  /** The member repository's current PR: the last one recorded for it. */
-  pullRequest?: import('./pull-request').PullRequestReference;
-};
-/** The frozen Project group snapshot of a conversation (session meta `projectRun`). */
-export type ProjectRun = {
-  id: string;
-  name: string;
-  /** Placement order: each root followed by its submodules. */
-  members: ProjectRunMember[];
+  /** A multi-repository project's GitHub members (`projectRun`), in member order. */
+  repositories?: string[];
 };
 export type Session = {
   lastModel?: { modelId?: string; name?: string } | null;
@@ -67,8 +43,6 @@ export type Session = {
   /** Uncommitted changes / local commits the remote lacks; drive the action bar's Commit & Push. */
   workspaceDirty?: boolean;
   workspaceUnpushed?: boolean;
-  /** Present for Project group conversations. */
-  projectRun?: ProjectRun;
 };
 export type Catalog = {
   agentUsage?: Record<string, import('./agent-usage.ts').AgentUsage>;

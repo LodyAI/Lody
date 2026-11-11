@@ -104,6 +104,34 @@ class SessionInfoBarTest {
         assertNull(writes.mergeState(credential, "w", "lody/zed", 7))
     }
 
+    @Test fun projectPullRequestLinksOpenThePanelAndOthersStayInTheBrowser() {
+        val members = listOf("Lody/Zed", "lody/docs")
+        // Case-insensitive, named with the project's spelling; tabs, queries and fragments allowed.
+        assertEquals(PullRequestLink("Lody/Zed", 7), PullRequestLink.inProject("https://github.com/lody/zed/pull/7/files?w=1#diff", members))
+        assertEquals(PullRequestLink("lody/docs", 12), PullRequestLink.inProject("http://www.github.com/lody/docs/pull/12", members))
+        // Another repository, a non-PR page, a malformed number or another host stays in the browser.
+        assertNull(PullRequestLink.inProject("https://github.com/other/zed/pull/7", members))
+        assertNull(PullRequestLink.inProject("https://github.com/lody/zed/issues/7", members))
+        assertNull(PullRequestLink.inProject("https://github.com/lody/zed/pull/+7", members))
+        assertNull(PullRequestLink.inProject("https://github.com/lody/zed/pull/0", members))
+        assertNull(PullRequestLink.inProject("https://gist.github.com/lody/zed/pull/7", members))
+        assertNull(PullRequestLink.inProject("https://github.com/lody/zed/pull/7", emptyList()))
+        // The session's reported PR keeps its catalog state; an unknown one starts without a status.
+        val link = PullRequestLink("lody/zed", 7)
+        assertEquals(pr("draft", ci = "p"), link.reference(listOf(pr("draft", ci = "p"))))
+        assertEquals(CatalogPullRequest("lody/zed", 8, "", url = "https://github.com/lody/zed/pull/8"), PullRequestLink("lody/zed", 8).reference(listOf(pr())))
+    }
+
+    @Test fun linkedPullRequestDetailsUseCatalogStatesFromGitHub() {
+        val open = JSONObject().put("state", "open").put("merged", false).put("draft", false).put("mergeable", true)
+            .put("mergeable_state", "clean").put("head", JSONObject().put("ref", "feat/x")).put("additions", 12).put("deletions", 3)
+        assertEquals(PullRequestDetails("open", "c", "feat/x", 12, 3), PullRequestDetails.of(open))
+        assertEquals("draft", PullRequestDetails.of(JSONObject(open.toString()).put("draft", true)).status)
+        assertNull(PullRequestDetails.of(JSONObject(open.toString()).put("draft", true)).merge)
+        assertEquals(PullRequestDetails("merged", null, "feat/x", 12, 3), PullRequestDetails.of(JSONObject(open.toString()).put("state", "closed").put("merged", true)))
+        assertEquals("closed", PullRequestDetails.of(JSONObject(open.toString()).put("state", "closed")).status)
+    }
+
     private fun session(
         dirty: Boolean = false, unpushed: Boolean = false, added: Int = 0, pr: CatalogPullRequest? = null,
     ) = CatalogSession(
@@ -130,11 +158,14 @@ class SessionInfoBarTest {
         assertEquals(listOf(Action.FixCi), actions(session(pr = pr(ci = "e"))))
     }
 
-    @Test fun aCleanPassingPrOffersMergeEvenBehindPublishing() {
+    @Test fun mergeIsOfferedWheneverGitHubWouldAcceptItEvenBehindPublishing() {
         assertEquals(listOf(Action.Merge), actions(session(pr = pr(merge = "c"))))
         assertEquals(listOf(Action.CommitAndPush, Action.Merge), actions(session(unpushed = true, pr = pr(ci = "s", merge = "c"))))
-        assertEquals(emptyList<Action>(), actions(session(pr = pr(ci = "p", merge = "c"))))
-        assertEquals(emptyList<Action>(), actions(session(pr = pr(merge = "b"))))
+        // Checks still running or failing but not required: GitHub reports unstable and merges.
+        assertEquals(listOf(Action.Merge), actions(session(pr = pr(ci = "p", merge = "u"))))
+        assertEquals(listOf(Action.FixCi, Action.Merge), actions(session(pr = pr(ci = "f", merge = "u"))))
+        for (blocked in listOf("b", "h")) assertEquals(emptyList<Action>(), actions(session(pr = pr(ci = "p", merge = blocked))))
+        assertEquals(emptyList<Action>(), actions(session(pr = pr(ci = "p"))))
     }
 
     @Test fun draftAndFinishedPrsOfferPublishingAndReadiness() {

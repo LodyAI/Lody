@@ -9,7 +9,12 @@ import org.json.JSONObject
  * lenient so a missing, null or malformed extra never rejects a catalog or an older cache file.
  */
 object CatalogJson {
-    fun project(base: CatalogProject, json: JSONObject) = base.copy(repoFullName = json.optText("repoFullName"))
+    fun project(base: CatalogProject, json: JSONObject) = base.copy(
+        repoFullName = json.optText("repoFullName"),
+        repositories = json.optJSONArray("repositories")?.let { array ->
+            (0 until array.length()).mapNotNull { (array.opt(it) as? String)?.takeIf(String::isNotBlank) }.distinct()
+        }.orEmpty(),
+    )
 
     fun session(base: CatalogSession, json: JSONObject) = base.copy(
         isTabClosed = json.opt("isTabClosed") == true,
@@ -85,6 +90,7 @@ object CatalogJson {
 
     fun putProject(json: JSONObject, project: CatalogProject): JSONObject = json.apply {
         project.repoFullName?.let { put("repoFullName", it) }
+        if (project.repositories.isNotEmpty()) put("repositories", JSONArray(project.repositories))
     }
 
     fun putSession(json: JSONObject, session: CatalogSession): JSONObject = json.apply {

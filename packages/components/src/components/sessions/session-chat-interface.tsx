@@ -139,7 +139,6 @@ import {
   countPendingQueuedUserTurns,
   collectConversationMessages,
   type ConversationMessage,
-  deriveSessionPullRequestReadiness,
   evaluateBillingQuota,
   FREE_SESSION_TURN_LIMIT,
   FREE_SESSION_TURN_WARNING_REMAINING,
@@ -6003,7 +6002,6 @@ export const SessionChatInterface = memo(
         isAgentBusy,
         prCiState: latestPrState?.s,
         prMergeState: latestPrState?.m,
-        prReadiness: deriveSessionPullRequestReadiness(latestPrState),
         prStatus: effectivePrStatus,
       }).map((actionId) => {
         const disabledForHydration = shouldDisableSessionInfoBarGitHubActionForHydration(
@@ -7429,7 +7427,9 @@ export const SessionChatInterface = memo(
                         !shareSelection.active &&
                         !shouldReplaceComposerWithPermission
                       }
-                      onQuote={(text) => inputAreaRef.current?.addMessageQuote(text) ?? false}
+                      onQuote={(text, options) =>
+                        inputAreaRef.current?.addMessageQuote(text, options) ?? false
+                      }
                     />
                     <div
                       ref={setMessageArea}

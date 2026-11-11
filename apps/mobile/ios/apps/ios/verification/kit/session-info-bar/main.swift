@@ -26,6 +26,20 @@ session.pullRequests[0].status = "draft"
 check(bar(updates.apply(session)).actions == [.readyForReview], "after convergence, a later re-draft is authoritative")
 print("PASS: confirmed PR transitions and catalog convergence")
 
+// Merge is offered whenever GitHub would accept it, including while CI runs.
+var open = SessionPullRequest(repository: "owner/repo", number: 8, status: "open", ci: "p", merge: "u")
+session.pullRequests = [open]
+check(bar(session).actions == [.merge], "unstable while CI runs offers Merge")
+open.ci = "f"; session.pullRequests = [open]
+check(bar(session).actions == [.fixCi, .merge], "failing optional checks keep Merge behind Fix CI")
+for blocked in ["b", "h", "d"] {
+  open.ci = "p"; open.merge = blocked; session.pullRequests = [open]
+  check(!bar(session).actions.contains(.merge), "\(blocked) cannot be merged")
+}
+open.merge = nil; session.pullRequests = [open]
+check(bar(session).actions.isEmpty, "an unknown merge state offers no Merge")
+print("PASS: Merge follows GitHub's merge state, not CI completion")
+
 updates = SessionPullRequestUpdates()
 session.pullRequests = [draft]
 updates.begin(draft, merged: false)

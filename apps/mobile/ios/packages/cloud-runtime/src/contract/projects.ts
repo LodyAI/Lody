@@ -7,6 +7,8 @@ export const Project = z
     name: z.string(),
     rootPath: z.string(),
     repoFullName: z.string().optional(),
+    /** A multi-repository project's GitHub members (`projectRun`), in member order. */
+    repositories: z.array(z.string()).optional(),
   })
   .meta({ id: 'Project' });
 

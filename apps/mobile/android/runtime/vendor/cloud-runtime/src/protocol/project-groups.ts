@@ -318,8 +318,6 @@ export function buildProjectGroupProjectRef(
 export type ProjectGroupItem = {
   id: string;
   name: string;
-  /** Its creator; only they can edit or delete it (web `canManageWorkspaceProject`). */
-  ownerUserId: string;
   /** The machine its local members pin; null runs anywhere; `conflict` cannot run. */
   machineId: string | null;
   conflict: boolean;
@@ -350,7 +348,6 @@ export function projectGroupItems(
     return {
       id: project.id,
       name: project.name,
-      ownerUserId: project.ownerUserId,
       machineId: bound === 'conflict' ? null : bound,
       conflict: bound === 'conflict',
       members: project.members.map((member) => ({

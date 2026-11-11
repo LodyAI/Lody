@@ -80,6 +80,8 @@ data class ChatContext(
     val closedTabs: List<CatalogSession> = emptyList(),
     val relatedSessions: List<CatalogSession> = emptyList(),
     val repository: String = "",
+    /** Every GitHub repository whose PRs belong to the project (a multi-repository project's members). */
+    val repositories: List<String> = emptyList(),
     val machineName: String = "",
     val machineKind: app.lody.android.create.CreateSessionModel.MachineKind = app.lody.android.create.CreateSessionModel.MachineKind.Laptop,
 )
@@ -444,12 +446,11 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         mergeObserved // read so a landed merge state recomposes the bar
         SessionInfoBar.of(prUpdates.apply(it), context.repository, busy = running || !canSend)
     }
-    // A Project group has no single PR: the member whose PR panel was opened from the group
-    // capsule is the one Merge and Delete branch act on.
-    var groupMemberId by remember(scope, id) { mutableStateOf<String?>(null) }
-    val activePr = if (bar?.group != null) bar.group.members.firstOrNull { it.id == groupMemberId }?.pullRequest else bar?.pullRequest
     // Merge / Ready for review go straight to GitHub, one at a time, never retried.
-    var merging by remember(id) { mutableStateOf(false) }
+    // The PR whose merge method sheet is open: the bar's PR or one opened from a link.
+    var mergeTarget by remember(id) { mutableStateOf<CatalogPullRequest?>(null) }
+    // A project PR opened from a link in the transcript, shown in the PR panel.
+    var linkedPullRequest by remember(id) { mutableStateOf<PullRequestLink?>(null) }
     var writing by remember(scope, id) { mutableStateOf<SessionInfoBar.Action?>(null) }
     val prefs = remember { appContext.getSharedPreferences("lody.chat", android.content.Context.MODE_PRIVATE) }
     val writeTexts = WriteTexts(
@@ -458,8 +459,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         WriteErrors.associateWith { code -> stringResource(writeErrorText(code)) },
     )
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val writePullRequest: (String?) -> Unit = write@{ method ->
-        val pr = activePr ?: return@write
+    val writePullRequest: (CatalogPullRequest, String?) -> Unit = write@{ pr, method ->
         if (writing != null) return@write
         prUpdates.begin(pr, merged = method != null)
         writing = if (method != null) SessionInfoBar.Action.Merge else SessionInfoBar.Action.ReadyForReview
@@ -499,15 +499,15 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             }
         }
     }
-    if (merging && activePr != null) {
+    mergeTarget?.let { target ->
         MergeSheet(
-            "${activePr.repository} #${activePr.number}",
+            "${target.repository} #${target.number}",
             preferred = prefs.getString("prMergeMethod", "merge") ?: "merge",
-            onDismiss = { merging = false },
+            onDismiss = { mergeTarget = null },
             onMerge = { method ->
-                merging = false
+                mergeTarget = null
                 prefs.edit().putString("prMergeMethod", method).apply()
-                writePullRequest(method)
+                writePullRequest(target, method)
             },
         )
     }
@@ -516,11 +516,11 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         stringResource(R.string.pr_error_delete_unknown), stringResource(R.string.pr_error_branch_protected),
     )
     // The PR panel (web's PR tab on mobile): Merge while open, Delete branch once merged.
-    val pullRequestPanel = activePr?.let { pr ->
+    val panelFor: (CatalogPullRequest) -> PullRequestPanel = { pr ->
         PullRequestPanel(
             canMerge = pr.status == "open" && writing == null,
             merging = writing == SessionInfoBar.Action.Merge,
-            onMerge = { if (writing == null) merging = true },
+            onMerge = { if (writing == null) mergeTarget = pr },
             branchExists = { repository.headBranchExists(scope, pr.repository, pr.number) },
             deleteBranch = { done ->
                 // Outlives the sheet; one request, never retried.
@@ -545,6 +545,32 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 }
             },
         )
+    }
+    val pullRequestPanel = bar?.pullRequest?.let(panelFor)
+    // Transcript links to a PR of this project (a multi-repository project's members included)
+    // open the PR panel; other links go to the browser. iOS `openPullRequestLink`.
+    val browser = androidx.compose.ui.platform.LocalUriHandler.current
+    val repositories = context.repositories
+    val transcriptLinks = remember(browser, repositories) {
+        object : androidx.compose.ui.platform.UriHandler {
+            override fun openUri(uri: String) {
+                val link = PullRequestLink.inProject(uri, repositories)
+                if (link != null) linkedPullRequest = link else browser.openUri(uri)
+            }
+        }
+    }
+    linkedPullRequest?.let { link ->
+        val own = bar?.pullRequest?.takeIf { it.number == link.number && it.repository.equals(link.repository, ignoreCase = true) }
+        if (bar != null && own != null) {
+            PullRequestSheet(PullRequestView.of(bar, own), ciVerdict(own.ci), { coroutines.launch { snackbar.showSnackbar(it) } }, pullRequestPanel) { linkedPullRequest = null }
+        } else {
+            LinkedPullRequestSheet(
+                link, context.session?.pullRequests.orEmpty(),
+                load = { repository.pullRequestDetails(scope, link.repository, link.number) },
+                onCopied = { coroutines.launch { snackbar.showSnackbar(it) } },
+                panelFor = panelFor,
+            ) { linkedPullRequest = null }
+        }
     }
     val prompts = SessionInfoBar.Prompts(
         stringResource(R.string.bar_prompt_createPrOrigin), stringResource(R.string.bar_prompt_createDraftPrOrigin),
@@ -572,14 +598,14 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     }
                 } else {
                     // The transcript scrolls under the floating header.
-                    ChatTranscript(
+                    CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides transcriptLinks) { ChatTranscript(
                         all, Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top + if (creationNotice != null) LodySize.controlLg else LodySpacing.none, bottom = LodySpacing.md), state = listState, scrollToLatest = scrollToLatest,
                         actions = messageActions,
                         relatedSessions = context.relatedSessions,
                         navigateSession = { target -> if (SessionRelations.target(target, context.relatedSessions) != null) onSelectTab(target) },
                         loadDetail = { entryId, itemId -> repository.detail(scope, id, entryId, itemId) },
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
-                    )
+                    ) }
                 }
                 ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine)
                 if (creationNotice != null) {
@@ -610,14 +636,14 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     bar,
                     writing = writing,
                     pullRequestPanel = pullRequestPanel,
-                    onOpenMember = { groupMemberId = it },
+                    panelFor = panelFor,
                     relations = if (hasRelations) ({ SessionRelationsChip(id, context.relatedSessions, onSelectTab) }) else null,
                     onAction = { action ->
                         // Only while still offered, so a menu left open cannot act for a state that moved on.
                         when {
                             writing != null || action !in bar.actions -> Unit
-                            action == SessionInfoBar.Action.Merge -> merging = true
-                            action == SessionInfoBar.Action.ReadyForReview -> writePullRequest(null)
+                            action == SessionInfoBar.Action.Merge -> mergeTarget = bar.pullRequest
+                            action == SessionInfoBar.Action.ReadyForReview -> bar.pullRequest?.let { writePullRequest(it, null) }
                             else -> sendText(bar.prompt(action, prompts), emptyList())
                         }
                     },
@@ -1164,8 +1190,8 @@ internal fun ChatActionBar(
     writing: SessionInfoBar.Action? = null,
     relations: (@Composable () -> Unit)? = null,
     pullRequestPanel: PullRequestPanel? = null,
-    /** A Project group member whose PR panel opens; Merge and Delete branch then act on its PR. */
-    onOpenMember: (String) -> Unit = {},
+    /** The PR panel for any PR; a Project group member's PR opens with its own. */
+    panelFor: ((CatalogPullRequest) -> PullRequestPanel)? = null,
 ) {
     val context = bar.group != null || bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
@@ -1173,7 +1199,7 @@ internal fun ChatActionBar(
     @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
         Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             relations?.invoke()
-            if (bar.group != null) GroupContextItem(bar, bar.group, diffDot, onCopied, pullRequestPanel, onOpenMember)
+            if (bar.group != null) GroupContextItem(bar, bar.group, diffDot, onCopied, panelFor)
             else if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel)
         }
     }
@@ -1300,15 +1326,7 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var open by remember { mutableStateOf(false) }
     val pr = bar.pullRequest
-    val ci = pr?.ci
-    val verdict = when (ci) {
-        "s" -> stringResource(R.string.bar_ci_s)
-        "f" -> stringResource(R.string.bar_ci_f)
-        "e" -> stringResource(R.string.bar_ci_e)
-        "p" -> stringResource(R.string.bar_ci_p)
-        "x" -> stringResource(R.string.home_ci_expected)
-        else -> null
-    }
+    val verdict = ciVerdict(pr?.ci)
     val label = pr?.let { "#${it.number}" } ?: bar.branch.ifEmpty { bar.repository.substringAfterLast('/') }
     val copied = stringResource(R.string.bar_branch_copied)
     val diff = bar.added + bar.removed > 0
@@ -1317,7 +1335,7 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
     val description = listOfNotNull(bar.repository, bar.branch, label, verdict, counts.takeIf { diff })
         .filter { it.isNotEmpty() }.distinct().joinToString(", ")
     var sheet by remember { mutableStateOf(false) }
-    if (sheet && pr != null) PullRequestSheet(bar, pr, verdict, onCopied, panel) { sheet = false }
+    if (sheet && pr != null) PullRequestSheet(PullRequestView.of(bar, pr), verdict, onCopied, panel) { sheet = false }
     Box(modifier.barCapsule(colors)) {
         // Always choose a destination before opening the PR or inspecting changes.
         BarCell(
@@ -1410,8 +1428,7 @@ private fun GroupContextItem(
     run: CatalogProjectRun,
     diffDot: Boolean,
     onCopied: (String) -> Unit,
-    panel: PullRequestPanel?,
-    onOpenMember: (String) -> Unit,
+    panelFor: ((CatalogPullRequest) -> PullRequestPanel)?,
 ) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
@@ -1430,18 +1447,11 @@ private fun GroupContextItem(
     val member = run.members.firstOrNull { it.id == memberId }
     val memberPr = member?.pullRequest
     if (member != null && memberPr != null) {
-        val verdict = when (memberPr.ci) {
-            "s" -> stringResource(R.string.bar_ci_s)
-            "f" -> stringResource(R.string.bar_ci_f)
-            "e" -> stringResource(R.string.bar_ci_e)
-            "p" -> stringResource(R.string.bar_ci_p)
-            "x" -> stringResource(R.string.home_ci_expected)
-            else -> null
-        }
-        val memberBar = SessionInfoBar(
-            memberPr.repository, member.branch.orEmpty(), memberPr, member.diffAdded ?: 0, member.diffRemoved ?: 0, emptyList(),
+        val view = PullRequestView(
+            memberPr, member.branch.orEmpty(), member.diffAdded ?: 0, member.diffRemoved ?: 0,
+            memberPr.url ?: "https://github.com/${memberPr.repository}/pull/${memberPr.number}",
         )
-        PullRequestSheet(memberBar, memberPr, verdict, onCopied, panel) { memberId = null }
+        PullRequestSheet(view, ciVerdict(memberPr.ci), onCopied, panelFor?.invoke(memberPr)) { memberId = null }
     }
     Box(Modifier.barCapsule(colors)) {
         BarCell(description, onClick = { open = true }, Modifier.padding(horizontal = LodySpacing.xs)) {
@@ -1468,7 +1478,7 @@ private fun GroupContextItem(
                 items(run.members, key = { it.id }) { item ->
                     GroupMemberRow(
                         item,
-                        onOpen = { open = false; onOpenMember(item.id); memberId = item.id },
+                        onOpen = { open = false; memberId = item.id },
                         onCopyBranch = { branch ->
                             clipboard.setText(androidx.compose.ui.text.AnnotatedString(branch))
                             onCopied(copied)
@@ -1693,6 +1703,65 @@ private fun MergeSheet(title: String, preferred: String, onDismiss: () -> Unit, 
     }
 }
 
+/** What the PR panel shows: the PR, its head branch and ±lines, the URL it opens, and a [note] while its state is unknown. */
+internal data class PullRequestView(
+    val pr: CatalogPullRequest,
+    val branch: String,
+    val added: Int,
+    val removed: Int,
+    val url: String,
+    val note: String? = null,
+) {
+    companion object {
+        /** The session's own PR, described by the action bar. */
+        fun of(bar: SessionInfoBar, pr: CatalogPullRequest) = PullRequestView(pr, bar.branch, bar.added, bar.removed, pr.url ?: bar.pullRequestUrl)
+    }
+}
+
+@Composable
+private fun ciVerdict(ci: String?): String? = when (ci) {
+    "s" -> stringResource(R.string.bar_ci_s)
+    "f" -> stringResource(R.string.bar_ci_f)
+    "e" -> stringResource(R.string.bar_ci_e)
+    "p" -> stringResource(R.string.bar_ci_p)
+    "x" -> stringResource(R.string.home_ci_expected)
+    else -> null
+}
+
+/**
+ * The PR panel for a project PR opened from a transcript link that is not the action bar's PR:
+ * what the catalog knows at once (any PR the session reported), then GitHub's state, branch and
+ * ±lines from a read. Merge and Delete branch appear only once that state is known.
+ */
+@Composable
+private fun LinkedPullRequestSheet(
+    link: PullRequestLink,
+    known: List<CatalogPullRequest>,
+    load: suspend () -> PullRequestDetails,
+    onCopied: (String) -> Unit,
+    panelFor: (CatalogPullRequest) -> PullRequestPanel,
+    onDismiss: () -> Unit,
+) {
+    val reference = remember(link, known) { link.reference(known) }
+    var details by remember(link) { mutableStateOf<PullRequestDetails?>(null) }
+    var failed by remember(link) { mutableStateOf(false) }
+    LaunchedEffect(link) {
+        try { details = load() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { failed = true }
+    }
+    val current = details
+    // Until GitHub answers, the catalog's entry (status empty when the session never reported it).
+    val pr = current?.let { reference.copy(status = it.status, merge = it.merge) } ?: reference
+    val note = when {
+        current != null || reference.status.isNotEmpty() -> null
+        failed -> stringResource(R.string.pr_load_failed)
+        else -> stringResource(R.string.pr_loading)
+    }
+    val view = PullRequestView(pr, current?.branch.orEmpty(), current?.added ?: 0, current?.removed ?: 0, reference.url ?: link.url, note)
+    PullRequestSheet(view, ciVerdict(reference.ci), onCopied, if (current != null) panelFor(pr) else null, onDismiss)
+}
+
 /**
  * What the PR panel may do, from the conversation (web's mobile PR tab): Merge while the PR is
  * open — [onMerge] opens [MergeSheet], whose method choice is the confirmation — and, once
@@ -1715,8 +1784,7 @@ internal class PullRequestPanel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PullRequestSheet(
-    bar: SessionInfoBar,
-    pr: CatalogPullRequest,
+    view: PullRequestView,
     verdict: String?,
     onCopied: (String) -> Unit,
     panel: PullRequestPanel?,
@@ -1727,14 +1795,14 @@ private fun PullRequestSheet(
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val copied = stringResource(R.string.bar_branch_copied)
-    val state = stringResource(
-        when (pr.status) {
-            "merged" -> R.string.home_pr_merged
-            "closed" -> R.string.home_pr_closed
-            "draft" -> R.string.home_pr_draft
-            else -> R.string.home_pr_open
-        },
-    )
+    val pr = view.pr
+    val state = when (pr.status) {
+        "merged" -> R.string.home_pr_merged
+        "closed" -> R.string.home_pr_closed
+        "draft" -> R.string.home_pr_draft
+        "open" -> R.string.home_pr_open
+        else -> null // not read yet: [PullRequestView.note] says why
+    }?.let { stringResource(it) }
     // Web probes the head branch only once merged; unknown keeps Delete branch hidden.
     var branchExists by remember(pr.repository, pr.number) { mutableStateOf<Boolean?>(null) }
     var deleting by remember(pr.repository, pr.number) { mutableStateOf(false) }
@@ -1745,7 +1813,7 @@ private fun PullRequestSheet(
     if (confirmingDelete && panel != null) AlertDialog(
         onDismissRequest = { confirmingDelete = false },
         title = { Text(stringResource(R.string.pr_delete_branch_title)) },
-        text = { Text(stringResource(R.string.pr_delete_branch_message, bar.branch)) },
+        text = { Text(stringResource(R.string.pr_delete_branch_message, view.branch)) },
         confirmButton = {
             TextButton(onClick = {
                 confirmingDelete = false
@@ -1764,18 +1832,18 @@ private fun PullRequestSheet(
                 app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci, size = LodyIconSize.lg)
                 Column(Modifier.weight(1f)) {
                     Text("${pr.repository} #${pr.number}", style = type.headline, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(listOfNotNull(state, verdict, if (pr.merge == "d") stringResource(R.string.bar_conflicts) else null).joinToString(" · "),
+                    Text(view.note ?: listOfNotNull(state, verdict, if (pr.merge == "d") stringResource(R.string.bar_conflicts) else null).joinToString(" · "),
                         style = type.footnote, color = colors.textSecondary)
                 }
             }
-            if (bar.branch.isNotEmpty() || bar.added + bar.removed > 0) {
+            if (view.branch.isNotEmpty() || view.added + view.removed > 0) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
                     Icon(LodyIcons.Branch, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
-                    Text(bar.branch, style = type.subhead, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
-                    if (bar.added + bar.removed > 0) {
+                    Text(view.branch, style = type.subhead, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
+                    if (view.added + view.removed > 0) {
                         val style = type.subhead.copy(fontFeatureSettings = "tnum")
-                        Text("+${bar.added}", style = style, color = colors.diffAddedText)
-                        Text("−${bar.removed}", style = style, color = colors.diffRemovedText)
+                        Text("+${view.added}", style = style, color = colors.diffAddedText)
+                        Text("−${view.removed}", style = style, color = colors.diffRemovedText)
                     }
                 }
             }
@@ -1793,7 +1861,7 @@ private fun PullRequestSheet(
                     Icon(LodyIcons.Expand, contentDescription = null, modifier = Modifier.size(LodyIconSize.sm))
                 }
             }
-            if (panel != null && pr.status == "merged" && bar.branch.isNotEmpty() && (branchExists == true || deleting)) {
+            if (panel != null && pr.status == "merged" && view.branch.isNotEmpty() && (branchExists == true || deleting)) {
                 Button(
                     onClick = { confirmingDelete = true },
                     enabled = !deleting,
@@ -1808,7 +1876,7 @@ private fun PullRequestSheet(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
                 Button(
-                    onClick = { onDismiss(); uri.openUri(bar.pullRequestUrl) },
+                    onClick = { onDismiss(); uri.openUri(view.url) },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.fillSecondary, contentColor = colors.textPrimary),
                     modifier = Modifier.weight(1f),
                 ) {
@@ -1816,10 +1884,10 @@ private fun PullRequestSheet(
                     Spacer(Modifier.width(LodySpacing.xs))
                     Text(stringResource(R.string.bar_open_github), style = type.subhead)
                 }
-                if (bar.branch.isNotEmpty()) {
+                if (view.branch.isNotEmpty()) {
                     Button(
                         onClick = {
-                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(bar.branch))
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(view.branch))
                             onCopied(copied)
                             onDismiss()
                         },

@@ -4456,12 +4456,14 @@ extension RuntimeContract {
     public var name: String
     public var rootPath: String
     public var repoFullName: String?
-    public init(id: String, machineId: String, name: String, rootPath: String, repoFullName: String? = nil) {
+    public var repositories: [String]?
+    public init(id: String, machineId: String, name: String, rootPath: String, repoFullName: String? = nil, repositories: [String]? = nil) {
       self.id = id
       self.machineId = machineId
       self.name = name
       self.rootPath = rootPath
       self.repoFullName = repoFullName
+      self.repositories = repositories
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
@@ -4470,6 +4472,7 @@ extension RuntimeContract {
       self.name = try c.decode(String.self, forKey: Key("name"))
       self.rootPath = try c.decode(String.self, forKey: Key("rootPath"))
       self.repoFullName = try c.decodeIfPresent(String.self, forKey: Key("repoFullName"))
+      self.repositories = try c.decodeIfPresent([String].self, forKey: Key("repositories"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
@@ -4478,6 +4481,7 @@ extension RuntimeContract {
       try c.encode(self.name, forKey: Key("name"))
       try c.encode(self.rootPath, forKey: Key("rootPath"))
       try c.encodeIfPresent(self.repoFullName, forKey: Key("repoFullName"))
+      try c.encodeIfPresent(self.repositories, forKey: Key("repositories"))
     }
   }
 

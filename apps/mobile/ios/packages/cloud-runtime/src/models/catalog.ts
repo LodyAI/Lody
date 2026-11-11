@@ -4,6 +4,8 @@ export type Project = {
   name: string;
   rootPath: string;
   repoFullName?: string;
+  /** A multi-repository project's GitHub members (`projectRun`), in member order. */
+  repositories?: string[];
 };
 /** One repository or folder of a multi-repository (Project group) conversation. */
 export type ProjectRunMember = {

@@ -71,6 +71,21 @@ extension SessionController {
     LodyShell.shared.presentDetail(page, title: "PR #\(reference.number)", from: self)
   }
 
+  /// A PR link in the conversation opens the native PR page when it belongs to the session's
+  /// project (a multi-repository project's members included); others stay in the browser.
+  func openPullRequestLink(_ link: ChatPullRequestLink) -> Bool {
+    let catalog = source.state.catalog
+    guard let session = catalog.session(sessionId) else { return false }
+    let repositories = catalog.projects.first { $0.id == session.projectId }?.githubRepositories
+      ?? (session.projectId.hasPrefix("github:") ? [String(session.projectId.dropFirst(7))] : [])
+    guard let repository = repositories.first(where: { $0.caseInsensitiveCompare(link.repository) == .orderedSame }) else { return false }
+    let known = session.pullRequests.last {
+      $0.number == link.number && $0.repository.caseInsensitiveCompare(repository) == .orderedSame
+    }
+    openPullRequest(known ?? SessionPullRequest(repository: repository, number: link.number, status: "", ci: nil, url: link.url))
+    return true
+  }
+
   func updateDetails(_ json: String) { subagentPage?.update(json) }
 
 }

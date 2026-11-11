@@ -197,6 +197,8 @@
     <string name="bar_error_not_open">这个 PR 已不是打开状态。</string>
     <string name="bar_error_forbidden">你没有修改这个 PR 的权限。</string>
     <string name="bar_open_github">在 GitHub 打开</string>
+    <string name="pr_loading">正在载入 PR…</string>
+    <string name="pr_load_failed">无法载入这个 PR。</string>
     <string name="pr_merge">合并</string>
     <string name="pr_delete_branch">删除分支</string>
     <string name="pr_deleting_branch">正在删除分支…</string>

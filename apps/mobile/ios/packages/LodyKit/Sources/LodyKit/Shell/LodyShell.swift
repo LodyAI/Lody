@@ -28,7 +28,8 @@ final class LodyShell {
 
   @discardableResult
   func pushNative(_ content: UIViewController, title: String, from source: UIViewController, headerShown: Bool = true) -> LodyPageController? {
-    guard let target = (source as? UINavigationController) ?? source.navigationController else { return nil }
+    guard let base = (source as? UINavigationController) ?? source.navigationController else { return nil }
+    let target = HomeController.current?.pushTarget(for: base) ?? base
     let spec = ShellPageSpec(
       title: title, style: "push", animation: "slide", dismissible: true, headerShown: headerShown,
       headerVariant: "transparent"

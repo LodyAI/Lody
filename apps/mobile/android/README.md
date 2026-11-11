@@ -200,6 +200,18 @@ TalkBack can activate named landmarks or adjust the index range one section at
 a time, including omitted sections; its state description names the current section. Other grouping/search views retain
 their ordinary list behavior.
 
+### PR links
+
+The PR panel (`PullRequestSheet`) describes any PR through `PullRequestView`, not
+only the action bar's. The transcript's `LocalUriHandler` matches links with
+`PullRequestLink` (case-insensitive) against `ChatContext.repositories`: the
+project's repository, or a multi-repository project's GitHub members from catalog
+`Project.repositories`. Matching links open the panel; other links go to the
+browser. The bar's own PR opens with the bar's data. Another PR starts from the
+session's catalog entry, then fills state, merge state, branch and ±lines from a
+GitHub read grant (`PullRequestDetails`); Merge and Delete branch appear only once
+that read lands.
+
 ## Schedules
 
 The native Schedules tab shows flat rows grouped by Attention, Active, Paused and
@@ -270,8 +282,11 @@ GitHub (`GitHubSettingsScreen`) mirrors iOS Settings › GitHub: personal identi
 and admins (the App's install page in the browser; the page re-reads on return), then the
 workspace repositories with owner logos, Material switches and a search field. `GitHubSettingsCloud`
 ports iOS `WorkspaceSettingsCloud.github` over Convex with the verified account: writes check the
-row first, are never retried, and count only after a read back. A flipped switch shows at once;
-a failed or unknown write rolls it back and locks writes until a fresh read (`GitHubSettingsTest`).
+row first, are never retried, and count only after a read back. The last complete read shows at
+once from process memory while a quiet refresh runs; because the list rarely changes its switches
+work straight away (each write re-reads the role and repositories), and a write supersedes that
+refresh. A flipped switch shows at once; a failed or unknown write rolls it back and locks writes
+until a fresh read (`GitHubSettingsTest`).
 
 Agent settings select one machine above its provider list (online and own machines
 first); the top bar's "+" adds a provider to it, and the last list shows from process
@@ -304,7 +319,7 @@ shared session usage meters and reset-time controls. Absent usage stays hidden.
 The native adapter uses canonical `agentProviders`, `agentProviderDetail`,
 `agentProviderProbe`, `agentProviderAuth` and `agentProviderOperation` with verified
 native identity. The reviewed runtime snapshot is fixed at
-`7f74298641f35b714c68752f3976e9b0ffaf6c52` with matching provenance and hashes.
+`041760cfd7982cf3b7298b37cf0e668b180a216f` with matching provenance and hashes.
 Native compilation and synthetic acceptance do not establish cloud integration.
 
 `ANDROID_SERIAL=<disposable-emulator> python3 verification/agent-settings.py` runs
