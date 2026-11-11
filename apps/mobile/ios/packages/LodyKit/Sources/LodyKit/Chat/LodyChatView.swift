@@ -77,6 +77,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   weak var messageDetailsPage: MessageDetailsController?
   var turnInfoEnabled = false
   var onFilePress: ([String: Any]) -> Void = { _ in }
+  /// Opens a GitHub PR link in the native PR page; false leaves it to the browser.
+  var onPullRequestLink: (ChatPullRequestLink) -> Bool = { _ in false }
   var onTurnChangesPress: ([String: Any]) -> Void = { _ in }
   var onReconnect: ([String: Any]) -> Void = { _ in }
   var onRetrySend: ([String: Any]) -> Void = { _ in }
@@ -799,6 +801,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     pauseTracking()
     if let target = ChatFileLink(href) {
       onFilePress(["path": target.path, "line": target.line ?? 0])
+    } else if let pr = ChatPullRequestLink(href), onPullRequestLink(pr) {
+      return
     } else if let url = URL(string: href), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
       UIApplication.shared.open(url)
     }

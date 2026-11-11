@@ -119,8 +119,10 @@ struct SessionProject: Decodable, Equatable, Sendable {
   var rootPath = ""
   var machineId = ""
   var repoFullName: String?
+  /// A multi-repository project's GitHub members (`projectRun`), in member order.
+  var repositories: [String] = []
 
-  private enum CodingKeys: String, CodingKey { case id, name, rootPath, repoFullName, machineId }
+  private enum CodingKeys: String, CodingKey { case id, name, rootPath, repoFullName, machineId, repositories }
 
   init(id: String, name: String = "", rootPath: String = "", repoFullName: String? = nil) {
     self.id = id
@@ -136,6 +138,15 @@ struct SessionProject: Decodable, Equatable, Sendable {
     rootPath = (try? values.decodeIfPresent(String.self, forKey: .rootPath)) ?? ""
     machineId = (try? values.decodeIfPresent(String.self, forKey: .machineId)) ?? ""
     repoFullName = (try? values.decodeIfPresent(String.self, forKey: .repoFullName)) ?? nil
+    repositories = (try? values.decodeIfPresent([String].self, forKey: .repositories)) ?? []
+  }
+
+  /// GitHub repositories whose PRs belong to this project: its repository, or a group's members.
+  var githubRepositories: [String] {
+    var result = repositories
+    if let repoFullName, !repoFullName.isEmpty { result.insert(repoFullName, at: 0) }
+    if result.isEmpty, id.hasPrefix("github:") { result.append(String(id.dropFirst(7))) }
+    return result
   }
 }
 
