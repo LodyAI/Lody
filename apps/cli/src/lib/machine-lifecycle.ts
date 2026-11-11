@@ -81,21 +81,17 @@ export const resolveMachineLifecycleCapability = (
 };
 
 /**
- * Lifecycle actions stop the whole daemon process, so they also interrupt every
- * encrypted workspace it hosts. Encrypted lifecycle authorization is not
- * implemented; any hosted encrypted workspace disables them machine-wide.
+ * An update replaces the binary that holds every hosted workspace's custody,
+ * including encrypted ones, and encrypted lifecycle authorization is not
+ * implemented. Any hosted encrypted workspace therefore disables remote update
+ * machine-wide. Restart keeps the same binary and is unaffected.
  */
 export const withMachineEncryption = (
   capability: MachineLifecycleCapability,
   hostsEncryptedWorkspace: boolean
 ): MachineLifecycleCapability =>
-  hostsEncryptedWorkspace
-    ? {
-        launchMode: capability.launchMode,
-        canRemoteRestart: false,
-        canRemoteUpgrade: false,
-        reason: 'unsupported_install',
-      }
+  hostsEncryptedWorkspace && capability.canRemoteUpgrade
+    ? { ...capability, canRemoteUpgrade: false, reason: 'unsupported_install' }
     : capability;
 
 const MachineLifecycleVerifyResponseSchema = z

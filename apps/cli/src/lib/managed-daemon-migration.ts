@@ -47,6 +47,16 @@ export function npmInstallationChannel(version: string): 'stable' | 'next' | 'ni
   return prerelease.startsWith('nightly') ? 'nightly' : 'next';
 }
 
+/**
+ * Phase an npm runner records for an operation it finds at startup, after it
+ * acquired the exclusive Host lease. Unfinished preparation is abandoned, and a
+ * relay `blocked` record is released: owning the lease proves the runner whose
+ * termination was unconfirmed is gone, so the block no longer protects anything.
+ */
+export function npmStartupOperationPhase(phase: string): 'failed' | null {
+  return ['preparing', 'prepared', 'waiting', 'blocked'].includes(phase) ? 'failed' : null;
+}
+
 export type RelayLaunchResult = { status: 'ready' } | { status: string; message?: string };
 
 export type RelayDeps = {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canRelayNpmInstallation,
   npmInstallationChannel,
+  npmStartupOperationPhase,
   relayToManagedService,
   type RelayDeps,
 } from './managed-daemon-migration';
@@ -157,5 +158,15 @@ describe('relay cancellation and occupancy', () => {
     });
     expect((await relayToManagedService(deps)).kind).toBe('blocked');
     expect(events.at(-1)).toBe('phase:failed');
+  });
+});
+
+describe('npm startup after an interrupted relay', () => {
+  it('holding the Host lease clears a relay block so later updates are accepted again', () => {
+    // The lease is exclusive: owning it proves the stuck managed runner is gone.
+    expect(npmStartupOperationPhase('blocked')).toBe('failed');
+    expect(npmStartupOperationPhase('waiting')).toBe('failed');
+    expect(npmStartupOperationPhase('applied')).toBeNull();
+    expect(npmStartupOperationPhase('rolled-back')).toBeNull();
   });
 });

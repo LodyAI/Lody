@@ -22,6 +22,7 @@ import { ManagedPrepareRequestSchema } from '@/lib/managed-daemon-ipc';
 import {
   canRelayNpmInstallation,
   npmInstallationChannel,
+  npmStartupOperationPhase,
   relayToManagedService,
 } from '@/lib/managed-daemon-migration';
 import { readFileSync } from 'node:fs';
@@ -698,7 +699,13 @@ export const daemonRunnerCommand = new Command('daemon-runner')
       );
     };
     const previousOperation = sea || npmMigration ? await readManagedOperation() : null;
-    if (previousOperation && ['preparing', 'waiting', 'prepared'].includes(previousOperation.phase))
+    if (!sea && previousOperation && npmStartupOperationPhase(previousOperation.phase))
+      await saveManagedOperation({ ...previousOperation, phase: 'failed' });
+    if (
+      sea &&
+      previousOperation &&
+      ['preparing', 'waiting', 'prepared'].includes(previousOperation.phase)
+    )
       await saveManagedOperation({ ...previousOperation, phase: 'failed' });
     if (
       sea &&

@@ -65,11 +65,39 @@ function fixedServicePath(): string {
  * publish the installation: until `publishManagedInstallation`, launchers keep
  * starting whatever installation they already own.
  */
+const isProcessAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && 'code' in error && error.code === 'ESRCH');
+  }
+};
+/**
+ * The lock names its holder's pid. A lock whose holder no longer exists was left
+ * by a crashed install and is taken over once; a live holder keeps exclusion.
+ */
+async function acquireInstallLock(lockPath: string): Promise<fs.FileHandle> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const lock = await fs.open(lockPath, 'wx', 0o600);
+      await lock.writeFile(String(process.pid));
+      return lock;
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST') || attempt > 0)
+        throw error;
+      const holder = Number.parseInt(await fs.readFile(lockPath, 'utf8').catch(() => ''), 10);
+      if (!Number.isInteger(holder) || holder <= 0 || isProcessAlive(holder))
+        throw new Error(`Managed install in progress (${lockPath}): ${error.message}`);
+      await fs.rm(lockPath, { force: true });
+    }
+  }
+}
 export async function installFixedServiceEntry(capsulePath: string): Promise<string> {
   const root = managedDaemonRoot();
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   const lockPath = path.join(root, 'install.lock');
-  const lock = await fs.open(lockPath, 'wx', 0o600);
+  const lock = await acquireInstallLock(lockPath);
   const tmp = path.join(root, `.service-${randomUUID()}.installing`);
   try {
     const service = fixedServicePath();

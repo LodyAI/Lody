@@ -152,6 +152,19 @@ describe('checksummed managed daemon installation', () => {
     await fs.rm(service);
     expect(resolvePublishedManagedService('lody-oss')).toBeNull();
   });
+  it('a fixed-entry install left locked by a crashed installer recovers, but a live installer still excludes', async () => {
+    const { dir } = await fixture();
+    const capsule = path.join(dir, 'downloaded-capsule');
+    await fs.writeFile(capsule, bytes);
+    const lock = path.join(dir, 'daemon-managed', 'install.lock');
+    await fs.mkdir(path.dirname(lock), { recursive: true });
+    await fs.writeFile(lock, String(process.pid));
+    await expect(installFixedServiceEntry(capsule)).rejects.toThrow(/EEXIST|in progress/);
+    // A pid that cannot exist (above the Linux and macOS pid ceilings).
+    await fs.writeFile(lock, '99999999');
+    expect(await fs.readFile(await installFixedServiceEntry(capsule))).toEqual(bytes);
+    await expect(fs.access(lock)).rejects.toThrow();
+  });
   it.each(['compressed', 'extracted'] as const)(
     'a bad %s SHA never publishes an executable or a successful update record',
     async (stage) => {

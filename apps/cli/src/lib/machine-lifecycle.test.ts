@@ -73,15 +73,17 @@ describe('managed lifecycle capability', () => {
     ).toBe(false);
   });
 
-  it('a daemon that also hosts an encrypted workspace refuses remote restart and update from every workspace', () => {
+  it('a daemon that also hosts an encrypted workspace refuses remote update from every workspace but keeps restart', () => {
     const plaintext = resolveMachineLifecycleCapability('daemon', {
       managed: true,
       platform: 'linux',
     });
     expect(withMachineEncryption(plaintext, false)).toEqual(plaintext);
+    // Replacing the binary that holds encrypted-workspace custody needs encrypted
+    // authorization; a restart of the same binary does not.
     expect(withMachineEncryption(plaintext, true)).toEqual({
       launchMode: 'daemon',
-      canRemoteRestart: false,
+      canRemoteRestart: true,
       canRemoteUpgrade: false,
       reason: 'unsupported_install',
     });
