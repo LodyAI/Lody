@@ -80,6 +80,16 @@ internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService
         refresh()
     }
     LaunchedEffect(visibility) { visibility?.restore(); visibility?.refresh() }
+    // Computer presence for the visibility headers (iOS `SettingsMachinePresence`): the creation
+    // options' online computers, unknown until they load or while the catalog is not live.
+    var onlineMachines by remember(scope) { mutableStateOf<Set<String>?>(null) }
+    LaunchedEffect(service, scope) {
+        if (service == null || scope == null) return@LaunchedEffect
+        try { service.observeOptions(scope).collect { onlineMachines = it?.onlineMachineIds } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { onlineMachines = null }
+    }
+    val presence = onlineMachines.takeIf { home.sync == HomeSyncState.Live }
     val machineNames = home.snapshot?.machineNames.orEmpty()
     val open = groups?.firstOrNull { it.id == openId }
     if (open != null) {
@@ -100,7 +110,7 @@ internal fun ProjectGroupsScreen(home: ChatListUiState, service: CreationService
         ) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + LodySpacing.xxl)) {
                 if ((loading || visibility?.loading == true || visibility?.writing == true) && !pulling) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                if (visibility != null) projectVisibility(visibility, home)
+                if (visibility != null) projectVisibility(visibility, home, presence)
                 if (failed) item(key = "notice") {
                     Row(Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg, vertical = LodySpacing.sm), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
@@ -195,7 +205,7 @@ private fun ProjectGroupPage(group: ProjectGroup, home: ChatListUiState, machine
  * hint, each project with its state, and for the owner a menu of Shared / Private. Changes need a
  * live read; a failed read or an unknown write says so and offers a fresh read.
  */
-private fun androidx.compose.foundation.lazy.LazyListScope.projectVisibility(state: ProjectVisibilityState, home: ChatListUiState) {
+private fun androidx.compose.foundation.lazy.LazyListScope.projectVisibility(state: ProjectVisibilityState, home: ChatListUiState, online: Set<String>?) {
     val machines = ProjectVisibilityModel.machines(state.snapshot, home.snapshot)
     if (state.failed || state.unconfirmed) item(key = "visibility-notice") {
         val tasks = rememberCoroutineScope()
@@ -219,7 +229,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.projectVisibility(sta
     machines.forEach { machine ->
         item(key = "visibility-machine-${machine.machineId}") {
             val name = home.snapshot?.machineNames?.get(machine.machineId)?.takeIf { it.isNotEmpty() } ?: machine.machineId
-            SettingsGroup(name) { machine.items.forEach { VisibilityLine(it, state) } }
+            // The computer's name, then its presence once known (iOS `SettingsText.statusHeader`).
+            val status = online?.let { stringResource(if (machine.machineId in it) R.string.machine_online else R.string.home_offline) }
+            SettingsGroup(listOfNotNull(name, status).joinToString(" · ")) { machine.items.forEach { VisibilityLine(it, state) } }
         }
     }
     if (machines.isNotEmpty()) item(key = "visibility-footer") {

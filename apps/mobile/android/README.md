@@ -268,7 +268,8 @@ but does not create or edit them yet.
 - Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups (the last accepted
   list first, from the `project-groups` settings snapshot) from a fresh `projectGroups` read and opens a read-only page with the group's computer, creator and
   members.
-- Above the groups, the same page shows local project visibility per computer, as iOS
+- Above the groups, the same page shows local project visibility per computer (its header
+  adds Online / Offline from the creation options' online computers while the catalog is live), as iOS
   (`ProjectVisibility.kt`, mirroring `WorkspaceSettingsCloud` / `ProjectVisibilitySections`).
   Catalog projects list at once; the `localProjects:listVisibleLocalProjects` registrations
   (the last accepted read for the scope first: process memory, then the `project-visibility`
