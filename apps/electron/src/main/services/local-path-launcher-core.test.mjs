@@ -65,11 +65,12 @@ void test('does not open the deeplink when a command launches', async () => {
   assert.deepEqual(result, { launched: true, method: 'command', command: 'code' })
 })
 
-void test('default application opening rejects executable files, bundles and symlink targets', async (t) => {
+void test('default application opening admits only document types and refuses executable symlink targets', async (t) => {
   const { mkdtemp, writeFile, mkdir, symlink, rm, chmod } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
-  const { canOpenLocalPath } = await import('./local-file-open-policy.ts')
+  const { resolveOpenableLocalPath } = await import('./local-file-open-policy.ts')
+  const canOpenLocalPath = async (...args) => (await resolveOpenableLocalPath(...args)) !== null
   const root = await mkdtemp(join(tmpdir(), 'lody-open-policy-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   for (const suffix of [
@@ -81,7 +82,28 @@ void test('default application opening rejects executable files, bundles and sym
     'ps1',
     'desktop',
     'AppImage',
-    'lnk'
+    'lnk',
+    'hta',
+    'appref-ms',
+    'pif',
+    'sct',
+    'msc',
+    'reg',
+    'chm',
+    'pyw',
+    'msix',
+    'msixbundle',
+    'appx',
+    'appxbundle',
+    'gadget',
+    'terminal',
+    'term',
+    'tool',
+    'pkg',
+    'mpkg',
+    'inetloc',
+    'webloc',
+    'fileloc'
   ]) {
     const target = join(root, `unsafe.${suffix}`)
     await writeFile(target, 'synthetic', { mode: 0o644 })
@@ -92,7 +114,8 @@ void test('default application opening rejects executable files, bundles and sym
   assert.equal(await canOpenLocalPath(executable), false)
   await symlink(executable, join(root, 'innocent.txt'))
   assert.equal(await canOpenLocalPath(join(root, 'innocent.txt')), false)
-  await mkdir(join(root, 'Tool.app'))
+  await mkdir(join(root, 'Tool.app', 'Contents'), { recursive: true })
+  await writeFile(join(root, 'Tool.app', 'Contents', 'Info.plist'), '<plist/>')
   await writeFile(join(root, 'Tool.app', 'notes.txt'), 'synthetic')
   await symlink(join(root, 'Tool.app'), join(root, 'alias'))
   assert.equal(await canOpenLocalPath(join(root, 'alias', 'notes.txt'), 'darwin'), false)
@@ -109,8 +132,126 @@ void test('default application opening rejects executable files, bundles and sym
   const unknown = join(source, 'unknown.binary')
   await writeFile(unknown, 'synthetic executable', { mode: 0o755 })
   assert.equal(await canOpenLocalPath(unknown), false)
+  await chmod(unknown, 0o644)
+  assert.equal(
+    await canOpenLocalPath(unknown),
+    false,
+    'unknown types need refusal even without execute bits'
+  )
   await symlink(join(root, 'unsafe.command'), join(root, 'disguised.md'))
   assert.equal(await canOpenLocalPath(join(root, 'disguised.md')), false)
+})
+
+void test('default opening allows documents under bundle-like repository directories but refuses real macOS bundles', async (t) => {
+  const { mkdtemp, writeFile, mkdir, symlink, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { resolveOpenableLocalPath } = await import('./local-file-open-policy.ts')
+  const canOpenLocalPath = async (...args) => (await resolveOpenableLocalPath(...args)) !== null
+  const root = await mkdtemp(join(tmpdir(), 'lody-bundle-open-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const repo = join(root, 'github---owner---foo.app', 'worktrees', 'login.action')
+  await mkdir(repo, { recursive: true })
+  const document = join(repo, 'readme.md')
+  await writeFile(document, 'ordinary repository document')
+  assert.equal(await canOpenLocalPath(document, 'darwin'), true)
+  assert.equal(await canOpenLocalPath(join(repo, '..'), 'darwin'), true)
+  assert.equal(
+    await canOpenLocalPath(repo, 'darwin'),
+    false,
+    'target directory checks its own name'
+  )
+  for (const suffix of ['app', 'workflow', 'scptd', 'bundle', 'plugin', 'kext', 'osax', 'action']) {
+    const bundle = join(root, `Actual.${suffix}`)
+    await mkdir(join(bundle, 'Contents'), { recursive: true })
+    await writeFile(join(bundle, 'Contents', 'Info.plist'), '<plist/>')
+    await writeFile(join(bundle, 'notes.txt'), 'bundle content')
+    assert.equal(await canOpenLocalPath(join(bundle, 'notes.txt'), 'darwin'), false, suffix)
+    await symlink(bundle, join(root, `alias-${suffix}`))
+    assert.equal(
+      await canOpenLocalPath(join(root, `alias-${suffix}`, 'notes.txt'), 'darwin'),
+      false
+    )
+  }
+  const flatBundle = join(root, 'Flat.plugin')
+  await mkdir(flatBundle)
+  await writeFile(join(flatBundle, 'Info.plist'), '<plist/>')
+  await writeFile(join(flatBundle, 'notes.txt'), 'flat bundle content')
+  assert.equal(await canOpenLocalPath(join(flatBundle, 'notes.txt'), 'darwin'), false)
+})
+
+void test('default-open IPC opens the checked real document when the original symlink is replaced', async (t) => {
+  const { mkdtemp, writeFile, readFile, realpath, symlink, unlink, rm } =
+    await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { runInNewContext } = await import('node:vm')
+  const { createRequire } = await import('node:module')
+  const { resolveOpenableLocalPath } = await import('./local-file-open-policy.ts')
+  const { localFileActionError } = await import('./local-file-action-error.ts')
+  const require = createRequire(import.meta.url)
+  const ts = require('typescript')
+  const root = await mkdtemp(join(tmpdir(), 'lody-open-ipc-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const document = join(root, 'notes.md')
+  const unsafe = join(root, 'payload.command')
+  const alias = join(root, 'alias.md')
+  await writeFile(document, 'checked document')
+  await writeFile(unsafe, 'must not execute')
+  await symlink(document, alias)
+  const opened = []
+  const deps = {
+    '../product-window-ipc-service': { ProductWindowIpcService: class {} },
+    'electron-ipc-decorator': { IpcMethod: () => () => {} },
+    electron: {
+      shell: {
+        openPath: async (path) => {
+          opened.push({ path, content: await readFile(path, 'utf8') })
+          return ''
+        }
+      }
+    },
+    '../../services/local-file-action-error': { localFileActionError },
+    '../../services/local-file-open-policy': {
+      resolveOpenableLocalPath: async (path) => {
+        const checked = await resolveOpenableLocalPath(path)
+        if (path === alias) {
+          await unlink(alias)
+          await symlink(unsafe, alias)
+        }
+        return checked
+      }
+    }
+  }
+  const exports = {}
+  runInNewContext(
+    ts.transpileModule(
+      await readFile(new URL('../ipc/services/app-ipc.ts', import.meta.url), 'utf8'),
+      {
+        compilerOptions: {
+          target: ts.ScriptTarget.ES2022,
+          module: ts.ModuleKind.CommonJS,
+          experimentalDecorators: true,
+          esModuleInterop: true
+        }
+      }
+    ).outputText,
+    {
+      exports,
+      process,
+      console,
+      require: (id) =>
+        Object.hasOwn(deps, id) ? deps[id] : id.startsWith('node:') ? require(id) : {}
+    }
+  )
+  const app = new exports.AppIpc()
+  assert.equal((await app.openLocalPath(unsafe)).error, 'unsupported_file_type')
+  assert.equal((await app.openLocalPath(join(root, 'missing.md'))).error, 'not_found')
+  assert.equal((await app.openLocalPath('relative.md')).error, 'invalid_path')
+  assert.deepEqual(opened, [])
+  assert.equal((await app.openLocalPath(alias)).opened, true)
+  assert.deepEqual(opened, [{ path: await realpath(document), content: 'checked document' }])
+  assert.equal(await realpath(alias), await realpath(unsafe))
 })
 
 void test('launcher commands come from main configuration and custom changes require native approval', async () => {

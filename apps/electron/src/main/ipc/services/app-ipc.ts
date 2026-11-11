@@ -32,7 +32,7 @@ import {
   setWindowWarmupEnabled
 } from '../../window-warm-service'
 import { setMenuLanguage } from '../../menu'
-import { canOpenLocalPath } from '../../services/local-file-open-policy'
+import { resolveOpenableLocalPath } from '../../services/local-file-open-policy'
 import { localFileActionError } from '../../services/local-file-action-error'
 import {
   approvePathLauncher,
@@ -542,9 +542,8 @@ export class AppIpc extends ProductWindowIpcService {
   }
 
   // Hands a workspace file to the OS default handler — the same thing a
-  // double-click in Finder/Explorer does. It is the only way to see a file the
-  // in-app viewer refuses (too large, unsupported), so the renderer offers it
-  // beside `revealLocalPath` on those error states.
+  // double-click in Finder/Explorer does. Limit this to known documents and
+  // ordinary folders; unsupported types can still use `revealLocalPath`.
   @IpcMethod()
   async openLocalPath(pathRaw: unknown) {
     if (typeof pathRaw !== 'string') {
@@ -554,15 +553,16 @@ export class AppIpc extends ProductWindowIpcService {
     if (!targetPath || !isAbsolute(targetPath)) {
       return { opened: false as const, error: 'invalid_path' }
     }
+    let openPath: string | null
     try {
-      if (!(await canOpenLocalPath(targetPath)))
-        return { opened: false as const, error: 'executable_path' }
+      openPath = await resolveOpenableLocalPath(targetPath)
+      if (!openPath) return { opened: false as const, error: 'unsupported_file_type' }
     } catch (error) {
       return { opened: false as const, error: localFileActionError(error) }
     }
     // `shell.openPath` resolves to '' on success and to the failure message
     // otherwise; it never rejects.
-    const failure = await shell.openPath(targetPath)
+    const failure = await shell.openPath(openPath)
     if (failure) {
       return { opened: false as const, error: failure }
     }

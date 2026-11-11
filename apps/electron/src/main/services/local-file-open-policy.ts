@@ -1,11 +1,9 @@
 import { realpath, stat } from 'node:fs/promises'
-import { basename, extname } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 
-// OS default handlers may execute these files instead of displaying them.
-const EXECUTABLE_SUFFIX =
-  /\.(?:app|command|sh|bash|zsh|fish|exe|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|msi|msp|scr|cpl|lnk|url|desktop|appimage|workflow|scpt|scptd|jar|py|rb|pl)$/iu
-
-const MAC_BUNDLE_SUFFIX = /\.(?:app|workflow|scptd|bundle|plugin|kext|osax|action)$/iu
+// Default handlers can execute scripts, shortcuts, installers and URL locators
+// without execute bits. Unknown types must use Reveal or an explicit editor.
+const MAC_BUNDLE_SUFFIX = /\.(?:app|workflow|scptd|bundle|plugin|kext|osax|action|pkg|mpkg)$/iu
 const DOCUMENT_SUFFIXES = new Set([
   '.txt',
   '.md',
@@ -57,25 +55,44 @@ const DOCUMENT_SUFFIXES = new Set([
   '.avi'
 ])
 
-export async function canOpenLocalPath(
+async function isBundleDirectory(directory: string): Promise<boolean> {
+  if (!MAC_BUNDLE_SUFFIX.test(basename(directory))) return false
+  for (const marker of [join(directory, 'Contents', 'Info.plist'), join(directory, 'Info.plist')]) {
+    try {
+      if ((await stat(marker)).isFile()) return true
+    } catch (error) {
+      if (
+        !(
+          error &&
+          typeof error === 'object' &&
+          'code' in error &&
+          (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+        )
+      )
+        throw error
+    }
+  }
+  return false
+}
+
+/** Return the checked real path, so callers never reopen the original symlink. */
+export async function resolveOpenableLocalPath(
   targetPath: string,
   platform = process.platform
-): Promise<boolean> {
+): Promise<string | null> {
   const resolved = await realpath(targetPath)
-  const paths = [targetPath, resolved]
-  // A directory named github.com or three.js is not an executable file.
-  if (
-    platform === 'darwin' &&
-    paths.some((value) => value.split(/[\\/]/u).some((part) => MAC_BUNDLE_SUFFIX.test(part)))
-  )
-    return false
   const info = await stat(resolved)
-  if (info.isDirectory()) return true
-  if (paths.some((value) => EXECUTABLE_SUFFIX.test(basename(value)))) return false
-  // Removable/network volumes and Git can mark ordinary documents executable.
-  // Inspect the real target's extension so an innocent symlink cannot hide a binary.
-  return (
-    info.isFile() &&
-    ((info.mode & 0o111) === 0 || DOCUMENT_SUFFIXES.has(extname(resolved).toLowerCase()))
-  )
+  if (info.isDirectory()) {
+    // Opening a directory asks the OS to handle that directory, not its ancestors.
+    return platform === 'darwin' && MAC_BUNDLE_SUFFIX.test(basename(resolved)) ? null : resolved
+  }
+  if (!info.isFile() || !DOCUMENT_SUFFIXES.has(extname(resolved).toLowerCase())) return null
+  if (platform === 'darwin') {
+    for (let ancestor = dirname(resolved); ; ancestor = dirname(ancestor)) {
+      if (await isBundleDirectory(ancestor)) return null
+      if (dirname(ancestor) === ancestor) break
+    }
+  }
+  // Known documents remain openable on 0777 volumes and with Git's executable bit.
+  return resolved
 }
