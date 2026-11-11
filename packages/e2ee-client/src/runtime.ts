@@ -15,6 +15,7 @@ import {
 } from '@lody/e2ee-core/protocol';
 import {
   ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS,
+  KEY_DELIVERY_RETRY_DELAYS,
   personalHostAccountPairing,
   type AccountPairingIdentityHost,
 } from './account-requester';
@@ -63,6 +64,11 @@ export interface PersonalRuntimeOptions<E> {
   readonly recordCreated?: (
     input: Parameters<E2eeWorkspaceRuntime['recordCreated']>[0]
   ) => Effect.Effect<void, unknown>;
+  /** Member key delivery's due-retry schedule; tests inject `sleep` instead of waiting. */
+  readonly keyDeliveryRetry?: {
+    readonly delays?: readonly number[];
+    readonly sleep?: (ms: number) => Effect.Effect<void>;
+  };
 }
 
 /**
@@ -232,7 +238,9 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     return undefined;
   });
   // Key delivery after a member admission. Delivery never holds or undoes the admission;
-  // its state is reason codes only, and a failed delivery can be retried from here.
+  // its state is reason codes only. An attempt short of mailbox evidence is retried on
+  // the desktop's bounded backoff while the entry stays `delivering`; only an exhausted
+  // schedule or a sender that can never send leaves it `failed` for a manual retry.
   const deliveries = new Map<
     string,
     { device: string } & Omit<E2eeMemberKeyDelivery, 'requestId'>
@@ -241,32 +249,54 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     const entry = deliveries.get(requestId)!;
     return { requestId, state: entry.state, ...(entry.code ? { code: entry.code } : {}) };
   };
-  const deliver = (id: string, requestId: string) =>
+  const deliveryDelays = options.keyDeliveryRetry?.delays ?? KEY_DELIVERY_RETRY_DELAYS;
+  const deliverySleep = options.keyDeliveryRetry?.sleep ?? ((ms: number) => Effect.sleep(ms));
+  // One attempt holds the reader only while it runs, never across the backoff, and never
+  // opens one: without an open reader it reports `closed` and the schedule continues.
+  // The mailbox refuses a sender behind the ledger, so a retry catches up first; a
+  // failed or timed-out catch-up does not skip the round.
+  const attemptDelivery = (id: string, device: string, retry: number) =>
     withSession(id, (session) =>
       Effect.gen(function* () {
-        const entry = deliveries.get(requestId);
-        if (!entry || entry.state === 'delivering' || entry.state === 'delivered') return;
-        entry.state = 'delivering';
-        delete entry.code;
-        const exit = yield* Effect.exit(
-          Effect.gen(function* () {
-            yield* session.keyRound();
-            return yield* session.keyDeliveryEvidence(entry.device);
-          })
-        );
-        if (Exit.isSuccess(exit) && exit.value === 'delivered') entry.state = 'delivered';
-        else {
-          entry.state = 'failed';
-          entry.code = Exit.isSuccess(exit) ? exit.value : 'e2ee_key_delivery_failed';
-        }
+        if (retry > 0)
+          yield* Effect.result(
+            session.refresh().pipe(Effect.timeoutOption(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))
+          );
+        const round = yield* Effect.result(session.keyRound());
+        const evidence = yield* Effect.result(session.keyDeliveryEvidence(device));
+        if (Result.isSuccess(evidence) && evidence.success === 'delivered') return 'delivered';
+        return Result.isSuccess(round) && Result.isSuccess(evidence)
+          ? evidence.success
+          : 'e2ee_key_delivery_failed';
       })
     );
   const startDelivery = (id: string, requestId: string) => {
-    void run(deliver(id, requestId)).catch(() => {
-      const entry = deliveries.get(requestId);
-      if (entry?.state === 'delivering') {
+    const entry = deliveries.get(requestId);
+    if (!entry || entry.state === 'delivering' || entry.state === 'delivered') return;
+    entry.state = 'delivering';
+    delete entry.code;
+    const schedule = Effect.gen(function* () {
+      for (let retry = 0; ; retry++) {
+        const attempt = yield* Effect.result(attemptDelivery(id, entry.device, retry));
+        const code = Result.isSuccess(attempt) ? attempt.success : 'e2ee_key_delivery_failed';
+        if (code === 'delivered') {
+          entry.state = 'delivered';
+          delete entry.code;
+          return;
+        }
+        entry.code = code;
+        // A retired assembly or a sender the ledger excludes can never deliver.
+        if (retired || code === 'e2ee_key_sender_ineligible' || retry >= deliveryDelays.length) {
+          entry.state = 'failed';
+          return;
+        }
+        yield* deliverySleep(deliveryDelays[retry]!);
+      }
+    });
+    void run(schedule).catch(() => {
+      if (entry.state === 'delivering') {
         entry.state = 'failed';
-        entry.code = 'e2ee_key_delivery_failed';
+        entry.code ??= 'e2ee_key_delivery_failed';
       }
     });
   };

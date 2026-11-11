@@ -159,6 +159,9 @@ let offer: PersonalPairingOffer,
   // slot keeps reporting an installed key.
   watchedRecipient: string | undefined,
   watchedFrom = 0,
+  // Backoffs the runtime's member key delivery waited; `holdDeliveryRetry` never ends one.
+  deliverySleeps: number[] = [],
+  holdDeliveryRetry = false,
   failKeys = false,
   foreign = false;
 let databasePrefix = 'personal';
@@ -317,6 +320,8 @@ export async function boot(
   refusePuts = false;
   watchedRecipient = undefined;
   watchedFrom = 0;
+  deliverySleeps = [];
+  holdDeliveryRetry = false;
   session = undefined;
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -1693,6 +1698,18 @@ export async function bootRuntime(withSharing = false) {
                 .slice(checked.historyStart, checked.length)
                 .map((record, index) => ({ position: checked.historyStart + index, record }))
         ),
+      // Only the injected backoff moves: the mailbox recovers while the retry waits.
+      keyDeliveryRetry: {
+        sleep: (ms) =>
+          Effect.suspend(() => {
+            deliverySleeps.push(ms);
+            return holdDeliveryRetry
+              ? Effect.never
+              : Effect.sync(() => {
+                  refusePuts = false;
+                });
+          }),
+      },
       run: async (program) => {
         if (executorOverride) return await executorOverride(program);
         const exit = await Effect.runPromiseExit(
@@ -2256,6 +2273,28 @@ export async function runtimeInvoke(action: string) {
         break;
       case 'memberAdmitted':
         value = view().inspectState().devices.has(memberRelay.item!.signingPublicKey);
+        break;
+      // The mailbox refuses every envelope; only the applicant's slot reports its stores.
+      case 'memberRefuseKeys':
+        refusePuts = true;
+        watchedRecipient = memberRelay.item!.signingPublicKey;
+        watchedFrom = putAttempts.length;
+        value = true;
+        break;
+      case 'memberHoldRetry':
+        holdDeliveryRetry = true;
+        value = true;
+        break;
+      case 'memberAcceptKeys':
+        refusePuts = false;
+        value = true;
+        break;
+      case 'memberDeliveries':
+        value = {
+          items: (await runtime.memberKeyDeliveries!(offer.workspaceId)).items,
+          sleeps: deliverySleeps,
+          envelopes: putAttempts.slice(watchedFrom).map((item) => item.stored),
+        };
         break;
       case 'memberRecordCount':
         value = view().length;
