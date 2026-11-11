@@ -142,9 +142,9 @@ struct SessionInfoBar: Equatable {
     if pullRequest.status == "draft" { return actions + [.readyForReview] }
     if pullRequest.merge == "d" { actions.append(.resolveConflicts) }
     if ["f", "e"].contains(pullRequest.ci ?? "") { actions.append(.fixCi) }
-    // Web `deriveSessionPullRequestReadiness`: GitHub reports clean, CI passed or absent. A demoted
-    // merge stays in the menu so readiness is reachable on sessions that rank Commit & Push first.
-    if pullRequest.merge == "c" && [nil, "s"].contains(pullRequest.ci) { actions.append(.merge) }
+    // Web `resolveSessionInfoBarGitHubActionIds`: Merge whenever GitHub would accept it, clean or
+    // unstable (checks running or failing but not required). A demoted merge stays in the menu.
+    if ["c", "u"].contains(pullRequest.merge) { actions.append(.merge) }
     return actions
   }
 

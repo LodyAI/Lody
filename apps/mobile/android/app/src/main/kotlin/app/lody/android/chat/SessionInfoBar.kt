@@ -158,9 +158,9 @@ data class SessionInfoBar(
             if (pr.status == "draft") return actions + Action.ReadyForReview
             if (pr.merge == "d") actions += Action.ResolveConflicts
             if (pr.ci == "f" || pr.ci == "e") actions += Action.FixCi
-            // Web `deriveSessionPullRequestReadiness`: GitHub reports clean, CI passed or absent. A
-            // demoted merge stays in the menu so readiness is reachable behind Commit & Push.
-            if (pr.merge == "c" && (pr.ci == null || pr.ci == "s")) actions += Action.Merge
+            // Web `resolveSessionInfoBarGitHubActionIds`: Merge whenever GitHub would accept it, clean
+            // or unstable (checks running or failing but not required). A demoted merge stays in the menu.
+            if (pr.merge == "c" || pr.merge == "u") actions += Action.Merge
             return actions
         }
     }
