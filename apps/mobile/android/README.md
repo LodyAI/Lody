@@ -212,6 +212,18 @@ session's catalog entry, then fills state, merge state, branch and ±lines from 
 GitHub read grant (`PullRequestDetails`); Merge and Delete branch appear only once
 that read lands.
 
+### Project files
+
+Conversation More offers Project files for a live conversation in a local project
+(`ProjectFiles.browsable`; iOS `openProjectFiles`). `ProjectFilesSheet` is a near
+full-screen sheet like the turn's files sheet: folders come from runtime `listDir`
+(rooted at the local project, folders first), and a Markdown file (`.md`,
+`.markdown`, `.mdx`) is read through `readFile` and rendered block by block with the
+transcript's `MarkdownBlock`, with a Source toggle. Relative Markdown links open in
+the sheet; web links go to the browser. Other files are listed but not opened in this
+first version. Both commands are reads, routed through the existing contract bridge,
+and never retried automatically. `ProjectFilesTest` covers the path rules.
+
 ## Schedules
 
 The native Schedules tab shows flat rows grouped by Attention, Active, Paused and

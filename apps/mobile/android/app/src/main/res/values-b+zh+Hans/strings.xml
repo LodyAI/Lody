@@ -290,6 +290,21 @@
         <item quantity="one">%d 个文件</item>
         <item quantity="other">%d 个文件</item>
     </plurals>
+    <string name="files_title">项目文件</string>
+    <string name="files_retry">重试</string>
+    <string name="files_error_folder">无法读取此文件夹，电脑可能已离线。</string>
+    <string name="files_empty_folder">此文件夹为空。</string>
+    <string name="files_truncated">仅显示前 2000 项。</string>
+    <string name="files_markdown_only">目前仅支持预览 Markdown 文件。</string>
+    <string name="files_error_too_large">文件太大，无法预览。</string>
+    <string name="files_error_not_found">此文件已不存在。</string>
+    <string name="files_error_permission">电脑不允许读取此文件。</string>
+    <string name="files_error_path">此文件不在项目内。</string>
+    <string name="files_error_binary">此文件不是文本，无法预览。</string>
+    <string name="files_error_read">无法读取此文件，电脑可能已离线。</string>
+    <string name="files_preview">预览</string>
+    <string name="files_source">源码</string>
+    <string name="files_empty_file">此文件为空。</string>
     <string name="chat_files_back">返回文件列表</string>
     <string name="chat_diff_binary">这个文件不是文本，没有行级 diff。</string>
     <string name="chat_diff_too_large">改动太大，无法在手机上显示。</string>
