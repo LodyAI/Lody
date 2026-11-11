@@ -72,6 +72,7 @@
     <string name="home_empty">No chats yet</string>
     <string name="home_projects_empty">No projects yet</string>
     <string name="home_offline">Offline</string>
+    <string name="home_connecting">Connecting…</string>
     <string name="home_syncing">Syncing…</string>
     <string name="home_connected">Connected</string>
     <string name="home_no_workspaces">No accessible workspaces</string>

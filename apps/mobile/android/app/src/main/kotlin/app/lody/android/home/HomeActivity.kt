@@ -214,7 +214,7 @@ private fun uiState(auth: AuthState, catalog: CatalogState): ChatListUiState {
     // Only actionable connection state reaches the sync pill; a live list shows none.
     val sync = when (catalog.phase) {
         ConnectionPhase.CONNECTING, ConnectionPhase.SYNCING -> HomeSyncState.Syncing
-        ConnectionPhase.UNAVAILABLE, ConnectionPhase.PAUSED -> HomeSyncState.Offline
+        ConnectionPhase.UNAVAILABLE, ConnectionPhase.PAUSED -> HomeSyncState.Connecting
         else -> HomeSyncState.Live
     }
     val placeholder = when {

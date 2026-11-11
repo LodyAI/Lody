@@ -258,6 +258,17 @@ jobs:
       - name: Rust tests
         run: pnpm --filter @lody/iroh-native test:rust
 
+      - name: Generate mobile bindings
+        if: runner.os == 'Linux'
+        working-directory: packages/iroh-native
+        run: |
+          cargo build --locked -p lody-iroh-uniffi
+          for language in swift kotlin; do
+            cargo run --locked -p lody-iroh-uniffi --bin uniffi-bindgen -- generate \
+              --library target/debug/liblody_iroh_uniffi.so --language "$language" \
+              --out-dir "$RUNNER_TEMP/bindings/$language" --no-format
+          done
+
       - name: Build module
         run: pnpm --filter @lody/iroh-native build:debug
 

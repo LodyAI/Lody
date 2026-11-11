@@ -231,7 +231,7 @@ final class InboxController: UIViewController {
   }
 
   private func syncState(_ state: SessionListState) -> HomeSyncState {
-    if !state.connected { return .offline }
+    if !state.connected { return .connecting }
     return state.loading ? .syncing : .live
   }
 

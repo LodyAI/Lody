@@ -20335,19 +20335,19 @@
         }
       }
     },
-    "home.status.offline": {
+    "home.status.connecting": {
       "extractionState": "manual",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "离线"
+            "value": "正在连接…"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Offline"
+            "value": "Connecting…"
           }
         }
       }

@@ -791,6 +791,8 @@ struct MergeOptionsContent: View {
   let preferred: String
   var onMerge: (String) -> Void
   private var methods: [String] { [preferred] + ["merge", "squash", "rebase"].filter { $0 != preferred } }
+  /// One SF Symbol per method so the rows read apart at a glance.
+  private static let symbols = ["merge": "arrow.triangle.merge", "squash": "rectangle.compress.vertical", "rebase": "square.stack.3d.up"]
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       VStack(alignment: .leading, spacing: LodySpacing.xs) {
@@ -803,7 +805,8 @@ struct MergeOptionsContent: View {
       ForEach(methods, id: \.self) { method in
         Button { onMerge(method) } label: {
           HStack(spacing: LodySpacing.md) {
-            LodyIcon.merge.image.frame(width: LodyIconSize.md).foregroundStyle(LodyColor.iconSecondary)
+            Image(systemName: Self.symbols[method] ?? "arrow.triangle.merge")
+              .font(.body).frame(width: 24).foregroundStyle(LodyColor.iconSecondary)
             Text(String(localized: String.LocalizationValue("bar.merge." + method), bundle: .lody))
               .font(.body).frame(maxWidth: .infinity, alignment: .leading)
             if method == preferred { Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(LodyColor.iconSecondary) }
