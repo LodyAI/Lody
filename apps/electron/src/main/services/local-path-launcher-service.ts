@@ -21,7 +21,11 @@ import type {
   LocalPathCommandSpec
 } from '@lody/shared/electron-ipc'
 import { formatUnknownError } from '../utils'
-import { launchCommandPathWithFallback, probePathLauncher } from './local-path-launcher-core'
+import {
+  launchCommandPathWithFallback,
+  probePathLauncher,
+  selectSafePathLauncherInput
+} from './local-path-launcher-core'
 import { getUserShellEnvCachedLegacy, shouldUseWindowsShell } from './shell-env'
 
 const PROBE_CACHE_MS = 5 * 60 * 1000
@@ -131,8 +135,10 @@ async function hasProtocol(urlValue: string): Promise<boolean> {
 }
 
 export function hasPathLauncher(input: LaunchLocalPathInput): Promise<boolean> {
+  const selected = selectSafePathLauncherInput(input, process.platform, shouldUseWindowsShell)
+  if (!selected) return Promise.resolve(false)
   return probePathLauncher(
-    input,
+    selected,
     (candidate) => hasCommand(candidate.command, candidate.args),
     hasProtocol
   )
@@ -261,6 +267,9 @@ async function launchLocalUrl(urlValue: string): Promise<LaunchLocalPathResult> 
 }
 
 export async function launchLocalPath(input: LaunchLocalPathInput): Promise<LaunchLocalPathResult> {
+  const selected = selectSafePathLauncherInput(input, process.platform, shouldUseWindowsShell)
+  if (!selected) return { launched: false, error: 'unsafe_shell_path' }
+  input = selected
   if (input.kind === 'url') {
     return await launchLocalUrl(input.url)
   }
@@ -310,8 +319,6 @@ const builtinIds = new Set([
 export function resolvePathLauncher(request: PathLauncherRequest): LaunchLocalPathInput | null {
   if (!path.isAbsolute(request.targetPath)) return null
   const targetPath = path.normalize(request.targetPath)
-  // cmd.exe interprets metacharacters even in argv when launching .cmd shims.
-  if (process.platform === 'win32' && /[&|<>^%!"\r\n]/u.test(targetPath)) return null
   if (builtinIds.has(request.launcherId)) {
     if (request.launcherId === 'xcode' && process.platform !== 'darwin') return null
     return buildPathLauncherLaunchInput(

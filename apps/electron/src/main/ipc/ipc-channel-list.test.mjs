@@ -82,7 +82,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
       handle: (channel, handler) => handlers.set(channel, handler)
     }
   }
-  const load = async (relative, deps) => {
+  const load = async (relative, deps, env = {}) => {
     const exports = {}
     runInNewContext(
       ts.transpileModule(await readFile(new URL(relative, import.meta.url), 'utf8'), {
@@ -95,7 +95,8 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
       {
         exports,
         URL,
-        process: { env: {} },
+        __dirname: '/app/out/main',
+        process: { env },
         console,
         require: (id) => (Object.hasOwn(deps, id) ? deps[id] : require(id))
       }
@@ -170,6 +171,62 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     sends.get('terminal.input')(event, { data: 'synthetic' })
     assert.equal(running, false)
   }
+  let recovered = false
+  let reported = false
+  class RecoveryIpc extends service.ProductWindowIpcService {
+    static groupName = 'app'
+    constructor() {
+      super()
+      this.registerMethod('requestRendererReload', () => {
+        recovered = true
+      })
+      this.registerMethod('reportRendererFatalError', () => {
+        reported = true
+      })
+      this.registerMethod('openLocalPath', () => {
+        throw new Error('privileged handler reached')
+      })
+    }
+  }
+  new RecoveryIpc()
+  const recovery = window()
+  recovery.senderFrame.url = 'file:///app/out/renderer/recovery.html'
+  await handlers.get('app.requestRendererReload')(recovery)
+  await handlers.get('app.reportRendererFatalError')(recovery)
+  assert.equal(recovered, true)
+  assert.equal(reported, true)
+  await assert.rejects(handlers.get('app.openLocalPath')(recovery), /untrusted renderer/)
+  await assert.rejects(handlers.get('cli.terminate')(recovery), /untrusted renderer/)
+  for (const url of [
+    'file:///foreign/out/renderer/recovery.html',
+    'https://example.com/out/renderer/recovery.html'
+  ]) {
+    const foreign = window()
+    foreign.senderFrame.url = url
+    await assert.rejects(handlers.get('app.requestRendererReload')(foreign), /untrusted renderer/)
+  }
+  await assert.rejects(
+    handlers.get('app.requestRendererReload')({
+      ...recovery,
+      senderFrame: { url: recovery.senderFrame.url }
+    }),
+    /untrusted renderer/
+  )
+  productWindows.delete(windows.get(recovery.sender))
+  await assert.rejects(handlers.get('app.reportRendererFatalError')(recovery), /untrusted renderer/)
+  const devGuard = await load(
+    './assert-sender.ts',
+    { electron, '../window-state': { productWindows } },
+    { ELECTRON_RENDERER_URL: 'http://localhost:5173' }
+  )
+  const devRecovery = window()
+  devRecovery.senderFrame.url = 'http://localhost:5173/recovery.html'
+  devGuard.assertProductWindowSender(devRecovery, 'app.requestRendererReload')
+  devGuard.assertProductWindowSender(devRecovery, 'app.reportRendererFatalError')
+  assert.throws(
+    () => devGuard.assertProductWindowSender(devRecovery, 'cli.terminate'),
+    /untrusted renderer/
+  )
 })
 
 void test('preload exposes only the filtered IPC bridge and no raw Electron process environment', async () => {

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { launchCommandPathWithFallback } from './local-path-launcher-core.ts'
+import {
+  launchCommandPathWithFallback,
+  selectSafePathLauncherInput,
+  probePathLauncher
+} from './local-path-launcher-core.ts'
 
 void test('opens the deeplink after every command candidate fails', async () => {
   const attempts = []
@@ -62,7 +66,7 @@ void test('does not open the deeplink when a command launches', async () => {
 })
 
 void test('default application opening rejects executable files, bundles and symlink targets', async (t) => {
-  const { mkdtemp, writeFile, mkdir, symlink, rm } = await import('node:fs/promises')
+  const { mkdtemp, writeFile, mkdir, symlink, rm, chmod } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
   const { canOpenLocalPath } = await import('./local-file-open-policy.ts')
@@ -91,10 +95,22 @@ void test('default application opening rejects executable files, bundles and sym
   await mkdir(join(root, 'Tool.app'))
   await writeFile(join(root, 'Tool.app', 'notes.txt'), 'synthetic')
   await symlink(join(root, 'Tool.app'), join(root, 'alias'))
-  assert.equal(await canOpenLocalPath(join(root, 'alias', 'notes.txt')), false)
+  assert.equal(await canOpenLocalPath(join(root, 'alias', 'notes.txt'), 'darwin'), false)
   await writeFile(join(root, 'notes.txt'), 'ordinary document', { mode: 0o644 })
   assert.equal(await canOpenLocalPath(join(root, 'notes.txt')), true)
   assert.equal(await canOpenLocalPath(root), true)
+  const source = join(root, 'go', 'src', 'github.com', 'owner', 'three.js')
+  await mkdir(source, { recursive: true })
+  const document = join(source, 'README.md')
+  await writeFile(document, 'ordinary versioned document')
+  await chmod(document, 0o777)
+  assert.equal(await canOpenLocalPath(document), true)
+  assert.equal(await canOpenLocalPath(source), true)
+  const unknown = join(source, 'unknown.binary')
+  await writeFile(unknown, 'synthetic executable', { mode: 0o755 })
+  assert.equal(await canOpenLocalPath(unknown), false)
+  await symlink(join(root, 'unsafe.command'), join(root, 'disguised.md'))
+  assert.equal(await canOpenLocalPath(join(root, 'disguised.md')), false)
 })
 
 void test('launcher commands come from main configuration and custom changes require native approval', async () => {
@@ -104,6 +120,11 @@ void test('launcher commands come from main configuration and custom changes req
   const require = createRequire(import.meta.url)
   const ts = require('typescript')
   const ipc = await import('@lody/shared/electron-ipc')
+  const core = await import('./local-path-launcher-core.ts')
+  const pathModule = await import('node:path')
+  const { EventEmitter } = await import('node:events')
+  const runtimeProcess = { platform: 'darwin', env: {} }
+  const started = []
   const builders = await import('@lody/shared/path-launchers')
   let launchers = []
   let answer = 0
@@ -130,10 +151,35 @@ void test('launcher commands come from main configuration and custom changes req
     '../menu': { translateMenu: (_key, fallback) => fallback },
     '@lody/shared/path-launchers': builders,
     '@lody/shared/electron-ipc': ipc,
-    '@lody/shared/node/process': {},
+    'node:path': new Proxy(
+      {},
+      {
+        get: (_target, name) =>
+          (runtimeProcess.platform === 'win32' ? pathModule.win32 : pathModule.posix)[name]
+      }
+    ),
+    'node:fs/promises': {
+      stat: async (value) => ({ isFile: () => value.endsWith('.exe') }),
+      access: async () => {}
+    },
+    '@lody/shared/node/process': {
+      startProcessLegacy: (spec) => {
+        started.push(spec)
+        const child = new EventEmitter()
+        child.unref = () => {}
+        queueMicrotask(() => child.emit('spawn'))
+        return { child }
+      }
+    },
     '../utils': {},
-    './local-path-launcher-core': {},
-    './shell-env': {}
+    './local-path-launcher-core': core,
+    './shell-env': {
+      getUserShellEnvCachedLegacy: async () => ({}),
+      shouldUseWindowsShell: (command) =>
+        runtimeProcess.platform === 'win32' &&
+        (/\.(cmd|bat)$/iu.test(command) ||
+          (!/[\\/]/u.test(command) && !/\.(exe|com)$/iu.test(command)))
+    }
   }
   const exports = {}
   runInNewContext(
@@ -149,7 +195,7 @@ void test('launcher commands come from main configuration and custom changes req
     ).outputText,
     {
       exports,
-      process: { platform: 'darwin' },
+      process: runtimeProcess,
       require: (id) => (Object.hasOwn(deps, id) ? deps[id] : require(id))
     }
   )
@@ -197,4 +243,78 @@ void test('launcher commands come from main configuration and custom changes req
       .command,
     'code-insiders'
   )
+  runtimeProcess.platform = 'win32'
+  const windowsRequest = { ...request, targetPath: 'C:\\R&D\\repo' }
+  const windowsInput = exports.resolvePathLauncher(windowsRequest)
+  assert.notEqual(windowsInput, null)
+  assert.equal(await exports.hasPathLauncher(windowsInput), true)
+  assert.equal((await exports.launchLocalPath(windowsInput)).launched, true)
+  assert.equal(started[0].command.endsWith('Code.exe'), true)
+  assert.equal(started[0].options.shell, false)
+  assert.deepEqual(started[0].args, ['-n', windowsRequest.targetPath])
+  const refused = await exports.launchLocalPath({
+    kind: 'command',
+    command: { command: 'only.cmd' },
+    targetPath: windowsRequest.targetPath
+  })
+  assert.equal(refused.launched, false)
+  assert.equal(refused.error, 'unsafe_shell_path')
+})
+
+void test('Windows metacharacter paths preserve native executables and URLs while excluding shell candidates', async () => {
+  const { buildPathLauncherLaunchInput } = await import('@lody/shared/path-launchers')
+  const usesShell = (command) =>
+    /\.(cmd|bat)$/iu.test(command) || (!/[\\/]/u.test(command) && !/\.(exe|com)$/iu.test(command))
+  for (const character of ['&', '|', '<', '>', '^', '%', '!', '"']) {
+    const targetPath = `C:\\R${character}D\\repo`
+    const built = buildPathLauncherLaunchInput(
+      { kind: 'builtin', id: 'vscode', label: 'VS Code' },
+      targetPath,
+      'win32'
+    )
+    const safe = selectSafePathLauncherInput(
+      {
+        ...built,
+        fallbackCommands: [...built.fallbackCommands, { command: 'code.cmd', args: [targetPath] }]
+      },
+      'win32',
+      usesShell
+    )
+    assert.equal(safe.kind, 'command')
+    assert.equal(safe.command.command.endsWith('Code.exe'), true)
+    assert.deepEqual(safe.command.args, ['-n', targetPath])
+    assert.equal(
+      [safe.command, ...safe.fallbackCommands].some((item) => usesShell(item.command)),
+      false
+    )
+    const available = await probePathLauncher(
+      safe,
+      async (spec) => spec.command.endsWith('Code.exe'),
+      async () => false
+    )
+    assert.equal(available, true)
+    const launched = await launchCommandPathWithFallback(
+      safe,
+      async (spec) => ({ launched: true, method: 'command', command: spec.command }),
+      async () => {
+        throw new Error('unexpected URL')
+      }
+    )
+    assert.equal(launched.launched, true)
+    const urlOnly = selectSafePathLauncherInput(
+      { ...built, fallbackCommands: [] },
+      'win32',
+      usesShell
+    )
+    assert.equal(urlOnly.kind, 'url')
+    assert.equal(urlOnly.url, built.fallbackUrl)
+    assert.equal(
+      selectSafePathLauncherInput(
+        { kind: 'command', command: { command: 'only.cmd' }, targetPath },
+        'win32',
+        usesShell
+      ),
+      null
+    )
+  }
 })

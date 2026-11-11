@@ -9,7 +9,10 @@ export abstract class ProductWindowIpcService extends IpcService {
     handler: (...args: any[]) => Promise<TOutput> | TOutput
   ) {
     super.registerMethod(methodName, (...args) => {
-      assertProductWindowSender(getIpcContext().event)
+      assertProductWindowSender(
+        getIpcContext().event,
+        `${(this.constructor as typeof IpcService).groupName}.${methodName}`
+      )
       return handler(...args)
     })
   }

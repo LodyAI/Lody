@@ -6,7 +6,9 @@
 
 All product service classes extend `ProductWindowIpcService`. Register one-way product
 messages through `onProductWindowMessage`; both admit only a registered product
-window's trusted main frame. Public browser views and preview frames have no product
+window's trusted main frame. The trusted recovery page may invoke only
+`app.requestRendererReload` and `app.reportRendererFatalError`; it has no other
+product IPC authority. Public browser views and preview frames have no product
 IPC authority. Launch requests carry only a launcher id and absolute target path;
 main resolves built-ins and natively approved, main-stored custom commands. Never
 accept command specifications from a launch or probe request.

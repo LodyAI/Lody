@@ -1,7 +1,14 @@
 import { BrowserWindow, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { productWindows } from '../window-state'
 
-export function assertProductWindowSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
+const RECOVERY_CHANNELS = new Set(['app.requestRendererReload', 'app.reportRendererFatalError'])
+
+export function assertProductWindowSender(
+  event: IpcMainInvokeEvent | IpcMainEvent,
+  channel?: string
+): void {
   const mainWindow = BrowserWindow.fromWebContents(event.sender)
   const registered = mainWindow && productWindows.has(mainWindow)
   const senderUrl = event.senderFrame?.url
@@ -9,11 +16,19 @@ export function assertProductWindowSender(event: IpcMainInvokeEvent | IpcMainEve
   let hasAllowedUrl = false
   try {
     const parsedSender = new URL(senderUrl ?? '')
-    hasAllowedUrl = devRendererUrl
-      ? parsedSender.origin === new URL(devRendererUrl).origin
-      : parsedSender.protocol === 'file:' &&
-        (parsedSender.pathname.endsWith('/out/renderer/index.html') ||
-          parsedSender.pathname.endsWith('/out/renderer/devbar.html'))
+    const recoveryAllowed = channel !== undefined && RECOVERY_CHANNELS.has(channel)
+    if (devRendererUrl) {
+      const devUrl = new URL(devRendererUrl)
+      const isRecovery = parsedSender.pathname === new URL('recovery.html', devUrl).pathname
+      hasAllowedUrl = parsedSender.origin === devUrl.origin && (!isRecovery || recoveryAllowed)
+    } else if (parsedSender.protocol === 'file:') {
+      const senderPath = fileURLToPath(parsedSender)
+      hasAllowedUrl = [
+        'index.html',
+        'devbar.html',
+        ...(recoveryAllowed ? ['recovery.html'] : [])
+      ].some((entry) => senderPath === resolve(__dirname, '../renderer', entry))
+    }
   } catch {
     hasAllowedUrl = false
   }

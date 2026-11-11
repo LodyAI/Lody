@@ -28,9 +28,13 @@ change) opens a native confirmation showing the exact template. Main stores
 only approved templates in its own `path-launchers` settings. Cancelling leaves
 that store unchanged. Built-ins keep their existing editor and terminal fallbacks;
 custom options stay visible before approval so this confirmation is reachable.
+Windows paths containing shell metacharacters exclude only command candidates
+that need the shell; native executable and protocol fallbacks remain available.
 
-Default-application opening refuses executable suffixes, application bundles and
-regular files with executable bits, including symlink targets. Users can still
+Default-application opening checks executable suffixes on the filename and macOS
+application bundles on ancestor paths, including symlink targets. Execute bits
+refuse unknown or extensionless regular files; known documents remain openable
+on volumes that mark every file executable. Users can still
 reveal these files in the file manager or open them in a configured editor.
 
 ## Two path origins and two cache keys

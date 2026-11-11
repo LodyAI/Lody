@@ -33,10 +33,10 @@ const buildInfo: Record<string, string> = {
 renderBootFailure(rootElement, reconstructed, {
   buildInfo,
   surface: 'recovery',
-  onReload: () => {
+  onReload: async () => {
     if (getIpcServices()) {
       try {
-        void getIpcServices()!.app.requestRendererReload()
+        await getIpcServices()!.app.requestRendererReload()
         return
       } catch (error) {
         console.warn('[Lody] requestRendererReload bridge threw', error)
@@ -44,9 +44,9 @@ renderBootFailure(rootElement, reconstructed, {
     }
     window.location.reload()
   },
-  onCopy: () => {
+  onCopy: async () => {
     try {
-      void getIpcServices()?.app.reportRendererFatalError({
+      await getIpcServices()?.app.reportRendererFatalError({
         scope: `recovery:${source}`,
         message,
         details,
