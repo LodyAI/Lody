@@ -11,12 +11,7 @@ import {
   readEncryptedMachineAccess,
 } from '@/lib/session-command-environment';
 import type { SessionSteerResponse } from '@lody/shared';
-import {
-  buildSessionGroupRenamePatch,
-  buildSessionTabRenamePatch,
-  normalizeMcpServerIdSelection,
-  resolveSessionConversationConfig,
-} from '@lody/shared';
+import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import {
   getMachineRoomId,
@@ -355,7 +350,6 @@ type ListOptions = CommonOptions &
 
 type RenameOptions = CommonOptions & {
   title?: string;
-  group?: boolean;
 };
 
 type HistoryOptions = CommonOptions & {
@@ -5921,10 +5915,6 @@ const sessionRenameCommand = new Command('rename')
   .description('Rename a session')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--title <title>', 'New session title')
-  .option(
-    '--group',
-    "Rename the root session's conversation group in the sidebar instead of its tab"
-  )
   .option('--json', 'Print JSON output')
   .option('--debug', 'Enable debug output')
   .argument('[sessionId]', 'Session ID; falls back to LODY_SESSION_ID')
@@ -5951,22 +5941,15 @@ const sessionRenameCommand = new Command('rename')
         );
         await withWorkspaceManager(auth, workspace, async (manager) => {
           await syncWorkspaceMetaForRead(manager, `session.rename:${sessionId}:prewrite`);
-          const meta = await assertSessionManagementAccess({ auth, workspace, manager, sessionId });
-          if (options.group && meta.parentSessionId) {
-            throw new Error(
-              `Session ${sessionId} is a child tab; only a root session has a group title.`
-            );
-          }
-          await manager.repo.upsertDocMeta(
-            getSessionRoomId(sessionId),
-            options.group
-              ? buildSessionGroupRenamePatch(title)
-              : buildSessionTabRenamePatch(meta, title)
-          );
+          await assertSessionManagementAccess({ auth, workspace, manager, sessionId });
+          await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+            title,
+            titleSource: 'user',
+          } satisfies Partial<SessionMeta>);
           await ensureWorkspaceMetaSynced(manager, `session.rename:${sessionId}`);
 
           if (options.json) {
-            printJson({ ok: true, sessionId, title, scope: options.group ? 'group' : 'tab' });
+            printJson({ ok: true, sessionId, title });
             return;
           }
 

@@ -48,7 +48,7 @@ describe('getCopyTextFromMessageItems', () => {
     );
     expect(getTextContentFromMessageItems(items)).toBe('See [Old](session://child)');
   });
-  const rolePrompt = 'use lody mcp to create a session with agent role[id: role-1, name: Reviewer]';
+  const rolePrompt = '[Agent Role: Reviewer (agentRoleId: role-1)]';
   const roleMessage: MessageContent = {
     type: 'text',
     text: `please ${rolePrompt} on this diff`,

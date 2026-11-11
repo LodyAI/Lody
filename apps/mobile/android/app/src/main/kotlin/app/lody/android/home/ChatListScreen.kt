@@ -222,6 +222,7 @@ fun ChatListScreen(
     var rolesOpen by rememberSaveable(scope) { mutableStateOf(false) }
     var shortcutsOpen by rememberSaveable(scope) { mutableStateOf(false) }
     var githubOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var projectsOpen by rememberSaveable(scope) { mutableStateOf(false) }
     val deferredMessage = stringResource(R.string.settings_deferred)
     var scheduleEditor by rememberSaveable(scope) { mutableStateOf<String?>(null) }
     LaunchedEffect(tab, scheduleList, state.sync) {
@@ -254,6 +255,10 @@ fun ChatListScreen(
     }
     if (githubOpen) {
         GitHubSettingsScreen(githubSettings, scope, onBack = { githubOpen = false })
+        return
+    }
+    if (projectsOpen) {
+        ProjectGroupsScreen(state, creation, scope, onBack = { projectsOpen = false })
         return
     }
     if (rolesOpen) {
@@ -304,7 +309,13 @@ fun ChatListScreen(
                 HomeBottomBar(
                     selected = tab,
                     collapsed = tab == HomeTab.Chats && barCollapsed,
-                    onSelect = { tab = it },
+                    onSelect = { next ->
+                        // The compact bar shows only the selected tab; tapping it restores the full bar.
+                        if (next == tab && barCollapsed) {
+                            barScroll.expand()
+                            barCollapsed = false
+                        } else tab = next
+                    },
                     adds = adds,
                     onCreate = { if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
                 )
@@ -338,7 +349,7 @@ fun ChatListScreen(
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
             )
-            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onGitHub = { githubOpen = true }, onDeferred = { notice(deferredMessage) })
+            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onGitHub = { githubOpen = true }, onProjects = { projectsOpen = true }, onDeferred = { notice(deferredMessage) })
         }
     }
     }
@@ -734,10 +745,12 @@ internal fun HomeList(
             ),
         ) {
             shown.forEach { section ->
+                // Project groups lead their label with the project's logo.
+                val logo = section.repository.takeIf { section.header is HomeSection.Header.Project }
                 if (pinsLabels) {
-                    stickyHeader(key = section.id) { SectionTitle(titles.getValue(section.id)) }
+                    stickyHeader(key = section.id) { SectionTitle(titles.getValue(section.id), logo) }
                 } else {
-                    item(key = section.id) { SectionTitle(titles.getValue(section.id)) }
+                    item(key = section.id) { SectionTitle(titles.getValue(section.id), logo) }
                 }
                 items(section.visibleChats(idleExpanded), key = { "${section.id}/${it.id}" }) { chat ->
                     ChatRow(
@@ -950,17 +963,20 @@ private val ProjectSource.label: Int
 // MARK: - Rows
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = LodyTheme.typography.subhead,
-        color = LodyTheme.colors.textSecondary,
-        modifier = Modifier
+private fun SectionTitle(text: String, repository: String? = null) {
+    Row(
+        Modifier
             .fillMaxWidth()
             .background(LodyTheme.colors.bgBase)
-            .semantics { heading() }
+            .semantics(mergeDescendants = true) { heading() }
             .padding(start = LodyLayout.screenPaddingX, end = LodyLayout.screenPaddingX, top = LodySpacing.lg, bottom = LodySpacing.xs),
-    )
+        horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // The project's logo in its original colours, unlike the muted row marks.
+        if (!repository.isNullOrBlank()) RepositoryIcon(repository, muted = false)
+        Text(text, style = LodyTheme.typography.subhead, color = LodyTheme.colors.textSecondary)
+    }
 }
 
 /**

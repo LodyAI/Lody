@@ -11,9 +11,10 @@ rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2
   or authorizes a frame, and it exposes no signing, key export or frame inspection.
   Transport identity of a peer is never authority; receivers keep ledger checks.
 - The endpoint secret is the workspace ledger device seed, handed over only through
-  node custody's `withTransportSeed`. The binding zeroes the caller's buffer before
-  returning and wipes its own copy when the endpoint drops. Never route the seed
-  through IPC, a renderer, a WebView or a log.
+  a custody `withTransportSeed` (node custody on desktop and CLI). The binding zeroes
+  the caller's buffer before returning and wipes its own copy when the endpoint drops.
+  Never route the seed through desktop IPC, a renderer or a log; the only WebView
+  handoff is the mobile plugin described below.
 - A process holds at most one live endpoint per device key; the core registry
   enforces it because two endpoints with one key make relays evict each other.
 - Relays come only from the official build composition and every dial names all of
@@ -24,6 +25,13 @@ rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2
   only with the same original envelope.
 - Keep the iroh floor at 1.4.1 or later and follow upstream security advisories.
   Mobile bindings must disable port mapping and `fast-apple-datapath`.
+  `Cargo.lock` holds `libc` at 0.2.189: 0.2.190 limits `in6_ifreq` to macOS, which
+  breaks `netdev`'s Darwin code on iOS. Raise it only after an iOS build passes.
+- `uniffi/` is the mobile binding (dial-only, port mapping always off), built by
+  `scripts/build-mobile.mjs`. On mobile the WebView portable host is the trusted
+  host: it hands the seed once, through `BrowserDevice.withTransportSeed`, to one
+  purpose-limited native plugin that exposes only open, connection status, send and
+  receive. Keep that plugin's bridge logging off and never return the seed to JS.
 - Rust tests (`cargo test -p lody-iroh`) cover the wire and endpoint rules; Node
   tests load the development build and skip when it is absent, except under
   `LODY_IROH_REQUIRE=1` (CI on Linux and macOS), where absence fails. Release builds

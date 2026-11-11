@@ -63,6 +63,8 @@
 	<string>Take photos to attach to your messages.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connect to your Mac on the local network to view and control its iOS Simulator.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save images from your conversations to Photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose photos to attach to your messages.</string>
 	<key>OneSignal_app_groups_key</key>

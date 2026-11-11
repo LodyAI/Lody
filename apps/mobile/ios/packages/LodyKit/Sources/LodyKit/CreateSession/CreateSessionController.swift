@@ -79,6 +79,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     dismissKeyboard.delegate = self
     view.addGestureRecognizer(dismissKeyboard)
     panelState.onPick = { [weak self] id, option in self?.optionPicked(id, option) }
+    panelState.onRetry = { [weak self] in self?.load() }
     panelState.onWorktree = { [weak self] on in
       guard let self, !self.sending else { return }
       self.form.current.worktree = on
@@ -292,6 +293,9 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     onSelection?(form)
   }
 
+  /// The last options read failed; the host reads again when the runtime comes back.
+  var optionsFailed: Bool { form.current.failed }
+
   func load(background: Bool = false) {
     guard !sending else { return }
     if !background {
@@ -337,21 +341,6 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       guard let roles = try? await self?.loadRoles?(), let self, !Task.isCancelled else { return }
       self.form.roles = roles
       self.render()
-    }
-  }
-
-  private func rowPressed(_ id: String) {
-    guard !sending else { return }
-    let page = form.current
-    switch id {
-    case "project": pickProject()
-    case "machine", "agent":
-      guard !page.failed, page.options != nil, !page.machines.isEmpty else { return load() }
-      if id == "agent" && page.agents.isEmpty { return load() }
-      id == "machine" ? pickMachine() : pickAgent()
-    case "model": pickModel()
-    case "branch": pickBranch()
-    default: break
     }
   }
 

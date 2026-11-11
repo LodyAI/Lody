@@ -33,6 +33,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   private var dataSource: UICollectionViewDiffableDataSource<String, Item>!
   private var entries: [Item: Entry] = [:]
   private var titles: [String: String] = [:]
+  /// Repository of each project group's label (project grouping), drawn as its logo.
+  private var titleRepositories: [String: String] = [:]
   private let placeholder = UILabel()
   private let topBackdrop = ChatHeaderBackdrop()
   private var placeholderText = ""
@@ -123,9 +125,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
       elementKind: UICollectionView.elementKindSectionHeader
     ) { [weak self] view, _, path in
-      let title = self?.dataSource.sectionIdentifier(for: path.section).flatMap { self?.titles[$0] } ?? ""
+      let id = self?.dataSource.sectionIdentifier(for: path.section)
+      let title = id.flatMap { self?.titles[$0] } ?? ""
+      let repository = id.flatMap { self?.titleRepositories[$0] } ?? ""
       view.contentConfiguration = UIHostingConfiguration {
-        SectionTitle(text: title)
+        SectionTitle(text: title, repository: repository)
       }
       .margins(.all, 0)
       view.backgroundConfiguration = .clear()
@@ -195,10 +199,16 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     var snapshot = NSDiffableDataSourceSnapshot<String, Item>()
     var next: [Item: Entry] = [:]
     var nextTitles: [String: String] = [:]
+    var nextRepositories: [String: String] = [:]
     for section in sections where !section.rows.isEmpty {
       snapshot.appendSections([section.id])
       // Only flat sections (inbox buckets, search) carry a text header; groups use their parent row.
       nextTitles[section.id] = section.rows.first?.parent == true ? "" : section.header
+      // Project grouping: the root row keeps its raw repository, never a cross-project child's.
+      if section.id.hasPrefix("group:"), section.id != "group:\(InboxSections.chatId)",
+         let repository = section.rows.first?.repository, !repository.isEmpty {
+        nextRepositories[section.id] = repository
+      }
       let children = section.rows.contains { !$0.parent }
       for row in section.rows {
         let item = Item(section: section.id, row: row.id)
@@ -233,6 +243,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     }
     entries = next
     titles = nextTitles
+    titleRepositories = nextRepositories
     snapshot.reloadItems(Array(actionsChanged))
     snapshot.reconfigureItems(Array(changed.subtracting(actionsChanged)))
     dataSource.apply(snapshot, animatingDifferences: window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
@@ -875,19 +886,27 @@ private struct MoreRowContent: View {
 
 private struct SectionTitle: View {
   let text: String
+  var repository = ""
 
   var body: some View {
     if text.isEmpty {
       Color.clear.frame(height: LodySpacing.sm)
     } else {
-      Text(text)
-        .lodyTextStyle(.groupLabel)
-        .foregroundStyle(LodyColor.textTertiary)
-        .padding(.horizontal, LodyLayout.listEdgeX)
-        .padding(.top, LodySpacing.xs)
-        .padding(.bottom, LodySpacing.xs)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityAddTraits(.isHeader)
+      HStack(spacing: LodySpacing.xs) {
+        if !repository.isEmpty {
+          // The project's logo in its original colours, unlike the muted row marks.
+          RepositoryIcon(repository: repository, muted: false)
+        }
+        Text(text)
+          .lodyTextStyle(.groupLabel)
+          .foregroundStyle(LodyColor.textTertiary)
+      }
+      .padding(.horizontal, LodyLayout.listEdgeX)
+      .padding(.top, LodySpacing.xs)
+      .padding(.bottom, LodySpacing.xs)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+      .accessibilityAddTraits(.isHeader)
     }
   }
 }

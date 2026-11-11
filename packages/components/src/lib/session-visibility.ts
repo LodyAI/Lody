@@ -192,16 +192,12 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
   );
 }
 
-/** My scope is responsibility plus the machines I own, independent of sharing. */
+/** My scope is assignment only; machine ownership controls access separately. */
 export function isSessionInMyScope(
   session: SessionMachineRecord,
-  currentUserId: string | null | undefined,
-  ownedMachineIds: ReadonlySet<MachineId>
+  currentUserId: string | null | undefined
 ): boolean {
-  return (
-    !!currentUserId &&
-    (session.userId === currentUserId || ownedMachineIds.has(session.machineId as MachineId))
-  );
+  return !!currentUserId && session.userId === currentUserId;
 }
 
 /** Assignment may use existing access only; it never changes sharing. */

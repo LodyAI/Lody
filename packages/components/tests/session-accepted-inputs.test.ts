@@ -931,6 +931,60 @@ describe('locally accepted Roost input', () => {
     expect(fixture.delivered).toEqual([input.id]);
   });
 
+  it('dispatching a new conversation held for attachment preparation leaves it to the queue instead of refusing an unwritten session', async () => {
+    const fixture = await workspaceHarness({
+      newSession: true,
+      paused: true,
+      accept: async () => {
+        throw new Error('unused');
+      },
+    });
+    const { input, sessionId, repo } = fixture;
+    const { runtime, pending } = fixture.makeRuntime();
+    const accepted = await acceptSessionUserTurn(
+      runtime,
+      sessionId,
+      input.entry,
+      { kind: 'dispatch' },
+      {
+        id: sessionId,
+        machineId: input.targetMachineId,
+        historyBackend: 'loro',
+        userId: 'source-user',
+      } as SessionMeta,
+      undefined,
+      [
+        {
+          id: 'attachment',
+          kind: 'image',
+          name: 'input.png',
+          mimeType: 'image/png',
+          lastModified: 0,
+          source: new Blob(['image']),
+        },
+      ]
+    );
+    expect(accepted).toBe('pending');
+    expect(await repo.getDocMeta(getSessionRoomId(sessionId))).toBeUndefined();
+    const submission = createSessionSubmission({
+      runtime,
+      assertSessionCreateAllowed: () => {},
+      // Like the management guard: a session without written metadata is refused.
+      assertSessionEditable: async (id) => {
+        if (!(await repo.getDocMeta(getSessionRoomId(id))))
+          throw new Error('history machine unavailable');
+      },
+      recordWorkspaceActivity: () => {},
+      publishSessionMeta: () => {},
+      readSessionMeta: () => undefined,
+      recordChat: () => {},
+      onRpcDelivered: () => {},
+    });
+    await expect(submission.requestSessionDispatch(sessionId, input.id)).resolves.toBeUndefined();
+    expect(pending.getSnapshot()).toMatchObject([{ id: input.id, sessionId }]);
+    expect(fixture.delivered).toEqual([]);
+  });
+
   it.each(['image', 'file'] as const)(
     'accepts already prepared %s content through the shared history input parser',
     async (kind) => {

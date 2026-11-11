@@ -59,7 +59,20 @@ export type PersonalKeyPorts = Exclude<
   | KeyProtector
   | CandidateProtector
 >;
-/** Trusted platform implementation, with no default filesystem, account or network implementation. */
+/** A native dial-only iroh endpoint bound to this device's ledger key. Network
+ * waits never hold session locks; any failure means "use Streams RPC". */
+export interface PersonalIrohEndpoint {
+  hasConnection(endpointId: string): Promise<boolean>;
+  warm(endpointId: string, timeoutMs: number): Promise<void>;
+  call(
+    endpointId: string,
+    request: Uint8Array,
+    connectTimeoutMs: number
+  ): Promise<{ nextReply(): Promise<Uint8Array | null>; cancel(): void }>;
+  close(): Promise<void>;
+}
+
+/** Trusted platform implementation, with no default filesystem, account or network implementation.*/
 export class PersonalHostPlatform extends Context.Service<
   PersonalHostPlatform,
   {
@@ -89,6 +102,14 @@ export class PersonalHostPlatform extends Context.Service<
     evidence(
       binding: ClientCustodyBinding
     ): Layer.Layer<ClientApprovalEvidenceStore, unknown, DeviceIdentity | WorkspaceScope>;
+    /**
+     * Optional native iroh transport (mobile shells). `open` receives a copy of the
+     * device seed exactly once per session and must hand it straight to native code
+     * (it is wiped when `open` settles). Absence keeps encrypted Streams RPC.
+     */
+    iroh?: {
+      open(seed: Uint8Array): Promise<PersonalIrohEndpoint>;
+    };
     /** Optional closed product RPC support; absence is reported unsupported. */
     rpc?(
       binding: ClientCustodyBinding

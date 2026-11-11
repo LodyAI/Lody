@@ -7,6 +7,7 @@ import type {
   E2eeWorkspaceMemberProfilesRequest,
   E2eeWorkspaceMemberProfiles,
   WorkspaceAdmissionDescriptor,
+  E2eeWorkspaceLedgerHead,
 } from '@lody/cloud-api';
 
 import type {
@@ -57,6 +58,15 @@ export interface E2eeWorkspacePrepared extends E2eeWorkspacePrepareInput {
  */
 export interface PlatformE2eeWorkspaces {
   readonly runtime?: E2eeWorkspaceRuntime;
+  /** Observe an untrusted ledger change hint while a control surface is open.
+   * The caller owns unsubscribe; notifications never grant authority. Errors leave
+   * verified local reads usable. An absent port retains manual refresh.
+   */
+  readonly subscribeLedgerHead?: (
+    input: { workspaceId: string },
+    changed: (head: E2eeWorkspaceLedgerHead) => void,
+    failed: (error: unknown) => void
+  ) => () => void;
   /** Optional display directory. Names/images never establish permission, keys or identity pins. */
   readonly memberProfiles?: (
     input: E2eeWorkspaceMemberProfilesRequest

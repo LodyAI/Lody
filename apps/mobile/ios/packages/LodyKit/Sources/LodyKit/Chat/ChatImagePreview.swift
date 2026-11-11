@@ -1,3 +1,4 @@
+import Photos
 import UIKit
 
 final class ChatImagePageIndicator: UILabel {
@@ -11,7 +12,7 @@ final class ChatImagePageIndicator: UILabel {
   override func accessibilityDecrement() { onDecrement?() }
 }
 
-final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
+final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate, UIContextMenuInteractionDelegate {
   private var items: [ChatImagePreviewItem]
   private var page: Int
   private var workspace: String
@@ -24,6 +25,7 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
   private let pagesHost = UIView()
   private var pages: [Int: ChatImagePreviewPage] = [:]
   private let close = UIButton(type: .system)
+  private let share = UIButton(type: .system)
   private let counter = ChatImagePageIndicator()
   private var chromeVisible = true
   private var pagerOffset: CGFloat = 0
@@ -31,6 +33,8 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
   private var viewport = CGSize.zero
   private var pagePanRecognizer: UIPanGestureRecognizer?
   private var overlayRevealed = false
+  private var dismissPanRecognizer: UIPanGestureRecognizer?
+  private var dismissing = false
 
   @discardableResult
   static func present(
@@ -84,7 +88,11 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
       placeholders: placeholders,
       sourceView: sourceView
     )
-    preview.preferredTransition = .zoom { [weak preview] _ in preview?.currentSourceView() }
+    // Swipe-down dismissal is ours (`dismissDrag`): the system's interactive zoom dismissal
+    // competes with paging and zooming, and never began over the photo.
+    let options = UIViewController.Transition.ZoomOptions()
+    options.interactiveDismissShouldBegin = { _ in false }
+    preview.preferredTransition = .zoom(options: options) { [weak preview] _ in preview?.currentSourceView() }
     controller.present(preview, animated: true)
     return preview
   }
@@ -146,6 +154,15 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
     close.accessibilityLabel = String(localized: "native.chat.image.closePreview", bundle: .lody)
     close.addAction(UIAction { [weak self] _ in self?.dismiss(animated: true) }, for: .touchUpInside)
     view.addSubview(close)
+    var shareConfig = config
+    shareConfig.image = UIImage(
+      systemName: "square.and.arrow.up",
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+    )
+    share.configuration = shareConfig
+    share.accessibilityLabel = String(localized: "native.chat.image.share", bundle: .lody)
+    share.addAction(UIAction { [weak self] _ in self?.shareCurrent() }, for: .touchUpInside)
+    view.addSubview(share)
     let size = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
     counter.font = UIFont.systemFont(ofSize: size, weight: .medium).withTabularNumbers()
     counter.textColor = .label
@@ -161,6 +178,13 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
     singleTap.require(toFail: doubleTap)
     pagesHost.addGestureRecognizer(doubleTap)
     pagesHost.addGestureRecognizer(singleTap)
+    let closePan = UIPanGestureRecognizer(target: self, action: #selector(dismissDrag(_:)))
+    closePan.delegate = self
+    closePan.maximumNumberOfTouches = 1
+    dismissPanRecognizer = closePan
+    view.addGestureRecognizer(closePan)
+    // Long-press: Copy, Save to Photos, Share — on whichever photo is showing.
+    pagesHost.addInteraction(UIContextMenuInteraction(delegate: self))
     if items.count > 1 {
       let pan = UIPanGestureRecognizer(target: self, action: #selector(pagePan(_:)))
       pan.delegate = self
@@ -202,6 +226,10 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
 
   func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
     guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+    if pan === dismissPanRecognizer {
+      let velocity = pan.velocity(in: view)
+      return !dismissing && (currentPage?.scroll.zoomScale ?? 1) <= 1.01 && abs(velocity.y) > abs(velocity.x)
+    }
     return ChatImagePreviewGeometry.shouldPage(
       zoomScale: currentPage?.scroll.zoomScale ?? 1,
       velocity: pan.velocity(in: view),
@@ -214,7 +242,7 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
 
   @objc private func tapped(_ gesture: UITapGestureRecognizer) {
     let point = gesture.location(in: view)
-    if close.frame.contains(point) || (!counter.isHidden && counter.frame.contains(point)) { return }
+    if close.frame.contains(point) || share.frame.contains(point) || (!counter.isHidden && counter.frame.contains(point)) { return }
     if let photo = currentPage?.photo {
       let frame = photo.convert(photo.bounds, to: view)
       if frame.contains(point) {
@@ -304,6 +332,9 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
       if let pan = pagePanRecognizer {
         pageView.scroll.panGestureRecognizer.require(toFail: pan)
       }
+      if let pan = dismissPanRecognizer {
+        pageView.scroll.panGestureRecognizer.require(toFail: pan)
+      }
     }
     pagesHost.frame.size = CGSize(width: step * CGFloat(max(items.count, 1)), height: height)
     pagesHost.frame.origin.y = 0
@@ -321,6 +352,8 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
   private func updateChrome() {
     close.isUserInteractionEnabled = chromeVisible
     close.accessibilityElementsHidden = !chromeVisible
+    share.isUserInteractionEnabled = chromeVisible
+    share.accessibilityElementsHidden = !chromeVisible
     let paging = items.count > 1
     counter.isHidden = !paging
     counter.text = paging
@@ -336,6 +369,7 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
     let counterAlpha: CGFloat = chromeVisible && paging ? revealed : 0
     UIView.animate(withDuration: 0.18, delay: 0, options: [.beginFromCurrentState]) {
       self.close.alpha = closeAlpha
+      self.share.alpha = closeAlpha
       self.counter.alpha = counterAlpha
     }
   }
@@ -343,6 +377,7 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
   private func layoutChrome() {
     let top = view.safeAreaInsets.top + 8
     close.frame = CGRect(x: view.safeAreaInsets.left + 16, y: top, width: 44, height: 44)
+    share.frame = CGRect(x: view.bounds.width - view.safeAreaInsets.right - 60, y: top, width: 44, height: 44)
     let chipHeight: CGFloat = 28
     let chipWidth = max(counter.sizeThatFits(CGSize(width: 160, height: chipHeight)).width + 24, 44)
     counter.layer.cornerRadius = chipHeight / 2
@@ -360,10 +395,12 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
     dim.alpha = value
     if !overlayRevealed || !chromeVisible {
       close.alpha = 0
+      share.alpha = 0
       counter.alpha = 0
       return
     }
     close.alpha = value
+    share.alpha = value
     counter.alpha = items.count > 1 ? value : 0
   }
 
@@ -406,6 +443,149 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
     }
   }
 
+  // MARK: Swipe down to close
+
+  @objc private func dismissDrag(_ pan: UIPanGestureRecognizer) {
+    guard let page = currentPage else { return }
+    let translation = pan.translation(in: view)
+    let progress = min(1, abs(translation.y) / max(view.bounds.height * 0.5, 1))
+    switch pan.state {
+    case .began, .changed:
+      // The photo follows the finger and shrinks a little; the backdrop fades with it.
+      let scale = 1 - progress * 0.3
+      page.transform = CGAffineTransform(translationX: translation.x, y: translation.y).scaledBy(x: scale, y: scale)
+      backdrop.alpha = 1 - progress
+      wash.alpha = 1 - progress
+      dim.alpha = 1 - progress
+      close.alpha = 0
+      share.alpha = 0
+      counter.alpha = 0
+    case .ended, .cancelled, .failed:
+      let velocity = pan.velocity(in: view).y
+      let closes = pan.state == .ended && (abs(translation.y) > 100 || abs(velocity) > 800)
+      if closes {
+        finishDismiss(page: page)
+        return
+      }
+      UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
+                     options: [.beginFromCurrentState, .allowUserInteraction]) {
+        page.transform = .identity
+        self.overlayAlpha(1)
+      } completion: { _ in self.updateChrome() }
+    default:
+      break
+    }
+  }
+
+  /// Flies the photo back into its place in the conversation (or off screen when that place
+  /// scrolled away), then removes the preview without replaying the zoom transition.
+  private func finishDismiss(page: ChatImagePreviewPage) {
+    dismissing = true
+    let photo = page.photo
+    let start = photo.convert(photo.bounds, to: view)
+    let flyer = UIImageView(image: photo.image)
+    flyer.frame = start
+    flyer.contentMode = .scaleAspectFill
+    flyer.clipsToBounds = true
+    flyer.layer.cornerCurve = .continuous
+    flyer.layer.cornerRadius = ChatImagePreviewGeometry.cornerRadius
+    view.addSubview(flyer)
+    pagesHost.isHidden = true
+    let source = currentSourceView()
+    let target: CGRect
+    if let source {
+      target = view.convert(source.convert(source.bounds, to: nil), from: nil)
+    } else {
+      let offset = (start.midY >= view.bounds.midY ? 1 : -1) * view.bounds.height
+      target = start.offsetBy(dx: 0, dy: offset)
+    }
+    source?.alpha = 0
+    let animated = !UIAccessibility.isReduceMotionEnabled
+    UIView.animate(withDuration: animated ? 0.32 : 0, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0) {
+      flyer.frame = target
+      flyer.layer.cornerRadius = source == nil ? ChatImagePreviewGeometry.cornerRadius : 16
+      self.overlayRevealed = false
+      self.overlayAlpha(0)
+    } completion: { _ in
+      source?.alpha = 1
+      self.dismiss(animated: false)
+    }
+  }
+
+  // MARK: Copy, save and share
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
+    guard let page = currentPage, page.photo.image != nil else { return nil }
+    let frame = page.photo.convert(page.photo.bounds, to: pagesHost)
+    guard frame.contains(location) else { return nil }
+    return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+      guard let self else { return nil }
+      return UIMenu(children: [
+        UIAction(
+          title: String(localized: "native.chat.image.copy", bundle: .lody),
+          image: UIImage(systemName: "doc.on.doc")
+        ) { [weak self] _ in self?.copyCurrent() },
+        UIAction(
+          title: String(localized: "native.chat.image.save", bundle: .lody),
+          image: UIImage(systemName: "square.and.arrow.down")
+        ) { [weak self] _ in self?.saveCurrent() },
+        UIAction(
+          title: String(localized: "native.chat.image.share", bundle: .lody),
+          image: UIImage(systemName: "square.and.arrow.up")
+        ) { [weak self] _ in self?.shareCurrent() },
+      ])
+    }
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+  ) -> UITargetedPreview? {
+    guard let photo = currentPage?.photo, photo.window != nil else { return nil }
+    let parameters = UIPreviewParameters()
+    parameters.backgroundColor = .clear
+    parameters.visiblePath = UIBezierPath(roundedRect: photo.bounds, cornerRadius: photo.layer.cornerRadius)
+    return UITargetedPreview(view: photo, parameters: parameters)
+  }
+
+  private func withFullImage(_ action: @escaping @MainActor @Sendable (UIImage) -> Void) {
+    guard let page = currentPage else { return }
+    page.fullImage { image in
+      guard let image else {
+        LodyToastOverlay.shared.show(message: String(localized: "native.chat.image.unavailable", bundle: .lody), kind: .error)
+        return
+      }
+      action(image)
+    }
+  }
+
+  private func copyCurrent() {
+    withFullImage { image in
+      UIPasteboard.general.image = image
+      LodyToastOverlay.shared.show(message: String(localized: "native.chat.image.copied", bundle: .lody), kind: .success)
+    }
+  }
+
+  private func saveCurrent() {
+    withFullImage { image in
+      ChatImageSaver.save(image)
+    }
+  }
+
+  private func shareCurrent() {
+    let anchor = share
+    withFullImage { [weak self] image in
+      guard let self, self.presentedViewController == nil else { return }
+      let sheet = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+      sheet.popoverPresentationController?.sourceView = anchor
+      sheet.popoverPresentationController?.sourceRect = anchor.bounds
+      self.present(sheet, animated: true)
+    }
+  }
+
   private var pageWidth: CGFloat {
     view.bounds.width + ChatImagePreviewGeometry.pageGap
   }
@@ -417,5 +597,27 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate {
     let view = sourceView(items[page].id)
     guard let view, view.window != nil else { return nil }
     return view
+  }
+}
+
+/// Saves through the Photos add-only permission and reports the outcome as a toast.
+@MainActor
+private enum ChatImageSaver {
+  static func save(_ image: UIImage) {
+    Task { @MainActor in
+      let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+      guard status == .authorized || status == .limited else {
+        LodyToastOverlay.shared.show(message: String(localized: "native.chat.image.saveDenied", bundle: .lody), kind: .error)
+        return
+      }
+      do {
+        try await PHPhotoLibrary.shared().performChanges {
+          PHAssetChangeRequest.creationRequestForAsset(from: image)
+        }
+        LodyToastOverlay.shared.show(message: String(localized: "native.chat.image.saved", bundle: .lody), kind: .success)
+      } catch {
+        LodyToastOverlay.shared.show(message: String(localized: "native.chat.image.saveFailed", bundle: .lody), kind: .error)
+      }
+    }
   }
 }

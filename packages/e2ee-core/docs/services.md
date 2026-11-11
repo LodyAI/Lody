@@ -134,6 +134,11 @@ The pair works only with core HPKE in the same isolate; it cannot be exported,
 structured-cloned or passed to native WebCrypto. Close rejects new use, drains
 admitted HPKE and wipes owned private bytes; Scope release closes automatically.
 This crypto adapter provides neither durable protection nor admission.
+`withTransportSeed(open)` is the one purpose-limited seed handoff: it passes a copy
+of the Ed25519 seed to the mobile shell's native iroh opener (its EndpointId is
+this signing key), wipes the copy when `open` settles, refuses after close, and
+makes close wait for an admitted handoff. The opener runs uninterruptibly, so
+callers acquire its resource with `acquireRelease`. Hosts pass no other consumer.
 
 ### KeyProtector / CandidateProtector
 

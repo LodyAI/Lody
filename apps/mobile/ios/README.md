@@ -134,14 +134,18 @@ precise openers never fall back to provenance-only root IDs. Archived and side-p
 sessions are excluded; closed Tabs appear only when current. The tree does not
 change archive ownership or read additional transcripts.
 
-The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, like
-conversation More. UIKit owns presentation, width, height, scrolling and title
-truncation; there is no six-row limit or custom fade. Actions retain full names,
-circular avatars and native selected state. Selecting the current workspace is a
-no-op; catalog changes refresh the menu. The root menu title displays the account
-email in UIKit’s heading style, projected explicitly through the session source
-and chrome model. Empty email removes the heading; synthetic sources never fall
-back to the live account. Workspace management stays in Settings.
+The workspace switcher is `Chrome/WorkspaceSwitcherPanel`, a popover anchored to
+the capsule that never adapts into a sheet. A `UIMenu` wraps long titles onto
+several lines and offers no fade, so the panel draws its own menu-style rows:
+leading checkmark, circular avatar, and the name on one line that fades out at the
+trailing edge (`LodyFadingLabel`, mirrored for right-to-left) instead of wrapping or
+showing an ellipsis. Rows keep full names and the selected trait for VoiceOver; up
+to eight rows show before the list scrolls, and the width stays between 240 and
+320 pt within the window. Selecting the current workspace is a no-op; catalog
+changes refresh the open panel. The account email heads the panel, projected
+explicitly through the session source and chrome model. Empty email removes the
+heading; synthetic sources never fall back to the live account. Workspace
+management stays in Settings.
 
 Conversation Back, title/machine, Tabs and More controls belong to the page, so
 UIKit’s interactive pop moves them with its content instead of separately animating
@@ -226,16 +230,42 @@ older reads; account/workspace changes discard snapshots and late responses.
 The runtime still re-reads current data before mutations. A workspace without a
 saved list shows the loading state until its first successful read.
 
+### Project groups
+
+Project groups are desktop's multi-repository projects: one project whose members are
+GitHub repositories or local folders. Mobile shows them but does not create or edit
+them yet.
+
+- The runtime catalog carries a group conversation's members (`protocol/project-run.ts`,
+  web `buildSessionProjectMemberRows`): placement order with submodules under their
+  parent, and each member's branch, diff, publish state and current PR (the last PR
+  recorded for its repository).
+- `Catalog/ProjectGroupStore` keeps the workspace's groups. It reads them when the
+  workspace changes, when the catalog names an unknown `group:` id and when Settings ›
+  Projects opens, restoring the last accepted list first. The iPad project list adds
+  runnable groups that have no conversations yet ("N repositories or folders").
+  Settings › Projects lists every group after the folders and opens a read-only page
+  with the group's computer, creator and members.
+- In a group conversation the action bar's context capsule summarises repositories,
+  PRs and the group-wide diff. Its popover lists every member (identity, path · branch,
+  ±diff, PR) instead of web's hidden selected member, so every PR stays visible. A PR
+  row opens that PR's page, which carries merge and the other PR actions. The bar's
+  own actions stay Create PR / Draft and Commit & Push, sent with web's
+  `withProjectGroupPrScope` text so the agent publishes every changed member.
+- A single-repository conversation shows only the latest PR of its own repository.
+
 ### Code Diffs & Workspace File Browsing
 
 - **Turn Changes Overview**: Automatically summarizes file changes for each conversation turn, with one-tap access to all modified files.
 - **Word-Level Diff Highlighting**: File, workspace and tool-detail diffs render natively in LodyKit.
 - **Remote Workspace File Tree**: Browse project directories and files on remote Macs or servers at any time, with previews via native code view `LodyCodeView` or system Quick Look.
+- **Project Files from More**: a live conversation in a local project offers Project Files in its More menu (`SessionController.openProjectFiles`). `FilesController` lists folders through runtime `listDir`, which lists the conversation's own folder (its worktree when it has one) with the machine's `file/list-dir`, or the local project's folder on machines without the `sessionDirectoryListing` capability; a file opens in `FileContentController` through `readFile`, which renders Markdown with a Source toggle and opens relative Markdown links in place. Android mirrors this in `chat/ProjectFiles.kt` ([Android README](../android/README.md#project-files)).
 
 ### Live Preview & Simulator Streaming
 
 - **Preview Chip**: When an agent reports a local dev server, a chip above the composer opens it through the machine's Lody Quick Tunnel. Long-press copies the share link, opens it in Safari, or stops sharing. The control proof is signed natively with the Keychain credential; only short-lived tunnel links reach the app.
 - **Native Simulator Viewer**: A [baguette](https://github.com/tddworks/baguette) server behind the tunnel opens a pushed native page. Native WebRTC DataChannels carry H.264/MJPEG frames, touches and hardware controls, with automatic WebSocket fallback for older CLI versions or failed connections. H.264 decodes into `AVSampleBufferDisplayLayer`; the device frame and side buttons are drawn natively. Quick Tunnel is still required for signaling and artwork. Hardware actions (Home, lock, rotate, shake, volume, screenshot) sit in the navigation bar.
+- **Android Emulator Viewer**: The same gateway and native viewer stream an AVD from any computer whose Lody offers Android Emulator preview. It is H.264 only without device artwork, with Back, Home, Recents, rotation, appearance, pasted text and a Data Saver / Balanced / Clear quality choice. iOS and Android previews keep separate state and may run together; see [`SimulatorStream/README.md`](packages/LodyKit/Sources/LodyKit/SimulatorStream/README.md#android-emulator).
 
 ### Offscreen WASM CRDT Data Sync Engine
 

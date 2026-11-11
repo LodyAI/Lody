@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "napi"]
+members = ["core", "napi", "uniffi"]
 
 [workspace.package]
 edition = "2024"

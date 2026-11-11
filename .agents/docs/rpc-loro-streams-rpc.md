@@ -154,6 +154,12 @@ The earlier `method.startsWith('code-collab/')` checks silently excluded any new
 envelope method, which is why every encrypt/decrypt/error-decode site now goes
 through `isOwnerScopedEncryptedRpcMethod`.
 
+`file/list-dir` (capability `sessionDirectoryListing`) is the folder counterpart: one
+folder of the session's own workspace, in the same envelope and owner check, so a
+listed file is always one `file/preview` can open. `local-project/list-dir` lists the
+project's original folder instead, which differs from a worktree conversation's
+workspace. Encrypted workspaces answer `unsupported_protocol` for now.
+
 ## Project group member probing
 
 `project/probe-local-member` is a read-only workspace/machine method. It carries a registered
