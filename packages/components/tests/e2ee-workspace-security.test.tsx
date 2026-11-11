@@ -467,6 +467,7 @@ describe('recovery vault settings actions', () => {
         uncovered: [workspace('b', { kind: 'notSet' }), workspace('c', { kind: 'notSet' })],
       } as RecoveryPlan,
       {
+        passkeyAvailable: async () => true,
         restore: async () => ({
           outcome: 'restored',
           results: [
@@ -479,8 +480,9 @@ describe('recovery vault settings actions', () => {
     const view = await mount(undefined, {}, port);
     try {
       expect(view.text).toContain('e2ee.recovery.replacingOtherDevice');
-      for (const label of ['e2ee.recovery.replaceContinue', 'e2ee.recovery.replaceAbandon'])
-        expect(view.labels).not.toContain(label);
+      // Read-only until the starting device finishes: no setup, passkey changes or
+      // replacement actions, only restoring.
+      expect(view.labels).toEqual(['e2ee.recovery.restore', 'e2ee.recovery.restorePasskey']);
       await view.click('e2ee.recovery.restore');
       // A wait that timed out is still waiting, and an uncovered workspace is not a failure.
       expect(view.text).toContain('e2ee.recovery.restoreWaiting');
