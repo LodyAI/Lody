@@ -265,6 +265,7 @@ them yet.
 
 - **Preview Chip**: When an agent reports a local dev server, a chip above the composer opens it through the machine's Lody Quick Tunnel. Long-press copies the share link, opens it in Safari, or stops sharing. The control proof is signed natively with the Keychain credential; only short-lived tunnel links reach the app.
 - **Native Simulator Viewer**: A [baguette](https://github.com/tddworks/baguette) server behind the tunnel opens a pushed native page. Native WebRTC DataChannels carry H.264/MJPEG frames, touches and hardware controls, with automatic WebSocket fallback for older CLI versions or failed connections. H.264 decodes into `AVSampleBufferDisplayLayer`; the device frame and side buttons are drawn natively. Quick Tunnel is still required for signaling and artwork. Hardware actions (Home, lock, rotate, shake, volume, screenshot) sit in the navigation bar.
+- **Android Emulator Viewer**: The same gateway and native viewer stream an AVD from any computer whose Lody offers Android Emulator preview. It is H.264 only without device artwork, with Back, Home, Recents, rotation, appearance, pasted text and a Data Saver / Balanced / Clear quality choice. iOS and Android previews keep separate state and may run together; see [`SimulatorStream/README.md`](packages/LodyKit/Sources/LodyKit/SimulatorStream/README.md#android-emulator).
 
 ### Offscreen WASM CRDT Data Sync Engine
 

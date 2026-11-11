@@ -157,7 +157,7 @@ extension SessionController {
     if id == "relations" { presentRelations(); return }
     if githubOperation != nil && (id == "act" || id.hasPrefix("more:")) { return }
     let parts = id.split(separator: ":", maxSplits: 1).map(String.init)
-    if ["browser", "simulator"].contains(parts[0]) { resourceAction(parts[0], parts.count > 1 ? parts[1] : "open"); return }
+    if ["browser", "simulator", "emulator"].contains(parts[0]) { resourceAction(parts[0], parts.count > 1 ? parts[1] : "open"); return }
     guard let bar = infoBar else { return }
     switch id {
     case "diff", "context:diff":
