@@ -101,6 +101,8 @@ export function createCommands(runtime, sendTurn, identity) {
     return {state:sent.state,reason:sent.reason};
    } catch {return {state:'unknown'};}
   },
+  // Before the write, a selection the live options or Roles refuse (or a failed read of them) is
+  // `rejected`: nothing was written. After it only a refusal the runtime made unread is.
   async createAndSend(input,signal) {
    signal?.throwIfAborted();
    if(!input || !uuid.test(input.sessionId) || !uuid.test(input.turnId) || typeof input.text!=='string' || input.text.length>32000)throw Error('invalid_creation');
@@ -111,27 +113,41 @@ export function createCommands(runtime, sendTurn, identity) {
    // group fresh, checks its computer and writes its frozen run (web Project group).
    const group=typeof input.projectId==='string' && input.projectId.startsWith('group:') ? input.projectId.slice(6) : undefined;
    if(group!==undefined && !uuid.test(group))throw Error('invalid_creation');
-   const scope=identity(), available=await options(group===undefined?input.projectId:undefined);
-   const agent=available.agents.find(a=>a.id===input.agentConfigId && a.machineId===input.machineId);
-   if(!agent)throw Error('agent_unavailable');
-   const capability=available.capabilities.find(c=>c.machineId===agent.machineId && c.agentConfigId===agent.id) ?? available.capabilities.find(c=>c.machineId===agent.machineId && !c.agentConfigId && c.cliType===agent.cliType && c.agentType===agent.agentType);
-   if(input.modelId && !capability?.models.some(m=>m.id===input.modelId))throw Error('invalid_model');
-   if(input.modeId && !capability?.modes.some(m=>m.id===input.modeId))throw Error('invalid_mode');
-   if(input.effort && !effortsFor(capability, input.modelId).includes(input.effort))throw Error('invalid_effort');
-   // A Role binds this computer's agent exactly (web): re-read it to freeze its revision as
-   // provenance; the first turn's send re-reads it again and applies it or refuses.
    const pinned=input.configOptionValues;
    if(pinned!==undefined && (!pinned || typeof pinned!=='object' || Array.isArray(pinned) || Object.keys(pinned).length>64 || Object.entries(pinned).some(([k,v])=>!k || k.length>128 || !['string','boolean'].includes(typeof v) || (typeof v==='string' && v.length>128))))throw Error('invalid_creation');
-   let role;
-   if(input.agentRoleId!==undefined) {
-    if(typeof input.agentRoleId!=='string' || !input.agentRoleId)throw Error('invalid_creation');
-    role=(await roles()).find(r=>r.id===input.agentRoleId);
-    const target=role?.targets.find(t=>t.machineId===agent.machineId);
-    if(!target || target.agentConfigId!==agent.id || target.state!=='configured')throw Error('role_unavailable');
+   if(input.agentRoleId!==undefined && (typeof input.agentRoleId!=='string' || !input.agentRoleId))throw Error('invalid_creation');
+   let scope, agent, capability, role;
+   try {
+    scope=identity();
+    const available=await options(group===undefined?input.projectId:undefined);
+    agent=available.agents.find(a=>a.id===input.agentConfigId && a.machineId===input.machineId);
+    if(!agent)throw Error('agent_unavailable');
+    capability=available.capabilities.find(c=>c.machineId===agent.machineId && c.agentConfigId===agent.id) ?? available.capabilities.find(c=>c.machineId===agent.machineId && !c.agentConfigId && c.cliType===agent.cliType && c.agentType===agent.agentType);
+    if(input.modelId && !capability?.models.some(m=>m.id===input.modelId))throw Error('invalid_model');
+    if(input.modeId && !capability?.modes.some(m=>m.id===input.modeId))throw Error('invalid_mode');
+    if(input.effort && !effortsFor(capability, input.modelId).includes(input.effort))throw Error('invalid_effort');
+    // A Role binds this computer's agent exactly (web): re-read it to freeze its revision as
+    // provenance; the first turn's send re-reads it again and applies it or refuses.
+    if(input.agentRoleId!==undefined) {
+     role=(await roles()).find(r=>r.id===input.agentRoleId);
+     const target=role?.targets.find(t=>t.machineId===agent.machineId);
+     if(!target || target.agentConfigId!==agent.id || target.state!=='configured')throw Error('role_unavailable');
+    }
+   } catch {
+    signal?.throwIfAborted();
+    return {state:'rejected',sessionId:input.sessionId};
    }
+   signal?.throwIfAborted();
    attempted.add(input.sessionId);
    try {
-    const result=await runtime.createSession({workspaceId:scope.workspaceId,userId:scope.userId,preferRoost:input.preferRoost===true,sessionId:input.sessionId,machineId:agent.machineId,agentConfigId:agent.id,...(group===undefined?{projectId:input.projectId}:{projectGroupId:group}),branch:group===undefined?input.branch:undefined,useWorktree:input.worktree===true,title:input.text.trim().slice(0,200),...(role?{agentRoleId:role.id,agentRoleRevision:role.revision}:{})});
+    let result;
+    try {
+     result=await runtime.createSession({workspaceId:scope.workspaceId,userId:scope.userId,preferRoost:input.preferRoost===true,sessionId:input.sessionId,machineId:agent.machineId,agentConfigId:agent.id,...(group===undefined?{projectId:input.projectId}:{projectGroupId:group}),branch:group===undefined?input.branch:undefined,useWorktree:input.worktree===true,title:input.text.trim().slice(0,200),...(role?{agentRoleId:role.id,agentRoleRevision:role.revision}:{})});
+    } catch(error) {
+     // The shared channel answers these before its handler runs, so no write was attempted.
+     if(['invalid_params','unsupported_method'].includes(error?.message))return {state:'rejected',sessionId:input.sessionId};
+     throw error;
+    }
     if(result.state!=='created')return {state:result.state==='unknown'?'unknown':'rejected',sessionId:input.sessionId};
     signal?.throwIfAborted();
     await runtime.ensureSession({sessionId:input.sessionId});
