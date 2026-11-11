@@ -30,7 +30,11 @@ extension SessionController {
         "accessibilityLabel": String(localized: "session.relations.title", bundle: .lody)])
     }
     result["items"] = items
-    if let context = contextItem(bar, projectName: project?.name) { result["context"] = context }
+    if let run = bar.group {
+      result["context"] = groupContextItem(run)
+    } else if let context = contextItem(bar, projectName: project?.name) {
+      result["context"] = context
+    }
     if bar.added + bar.removed > 0 {
       result["diff"] = [
         "added": bar.added, "removed": bar.removed, "tap": reviewable,
@@ -90,6 +94,50 @@ extension SessionController {
     ]
   }
 
+  /// A Project group: the capsule summarises the repositories and their PRs; its popover lists
+  /// every member with its own branch, ±diff and PR (web's Repositories chip, without a hidden
+  /// selected member). A PR row opens that PR's page, which carries its PR-bound actions.
+  private func groupContextItem(_ run: SessionProjectRun) -> [String: Any] {
+    let repositories = String.localizedStringWithFormat(String(localized: "bar.group.repositories", bundle: .lody), run.members.count)
+    let pullRequests = run.pullRequests
+    let prs = String.localizedStringWithFormat(String(localized: "bar.group.pullRequests", bundle: .lody), pullRequests.count)
+    let label = pullRequests.isEmpty ? repositories : repositories + " · " + prs
+    // A failing check anywhere is the one thing worth colour on the capsule.
+    let failing = pullRequests.contains { ["open", "draft"].contains($0.status) && ["f", "e"].contains($0.ci ?? "") }
+    let members: [[String: Any]] = run.members.map { member in
+      var row: [String: Any] = [
+        "id": member.id, "title": member.identity, "kind": member.kind, "depth": member.depth, "submodule": member.submodule,
+      ]
+      var detail: [String] = []
+      if member.path != member.identity { detail.append(member.path) }
+      if member.inPlace {
+        detail.append(String(localized: "bar.group.inPlace", bundle: .lody))
+      } else if let branch = member.branch {
+        detail.append(branch)
+        row["branch"] = branch
+      }
+      row["detail"] = detail.joined(separator: " · ")
+      if let repository = member.repoFullName { row["repository"] = repository }
+      if let diff = member.diff { row["added"] = diff.add; row["removed"] = diff.del }
+      if let pr = member.pullRequest {
+        row["prNumber"] = pr.number
+        row["prStatus"] = pr.status
+        if let ci = pr.ci { row["prCI"] = ci }
+      }
+      return row
+    }
+    var description = [run.name, repositories]
+    if !pullRequests.isEmpty { description.append(prs) }
+    return [
+      "label": label, "symbol": "square.stack", "tint": failing ? "danger" : "secondary", "actions": [] as [[String: Any]],
+      "accessibilityLabel": description.filter { !$0.isEmpty }.joined(separator: ", "),
+      "menuTitle": run.name,
+      "menuSubtitle": String.localizedStringWithFormat(String(localized: "create.context.groupMembers", bundle: .lody), run.members.count)
+        + (pullRequests.isEmpty ? "" : " · " + prs),
+      "members": members,
+    ]
+  }
+
   private static func symbol(_ action: SessionInfoBar.Action) -> String {
     switch action {
     case .createPr: "arrow.triangle.pull"
@@ -118,11 +166,28 @@ extension SessionController {
       if let pr = bar.pullRequest { openPullRequest(pr) }
     case "context:branch":
       guard !bar.branch.isEmpty else { return }
-      UIPasteboard.general.string = bar.branch
-      LodyToastOverlay.shared.show(message: String(localized: "session.title.branchCopied", bundle: .lody), kind: .neutral)
+      copyBranch(bar.branch)
     default:
+      if id.hasPrefix("context:member:"), let member = groupMember(id, prefix: "context:member:") {
+        if let pr = member.pullRequest { openPullRequest(pr) }
+        return
+      }
+      if id.hasPrefix("context:memberBranch:"), let branch = groupMember(id, prefix: "context:memberBranch:")?.branch {
+        copyBranch(branch)
+        return
+      }
       if id.hasPrefix("more:"), let action = SessionInfoBar.Action(rawValue: String(id.dropFirst(5))) { performInfoBarAction(action) }
     }
+  }
+
+  private func groupMember(_ id: String, prefix: String) -> SessionProjectMember? {
+    let memberId = String(id.dropFirst(prefix.count))
+    return infoBar?.group?.members.first { $0.id == memberId }
+  }
+
+  private func copyBranch(_ branch: String) {
+    UIPasteboard.general.string = branch
+    LodyToastOverlay.shared.show(message: String(localized: "session.title.branchCopied", bundle: .lody), kind: .neutral)
   }
 
   private func performInfoBarAction(_ action: SessionInfoBar.Action) {

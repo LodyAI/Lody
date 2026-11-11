@@ -2296,6 +2296,7 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string" },
+        "ownerUserId": { "type": "string" },
         "machineId": { "type": ["string", "null"] },
         "conflict": { "type": "boolean" },
         "members": {
@@ -2316,7 +2317,14 @@
           }
         }
       },
-      "required": ["id", "name", "machineId", "conflict", "members"]
+      "required": [
+        "id",
+        "name",
+        "ownerUserId",
+        "machineId",
+        "conflict",
+        "members"
+      ]
     },
     "ProjectGroupsParams": {
       "type": "object",

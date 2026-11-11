@@ -1,5 +1,6 @@
 import { projectAgentUsage, legacyAgentQuotas } from './agent-usage.ts';
 import { pullRequestReferences } from './pull-request.ts';
+import { projectRunOf } from './project-run.ts';
 import type { Catalog, Project, Session } from '../models/catalog.ts';
 
 export type { Catalog, Project, Session } from '../models/catalog.ts';
@@ -163,6 +164,11 @@ export function projectRows(
         : repo
           ? `github:${repo}`
           : `${machineId}:unassigned`;
+    const pullRequests = pullRequestReferences(
+      value.pullRequests,
+      value.pullRequestState,
+    );
+    const projectRun = runId ? projectRunOf(run, pullRequests) : undefined;
     sessions.push({
       lastModel: modelOf(value.lastModel),
       cliType: text(value.cliType),
@@ -198,13 +204,11 @@ export function projectRows(
         undefined,
       iosSimulatorPreviewRequestId:
         text(value.iosSimulatorPreviewRequestId) || undefined,
-      pullRequests: pullRequestReferences(
-        value.pullRequests,
-        value.pullRequestState,
-      ),
+      pullRequests,
       diff: diffOf(value.diffStats),
       workspaceDirty: value.workspaceDirty === true || undefined,
       workspaceUnpushed: value.workspaceUnpushed === true || undefined,
+      ...(projectRun ? { projectRun } : {}),
     });
     if (runId) {
       projects.push({

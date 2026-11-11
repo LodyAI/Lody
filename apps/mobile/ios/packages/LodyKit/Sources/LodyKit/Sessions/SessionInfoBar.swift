@@ -115,17 +115,51 @@ struct SessionInfoBar: Equatable {
   /// Priority order: the first is the bar's one text button, the rest hang off its menu.
   var actions: [Action] = []
 
+  /// A Project group conversation: the context lists every member with its own PR instead
+  /// of one repository, and the actions apply to the whole group.
+  var group: SessionProjectRun?
+
   init(session: SessionItem, repository: String, busy: Bool) {
-    self.repository = repository
-    branch = session.branchName ?? ""
-    // The machine appends associations, so the last is the current PR (web `getLatestPullRequest`).
-    pullRequest = repository.isEmpty ? nil : session.pullRequests.last
     added = session.diff["add"] ?? 0
     removed = session.diff["del"] ?? 0
+    if let run = session.projectRun, !run.members.isEmpty {
+      group = run
+      actions = busy ? [] : Self.groupActions(session: session, run: run)
+      return
+    }
+    self.repository = repository
+    branch = session.branchName ?? ""
+    // The machine appends associations; the last one for this repository is the current PR
+    // (web `selectPrimarySessionPullRequest`).
+    pullRequest = repository.isEmpty
+      ? nil : session.pullRequests.last { $0.repository.lowercased() == repository.lowercased() }
     actions = Self.actions(session: session, pullRequest: pullRequest, repository: repository, busy: busy)
   }
 
-  var hasContext: Bool { !repository.isEmpty || !branch.isEmpty || added + removed > 0 || pullRequest != nil }
+  var hasContext: Bool { group != nil || !repository.isEmpty || !branch.isEmpty || added + removed > 0 || pullRequest != nil }
+
+  /// Web keeps Create PR and Commit & Push conversation-wide for a group (scoped by
+  /// `withProjectGroupPrScope`); PR-bound actions (merge, ready, CI, conflicts) belong to one
+  /// member's PR and are reached from that member's PR page.
+  static func groupActions(session: SessionItem, run: SessionProjectRun) -> [Action] {
+    let unpublished = session.workspaceDirty || session.workspaceUnpushed
+      || run.members.contains { $0.dirty == true || $0.unpushed == true }
+    let reported = run.members.contains { $0.diff != nil || $0.dirty != nil || $0.unpushed != nil }
+    // A changed repository without an open PR still needs one. Members used in place have no PR.
+    let needsPullRequest = reported
+      ? run.members.contains { member in
+        guard !member.inPlace, member.repoFullName != nil else { return false }
+        let open = member.pullRequest.map { ["open", "draft"].contains($0.status) } ?? false
+        let changed = (member.diff.map { $0.add + $0.del } ?? 0) > 0 || member.dirty == true || member.unpushed == true
+        return changed && !open
+      }
+      : run.pullRequests.isEmpty && (unpublished || (session.diff["add"] ?? 0) + (session.diff["del"] ?? 0) > 0)
+    let create: [Action] = needsPullRequest ? [.createPr, .createDraftPr] : []
+    let commit: [Action] = unpublished ? [.commitAndPush] : []
+    // Without any PR, creating one leads as for a single repository; once PRs exist,
+    // unpublished work outranks opening the remaining ones.
+    return run.pullRequests.isEmpty ? create + commit : commit + create
+  }
 
   static func actions(session: SessionItem, pullRequest: SessionPullRequest?, repository: String, busy: Bool) -> [Action] {
     guard !repository.isEmpty, !busy else { return [] }
@@ -156,13 +190,15 @@ struct SessionInfoBar: Equatable {
   func prompt(_ action: Action) -> String {
     func text(_ key: String) -> String { String(localized: String.LocalizationValue("bar.prompt." + key), bundle: .lody) }
     let upkeep = text("prBranchUpkeep")
+    // Web `withProjectGroupPrScope`: a group conversation publishes every changed member.
+    let scoped = { (prompt: String) in group == nil ? prompt : prompt + "\n\n" + Self.projectGroupScope }
     switch action {
     case .createPr:
-      return text("createPrOrigin") + "\n\n" + text("createPr") + "\n\n" + upkeep
+      return text("createPrOrigin") + "\n\n" + scoped(text("createPr") + "\n\n" + upkeep)
     case .createDraftPr:
-      return text("createDraftPrOrigin") + "\n\n" + text("createDraftPr") + "\n\n" + upkeep
+      return text("createDraftPrOrigin") + "\n\n" + scoped(text("createDraftPr") + "\n\n" + upkeep)
     case .commitAndPush:
-      return text("commitAndPush")
+      return scoped(text("commitAndPush"))
     case .resolveConflicts:
       guard let pullRequest else { return "" }
       return String(format: text("resolveConflicts"), repository, "#\(pullRequest.number)", pullRequestURL)
@@ -173,6 +209,17 @@ struct SessionInfoBar: Equatable {
       return ""
     }
   }
+
+  /// Web `withProjectGroupPrScope` (`packages/shared/src/pr-prompts.ts`), which web sends
+  /// untranslated: it instructs the agent rather than reading back to the user.
+  static let projectGroupScope = [
+    "Project group scope:",
+    "- Apply the requested action to each member repository with changes or unpublished commits. Use the member inventory in this conversation and run Git in each member directory; the Project group directory itself is not a Git repository.",
+    "- Process submodules before their parents, recursively: commit and push each changed submodule first, then update and commit its gitlink in the parent repository and push the parent branch.",
+    "- If this action requests PRs, create or update one PR per changed repository. Open submodule PRs before parent PRs, preserve the requested draft or regular status, and link all related PRs in each PR body once their URLs are available.",
+    "- If this action only requests Commit & Push, do not open PRs. If PR upkeep was requested, apply it to each repository with a PR.",
+    "- If publishing a child fails, report the failure and do not publish a parent gitlink pointing to that unpublished commit. Report results and any PR URLs per repository.",
+  ].joined(separator: "\n")
 
   var pullRequestURL: String {
     guard let pullRequest else { return "" }
