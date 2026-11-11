@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform } from '@lody/platform/react';
+import { Button } from '@lody/ui/button';
 import { selectAtom } from 'jotai/utils';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
@@ -89,9 +90,16 @@ export function SessionHistoryAccessBoundary({
         (ownedMachineIds.has(selected.machineId) ||
           isSessionMachineAvailable(selected, visibleMachineIds, visibleLocalProjectKeys))));
   const [checked, setChecked] = useState<object | null>(null);
+  // A check whose read failed: "not shared" would then be a guess, so the reader is told
+  // the check failed and may retry, which starts a new check.
+  const [failed, setFailed] = useState<object | null>(null);
+  const [attempt, setAttempt] = useState(0);
   // Opening a deep link always authenticates this machine's latest policy as a fallback
   // for missed version notifications. The old policy cannot admit the first read.
-  const checkKey = useMemo(() => ({}), [runtime, root?.machineId, selectedId, access.store]);
+  const checkKey = useMemo(
+    () => ({}),
+    [runtime, root?.machineId, selectedId, access.store, attempt]
+  );
   useEffect(() => {
     let retired = false;
     if (!root?.machineId || !access.store || editable) {
@@ -102,8 +110,12 @@ export function SessionHistoryAccessBoundary({
       () => {
         if (!retired) setChecked(checkKey);
       },
-      () => {
-        if (!retired) setChecked(checkKey);
+      (error: unknown) => {
+        if (retired) return;
+        // A newer read of the same machine took over; it publishes its own result.
+        if (!(error instanceof Error && error.message === 'session_access_superseded'))
+          setFailed(checkKey);
+        setChecked(checkKey);
       }
     );
     return () => {
@@ -126,7 +138,17 @@ export function SessionHistoryAccessBoundary({
     (isSessionReadShared(root, access.views, undefined, accountId) ||
       (!!accountId && root.userId === accountId)) &&
     (selectedId === rootId || (validTab && !!selected && selected.machineId === root.machineId));
-  if (!readable) return <p role="status">{t('sessions.access.unavailable')}</p>;
+  if (!readable)
+    return failed === checkKey ? (
+      <div role="alert">
+        <p>{t('sessions.access.readFailed')}</p>
+        <Button size="small" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
+          {t('common.retry')}
+        </Button>
+      </div>
+    ) : (
+      <p role="status">{t('sessions.access.unavailable')}</p>
+    );
   return (
     <SessionHistoryReader
       key={`${runtime?.workspaceId}:${runtime?.accountId}:${rootId}:${selectedId}`}

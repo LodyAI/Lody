@@ -6576,6 +6576,7 @@
   "sessions.access.failed": "Could not change conversation access. Refresh and try again.",
   "sessions.access.confirmRead": "Teammates can read this conversation and reference it in their own sessions.",
   "sessions.access.unavailable": "This conversation is not shared with you.",
+  "sessions.access.readFailed": "Couldn't check whether this conversation is shared with you. Check your connection and retry.",
   "sessions.access.readonly": "Read-only",
   "sessions.access.readonlyMachine": "Read-only · Runs on {{machine}}",
   "sessions.access.reference": "Reference in a new session",
