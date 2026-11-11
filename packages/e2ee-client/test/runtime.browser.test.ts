@@ -1383,10 +1383,13 @@ it.each(['chromium', 'webkit'] as const)(
       // A retry resubmits the retained original; nothing is signed again.
       expect(await ok('prepare')).toMatchObject({ keyPackageHex: request.keyPackageHex });
       expect(await ok('submitted')).toEqual([request.keyPackageHex, request.keyPackageHex]);
-      expect(await ok('pending')).toMatchObject({
+      const waiting = await ok('pending');
+      expect(waiting).toMatchObject({
         requestId: request.requestId,
         offer: { mode: 'link', token: 'cd'.repeat(32) },
       });
+      // Not admitted yet: a reopened page resumes waiting, not as joined.
+      expect(waiting).not.toHaveProperty('joined');
       expect(await ok('claim')).toEqual({ ready: false, state: 'pending' });
       // The relay's word is not admission: only the signed history can admit this device.
       await ok('relayClaimsEarly');
@@ -1410,6 +1413,8 @@ it.each(['chromium', 'webkit'] as const)(
       });
       // Accepted once; a later claim reuses the retained approval.
       expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });
+      // A reopened join page learns this device is already joined before it claims.
+      expect(await ok('pending')).toMatchObject({ requestId: request.requestId, joined: true });
     } finally {
       await context?.close();
       await rm(directory, { recursive: true, force: true });

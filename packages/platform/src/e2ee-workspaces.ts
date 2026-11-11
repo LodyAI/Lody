@@ -217,9 +217,14 @@ export interface E2eeWorkspaceRuntime
   prepareMemberJoin?(
     offer: import('@lody/cloud-api').E2eeMemberOffer
   ): Promise<import('@lody/cloud-api').E2eeMemberRequest>;
-  pendingMemberJoin?(
-    workspaceId: string
-  ): Promise<{ offer: import('@lody/cloud-api').E2eeMemberOffer; requestId: string | null } | null>;
+  /** The retained team join for this workspace. `joined` says this device's admission was
+   * already accepted, so a reopened join page can show it joined at once; the page still
+   * claims to confirm. Hosts that omit it keep the ordinary resume. */
+  pendingMemberJoin?(workspaceId: string): Promise<{
+    offer: import('@lody/cloud-api').E2eeMemberOffer;
+    requestId: string | null;
+    joined?: boolean;
+  } | null>;
   memberJoinRequests?(
     workspaceId: string
   ): Promise<import('@lody/cloud-api').E2eeMemberReplies['pending']>;
