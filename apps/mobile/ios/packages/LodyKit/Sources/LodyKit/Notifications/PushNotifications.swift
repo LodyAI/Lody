@@ -143,7 +143,9 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   }
 
   func deviceToken(_ data: Data) {
-    registration.deviceToken(data.map { String(format: "%02x", $0) }.joined(), bundle: Bundle.main.bundleIdentifier)
+    // OneSignal's optIn re-registers with APNs and lands here too; refreshing on an
+    // unchanged token would loop through login/optIn and the backend every few seconds.
+    guard registration.deviceToken(data.map { String(format: "%02x", $0) }.joined(), bundle: Bundle.main.bundleIdentifier) else { return }
     refresh()
   }
 
