@@ -24,7 +24,6 @@ import {
   SessionId,
   WorkspaceId,
   getSessionRoomId,
-  resolveGeneratedGroupTitleUpdate,
   getSessionIdFromRoomId,
   AgentConfigId,
   MachineId,
@@ -3349,9 +3348,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * write time against the latest doc meta: an existing titled meta whose
    * titleSource is set and not in `allowedSources` blocks the write. This guards
    * against user renames (source 'user') racing with asynchronous title updates.
-   * A generated root title is also copied once into the group (sidebar) title,
-   * per `resolveGeneratedGroupTitleUpdate`. Returns true when the tab title was
-   * applied.
+   * Returns true when the title was applied.
    */
   async setTitleIfSourceIn(
     title: string,
@@ -3370,17 +3367,11 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     const currentMeta = await this.getMetaState();
     const currentTitle = currentMeta?.title?.trim();
     const currentSource = currentMeta?.titleSource;
-    const applied = !(currentTitle && currentSource && !allowedSources.includes(currentSource));
-    const groupUpdate =
-      source === 'generated'
-        ? resolveGeneratedGroupTitleUpdate(currentMeta, sanitized, applied)
-        : undefined;
-    if (!applied && !groupUpdate) return false;
-    await this.repo.upsertDocMeta(this.roomId, {
-      ...(applied ? { title: sanitized, titleSource: source } : {}),
-      ...groupUpdate,
-    } satisfies Partial<SessionMeta>);
-    return applied;
+    if (currentTitle && currentSource && !allowedSources.includes(currentSource)) {
+      return false;
+    }
+    await this.repo.upsertDocMeta(this.roomId, { title: sanitized, titleSource: source });
+    return true;
   }
 
   async setRepoFullName(repoFullName: string) {

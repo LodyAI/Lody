@@ -8,11 +8,7 @@ import { turnNotificationAudience } from '@/lib/notifications/turn-notification-
 import { registerAgentRoleTools } from './agent-role-tools';
 import { proposeAgentRole } from '@/lib/agent-role-proposal';
 import { batchPage } from '@/orchestration/inbox/batch-page';
-import {
-  buildSessionGroupRenamePatch,
-  buildSessionTabRenamePatch,
-  isSessionCollaborationStopped,
-} from '@lody/shared';
+import { isSessionCollaborationStopped } from '@lody/shared';
 import {
   assertMachineFlockCacheSufficient,
   MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -985,13 +981,6 @@ const SessionTitleToolInputSchema = z
   .max(MAX_MCP_SESSION_TITLE_CHARS)
   .describe(`New session title, up to ${MAX_MCP_SESSION_TITLE_CHARS} characters.`);
 
-const SessionRenameScopeSchema = z
-  .enum(['tab', 'group'])
-  .optional()
-  .describe(
-    "tab (default) renames this conversation tab only. group renames the sidebar title of a root Session's conversation group; its tabs keep their own titles."
-  );
-
 const SessionRenameToolInputSchema = z
   .object({
     sessionId: z
@@ -1001,7 +990,6 @@ const SessionRenameToolInputSchema = z
       .optional()
       .describe('Target session id, or current. Defaults to current.'),
     title: SessionTitleToolInputSchema,
-    scope: SessionRenameScopeSchema,
   })
   .strict();
 
@@ -1009,7 +997,6 @@ const SessionRenameManyItemSchema = z
   .object({
     sessionId: z.string().trim().min(1).describe('Target session id, or current.'),
     title: SessionTitleToolInputSchema,
-    scope: SessionRenameScopeSchema,
   })
   .strict();
 
@@ -1997,7 +1984,6 @@ const sessionSummaryForMcp = (
 ) => ({
   id: session.id,
   ...(session.title ? { title: session.title } : {}),
-  ...(session.groupTitle?.trim() ? { groupTitle: session.groupTitle.trim() } : {}),
   createdAt: isoTimestamp(session.createdAt),
   lastActivityAt: isoTimestamp(session.lastMessageAt ?? session.createdAt),
   archived: session.isArchived === true,
@@ -3798,11 +3784,7 @@ const mapWithConcurrency = async <T, R>(
   return output;
 };
 
-type ResolvedSessionRenameItem = {
-  sessionId: SessionId;
-  title: string;
-  scope: 'tab' | 'group';
-};
+type ResolvedSessionRenameItem = { sessionId: SessionId; title: string };
 
 const resolveSessionRenameItems = (
   items: readonly z.infer<typeof SessionRenameManyItemSchema>[],
@@ -3812,7 +3794,6 @@ const resolveSessionRenameItems = (
   const resolved = items.map((item) => ({
     sessionId: resolveMcpSessionId(item.sessionId, ctx) as SessionId,
     title: item.title,
-    scope: item.scope ?? 'tab',
   }));
   if (new Set(resolved.map((item) => item.sessionId)).size !== resolved.length) {
     throw new LodyOperationStoreError(
@@ -3831,12 +3812,7 @@ const applySessionRenameItems = async (
   await mapWithConcurrency(items, 5, async (item) => {
     try {
       await rename(item);
-      return {
-        sessionId: item.sessionId,
-        ok: true as const,
-        title: item.title,
-        scope: item.scope,
-      };
+      return { sessionId: item.sessionId, ok: true as const, title: item.title };
     } catch (error) {
       return {
         sessionId: item.sessionId,
@@ -3862,19 +3838,10 @@ const persistSessionRenameItems = async (
       );
     }
     session = await assertCanManage(item.sessionId);
-    if (item.scope === 'group' && session.parentSessionId) {
-      throw new LodyOperationStoreError(
-        'COMMAND_REJECTED',
-        `Session ${item.sessionId} is a child tab; only a root Session has a group title.`,
-        false
-      );
-    }
-    await manager.repo.upsertDocMeta(
-      getSessionRoomId(item.sessionId),
-      item.scope === 'group'
-        ? buildSessionGroupRenamePatch(item.title)
-        : buildSessionTabRenamePatch(session, item.title)
-    );
+    await manager.repo.upsertDocMeta(getSessionRoomId(item.sessionId), {
+      title: item.title,
+      titleSource: 'user',
+    } satisfies Partial<SessionMeta>);
   });
   if (results.some((item) => item.ok)) {
     await ensureWorkspaceMetaSynced(manager, syncReason);
@@ -5643,16 +5610,16 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_RENAME_TOOL_NAME,
     {
-      summary: 'Set a conversation Tab title or its sidebar group title.',
+      summary: 'Set the title of one Session.',
       title: 'Rename a Lody session',
       description:
-        "Set the title of one Session. Omit sessionId (or pass current) to rename the current Session. scope tab (default) renames that conversation tab; scope group renames the sidebar title of a root Session's tab group. The two titles are independent. The durable rename is treated as a user-directed title and is not replaced by later automatic title generation.",
+        'Set the title of one Session. Omit sessionId (or pass current) to rename the current Session. The durable rename is treated as a user-directed title and is not replaced by later automatic title generation.',
       inputSchema: SessionRenameToolInputSchema,
     },
     async (args: SessionRenameToolInput) => {
       try {
         const [item] = await renameSessionItems({
-          items: [{ sessionId: args.sessionId ?? 'current', title: args.title, scope: args.scope }],
+          items: [{ sessionId: args.sessionId ?? 'current', title: args.title }],
         });
         if (!item) {
           throw new Error('Session rename returned no result.');
@@ -5667,10 +5634,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_RENAME_MANY_TOOL_NAME,
     {
-      summary: 'Rename multiple conversation Tab/group titles with isolated per-item failures.',
+      summary: 'Rename multiple Sessions with isolated per-item failures.',
       title: 'Rename multiple Lody sessions',
       description:
-        "Set titles for 1-20 Sessions; each item's scope chooses the tab title (default) or a root Session's group title. Session ids must be unique. Results preserve input order and failures are isolated per item; successful renames remain applied when another item fails.",
+        'Set titles for 1-20 Sessions. Session ids must be unique. Results preserve input order and failures are isolated per item; successful renames remain applied when another item fails.',
       inputSchema: SessionRenameManyToolInputSchema,
     },
     async (args: SessionRenameManyToolInput) => {
