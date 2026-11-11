@@ -270,10 +270,37 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
         failed: unfinished.filter((row) => !finished.has(row.id)).map((row) => row.name),
       };
     });
+  const removePasskey = async (entryId: string): Promise<Result | undefined> => {
+    const removed = await port.removePasskey(entryId);
+    if (removed.outcome === 'cancelled') return undefined;
+    if (removed.passkeys) {
+      setPasskeys(removed.passkeys);
+      setPending(removed.pending);
+    } else {
+      // The removal settled but the list could not be read again: keep its outcome and
+      // drop the stale list rather than showing the removed passkey; Manage reads it anew.
+      setPasskeys(undefined);
+      setPending([]);
+    }
+    return {
+      kind: 'notice',
+      key:
+        removed.outcome === 'removed'
+          ? 'e2ee.recovery.passkeyRemoved'
+          : 'e2ee.recovery.passkeyRemoveIncomplete',
+    };
+  };
+  // Restoring leads when it is this host's only next step: a replacement it cannot
+  // continue, or nothing to set up and no file check. Desktop always has a step that
+  // leads instead (continue, set up all, check), so its restore stays secondary.
+  const restoreLeads =
+    canRestore &&
+    ((mode === 'replacing' && !replacement) ||
+      (mode === 'ready' && unfinished.length === 0 && !checkFile));
   const restoreButton = (method: 'file' | 'passkey') => (
     <Button
       size="small"
-      variant="secondary"
+      variant={restoreLeads && method === 'file' ? 'primary' : 'secondary'}
       disabled={busy}
       onClick={() =>
         void run(async () => {
@@ -457,21 +484,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                   size="small"
                   variant="secondary"
                   disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      const removed = await port.removePasskey(row.entryId);
-                      if (removed.outcome === 'cancelled') return undefined;
-                      setPasskeys(removed.passkeys);
-                      setPending(removed.pending);
-                      return {
-                        kind: 'notice',
-                        key:
-                          removed.outcome === 'removed'
-                            ? 'e2ee.recovery.passkeyRemoved'
-                            : 'e2ee.recovery.passkeyRemoveIncomplete',
-                      };
-                    })
-                  }
+                  onClick={() => void run(() => removePasskey(row.entryId))}
                 >
                   {t('e2ee.recovery.passkeyRemoveRetry')}
                 </Button>
@@ -694,19 +707,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
               onClick={() => {
                 const entryId = removing?.entryId ?? '';
                 setRemoving(undefined);
-                void run(async () => {
-                  const removed = await port.removePasskey(entryId);
-                  if (removed.outcome === 'cancelled') return undefined;
-                  setPasskeys(removed.passkeys);
-                  setPending(removed.pending);
-                  return {
-                    kind: 'notice',
-                    key:
-                      removed.outcome === 'removed'
-                        ? 'e2ee.recovery.passkeyRemoved'
-                        : 'e2ee.recovery.passkeyRemoveIncomplete',
-                  };
-                });
+                void run(() => removePasskey(entryId));
               }}
             >
               {t('e2ee.recovery.passkeyRemove')}

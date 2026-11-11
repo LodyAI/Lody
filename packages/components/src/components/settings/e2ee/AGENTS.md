@@ -43,6 +43,8 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
 - A host that cannot create, check or replace a recovery file sets that operation to
   null, and the section hides the action rather than offering one that dead-ends. A
   replacement such a host cannot continue is shown as one to finish on the device that
-  started it, while restoring stays available. A host-owned `Section` is accepted only
+  started it, while restoring stays available and leads when it is the host's only next
+  step. A passkey removal that settled keeps its outcome even when the host cannot read
+  the list again; the section then drops the stale list instead of reporting a failure. A host-owned `Section` is accepted only
   while hosts move to the port, and a host with neither shows where recovery can be
   set up instead of an empty tab.
