@@ -51,7 +51,7 @@
 	<key>GIDServerClientID</key>
 	<string>$(LODY_GOOGLE_SERVER_CLIENT_ID)</string>
 	<key>LodyOneSignalAppId</key>
-	<string>e383bf31-7c8e-4641-b3f6-3486e77b9a82</string>
+	<string>930dcd5c-3534-46aa-805d-f279f008f80b</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
