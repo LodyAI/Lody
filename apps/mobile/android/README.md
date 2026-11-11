@@ -299,6 +299,12 @@ the same payload so the only next step is retrying that save. The runtime's
 `activateDocument`) reach `PromptShortcutCloud`, which calls `promptShortcuts:*` on Convex
 with the verified account and the native workspace; mutations use a one-shot client.
 This also lets the composer's `/` shortcuts load their bodies.
+The list and the bodies already read are cached per account/workspace (process memory,
+then the `prompt-shortcuts` settings snapshot in `AtomicCatalogStore`, cleared on logout):
+the list shows at once on cold start, an opened shortcut shows its last body read only until
+the fresh read (the save base) arrives, and while the page is open up to 20 uncached bodies
+are read one at a time in the background. Changed or removed entries drop their bodies; at
+most 64 bodies are kept.
 
 GitHub (`GitHubSettingsScreen`) mirrors iOS Settings › GitHub: personal identity with an
 "Act as you" switch (turning it on needs a live authorization), Manage GitHub App for owners

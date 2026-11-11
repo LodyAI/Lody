@@ -20,6 +20,8 @@ import app.lody.android.designsystem.*
 import app.lody.android.runtime.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 interface ShortcutSettingsService {
     suspend fun perform(scope: RuntimeScope, action: ShortcutSettingsAction): ShortcutSettingsResult
@@ -31,15 +33,32 @@ class RuntimeShortcutSettingsService(private val owner: RuntimeOwner) : Shortcut
 }
 
 /**
- * iOS `PromptShortcutsController`: the last list shows at once while a live read replaces it; only
- * a live list enables adding; a save shows at once and rolls back if it fails.
+ * iOS `PromptShortcutsController`: only a live list enables adding; a save shows at once and rolls
+ * back if it fails. The list and the bodies already read show at once from the
+ * account/workspace settings cache (memory, then disk); a live read replaces them. A cached body
+ * is display only: editing and saving always wait for a fresh body read, which is the save base.
  */
-internal class ShortcutsState(private val service: ShortcutSettingsService, val scope: RuntimeScope) {
+internal class ShortcutsState(private val service: ShortcutSettingsService, val scope: RuntimeScope, private val store: SettingsSnapshotStore? = null) {
     var entries by mutableStateOf(remembered?.takeIf { it.first == scope }?.second); private set
     var live by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
     private var version = 0
+    /** Bodies by the entry JSON they were read for, so any change to the entry misses. */
+    private val bodies = (rememberedBodies?.takeIf { it.first == scope }?.second ?: emptyMap()).toMutableMap()
+
+    /** Restores the disk cache when nothing is in memory yet; never replaces a live read. */
+    suspend fun restore() {
+        if (store == null || (entries != null && bodies.isNotEmpty())) return
+        val cached = try { store.readSettings(scope, CACHE_KIND) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null } ?: return
+        try {
+            val list = cached.getJSONArray("entries").let { rows -> (0 until rows.length()).map { ShortcutSettingsJson.cachedEntry(rows.getString(it)) } }
+            cached.optJSONArray("bodies")?.let { rows ->
+                for (index in 0 until rows.length()) rows.optJSONObject(index)?.let { bodies.putIfAbsent(it.getString("entry"), ShortcutSettingsJson.cachedBody(it.getString("body"))) }
+            }
+            if (entries == null && !live) entries = list
+        } catch (_: Exception) { /* A malformed cache is ignored; the live read follows. */ }
+    }
 
     suspend fun refresh() {
         val id = ++version
@@ -52,11 +71,25 @@ internal class ShortcutsState(private val service: ShortcutSettingsService, val 
         finally { if (id == version) busy = false }
     }
 
+    /** The last body read for exactly this entry, for display while a fresh read runs. */
+    fun cachedBody(entry: ShortcutEntry): ShortcutBody? = bodies[entry.raw]
+
     /** A fresh body for the editor; null when it changed or access was revoked. */
     suspend fun read(entry: ShortcutEntry): ShortcutBody? = try {
-        (service.perform(scope, ShortcutSettingsAction.Read(entry)) as? ShortcutSettingsResult.Read)?.body
+        (service.perform(scope, ShortcutSettingsAction.Read(entry)) as? ShortcutSettingsResult.Read)?.body?.also { keepBody(entry, it) }
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (_: Exception) { null }
+
+    /**
+     * Reads, one at a time, the bodies of listed entries that are not cached yet, so later opens
+     * show their prompt at once. Reads only; stops at [limit].
+     */
+    suspend fun prefetch(limit: Int = 20) {
+        entries.orEmpty().filter { it.raw !in bodies }.take(limit).forEach { entry ->
+            if (entries?.any { it.raw == entry.raw } != true) return@forEach
+            read(entry)
+        }
+    }
 
     /** Returns null on success, else the failure code; [preview] shows until the reply or a rollback. */
     suspend fun save(action: ShortcutSettingsAction.Save, preview: ShortcutEntry): String? {
@@ -77,29 +110,62 @@ internal class ShortcutsState(private val service: ShortcutSettingsService, val 
         }
     }
 
-    private fun accept(next: List<ShortcutEntry>) {
+    private suspend fun accept(next: List<ShortcutEntry>) {
         entries = next; live = true; error = null
         remembered = scope to next
+        // Bodies of entries that changed or went away are dropped.
+        val current = next.mapTo(mutableSetOf()) { it.raw }
+        bodies.keys.retainAll(current)
+        persist()
+    }
+
+    private suspend fun keepBody(entry: ShortcutEntry, body: ShortcutBody) {
+        bodies[entry.raw] = body
+        persist()
+    }
+
+    private suspend fun persist() {
+        rememberedBodies = scope to bodies.toMap()
+        val list = entries ?: return
+        if (store == null || !live) return
+        // The newest list and at most [BODY_LIMIT] bodies (prompts are up to 16k characters).
+        val kept = bodies.entries.filter { (raw, _) -> list.any { it.raw == raw } }.take(BODY_LIMIT)
+        val value = JSONObject()
+            .put("entries", JSONArray(list.map { it.raw }))
+            .put("bodies", JSONArray(kept.map { (raw, body) -> JSONObject().put("entry", raw).put("body", body.raw) }))
+        try { store.writeSettings(scope, CACHE_KIND, value) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Only the cache is lost. */ }
     }
 
     private companion object {
-        /** Process memory only (one scope). */
+        const val CACHE_KIND = "prompt-shortcuts"
+        const val BODY_LIMIT = 64
+        /** Process memory (one scope), ahead of the disk cache. */
         @Volatile var remembered: Pair<RuntimeScope, List<ShortcutEntry>>? = null
+        @Volatile var rememberedBodies: Pair<RuntimeScope, Map<String, ShortcutBody>>? = null
     }
 }
 
-private data class ShortcutDraft(val base: ShortcutEntry?, val body: ShortcutBody?)
+/** [cached] is the last body read for [base], shown read only until the fresh [body] arrives. */
+private data class ShortcutDraft(val base: ShortcutEntry?, val body: ShortcutBody?, val cached: ShortcutBody? = null)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ShortcutsScreen(home: ChatListUiState, service: ShortcutSettingsService?, scope: RuntimeScope?, onBack: () -> Unit) {
-    val state = remember(service, scope) { if (service != null && scope != null) ShortcutsState(service, scope) else null }
+internal fun ShortcutsScreen(home: ChatListUiState, service: ShortcutSettingsService?, scope: RuntimeScope?, store: SettingsSnapshotStore? = null, onBack: () -> Unit) {
+    val state = remember(service, scope, store) { if (service != null && scope != null) ShortcutsState(service, scope, store) else null }
     val tasks = rememberCoroutineScope()
     var draft by remember(scope) { mutableStateOf<ShortcutDraft?>(null) }
     var opening by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val changed = stringResource(R.string.shortcuts_changed)
-    LaunchedEffect(state) { state?.refresh() }
+    LaunchedEffect(state) {
+        state ?: return@LaunchedEffect
+        state.restore()
+        state.refresh()
+        // Fill the body cache in the background while the page is open; opening never waits on it.
+        state.prefetch()
+    }
     BackHandler { if (draft != null) draft = null else onBack() }
     val editing = draft
     if (editing != null && state != null) {
@@ -130,7 +196,7 @@ internal fun ShortcutsScreen(home: ChatListUiState, service: ShortcutSettingsSer
                         if (state == null) return@SettingsLine
                         // Open at once from the list entry; the body fills in when its read returns
                         // and saving waits for it (iOS #2531).
-                        val opened = ShortcutDraft(entry, null)
+                        val opened = ShortcutDraft(entry, null, state.cachedBody(entry))
                         draft = opened
                         opening = true
                         tasks.launch {
@@ -166,7 +232,7 @@ private fun ShortcutEditor(state: ShortcutsState, draft: ShortcutDraft, userId: 
     val readOnly = base != null && !loading && (base.ownerUserId != userId || !base.simple || body?.simple != true || body.prompt.length > ShortcutSettingsJson.PROMPT_LIMIT)
     var name by remember(base?.id) { mutableStateOf(base?.name.orEmpty()) }
     var slug by remember(base?.id) { mutableStateOf(base?.slug.orEmpty()) }
-    var prompt by remember(base?.id) { mutableStateOf(body?.prompt.orEmpty()) }
+    var prompt by remember(base?.id) { mutableStateOf((body ?: draft.cached)?.prompt.orEmpty()) }
     LaunchedEffect(base?.id, body) { if (body != null) prompt = body.prompt }
     var shared by remember(base?.id) { mutableStateOf(base?.shared == true) }
     // A save of unknown outcome is held unchanged so a retry can only repeat that same save.

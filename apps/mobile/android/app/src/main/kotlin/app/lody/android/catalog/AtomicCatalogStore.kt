@@ -17,7 +17,7 @@ import java.io.File
 import java.security.MessageDigest
 
 /** Whole display snapshots, serialized on IO. No tokens, CRDT replicas or cursors. */
-internal class AtomicCatalogStore(context: Context, name: String = "catalog") : CatalogStore, CreationOptionsStore, WorkspaceMemberStore, app.lody.android.schedules.ScheduleStore {
+internal class AtomicCatalogStore(context: Context, name: String = "catalog") : CatalogStore, CreationOptionsStore, WorkspaceMemberStore, app.lody.android.schedules.ScheduleStore, app.lody.android.home.SettingsSnapshotStore {
     init { require(name.matches(Regex("[a-zA-Z0-9_-]+"))) }
     private val directory = File(context.noBackupFilesDir, name + app.lody.android.BackendEnvironment.storageSuffix)
     private val mutex = Mutex()
@@ -140,6 +140,22 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
         directory.listFiles()?.filter { it.name.startsWith("schedules-") && it.name.endsWith(".json") }
             ?.sortedByDescending { it.lastModified() }?.drop(8)?.forEach { AtomicFile(it).delete() }
         Unit
+    }
+    private fun settingsFile(scope: RuntimeScope, kind: String): File {
+        require(kind.matches(Regex("[a-z0-9-]{1,40}")))
+        return File(directory, "settings-$kind-" + catalogFile(scope).name)
+    }
+    override suspend fun readSettings(scope: RuntimeScope, kind: String): JSONObject? = io {
+        if (!owns(scope)) return@io null
+        val data = load(settingsFile(scope, kind), 2L * 1024 * 1024) ?: return@io null
+        try {
+            require(data.getString("account") == scope.accountId && data.getString("workspace") == scope.workspaceId && data.getString("kind") == kind)
+            data.getJSONObject("value")
+        } catch (_: Exception) { AtomicFile(settingsFile(scope, kind)).delete(); null }
+    }
+    override suspend fun writeSettings(scope: RuntimeScope, kind: String, value: JSONObject) = io {
+        require(owns(scope)) { "cache_scope_changed" }
+        save(settingsFile(scope, kind), JSONObject().put("account", scope.accountId).put("workspace", scope.workspaceId).put("kind", kind).put("value", value), 2 * 1024 * 1024)
     }
     override suspend fun readContext(): AccountContext? = io { context() }
     private fun membersFile(scope: RuntimeScope) = File(directory, "members-" + catalogFile(scope).name)
