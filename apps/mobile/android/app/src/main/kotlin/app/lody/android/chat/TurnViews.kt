@@ -527,22 +527,25 @@ private fun OutputRow(
 }
 
 /**
- * The line that closes a finished turn, always last: the agent mark, model and finish time (web's
- * footer shows config, not author identity).
+ * The line that closes a finished turn, always last, as iOS `ChatMessageActionsCell`: Copy, Info
+ * and Fork packed tightly at the message edge (48 dp touch targets overlapping), then the finish
+ * time beside them; no model line.
  */
 internal fun LazyListScope.turnFooter(entry: ChatEntry.Assistant, actions: MessageActionState) {
     if (entry.working) return
-    val text = listOf(entry.who.name, entry.who.time).filter { it.isNotBlank() }.joinToString(" · ")
     item(key = "${entry.id}#footer", contentType = "footer") {
-        Column(Modifier.animateItem().fillMaxWidth().padding(horizontal = TranscriptMargin, vertical = LodySpacing.xs)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
-                app.lody.android.home.AgentMark(entry.agentCliType, entry.agentType, LodyTheme.colors.iconTertiary, Modifier.size(LodyIconSize.sm))
-                Text(text, style = LodyTheme.typography.footnote, color = LodyTheme.colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Row(Modifier.padding(top = LodySpacing.xs).offset(x = -(app.lody.android.designsystem.LodySize.controlLg - LodyIconSize.sm) / 2)) {
-                MessageCopyButton(entry.layout.visible.filterIsInstance<TurnLayout.Content>().mapNotNull { (it.item as? app.lody.android.runtime.TurnItem.Text)?.text }.joinToString("\n\n"))
-                MessageActionButton(LodyIcons.Info, stringResource(R.string.message_info)) { actions.info(entry.id) }
-                MessageActionButton(LodyIcons.Branch, stringResource(R.string.message_fork)) { actions.fork(entry.id) }
+        val inset = (app.lody.android.designsystem.LodySize.controlLg - LodyIconSize.sm) / 2
+        Row(
+            Modifier.animateItem().fillMaxWidth().padding(horizontal = TranscriptMargin).offset(x = -inset),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(-LodySpacing.lg),
+        ) {
+            MessageCopyButton(entry.layout.visible.filterIsInstance<TurnLayout.Content>().mapNotNull { (it.item as? app.lody.android.runtime.TurnItem.Text)?.text }.joinToString("\n\n"))
+            MessageActionButton(LodyIcons.Info, stringResource(R.string.message_info)) { actions.info(entry.id) }
+            MessageActionButton(LodyIcons.Branch, stringResource(R.string.message_fork)) { actions.fork(entry.id) }
+            if (entry.who.time.isNotBlank()) {
+                Text(entry.who.time, style = LodyTheme.typography.footnote, color = LodyTheme.colors.textTertiary, maxLines = 1,
+                    modifier = Modifier.padding(start = LodySpacing.md))
             }
         }
     }
