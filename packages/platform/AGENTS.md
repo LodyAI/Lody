@@ -107,4 +107,5 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   and the encrypted runtime own access and protected Streams tokens respectively.
 - Optional `runtime.readIdentity` returns only workspace ID/genesis from the expected
   account's retained verified ledger, releasing its temporary read before replying.
-  Missing capability fails closed; never fall back to unleased `status`.
+  Missing capability fails closed; never fall back to unleased `status`. A server
+  answer other than encrypted is admitted only after it reports missing identity.

@@ -51,6 +51,11 @@ import {
   type LocalWorkspaceCatalogSnapshot,
 } from '@/lib/local-workspace-catalog';
 import { Lody } from '@/lib/lody';
+import {
+  E2eeBindingUnreadableError,
+  E2eeModeConflictError,
+  classifyRetainedE2eeMode,
+} from '@/lib/e2ee/retained-binding';
 import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
 import type { MachineProcessLifecycleAction } from '@/lib/machine-lifecycle';
 import { loadPrPollerConfig } from '@/lib/pr-poller/pr-poller-config';
@@ -165,6 +170,18 @@ type WorkspaceRuntimeState = {
   cleanupCauses?: unknown[];
 };
 
+/** Mode is immutable: a running encrypted runtime keeps its verified mode and
+ * genesis when a listing names another one. */
+function keepsEncryptedMode(
+  running: { contentMode?: string; genesisHash?: string },
+  listed: { contentMode?: string; genesisHash?: string }
+): boolean {
+  return (
+    running.contentMode === 'e2ee' &&
+    (listed.contentMode !== 'e2ee' || listed.genesisHash !== running.genesisHash)
+  );
+}
+
 export class LodyFleet {
   private readonly logger: Logger;
   private readonly builtinAgentConfigCliTypes: CliType[];
@@ -245,6 +262,12 @@ export class LodyFleet {
   // one-off reconcile failure (e.g. a catalog write error) could leave the fleet
   // permanently un-reconciled / un-attached.
   private lastValidWorkspaceListResult: AuthorizedWorkspaceList | null = null;
+  private modeConflictWorkspaceIds = new Set<string>();
+  // Unreadable pairing bindings, by errno: one Fleet-level issue per errno, a
+  // backoff per workspace, and a full stack only for an errno's first occurrence.
+  private readonly unreadableBindings = new Map<string, Set<string>>();
+  private readonly unreadableBindingDelayMs = new Map<string, number>();
+  private readonly unreadableBindingStacksLogged = new Set<string>();
   private reconcileRetryTimer: NodeJS.Timeout | null = null;
   private reconcileRetryDelayMs = 0;
 
@@ -530,7 +553,9 @@ export class LodyFleet {
     }
 
     this.logger.debug(`[fleet] Bootstrapping ${workspaces.length} workspace(s) from local catalog`);
-    await this.applyWorkspaceList(workspaces.map(localCatalogWorkspaceToWorkspaceListItem));
+    const cached = workspaces.map(localCatalogWorkspaceToWorkspaceListItem);
+    const conflicts = this.screenRetainedModes(cached);
+    await this.applyWorkspaceList(cached.filter((workspace) => !conflicts.has(workspace.id)));
   }
 
   private async startWorkspaceSubscription(options: { waitForInitial: boolean }): Promise<void> {
@@ -792,6 +817,80 @@ export class LodyFleet {
     this.terminalPtyService.closeAll();
   }
 
+  /**
+   * The server's mode field cannot downgrade a workspace this machine holds an
+   * encrypted pairing binding for. Returns the IDs whose readable binding
+   * contradicts the row; the binding and encrypted data stay untouched. A row
+   * whose binding cannot be read is not reported here: its opener refuses it with
+   * the original error and the ordinary startup retry rereads the binding.
+   */
+  private screenRetainedModes(
+    workspaces: readonly { id: string; contentMode?: string; genesisHash?: string }[]
+  ): Set<string> {
+    const conflicts = new Set<string>();
+    for (const workspace of workspaces) {
+      const verdict = classifyRetainedE2eeMode(this.userId, workspace);
+      if (verdict.kind !== 'conflict') continue;
+      conflicts.add(workspace.id);
+      if (!this.modeConflictWorkspaceIds.has(workspace.id)) this.reportModeConflict(verdict.error);
+    }
+    for (const workspaceId of this.modeConflictWorkspaceIds)
+      if (!conflicts.has(workspaceId))
+        this.runtimeStateReporter.clearIssue(`e2ee_mode_conflict:${workspaceId}`);
+    this.modeConflictWorkspaceIds = conflicts;
+    return conflicts;
+  }
+
+  /** The opener could not read this workspace's pairing binding. The workspace stays
+   * closed to plaintext; retries back off from 10 seconds to 5 minutes. */
+  private recordUnreadableBinding(
+    workspace: WorkspaceListItem,
+    error: E2eeBindingUnreadableError
+  ): void {
+    const code = error.code ?? 'unknown';
+    for (const [other, ids] of this.unreadableBindings)
+      if (other !== code) this.dropUnreadableBinding(other, ids, workspace.id);
+    const ids = this.unreadableBindings.get(code) ?? new Set<string>();
+    this.unreadableBindings.set(code, ids.add(workspace.id));
+    if (!this.unreadableBindingStacksLogged.has(code)) {
+      this.unreadableBindingStacksLogged.add(code);
+      this.logger.warn(`[fleet] ${formatErrorMessage(error, { includeStack: true })}`);
+    } else {
+      this.logger.debug(`[fleet] ${error.message}`);
+    }
+    this.runtimeStateReporter.upsertIssue({
+      code: `e2ee_binding_unreadable:${code}`,
+      severity: 'warning',
+      recoverable: true,
+      message: `Encrypted pairing bindings could not be read (${code}) for ${ids.size} workspace(s). Lody retries and keeps them closed to unencrypted access meanwhile.`,
+    });
+    const delayMs = this.unreadableBindingDelayMs.get(workspace.id) ?? 10_000;
+    this.unreadableBindingDelayMs.set(workspace.id, Math.min(delayMs * 2, 5 * 60_000));
+    this.scheduleRetry(workspace, delayMs);
+  }
+
+  private clearUnreadableBinding(workspaceId: string): void {
+    this.unreadableBindingDelayMs.delete(workspaceId);
+    for (const [code, ids] of this.unreadableBindings)
+      this.dropUnreadableBinding(code, ids, workspaceId);
+  }
+
+  private dropUnreadableBinding(code: string, ids: Set<string>, workspaceId: string): void {
+    if (!ids.delete(workspaceId) || ids.size) return;
+    this.unreadableBindings.delete(code);
+    this.runtimeStateReporter.clearIssue(`e2ee_binding_unreadable:${code}`);
+  }
+
+  private reportModeConflict(conflict: E2eeModeConflictError): void {
+    this.logger.error(`[fleet] ${conflict.message}`);
+    this.runtimeStateReporter.upsertIssue({
+      code: `e2ee_mode_conflict:${conflict.workspaceId}`,
+      severity: 'error',
+      recoverable: true,
+      message: conflict.message,
+    });
+  }
+
   private async applyWorkspaceList(
     next: WorkspaceListItem[],
     options: { retainRunningWorkspaceIds?: Set<string> } = {}
@@ -802,7 +901,7 @@ export class LodyFleet {
     for (const workspace of next) {
       this.desiredWorkspaces.set(workspace.id, workspace);
       const runtime = this.runtimes.get(workspace.id);
-      if (runtime) {
+      if (runtime && !keepsEncryptedMode(runtime.workspace, workspace)) {
         runtime.workspace = workspace;
       }
     }
@@ -860,8 +959,14 @@ export class LodyFleet {
     const workspace = remote
       ? remote.workspaces.find((candidate) => candidate.id === workspaceId)
       : this.desiredWorkspaces.get(workspaceId);
-    if (workspace) return { status: 'authorized', workspace };
-    return remote ? { status: 'revoked' } : { status: 'unknown' };
+    if (!workspace) return remote ? { status: 'revoked' } : { status: 'unknown' };
+    // A listing that contradicts this machine's encrypted binding neither revokes
+    // nor relabels it: a running encrypted runtime keeps its own verified mode.
+    const running = this.runtimes.get(workspaceId)?.workspace;
+    if (running && keepsEncryptedMode(running, workspace))
+      return { status: 'authorized', workspace: running };
+    if (this.modeConflictWorkspaceIds.has(workspaceId)) return { status: 'unknown' };
+    return { status: 'authorized', workspace };
   }
 
   private async applyRemoteWorkspaceList(result: AuthorizedWorkspaceList): Promise<void> {
@@ -871,7 +976,12 @@ export class LodyFleet {
     }
     // The subscription re-fires on every reactive change; only repeat the remote
     // bridge reconcile when the meaningful workspace set actually changed.
+    // Contradicted rows stay listed for authorization and revocation, but never
+    // start, relabel a runtime or rewrite their cached row. Unreadable bindings are
+    // not verdicts: those rows continue to start, where the opener refuses and retries.
+    const conflicts = this.screenRetainedModes(result.workspaces);
     const signature = JSON.stringify({
+      conflicts: [...conflicts].sort(),
       userId: result.userId,
       machineId: this.machineId,
       machineName: this.machineName,
@@ -892,6 +1002,7 @@ export class LodyFleet {
     if (signature !== this.lastCachedWorkspaceSignature) {
       const reconcile = await remoteBridge.reconcileOnline({
         workspaces: [...result.workspaces],
+        heldWorkspaceIds: conflicts,
         runningWorkspaceIds: this.runtimes.keys(),
       });
       revokedRunningWorkspaceIds = reconcile.revokedRunningWorkspaceIds;
@@ -918,9 +1029,10 @@ export class LodyFleet {
         this.runtimeStateReporter.clearIssue('encrypted_workspace_catalog_unavailable');
       }
     }
-    await this.applyWorkspaceList([...result.workspaces], {
-      retainRunningWorkspaceIds: this.remoteRevokedWorkspaceIds,
-    });
+    await this.applyWorkspaceList(
+      result.workspaces.filter((workspace) => !conflicts.has(workspace.id)),
+      { retainRunningWorkspaceIds: new Set([...this.remoteRevokedWorkspaceIds, ...conflicts]) }
+    );
     await remoteBridge.attachAllowedRuntimes(result.workspaces.map((workspace) => workspace.id));
     this.refreshRuntimeState();
     // A full apply succeeded; drop any pending reconcile retry + reset backoff.
@@ -1151,6 +1263,8 @@ export class LodyFleet {
           },
           workspaceWatchCoordinator: this.workspaceWatchCoordinator,
         });
+        // The opener read the binding: any earlier unreadable episode has ended.
+        this.clearUnreadableBinding(workspace.id);
 
         if (!this.mayStart(workspace.id) || accessLost) {
           await lody.cleanup();
@@ -1326,6 +1440,17 @@ export class LodyFleet {
       }
     })()
       .catch((error: unknown) => {
+        if (error instanceof E2eeModeConflictError) {
+          // A readable contradicting binding is final until a consistent list
+          // restarts it. Unreadable bindings are retried below.
+          if (!this.modeConflictWorkspaceIds.has(workspace.id)) this.reportModeConflict(error);
+          this.modeConflictWorkspaceIds.add(workspace.id);
+          return;
+        }
+        if (error instanceof E2eeBindingUnreadableError) {
+          this.recordUnreadableBinding(workspace, error);
+          return;
+        }
         if (
           workspace.contentMode === 'e2ee' &&
           error instanceof Error &&
@@ -1358,11 +1483,10 @@ export class LodyFleet {
     return await task;
   }
 
-  private scheduleRetry(workspace: WorkspaceListItem): void {
+  private scheduleRetry(workspace: WorkspaceListItem, delayMs = 10_000): void {
     if (!this.mayStart(workspace.id)) return;
     if (this.retryTimers.has(workspace.id)) return;
 
-    const delayMs = 10_000;
     const timer = setTimeout(() => {
       this.retryTimers.delete(workspace.id);
       this.refreshRuntimeState();
@@ -1381,6 +1505,7 @@ export class LodyFleet {
       clearTimeout(retryTimer);
     }
     this.retryTimers.delete(workspaceId);
+    this.clearUnreadableBinding(workspaceId);
 
     this.encryptedAuthorityConfirmedAt.delete(workspaceId);
     this.suspendedEncryptedWorkspaces.delete(workspaceId);
@@ -2264,13 +2389,23 @@ export class LodyFleet {
   private async resetLocalE2eeIdentity(
     message: LocalE2eeResetRequest
   ): Promise<LocalE2eeResetResponse> {
-    const workspace = this.desiredWorkspaces.get(message.workspaceId);
+    // A row held back by a contradicting binding is not desired, but an explicit
+    // reset is its local exit: take it from the complete last list.
+    const conflicted = this.modeConflictWorkspaceIds.has(message.workspaceId);
+    const workspace =
+      this.desiredWorkspaces.get(message.workspaceId) ??
+      (conflicted
+        ? this.lastValidWorkspaceListResult?.workspaces.find(
+            (candidate) => candidate.id === message.workspaceId
+          )
+        : undefined);
     if (
       this.stopped ||
       this.localPlatform ||
       message.accountId !== this.userId ||
       message.machineId !== this.machineId ||
-      workspace?.contentMode !== 'e2ee'
+      !workspace ||
+      (workspace.contentMode !== 'e2ee' && !conflicted)
     )
       throw new Error('e2ee_account_unavailable');
     if (this.e2eeResets.has(workspace.id)) throw new Error('e2ee_identity_busy');
@@ -2295,6 +2430,17 @@ export class LodyFleet {
       );
       this.waitingForPairing.add(workspace.id);
       this.refreshRuntimeState();
+      // Re-screen the last list once: the archived binding no longer contradicts it.
+      // Never a second reset or start: the workspace stays parked for pairing.
+      if (conflicted && this.lastValidWorkspaceListResult)
+        await this.applyRemoteWorkspaceList(this.lastValidWorkspaceListResult).catch(
+          (error: unknown) => {
+            this.logger.warn(
+              `[fleet] Workspace list replay after identity reset failed: ${formatErrorMessage(error)}`
+            );
+            this.scheduleReconcileRetry();
+          }
+        );
       return { ok: true as const, resetId: message.resetId, archive };
     })().finally(() => this.e2eeResets.delete(workspace.id));
     this.e2eeResets.set(workspace.id, completion);
