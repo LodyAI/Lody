@@ -43,6 +43,13 @@ export type E2eeWorkspaceCreateResult = Extract<
 /** A server-advertised history boundary, not a trusted cryptographic checkpoint. */
 export type E2eeLedgerCheckpoint = { headHash: string; length: number };
 
+/** Lightweight, untrusted change hint. Fetch and verify original records before use. */
+export type E2eeWorkspaceLedgerHead = {
+  workspaceId: string;
+  genesisHash: string;
+  checkpoint: E2eeLedgerCheckpoint;
+};
+
 export type E2eeWorkspaceHistoryRequest = {
   workspaceId: string;
   /** CLI identity supplements account authentication, never ledger authority. */

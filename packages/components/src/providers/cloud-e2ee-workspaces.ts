@@ -28,7 +28,10 @@ export class E2eeClientUpgradeRequiredError extends Error {
  */
 export function createCloudE2eeWorkspaces(input: {
   session: () => PlatformSessionState;
-  remote: Pick<PlatformE2eeWorkspaces, 'create' | 'describe' | 'history' | 'memberProfiles'>;
+  remote: Pick<
+    PlatformE2eeWorkspaces,
+    'create' | 'describe' | 'history' | 'memberProfiles' | 'subscribeLedgerHead'
+  >;
   prepareCreation?: PlatformE2eeWorkspaces['prepareCreation'];
   runtime?: PlatformE2eeWorkspaces['runtime'];
   refreshWorkspaces: () => Promise<void>;
@@ -46,6 +49,32 @@ export function createCloudE2eeWorkspaces(input: {
   const intentKey = (owner: string, requestId: string) => JSON.stringify([owner, requestId]);
 
   return {
+    ...(input.remote.subscribeLedgerHead
+      ? {
+          subscribeLedgerHead: ((request, changed, failed) => {
+            const owner = account();
+            const workspaceId = request.workspaceId;
+            let stopped = false;
+            const current = () => {
+              const session = input.session();
+              return !stopped && session.status === 'authenticated' && session.user.id === owner;
+            };
+            const unsubscribe = input.remote.subscribeLedgerHead!(
+              { workspaceId },
+              (head) => {
+                if (current() && head.workspaceId === workspaceId) changed(head);
+              },
+              (error) => {
+                if (current()) failed(error);
+              }
+            );
+            return () => {
+              stopped = true;
+              unsubscribe();
+            };
+          }) satisfies NonNullable<PlatformE2eeWorkspaces['subscribeLedgerHead']>,
+        }
+      : {}),
     ...(input.remote.memberProfiles
       ? {
           memberProfiles: async (request: { workspaceId: string }) => {

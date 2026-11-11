@@ -6,6 +6,14 @@ PR review Markdown offers per-image HTTPS loading; automatic loading is a
 device-local preference, off by default. The isolated desktop image document
 keeps the main renderer's image policy unchanged. [Decision](../../../../../.agents/notes/implemented/feature/2026-11-02-pr-remote-images.md).
 
+## Ordinary member approval
+
+The join-request subscription and Better Auth's member cache have different owners.
+After approval commits, Settings refreshes the member cache immediately. The
+existing subscription's optional `membershipVersion` also refreshes it on open
+and after changes from other devices. Refreshes keep a pending change while an
+older read settles; a cache failure never reports the approval as failed.
+
 ## Agent Role summaries
 
 Role rows resolve saved model, mode and option IDs against the bound machine's
