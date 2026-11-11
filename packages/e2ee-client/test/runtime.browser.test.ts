@@ -298,6 +298,7 @@ it.each(['chromium', 'webkit'] as const)(
       });
       expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 0 });
       expect(await good(page, 'capabilities')).toEqual({
+        iroh: true,
         rpc: true,
         sharing: false,
         manager: true,
@@ -326,6 +327,23 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'refresh');
       const rpc = await good(page, 'rpc');
       expect(await good(page, 'rpc')).toEqual(rpc);
+      // Native iroh port: no connection yet, so this request uses Streams and a
+      // background dial starts; the next request uses iroh.
+      expect(await good(page, 'irohReady')).toBe(false);
+      expect(await good(page, 'irohReady')).toBe(true);
+      expect(await good(page, 'irohCall')).toEqual(['cd'.repeat(150)]);
+      const iroh = (await good(page, 'irohEvidence')) as {
+        opener: string;
+        device: string;
+        seedWiped: boolean;
+        targets: string[];
+        machine: string;
+      };
+      // The endpoint key is this device's ledger key; the dialed target is the
+      // ledger-admitted machine device, resolved from the verified ledger.
+      expect(iroh.opener).toBe(iroh.device);
+      expect(iroh.seedWiped).toBe(true);
+      expect(iroh.targets).toEqual([iroh.machine]);
       await savesSignedSchedule(page);
       expect((await raw(page, 'rotateRemote')).ok).toBe(true);
       expect(await good(page, 'refresh')).toMatchObject({
@@ -406,6 +424,14 @@ it.each(['chromium', 'webkit'] as const)(
         afterAll: false,
       });
       await good(page, 'close');
+      await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
+      await good(page, 'open');
+      // Closing while the first native open is in flight waits for it, and the late
+      // endpoint is still closed instead of keeping the device key's endpoint alive.
+      expect(await good(page, 'irohCloseDuringOpen')).toEqual({
+        beforeRelease: { closeSettled: false, closed: 0 },
+        closed: 1,
+      });
       await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
       await good(page, 'open');
       expect(await good(page, 'capabilities')).toMatchObject({ sharing: true });

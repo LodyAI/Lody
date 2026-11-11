@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "041760cfd7982cf3b7298b37cf0e668b180a216f",
+  "commit": "763403859b3bb32a1cb6bc34c16abb21a05b7323",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 041760cfd7982cf3b7298b37cf0e668b180a216f apps/mobile/ios/packages/cloud-runtime",
-  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 7f742986, catalog multi-repository projects carry `repositories` (their `projectRun` GitHub members, so a conversation can open its members' PR links in the native PR panel), the `promptShortcuts` list action accepts an optional `fresh` and the runtime caches the access directory, grants and bodies (forgotten on scope change), and the unused `publishedShares` call is removed. Dependencies and licenses unchanged."
+  "export": "git archive 763403859b3bb32a1cb6bc34c16abb21a05b7323 apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 041760cf, the catalog carries each Project group conversation's members (`projectRun`: placement order, branch, diff, publish state and the current PR per repository) and `projectGroups` returns each group's `ownerUserId`. Dependencies and licenses unchanged."
 }

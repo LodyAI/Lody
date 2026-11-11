@@ -72,6 +72,7 @@
     <string name="home_empty">No chats yet</string>
     <string name="home_projects_empty">No projects yet</string>
     <string name="home_offline">Offline</string>
+    <string name="home_connecting">Connecting…</string>
     <string name="home_syncing">Syncing…</string>
     <string name="home_connected">Connected</string>
     <string name="home_no_workspaces">No accessible workspaces</string>
@@ -754,4 +755,30 @@
     <string name="shortcuts_retry">Retry this save</string>
     <string name="shortcuts_save_unknown">Save could not be confirmed. This same save is held for a safe retry; close and refresh to edit again.</string>
     <string name="shortcuts_save_failed">The shortcut could not be saved. Check the command name, then try again.</string>
+    <plurals name="bar_group_repositories">
+        <item quantity="one">%d repo</item>
+        <item quantity="other">%d repos</item>
+    </plurals>
+    <plurals name="bar_group_pull_requests">
+        <item quantity="one">%d PR</item>
+        <item quantity="other">%d PRs</item>
+    </plurals>
+    <string name="bar_group_in_place">Original directory · not isolated</string>
+    <string name="bar_group_all_changes">All changes</string>
+    <plurals name="project_group_members">
+        <item quantity="one">%d repository or folder</item>
+        <item quantity="other">%d repositories or folders</item>
+    </plurals>
+    <string name="project_groups_header">Project groups</string>
+    <string name="project_groups_empty">No project groups in this workspace yet.</string>
+    <string name="project_groups_untitled">Untitled group</string>
+    <string name="project_groups_computer">Computer</string>
+    <string name="project_groups_owner">Created by</string>
+    <string name="project_groups_owner_you">You</string>
+    <string name="project_groups_owner_member">A workspace member</string>
+    <string name="project_groups_any_computer">Any computer</string>
+    <string name="project_groups_conflict">Folders on different computers</string>
+    <string name="project_groups_read_only">Create and edit project groups in Lody on your computer.</string>
+    <string name="project_groups_load_failed">Project groups could not be loaded.</string>
+    <string name="project_groups_stale">Showing the last list; it could not be refreshed.</string>
 </resources>

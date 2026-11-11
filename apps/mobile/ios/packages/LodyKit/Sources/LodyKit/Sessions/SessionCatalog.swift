@@ -10,6 +10,45 @@ struct SessionPullRequest: Decodable, Equatable, Sendable {
   var merge: String? = nil
 }
 
+/// One repository or folder of a Project group conversation, in placement order.
+struct SessionProjectMember: Decodable, Equatable, Sendable {
+  var id: String
+  /// Path under the conversation's directory, e.g. `api/proto`.
+  var path: String
+  /// `github` or `local`.
+  var kind: String
+  var depth = 0
+  var submodule = false
+  /// `additional` / `link`: a local folder used in place, with no branch or PR.
+  var access: String?
+  var repoFullName: String?
+  var branch: String?
+  var diff: SessionDiff?
+  var dirty: Bool?
+  var unpushed: Bool?
+  /// The member repository's current PR (the last one recorded for it).
+  var pullRequest: SessionPullRequest?
+
+  /// Web `repoFullName ?? path`.
+  var identity: String { repoFullName ?? path }
+  var inPlace: Bool { access == "additional" || access == "link" }
+}
+
+struct SessionDiff: Decodable, Equatable, Sendable {
+  var add: Int
+  var del: Int
+}
+
+/// The frozen Project group snapshot of a conversation (session meta `projectRun`).
+struct SessionProjectRun: Decodable, Equatable, Sendable {
+  var id: String
+  var name: String
+  var members: [SessionProjectMember]
+
+  /// Current PRs across members, one per repository.
+  var pullRequests: [SessionPullRequest] { members.compactMap(\.pullRequest) }
+}
+
 struct SessionItem: Equatable, Sendable {
   var id: String
   var title = ""
@@ -46,6 +85,8 @@ struct SessionItem: Equatable, Sendable {
   /// Uncommitted changes / local commits the remote lacks (the action bar's Commit & Push).
   var workspaceDirty = false
   var workspaceUnpushed = false
+  /// Present for Project group conversations.
+  var projectRun: SessionProjectRun?
 
   var activityAt: Double { lastMessageAt ?? SessionItem.parse(createdAt) }
 
@@ -61,7 +102,7 @@ extension SessionItem: Decodable {
     case id, title, status, isTabClosed, archived, pinned, projectId, createdAt, openedBySessionId, openedByRootSessionId
     case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, awaitingUserSince, branchName, baseBranch, lastModel, diff, machineId
     case cliType, agentType, resume, pullRequests, iosSimulatorPreviewRequestId, userId, agentConfigId
-    case workspaceDirty, workspaceUnpushed
+    case workspaceDirty, workspaceUnpushed, projectRun
   }
 
   private struct Model: Decodable {
@@ -105,6 +146,7 @@ extension SessionItem: Decodable {
     iosSimulatorPreviewRequestId = present(value(.iosSimulatorPreviewRequestId))
     workspaceDirty = value(.workspaceDirty) ?? false
     workspaceUnpushed = value(.workspaceUnpushed) ?? false
+    projectRun = value(.projectRun)
     modelNeverRan = values.contains(.lastModel) && ((try? values.decodeNil(forKey: .lastModel)) ?? false)
     if let model: Model = value(.lastModel) {
       modelName = [model.name, model.modelId].compactMap { $0 }.first { !$0.isEmpty } ?? ""
@@ -121,6 +163,10 @@ struct SessionProject: Decodable, Equatable, Sendable {
   var repoFullName: String?
   /// A multi-repository project's GitHub members (`projectRun`), in member order.
   var repositories: [String] = []
+  /// A Project group (`group:<id>`): its member count, from the workspace's group list.
+  var memberCount: Int?
+
+  var isGroup: Bool { id.hasPrefix("group:") }
 
   private enum CodingKeys: String, CodingKey { case id, name, rootPath, repoFullName, machineId, repositories }
 

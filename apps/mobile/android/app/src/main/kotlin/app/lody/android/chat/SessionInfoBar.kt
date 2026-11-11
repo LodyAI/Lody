@@ -1,5 +1,6 @@
 package app.lody.android.chat
 
+import app.lody.android.runtime.CatalogProjectRun
 import app.lody.android.runtime.CatalogPullRequest
 import app.lody.android.runtime.CatalogSession
 
@@ -94,6 +95,11 @@ data class SessionInfoBar(
     val removed: Int,
     /** Priority order: the first is the bar's one text button, the rest hang off its menu. */
     val actions: List<Action>,
+    /**
+     * A Project group conversation: the context lists every member with its own PR instead of one
+     * repository, and the actions apply to the whole group (iOS `SessionInfoBar.group`).
+     */
+    val group: CatalogProjectRun? = null,
 ) {
     enum class Action {
         CreatePr, CreateDraftPr, CommitAndPush, ResolveConflicts, FixCi, ReadyForReview, Merge;
@@ -102,7 +108,7 @@ data class SessionInfoBar(
         val direct: Boolean get() = this == Merge || this == ReadyForReview
     }
 
-    val hasContext: Boolean get() = repository.isNotEmpty() || branch.isNotEmpty() || added + removed > 0 || pullRequest != null
+    val hasContext: Boolean get() = group != null || repository.isNotEmpty() || branch.isNotEmpty() || added + removed > 0 || pullRequest != null
 
     val pullRequestUrl: String
         get() = pullRequest?.let { it.url ?: "https://github.com/${it.repository}/pull/${it.number}" }.orEmpty()
@@ -123,22 +129,69 @@ data class SessionInfoBar(
 
     /** The turn an action sends; empty when the action needs a PR that is gone. */
     fun prompt(action: Action, prompts: Prompts): String = when (action) {
-        Action.CreatePr -> "${prompts.createPrOrigin}\n\n${prompts.createPr}\n\n${prompts.upkeep}"
-        Action.CreateDraftPr -> "${prompts.createDraftPrOrigin}\n\n${prompts.createDraftPr}\n\n${prompts.upkeep}"
-        Action.CommitAndPush -> prompts.commitAndPush
+        Action.CreatePr -> "${prompts.createPrOrigin}\n\n${scoped("${prompts.createPr}\n\n${prompts.upkeep}")}"
+        Action.CreateDraftPr -> "${prompts.createDraftPrOrigin}\n\n${scoped("${prompts.createDraftPr}\n\n${prompts.upkeep}")}"
+        Action.CommitAndPush -> scoped(prompts.commitAndPush)
         Action.ResolveConflicts -> pullRequest?.let { prompts.resolveConflicts.format(repository, "#${it.number}", pullRequestUrl) }.orEmpty()
         Action.FixCi -> pullRequest?.let { prompts.fixCi.format(repository, it.number, pullRequestUrl, branch.ifEmpty { "-" }) }.orEmpty()
         Action.ReadyForReview, Action.Merge -> ""
     }
 
+    /** Web `withProjectGroupPrScope`: a group conversation publishes every changed member. */
+    private fun scoped(prompt: String): String = if (group == null) prompt else "$prompt\n\n$PROJECT_GROUP_SCOPE"
+
     companion object {
+        /**
+         * Web `withProjectGroupPrScope` (`packages/shared/src/pr-prompts.ts`), sent untranslated as web
+         * does: it instructs the agent rather than reading back to the user.
+         */
+        val PROJECT_GROUP_SCOPE = listOf(
+            "Project group scope:",
+            "- Apply the requested action to each member repository with changes or unpublished commits. Use the member inventory in this conversation and run Git in each member directory; the Project group directory itself is not a Git repository.",
+            "- Process submodules before their parents, recursively: commit and push each changed submodule first, then update and commit its gitlink in the parent repository and push the parent branch.",
+            "- If this action requests PRs, create or update one PR per changed repository. Open submodule PRs before parent PRs, preserve the requested draft or regular status, and link all related PRs in each PR body once their URLs are available.",
+            "- If this action only requests Commit & Push, do not open PRs. If PR upkeep was requested, apply it to each repository with a PR.",
+            "- If publishing a child fails, report the failure and do not publish a parent gitlink pointing to that unpublished commit. Report results and any PR URLs per repository.",
+        ).joinToString("\n")
+
         fun of(session: CatalogSession, repository: String, busy: Boolean): SessionInfoBar {
-            // The machine appends associations, so the last is the current PR (web `getLatestPullRequest`).
-            val pr = session.pullRequests.lastOrNull().takeIf { repository.isNotEmpty() }
+            session.projectRun?.takeIf { it.members.isNotEmpty() }?.let { run ->
+                return SessionInfoBar(
+                    "", "", null, session.diffAdded, session.diffRemoved,
+                    if (busy) emptyList() else groupActions(session, run), run,
+                )
+            }
+            // The machine appends associations; the last one for this repository is the current PR
+            // (web `selectPrimarySessionPullRequest`).
+            val pr = session.pullRequests.lastOrNull { it.repository.equals(repository, ignoreCase = true) }
+                .takeIf { repository.isNotEmpty() }
             return SessionInfoBar(
                 repository, session.branchName.orEmpty(), pr, session.diffAdded, session.diffRemoved,
                 actions(session, pr, repository, busy),
             )
+        }
+
+        /**
+         * Web keeps Create PR and Commit & Push conversation-wide for a group; PR-bound actions
+         * (merge, ready, CI, conflicts) belong to one member's PR and live on that PR's panel.
+         */
+        fun groupActions(session: CatalogSession, run: CatalogProjectRun): List<Action> {
+            val unpublished = session.workspaceDirty || session.workspaceUnpushed || run.members.any { it.dirty || it.unpushed }
+            val reported = run.members.any { it.diffAdded != null || it.dirty || it.unpushed }
+            // A changed repository without an open PR still needs one. Members used in place have no PR.
+            val needsPullRequest = if (reported) {
+                run.members.any { member ->
+                    val open = member.pullRequest?.status.let { it == "open" || it == "draft" }
+                    val changed = (member.diffAdded ?: 0) + (member.diffRemoved ?: 0) > 0 || member.dirty || member.unpushed
+                    !member.inPlace && member.repoFullName != null && changed && !open
+                }
+            } else {
+                run.pullRequests.isEmpty() && (unpublished || session.diffAdded + session.diffRemoved > 0)
+            }
+            val create = if (needsPullRequest) listOf(Action.CreatePr, Action.CreateDraftPr) else emptyList()
+            val commit = if (unpublished) listOf(Action.CommitAndPush) else emptyList()
+            // Without any PR, creating one leads; once PRs exist, unpublished work outranks the rest.
+            return if (run.pullRequests.isEmpty()) create + commit else commit + create
         }
 
         fun actions(session: CatalogSession, pr: CatalogPullRequest?, repository: String, busy: Boolean): List<Action> {

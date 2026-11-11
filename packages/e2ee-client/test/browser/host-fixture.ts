@@ -100,6 +100,21 @@ import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { LedgerFeedError } from '@lody/e2ee-core';
 import { toHex, fromHex } from '../../src/bytes';
+
+// Synthetic native iroh port: records what the portable host hands it.
+const irohFixture = {
+  openedKey: undefined as string | undefined,
+  handedSeed: undefined as Uint8Array | undefined,
+  targets: [] as string[],
+  connected: false,
+  requests: [] as string[],
+  machine: undefined as string | undefined,
+  // Explicit signals for holding the native open in flight.
+  gate: undefined as Promise<void> | undefined,
+  release: undefined as (() => void) | undefined,
+  entered: undefined as (() => void) | undefined,
+  closed: 0,
+};
 import {
   decodeMemberKeyPackage,
   emailMemberRequestId,
@@ -715,6 +730,50 @@ export async function boot(
           }),
         rpc: (binding) =>
           indexedDbClientRpcOriginals({ databaseName: `${databasePrefix}-custody`, binding, mode }),
+        iroh: {
+          open: async (seed) => {
+            irohFixture.entered?.();
+            if (irohFixture.gate) await irohFixture.gate;
+            // Derive the public key the native endpoint would use from this exact seed.
+            irohFixture.openedKey = await Effect.runPromise(
+              Effect.scoped(
+                Effect.map(
+                  importBrowserDevice({
+                    signingPrivate: new Uint8Array(seed),
+                    encryptionPrivate: new Uint8Array(32).fill(7),
+                  }),
+                  (derived) => toHex(derived.publicKey.toBytes())
+                )
+              )
+            );
+            irohFixture.handedSeed = seed;
+            return {
+              hasConnection: async (id) => {
+                irohFixture.targets.push(id);
+                return irohFixture.connected;
+              },
+              warm: async () => {
+                irohFixture.connected = true;
+              },
+              call: async (_id, request) => {
+                irohFixture.requests.push(new TextDecoder().decode(request));
+                const envelope = JSON.parse(new TextDecoder().decode(request)) as { id: string };
+                const replies = [
+                  new TextEncoder().encode(
+                    JSON.stringify({ id: envelope.id, frame: 'cd'.repeat(150) })
+                  ),
+                ];
+                return {
+                  nextReply: async () => replies.shift() ?? null,
+                  cancel: () => {},
+                };
+              },
+              close: async () => {
+                irohFixture.closed++;
+              },
+            };
+          },
+        },
         drainOld: () => (session ? session.close() : Effect.void),
       });
       const remote = PersonalHostRemote.of({
@@ -1317,6 +1376,8 @@ export async function invoke(action: string) {
             );
             records.push(yield* signLedgerRecord(proposal, owner));
             retain();
+            if (machineId === 'fixture-machine')
+              irohFixture.machine = toHex(machine.publicKey.toBytes());
             return true;
           }
           case 'rpc':
@@ -1908,8 +1969,53 @@ export async function runtimeInvoke(action: string) {
       case 'ledger':
         value = await runtime.ledgerView(offer.workspaceId);
         break;
+      case 'irohReady':
+        value = await runtime.irohReady!(offer.workspaceId, 'fixture-machine');
+        break;
+      case 'irohCall':
+        value = await runtime.irohCall!(
+          offer.workspaceId,
+          'fixture-machine',
+          { id: '11'.repeat(16), frame: 'ab'.repeat(200) },
+          1000
+        );
+        break;
+      case 'irohCloseDuringOpen': {
+        // Session closes while the first native open is still in flight.
+        irohFixture.closed = 0;
+        irohFixture.gate = new Promise((resolve) => (irohFixture.release = resolve));
+        const entered = new Promise<void>((resolve) => (irohFixture.entered = resolve));
+        const ready = runtime.irohReady!(offer.workspaceId, 'fixture-machine').then(
+          () => 'ready',
+          () => 'failed'
+        );
+        await entered;
+        let closeSettled = false;
+        const closing = runtime
+          .close(offer.workspaceId, 'account', runtimeLease)
+          .finally(() => (closeSettled = true));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const beforeRelease = { closeSettled, closed: irohFixture.closed };
+        irohFixture.release!();
+        await closing;
+        await ready;
+        irohFixture.gate = undefined;
+        irohFixture.entered = undefined;
+        value = { beforeRelease, closed: irohFixture.closed };
+        break;
+      }
+      case 'irohEvidence':
+        value = {
+          opener: irohFixture.openedKey,
+          device: (await runtime.status(offer.workspaceId)).signingPublicKey,
+          seedWiped: !!irohFixture.handedSeed?.every((byte) => byte === 0),
+          targets: [...new Set(irohFixture.targets)],
+          machine: irohFixture.machine,
+        };
+        break;
       case 'capabilities':
         value = {
+          iroh: !!runtime.irohReady && !!runtime.irohCall,
           rpc: !!runtime.prepareDispatch,
           sharing: !!runtime.readMachineSharing,
           manager: !!runtime.managementState,
