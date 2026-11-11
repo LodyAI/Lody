@@ -181,4 +181,20 @@ void test('launcher commands come from main configuration and custom changes req
     exports.resolvePathLauncher({ ...request, launcherId: 'custom:editor' }).command.command,
     'code-insiders'
   )
+  // Replacing renderer preferences repeatedly cannot permanently exhaust main's store.
+  answer = 1
+  for (let index = 0; index < 21; index++) {
+    const next = { ...custom, id: `replacement-${index}` }
+    assert.equal((await exports.approvePathLauncher(next, owner)).approved, true)
+  }
+  assert.equal(launchers.length, 20)
+  assert.equal(
+    exports.resolvePathLauncher({ ...request, launcherId: 'custom:replacement-0' }),
+    null
+  )
+  assert.equal(
+    exports.resolvePathLauncher({ ...request, launcherId: 'custom:replacement-20' }).command
+      .command,
+    'code-insiders'
+  )
 })

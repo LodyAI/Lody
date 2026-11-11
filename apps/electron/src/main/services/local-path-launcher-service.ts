@@ -371,7 +371,8 @@ export async function approvePathLauncher(
   })
   if (result.response !== 1 || owner.isDestroyed()) return { approved: false }
   const launchers = launcherStore.get('launchers').filter((item) => item.id !== candidate.id)
-  if (launchers.length >= 20) return { approved: false }
-  launcherStore.set('launchers', [...launchers, candidate])
+  // Renderer preferences can delete old ids; obsolete approvals must not fill
+  // the native store forever and prevent a newly approved launcher from working.
+  launcherStore.set('launchers', [...launchers.slice(-19), candidate])
   return { approved: true }
 }
