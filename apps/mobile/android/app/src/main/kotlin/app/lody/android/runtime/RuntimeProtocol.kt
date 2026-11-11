@@ -151,6 +151,31 @@ internal object RuntimeProtocol {
         )
     }
 
+    /** Upstream `listDir`, leniently: malformed entries are dropped, folders first, then by name. */
+    fun directory(json: JSONObject): DirectoryListing {
+        val array = json.optJSONArray("entries") ?: throw IllegalArgumentException("invalid_directory")
+        val entries = (0 until array.length()).mapNotNull { index ->
+            val entry = array.optJSONObject(index) ?: return@mapNotNull null
+            val name = entry.optString("name")
+            val type = entry.optString("type")
+            if (name.isBlank() || name == "." || name == ".." || '/' in name || type !in setOf("file", "directory")) null
+            else DirectoryEntry(name, type == "directory")
+        }.sortedWith(compareBy<DirectoryEntry> { !it.directory }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        return DirectoryListing(entries, json.optBoolean("truncated"))
+    }
+
+    /** Upstream `readFile`: text, binary (contents not kept), or the computer's error code. */
+    fun file(json: JSONObject, requested: String): FileContent {
+        val path = json.optString("path").ifBlank { requested }
+        val bytes = (json.opt("bytes") as? Number)?.toLong() ?: 0L
+        return when {
+            json.optString("status") != "ok" -> FileContent.Failed(path, json.optString("code").ifBlank { "read_failed" })
+            json.optString("kind") == "text" && json.has("text") -> FileContent.Text(path, json.optString("text"), bytes)
+            json.optString("kind") == "binary" -> FileContent.Binary(path, bytes)
+            else -> FileContent.Failed(path, "read_failed")
+        }
+    }
+
     /** Upstream `itemDetail` blocks (`terminal_command` / `terminal_output` / `diff` / `text` / …), leniently. */
     fun detail(json: JSONObject): StepDetail {
         val blocks = json.optJSONArray("blocks")?.objects().orEmpty().mapNotNull { block ->

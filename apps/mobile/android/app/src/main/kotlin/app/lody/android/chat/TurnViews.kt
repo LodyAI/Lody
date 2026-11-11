@@ -763,11 +763,11 @@ private fun DiffLineRow(line: LineDiff.Line, style: androidx.compose.ui.text.Tex
     }
 }
 
-private enum class Segment { Only, First, Middle, Last }
+internal enum class Segment { Only, First, Middle, Last }
 
 /** One row's slice of the task card: rounded only where the card starts or ends, ruled between rows. */
 @Composable
-private fun Modifier.cardSegment(segment: Segment): Modifier {
+internal fun Modifier.cardSegment(segment: Segment): Modifier {
     val colors = LodyTheme.colors
     val radius = LodySpacing.md
     val shape = when (segment) {

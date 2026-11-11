@@ -140,6 +140,8 @@ import type {
   SessionHistoryWriteResponse,
   FilePreviewV3Request,
   FilePreviewV3Response,
+  SessionDirectoryListRequest,
+  SessionDirectoryListResponse,
 } from '@lody/shared';
 import {
   AgentConfigIdSchema,
@@ -151,6 +153,7 @@ import {
   FilePreviewV3ErrorCodeSchema,
   FilePreviewV3ErrorSchema,
   FilePreviewV3ResponseSchema,
+  SessionDirectoryListResponseSchema,
   deriveCodeCollabV2ContentKeyBytes,
   deriveCodeCollabV2ContentKeyId,
   LocalProjectControlRequestSchema,
@@ -314,6 +317,8 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   // plain read and must never activate Code Collab on the machine.
   'file/preview',
   'file/download-chunk',
+  // One folder of the session's own workspace; same envelope and owner check as file/preview.
+  'file/list-dir',
   'session/cancel',
   'session/live-status',
   'session/withdraw-input',
@@ -616,6 +621,11 @@ export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
   params: CodeCollabV2RpcContentEnvelopeSchema,
 }).strict();
 
+export const LoroFileListDirRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('file/list-dir'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
 /**
  * Methods whose params/results travel inside the encrypted owner-session
  * envelope. Every encrypt, decrypt, and error-decode site must consult this —
@@ -627,6 +637,7 @@ export const isOwnerScopedEncryptedRpcMethod = (method: string): boolean =>
   method === 'session/automation-control' ||
   method === 'file/preview' ||
   method === 'file/download-chunk' ||
+  method === 'file/list-dir' ||
   method === 'session/history-read' ||
   method === 'session/history-watch' ||
   method === 'session/history-write';
@@ -900,6 +911,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroCodeCollabV2LspReferencesRpcRequestSchema,
   LoroFilePreviewRpcRequestSchema,
   LoroFileDownloadRpcRequestSchema,
+  LoroFileListDirRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
   LoroSessionWithdrawInputRpcRequestSchema,
@@ -1747,6 +1759,7 @@ export type LoroMachineRpcResult =
   | CodeCollabV2Error
   | FilePreviewV3Response
   | FileDownloadResponse
+  | SessionDirectoryListResponse
   | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
@@ -2079,7 +2092,7 @@ const toLegacyRpcErrorResponse = (
     return parsed.success ? parsed.data : { status: 'error', code: 'transient_io' };
   }
 
-  if (method === 'file/preview') {
+  if (method === 'file/preview' || method === 'file/list-dir') {
     const parsedData = FilePreviewV3ErrorSchema.safeParse(error.data);
     if (parsedData.success) {
       return {
@@ -2328,6 +2341,10 @@ const parseRpcSuccessResult = async (
     if (response.method === 'file/preview') {
       const previewParsed = FilePreviewV3ResponseSchema.safeParse(decrypted);
       return previewParsed.success ? previewParsed.data : null;
+    }
+    if (response.method === 'file/list-dir') {
+      const listParsed = SessionDirectoryListResponseSchema.safeParse(decrypted);
+      return listParsed.success ? listParsed.data : null;
     }
     if (
       response.method === 'code-collab/open-diff-manifest' ||
@@ -3627,6 +3644,26 @@ export class LoroStreamsMachineRpcClient {
     })) as FileDownloadResponse | null;
   }
 
+  /** One folder of the session's own workspace (capability `sessionDirectoryListing`). */
+  async requestSessionDirectoryList(
+    options: Omit<SessionDirectoryListRequest, 'v'> & {
+      ownerSessionId?: string;
+      timeoutMs?: number;
+    }
+  ): Promise<SessionDirectoryListResponse | null> {
+    return (await this.sendRequest({
+      method: 'file/list-dir',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      ownerSessionId: options.ownerSessionId ?? options.sessionId,
+      params: {
+        v: FILE_PREVIEW_PROTOCOL_VERSION,
+        sessionId: options.sessionId,
+        path: options.path,
+        ...(options.limit === undefined ? {} : { limit: options.limit }),
+      },
+    })) as SessionDirectoryListResponse | null;
+  }
+
   async requestFilePreview(
     options: Omit<FilePreviewV3Request, 'v'> & { ownerSessionId?: string; timeoutMs?: number }
   ): Promise<FilePreviewV3Response | null> {
@@ -4282,6 +4319,12 @@ export class LoroStreamsMachineRpcClient {
           params: FilePreviewV3Request;
         }
       | {
+          method: 'file/list-dir';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: SessionDirectoryListRequest;
+        }
+      | {
           method: 'session/automation-control';
           timeoutMs: number;
           ownerSessionId: string;
@@ -4389,6 +4432,7 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/lsp-references' ||
       args.method === 'file/preview' ||
       args.method === 'file/download-chunk' ||
+      args.method === 'file/list-dir' ||
       args.method === 'session/history-read' ||
       args.method === 'session/history-watch' ||
       args.method === 'session/automation-control' ||
@@ -4693,6 +4737,7 @@ export class LoroStreamsMachineRpcClient {
           break;
         case 'file/download-chunk':
         case 'file/preview':
+        case 'file/list-dir':
           request = {
             ...envelope,
             method: args.method,

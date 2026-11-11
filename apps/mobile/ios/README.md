@@ -255,6 +255,7 @@ them yet.
 - **Turn Changes Overview**: Automatically summarizes file changes for each conversation turn, with one-tap access to all modified files.
 - **Word-Level Diff Highlighting**: File, workspace and tool-detail diffs render natively in LodyKit.
 - **Remote Workspace File Tree**: Browse project directories and files on remote Macs or servers at any time, with previews via native code view `LodyCodeView` or system Quick Look.
+- **Project Files from More**: a live conversation in a local project offers Project Files in its More menu (`SessionController.openProjectFiles`). `FilesController` lists folders through runtime `listDir`, which lists the conversation's own folder (its worktree when it has one) with the machine's `file/list-dir`, or the local project's folder on machines without the `sessionDirectoryListing` capability; a file opens in `FileContentController` through `readFile`, which renders Markdown with a Source toggle and opens relative Markdown links in place. Android mirrors this in `chat/ProjectFiles.kt` ([Android README](../android/README.md#project-files)).
 
 ### Live Preview & Simulator Streaming
 
