@@ -128,7 +128,29 @@ data class CatalogSession(
     val isTabClosed: Boolean = false,
     val workspaceDirty: Boolean = false,
     val workspaceUnpushed: Boolean = false,
+    /** Present for Project group conversations. */
+    val projectRun: CatalogProjectRun? = null,
 )
+/** One repository or folder of a Project group conversation, in placement order (iOS `SessionProjectMember`). */
+data class CatalogProjectMember(
+    val id: String, val path: String, val kind: String, val depth: Int = 0, val submodule: Boolean = false,
+    /** `additional` / `link`: a local folder used in place, with no branch or PR. */
+    val access: String? = null,
+    val repoFullName: String? = null, val branch: String? = null,
+    val diffAdded: Int? = null, val diffRemoved: Int? = null,
+    val dirty: Boolean = false, val unpushed: Boolean = false,
+    /** The member repository's current PR: the last one recorded for it. */
+    val pullRequest: CatalogPullRequest? = null,
+) {
+    /** Web `repoFullName ?? path`. */
+    val identity: String get() = repoFullName ?: path
+    val inPlace: Boolean get() = access == "additional" || access == "link"
+}
+/** The frozen Project group snapshot of a conversation (session meta `projectRun`). */
+data class CatalogProjectRun(val id: String, val name: String, val members: List<CatalogProjectMember>) {
+    /** Current PRs across members, one per repository. */
+    val pullRequests: List<CatalogPullRequest> get() = members.mapNotNull { it.pullRequest }
+}
 /** Read projection, never a CRDT replica. Optional feature-specific fields come later. */
 /** [machineNames] is optional display data (computer id to name); empty from older caches. */
 data class CatalogSnapshot(
@@ -357,5 +379,14 @@ data class MentionCatalogPage(val items: List<MentionCandidate>, val truncated: 
  * together in one conversation. [machineId] is the computer its local members pin (null: any);
  * [conflict] groups (local members on two computers) cannot start one.
  */
-data class ProjectGroup(val id: String, val name: String, val machineId: String?, val conflict: Boolean, val members: List<String>)
+/** A workspace Project group (multi-repository project); only [ownerUserId] may edit it, on desktop. */
+data class ProjectGroup(
+    val id: String, val name: String, val machineId: String?, val conflict: Boolean, val members: List<ProjectGroupMember>,
+    val ownerUserId: String = "",
+)
+/** [kind] is `github` or `local`; [label] is the repository or the local project's name. */
+data class ProjectGroupMember(
+    val id: String, val kind: String, val label: String, val path: String,
+    val repoFullName: String? = null, val machineId: String? = null,
+)
 

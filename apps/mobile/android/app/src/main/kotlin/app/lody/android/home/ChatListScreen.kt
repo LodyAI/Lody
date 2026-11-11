@@ -222,6 +222,7 @@ fun ChatListScreen(
     var rolesOpen by rememberSaveable(scope) { mutableStateOf(false) }
     var shortcutsOpen by rememberSaveable(scope) { mutableStateOf(false) }
     var githubOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var projectsOpen by rememberSaveable(scope) { mutableStateOf(false) }
     val deferredMessage = stringResource(R.string.settings_deferred)
     var scheduleEditor by rememberSaveable(scope) { mutableStateOf<String?>(null) }
     LaunchedEffect(tab, scheduleList, state.sync) {
@@ -254,6 +255,10 @@ fun ChatListScreen(
     }
     if (githubOpen) {
         GitHubSettingsScreen(githubSettings, scope, onBack = { githubOpen = false })
+        return
+    }
+    if (projectsOpen) {
+        ProjectGroupsScreen(state, creation, scope, onBack = { projectsOpen = false })
         return
     }
     if (rolesOpen) {
@@ -338,7 +343,7 @@ fun ChatListScreen(
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
             )
-            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onGitHub = { githubOpen = true }, onDeferred = { notice(deferredMessage) })
+            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onGitHub = { githubOpen = true }, onProjects = { projectsOpen = true }, onDeferred = { notice(deferredMessage) })
         }
     }
     }

@@ -34,7 +34,43 @@ object CatalogJson {
         diffRemoved = json.optJSONObject("diff")?.optCount("del") ?: 0,
         workspaceDirty = json.opt("workspaceDirty") == true,
         workspaceUnpushed = json.opt("workspaceUnpushed") == true,
+        projectRun = json.optJSONObject("projectRun")?.let(::projectRun),
     )
+
+    /** A Project group snapshot; a member without an id or path is skipped, never the session. */
+    private fun projectRun(json: JSONObject): CatalogProjectRun? {
+        val id = json.optText("id") ?: return null
+        val members = json.optJSONArray("members") ?: JSONArray()
+        return CatalogProjectRun(id, json.optText("name").orEmpty(), (0 until members.length()).mapNotNull { index ->
+            val member = members.optJSONObject(index) ?: return@mapNotNull null
+            val memberId = member.optText("id") ?: return@mapNotNull null
+            val path = member.optText("path") ?: return@mapNotNull null
+            val diff = member.optJSONObject("diff")
+            CatalogProjectMember(
+                memberId, path, member.optText("kind") ?: "github", member.optCount("depth") ?: 0, member.opt("submodule") == true,
+                member.optText("access"), member.optText("repoFullName"), member.optText("branch"),
+                diff?.optCount("add"), diff?.optCount("del"),
+                member.opt("dirty") == true, member.opt("unpushed") == true,
+                member.optJSONObject("pullRequest")?.let(::pullRequest),
+            )
+        })
+    }
+
+    private fun putProjectRun(run: CatalogProjectRun): JSONObject = JSONObject().put("id", run.id).put("name", run.name)
+        .put("members", JSONArray(run.members.map { member ->
+            JSONObject().put("id", member.id).put("path", member.path).put("kind", member.kind)
+                .put("depth", member.depth).put("submodule", member.submodule).apply {
+                    member.access?.let { put("access", it) }
+                    member.repoFullName?.let { put("repoFullName", it) }
+                    member.branch?.let { put("branch", it) }
+                    if (member.diffAdded != null && member.diffRemoved != null) {
+                        put("diff", JSONObject().put("add", member.diffAdded).put("del", member.diffRemoved))
+                    }
+                    if (member.dirty) put("dirty", true)
+                    if (member.unpushed) put("unpushed", true)
+                    member.pullRequest?.let { put("pullRequest", putPullRequest(it)) }
+                }
+        }))
 
     /** Optional `machineNames` object; non-string or empty names are skipped. */
     fun machineNames(json: JSONObject): Map<String, String> = stringMap(json, "machineNames")
@@ -68,18 +104,20 @@ object CatalogJson {
         session.lastReadAt?.let { put("lastReadAt", it) }
         session.awaitingUserSince?.let { put("awaitingUserSince", it) }
         if (session.pullRequests.isNotEmpty()) {
-            put("pullRequests", JSONArray(session.pullRequests.map { pr ->
-                JSONObject().put("repository", pr.repository).put("number", pr.number).put("status", pr.status).apply {
-                    pr.ci?.let { put("ci", it) }
-                    pr.url?.let { put("url", it) }
-                    pr.merge?.let { put("merge", it) }
-                }
-            }))
+            put("pullRequests", JSONArray(session.pullRequests.map(::putPullRequest)))
         }
+        session.projectRun?.let { put("projectRun", putProjectRun(it)) }
         if (session.diffAdded > 0 || session.diffRemoved > 0) put("diff", JSONObject().put("add", session.diffAdded).put("del", session.diffRemoved))
         if (session.workspaceDirty) put("workspaceDirty", true)
         if (session.workspaceUnpushed) put("workspaceUnpushed", true)
     }
+
+    private fun putPullRequest(pr: CatalogPullRequest): JSONObject =
+        JSONObject().put("repository", pr.repository).put("number", pr.number).put("status", pr.status).apply {
+            pr.ci?.let { put("ci", it) }
+            pr.url?.let { put("url", it) }
+            pr.merge?.let { put("merge", it) }
+        }
 
     private fun pullRequest(json: JSONObject): CatalogPullRequest? {
         val repository = json.optText("repository") ?: return null

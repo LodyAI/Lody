@@ -139,7 +139,7 @@ export const LocalProjectsResult = z
   ])
   .meta({ id: 'LocalProjectsResult' });
 
-/** The workspace's multi-repository projects (web Project groups), for the new-chat picker. */
+/** The workspace's multi-repository projects (web Project groups): the new-chat picker, Projects and Settings. */
 export const ProjectGroupsParams = z
   .object({ workspaceId: z.string().min(1), userId: z.string() })
   .meta({ id: 'ProjectGroupsParams' });
@@ -148,6 +148,8 @@ export const ProjectGroupItem = z
   .object({
     id: z.string().min(1),
     name: z.string(),
+    /** Its creator; only they can edit or delete it. */
+    ownerUserId: z.string(),
     /** The machine its local members pin; null when it runs anywhere. */
     machineId: z.string().nullable(),
     /** Local members on different machines: it cannot start a conversation. */

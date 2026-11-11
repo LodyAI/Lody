@@ -157,11 +157,6 @@
       "result": "PromptShortcutsResult",
       "timeoutMs": 130000
     },
-    "publishedShares": {
-      "params": "PublishedSharesParams",
-      "result": "PublishedSharesResult",
-      "timeoutMs": 70000
-    },
     "readFile": {
       "params": "ReadFileParams",
       "result": "FileContent",
@@ -2301,6 +2296,7 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string" },
+        "ownerUserId": { "type": "string" },
         "machineId": { "type": ["string", "null"] },
         "conflict": { "type": "boolean" },
         "members": {
@@ -2321,7 +2317,14 @@
           }
         }
       },
-      "required": ["id", "name", "machineId", "conflict", "members"]
+      "required": [
+        "id",
+        "name",
+        "ownerUserId",
+        "machineId",
+        "conflict",
+        "members"
+      ]
     },
     "ProjectGroupsParams": {
       "type": "object",
@@ -2487,7 +2490,8 @@
           "properties": {
             "workspaceId": { "type": "string", "minLength": 1 },
             "userId": { "type": "string" },
-            "action": { "type": "string", "const": "list" }
+            "action": { "type": "string", "const": "list" },
+            "fresh": { "type": "boolean" }
           },
           "required": ["workspaceId", "userId", "action"]
         },
@@ -2888,198 +2892,6 @@
         }
       },
       "required": ["configOptionValues"]
-    },
-    "PublishedSharesParams": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "list" },
-            "cursor": { "type": "string" }
-          },
-          "required": ["workspaceId", "userId", "action"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "shareId": { "type": "string", "minLength": 1 },
-            "rootSessionId": { "type": "string", "minLength": 1 },
-            "expectedRevision": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "detail" }
-          },
-          "required": [
-            "workspaceId",
-            "shareId",
-            "rootSessionId",
-            "userId",
-            "action"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "shareId": { "type": "string", "minLength": 1 },
-            "rootSessionId": { "type": "string", "minLength": 1 },
-            "expectedRevision": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "copy" }
-          },
-          "required": [
-            "workspaceId",
-            "shareId",
-            "rootSessionId",
-            "userId",
-            "action"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "shareId": { "type": "string", "minLength": 1 },
-            "rootSessionId": { "type": "string", "minLength": 1 },
-            "expectedRevision": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "open" }
-          },
-          "required": [
-            "workspaceId",
-            "shareId",
-            "rootSessionId",
-            "userId",
-            "action"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "shareId": { "type": "string", "minLength": 1 },
-            "rootSessionId": { "type": "string", "minLength": 1 },
-            "expectedRevision": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "userId": { "type": "string" },
-            "action": { "type": "string", "const": "revoke" }
-          },
-          "required": [
-            "workspaceId",
-            "shareId",
-            "rootSessionId",
-            "userId",
-            "action"
-          ]
-        }
-      ]
-    },
-    "PublishedSharesResult": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "outcome": { "type": "string", "const": "page" },
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "userId": { "type": "string", "minLength": 1 },
-            "page": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "shareId": { "type": "string", "minLength": 1 },
-                  "rootSessionId": { "type": "string", "minLength": 1 },
-                  "publisherUserId": { "type": "string", "minLength": 1 },
-                  "status": { "type": "string", "enum": ["active", "revoked"] },
-                  "title": { "type": "string" },
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "credentialVersion": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "createdAt": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "updatedAt": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "totalBytes": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "conversationCount": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "canManage": { "type": "boolean" },
-                  "canRevoke": { "type": "boolean" },
-                  "hasLocalLink": { "type": "boolean" }
-                },
-                "required": [
-                  "shareId",
-                  "rootSessionId",
-                  "publisherUserId",
-                  "status",
-                  "title",
-                  "revision",
-                  "credentialVersion",
-                  "createdAt",
-                  "updatedAt",
-                  "canManage",
-                  "canRevoke",
-                  "hasLocalLink"
-                ]
-              }
-            },
-            "isDone": { "type": "boolean" },
-            "continueCursor": { "type": "string" }
-          },
-          "required": [
-            "outcome",
-            "workspaceId",
-            "userId",
-            "page",
-            "isDone",
-            "continueCursor"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "outcome": { "type": "string", "const": "failed" },
-            "error": { "type": "string", "minLength": 1 }
-          },
-          "required": ["outcome", "error"]
-        }
-      ]
     },
     "QuotaReason": {
       "type": "string",
@@ -3994,107 +3806,6 @@
                 }
               },
               "required": ["intent"]
-            }
-          },
-          "required": ["workspaceId", "operation", "args"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "operation": { "type": "string", "const": "management" },
-            "args": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "action": { "type": "string", "const": "list" },
-                    "cursor": { "type": ["string", "null"] }
-                  },
-                  "required": ["workspaceId", "action", "cursor"]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "shareId": { "type": "string", "minLength": 1 },
-                    "rootSessionId": { "type": "string", "minLength": 1 },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "action": { "type": "string", "const": "detail" }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "shareId",
-                    "rootSessionId",
-                    "action"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "shareId": { "type": "string", "minLength": 1 },
-                    "rootSessionId": { "type": "string", "minLength": 1 },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "action": { "type": "string", "const": "copy" }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "shareId",
-                    "rootSessionId",
-                    "action"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "shareId": { "type": "string", "minLength": 1 },
-                    "rootSessionId": { "type": "string", "minLength": 1 },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "action": { "type": "string", "const": "open" }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "shareId",
-                    "rootSessionId",
-                    "action"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "workspaceId": { "type": "string", "minLength": 1 },
-                    "shareId": { "type": "string", "minLength": 1 },
-                    "rootSessionId": { "type": "string", "minLength": 1 },
-                    "expectedRevision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "action": { "type": "string", "const": "revoke" }
-                  },
-                  "required": [
-                    "workspaceId",
-                    "shareId",
-                    "rootSessionId",
-                    "action"
-                  ]
-                }
-              ]
             }
           },
           "required": ["workspaceId", "operation", "args"]
