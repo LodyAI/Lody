@@ -98,6 +98,11 @@ export function MachineBatchUpdateDialog({
   const [nowMs, setNowMs] = useState(() => Date.now());
   const machinesRef = useRef(machines);
   machinesRef.current = machines;
+  // Parents rebuild the probe as presence and sessions change; only `open` may
+  // reset the run, so effects read the latest probe through a ref.
+  const probeRef = useRef(probe);
+  probeRef.current = probe;
+  const probesInFlight = useRef(new Set<string>());
 
   // Probe each owned online machine's lifecycle capability when the dialog opens.
   useEffect(() => {
@@ -110,7 +115,7 @@ export function MachineBatchUpdateDialog({
     setProbing(true);
     void Promise.all(
       targets.map(async (machine) => {
-        const result = await probe(machine.id).catch(() => ({ lifecycle: null }));
+        const result = await probeRef.current(machine.id).catch(() => ({ lifecycle: null }));
         return [machine.id, result.lifecycle] as const;
       })
     ).then((entries) => {
@@ -121,7 +126,7 @@ export function MachineBatchUpdateDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, probe]);
+  }, [open]);
 
   const plan = useMemo(
     () =>
@@ -185,13 +190,16 @@ export function MachineBatchUpdateDialog({
   });
   const pendingKey = pending.join(',');
   useEffect(() => {
-    if (step !== 'running' || pendingKey === '') return undefined;
+    if (!open || step !== 'running' || pendingKey === '') return undefined;
     const timer = setInterval(() => {
       setNowMs(Date.now());
       for (const machineId of pendingKey.split(',')) {
         const machine = machinesRef.current.find((entry) => entry.id === machineId);
-        if (!machine?.isOnline) continue;
-        void probe(machineId)
+        if (!machine?.isOnline || probesInFlight.current.has(machineId)) continue;
+        probesInFlight.current.add(machineId);
+        void probeRef
+          .current(machineId)
+          .finally(() => probesInFlight.current.delete(machineId))
           .then((result) => {
             const phase = result.update?.phase;
             if (!phase || phase === 'unconfirmed') return;
@@ -205,7 +213,7 @@ export function MachineBatchUpdateDialog({
       }
     }, 3000);
     return () => clearInterval(timer);
-  }, [pendingKey, probe, step]);
+  }, [open, pendingKey, step]);
 
   const start = useCallback(() => {
     setStep('running');

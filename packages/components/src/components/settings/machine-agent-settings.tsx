@@ -99,6 +99,7 @@ import {
   type BatchUpdateMachine,
   type BatchUpdateProbe,
 } from './machine-batch-update-dialog';
+import { batchUpgradeOptions } from '@/lib/machine-batch-update';
 import {
   MachineConnectedResources,
   type MachineConnectedProject,
@@ -1227,9 +1228,17 @@ export function MachineAgentSettings({
   );
   const requestBatchUpgrade = useCallback(
     async (machineId: string, target: string, policy: 'when-idle' | 'immediate') => {
-      await upgradeMachine(machineId as MachineId, target, policy);
+      const releaseChannel = collectClientBuildInfo().releaseChannel;
+      const channel =
+        releaseChannel === 'nightly' ? 'nightly' : releaseChannel === 'staging' ? 'next' : 'stable';
+      await requestMachineLifecycle({
+        machineId: machineId as MachineId,
+        action: 'upgrade',
+        targetVersion: target,
+        upgrade: batchUpgradeOptions(channel, policy),
+      });
     },
-    [upgradeMachine]
+    [requestMachineLifecycle]
   );
 
   const handleRefreshConfig = useCallback(

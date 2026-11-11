@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MachineLifecycleCapability } from '@lody/shared';
 import {
   BATCH_SWITCH_TIMEOUT_MS,
+  batchUpgradeOptions,
   deriveBatchRowStatus,
   planMachineBatchUpdate,
   type BatchMachineInput,
@@ -130,5 +131,17 @@ describe('per-machine progress after the request is accepted', () => {
     expect(
       deriveBatchRowStatus({ ...base, request: 'failed', error: 'expired', isOnline: true })
     ).toEqual({ kind: 'request-failed', error: 'expired' });
+  });
+});
+
+describe('one-click update never moves a machine across channels or backwards', () => {
+  it('signs the client channel without confirming a channel change or downgrade', () => {
+    expect(batchUpgradeOptions('next', 'immediate')).toEqual({
+      protocol: 1,
+      channel: 'next',
+      switchPolicy: 'immediate',
+      confirmChannelChange: false,
+      confirmDowngrade: false,
+    });
   });
 });

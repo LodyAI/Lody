@@ -1,4 +1,8 @@
-import type { MachineLifecycleCapability, ManagedDaemonUpdateStatus } from '@lody/shared';
+import type {
+  MachineLifecycleCapability,
+  ManagedDaemonUpgradeOptions,
+  ManagedDaemonUpdateStatus,
+} from '@lody/shared';
 import { isCliVersionOutdated } from './machine-lifecycle-api';
 
 /**
@@ -110,4 +114,21 @@ export function deriveBatchRowStatus(input: {
     return { kind: 'switching' };
   }
   return { kind: 'waiting-idle' };
+}
+
+/**
+ * Batch requests never confirm a channel change or a downgrade: a machine on
+ * another channel, or already ahead, refuses the request and keeps running.
+ */
+export function batchUpgradeOptions(
+  channel: ManagedDaemonUpgradeOptions['channel'],
+  switchPolicy: ManagedDaemonUpgradeOptions['switchPolicy']
+): ManagedDaemonUpgradeOptions {
+  return {
+    protocol: 1,
+    channel,
+    switchPolicy,
+    confirmChannelChange: false,
+    confirmDowngrade: false,
+  };
 }
