@@ -1010,9 +1010,19 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         withSession(id, (session) =>
           Effect.gen(function* () {
             if (!/^[0-9a-f]{32}$/.test(membership)) return yield* fail('invalid-input');
-            const result = yield* session.removeMember(
-              Result.getOrThrow(Bytes.membershipId(fromHex(membership)))
-            );
+            const membershipId = Result.getOrThrow(Bytes.membershipId(fromHex(membership)));
+            const state = (yield* session.ledgerState()).view.inspectState();
+            const self = state.devices.get(toHex(session.binding.device.toBytes()));
+            // Core lets only the owner remove a member and publish the next epoch in one
+            // record. An administrator removes the member plainly, as desktop does; that
+            // marks the epoch for rotation, which an administrator may then publish.
+            if (self && state.members.get(toHex(self.membershipId.toBytes()))?.role !== 'owner') {
+              if (!state.capabilities.includes(1))
+                yield* finish(session, { _tag: 'DeclareCapabilities', capabilities: [1] });
+              yield* finish(session, { _tag: 'RemoveMember', membershipId });
+              return undefined;
+            }
+            const result = yield* session.removeMember(membershipId);
             yield* session.refresh();
             yield* session.acknowledgeRotation(result);
             if (result.outcome !== 'Committed') return yield* fail('conflict');
