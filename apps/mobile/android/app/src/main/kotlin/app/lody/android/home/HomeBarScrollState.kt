@@ -9,4 +9,9 @@ internal class HomeBarScrollState {
         if (offset <= 1f) collapsed = false
         else if (scrolling && offset > threshold) collapsed = true
     }
+
+    /** Tapping the compact bar restores it; the next downward scroll may collapse it again. */
+    fun expand() {
+        collapsed = false
+    }
 }

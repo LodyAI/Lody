@@ -129,6 +129,7 @@ export function E2eeWorkspaceConsole({
     if (presentation === 'page') clearWorkspace({ slug: null, workspaceId: null });
   }, [clearWorkspace, presentation]);
   const [generation, setGeneration] = useState(0);
+  const [directoryRevision, setDirectoryRevision] = useState(0);
   // The joining device starts on the approval guide; details reveal the full ledger page.
   const [showDetails, setShowDetails] = useState(false);
   useEffect(() => {
@@ -155,6 +156,7 @@ export function E2eeWorkspaceConsole({
   }>({ scope, identity, descriptor: null, history: null, loading: true, failure: null });
   useEffect(() => {
     let disposed = false;
+    let unsubscribeLedger: (() => void) | undefined;
     let hostAccessStarted = false;
     let hostOpened = false;
     let nativeAcquisition: Promise<E2eeRuntimeStatus | undefined> | undefined;
@@ -207,6 +209,7 @@ export function E2eeWorkspaceConsole({
     if (!port || !accountId) return undefined;
     const owner: NonNullable<typeof readOwner.current> = {};
     readOwner.current = owner;
+    const isCurrent = () => !disposed && scopeRef.current === scope && readOwner.current === owner;
     void (async () => {
       try {
         const retained = readEncryptedLocalIdentity(accountId, workspaceId);
@@ -287,14 +290,32 @@ export function E2eeWorkspaceConsole({
               cryptoOrgId: status.genesisHash,
             };
             let publication = 0;
+            let published = status;
             const publish = async () => {
-              if (disposed) return;
+              if (!isCurrent()) return;
               const revision = ++publication;
               const exported = await runtime.ledgerView(workspaceId);
-              if (disposed || revision !== publication) return;
-              const history = hostLedgerHistory(exported);
-              if (!history.continuityPending)
-                retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
+              if (!isCurrent() || revision !== publication) return;
+              let history: VerifiedLedgerHistory;
+              try {
+                history = hostLedgerHistory(exported);
+                if (!history.continuityPending)
+                  retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
+              } catch (error) {
+                // Decode/verification errors are not a failed notification channel.
+                setState((previous) =>
+                  previous.scope !== scope
+                    ? previous
+                    : {
+                        ...previous,
+                        loading: false,
+                        failure: classifyE2eeControlFailure(error),
+                        nativeStatus: undefined,
+                      }
+                );
+                throw error;
+              }
+              published = exported.status;
               if (!disposed)
                 setState({
                   scope,
@@ -308,6 +329,29 @@ export function E2eeWorkspaceConsole({
             };
             owner.publish = publish;
             await publish();
+            const synchronize = async () => {
+              if (!isCurrent()) return;
+              const local = await runtime.ledgerView(workspaceId);
+              if (!isCurrent()) return;
+              let page = await port.history({
+                workspaceId,
+                ...(local.status.position ? { after: local.status.position } : {}),
+              });
+              for (;;) {
+                if (!isCurrent()) return;
+                const next = await runtime.ingestLedgerRecords(workspaceId, page);
+                if (!isCurrent()) return;
+                if (page.nextCursor === null || next.upgradeRequiredAt !== undefined) {
+                  await publish();
+                  return;
+                }
+                page = await port.history({
+                  workspaceId,
+                  cursor: page.nextCursor,
+                  checkpoint: page.checkpoint,
+                });
+              }
+            };
             // A saved local view is visible before the first network request.
             try {
               const remote = await port.describe({ workspaceId });
@@ -319,24 +363,7 @@ export function E2eeWorkspaceConsole({
               )
                 throw new Error('e2ee_genesis_conflict');
               retainEncryptedWorkspaceMode(localStorage, accountId, remote);
-              let page = await port.history({
-                workspaceId,
-                ...(status.position ? { after: status.position } : {}),
-              });
-              for (;;) {
-                if (disposed) break;
-                status = await runtime.ingestLedgerRecords(workspaceId, page);
-                if (disposed) break;
-                if (page.nextCursor === null || status.upgradeRequiredAt !== undefined) {
-                  await publish();
-                  break;
-                }
-                page = await port.history({
-                  workspaceId,
-                  cursor: page.nextCursor,
-                  checkpoint: page.checkpoint,
-                });
-              }
+              await synchronize();
             } catch (error) {
               // The account-facing directory/history can only report a generic
               // denial. Native refresh checks the retained device credential;
@@ -355,6 +382,57 @@ export function E2eeWorkspaceConsole({
                 setState((previous) =>
                   previous.scope === scope ? { ...previous, offline: true } : previous
                 );
+            }
+            // The first subscription value closes the gap after initial catch-up.
+            // Only original, verified history advances the local checkpoint.
+            let running = false;
+            let pending = false;
+            const subscriptionFailed = () => {
+              if (isCurrent()) console.warn('E2EE ledger live updates unavailable');
+            };
+            if (isCurrent() && port.subscribeLedgerHead) {
+              try {
+                unsubscribeLedger = port.subscribeLedgerHead(
+                  { workspaceId },
+                  (head) => {
+                    if (
+                      !isCurrent() ||
+                      head.workspaceId !== workspaceId ||
+                      (head.genesisHash === published.genesisHash &&
+                        head.checkpoint.length === published.length &&
+                        head.checkpoint.headHash === published.headHash)
+                    )
+                      return;
+                    pending = true;
+                    if (running) return;
+                    running = true;
+                    void (async () => {
+                      try {
+                        while (pending && isCurrent()) {
+                          pending = false;
+                          await synchronize();
+                          if (isCurrent()) setDirectoryRevision((value) => value + 1);
+                        }
+                      } catch (error) {
+                        if (!isCurrent()) return;
+                        const failure = classifyE2eeControlFailure(error);
+                        setState((previous) =>
+                          previous.scope !== scope
+                            ? previous
+                            : failure.kind === 'network'
+                              ? { ...previous, offline: true }
+                              : { ...previous, failure, nativeStatus: undefined }
+                        );
+                      } finally {
+                        running = false;
+                      }
+                    })();
+                  },
+                  subscriptionFailed
+                );
+              } catch {
+                subscriptionFailed();
+              }
             }
             return;
           }
@@ -437,6 +515,11 @@ export function E2eeWorkspaceConsole({
     })();
     return () => {
       disposed = true;
+      try {
+        unsubscribeLedger?.();
+      } catch {
+        console.warn('E2EE ledger subscription cleanup incomplete');
+      }
       if (hostAccessStarted) void closeHost().catch(reportClose);
       if (readOwner.current === owner) readOwner.current = null;
     };
@@ -468,7 +551,7 @@ export function E2eeWorkspaceConsole({
     return () => {
       disposed = true;
     };
-  }, [scope, authenticated, port, workspaceId]);
+  }, [scope, authenticated, port, workspaceId, directoryRevision]);
   const current = state.identity === identity ? state : null;
   const backToWorkspaces = () => {
     if (onClose) {
@@ -608,10 +691,10 @@ export function E2eeWorkspaceConsole({
     if (!join.request) requestAccountPairingKey(join);
     else observeKeyRequest(join.request);
   }, [identity, joinedCredential, joinedKey, workspaceSlug, navigate, port, workspaceId]);
-  const manageMember = async (work: () => Promise<void>) => {
+  const manageMember = async (work?: () => Promise<void>) => {
     const owner = readOwner.current;
     if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
-    await work();
+    await work?.();
     if (scopeRef.current !== scope || readOwner.current !== owner) return;
     // A management result already advanced the native ledger. Read and verify it
     // on this reader; rebuilding the effect creates an unnecessary no-reader gap.
@@ -838,6 +921,11 @@ export function E2eeWorkspaceConsole({
               workspaceId={workspaceId}
               accountId={accountId}
               profiles={directory?.scope === scope ? directory.profiles : undefined}
+              ledgerVersion={port.subscribeLedgerHead ? current.nativeStatus?.headHash : undefined}
+              onMembersChanged={async () => {
+                await manageMember();
+                if (scopeRef.current === scope) setDirectoryRevision((value) => value + 1);
+              }}
             />
           </E2eeConsoleSection>
         )}

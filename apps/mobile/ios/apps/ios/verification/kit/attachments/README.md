@@ -13,8 +13,12 @@ that attachment references reach both persisted history and Machine RPC and
 survive a lost append acknowledgement. These checks do not send a live cloud turn.
 
 Cloud limits: eight images (5 MiB each after conversion) and eight files
-(100 MiB each) per message. HEIC and oversized photos convert to JPEG at up to
-2048 pixels. Videos and other non-image types upload as files; a movie marked
+(100 MiB each) per message. The image type comes from its content, not its file
+extension: the server rejects a declared type that does not match the bytes, and
+an edited Photos asset keeps its original `.PNG` name while its rendered data is
+JPEG or HEIC. Supported PNG/JPEG/WebP/GIF content uploads unchanged, renamed to
+match; HEIC, other formats and oversized photos convert to JPEG at up to 2048
+pixels. The check's image route applies the same byte check as the server. Videos and other non-image types upload as files; a movie marked
 as an image is coerced onto the file route instead of extracting a still.
 Upload failure retains the pending turn for explicit retry. A definite failure
 does not disable the composer: submitting new content replaces that pending turn

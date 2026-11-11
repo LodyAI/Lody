@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "4477100161b7ef8fa73b92bbe6f77d5e5d003f63",
+  "commit": "6308c98c87a1fb848182035e49b55b0549385782",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 4477100161b7ef8fa73b92bbe6f77d5e5d003f63 apps/mobile/ios/packages/cloud-runtime",
-  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 76340385, `listDir` lists the conversation's own folder through the machine's `file/list-dir` (capability `sessionDirectoryListing`) and keeps the local-project listing for machines without it. Dependencies and licenses unchanged."
+  "export": "git archive 6308c98c87a1fb848182035e49b55b0549385782 apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 44771001, adds `androidEmulatorControl` (signed `android-emulator/control` with an encrypted viewer URL), catalog `machineEmulators` / `androidEmulatorPreviewRequestId`, and carries main's mention-expansion wording (#2559). Dependencies and licenses unchanged."
 }

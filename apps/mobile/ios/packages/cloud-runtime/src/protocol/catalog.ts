@@ -91,7 +91,8 @@ export function projectRows(
     machineIds = new Set<string>(),
     machineNames: Record<string, string> = {},
     machineOs: Record<string, string> = {},
-    machineSimulators: NonNullable<Catalog['machineSimulators']> = {};
+    machineSimulators: NonNullable<Catalog['machineSimulators']> = {},
+    machineEmulators: NonNullable<Catalog['machineEmulators']> = {};
   if (mode !== 'meta') {
     for (const row of rows) {
       if (row.key[0] !== 'localProject' || row.value === undefined) continue;
@@ -146,6 +147,9 @@ export function projectRows(
           Number(object(value.protocolCapabilities).iosSimulator) >= 1
             ? 'available'
             : 'upgrade-required';
+      // Android preview has no OS gate; an old CLI simply does not offer it.
+      if (Number(object(value.protocolCapabilities).androidEmulator) >= 1)
+        machineEmulators[machineId] = 'available';
       // Match the CLI's legacy metadata + machine Flock project merge.
       for (const [localId, item] of Object.entries(
         object(value.localProjects),
@@ -216,6 +220,8 @@ export function projectRows(
         undefined,
       iosSimulatorPreviewRequestId:
         text(value.iosSimulatorPreviewRequestId) || undefined,
+      androidEmulatorPreviewRequestId:
+        text(value.androidEmulatorPreviewRequestId) || undefined,
       pullRequests,
       diff: diffOf(value.diffStats),
       workspaceDirty: value.workspaceDirty === true || undefined,
@@ -267,6 +273,7 @@ export function projectRows(
     machineNames,
     machineOs,
     machineSimulators,
+    machineEmulators,
     agentUsage,
   };
 }
