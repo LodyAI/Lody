@@ -148,8 +148,8 @@ several lines and offers no fade, so the panel draws its own menu-style rows:
 leading checkmark, circular avatar, and the name on one line that fades out at the
 trailing edge (`LodyFadingLabel`, mirrored for right-to-left) instead of wrapping or
 showing an ellipsis. Rows keep full names and the selected trait for VoiceOver; up
-to eight rows show before the list scrolls, and the width stays between 240 and
-320 pt within the window. Selecting the current workspace is a no-op; catalog
+to eight rows show before the list scrolls, and the width stays between 200 and
+260 pt within the window. Selecting the current workspace is a no-op; catalog
 changes refresh the open panel. The account email heads the panel, projected
 explicitly through the session source and chrome model. Empty email removes the
 heading; synthetic sources never fall back to the live account. Workspace
