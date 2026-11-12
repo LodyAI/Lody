@@ -42,6 +42,15 @@ automatically collected. See the [implementation decision and validation limits]
 The pure codecs in `src/e2ee-wire.ts` also define nested error and presence
 bodies; those codecs do not enable additional RPC methods or presence transport.
 
+Feature RPC signs an 11-minute read deadline or a 25-minute write deadline: the
+usual 1/15-minute TTL plus 10 minutes for a slow sender. Admission allows another
+10 minutes above that TTL for a fast sender. Thus relative clock offsets up to
+±10 minutes preserve the usual minimum lifetime. The receiver uses the original
+signed deadline throughout; query work still has its 45-second bound. This widens
+the time a delayed unclaimed frame can be admitted; exact originals, current
+authorization and at-most-once write claims remain required. Presence body codecs
+only bound the sender's issued-to-expiry interval; they do not compare device clocks.
+
 ## Request deadlines
 
 JSON appends keep a 10-second upload deadline by default. A configured

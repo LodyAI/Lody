@@ -30,6 +30,12 @@ import {
 } from './e2ee-feature-parts';
 import type { E2eeRpcStore } from './e2ee-store';
 
+// Pad signed deadlines for a slow sender; the admission upper bound also allows
+// a fast sender. Receiver work keeps the same signed deadline throughout.
+const CLOCK_SKEW_TOLERANCE_MS = 10 * 60_000;
+const featureTtl = (method: string) =>
+  (isE2eeReadQuery(method, undefined) ? 60_000 : 900_000) + CLOCK_SKEW_TOLERANCE_MS;
+
 type OpenedFeature = {
   input: E2eeFeatureInput;
   frame: Uint8Array;
@@ -228,7 +234,7 @@ export function makeE2eeFeatureRpcClient(options: {
     for (const [id, saved] of incoming) if (saved.expiresAt <= now) discard(id);
     if (
       part.expiresAt <= now ||
-      part.expiresAt > now + (isE2eeReadQuery(part.method, undefined) ? 60_000 : 900_000)
+      part.expiresAt > now + featureTtl(part.method) + CLOCK_SKEW_TOLERANCE_MS
     )
       return yield* Effect.fail(new Error('e2ee_feature_expiry'));
     if (part.count === 1) return yield* openFrames(machineId, [frameHex]);
@@ -290,9 +296,7 @@ export function makeE2eeFeatureRpcClient(options: {
               const body = yield* attempt(() =>
                 encodeE2eeRpcRequestBody({
                   requestId: unhex(args.requestId),
-                  expiresAt:
-                    now +
-                    (isE2eeReadQuery(args.request.method, args.request.params) ? 60_000 : 900_000),
+                  expiresAt: now + featureTtl(args.request.method),
                   method: args.request.method,
                   params,
                 })

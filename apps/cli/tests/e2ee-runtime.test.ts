@@ -7759,14 +7759,61 @@ describe('machine execution authorization freshness', () => {
       }
     });
 
-    it('ends a window when the clocks disagree about elapsed time', () =>
+    it('keeps execution and reads after a 30-minute suspend, then expires on wall time', () =>
       withOutage(({ fixture, gate, io }) =>
         Effect.gen(function* () {
-          io.monotonic = FIFTEEN_MINUTES;
-          io.wall = 2 * HOUR;
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+          io.wall = 30 * 60_000;
+          io.monotonic = 5_000;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.wall = 4 * HOUR - 1;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.wall++;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Denied',
-            reason: 'unavailable',
+          });
+          io.wall = 24 * HOUR - 1;
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.wall++;
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+        })
+      ));
+
+    it('uses monotonic elapsed time through a three-minute NTP rollback', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          io.wall = -3 * 60_000;
+          io.monotonic = 5_000;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.monotonic = 4 * HOUR - 1;
+          io.wall = io.monotonic - 3 * 60_000;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.monotonic++;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          io.monotonic = 24 * HOUR - 1;
+          io.wall = io.monotonic - 3 * 60_000;
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.monotonic++;
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
           });
         })
       ));
@@ -7848,51 +7895,21 @@ describe('machine execution authorization freshness', () => {
         })
       ));
 
-    it('needs a successful read after the clocks disagree', () =>
-      withOutage(({ fixture, gate, io }) =>
-        Effect.gen(function* () {
-          at(io, FIFTEEN_MINUTES);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
-            _tag: 'Authorized',
-          });
-          at(io, FIFTEEN_MINUTES + 120_000);
-          io.wall += 2 * HOUR;
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
-            _tag: 'Denied',
-            reason: 'unavailable',
-          });
-          at(io, FIFTEEN_MINUTES + 240_000);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
-            _tag: 'Denied',
-            reason: 'unavailable',
-          });
-          io.respond = async () => page(fixture.records);
-          at(io, FIFTEEN_MINUTES + 360_000);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
-            _tag: 'Authorized',
-          });
-        })
-      ));
-
-    it('ends the window when a held authorization sees the clocks disagree', () =>
+    it('keeps a held authorization through suspend and clock correction', () =>
       withOutage(({ fixture, gate, io }) =>
         Effect.gen(function* () {
           at(io, FIFTEEN_MINUTES);
           const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
           if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
-          io.wall += 2 * HOUR;
-          expect(granted.isCurrent?.()).toBe(false);
-          at(io, FIFTEEN_MINUTES + 120_000);
-          expect(granted.isCurrent?.()).toBe(false);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
-            _tag: 'Denied',
-            reason: 'unavailable',
-          });
-          io.respond = async () => page(fixture.records);
-          at(io, FIFTEEN_MINUTES + 240_000);
+          io.wall += 30 * 60_000;
+          expect(granted.isCurrent?.()).toBe(true);
+          io.wall -= 3 * 60_000;
+          expect(granted.isCurrent?.()).toBe(true);
           expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
+          io.monotonic = 4 * HOUR;
+          expect(granted.isCurrent?.()).toBe(false);
         })
       ));
 
@@ -8700,7 +8717,7 @@ describe('machine execution authorization freshness', () => {
     }
   });
 
-  it('rejects rollback, corrupted pages and reads that exhaust their freshness budget; keeps other owners usable', async () => {
+  it('rejects ledger rollback, corrupted pages and exhausted reads; tolerates wall-clock correction', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'execution-isolation-'));
     try {
       await execute(
@@ -8736,9 +8753,13 @@ describe('machine execution authorization freshness', () => {
           ).toMatchObject({
             _tag: 'Authorized',
           });
-          // Wall-clock rollback cannot lengthen the monotonic lease.
-          first.io.wall -= 1;
+          // A wall-clock correction keeps the fresh grant, but cannot extend its monotonic limit.
+          first.io.wall -= 3 * 60_000;
           first.io.offline = true;
+          expect(
+            yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
+          ).toMatchObject({ _tag: 'Authorized' });
+          first.io.monotonic += 900_000;
           expect(
             yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
           ).toMatchObject({ _tag: 'Denied' });

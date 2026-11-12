@@ -593,7 +593,7 @@ describe('host-only E2EE realtime journal', () => {
     );
   });
 
-  it('retains the observed floor for never-claimed received requests across rollback and restart', () => {
+  it('recovers unclaimed requests after local clock correction and restart without replaying started IDs', () => {
     journal.receive(request);
     const completedPermit = takePermit(journal);
     const completed = journal.finish(completedPermit, outcome);
@@ -607,8 +607,8 @@ describe('host-only E2EE realtime journal', () => {
     expect(journal.claim(observed).state).toBe('expired');
     now = 1_000;
     const reopened = new RealtimeJournal(filename, () => now);
-    expect(reopened.claim(pending).state).toBe('expired');
-    expect(reopened.claim(observed).state).toBe('expired');
+    expect(reopened.claim(pending).state).toBe('claimed');
+    expect(reopened.claim(observed).state).toBe('claimed');
     expect(reopened.claim(started)).toMatchObject({
       state: 'existing',
       record: { state: 'uncertain' },
@@ -619,6 +619,23 @@ describe('host-only E2EE realtime journal', () => {
     expect(journal.retainResponse(startedPermit, { index: 0, frame: responseFrame })).toEqual(
       responseFrame
     );
+  });
+
+  it('accepts new requests in the same workspace after a five-minute local clock correction', () => {
+    now = 300_100;
+    const jumped = { ...request, requestId: 'during-forward-jump', expiresAt: now + 60_000 };
+    journal.receive(jumped);
+    const permit = takePermit(journal, jumped);
+    now = 100;
+    const reopened = new RealtimeJournal(filename, () => now);
+    const next = { ...request, requestId: 'after-correction' };
+    reopened.receive(next);
+    expect(reopened.claim(next).state).toBe('claimed');
+    expect(reopened.claim(jumped)).toMatchObject({
+      state: 'existing',
+      record: { state: 'uncertain' },
+    });
+    expect(journal.finish(permit, outcome)).toMatchObject({ state: 'completed', outcome });
   });
 
   it('isolates a forward clock observation from new workspaces while completed evidence remains readable', () => {

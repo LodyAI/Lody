@@ -1,6 +1,6 @@
 # E2EE 基础模块边界
 
-Status: approved
+Status: draft
 Translation: current
 
 Approved revision: [`122dfeaf`](https://github.com/LodyAI/Lody/blob/122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1/specs/e2ee-foundations.zh.md)
@@ -256,16 +256,15 @@ chat、Role、续跑、agent 控制）。机器只在来源轮次活跃、且目
 执行机器自己发起经认证的最新账本读取，在**网络 I/O 前**记录本机开始时间。验证到
 该读取的最新边界；仅在内存缓存从该开始时刻计最多 **15 分钟**的剩余窗口。慢读取、
 失败或转发／缓存页不续期。读取没有得到答复时，机器所属成员适用[后端故障期间的执行新鲜度](e2ee/execution-freshness-outage.zh.md)中更长的窗口，从同一开始时刻计算。与请求／上游期限取交集并留时钟／停止余量；全局账号锁内
-不等网络。重启丢弃该授权，新远程执行前必须联网认证重查。时钟回退或无法确定休眠／
-恢复耗时时失效。retained checkpoint 和 journal 时间戳不能恢复执行新鲜度。离线
+不等网络。重启丢弃该授权，新远程执行前必须联网认证重查。按故障窗口决定取墙钟与单调时钟流逝时间的较大值；单独休眠或墙钟校准不会使缓存失效。retained checkpoint 和 journal 时间戳不能恢复执行新鲜度。离线
 文档／编辑及保留结果仍可用；过期只阻断新远程执行，不阻断无关本地工作；重新验证
 不会重启不确定操作。
 
 journal 的**持久过期时钟是另一种机制**，不是执行授权。按 owner 2026-11-10 决定（已批准），它只用于
 功能请求：执行记录没有期限，不适用任何时钟、偏差检查或下限。当前 schema 3 按
-`(genesis, workspaceId)` 保存跨 reopen 的单调不减下限。有独立认证的当前参考时间时，
+`(genesis, workspaceId)` 保存跨 reopen 的观测值。有独立认证的当前参考时间时，
 claim 拒绝本机或已保存下限超前超过 600,000 ms 的情形；接受时使用
-`max(reference, retainedFloor)`。无参考时仅在该工作区用 `max(localNow, retainedFloor)`。
+`max(reference, retainedFloor)`。无参考时使用 `localNow` 并替换观测值，避免不可信的本机峰值在校时后锁死新请求。校时后，原期限内从未领取的帧可能重新获准；持久 ID 仍保证已开始的请求不会再次执行。
 不得信任帧时间。显式保留证据的 reset 可清除中毒下限，但保留已退役请求 ID；不延长
 原期限，不恢复新鲜度，也不授予重放权限。遵循公开
 [journal 恢复决定](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.zh.md)。
