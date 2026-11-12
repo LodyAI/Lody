@@ -79,6 +79,30 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
   状态、发送、接收），插件从不回传种子。Capacitor 会序列化参数，因此会留下一份无法
   擦除的 JavaScript 种子字符串，直到被垃圾回收；owner 接受这一代价（2026-11-10）。
 
+- **设备每日统计（owner 2026-11-12）。** 只统计已完成路由的加密工作区 RPC，普通
+  工作区不会进入此发送器。没有完成过 E2EE RPC 的设备保持显式未激活状态，不启动
+  启动、前台、联网或每小时上报检查；首个完成的请求才激活，跨窗口与重启保持一致。
+  owner 补充确认：取消且尚未发送 Streams 的整次请求不计数，不虚构 Streams 尝试。
+  每次完成路由将尝试与结果一次性入账，避免被每日窗口拆开。Streams 失败后调用方的
+  持久派发不在本轮范围。
+  主字段是 `iroh_attempts`、`iroh_ready`、`iroh_success`、`streams_attempts`、
+  `streams_success`、`fallback_streams_attempts`、`fallback_streams_success`，
+  同时保留 `dispatch_` / `feature_` 分布。单帧且有能力的 iroh 请求为尝试，实际调用为
+  ready，验证通过的回复为成功（包括验证通过的业务错误回复）。Streams 以进入发送流程为尝试，
+  包括令牌/客户端/通道初始化失败（owner 补充确认）；null、超时、失败不算成功，验证通过才算成功。
+  `iroh_success <= iroh_ready <= iroh_attempts`；fallback 是 Streams 的子集，且
+  `fallback_streams_attempts = iroh_attempts - iroh_success`。
+  附加字段仍按 kind 保留 `iroh_ok`（success 别名）、not-ready known/never、call-failed、
+  unverified、unavailable/chunked、`lt200` / `lt800` / `ge800` 延迟档和
+  `direct` / `relay` / `unknown` 路径。`connectionPath` 仅读已有连接的
+  `Connection::paths()`，core、napi、uniffi 仅返回 `direct | relay | none`，不拨号、不返回地址。
+  Web Locks 串行读写设备本地 `lody:iroh-daily:v2`，加盐目标摘要绝不上报。每个 kind 每窗口
+  最多累计一百万条完整路由，超过后整条丢弃，以保留成对字段的不变量；总字段为两个 kind
+  的和，上限两百万。满 24 小时成功入队一条 `e2ee/iroh_daily` 后清零，离线多天仍合为一个
+  窗口；冻结的 pending 窗口与固定 SDK UUID 保留重试身份。最终 SDK 白名单移除工作区组、
+  URL、IP 和用户属性外层字段。OSS 本地版与 CLI 机器端不运行计数。这只证明 SDK 入队，
+  不证明生产 PostHog 收到。
+
 ## 依据
 
 检查过的 iroh v1.4.1 源码：

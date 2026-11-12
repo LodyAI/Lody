@@ -8,6 +8,7 @@ const WAIT: Duration = Duration::from_secs(20);
 
 fn config(seed: u8, accept: bool, relays: Vec<String>) -> EndpointConfig {
     EndpointConfig {
+        relay_only: false,
         secret_key: Zeroizing::new([seed; 32]),
         relay_urls: relays,
         relay_token: None,
@@ -61,9 +62,11 @@ async fn direct_call_returns_every_reply_and_authenticates_the_dialer() {
         direct_addrs: listener.direct_addrs(),
     };
     assert!(!dialer.has_connection(&target.endpoint_id).await);
+    assert_eq!(dialer.connection_path(&target.endpoint_id).await, "none");
     let call = dialer.call(&target, b"abc", WAIT).await.unwrap();
     assert_eq!(collect(call).await, vec![b"cba".to_vec(), b"done".to_vec()]);
     assert!(dialer.has_connection(&target.endpoint_id).await);
+    assert_eq!(dialer.connection_path(&target.endpoint_id).await, "direct");
     // A second request reuses the live connection.
     let call = dialer.call(&target, b"xy", WAIT).await.unwrap();
     assert_eq!(collect(call).await, vec![b"yx".to_vec(), b"done".to_vec()]);
@@ -88,9 +91,9 @@ async fn dial_reaches_a_peer_homed_on_any_configured_relay() {
     let (_map_a, url_a, _server_a) = iroh::test_utils::run_relay_server().await.unwrap();
     let (_map_b, url_b, _server_b) = iroh::test_utils::run_relay_server().await.unwrap();
     // The listener only knows relay B; the dialer knows both and publishes nothing.
-    let listener = LodyEndpoint::open(config(4, true, vec![url_b.to_string()]))
-        .await
-        .unwrap();
+    let mut listener_config = config(4, true, vec![url_b.to_string()]);
+    listener_config.relay_only = true;
+    let listener = LodyEndpoint::open(listener_config).await.unwrap();
     assert!(listener.online(WAIT).await);
     let dialer = LodyEndpoint::open(config(5, false, vec![url_a.to_string(), url_b.to_string()]))
         .await
@@ -105,8 +108,10 @@ async fn dial_reaches_a_peer_homed_on_any_configured_relay() {
         collect(call).await,
         vec![b"yaler".to_vec(), b"done".to_vec()]
     );
+    assert_eq!(dialer.connection_path(&target.endpoint_id).await, "relay");
     listener.close().await;
     dialer.close().await;
+    assert_eq!(dialer.connection_path(&target.endpoint_id).await, "none");
     assert_eq!(server.await.unwrap(), vec![public(5)]);
 }
 
@@ -120,6 +125,7 @@ async fn connection_status_never_waits_for_a_dial_in_progress() {
     let dialing = slot.lock().await;
     let answered = tokio::time::timeout(WAIT, dialer.has_connection(&public(13))).await;
     assert_eq!(answered, Ok(false));
+    assert_eq!(dialer.connection_path(&public(13)).await, "none");
     drop(dialing);
     dialer.close().await;
 }

@@ -357,6 +357,7 @@ export interface E2eeWorkspaceRuntime
    * frames, which the caller verifies with the accept methods. Neither prepares,
    * signs nor authorizes anything; failures mean "use Streams RPC".
    */
+  irohPath?(workspaceId: string, targetMachineId: string): Promise<'direct' | 'relay' | 'none'>;
   irohReady?(workspaceId: string, targetMachineId: string): Promise<boolean>;
   irohCall?(
     workspaceId: string,

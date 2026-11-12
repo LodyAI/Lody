@@ -44,6 +44,7 @@ export interface IrohEndpoint {
   directAddrs(): string[];
   online(timeoutMs: number): Promise<boolean>;
   hasConnection(endpointId: string): Promise<boolean>;
+  connectionPath?(endpointId: string): Promise<'direct' | 'relay' | 'none'>;
   warm(target: CallTarget, timeoutMs: number): Promise<void>;
   call(target: CallTarget, request: Buffer, connectTimeoutMs: number): Promise<IrohCall>;
   nextRequest(): Promise<IrohRequest | null>;

@@ -1144,6 +1144,14 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.acceptFeatureResponse(...args))),
       /** Resolves the machine's route from the admitted ledger; callers run the
        * returned route's network waits outside every session lock. */
+      irohPath: (machineId: string) =>
+        run(
+          Effect.gen(function* () {
+            const key = irohTargetDevice(yield* admitted(), machineId);
+            if (!key || !irohEndpoint) return undefined;
+            return makePersonalIrohRoute(irohEndpoint, key, irohWarming);
+          })
+        ),
       irohRoute: (machineId: string) =>
         run(
           Effect.gen(function* () {

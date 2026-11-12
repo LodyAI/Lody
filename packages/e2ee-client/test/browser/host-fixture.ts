@@ -800,6 +800,7 @@ export async function boot(
             );
             irohFixture.handedSeed = seed;
             return {
+              connectionPath: async () => (irohFixture.connected ? 'direct' : 'none'),
               hasConnection: async (id) => {
                 irohFixture.targets.push(id);
                 return irohFixture.connected;
@@ -2099,6 +2100,9 @@ export async function runtimeInvoke(action: string) {
         break;
       case 'ledger':
         value = await runtime.ledgerView(offer.workspaceId);
+        break;
+      case 'irohPath':
+        value = await runtime.irohPath!(offer.workspaceId, 'fixture-machine');
         break;
       case 'irohReady':
         value = await runtime.irohReady!(offer.workspaceId, 'fixture-machine');
