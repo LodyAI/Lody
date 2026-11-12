@@ -1,5 +1,11 @@
 import { effortsFor } from '../vendor/cloud-runtime/src/protocol/capability.ts';
 // Android-only text creation adapter. Shared CRDT persistence and dispatch remain upstream.
+// The native host's workspace plan read (iOS `WorkspaceBilling`), or null when unavailable: the
+// shared runtime then fails open, as the other clients do.
+export function billingEntitlement(value) {
+ return value && typeof value==='object' && ['free','plus','enterprise'].includes(value.effectivePlanTier) && typeof value.checkoutPending==='boolean'
+  ? {effectivePlanTier:value.effectivePlanTier,checkoutPending:value.checkoutPending} : null;
+}
 export function createCommands(runtime, sendTurn, identity) {
  const attempted=new Set();
  const uuid=/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -62,6 +68,13 @@ export function createCommands(runtime, sendTurn, identity) {
    }
    return runtime.mentionCatalog({workspaceId:scope.workspaceId,userId:scope.userId,category,...fields});
   },
+  // iOS `turnQuota`: whether the free-plan turn quota still admits a turn, checked before native
+  // uploads attachments that a refused send would waste. A read; the send checks again.
+  async turnQuota(sessionId,entitlement) {
+   if(typeof sessionId!=='string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId))throw Error('invalid_request');
+   const result=await runtime.checkTurnQuota({sessionId,billingEntitlement:billingEntitlement(entitlement)});
+   return {state:result?.state==='not_sent'?'not_sent':'allowed',...(result?.state==='not_sent'&&typeof result.reason==='string'?{reason:result.reason}:{})};
+  },
   // A text turn in an existing conversation. The stable turn id lets upstream reject a
   // duplicate; nothing here retries, and an uncertain write reports `unknown`.
   async sendText(input,signal) {
@@ -97,7 +110,7 @@ export function createCommands(runtime, sendTurn, identity) {
    try {
     await runtime.ensureSession({sessionId:input.sessionId});
     signal?.throwIfAborted();
-    const sent=await sendTurn({id:input.turnId,sessionId:input.sessionId,machineId:input.machineId,userId:scope.userId,text:input.text,cliType:input.cliType,agentType:input.agentType,...choice,...(attachments.length?{attachmentBlocks:attachments}:{}),...(input.resume?{resume:input.resume}:{}),...(input.guide===true?{guide:true}:input.queue?{queue:true}:{})});
+    const sent=await sendTurn({billingEntitlement:billingEntitlement(input.billingEntitlement),id:input.turnId,sessionId:input.sessionId,machineId:input.machineId,userId:scope.userId,text:input.text,cliType:input.cliType,agentType:input.agentType,...choice,...(attachments.length?{attachmentBlocks:attachments}:{}),...(input.resume?{resume:input.resume}:{}),...(input.guide===true?{guide:true}:input.queue?{queue:true}:{})});
     return {state:sent.state,reason:sent.reason};
    } catch {return {state:'unknown'};}
   },
@@ -139,20 +152,21 @@ export function createCommands(runtime, sendTurn, identity) {
    }
    signal?.throwIfAborted();
    attempted.add(input.sessionId);
+   const billing=billingEntitlement(input.billingEntitlement);
    try {
     let result;
     try {
-     result=await runtime.createSession({workspaceId:scope.workspaceId,userId:scope.userId,preferRoost:input.preferRoost===true,sessionId:input.sessionId,machineId:agent.machineId,agentConfigId:agent.id,...(group===undefined?{projectId:input.projectId}:{projectGroupId:group}),branch:group===undefined?input.branch:undefined,useWorktree:input.worktree===true,title:input.text.trim().slice(0,200),...(role?{agentRoleId:role.id,agentRoleRevision:role.revision}:{})});
+     result=await runtime.createSession({billingEntitlement:billing,workspaceId:scope.workspaceId,userId:scope.userId,preferRoost:input.preferRoost===true,sessionId:input.sessionId,machineId:agent.machineId,agentConfigId:agent.id,...(group===undefined?{projectId:input.projectId}:{projectGroupId:group}),branch:group===undefined?input.branch:undefined,useWorktree:input.worktree===true,title:input.text.trim().slice(0,200),...(role?{agentRoleId:role.id,agentRoleRevision:role.revision}:{})});
     } catch(error) {
      // The shared channel answers these before its handler runs, so no write was attempted.
      if(['invalid_params','unsupported_method'].includes(error?.message))return {state:'rejected',sessionId:input.sessionId};
      throw error;
     }
-    if(result.state!=='created')return {state:result.state==='unknown'?'unknown':'rejected',sessionId:input.sessionId};
+    if(result.state!=='created')return {state:result.state==='unknown'?'unknown':'rejected',sessionId:input.sessionId,...(result.state==='rejected'&&typeof result.reason==='string'?{reason:result.reason}:{})};
     signal?.throwIfAborted();
     await runtime.ensureSession({sessionId:input.sessionId});
     signal?.throwIfAborted();
-    const sent=await sendTurn({id:input.turnId,sessionId:input.sessionId,machineId:agent.machineId,userId:scope.userId,text:input.text,...(attachments.length?{attachmentBlocks:attachments}:{}),cliType:agent.cliType,agentType:agent.agentType,modelId:input.modelId,modeId:input.modeId,reasoningEffort:input.effort,reasoningEffortConfigId:capability?.reasoningEffortConfigId,...(pinned?{configOptionValues:pinned}:{}),...(role?{agentRoleId:role.id,agentConfigId:agent.id}:{})});
+    const sent=await sendTurn({billingEntitlement:billing,id:input.turnId,sessionId:input.sessionId,machineId:agent.machineId,userId:scope.userId,text:input.text,...(attachments.length?{attachmentBlocks:attachments}:{}),cliType:agent.cliType,agentType:agent.agentType,modelId:input.modelId,modeId:input.modeId,reasoningEffort:input.effort,reasoningEffortConfigId:capability?.reasoningEffortConfigId,...(pinned?{configOptionValues:pinned}:{}),...(role?{agentRoleId:role.id,agentConfigId:agent.id}:{})});
     return {state:sent.state,sessionId:input.sessionId,...(sent.state==='not_sent'&&sent.reason?{reason:sent.reason}:{})};
    } catch {return {state:'unknown',sessionId:input.sessionId};}
   },

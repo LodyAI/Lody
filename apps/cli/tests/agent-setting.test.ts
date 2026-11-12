@@ -13,9 +13,11 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { spawn } from 'node:child_process';
 
 import {
+  expandHomePath,
   getAcpCapabilitySourceVersion,
   mergeACPProcessEnv,
   mergeLoginShellEnv,
+  normalizeAgentProcessEnv,
   resolveACPSetting,
   resolveExpectedAcpCapabilitySourceVersion,
   resolveBuiltinAuthenticationProcessLaunch,
@@ -1072,6 +1074,49 @@ describe('custom ACP resolution', () => {
   });
 });
 
+describe('expandHomePath and normalizeAgentProcessEnv', () => {
+  it('expands ~, $HOME, and ${HOME} prefixes in path values', () => {
+    expect(expandHomePath('~/.claude-work', '/Users/test')).toBe(
+      join('/Users/test', '.claude-work')
+    );
+    expect(expandHomePath('$HOME/.claude-work', '/Users/test')).toBe(
+      join('/Users/test', '.claude-work')
+    );
+    expect(expandHomePath('${HOME}/.claude-work', '/Users/test')).toBe(
+      join('/Users/test', '.claude-work')
+    );
+    expect(expandHomePath('~', '/Users/test')).toBe('/Users/test');
+    expect(expandHomePath('/abs/path', '/Users/test')).toBe('/abs/path');
+  });
+
+  it('normalizes CLAUDE_CONFIG_DIR and strips empty CLAUDE_CONFIG_DIR values', () => {
+    expect(
+      normalizeAgentProcessEnv(
+        {
+          CLAUDE_CONFIG_DIR: ' ~/.claude-profile-a ',
+          CODEX_HOME: '$HOME/.codex-work',
+        },
+        '/Users/test'
+      )
+    ).toEqual({
+      CLAUDE_CONFIG_DIR: join('/Users/test', '.claude-profile-a'),
+      CODEX_HOME: join('/Users/test', '.codex-work'),
+    });
+
+    expect(
+      normalizeAgentProcessEnv(
+        {
+          CLAUDE_CONFIG_DIR: '   ',
+          PATH: '/usr/bin',
+        },
+        '/Users/test'
+      )
+    ).toEqual({
+      PATH: '/usr/bin',
+    });
+  });
+});
+
 describe('withDefaultAcpPathEntries', () => {
   it('prepends user-local bin directories to PATH', () => {
     const result = withDefaultAcpPathEntries({ PATH: '/usr/bin' });
@@ -1082,6 +1127,15 @@ describe('withDefaultAcpPathEntries', () => {
       join(homedir(), '.claude/local'),
       '/usr/bin',
     ]);
+  });
+
+  it('normalizes CLAUDE_CONFIG_DIR when preparing ACP PATH entries', () => {
+    const result = withDefaultAcpPathEntries({
+      PATH: '/usr/bin',
+      CLAUDE_CONFIG_DIR: '~/.claude-custom',
+    });
+
+    expect(result.CLAUDE_CONFIG_DIR).toBe(join(homedir(), '.claude-custom'));
   });
 
   it.each(['kimi', 'kimi-code'])('prepends the Kimi Code bin directory for %s', (agentType) => {
@@ -1120,9 +1174,14 @@ describe('mergeLoginShellEnv', () => {
 
   it('returns the base unchanged when the shell env is empty or missing', () => {
     const base = { PATH: '/usr/bin', HOME: '/home/u' };
-    expect(mergeLoginShellEnv(base, null)).toBe(base);
-    expect(mergeLoginShellEnv(base, undefined)).toBe(base);
-    expect(mergeLoginShellEnv(base, {})).toBe(base);
+    expect(mergeLoginShellEnv(base, null)).toEqual(base);
+    expect(mergeLoginShellEnv(base, undefined)).toEqual(base);
+    expect(mergeLoginShellEnv(base, {})).toEqual(base);
+  });
+
+  it('expands ~ and $HOME in CLAUDE_CONFIG_DIR even when login shell env is empty', () => {
+    const base = { PATH: '/usr/bin', HOME: '/home/u', CLAUDE_CONFIG_DIR: '$HOME/.claude-work' };
+    expect(mergeLoginShellEnv(base, null).CLAUDE_CONFIG_DIR).toBe('/home/u/.claude-work');
   });
 
   it('prepends login-shell PATH entries so user-installed tools resolve first', () => {

@@ -6626,5 +6626,19 @@
   "settings.machines.batchUpdate.start": "Update {{count}} machines",
   "settings.machines.batchUpdate.open": "Update all my machines",
   "desktop.pathLauncher.approve": "Allow this custom launcher to run commands?",
-  "desktop.pathLauncher.allow": "Allow launcher"
+  "desktop.pathLauncher.allow": "Allow launcher",
+  "settings.integrations.github.installErrors.authorizationRequired": "Authorize your personal GitHub account first, then connect the GitHub App. This does not change your “Act as you” preference.",
+  "settings.integrations.github.installErrors.temporarilyUnavailable": "GitHub could not be reached. Try the same installation again.",
+  "settings.integrations.github.installErrors.installationNotVisible": "Your GitHub account cannot access this installation. Check the account and repository access, then retry.",
+  "settings.integrations.github.installErrors.linkedElsewhere": "This installation is already connected to another workspace. Disconnect it there before connecting it here.",
+  "settings.integrations.github.installErrors.suspended": "This GitHub installation is suspended. Restore it in GitHub, then retry.",
+  "settings.integrations.github.installErrors.encryptedWorkspace": "GitHub App connections are unavailable in encrypted workspaces.",
+  "settings.integrations.github.installErrors.repositoriesTooMany": "This installation has too many repositories to verify. Select fewer repositories in GitHub, then retry.",
+  "settings.integrations.github.installErrors.invalidState": "This installation attempt has expired or already finished. Start a new connection.",
+  "settings.integrations.github.installErrors.forbidden": "Only a current workspace owner or admin can connect this installation.",
+  "settings.integrations.github.installErrors.deletionInProgress": "This account or workspace is being deleted. The installation cannot be connected.",
+  "settings.integrations.github.installErrors.unknown": "The installation could not be connected. Start a new connection or contact support.",
+  "settings.integrations.github.retryInstallation": "Retry installation",
+  "desktopGithubInstall.failedDescription": "The installation was not connected. Open Lody Desktop to review the error and retry.",
+  "settings.integrations.github.installErrors.managementRequired": "Reauthorize with the installation owner’s GitHub account or an active organization administrator, then retry."
 }

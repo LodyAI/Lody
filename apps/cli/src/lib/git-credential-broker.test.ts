@@ -1,6 +1,10 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { Effect, Exit, Scope } from 'effect';
 import { it as effectIt } from '@effect/vitest';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createGitCredentialBrokerHandler,
   GitCredentialBroker,
@@ -10,6 +14,92 @@ import type { GitHubTokenManager } from './github-token-manager';
 import type { Logger } from '../utils/logger';
 
 describe('GitCredentialBroker', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('binds only loopback and publishes owner-only broker state without opening a real socket', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'broker-security-'));
+    vi.stubEnv('LODY_DATA_DIR', root);
+    vi.resetModules();
+    const { GitCredentialBroker: IsolatedBroker } = await import('./git-credential-broker');
+    const server = http.createServer();
+    let bound: { address: string; family: string; port: number } | null = null;
+    vi.spyOn(server, 'listen').mockImplementation(((
+      port: number,
+      host: string,
+      ready: () => void
+    ) => {
+      bound = { address: host, family: 'IPv4', port: port || 12345 };
+      ready();
+      return server;
+    }) as typeof server.listen);
+    vi.spyOn(server, 'address').mockImplementation(() => bound);
+    vi.spyOn(server, 'close').mockImplementation(((done: () => void) => {
+      bound = null;
+      done();
+      return server;
+    }) as typeof server.close);
+    vi.spyOn(http, 'createServer').mockReturnValue(server);
+    const broker = new IsolatedBroker({
+      workspaceId: 'synthetic-workspace',
+      logger: { debug: vi.fn() } as unknown as Logger,
+      tokenManager: {} as GitHubTokenManager,
+    });
+    const statePath = broker.getStateFilePath() as string;
+    fs.writeFileSync(statePath, '{}', { mode: 0o644 });
+    try {
+      const env = await broker.ensureStarted();
+      // The actual start path's resulting bind state must exclude LAN interfaces.
+      expect(server.address()).toEqual({ address: '127.0.0.1', family: 'IPv4', port: env.port });
+      expect(env.url).toBe(`http://127.0.0.1:${env.port}`);
+      for (const file of [statePath, path.join(root, 'broker.json')]) {
+        expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(env);
+        if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      await broker.shutdown();
+      expect(server.address()).toBeNull();
+      expect(fs.readdirSync(root)).toEqual([]);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['', 'Bearer wrong', 'Bearer beareX', 'Bearer bearer extra'])(
+    'requires the exact bearer for health and credentials: %s',
+    async (auth) => {
+      const handler = createGitCredentialBrokerHandler({
+        authToken: 'bearer',
+        logger: { debug: vi.fn() } as unknown as Logger,
+        tokenManager: {} as GitHubTokenManager,
+      });
+      for (const [url, method] of [
+        ['/health', 'GET'],
+        ['/github-token', 'POST'],
+      ]) {
+        const res = makeRes();
+        handler(makeReq({ url, method, auth, body: {} }), res);
+        await res.finished;
+        expect(res.statusCode).toBe(401);
+        expect(res.body).not.toContain('timestamp');
+      }
+    }
+  );
+
+  it('returns only liveness to an authenticated health probe', async () => {
+    const handler = createGitCredentialBrokerHandler({
+      authToken: 'bearer',
+      logger: { debug: vi.fn() } as unknown as Logger,
+      tokenManager: {} as GitHubTokenManager,
+    });
+    const res = makeRes();
+    handler(makeReq({ url: '/health', method: 'GET', auth: 'Bearer bearer', body: {} }), res);
+    await res.finished;
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ status: 'ok' });
+  });
+
   it('serves legacy context locally even when cloud policy is unavailable', async () => {
     const handler = createGitCredentialBrokerHandler({
       authToken: 'bearer',
@@ -206,12 +296,13 @@ type MockReqOptions = {
   url: string;
   auth: string;
   body: unknown;
+  method?: string;
 };
 
 const makeReq = (options: MockReqOptions): any => {
   const payload = Buffer.from(JSON.stringify(options.body), 'utf8');
   return {
-    method: 'POST',
+    method: options.method ?? 'POST',
     url: options.url,
     headers: { authorization: options.auth },
     socket: { remoteAddress: '127.0.0.1' },

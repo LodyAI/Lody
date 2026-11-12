@@ -179,6 +179,18 @@
     <string name="chat_attach_remove">Remove</string>
     <string name="chat_attach_limit">Up to 8 images and 8 files per message.</string>
     <string name="chat_attach_failed">Couldn’t upload the attachments. The message wasn’t sent.</string>
+    <string name="chat_attach_too_large">Files must be %1$d MB or smaller: %2$s</string>
+    <plurals name="chat_free_turns_remaining">
+        <item quantity="one">Free session · %d message left.</item>
+        <item quantity="other">Free session · %d messages left.</item>
+    </plurals>
+    <string name="chat_free_turn_limit">Free session · %d-message limit reached.</string>
+    <string name="chat_free_turn_limit_reached">This Free session has reached 30 user turns. The message was not sent; your draft is saved.</string>
+    <string name="create_free_session_limit_reached">This Free workspace has reached 200 sessions. The new session was not created.</string>
+    <string name="chat_workspace_payment_required">Finish setting up this workspace before creating or sending sessions.</string>
+    <string name="chat_free_turn_limit_title">Free session limit</string>
+    <string name="chat_free_turn_limit_body">This Free session has reached %d messages, so the message field is closed.</string>
+    <string name="chat_composer_quota_closed">Message limit reached</string>
     <string name="create_search_branches">Search branches</string>
     <string name="create_more_branches">More branches…</string>
     <string name="create_mode_auto">Auto</string>
@@ -941,4 +953,7 @@
     <string name="chat_proposal_error_schedule_owner">Only the computer’s owner can schedule tasks on it.</string>
     <string name="chat_proposal_error_schedule_unsupported">Update Lody on this computer to use scheduled tasks.</string>
     <string name="chat_proposal_error_schedule_trigger">Check the time rule and time zone.</string>
+    <string name="github_settings_authorization_required">Personal GitHub authorization required</string>
+    <string name="github_settings_authorization_hint">Sign in to Lody web with the same Lody account and authorize or renew your personal GitHub access. Then return here and retry connecting the GitHub App. Your “Act as you” preference does not need to be enabled.</string>
+    <string name="github_settings_authorize_in_web">Open Lody web</string>
 </resources>

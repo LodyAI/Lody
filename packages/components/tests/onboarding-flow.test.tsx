@@ -1,3 +1,4 @@
+import { getFunctionName } from 'convex/server';
 import {
   createRouter,
   createRootRoute,
@@ -16,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, ProviderSetupTask, WorkspaceId } from '@lody/shared';
 
 const mocks = vi.hoisted(() => ({
+  personalAuthorization: 'authorized',
   createGitHubInstallState: vi.fn(),
   getCliState: vi.fn(),
   onCliState: vi.fn(),
@@ -31,7 +33,10 @@ vi.mock('convex/react', async (importOriginal) => ({
 
 vi.mock('../src/hooks/use-recoverable-convex-query', () => ({
   usePublicConvexQuery: () => undefined,
-  useRecoverableConvexQuery: () => [],
+  useRecoverableConvexQuery: (ref: unknown) =>
+    getFunctionName(ref as never) === 'github:getPersonalOperationSettings'
+      ? { enabled: false, authorization: { state: mocks.personalAuthorization } }
+      : [],
 }));
 
 vi.mock('../src/hooks/use-authenticated-convex', async (importOriginal) => {
@@ -119,6 +124,7 @@ describe('desktop onboarding flow', () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     await initI18n('en');
     localStorage.clear();
+    mocks.personalAuthorization = 'authorized';
     mocks.createGitHubInstallState.mockResolvedValue({ state: 'github-state-1' });
     mocks.openExternalUrl.mockResolvedValue(true);
     mocks.useVisibleLocalProjects.mockReturnValue({ projects: new Map() });
@@ -342,6 +348,24 @@ describe('desktop onboarding flow', () => {
     expect(router.state.location.pathname).toBe('/workspace/e2ee/workspace-1');
     expect(window.location.pathname).toBe(pathname);
     expect(container.textContent).toContain('Control and pairing');
+  });
+
+  it('guides missing personal GitHub authorization to settings before starting App installation', async () => {
+    mocks.personalAuthorization = 'missing';
+    await act(async () =>
+      root?.render(
+        <TestCloudPlatformProvider>
+          <Provider store={store}>
+            <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
+          </Provider>
+        </TestCloudPlatformProvider>
+      )
+    );
+    await act(async () => findButton(container, 'Connect a GitHub repository').click());
+    expect(mocks.openExternalUrl.mock.calls.at(-1)?.[0]).toContain(
+      '/workspace-1/settings/github?github_install_error=authorization_required'
+    );
+    expect(mocks.createGitHubInstallState).not.toHaveBeenCalled();
   });
 
   it('keeps GitHub available while the local agent is not ready', async () => {

@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, open, readFile, realpath, rm, symlink, writeFile } from
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FILE_PREVIEW_V3_LIMITS, type SessionId } from '@lody/shared';
 import { FilePreviewService, type FilePreviewWorkspaceResolver } from './file-preview-service';
@@ -17,6 +17,7 @@ const SESSION_ID = 'session-preview' as SessionId;
 const created: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(created.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -71,6 +72,60 @@ function createService(args: {
 }
 
 describe('FilePreviewService', () => {
+  it('denies remote tmpdir, sibling chat, configured root and symlink reads while preserving local preview', async () => {
+    const data = await makeDir('preview-data-');
+    const workspaceRoot = path.join(data, 'chats', 'this-session');
+    const sibling = path.join(data, 'chats', 'other-session');
+    await mkdir(workspaceRoot, { recursive: true });
+    await mkdir(sibling, { recursive: true });
+    const scratch = await makeDir('preview-temp-');
+    vi.stubEnv('LODY_DATA_DIR', data);
+    vi.stubEnv('LODY_FILE_PREVIEW_EXTRA_ROOTS', scratch);
+    const outside = [path.join(scratch, 'secret.txt'), path.join(sibling, 'secret.txt')];
+    for (const file of outside) await writeFile(file, 'synthetic secret');
+    const ownFile = path.join(workspaceRoot, 'own.txt');
+    await writeFile(ownFile, 'session output');
+    const link = path.join(workspaceRoot, 'escape.txt');
+    await symlink(outside[0], link);
+    const resolveWorkspace: FilePreviewWorkspaceResolver = async () => ({
+      ok: true,
+      ownerSessionId: SESSION_ID,
+      workspaceRoot,
+    });
+    // Use production defaults, including the environment, rather than the test root override.
+    const service = new FilePreviewService({
+      resolveWorkspace,
+      resolveLocalWorkspace: resolveWorkspace,
+      canDownloadLargeFiles: async () => true,
+    });
+    for (const requestedPath of [...outside, '../other-session/secret.txt', link]) {
+      const request = { v: 3 as const, sessionId: SESSION_ID, path: requestedPath };
+      const forgedLocalRequest = { ...request, allowArbitraryPaths: true };
+      expect(await service.previewFile(forgedLocalRequest)).toMatchObject({
+        status: 'error',
+        code: 'path_not_allowed',
+      });
+      expect(await service.previewFile({ ...request, resolveMarkdownLink: true })).toMatchObject({
+        status: 'error',
+        code: 'path_not_allowed',
+      });
+      expect(
+        await service.downloadFileChunk({
+          sessionId: SESSION_ID,
+          path: requestedPath,
+          offset: 0,
+        })
+      ).toMatchObject({ status: 'error', code: 'path_not_allowed' });
+      expect(await service.resolveLocalFile(request)).toMatchObject({
+        status: 'local-file',
+        external: true,
+      });
+    }
+    expect(await service.previewFile({ v: 3, sessionId: SESSION_ID, path: ownFile })).toMatchObject(
+      { status: 'ok', kind: 'text' }
+    );
+  });
+
   it('previews registered additional roots as internal and rejects their escaping links', async () => {
     const main = await makeDir('preview-main-');
     const docs = await makeDir('preview-member-');

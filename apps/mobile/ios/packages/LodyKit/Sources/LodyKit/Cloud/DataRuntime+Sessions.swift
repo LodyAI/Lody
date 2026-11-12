@@ -2,6 +2,15 @@ import LodyCore
 import Foundation
 
 extension DataRuntime {
+  /// The current workspace's plan for a typed call that the free-plan quota gates (a Tab);
+  /// nil when unavailable, which fails open like the other writes.
+  func billingEntitlement() async -> RuntimeContract.BillingEntitlement? {
+    guard let workspace else { return nil }
+    guard let value = await billing.entitlement(workspace: workspace, user: userId),
+          let tier = (value["effectivePlanTier"] as? String).flatMap(RuntimeContract.BillingEntitlementEffectivePlanTier.init(rawValue:)),
+          let pending = value["checkoutPending"] as? Bool else { return nil }
+    return .init(effectivePlanTier: tier, checkoutPending: pending)
+  }
   func releaseReserve(_ id: String) {
     reservedSessions.removeAll { $0 == id }
     dispatch(RuntimeContract.Calls.ReleaseReserve.self, .init(sessionId: id))

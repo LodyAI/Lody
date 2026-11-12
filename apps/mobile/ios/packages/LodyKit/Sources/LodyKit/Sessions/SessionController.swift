@@ -402,16 +402,23 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
       guard let self else { return }
       defer { self.creatingTab = false; self.render() }
       do {
+        // A Tab is a session: the free-plan session quota applies, as on Web.
+        let entitlement = await runtime.billingEntitlement()
         let result = try await runtime.workspaceCall(RuntimeContract.Calls.CreateTab.self) { workspace, _ in
-          RuntimeContract.CreateTabParams(workspaceId: workspace, sessionId: target, parentSessionId: self.sessionId, preferRoost: LodyPreferences.roostHistoryEnabled, title: String(localized: "session.tabs.defaultTitle", bundle: .lody))
+          RuntimeContract.CreateTabParams(workspaceId: workspace, sessionId: target, parentSessionId: self.sessionId, preferRoost: LodyPreferences.roostHistoryEnabled, title: String(localized: "session.tabs.defaultTitle", bundle: .lody), billingEntitlement: entitlement)
         }
         switch result {
         case .created:
           self.attemptedTab = nil
           LodyShell.shared.openSessionFromExternal(target)
-        case .rejected:
+        case .rejected(let rejected):
           self.attemptedTab = nil
-          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.failed", bundle: .lody), kind: .error)
+          let message = switch rejected.reason {
+          case .freeSessionLimitReached: String(localized: "session.tabs.freeSessionLimit", bundle: .lody)
+          case .workspacePaymentRequired: String(localized: "session.tabs.workspacePaymentRequired", bundle: .lody)
+          default: String(localized: "session.tabs.failed", bundle: .lody)
+          }
+          LodyToastOverlay.shared.show(message: message, kind: .error)
         case .unknown:
           LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
         }

@@ -434,7 +434,7 @@ keep their own freshness checks. Transport authentication is never authority.
   iroh only through its native plugin.
 
 Implementation rationale and evidence:
-[iroh transport decision](../.agents/notes/proposed/architecture/2026-11-10-e2ee-iroh-transport.md).
+[iroh transport decision](../.agents/notes/implemented/architecture/2026-11-10-e2ee-iroh-transport.md).
 
 ### Durable identities, actual start and retained outcomes
 

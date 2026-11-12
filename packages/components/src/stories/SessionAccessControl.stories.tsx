@@ -205,6 +205,20 @@ export const PersonalReadOnlyChinese: Story = {
   ...PersonalReadOnly,
   globals: { locale: 'zh_CN' },
 };
+export const MachineEditableWithMembersChineseDark: Story = {
+  globals: { locale: 'zh_CN', theme: 'dark' },
+  args: {
+    state: {
+      ...memberState,
+      visibility: 'team',
+      access: 'edit',
+      memberUserIds: [],
+      openMachineSettings: fn(),
+    },
+    publicShare: { status: 'none', renderEditor: ShareEditorStory },
+  },
+  play: PersonalReadOnly.play,
+};
 export const PersonalReadOnlyNonowner: Story = {
   args: { state: { ...memberState, canManage: false } },
   play: PersonalReadOnly.play,

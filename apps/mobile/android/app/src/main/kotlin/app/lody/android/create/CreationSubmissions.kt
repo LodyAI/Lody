@@ -11,7 +11,7 @@ class CreationSubmissions(
     private val tasks: CoroutineScope,
     private val create: suspend (RuntimeScope, CreateRequest) -> CreationReceipt,
 ) {
-    data class Submission(val scope: RuntimeScope, val request: CreateRequest, val at: String, val state: String = "sending") {
+    data class Submission(val scope: RuntimeScope, val request: CreateRequest, val at: String, val state: String = "sending", val reason: String? = null) {
         val session get() = CatalogSession(
             request.sessionId, request.machineId, request.projectId ?: "${request.machineId}:unassigned",
             request.text.take(200), "idle", false, false, at,
@@ -35,11 +35,11 @@ class CreationSubmissions(
         jobs[request.sessionId] = tasks.launch {
             // Publish and navigate before starting any transport work, even on Main.immediate.
             yield()
-            val result = try { create(scope, request).state }
+            val result = try { create(scope, request) }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { "unknown" }
+            catch (_: Exception) { CreationReceipt(request.sessionId, "unknown") }
             if (mutable.value[request.sessionId] === entry) {
-                mutable.value = mutable.value + (request.sessionId to entry.copy(state = result))
+                mutable.value = mutable.value + (request.sessionId to entry.copy(state = result.state, reason = result.reason))
             }
             jobs.remove(request.sessionId)
         }

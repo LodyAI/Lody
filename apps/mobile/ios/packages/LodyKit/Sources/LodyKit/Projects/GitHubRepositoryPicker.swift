@@ -15,6 +15,7 @@ final class GitHubRepositoryModel: ObservableObject {
   @Published var adding: String?
   @Published var settings: GitHubSettings?
   @Published var error: String?
+  @Published var authorizationRequired = false
   let workspaceId: String
   var service: (GitHubSettingsRequest) async throws -> GitHubSettingsResult = GitHubSettingsController.cloud
   var onAdded: (String) -> Void = { _ in }
@@ -70,11 +71,14 @@ final class GitHubRepositoryModel: ObservableObject {
 
   func install() {
     Task {
-      guard case .url(let url) = try? await service(GitHubSettingsRequest(workspaceId: workspaceId, action: "install")) else {
+      switch try? await service(GitHubSettingsRequest(workspaceId: workspaceId, action: "install")) {
+      case .url(let url):
+        await UIApplication.shared.open(url)
+      case .authorizationRequired:
+        authorizationRequired = true
+      default:
         error = String(localized: "projects.github.installFailed", bundle: .lody)
-        return
       }
-      await UIApplication.shared.open(url)
     }
   }
 }
@@ -107,6 +111,14 @@ struct GitHubRepositoryPicker: View {
     }
     .background(LodyColor.bgBase)
     .onAppear { if model.settings == nil { model.load() } }
+    .alert(GitHubSettingsSections.text("authorizationRequired"), isPresented: $model.authorizationRequired) {
+      Button(GitHubSettingsSections.text("authorizeInWeb")) {
+        Task { await UIApplication.shared.open(GitHubSettingsSections.authorizationURL) }
+      }
+      Button(String(localized: "common.cancel", bundle: .lody), role: .cancel) {}
+    } message: {
+      Text(GitHubSettingsSections.text("authorizationHint"))
+    }
   }
 
   private var search: some View {

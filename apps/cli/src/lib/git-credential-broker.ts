@@ -1,12 +1,13 @@
 import http from 'http';
+import { writePrivateCredentialFile } from './private-credential-file';
 import { Data, Effect } from 'effect';
-import { randomBytes } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import path from 'path';
 import { Logger, getLogger } from '@/utils/logger';
 import { GitHubTokenFetchError } from '@/lib/github-token-manager';
 import type { CloudGithubTokenManager } from '@lody/platform';
-import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 /**
  * Path to the broker state file. This file contains the current broker URL and token,
@@ -80,30 +81,26 @@ export const createGitCredentialBrokerHandler = (options: {
     const requestId = randomBytes(8).toString('hex');
     const startedAt = Date.now();
     try {
-      // Health check endpoint - no auth required, used for internal liveness checks
-      if (req.method === 'GET' && req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }));
-        return;
-      }
-
+      const health = req.method === 'GET' && req.url === '/health';
       if (
-        req.method !== 'POST' ||
-        ![
-          '/git-credential',
-          '/github-token',
-          '/git-credential/reject',
-          '/github-token/reject',
-          '/github-auth-context',
-        ].includes(req.url ?? '')
+        !health &&
+        (req.method !== 'POST' ||
+          ![
+            '/git-credential',
+            '/github-token',
+            '/git-credential/reject',
+            '/github-token/reject',
+            '/github-auth-context',
+          ].includes(req.url ?? ''))
       ) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'not_found', message: 'Endpoint not found.' }));
         return;
       }
 
-      const auth = req.headers.authorization ?? '';
-      if (auth !== `Bearer ${options.authToken}`) {
+      const auth = Buffer.from(req.headers.authorization ?? '');
+      const expected = Buffer.from(`Bearer ${options.authToken}`);
+      if (auth.length !== expected.length || !timingSafeEqual(auth, expected)) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({
@@ -111,6 +108,12 @@ export const createGitCredentialBrokerHandler = (options: {
             message: 'Invalid or missing authorization token.',
           })
         );
+        return;
+      }
+
+      if (health) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
         return;
       }
 
@@ -317,16 +320,14 @@ const HEALTH_CHECK_TIMEOUT_MS = 5_000; // 5 seconds
  * Write the broker state to a file so containers can always find the current broker.
  */
 const writeBrokerStateFile = (env: GitCredentialBrokerEnv, workspaceId?: string): void => {
-  const dir = path.dirname(BROKER_STATE_FILE_PATH);
-  mkdirSync(dir, { recursive: true });
+  ensureLodyDataDir();
   const contents = JSON.stringify({ url: env.url, port: env.port, token: env.token }, null, 2);
-  const options = { encoding: 'utf8', mode: 0o600 } as const; // Readable only by owner for security
   // The shared file stays for containers and CLI-restart recovery that only know
   // the legacy path. It is last-writer-wins across workspaces, so the per-workspace
   // file is the one sessions are pointed at.
-  writeFileSync(BROKER_STATE_FILE_PATH, contents, options);
+  writePrivateCredentialFile(BROKER_STATE_FILE_PATH, contents);
   if (workspaceId) {
-    writeFileSync(getBrokerStateFilePathForWorkspace(workspaceId), contents, options);
+    writePrivateCredentialFile(getBrokerStateFilePathForWorkspace(workspaceId), contents);
   }
 };
 
@@ -411,10 +412,9 @@ export class GitCredentialBroker {
     const token = randomBytes(32).toString('hex');
     const server = http.createServer(this.createHandler(token));
 
-    // Bind to 0.0.0.0 to allow connections from Docker containers via bridge network.
-    // Security is provided by the auth token, not IP restriction.
+    // All current callers run on this host; do not expose credentials on LAN interfaces.
     await new Promise<void>((resolve, reject) => {
-      server.listen(0, '0.0.0.0', () => resolve());
+      server.listen(0, '127.0.0.1', () => resolve());
       server.once('error', (err) => reject(err));
     });
 
@@ -434,7 +434,7 @@ export class GitCredentialBroker {
     // Write state file so containers can always find the current broker
     writeBrokerStateFile(this.env, this.workspaceId);
 
-    this.logger.debug(`Git credential broker listening on 0.0.0.0:${port}`);
+    this.logger.debug(`Git credential broker listening on 127.0.0.1:${port}`);
 
     return this.env;
   }
@@ -516,6 +516,7 @@ export class GitCredentialBroker {
           hostname: '127.0.0.1',
           port: (this.server?.address() as { port: number } | null)?.port,
           path: '/health',
+          headers: { authorization: `Bearer ${this.env?.token}` },
           method: 'GET',
           timeout: HEALTH_CHECK_TIMEOUT_MS,
         },

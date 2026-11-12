@@ -59,11 +59,20 @@ struct GitHubSettingsRequest: Encodable, Equatable, Sendable {
 enum GitHubSettingsResult: Equatable, Sendable {
   case settings(GitHubSettings)
   case url(URL)
+  case authorizationRequired
 }
 
 typealias GitHubSettingsService = @MainActor (GitHubSettingsRequest) async throws -> GitHubSettingsResult
 
 enum GitHubSettingsSections {
+  /// The existing neutral callback resolves the deployment's Web origin; no credentials enter it.
+  static var authorizationURL: URL {
+    var url = URLComponents(url: URL(string: BackendEnvironment.site)!, resolvingAgainstBaseURL: false)!
+    url.path = "/api/github/callback"
+    url.queryItems = [URLQueryItem(name: "setup_action", value: "request")]
+    return url.url!
+  }
+
   static func installURL(_ value: String) -> URL? {
     guard let components = URLComponents(string: value), let url = components.url,
           components.scheme?.lowercased() == "https", components.host?.lowercased() == "github.com",

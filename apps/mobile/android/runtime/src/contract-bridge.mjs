@@ -69,14 +69,17 @@ export function contractBridge(runtime, emit) {
   retryPendingInput:args=>invoke('retryPendingInput',args),
   ensureSession:args=>invoke('ensureSession',args),
   creationOptions:args=>invoke('creationOptions',args),
-  // The shared contract requires the entitlement on writes that check quota. Android reads none,
-  // so it sends null: the runtime's fail-open policy, as iOS does when its read is unavailable.
-  createSession:args=>invoke('createSession',{...args,billingEntitlement:null}),
-  editSession:args=>invoke('editSession',{...args,billingEntitlement:null}),
+  // The shared contract requires the entitlement on writes that check quota. Native reads it per
+  // write; null (an unavailable read) is the runtime's fail-open policy, as on iOS.
+  createSession:args=>invoke('createSession',{...args,billingEntitlement:args.billingEntitlement??null}),
+  editSession:args=>invoke('editSession',{...args,billingEntitlement:args.billingEntitlement??null}),
   forkSession:args=>invoke('forkSession',args),
+  // The free-plan turn quota alone (no write), asked before native uploads a turn's attachments.
+  checkTurnQuota:args=>invoke('checkTurnQuota',{sessionId:args.sessionId,billingEntitlement:args.billingEntitlement??null}),
   setTabClosed:args=>invoke('setTabClosed',args),
   archiveSession:args=>invoke('archiveSession',args),
-  createTab:args=>invoke('createTab',args),
+  // A Tab is a session: the contract requires the entitlement (null fails open), as on createSession.
+  createTab:args=>invoke('createTab',{...args,billingEntitlement:args.billingEntitlement??null}),
   // Agent Roles readable by this user, listed for the new-chat Role row.
   agentProviders:args=>invoke('agentProviders',args),
   agentProviderDetail:args=>invoke('agentProviderDetail',args),

@@ -545,12 +545,64 @@ export function resolveACPSetting(input: ResolveACPSettingInput): ResolvedACPSet
   throw new Error(`Unsupported ACP cliType: ${input.cliType as string}`);
 }
 
-function expandHomePath(pathValue: string): string {
-  if (pathValue === '~') return homedir();
+export function expandHomePath(pathValue: string, homeDir = homedir()): string {
+  if (!homeDir) return pathValue;
+  if (pathValue === '~' || pathValue === '$HOME' || pathValue === '${HOME}') {
+    return homeDir;
+  }
   if (pathValue.startsWith('~/') || pathValue.startsWith('~\\')) {
-    return join(homedir(), pathValue.slice(2));
+    return join(homeDir, pathValue.slice(2));
+  }
+  if (pathValue.startsWith('$HOME/') || pathValue.startsWith('$HOME\\')) {
+    return join(homeDir, pathValue.slice('$HOME/'.length));
+  }
+  if (pathValue.startsWith('${HOME}/') || pathValue.startsWith('${HOME}\\')) {
+    return join(homeDir, pathValue.slice('${HOME}/'.length));
   }
   return pathValue;
+}
+
+const AGENT_HOME_PATH_ENV_KEYS = [
+  'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_EXECUTABLE',
+  'CLAUDE_CODE_HOST_CREDS_FILE',
+  'CODEX_HOME',
+  'GROK_HOME',
+  'GROK_CONFIG',
+  'XDG_CONFIG_HOME',
+] as const;
+
+/**
+ * Expands leading `~`, `$HOME`, and `${HOME}` in filesystem-path environment
+ * variables configured in Lody's Agent Config UI. Unlike a terminal shell,
+ * JSON/UI environment maps do not undergo shell word expansion before `spawn()`,
+ * and downstream SDKs (such as `@anthropic-ai/claude-agent-sdk` reading
+ * `CLAUDE_CONFIG_DIR`) treat unexpanded `$HOME/...` or `~/.claude-...` as
+ * non-absolute paths.
+ */
+export function normalizeAgentProcessEnv(
+  env: NodeJS.ProcessEnv,
+  homeDir = env.HOME?.trim() || homedir()
+): NodeJS.ProcessEnv {
+  let out: NodeJS.ProcessEnv | undefined;
+  for (const key of AGENT_HOME_PATH_ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      if (key === 'CLAUDE_CONFIG_DIR') {
+        out ??= { ...env };
+        delete out[key];
+      }
+      continue;
+    }
+    const expanded = expandHomePath(trimmed, homeDir);
+    if (expanded !== raw) {
+      out ??= { ...env };
+      out[key] = expanded;
+    }
+  }
+  return out ?? env;
 }
 
 function trimRuntimeOverride(value: string | undefined): string | undefined {
@@ -905,13 +957,14 @@ export function withDefaultAcpPathEntries(
   env: NodeJS.ProcessEnv,
   agentType?: string
 ): NodeJS.ProcessEnv {
+  const normalizedEnv = normalizeAgentProcessEnv(env);
   const defaultEntries = getDefaultAcpPathEntries(homedir(), agentType);
   if (defaultEntries.length === 0) {
-    return env;
+    return normalizedEnv;
   }
 
-  const pathKey = getPathEnvKey(env);
-  const currentParts = (env[pathKey] ?? '').split(delimiter).filter(Boolean);
+  const pathKey = getPathEnvKey(normalizedEnv);
+  const currentParts = (normalizedEnv[pathKey] ?? '').split(delimiter).filter(Boolean);
   const defaultEntrySet = new Set(defaultEntries.map(normalizePathEntry));
   const currentWithoutDefaults = currentParts.filter(
     (entry) => !defaultEntrySet.has(normalizePathEntry(entry))
@@ -921,12 +974,12 @@ export function withDefaultAcpPathEntries(
     getLeadingGhShimBinDir(currentParts)
   ).join(delimiter);
 
-  if (env[pathKey] === nextPath) {
-    return env;
+  if (normalizedEnv[pathKey] === nextPath) {
+    return normalizedEnv;
   }
 
   return {
-    ...env,
+    ...normalizedEnv,
     [pathKey]: nextPath,
   };
 }
@@ -954,7 +1007,7 @@ export function mergeLoginShellEnv(
   shellEnv: NodeJS.ProcessEnv | null | undefined
 ): NodeJS.ProcessEnv {
   if (!shellEnv || Object.keys(shellEnv).length === 0) {
-    return base;
+    return normalizeAgentProcessEnv(base);
   }
 
   const merged: NodeJS.ProcessEnv = { ...shellEnv, ...base };
@@ -979,5 +1032,5 @@ export function mergeLoginShellEnv(
     merged[pathKey] = withLeadingEntry(ordered, getLeadingGhShimBinDir(baseParts)).join(delimiter);
   }
 
-  return merged;
+  return normalizeAgentProcessEnv(merged);
 }

@@ -7,6 +7,7 @@ import type { Logger } from '@/utils/logger';
 import type { AuthMethod } from '@agentclientprotocol/sdk';
 import { shutdownLocalAcpAgent, startLocalAcpAgent } from '@/agent/acp-runner';
 import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from '@/agent/claude-env-conflict';
+import { normalizeAgentProcessEnv } from '@/agent/setting';
 import type { ManagedRuntimeProgressCallback } from '@/agent/managed-agent-runtime';
 import { AcpAuthenticationRequiredError } from '@/agent/agent-client';
 import type { CodexProfileExecution } from './codex-profile-runtime';
@@ -15,6 +16,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { probeBuiltinAuthentication } from '@/agent/acp-authentication';
+import { isAntigravityRegistryAgent } from './antigravity-quota';
 import {
   normalizeAcpSessionCapabilities,
   type AcpCapabilitiesResult,
@@ -60,15 +62,17 @@ export async function fetchAcpCapabilities(
 ): Promise<FetchedAcpCapabilities> {
   options.signal?.throwIfAborted();
   const mergedProbeEnv: NodeJS.ProcessEnv = env ? { ...process.env, ...env } : process.env;
-  const probeEnv: NodeJS.ProcessEnv =
+  const probeEnv = normalizeAgentProcessEnv(
     shouldScrubClaudeAuthEnv(cliType, agentType) && env
       ? scrubInheritedClaudeAuthEnv(mergedProbeEnv, env)
-      : mergedProbeEnv;
+      : mergedProbeEnv
+  );
   const authentication = await probeBuiltinAuthentication({
     cliType,
     agentType,
     runtimeOverrides,
     env: probeEnv,
+    userExplicitEnv: env,
     onManagedRuntimeProgress: options.onManagedRuntimeProgress,
     signal: options.signal,
     logger,
@@ -104,6 +108,7 @@ export async function fetchAcpCapabilities(
         magpieGatewayUrl: options.magpieGatewayUrl,
         workdir,
         env: probeEnv,
+        userExplicitEnv: env,
         onManagedRuntimeProgress: options.onManagedRuntimeProgress,
         signal: options.signal,
         logger,
@@ -192,7 +197,11 @@ export async function fetchAcpCapabilities(
         ...normalizeAcpSessionCapabilities(sessionResponse, {
           sessionFork: client.supportsSessionFork?.() === true,
           sessionTitle: client.supportsSessionTitleGeneration(),
-          rateLimits: client.getRateLimitsCapability(),
+          rateLimits:
+            client.getRateLimitsCapability() ??
+            (isAntigravityRegistryAgent({ cliType, agentType })
+              ? { version: 1, query: true }
+              : undefined),
           acknowledgedSteer: client.supportsAcknowledgedSteer(),
           goalActions: client.getGoalCapability()?.actions.slice(),
           agent: { cliType, agentType },

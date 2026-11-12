@@ -178,6 +178,17 @@
     <string name="chat_attach_remove">移除</string>
     <string name="chat_attach_limit">每条消息最多 8 张图片和 8 个文件。</string>
     <string name="chat_attach_failed">附件上传失败，消息未发送。</string>
+    <string name="chat_attach_too_large">文件不能超过 %1$d MB：%2$s</string>
+    <plurals name="chat_free_turns_remaining">
+        <item quantity="other">免费会话 · 还可发送 %d 条消息</item>
+    </plurals>
+    <string name="chat_free_turn_limit">免费会话 · 已达到 %d 条消息上限</string>
+    <string name="chat_free_turn_limit_reached">此免费会话已达到 30 轮用户对话上限。消息未发送，草稿已保存。</string>
+    <string name="create_free_session_limit_reached">此免费工作区已达到 200 个会话上限，新会话未创建。</string>
+    <string name="chat_workspace_payment_required">请先完成工作区设置，再创建会话或发送消息。</string>
+    <string name="chat_free_turn_limit_title">免费会话已到上限</string>
+    <string name="chat_free_turn_limit_body">这个免费会话已达到 %d 条消息上限，输入栏已关闭。</string>
+    <string name="chat_composer_quota_closed">已达到消息上限</string>
     <string name="create_search_branches">搜索分支</string>
     <string name="create_more_branches">更多分支…</string>
     <string name="create_mode_auto">Auto</string>
@@ -929,4 +940,7 @@
     <string name="chat_proposal_error_schedule_owner">只有这台电脑的所有者可以在上面创建定时任务。</string>
     <string name="chat_proposal_error_schedule_unsupported">请先更新这台电脑上的 Lody 才能使用定时任务。</string>
     <string name="chat_proposal_error_schedule_trigger">请检查时间规则和时区。</string>
+    <string name="github_settings_authorization_required">需要个人 GitHub 授权</string>
+    <string name="github_settings_authorization_hint">请在 Lody 网页端登录同一个 Lody 账号，授权或续期个人 GitHub 访问权限，然后返回此处重试连接 GitHub App。无需开启“以你的身份操作”偏好。</string>
+    <string name="github_settings_authorize_in_web">打开 Lody 网页端</string>
 </resources>

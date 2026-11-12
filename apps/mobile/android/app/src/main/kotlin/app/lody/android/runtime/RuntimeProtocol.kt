@@ -121,6 +121,7 @@ internal object RuntimeProtocol {
                 preview = PreviewJson.summary(envelope.optJSONObject("preview")),
                 historyHasMore = envelope.optBoolean("historyHasMore"),
                 historyLoading = envelope.optBoolean("historyLoading"),
+                billableTurnCount = (envelope.opt("billableTurnCount") as? Number)?.toInt()?.takeIf { it >= 0 },
             ))
         }
         "catalog" -> {

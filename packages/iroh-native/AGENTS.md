@@ -5,7 +5,7 @@
 These rules bind the CLI machine listener (`apps/cli/src/lib/e2ee/iroh-listener.ts`)
 and the desktop client (`apps/electron/src/main/services/e2ee-iroh.mts`) as well as
 this package. Intent: [foundations Spec](../../specs/e2ee-foundations.md#preferred-route-iroh);
-rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2026-11-10-e2ee-iroh-transport.md).
+rationale: [iroh transport decision](../../.agents/notes/implemented/architecture/2026-11-10-e2ee-iroh-transport.md).
 
 - This package moves opaque `{id, frame}` envelopes only. It never parses, verifies
   or authorizes a frame, and it exposes no signing, key export or frame inspection.
@@ -34,5 +34,14 @@ rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2
   receive. Keep that plugin's bridge logging off and never return the seed to JS.
 - Rust tests (`cargo test -p lody-iroh`) cover the wire and endpoint rules; Node
   tests load the development build and skip when it is absent, except under
-  `LODY_IROH_REQUIRE=1` (CI on Linux and macOS), where absence fails. Release builds
+  `LODY_IROH_REQUIRE=1`, where absence fails. CI runs that job on Linux and macOS for
+  every main push and for pull requests that change this package, the CLI E2EE code
+  that drives it, the lockfile or the CI workflow; extend that path list in
+  `.github/workflows/ci.yml` when another caller starts loading the module. Release builds
   are not stripped: Cargo's macOS strip step produced an unloadable dylib.
+- Every endpoint keeps UDP segmentation offload (GSO) off. iroh 1.4.1 caches the
+  socket's segment limit when it creates the sender, so after a NIC refuses a
+  segmented send, open connections keep sending batches that fail
+  ([iroh #4555](https://github.com/n0-computer/iroh/issues/4555)); the Android
+  emulator returns EIO and stalled every call past the dispatch deadline. Re-enable
+  it only on an iroh release that reads the limit per send.

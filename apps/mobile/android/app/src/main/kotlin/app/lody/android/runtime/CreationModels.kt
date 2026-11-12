@@ -74,4 +74,5 @@ data class RunSelection(val agentId: String, val modelId: String? = null, val mo
 data class RecentRunConfig(val machineId: String, val selection: RunSelection, val agentRoleId: String? = null, val usedAt: Long = 0)
 /** Device-local, per account + workspace: the last selection on each computer and recent configurations, newest first. */
 data class RunConfigPrefs(val machines: Map<String, RunSelection> = emptyMap(), val recents: List<RecentRunConfig> = emptyList())
-data class CreationReceipt(val sessionId: String, val state: String)
+/** [reason]: the runtime's refusal (`free_session_limit_reached`, …) when [state] is `rejected`. */
+data class CreationReceipt(val sessionId: String, val state: String, val reason: String? = null)

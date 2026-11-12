@@ -1,4 +1,6 @@
 import * as fs from 'fs';
+import { ensureLodyDataDir } from '@lody/shared/node/installation-profile';
+import { writePrivateCredentialFile } from './private-credential-file';
 import path from 'path';
 import { getConfigPath } from '@/utils';
 import chalk from 'chalk';
@@ -761,10 +763,7 @@ export async function saveAuthInfo(
   machine: { machineName: string; machineId: string }
 ): Promise<void> {
   const configPath = getConfigPath();
-  const configDir = path.dirname(configPath);
-
-  // 确保目录存在
-  fs.mkdirSync(configDir, { recursive: true });
+  ensureLodyDataDir();
 
   // 保存认证信息
   const authData = {
@@ -775,14 +774,7 @@ export async function saveAuthInfo(
     createdAt: new Date().toISOString(),
   };
 
-  fs.writeFileSync(configPath, JSON.stringify(authData, null, 2));
-  if (process.platform !== 'win32') {
-    try {
-      fs.chmodSync(configPath, 0o600);
-    } catch {
-      // best effort
-    }
-  }
+  writePrivateCredentialFile(configPath, JSON.stringify(authData, null, 2));
 }
 
 /**

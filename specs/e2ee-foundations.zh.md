@@ -305,7 +305,7 @@ Owner 于 2026-10-28 将 iroh 移出 MVP，又于 **2026-11-10** 将其定为首
   Streams RPC；下掉它需要再次修订本 Spec。浏览器版 iroh 不在范围内；移动端 WebView
   只经其原生插件使用 iroh。
 
-实现理由与依据：[iroh 传输决定](../.agents/notes/proposed/architecture/2026-11-10-e2ee-iroh-transport.zh.md)。
+实现理由与依据：[iroh 传输决定](../.agents/notes/implemented/architecture/2026-11-10-e2ee-iroh-transport.zh.md)。
 
 ### 持久身份、实际启动与结果保留
 

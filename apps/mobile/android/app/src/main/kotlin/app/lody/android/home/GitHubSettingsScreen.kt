@@ -44,6 +44,7 @@ internal fun GitHubSettingsScreen(service: GitHubSettingsService?, scope: Runtim
     var query by rememberSaveable(scope) { mutableStateOf("") }
     var pulling by remember { mutableStateOf(false) }
     var opened by remember { mutableStateOf(false) }
+    var authorizationRequired by remember(scope) { mutableStateOf(false) }
     val installFailed = stringResource(R.string.github_settings_install_failed)
     LaunchedEffect(state) { state?.refresh() }
     // Returning from the GitHub App's page re-reads, as iOS does on becoming active.
@@ -54,6 +55,19 @@ internal fun GitHubSettingsScreen(service: GitHubSettingsService?, scope: Runtim
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
+    }
+    if (authorizationRequired) {
+        AlertDialog(
+            onDismissRequest = { authorizationRequired = false },
+            title = { Text(stringResource(R.string.github_settings_authorization_required)) },
+            text = { Text(stringResource(R.string.github_settings_authorization_hint)) },
+            confirmButton = { TextButton(onClick = {
+                authorizationRequired = false
+                opened = true
+                uriHandler.openUri(GitHubSettingsCloud.authorizationUrl())
+            }) { Text(stringResource(R.string.github_settings_authorize_in_web)) } },
+            dismissButton = { TextButton(onClick = { authorizationRequired = false }) { Text(stringResource(R.string.settings_agent_cancel)) } },
+        )
     }
     BackHandler(onBack = onBack)
     Scaffold(containerColor = colors.bgBase, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
@@ -111,6 +125,10 @@ internal fun GitHubSettingsScreen(service: GitHubSettingsService?, scope: Runtim
                                 tasks.launch {
                                     try { val url = current.installUrl(); opened = true; uriHandler.openUri(url) }
                                     catch (cancelled: CancellationException) { throw cancelled }
+                                    catch (failure: GitHubSettingsFailure) {
+                                        if (failure.code == "authorization_required") authorizationRequired = true
+                                        else snackbar.showSnackbar(installFailed)
+                                    }
                                     catch (_: Exception) { snackbar.showSnackbar(installFailed) }
                                 }
                             }, trailing = { Icon(LodyIcons.ExternalLink, null, Modifier.size(LodyIconSize.sm), tint = colors.textSecondary) })

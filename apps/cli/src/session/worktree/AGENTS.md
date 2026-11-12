@@ -26,6 +26,9 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Git credential broker
 
+- The broker binds only `127.0.0.1`; every credential and health request requires
+  its bearer token. Current session execution has no Docker bridge consumer.
+
 - GitHub auth: conversation-owner personal → matching-owner machine → repo App,
   once per source. Failures advance without a policy RPC; local context grants
   machine eligibility. Never persist managed tokens or replay uncertain writes.

@@ -29,7 +29,6 @@ import {
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   resolveFilePreviewPath,
-  getDefaultFilePreviewExtraRoots,
   type FilePreviewPathPolicyOptions,
   type ResolvedPreviewPath,
   type FilePreviewIoFailure,
@@ -88,7 +87,7 @@ export type FilePreviewServiceOptions = {
   readonly resolveLocalWorkspace: FilePreviewLocalWorkspaceResolver;
   readonly limits?: Partial<typeof FILE_PREVIEW_V3_LIMITS>;
   readonly pathPolicy?: FilePreviewPathPolicyOptions;
-  /** Test seam: overrides the fixed extra roots entirely. */
+  /** Test seam: supplies explicit roots; production uses only the resolved session roots. */
   readonly extraRoots?: readonly string[];
 };
 
@@ -319,8 +318,8 @@ export class FilePreviewService {
       return resolveMarkdownFileLink({
         workspaceRoot: workspace.workspaceRoot,
         requestedPath: request.path,
-        extraRoots: this.deps.extraRoots ?? getDefaultFilePreviewExtraRoots(this.deps.pathPolicy),
-        options: this.deps.pathPolicy,
+        extraRoots: this.deps.extraRoots ?? [],
+        options: { ...this.deps.pathPolicy, allowArbitraryPaths: false },
       });
     const resolution = this.resolvePath(request, workspace, false);
     if (!resolution.ok) {
