@@ -8,6 +8,7 @@ import { appendLedgerHistory, bytesToHex } from '../src/lib/e2ee-ledger-history'
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
+import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { E2eeMemberJoin } from '../src/components/pages/e2ee-member-join';
 import {
@@ -317,6 +318,131 @@ describe('encrypted team joining', () => {
     );
     expect(button('e2ee.team.submit')).toBeUndefined();
   });
+  it.each(['method_required', 'payment_required', 'refresh'] as const)(
+    'blocks encrypted approval for %s and resumes after payment recovery refresh',
+    async (paymentAction) => {
+      let ready = false,
+        admitted = false,
+        billingOpened = false;
+      const refreshed = deferred<void>();
+      const seatPreview = () =>
+        SeatInvitePreviewSchema.parse({
+          status: 'billed',
+          interval: 'month',
+          unitAmount: 1000,
+          proratedAmount: 500,
+          currentPeriodEnd: null,
+          seatCount: 1,
+          nextSeatCount: 2,
+          nextRenewalAmount: 2000,
+          paymentAction: ready ? undefined : paymentAction,
+          addedSeats: 1,
+          invoiceAt: null,
+        });
+      await render(
+        <E2eeTeamSettings
+          workspaceId="team"
+          runtime={{
+            createMemberInvitation: async () => offer,
+            memberJoinRequests: async () => ({
+              ...empty,
+              seatPreview: seatPreview(),
+              items: admitted ? [] : [application('applicant', 'link')],
+            }),
+            approveMemberJoin: async () => {
+              admitted = true;
+              return { admitted: true, keyPending: false };
+            },
+            rejectMemberJoin: async () => ({ state: 'rejected' }),
+            revokeMemberInvitation: async () => ({ revoked: true }),
+          }}
+          onOpenBilling={() => {
+            billingOpened = true;
+          }}
+          onRefreshBilling={async () => {
+            await refreshed.promise;
+            ready = true;
+          }}
+        />
+      );
+      await settle();
+      expect(
+        container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')?.disabled
+      ).toBe(true);
+      expect(admitted).toBe(false);
+      if (paymentAction !== 'refresh') {
+        await act(async () =>
+          button(
+            paymentAction === 'method_required'
+              ? 'billing.seatResolveMethod'
+              : 'billing.seatResolvePayment'
+          ).click()
+        );
+        expect(billingOpened).toBe(true);
+      }
+      const refresh = button('billing.seatRefreshPayment');
+      expect(refresh).toBeDefined();
+      await act(async () => refresh.click());
+      expect(
+        container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')?.disabled
+      ).toBe(true);
+      await act(async () => refreshed.resolve());
+      await settle();
+      expect(button('billing.seatRefreshPayment')).toBeUndefined();
+      const approve = container.querySelector<HTMLButtonElement>(
+        '[data-testid="e2ee-join-approve"]'
+      )!;
+      expect(approve.disabled).toBe(false);
+      await act(async () => approve.click());
+      expect(admitted).toBe(true);
+      expect(container.querySelector('[data-testid="e2ee-join-approve"]')).toBeNull();
+    }
+  );
+
+  it.each(['method_required', 'payment_required'] as const)(
+    'explains native-shell %s without adding a payment destination',
+    async (paymentAction) => {
+      await render(
+        <E2eeTeamSettings
+          workspaceId="team"
+          runtime={{
+            createMemberInvitation: async () => offer,
+            memberJoinRequests: async () => ({
+              ...empty,
+              items: [application('applicant', 'link')],
+              seatPreview: SeatInvitePreviewSchema.parse({
+                status: 'billed',
+                interval: 'month',
+                unitAmount: 1000,
+                proratedAmount: 500,
+                currentPeriodEnd: null,
+                seatCount: 1,
+                nextSeatCount: 2,
+                nextRenewalAmount: 2000,
+                paymentAction,
+              }),
+            }),
+            approveMemberJoin: async () => {
+              throw new Error('payment must be resolved first');
+            },
+            rejectMemberJoin: async () => ({ state: 'rejected' }),
+            revokeMemberInvitation: async () => ({ revoked: true }),
+          }}
+          onRefreshBilling={async () => {}}
+        />
+      );
+      await settle();
+      expect(
+        container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')?.disabled
+      ).toBe(true);
+      expect(container.textContent).toContain('billing.seatResolveOnWeb');
+      expect(button('billing.seatRefreshPayment')).toBeDefined();
+      expect(button('billing.seatResolveMethod')).toBeUndefined();
+      expect(button('billing.seatResolvePayment')).toBeUndefined();
+      expect(container.querySelector('a[href*="billing"]')).toBeNull();
+    }
+  );
+
   it('states the added seat cost beside approve when the workspace is billed', async () => {
     await render(
       <E2eeTeamSettings

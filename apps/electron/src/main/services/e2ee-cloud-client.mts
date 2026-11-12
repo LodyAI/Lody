@@ -1,3 +1,4 @@
+import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview'
 import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas'
 import type { SharingRemote } from '@lody/e2ee-machine-sharing'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
@@ -139,20 +140,6 @@ const joinSession = z.object({
   requestHex: bytesHex(8192),
   status: z.enum(['pending', 'cancelled', 'admitting', 'admitted', 'conflict', 'published'])
 })
-const seatPreview = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('not_billed'), reason: z.enum(['free', 'covered']) }),
-  z.object({
-    status: z.literal('billed'),
-    interval: z.enum(['month', 'year']),
-    unitAmount: z.number().nullable(),
-    proratedAmount: z.number().nullable(),
-    currentPeriodEnd: z.number().nullable(),
-    seatCount: z.number(),
-    nextSeatCount: z.number(),
-    nextRenewalAmount: z.number().nullable(),
-    currency: z.string().optional()
-  })
-])
 const memberRequest = z.object({
   id: z.string().min(1),
   workspaceId: z.string().min(1),
@@ -621,7 +608,7 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
               )
               .max(100),
             hasMore: z.boolean(),
-            seatPreview
+            seatPreview: SeatInvitePreviewSchema
           })
           .transform(({ unsignedInvitations, ...value }) => ({
             ...value,
