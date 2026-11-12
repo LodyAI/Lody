@@ -92,7 +92,7 @@
   "src/runtime/handlers/sessions.ts": "be29b9fb6c080487d0050ba052d642629c30662e1bd4f7b764c5e30ff9d18c14",
   "src/runtime/handlers/settings.ts": "e4a7a32794bd71f9e4e023638760e71955ba3db8eeabdb1f76dab2d1d2cbfc80",
   "src/runtime/handlers/sharing.ts": "d0e6c67bcb8fb6998d5217f550a01c0f79c6db62a4ae8068d745d69e0a6f77cd",
-  "src/runtime/index.ts": "8ed6d018c1a3acd7bd067af75c7a570bfb4380e98c526bd37785b981df0ec761",
+  "src/runtime/index.ts": "c7f83f608c5020052601e1644354e9be96736cebdde1e24484c0d36ebd8ff297",
   "src/runtime/local-projects.ts": "592265c4ac9b0e078c4f66530d1223be22af49e111b48384bdc15a70c8e8300a",
   "src/runtime/machine-presence.ts": "69cad588be7ef5da3ab67994dfdf3e5a7490cc5ef3e99ced2e43bded40929b7c",
   "src/runtime/machine-rpc.ts": "e330f78a6c8e3ab257cd9addfce4cae46d1ade308b1416cf29943a09474b2d49",

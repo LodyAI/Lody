@@ -363,7 +363,10 @@ function watch(mode: string) {
           if (upToDate) {
             if (mode === 'meta') {
               const first = !state.metaReplica;
-              state.metaReplica = { flock, client };
+              // Keep the replica's identity across polls: in-flight calls
+              // compare it to detect a reconnect, not a routine update.
+              if (state.metaReplica?.flock !== flock)
+                state.metaReplica = { flock, client };
               if (first) resumeAcceptedInputs();
             } else machineReplicas.set(mode, flock);
             unhealthy.delete(mode);
