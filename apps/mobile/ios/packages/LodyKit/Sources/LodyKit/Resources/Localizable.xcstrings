@@ -31363,6 +31363,54 @@
           }
         }
       }
+    },
+    "workspace.e2ee.unsupported": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mobile does not yet support end-to-end encrypted workspaces. Please open this workspace in Lody Desktop."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移动端暂不支持端到端加密工作区，请使用 Lody 桌面端打开。"
+          }
+        }
+      }
+    },
+    "workspace.mode.unknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to confirm workspace encryption. Please retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认工作区加密状态，请重试。"
+          }
+        }
+      }
+    },
+    "workspace.mode.retry": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

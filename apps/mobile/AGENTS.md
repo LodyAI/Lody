@@ -21,3 +21,5 @@ both platform indexes link them.
   the same resolver and endpoint-tuple storage namespace, including persistent
   Roost history and pending inputs. Never inject secrets
   or disable TLS validation. See README.md#backend-configuration.
+
+- Native mobile clients do not support encrypted content yet. Keep E2EE workspaces visible with a lock, but block their runtime and sending. Confirm unknown workspace modes through `e2eeWorkspaces:describe` before opening plaintext transport. Retain encrypted mode/genesis observations independently of account/catalog caches across logout and restart; server replies can never downgrade them. An explicit `legacy-unclassified` descriptor admits ordinary workspaces only without mode/crypto fields or retained encrypted evidence. Unreadable encrypted pins fail closed; optional plaintext cache failures never revoke online admission. Mode retries preserve account, credentials and workspace selection. Gate native creation and Outbox persistence before writing plaintext, and exclude blocked workspaces from Share snapshots and attachment uploads.

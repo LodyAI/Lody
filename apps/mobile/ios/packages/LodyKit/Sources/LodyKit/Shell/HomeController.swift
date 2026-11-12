@@ -114,6 +114,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     layoutColumns()
   }
   private func scopeChanged() {
+    tabsHost.canCreate = source.state.workspace?.resolvedMode == .plaintext
     let next = source.state.key
     guard next != scope else {
       if let session, !source.state.loading, source.state.catalog.session(session.sessionId) == nil { clearSession() }

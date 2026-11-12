@@ -12,6 +12,7 @@ class AccountController(private val api: CloudAuthApi, private val store: Creden
     val state: StateFlow<AuthState> = mutable.asStateFlow()
     private var pending: Job? = null
     private var epoch = 0L
+    private var modeRefresh: Job? = null
     private var credential: Credential? = null
     internal var browserStore: BrowserAuthStore? = null
     internal var now: () -> Long = System::currentTimeMillis
@@ -48,7 +49,28 @@ class AccountController(private val api: CloudAuthApi, private val store: Creden
             accept(token)
         }.join()
     }
+    fun refreshWorkspaceModes(): Job {
+        modeRefresh?.takeIf { it.isActive }?.let { return it }
+        val captured = state.value.account ?: return tasks.launch { }
+        val token = credential ?: return tasks.launch { }
+        val identity = epoch
+        return tasks.launch {
+            try {
+                val rows = api.workspaceModes(token, captured.workspaces)
+                currentCoroutineContext().ensureActive()
+                val current = state.value.account
+                if (epoch != identity || credential !== token || current?.id != captured.id) return@launch
+                val modes = rows.associateBy { it.id }
+                val updated = current.copy(workspaces = current.workspaces.map { row -> modes[row.id]?.let { row.copy(contentMode = it.contentMode, genesisHash = it.genesisHash) } ?: row })
+                mutable.value = mutable.value.copy(account = updated)
+                cache { context?.saveAccount(updated) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* A mode retry cannot revoke another workspace's verified account. */ }
+        }.also { modeRefresh = it }
+    }
+
     private fun operation(block: suspend () -> Unit): Job {
+        modeRefresh?.cancel(); modeRefresh = null
         val previous = pending
         previous?.cancel()
         val identity = ++epoch
@@ -145,6 +167,7 @@ class AccountController(private val api: CloudAuthApi, private val store: Creden
         val account = state.value.account
         val token = credential
         if (!state.value.verified || account?.id != scope.accountId || account.workspaces.none { it.id == scope.workspaceId } || token == null) throw AuthFailure("account_changed")
+        requirePlaintext(scope)
         val result = try { api.grant(token, scope.workspaceId) }
         catch (error: AuthFailure) {
             if (error.code == "auth_expired" && epoch == identity && credential === token) {
@@ -159,6 +182,7 @@ class AccountController(private val api: CloudAuthApi, private val store: Creden
         }
         currentCoroutineContext().ensureActive()
         if (epoch != identity || credential !== token) throw AuthFailure("account_changed")
+        requirePlaintext(scope)
         return result
     }
     suspend fun members(scope: RuntimeScope): List<WorkspaceMember> = withVerifiedAccount(scope) { api.members(it, scope.workspaceId) }
@@ -176,10 +200,21 @@ class AccountController(private val api: CloudAuthApi, private val store: Creden
         val token = credential ?: throw AuthFailure("account_changed")
         val account = state.value.account
         if (!state.value.verified || account?.id != scope.accountId || account.workspaces.none { it.id == scope.workspaceId }) throw AuthFailure("account_changed")
+        requirePlaintext(scope)
         val result = block(token)
         currentCoroutineContext().ensureActive()
         if (epoch != identity || credential !== token) throw AuthFailure("account_changed")
+        requirePlaintext(scope)
         return result
+    }
+    fun requirePlaintext(scope: RuntimeScope) {
+        val workspace = state.value.account?.takeIf { it.id == scope.accountId }?.workspaces?.firstOrNull { it.id == scope.workspaceId } ?: throw AuthFailure("account_changed")
+        val mode = api.workspaceMode(scope.workspaceId) ?: workspace.contentMode
+        when (mode) {
+            WorkspaceContentMode.PLAINTEXT -> Unit
+            WorkspaceContentMode.E2EE -> throw AuthFailure("workspace_e2ee_unsupported")
+            else -> throw AuthFailure("workspace_mode_unconfirmed")
+        }
     }
     private suspend fun clearLocal() {
         try { browserStore?.clear() } finally { try { store.clear() } finally { context?.clear() } }

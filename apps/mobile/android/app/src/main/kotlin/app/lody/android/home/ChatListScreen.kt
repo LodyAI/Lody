@@ -70,6 +70,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
@@ -349,12 +350,21 @@ fun ChatListScreen(
                         } else tab = next
                     },
                     adds = adds,
-                    onCreate = { if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
+                    onCreate = { if (state.workspaces.firstOrNull { it.id == state.workspaceId }?.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT) notice(state.placeholder) else if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
                 )
             }
         },
     ) { padding ->
+        val selectedWorkspace = state.workspaces.firstOrNull { it.id == state.workspaceId }
         when {
+            tab != HomeTab.Settings && selectedWorkspace?.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT -> {
+                Column(Modifier.fillMaxSize().padding(padding), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Text(state.placeholder, style = LodyTheme.typography.body, modifier = Modifier.padding(horizontal = app.lody.android.designsystem.LodySpacing.lg))
+                    if (selectedWorkspace?.contentMode == app.lody.android.auth.WorkspaceContentMode.UNKNOWN) {
+                        TextButton(onClick = { onSelectWorkspace(selectedWorkspace) }) { Text(stringResource(R.string.workspace_mode_retry)) }
+                    }
+                }
+            }
             tab == HomeTab.Schedules -> app.lody.android.schedules.SchedulesList(
                 scheduleList, if (searching) query else "", padding,
                 onOpen = { scheduleEditor = it.scheduleId },
@@ -478,8 +488,11 @@ private fun WorkspaceCapsule(state: ChatListUiState, onSelect: (Workspace) -> Un
                 DropdownMenuItem(
                     text = { app.lody.android.designsystem.LodyFadingText(workspace.name, LodyTheme.typography.body, colors.textPrimary, Modifier.fillMaxWidth()) },
                     leadingIcon = { Avatar(workspace.image, workspace.name, LodyIconSize.lg) },
-                    trailingIcon = { if (workspace.id == state.workspaceId) Glyph(LodyIcons.Check, colors.accentFg, LodyIconSize.sm) },
-                    onClick = { open = false; if (workspace.id != state.workspaceId) onSelect(workspace) },
+                    trailingIcon = { Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+                        if (workspace.contentMode == app.lody.android.auth.WorkspaceContentMode.E2EE) Icon(LodyIcons.Lock, contentDescription = "E2EE", tint = colors.textSecondary, modifier = Modifier.size(LodyIconSize.sm))
+                        if (workspace.id == state.workspaceId) Glyph(LodyIcons.Check, colors.accentFg, LodyIconSize.sm)
+                    } },
+                    onClick = { open = false; if (workspace.id != state.workspaceId || workspace.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT) onSelect(workspace) },
                 )
             }
         }

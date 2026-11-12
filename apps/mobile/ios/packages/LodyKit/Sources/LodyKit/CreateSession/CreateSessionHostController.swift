@@ -253,14 +253,16 @@ class CreateSessionHostController: UIViewController {
   }
 
   private func submit(_ draft: CreateSessionDraft, _ payload: [String: Any]) {
-    guard !opening else { return controller.submissionFailed() }
+    guard !opening, service.workspaceMode(draft.workspaceId) == .plaintext else { return controller.submissionFailed() }
     let built = CreateDraftRecord(draft: draft, payload: payload)
     let userId = params.userId, workspaceId = params.workspaceId
     let failed = built.record?.with(phase: "failed", reason: String(localized: "send.error.draftSaveShort", bundle: .lody))
-    let task = service.put(userId, workspaceId, built.recordJSON)
+    let task: Task<Void, Error>
+    do { task = try service.submit(user: userId, workspace: workspaceId, json: built.recordJSON) }
+    catch { controller.submissionFailed(); return }
     Task { [service] in
       guard (try? await task.value) == nil, let failed else { return }
-      _ = try? await service.put(userId, workspaceId, String(decoding: (try? JSONEncoder().encode(failed)) ?? Data(), as: UTF8.self)).value
+      _ = try? await service.submit(user: userId, workspace: workspaceId, json: String(decoding: (try? JSONEncoder().encode(failed)) ?? Data(), as: UTF8.self)).value
     }
     created = built.created
     guard relays, input.relayPayload != nil else {

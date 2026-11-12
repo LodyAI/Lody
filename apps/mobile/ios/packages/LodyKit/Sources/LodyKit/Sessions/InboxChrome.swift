@@ -122,6 +122,7 @@ final class InboxChrome {
     updateSync(model.connection, compact: compactLayout)
     workspace.setAccountEmail(model.accountEmail)
     workspace.setItems(menuItems(model))
+    padBar.canCreate = model.selected?.resolvedMode == .plaintext
     layout()
     let regular = host.traitCollection.horizontalSizeClass == .regular
     let left = [workspaceItem ?? UIBarButtonItem(customView: workspaceSlot)]
@@ -223,6 +224,8 @@ final class InboxChrome {
       var item = LodyMenuItem()
       item.id = workspace.id
       item.title = workspace.name
+      item.encrypted = workspace.resolvedMode == .e2ee
+      item.retrySelection = workspace.resolvedMode != .plaintext
       item.selected = workspace.id == model.selected?.id
       // Each workspace shows its real logo, its initial until that loads (as the capsule).
       item.photo = workspace.image ?? ""

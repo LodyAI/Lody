@@ -31,6 +31,7 @@ enum SessionNavigation {
       let content = LodyNativePages.make("session-share", params: SessionController.json(["workspaceId": state.workspaceId, "sessionId": id]))!
       LodyShell.shared.presentNative(content, title: String(localized: "share.title", bundle: .lody), grabber: true)
     case "create":
+      guard state.workspace?.resolvedMode == .plaintext else { throw WorkspaceContentError.blocked }
       var params = CreateSessionHostParams()
       params.userId = state.userId; params.workspaceId = state.workspaceId
       // Most recently active first: the new-session project menu offers the first five.

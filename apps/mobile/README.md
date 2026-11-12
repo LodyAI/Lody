@@ -25,6 +25,16 @@ Both clients can opt into Roost for new conversations through Developer Mode in
 Preferences when the selected machine supports it. Existing conversations retain
 their history backend.
 
+Workspace lists retain encrypted workspaces with a lock. Native clients currently
+require Lody Desktop to open them. Each backend's local encryption pins survive
+logout and restart and reject plaintext downgrades. New workspaces remain blocked
+until `e2eeWorkspaces:describe` confirms plaintext or explicitly admits an ordinary
+legacy workspace. A failed mode query shows a retry button; retry preserves login
+and the selected workspace. Mode queries share a six-second budget with at most
+four requests in flight and skip pinned encrypted workspaces. Plaintext cache
+writes are optional and cannot revoke successful online admission. Native creation,
+Outbox writes, Share export and attachment uploads all check plaintext admission.
+
 The clients are under active development. This source import does not establish
 an App Store, Play Store, or TestFlight release for this repository. The mobile
 clients currently use Lody Cloud; they are not a mobile frontend for the OSS

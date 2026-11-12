@@ -783,10 +783,12 @@ assert(fades.first { $0.text == "Other" }?.layer.mask == nil, "A short workspace
 let rows = switcherViews(switcher.view, UIControl.self).filter { $0.accessibilityIdentifier?.hasPrefix("workspace-row:") == true }
 assert(rows.map(\.accessibilityLabel) == [longWorkspace, "Other"], "Rows keep full names for VoiceOver")
 assert(rows[0].accessibilityTraits.contains(.selected) && !rows[1].accessibilityTraits.contains(.selected), "VoiceOver reads the current workspace as selected")
-switcher.update(items: [LodyMenuItem(id: "other", title: "Renamed", selected: true)], accountEmail: "")
+switcher.update(items: [LodyMenuItem(id: "other", title: "Renamed", selected: true, encrypted: true, retrySelection: true)], accountEmail: "")
 switcher.view.layoutIfNeeded()
 assert(!switcherViews(switcher.view, UILabel.self).contains { $0.text == "preview@example.test" }, "Clearing account identity removes the heading")
 assert(switcherViews(switcher.view, LodyFadingLabel.self).map(\.text) == ["Renamed"], "Catalog changes refresh the panel")
+assert(switcherViews(switcher.view, UIImageView.self).contains { $0.accessibilityIdentifier == "workspace-encrypted:other" && !$0.isHidden }, "Encrypted workspaces remain listed with a visible lock")
+assert(switcherViews(switcher.view, UIControl.self).contains { $0.accessibilityLabel == "Renamed, E2EE" }, "VoiceOver announces encryption")
 print("PASS: the workspace switcher keeps names on one line with a trailing fade, full VoiceOver names and selection")
 
 // Chat renders this shared cached photo at 36 pt. A 3x display needs 108 real pixels.
@@ -820,3 +822,46 @@ let black = Int(detailPixels[(54 * 108 + 52) * 4])
 let white = Int(detailPixels[(54 * 108 + 53) * 4])
 assert(white - black > 200, "One-pixel avatar detail must survive, not be blurred by a 1x intermediate")
 print("PASS: cached circular avatars preserve Retina resolution and image detail")
+
+// Only list rendering is stubbed here; retry ownership, UIButton and trait switching
+// run through the production SessionListView wrapper.
+struct WorkspaceMember: Equatable {}
+struct LodyListSection { var rows: [LodyListRow] = [] }
+@MainActor final class ChatListView: UIView {
+  let collection = UIScrollView()
+  var forwarded: ((String, [String: Any]) -> Void)?
+  var owners: [String: WorkspaceMember] = [:]
+  var archivedStyle = false
+  var projectIndexEnabled = false
+  var pinsGroupLabels = false
+  func setPlaceholder(_ value: String) {}
+  func setSections(_ value: [LodyListSection]) {}
+}
+@MainActor final class LodySidebar: UIView {
+  let scrollView = UIScrollView()
+  var onRowPress: (([String: Any]) -> Void)?
+  var onRowAction: (([String: Any]) -> Void)?
+  var archivedStyle = false
+  var previewUserId = "", previewWorkspaceId = ""
+  func setSelectedRowId(_ id: String) {}
+  func setPlaceholder(_ value: String) {}
+  func setSections(_ value: [LodyListSection]) {}
+}
+let retryList = SessionListView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+var retries = 0
+for sizeClass in [UIUserInterfaceSizeClass.compact, .regular] {
+  retryList.traitOverrides.horizontalSizeClass = sizeClass
+  retryList.setSections([])
+  retryList.setRetry { retries += 1 }
+  retryList.layoutIfNeeded()
+  let button = retryList.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == "workspace-mode-retry" }!
+  assert(!button.isHidden && button.bounds.height >= 44 && retryList.subviews.last === button, "Unknown-workspace retry stays visible and tappable on phone and sidebar")
+  let before = retries
+  button.sendActions(for: .primaryActionTriggered)
+  assert(retries == before + 1, "The retry button invokes its non-destructive refresh action")
+  retryList.setSections([LodyListSection(rows: [LodyListRow(title: "Ready")])])
+  assert(button.isHidden, "A populated ordinary workspace removes the unknown empty-state action")
+  retryList.setRetry(nil)
+  assert(button.isHidden)
+}
+print("PASS: unknown-workspace Retry is clickable in compact and regular layouts and disappears after admission")

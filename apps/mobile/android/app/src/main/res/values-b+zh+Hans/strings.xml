@@ -943,4 +943,7 @@
     <string name="github_settings_authorization_required">需要个人 GitHub 授权</string>
     <string name="github_settings_authorization_hint">请在 Lody 网页端登录同一个 Lody 账号，授权或续期个人 GitHub 访问权限，然后返回此处重试连接 GitHub App。无需开启“以你的身份操作”偏好。</string>
     <string name="github_settings_authorize_in_web">打开 Lody 网页端</string>
+    <string name="workspace_e2ee_unsupported">移动端暂不支持端到端加密工作区，请使用 Lody 桌面端打开。</string>
+    <string name="workspace_mode_unconfirmed">无法确认工作区加密状态，请重试。</string>
+    <string name="workspace_mode_retry">重试</string>
 </resources>

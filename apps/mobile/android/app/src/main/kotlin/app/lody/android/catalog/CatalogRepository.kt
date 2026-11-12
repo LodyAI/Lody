@@ -26,16 +26,20 @@ class CatalogRepository(private val account: AccountController, private val owne
  private var epoch = 0L
  init {
   tasks.launch {
-   account.state.map { it.account to it.verified }.distinctUntilChanged().collectLatest { (user, _) ->
+   var wasVerified = false
+   account.state.map { it.account to it.verified }.distinctUntilChanged().collectLatest { (user, verified) ->
     if (user == null) {
      if (mutable.value.workspace != null) disconnect()
     } else {
      val context = cached { store.readContext() }
      val selected = mutable.value.workspace?.id ?: context?.takeIf { it.account.id == user.id }?.workspaceId
      val workspace = user.workspaces.firstOrNull { it.id == selected }
-     if (workspace != null) select(workspace)
+     if (workspace != null) {
+      if (workspace != mutable.value.workspace || (!wasVerified && verified)) select(workspace)
+     }
      else if (mutable.value.workspace != null) disconnect()
     }
+    wasVerified = verified
    }
   }
  }
@@ -52,11 +56,16 @@ class CatalogRepository(private val account: AccountController, private val owne
    val user = account.state.value.account ?: return@launch
    if (user.workspaces.none { it.id == workspace.id }) return@launch
    val scope = RuntimeScope(user.id, workspace.id)
+   cached { store.select(scope) }
+   try { account.requirePlaintext(scope) }
+   catch (error: AuthFailure) {
+    mutable.value = CatalogState(workspace, ConnectionPhase.UNAVAILABLE, failure = error.code)
+    return@launch
+   }
    val saved = cached { store.read(scope) }
    ensureActive()
    if (identity != epoch) return@launch
    mutable.value = mutable.value.copy(snapshot = saved?.snapshot, syncedAt = saved?.syncedAt, cached = saved != null)
-   cached { store.select(scope) }
    if (!account.state.value.verified) {
     mutable.value = mutable.value.copy(phase = ConnectionPhase.DISCONNECTED)
     return@launch
@@ -135,7 +144,7 @@ class CatalogRepository(private val account: AccountController, private val owne
   if (!auth.verified) {
    if (auth.account != null && !auth.busy) account.restore()
   } else if (mutable.value.phase == ConnectionPhase.UNAVAILABLE) {
-   mutable.value.workspace?.let { select(it) }
+   mutable.value.workspace?.let { if (it.contentMode == WorkspaceContentMode.UNKNOWN) account.refreshWorkspaceModes() else select(it) }
   }
  }
  suspend fun disconnect() {

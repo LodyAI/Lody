@@ -9,6 +9,7 @@ final class InboxPadBar: UIView {
   let search = UISearchTextField()
   var searchChanged: ((String) -> Void)?
   var create: (() -> Void)?
+  var canCreate = false { didSet { createButton.isEnabled = canCreate } }
   private let searchGlass = UIVisualEffectView(effect: UIGlassEffect())
   private let createButton = UIButton(configuration: .glass())
   private let edge = UIScrollEdgeElementContainerInteraction()
