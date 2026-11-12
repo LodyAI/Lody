@@ -7,7 +7,9 @@ import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 
-import { currentWorkspaceIdAtom } from '@/atoms';
+import { getPersonalGitHubAuthorizationUrl } from '@/components/settings/github-personal-authorization';
+import { openExternalUrl } from '@/lib/native-browser';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
 import {
   isGitHubOperationTokenConnectionLostError,
@@ -45,11 +47,6 @@ export interface PrTabContainerProps {
   actionSessionId: string | null;
 }
 
-function resolveGitHubAppInstallUrl(): string {
-  const appName = (import.meta.env.VITE_GITHUB_APP_NAME as string | undefined) || 'lodyai';
-  return `https://github.com/apps/${appName}/installations/new`;
-}
-
 const NOT_AUTHENTICATED_ERROR_MESSAGE = 'Not authenticated. Please sign in.';
 
 function isRecoverableReadyForReviewAuthError(error: unknown): boolean {
@@ -70,6 +67,7 @@ export function PrTabContainer({
   const { t } = useTranslation();
   const postHog = usePostHog();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const {
     canWrite,
     state,
@@ -279,8 +277,8 @@ export function PrTabContainer({
   const handleRefresh = useCallback(() => refresh(), [refresh]);
 
   const handleGrantChecksPermission = useCallback(() => {
-    window.open(resolveGitHubAppInstallUrl(), '_blank', 'noopener,noreferrer');
-  }, []);
+    if (workspaceSlug) void openExternalUrl(getPersonalGitHubAuthorizationUrl(workspaceSlug));
+  }, [workspaceSlug]);
 
   return (
     <PrTabView

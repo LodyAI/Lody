@@ -1,7 +1,19 @@
 import { constants as fsConstants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import path from 'node:path'
-import { app, shell } from 'electron'
+import { app, shell, dialog, type BrowserWindow } from 'electron'
+import { createMainSettingsStore } from '../settings-store'
+import { translateMenu } from '../menu'
+import {
+  buildPathLauncherLaunchInput,
+  validateCustomPathLauncherCommandTemplate,
+  type BuiltinPathLauncherId
+} from '@lody/shared/path-launchers'
+import {
+  CustomPathLauncherApprovalSchema,
+  type CustomPathLauncherApproval,
+  type PathLauncherRequest
+} from '@lody/shared/electron-ipc'
 import { runCommandTextLegacy, startProcessLegacy } from '@lody/shared/node/process'
 import type {
   LaunchLocalPathInput,
@@ -9,7 +21,11 @@ import type {
   LocalPathCommandSpec
 } from '@lody/shared/electron-ipc'
 import { formatUnknownError } from '../utils'
-import { launchCommandPathWithFallback, probePathLauncher } from './local-path-launcher-core'
+import {
+  launchCommandPathWithFallback,
+  probePathLauncher,
+  selectSafePathLauncherInput
+} from './local-path-launcher-core'
 import { getUserShellEnvCachedLegacy, shouldUseWindowsShell } from './shell-env'
 
 const PROBE_CACHE_MS = 5 * 60 * 1000
@@ -119,8 +135,10 @@ async function hasProtocol(urlValue: string): Promise<boolean> {
 }
 
 export function hasPathLauncher(input: LaunchLocalPathInput): Promise<boolean> {
+  const selected = selectSafePathLauncherInput(input, process.platform, shouldUseWindowsShell)
+  if (!selected) return Promise.resolve(false)
   return probePathLauncher(
-    input,
+    selected,
     (candidate) => hasCommand(candidate.command, candidate.args),
     hasProtocol
   )
@@ -249,6 +267,9 @@ async function launchLocalUrl(urlValue: string): Promise<LaunchLocalPathResult> 
 }
 
 export async function launchLocalPath(input: LaunchLocalPathInput): Promise<LaunchLocalPathResult> {
+  const selected = selectSafePathLauncherInput(input, process.platform, shouldUseWindowsShell)
+  if (!selected) return { launched: false, error: 'unsafe_shell_path' }
+  input = selected
   if (input.kind === 'url') {
     return await launchLocalUrl(input.url)
   }
@@ -261,4 +282,104 @@ export async function launchLocalPath(input: LaunchLocalPathInput): Promise<Laun
       }),
     launchLocalUrl
   )
+}
+
+const launcherStore = createMainSettingsStore<{ launchers: CustomPathLauncherApproval[] }>({
+  configName: 'path-launchers',
+  defaults: { launchers: [] },
+  schema: {
+    launchers: {
+      type: 'array',
+      maxItems: 20,
+      items: {
+        type: 'object',
+        required: ['id', 'label', 'commandTemplate'],
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', maxLength: 80 },
+          label: { type: 'string', maxLength: 48 },
+          commandTemplate: { type: 'string', maxLength: 1000 }
+        }
+      }
+    }
+  }
+})
+const builtinIds = new Set([
+  'vscode',
+  'cursor',
+  'antigravity',
+  'windsurf',
+  'zed',
+  'sublime',
+  'warp',
+  'delta',
+  'xcode'
+])
+
+export function resolvePathLauncher(request: PathLauncherRequest): LaunchLocalPathInput | null {
+  if (!path.isAbsolute(request.targetPath)) return null
+  const targetPath = path.normalize(request.targetPath)
+  if (builtinIds.has(request.launcherId)) {
+    if (request.launcherId === 'xcode' && process.platform !== 'darwin') return null
+    return buildPathLauncherLaunchInput(
+      {
+        kind: 'builtin',
+        id: request.launcherId as BuiltinPathLauncherId,
+        label: request.launcherId
+      },
+      targetPath,
+      process.platform,
+      request.targetKind
+    )
+  }
+  const id = request.launcherId.startsWith('custom:') ? request.launcherId.slice(7) : null
+  const stored = launcherStore.get('launchers').find((item) => item.id === id)
+  const parsed = CustomPathLauncherApprovalSchema.safeParse(stored)
+  if (!parsed.success || !validateCustomPathLauncherCommandTemplate(parsed.data.commandTemplate).ok)
+    return null
+  return buildPathLauncherLaunchInput(
+    { ...parsed.data, kind: 'custom', launcherId: request.launcherId },
+    targetPath,
+    process.platform,
+    request.targetKind
+  )
+}
+
+export async function approvePathLauncher(
+  raw: unknown,
+  owner: BrowserWindow
+): Promise<{ approved: boolean }> {
+  const parsed = CustomPathLauncherApprovalSchema.safeParse(raw)
+  if (!parsed.success || !validateCustomPathLauncherCommandTemplate(parsed.data.commandTemplate).ok)
+    return { approved: false }
+  const candidate = parsed.data
+  if (
+    launcherStore
+      .get('launchers')
+      .some(
+        (item) => item.id === candidate.id && item.commandTemplate === candidate.commandTemplate
+      )
+  )
+    return { approved: true }
+  const result = await dialog.showMessageBox(owner, {
+    type: 'warning',
+    message: translateMenu(
+      'desktop.pathLauncher.approve',
+      'Allow this custom launcher to run commands?'
+    ),
+    detail: `${candidate.label}\n\n${candidate.commandTemplate}`,
+    buttons: [
+      translateMenu('common.cancel', 'Cancel'),
+      translateMenu('desktop.pathLauncher.allow', 'Allow launcher')
+    ],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true
+  })
+  if (result.response !== 1 || owner.isDestroyed()) return { approved: false }
+  const launchers = launcherStore.get('launchers').filter((item) => item.id !== candidate.id)
+  // Renderer preferences can delete old ids; obsolete approvals must not fill
+  // the native store forever and prevent a newly approved launcher from working.
+  launcherStore.set('launchers', [...launchers.slice(-19), candidate])
+  return { approved: true }
 }

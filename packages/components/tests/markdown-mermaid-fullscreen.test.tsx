@@ -19,7 +19,7 @@ const DIAGRAM_HEIGHT = 800;
 
 vi.mock('pele', () => ({
   render: () => ({
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" style="color:var(--_fg)" data-diagram="sequence"><text>Launch game</text></svg>`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" style="color:var(--_fg)" data-diagram="sequence"><text>Launch game</text><script>window.diagramInjected = true</script><foreignObject><iframe src="https://example.com"></iframe></foreignObject><path onload="alert(1)" d="M0 0L10 10"/></svg>`,
     width: DIAGRAM_WIDTH,
     height: DIAGRAM_HEIGHT,
     links: [],
@@ -542,4 +542,15 @@ describe('mermaid full-screen viewer', () => {
     await clickOn(surface);
     expect(viewer()).toBeTruthy();
   });
+});
+
+// The same renderer result feeds inline markup, fullscreen clones and exports.
+it('strips executable SVG markup before the diagram reaches any display surface', async () => {
+  const { renderMarkdownMermaidSvg } = await import('../src/components/ai-gui/markdown-mermaid');
+  const svg = await renderMarkdownMermaidSvg('graph TD; Safe-->Diagram');
+  const host = document.createElement('div');
+  host.innerHTML = svg;
+  expect(host.querySelector('script, foreignObject, iframe, [onload]')).toBeNull();
+  expect(host.querySelector('svg text')?.textContent).toBe('Launch game');
+  expect(host.querySelector('svg path')).not.toBeNull();
 });

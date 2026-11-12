@@ -139,3 +139,5 @@ component details.
   in personal Account settings; invoice details reuse `BillingInvoiceDetails`.
 
 - Billing telemetry: never infer payment from returns; exclude URLs, codes and raw errors.
+
+- GitHub installation: follow [authorization/recovery](README.md#github-installation).

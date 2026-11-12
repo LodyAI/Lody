@@ -1,3 +1,4 @@
+import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ComponentProps } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -119,3 +120,20 @@ export const IdentityOff: Story = {
 export const NotInstalled: Story = { args: { repos: [] } };
 
 export const Loading: Story = { args: { repos: [], reposLoading: true } };
+
+export const InstallationNeedsPersonalAuthorization: Story = {
+  render: () => (
+    <Harness
+      repos={[]}
+      identity={{
+        enabled: false,
+        authorizationState: 'missing',
+        onToggle: () => {},
+        onAuthorize: () => {},
+      }}
+      installationNotice={
+        <GitHubInstallationNotice needsAuthorization authorized={false} onAuthorize={() => {}} />
+      }
+    />
+  ),
+};

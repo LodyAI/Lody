@@ -1,4 +1,5 @@
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { ProductWindowIpcService } from '../product-window-ipc-service'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import type {
   ElectronStorageGuardRelaunchOutcome,
   ElectronStorageGuardState
@@ -6,7 +7,7 @@ import type {
 import { assertProductWindowSender } from '../assert-sender'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class StorageGuardIpc extends IpcService {
+export class StorageGuardIpc extends ProductWindowIpcService {
   static override readonly groupName = 'storageGuard'
 
   @IpcMethod()

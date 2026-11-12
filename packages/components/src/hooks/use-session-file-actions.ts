@@ -37,7 +37,7 @@ import { isAbsoluteFilePath, resolveLocalWorkspaceFilePath } from '@/lib/session
 import { resolveDirectMarkdownFileOpenTarget } from '@/lib/session-file-open-target';
 import { getMarkdownAgentFileCopyPath } from '@/lib/markdown-agent-file-link';
 import {
-  buildPathLauncherLaunchInput,
+  executePathLauncher,
   buildPathLauncherProbes,
   getAvailablePathLauncherOptions,
   getPathLauncherId,
@@ -378,10 +378,9 @@ export function useSessionFileActions({
             reportLocalActionFailure('editor', filePath, path, 'ipc_unavailable');
             return;
           }
-          const result = await services.app.launchLocalPath(
-            buildPathLauncherLaunchInput(launcher, path, platform, 'file')
-          );
-          if (!result.launched) reportLocalActionFailure('editor', filePath, path, result);
+          const result = await executePathLauncher(launcher, path, 'file');
+          if (!result.launched && result.error !== 'launcher_not_approved')
+            reportLocalActionFailure('editor', filePath, path, result);
         } catch (error) {
           reportLocalActionFailure('editor', filePath, path, error);
         }
@@ -410,9 +409,8 @@ export function useSessionFileActions({
     [launcherCandidates, pathLauncherPreference.selectedLauncherId]
   );
 
-  // The header deliberately advertises only launchers that the desktop bridge
-  // has found. Use the identical probe here so "Open in" cannot name a stale
-  // preference that is absent from the top control.
+  // Built-ins need an availability probe. Custom launchers stay reachable so
+  // their first explicit use can request native approval before main stores them.
   const [availableLauncherIds, setAvailableLauncherIds] = useState(new Set<string>());
   useEffect(() => {
     if (!isElectronRenderer || !workspacePath || !launcherCandidates) {
@@ -441,8 +439,9 @@ export function useSessionFileActions({
 
   const availableEditorLaunchers = useMemo(() => {
     if (!launcherCandidates) return null;
-    const options = launcherCandidates.filter((launcher) =>
-      availableLauncherIds.has(getPathLauncherId(launcher))
+    const options = launcherCandidates.filter(
+      (launcher) =>
+        launcher.kind === 'custom' || availableLauncherIds.has(getPathLauncherId(launcher))
     );
     if (options.length === 0) return null;
     const selected = resolveSelectedPathLauncher(

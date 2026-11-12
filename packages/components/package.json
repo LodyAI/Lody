@@ -147,6 +147,7 @@
     "convex": "catalog:",
     "date-fns": "^4.1.0",
     "debug": "^4.4.3",
+    "dompurify": "3.3.3",
     "effect": "catalog:",
     "emojibase-data": "^17.0.0",
     "framer-motion": "^14.9.0",

@@ -3,6 +3,8 @@ import {
   CliRuntimeStateSchema,
   isDevEmailPasswordLoginEnabled,
   LaunchLocalPathInputSchema,
+  PathLauncherRequestSchema,
+  PathLauncherProbeSchema,
 } from '../src/electron-ipc';
 
 describe('isDevEmailPasswordLoginEnabled', () => {
@@ -88,5 +90,30 @@ describe('CliRuntimeStateSchema', () => {
         issues: [],
       }).success
     ).toBe(true);
+  });
+});
+
+describe('renderer launcher authority', () => {
+  it('accepts only a launcher id and target, never renderer-supplied commands or URLs', () => {
+    const request = { launcherId: 'vscode', targetPath: '/tmp/project', targetKind: 'directory' };
+    expect(PathLauncherRequestSchema.parse(request)).toEqual(request);
+    for (const extra of [
+      { command: { command: 'sh', args: ['-c', 'arbitrary'] } },
+      { args: ['-c', 'arbitrary'] },
+      { url: 'file:///tmp/script.command' },
+      { fallbackCommands: [{ command: 'sh' }] },
+    ]) {
+      expect(PathLauncherRequestSchema.safeParse({ ...request, ...extra }).success).toBe(false);
+      expect(
+        PathLauncherProbeSchema.safeParse({ launchers: [{ ...request, ...extra }] }).success
+      ).toBe(false);
+    }
+    expect(
+      PathLauncherRequestSchema.safeParse({
+        kind: 'command',
+        command: { command: 'sh' },
+        targetPath: '/tmp/project',
+      }).success
+    ).toBe(false);
   });
 });

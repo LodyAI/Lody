@@ -104,7 +104,12 @@ import Foundation
     let scope: [String: Any] = ["workspaceId": workspace]
     let action = request["action"] as? String
     if action == "install" {
-      guard canManage,
+      guard canManage else { throw GitHubCloud.failure() }
+      guard let personal = try await call("query", "github:getPersonalOperationSettings", scope) as? [String: Any],
+            personal["enabled"] is Bool, let authorization = personal["authorization"] as? [String: Any],
+            let state = authorization["state"] as? String, ["missing", "expired", "authorized"].contains(state) else { throw GitHubCloud.failure() }
+      guard state == "authorized" else { return ["authorizationRequired": true] }
+      guard (authorization["githubAccountId"] as? String)?.isEmpty == false,
             let result = try await call("action", "github:createGitHubInstallState", ["workspaceId": workspace, "returnTarget": "web"]) as? [String: Any],
             let state = result["state"] as? String, !state.isEmpty, state.count <= 4096 else { throw GitHubCloud.failure() }
       var url = URLComponents(string: "https://github.com/apps/lodyai/installations/new")!

@@ -275,8 +275,8 @@ void test('in-place and subframe navigation retain the ledger lease; document na
   }
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
     '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
+    '../product-window-ipc-service': { ProductWindowIpcService: class {} },
     'electron-ipc-decorator': {
-      IpcService: class {},
       IpcMethod: () => (_target, _name, descriptor) => descriptor,
       getIpcContext: () => ({ event: { sender } })
     },
@@ -339,8 +339,8 @@ void test('uncertain admission preserves append and reconciliation failures, the
           }
         })
       },
+      '../product-window-ipc-service': { ProductWindowIpcService: class {} },
       'electron-ipc-decorator': {
-        IpcService: class {},
         IpcMethod: () => (_target, _name, descriptor) => descriptor,
         getIpcContext: () => ({ event: { sender } })
       },
@@ -852,8 +852,8 @@ async function personalJoinFixture(t) {
         (removalFence ??= { owner, workspaceId, reason, completed: false })
     }
     const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+      '../product-window-ipc-service': { ProductWindowIpcService: class {} },
       'electron-ipc-decorator': {
-        IpcService: class {},
         IpcMethod: () => (_t, _n, descriptor) => descriptor,
         getIpcContext: () => ({ event: { sender } })
       },
@@ -1806,8 +1806,8 @@ void test('workspace-scoped cold identity IPC composes with isolated custody wit
   })
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
     '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
+    '../product-window-ipc-service': { ProductWindowIpcService: class {} },
     'electron-ipc-decorator': {
-      IpcService: class {},
       IpcMethod: () => (_target, _name, descriptor) => descriptor,
       getIpcContext: () => ({ event: { sender } })
     },
@@ -1901,8 +1901,8 @@ void test('real preload bridge admits only confirmed trusted reset IPC and archi
         }
       })
     },
+    '../product-window-ipc-service': { ProductWindowIpcService: class {} },
     'electron-ipc-decorator': {
-      IpcService: class {},
       IpcMethod: () => (_target, _name, descriptor) => descriptor,
       getIpcContext: () => ({ event: { sender } })
     },
@@ -2011,8 +2011,8 @@ void test('prepareDispatch confirms access loss after its reader closes through 
         send: () => {}
       })
       const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+        '../product-window-ipc-service': { ProductWindowIpcService: class {} },
         'electron-ipc-decorator': {
-          IpcService: class {},
           IpcMethod: () => (_target, _name, descriptor) => descriptor,
           getIpcContext: () => ({ event: { sender } })
         },
@@ -2255,8 +2255,8 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
           const { E2eeIpc } = await load(
             '../ipc/services/e2ee-ipc.ts',
             {
+              '../product-window-ipc-service': { ProductWindowIpcService: class {} },
               'electron-ipc-decorator': {
-                IpcService: class {},
                 IpcMethod: () => (_target, _name, descriptor) => descriptor,
                 getIpcContext: () => ({ event: { sender } })
               },
@@ -2495,8 +2495,8 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
       })
       const server = { lost: false, checks: 0 }
       const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+        '../product-window-ipc-service': { ProductWindowIpcService: class {} },
         'electron-ipc-decorator': {
-          IpcService: class {},
           IpcMethod: () => (_target, _name, descriptor) => descriptor,
           getIpcContext: () => ({ event: { sender } })
         },
@@ -2651,8 +2651,8 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
       })
       let activeSender = sender
       const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+        '../product-window-ipc-service': { ProductWindowIpcService: class {} },
         'electron-ipc-decorator': {
-          IpcService: class {},
           IpcMethod: () => (_t, _n, d) => d,
           getIpcContext: () => ({ event: { sender: activeSender } })
         },
@@ -2837,8 +2837,8 @@ void test('30ms local dispatch stays fast with an 800ms credential reply', async
   })
   let waiterSettled = false
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+    '../product-window-ipc-service': { ProductWindowIpcService: class {} },
     'electron-ipc-decorator': {
-      IpcService: class {},
       IpcMethod: () => (_t, _n, d) => d,
       getIpcContext: () => ({ event: { sender } })
     },
@@ -3249,8 +3249,8 @@ void test('remote commands use workspace custody and never create an account con
     '../ipc/services/e2ee-ipc.ts',
     {
       '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
+      '../product-window-ipc-service': { ProductWindowIpcService: class {} },
       'electron-ipc-decorator': {
-        IpcService: class {},
         IpcMethod: () => (_target, _name, descriptor) => descriptor,
         getIpcContext: () => ({ event: { sender } })
       },
@@ -3445,8 +3445,8 @@ async function memberIpcFixture(options = {}) {
   }
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
     effect: { Effect },
+    '../product-window-ipc-service': { ProductWindowIpcService: class {} },
     'electron-ipc-decorator': {
-      IpcService: class {},
       IpcMethod: () => (_t, _n, d) => d,
       getIpcContext: () => ({ event: { sender } })
     },
@@ -5325,8 +5325,8 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
             authService: { getCachedSessionIdentity: () => ({ ...fixture.identity }) }
           })
         },
+        '../product-window-ipc-service': { ProductWindowIpcService: class {} },
         'electron-ipc-decorator': {
-          IpcService: class {},
           IpcMethod: () => (_target, _name, descriptor) => descriptor,
           getIpcContext: () => ({ event: { sender } })
         },
@@ -5536,8 +5536,8 @@ void test(
 
 const e2eeIpcDependencies = (runtime, sender, recordMethod = () => {}) => ({
   '../ipc-service-deps': { getIpcServiceDeps: () => ({ cliService: {} }) },
+  '../product-window-ipc-service': { ProductWindowIpcService: class {} },
   'electron-ipc-decorator': {
-    IpcService: class {},
     IpcMethod: () => (_target, name, descriptor) => {
       recordMethod(name)
       return descriptor

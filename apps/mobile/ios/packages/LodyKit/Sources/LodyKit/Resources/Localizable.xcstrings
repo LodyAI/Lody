@@ -1,6 +1,57 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.github.authorizeInWeb": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Lody web"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 Lody 网页端"
+          }
+        }
+      }
+    },
+    "settings.github.authorizationHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to Lody web with the same Lody account and authorize or renew your personal GitHub access. Then return here and retry connecting the GitHub App. Your “Act as you” preference does not need to be enabled."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在 Lody 网页端登录同一个 Lody 账号，授权或续期个人 GitHub 访问权限，然后返回此处重试连接 GitHub App。无需开启“以你的身份操作”偏好。"
+          }
+        }
+      }
+    },
+    "settings.github.authorizationRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personal GitHub authorization required"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要个人 GitHub 授权"
+          }
+        }
+      }
+    },
     "devices.ownerUnknown": {
       "extractionState": "manual",
       "localizations": {

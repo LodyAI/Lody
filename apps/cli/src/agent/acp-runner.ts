@@ -49,6 +49,7 @@ import {
   type AcpStartupStageEvent,
   type AcpStartupTimeoutOptions,
 } from './agent-client';
+import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from './claude-env-conflict';
 import { getLoginShellEnvLegacy } from './login-shell-env';
 import {
   mergeACPProcessEnv,
@@ -298,6 +299,12 @@ export type StartLocalAcpAgentOptions = {
   magpieGatewayUrl?: string;
   workdir: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * User-configured env vars from the Agent Config (before merging with
+   * `process.env`), used to scrub conflicting Claude auth/routing vars
+   * contributed by the login shell.
+   */
+  userExplicitEnv?: Record<string, string>;
   logger: Logger;
   terminalManager: TerminalManager;
   /** Set to false to disable terminal capability advertisement. Defaults to true. */
@@ -701,6 +708,11 @@ async function startLocalAcpProtocol<T>(
   // merging the agent-specific env. withDefaultAcpPathEntries still runs as a
   // last-resort fallback for environments where the shell probe yields nothing.
   const loginShellEnv = await getLoginShellEnvLegacy();
+  const withLoginShell = mergeLoginShellEnv(env, loginShellEnv);
+  const scrubbedEnv =
+    shouldScrubClaudeAuthEnv(options.cliType, options.agentType) && options.userExplicitEnv
+      ? scrubInheritedClaudeAuthEnv(withLoginShell, options.userExplicitEnv)
+      : withLoginShell;
   // withLoopbackNoProxy runs outermost so a proxy contributed by the login
   // shell is covered too: the agent reaches Lody's MCP HTTP host over
   // loopback, and a proxy that intercepts that kills MCP entirely.
@@ -708,10 +720,7 @@ async function startLocalAcpProtocol<T>(
     withoutElectronBootstrapCredentials(
       withLodyNpmCacheForNpx(
         launch.command,
-        withDefaultAcpPathEntries(
-          mergeACPProcessEnv(launch, mergeLoginShellEnv(env, loginShellEnv)),
-          options.agentType
-        )
+        withDefaultAcpPathEntries(mergeACPProcessEnv(launch, scrubbedEnv), options.agentType)
       )
     )
   );

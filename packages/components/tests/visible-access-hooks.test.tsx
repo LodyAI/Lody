@@ -706,6 +706,8 @@ describe('encrypted shared machine visibility', () => {
   let store: Store;
   let views: Map<string, View | Error>;
   let reads: string[];
+  // A machine whose policy read waits here until the test releases it.
+  let held: Map<string, Promise<void>>;
   let snapshot: { machines: string[]; projects: string[]; managed?: string[] } | undefined;
 
   let renderTree: (node: ReactNode) => Promise<void>;
@@ -735,6 +737,7 @@ describe('encrypted shared machine visibility', () => {
     store = createStore();
     views = new Map();
     reads = [];
+    held = new Map();
     snapshot = undefined;
     queryMocks.machineRows = undefined;
     queryMocks.localProjectRows = undefined;
@@ -780,6 +783,7 @@ describe('encrypted shared machine visibility', () => {
                 : value.sessions.map((row) => row.sessionId),
             })),
         read: async (_workspace: string, machineId: string) => {
+          await held.get(machineId);
           const value = views.get(machineId);
           if (!value || value instanceof Error) throw new Error('missing');
           return {
@@ -1039,6 +1043,37 @@ describe('encrypted shared machine visibility', () => {
     expect(container.querySelector('input')).toBeNull();
   });
 
+  it('holds an unconfirmed conversation in the pane wait, then says it is not shared', async () => {
+    const unshared = {
+      ...createCachedSession(owner),
+      id: 'unshared-on-private-machine' as SessionId,
+      machineId: 'private-machine' as MachineId,
+    };
+    store.set(sessionMetaCacheAtom, { [getSessionRoomId(unshared.id)]: unshared });
+    let release!: () => void;
+    held.set('private-machine', new Promise<void>((resolve) => (release = resolve)));
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={unshared.id}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    const wait = container.querySelector(
+      '[data-loading-placeholder-scope="content"] [role="status"]'
+    );
+    expect(wait?.textContent).toBe('sessions.access.opening');
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.querySelector('article')).toBeNull();
+
+    await act(async () => release());
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(container.querySelector('[data-loading-placeholder-scope]')).toBeNull();
+    const page = container.querySelector('[data-status-page="pane"][role="status"]');
+    expect(page?.querySelector('h2')?.textContent).toBe('sessions.access.unavailable');
+    expect(page?.textContent).toContain('sessions.access.unavailableDescription');
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.querySelector('article')).toBeNull();
+  });
+
   it('leaves new sessions without persisted metadata to the draft composer', async () => {
     await renderTree(
       <SessionHistoryAccessBoundary sessionId={'new-draft' as SessionId}>
@@ -1078,7 +1113,10 @@ describe('encrypted shared machine visibility', () => {
         <input aria-label="Execution composer" />
       </SessionHistoryAccessBoundary>
     );
-    expect(container.textContent).toBe('common.loading');
+    expect(
+      container.querySelector('[data-loading-placeholder-scope="content"] [role="status"]')
+        ?.textContent
+    ).toBe('sessions.access.opening');
     expect(container.querySelector('input')).toBeNull();
     await act(async () =>
       store.set(sessionMetaCacheAtom, { [getSessionRoomId(parent.id)]: parent })
@@ -1095,7 +1133,10 @@ describe('encrypted shared machine visibility', () => {
       </SessionHistoryAccessBoundary>
     );
     expect(container.querySelector('input')).toBeNull();
-    expect(container.textContent).toBe('common.loading');
+    expect(
+      container.querySelector('[data-loading-placeholder-scope="content"] [role="status"]')
+        ?.textContent
+    ).toBe('sessions.access.opening');
     await act(async () =>
       store.set(sessionMetaCacheAtom, (cache) => ({
         ...cache,

@@ -173,6 +173,8 @@ class GitHubSettingsController: UIViewController {
         case .url(let url):
           self.opening = true
           await self.open(url)
+        case .authorizationRequired:
+          self.showPersonalAuthorization()
         case .settings(let next):
           self.accept(next)
           self.changed()
@@ -186,6 +188,20 @@ class GitHubSettingsController: UIViewController {
       self.busy = false
       self.render()
     }
+  }
+
+  private func showPersonalAuthorization() {
+    let alert = UIAlertController(title: GitHubSettingsSections.text("authorizationRequired"),
+                                  message: GitHubSettingsSections.text("authorizationHint"), preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: String(localized: "common.cancel", bundle: .lody), style: .cancel))
+    alert.addAction(UIAlertAction(title: GitHubSettingsSections.text("authorizeInWeb"), style: .default) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        self.opening = true
+        await self.open(GitHubSettingsSections.authorizationURL)
+      }
+    })
+    present(alert, animated: true)
   }
 
   private var blocked: Bool { failed || unconfirmed || value?.errors.isEmpty == false }
@@ -243,8 +259,10 @@ class GitHubSettingsController: UIViewController {
     let payload = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
     let data = Data(try await WorkspaceSettingsCloud.run(payload).utf8)
     if request.action == "install" {
-      struct Install: Decodable { var url: String }
-      guard let url = GitHubSettingsSections.installURL(try JSONDecoder().decode(Install.self, from: data).url) else {
+      struct Install: Decodable { var url: String?; var authorizationRequired: Bool? }
+      let result = try JSONDecoder().decode(Install.self, from: data)
+      if result.authorizationRequired == true { return .authorizationRequired }
+      guard let value = result.url, let url = GitHubSettingsSections.installURL(value) else {
         throw CocoaError(.coderInvalidValue)
       }
       return .url(url)

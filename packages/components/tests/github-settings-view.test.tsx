@@ -20,6 +20,9 @@ const authState = vi.hoisted(() => ({
   mobile: false,
   available: true,
   authorization: 'missing',
+  preferenceEnabled: true,
+  preferenceWrites: [] as Array<{ name: string; args: unknown }>,
+  canManage: false,
   openedUrls: [] as string[],
   openResult: true,
   error: '',
@@ -74,18 +77,26 @@ vi.mock('../src/hooks/use-personal-github-authorization', () => ({
 vi.mock('../src/components/settings/settings-data-cache', () => ({
   useSettingsDataCache: () => ({
     workspaceId: 'workspace-test',
-    canManageGithub: false,
+    canManageGithub: authState.canManage,
     workspaceReposWithStatus: authState.repos,
     workspaceReposLoading: false,
   }),
 }));
 vi.mock('@lody/platform/react', async (original) => ({
   ...(await original<typeof import('@lody/platform/react')>()),
-  useCloudQuery: () => ({ enabled: true, authorization: { state: authState.authorization } }),
-  useCloudAction: () => async () => {},
-  useCloudMutation: () => async () => {},
+  useCloudQuery: () => ({
+    enabled: authState.preferenceEnabled,
+    authorization: { state: authState.authorization },
+  }),
+  useCloudAction: () => async () => ({ state: 'synthetic-signed-install-state' }),
+  useCloudMutation: (operation: { name: string }) => async (args: unknown) => {
+    authState.preferenceWrites.push({ name: operation.name, args });
+  },
 }));
 
+import { GitHubInstallationNotice } from '../src/components/settings/github-installation-notice';
+import { resolveDesktopGitHubInstallDeepLinkPath } from '../src/lib/desktop-github-install-deep-link';
+import { readGitHubInstallRetry } from '../src/lib/github-installation-recovery';
 import { IntegrationsSettingsComponent } from '../src/components/settings/integrations-setting';
 import { MobileSettingsFoldContext } from '../src/components/mobile/mobile-settings-fold-context';
 
@@ -147,6 +158,9 @@ describe('GitHubSettingsView', () => {
       mobile: false,
       available: true,
       authorization: 'missing',
+      preferenceEnabled: true,
+      preferenceWrites: [],
+      canManage: false,
       openedUrls: [],
       openResult: true,
       error: '',
@@ -271,4 +285,104 @@ describe('GitHubSettingsView', () => {
     await renderSettings();
     expect(container.textContent).toBe('');
   });
+  it.each([false, true])(
+    'requires personal authorization before App installation (mobile: %s)',
+    async (mobile) => {
+      authState.mobile = mobile;
+      authState.canManage = true;
+      authState.electron = true;
+      const popup = vi.spyOn(window, 'open');
+      await renderSettings();
+      const connect = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === 'Manage'
+      );
+      expect(connect).toBeDefined();
+      await act(async () => connect!.click());
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        'Authorize your personal GitHub account first'
+      );
+      expect(authState.openedUrls).toEqual([]);
+      expect(popup).not.toHaveBeenCalled();
+      // Authorization is independent of the operation preference; no App flow begins yet.
+      await act(async () => authorizeButton()!.click());
+      expect(authState.openedUrls[0]).toContain('github_install_error=authorization_required');
+      authState.authorization = 'authorized';
+      await renderSettings();
+      const authorizedConnect = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === 'Manage'
+      );
+      await act(async () => authorizedConnect!.click());
+      expect(authState.openedUrls.at(-1)).toContain(
+        '/installations/new?state=synthetic-signed-install-state'
+      );
+      popup.mockRestore();
+      authState.canManage = false;
+    }
+  );
+
+  it('preserves a recoverable installation error and retry through the desktop deep link', async () => {
+    vi.stubEnv('VITE_CONVEX_SITE_URL', 'https://synthetic.convex.site');
+    const callback =
+      'https://synthetic.convex.site/api/github/callback?installation_id=42&setup_action=update&state=synthetic-state';
+    const hash = `#github-install-retry=${encodeURIComponent(callback)}`;
+    const target = resolveDesktopGitHubInstallDeepLinkPath(
+      `lody://github-install?workspaceSlug=team&installed=true&github_install_error=temporarily_unavailable${hash}`,
+      '/',
+      { target: 'home' }
+    );
+    expect(target).toBe(
+      `/team/settings/github?github_install_error=temporarily_unavailable${hash}`
+    );
+    window.history.replaceState(null, '', target!);
+    await act(async () =>
+      root.render(
+        createElement(
+          TestCloudPlatformProvider,
+          null,
+          createElement(GitHubInstallationNotice, { authorized: true, onAuthorize: () => {} })
+        )
+      )
+    );
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'GitHub could not be reached'
+    );
+    const retry = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Retry installation'
+    );
+    expect(retry).toBeDefined();
+    authState.electron = true;
+    await act(async () => retry!.click());
+    expect(authState.openedUrls.at(-1)).toBe(callback);
+    // An untrusted deep link can display advice but never send credentials to another host.
+    expect(
+      readGitHubInstallRetry(
+        `#github-install-retry=${encodeURIComponent(callback.replace('synthetic.convex.site', 'attacker.example'))}`,
+        'https://synthetic.convex.site'
+      )
+    ).toBeNull();
+    expect(
+      readGitHubInstallRetry(
+        `#github-install-retry=${encodeURIComponent(callback + '&redirect=https://attacker.example')}`,
+        'https://synthetic.convex.site'
+      )
+    ).toBeNull();
+    window.history.replaceState(null, '', '/');
+    vi.unstubAllEnvs();
+  });
+  it.each([false, true])(
+    'personal authorization for App installation remains available with Act-as-you off and never enables that preference (mobile: %s)',
+    async (mobile) => {
+      authState.mobile = mobile;
+      authState.preferenceEnabled = false;
+      authState.repos = [];
+      await renderSettings();
+      const identitySwitch = container.querySelector('[role="switch"]');
+      expect(identitySwitch?.getAttribute('aria-checked')).toBe('false');
+      expect(authorizeButton()).toBeDefined();
+      await act(async () => authorizeButton()!.click());
+      expect(authState.linkedCallback).toBe('operation-only');
+      expect(identitySwitch?.getAttribute('aria-checked')).toBe('false');
+      expect(authState.preferenceWrites).toEqual([]);
+    }
+  );
 });

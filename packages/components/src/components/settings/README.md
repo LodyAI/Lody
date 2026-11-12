@@ -86,3 +86,20 @@ The confirmation shows that pairing notice only in an encrypted workspace.
 Deployment requires the cloud `machine-lifecycle/restore-identity` endpoint and
 receipt schema before enabling recovery on clients. Unit fixtures do not establish
 Windows filesystem, remote restart or encrypted pairing acceptance.
+
+## GitHub installation
+
+App installation requires personal operation authorization before opening GitHub;
+this does not enable the separate operation preference. Installation advice stays
+visible until the user repairs authorization or retries. The retry capability stays
+in a fragment or the same-tab OAuth proof, never a search parameter. Navigate only
+to the configured Convex Site origin and exact installation callback contract.
+Preserve the error and fragment through desktop handoff, and fence late OAuth
+completion against navigation and workspace changes. Session replay omits URL
+fragments; controls containing the capability stay outside replay capture.
+
+The workspace-independent `/settings/github` landing waits for the signed-in
+user's live member-workspace list. It selects an active workspace only from that
+list, otherwise using the existing member-list preference. Unsigned callback
+parameters never select the workspace or a desktop target. Anonymous returns use
+the existing login flow; retry capabilities are never placed in its redirect query.
