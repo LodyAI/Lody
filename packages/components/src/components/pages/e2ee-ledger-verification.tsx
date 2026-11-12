@@ -259,8 +259,10 @@ export function useQrCamera(active: boolean, onCode: (text: string) => void) {
       frame = requestAnimationFrame(tick);
     };
     setState('starting');
+    // Phones open the rear camera; a desktop webcam that rejects the hint still scans.
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+      .getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+      .catch(() => navigator.mediaDevices.getUserMedia({ video: true, audio: false }))
       .then(async (media) => {
         stream = media;
         if (stopped || !video.current) return stop();

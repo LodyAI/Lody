@@ -25,13 +25,20 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 // The QR drawing and camera are presentation; the payload is asserted directly.
-const qr = vi.hoisted(() => ({ payloads: [] as string[] }));
+const qr = vi.hoisted(() => ({
+  payloads: [] as string[],
+  /** The open camera's decode callback; tests deliver a scanned text through it. */
+  scan: null as ((text: string) => void) | null,
+}));
 vi.mock('../src/components/pages/e2ee-ledger-verification', () => ({
   LedgerQrCode: (props: { payload: string }) => {
     qr.payloads.push(props.payload);
     return null;
   },
-  useQrCamera: () => ({ video: { current: null }, state: 'idle' }),
+  useQrCamera: (active: boolean, onCode: (text: string) => void) => {
+    if (active) qr.scan = onCode;
+    return { video: { current: null }, state: active ? 'scanning' : 'idle' };
+  },
 }));
 
 // Synthetic code from packages/e2ee-core/test/pairing-vector.json, parsed by real core.
@@ -45,6 +52,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
   vi.setSystemTime(NOW);
   qr.payloads = [];
+  qr.scan = null;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -1050,4 +1058,397 @@ it('automatic-capable browsers choose recovery without pairing, or consent befor
   expect(requested).toBe(true);
   expect(container.textContent).toContain('123 456');
   expect(host.state).toBeNull();
+});
+
+describe('instant QR join and form-factor pairing', () => {
+  const flush = async () => {
+    for (let turn = 0; turn < 6; turn++) await act(async () => {});
+  };
+  const withCamera = () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: async () => ({}) },
+    });
+    return () => {
+      if (original) Object.defineProperty(navigator, 'mediaDevices', original);
+      else delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+    };
+  };
+  const preview: E2eeAccountPairingPreview = {
+    requestId: 'request-1',
+    deviceName: 'Synthetic phone',
+    approximateLocation: null,
+    requestedAt: NOW,
+    expiresAt: NOW + 600_000,
+    workspaces: [
+      { workspaceId: 'w1', name: 'Alpha' },
+      { workspaceId: 'w2', name: 'Beta' },
+    ],
+    unavailable: [],
+  };
+  const review = {
+    id: 'request',
+    requestId: 'native-request',
+    workspaceId: 'w1',
+    workspaceName: 'Synthetic team',
+    deviceName: 'Phone',
+    expiresAt: NOW + 600_000,
+    phase: 'waiting' as const,
+  };
+
+  it('signs every listed workspace once, with no confirmation, as soon as a scanned request verifies', async () => {
+    const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
+    const removeTelemetryScope = installWorkspaceTelemetryScope(() => 'ordinary-under-approval');
+    setTelemetryRouteTarget('ordinary-under-approval', true);
+    const replay = () =>
+      postHogPrivacy.beforeSend({
+        event: '$snapshot',
+        properties: { $snapshot_data: ['synthetic private surface'] },
+      });
+    let submitted = false;
+    const approvals: unknown[] = [];
+    let settle: (() => void) | undefined;
+    const runtime = {
+      accountPairingCode: async () => ({ pairingString: CODE, expiresAt: NOW + 600_000 }),
+      // `null` until the phone submits its request under this code.
+      inspectAccountPairing: async (code: string) => {
+        expect(code).toBe(CODE);
+        return submitted ? preview : null;
+      },
+      approveAccountPairing: (input: unknown) => {
+        approvals.push(input);
+        return new Promise((resolve) => {
+          settle = () =>
+            resolve({
+              workspaces: [
+                { workspaceId: 'w1', outcome: 'admitted' },
+                { workspaceId: 'w2', outcome: 'admitted' },
+              ],
+            });
+        });
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    const joined: string[] = [];
+    try {
+      await act(async () =>
+        root.render(<E2eeInstantQrApprove runtime={runtime} onJoined={(d) => joined.push(d)} />)
+      );
+      await flush();
+      expect(qr.payloads.at(-1)).toBe(`lody://pair/${CODE.replace(/-/g, '')}`);
+      expect(replay()).toBeNull();
+      await tick(900);
+      expect(approvals).toEqual([]);
+      submitted = true;
+      await tick(900);
+      await flush();
+      // Polls keep finding the request while the host signs: still exactly one approval.
+      await tick(900);
+      await tick(900);
+      expect(approvals).toEqual([
+        { pairingString: CODE, requestId: 'request-1', workspaceIds: ['w1', 'w2'] },
+      ]);
+      expect(text()).toContain('e2ee.instantQr.joining {"device":"Synthetic phone"}');
+      expect(container.querySelector('button')).toBeNull();
+      await act(async () => settle!());
+      await flush();
+      expect(text()).toContain('e2ee.instantQr.joined {"device":"Synthetic phone"}');
+      expect(joined).toEqual(['Synthetic phone']);
+      await act(async () => root.render(<></>));
+      await flush();
+      expect(replay()).not.toBeNull();
+    } finally {
+      removeTelemetryScope();
+    }
+  });
+
+  it('offers a fresh code once the shown one expires, without signing', async () => {
+    const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
+    let offers = 0;
+    const approve = vi.fn();
+    const runtime = {
+      accountPairingCode: async () => {
+        offers += 1;
+        return { pairingString: CODE, expiresAt: NOW + 1_000 };
+      },
+      inspectAccountPairing: async () => null,
+      approveAccountPairing: approve,
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () => root.render(<E2eeInstantQrApprove runtime={runtime} />));
+    await flush();
+    await tick(900);
+    await tick(900);
+    expect(text()).toContain('e2ee.instantQr.expired');
+    await click('e2ee.instantQr.refresh');
+    await flush();
+    expect(offers).toBe(2);
+    expect(approve).not.toHaveBeenCalled();
+  });
+
+  it('presents a request in a visible but unfocused window, and at once when a hidden window is shown again', async () => {
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    let visibility: DocumentVisibilityState = 'hidden';
+    const visible = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const runtime = {
+      pendingAutomaticPairing: async () => [review],
+      approveAutomaticPairing: async () => {},
+      declineAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    const codeInput = () => document.querySelector('[data-testid="e2ee-approval-code"]');
+    try {
+      await act(async () => root.render(<E2eeAutomaticPairingInbox runtime={runtime} />));
+      await flush();
+      expect(codeInput()).toBeNull();
+      visibility = 'visible';
+      // No poll interval elapses: the visibility change alone presents the request.
+      await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+      await flush();
+      expect(codeInput()).not.toBeNull();
+    } finally {
+      focus.mockRestore();
+      visible.mockRestore();
+    }
+  });
+
+  it('keeps a revealed QR code through its request leaving the list, then approves the scanning phone on a desktop', async () => {
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { ForceDesktopLayoutProvider } = await import('../src/hooks/use-mobile');
+    let rows = [review];
+    let offers = 0,
+      submitted = false;
+    const approvals: unknown[] = [];
+    const runtime = {
+      pendingAutomaticPairing: async () => rows,
+      approveAutomaticPairing: async () => {},
+      declineAutomaticPairing: async () => {},
+      accountPairingCode: async () => {
+        offers += 1;
+        return { pairingString: CODE, expiresAt: NOW + 600_000 };
+      },
+      inspectAccountPairing: async () => (submitted ? preview : null),
+      approveAccountPairing: async (input: unknown) => {
+        approvals.push(input);
+        return { workspaces: [{ workspaceId: 'w1', outcome: 'admitted' }] };
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    const showQr = () =>
+      document.querySelector<HTMLButtonElement>('[data-testid="e2ee-approval-show-qr"]');
+    await act(async () =>
+      root.render(
+        <ForceDesktopLayoutProvider>
+          <E2eeAutomaticPairingInbox runtime={runtime} />
+        </ForceDesktopLayoutProvider>
+      )
+    );
+    await flush();
+    // The secret is shown only on request; the typed-code path stays right below.
+    expect(offers).toBe(0);
+    expect(document.querySelector('[data-testid="e2ee-approval-code"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="e2ee-approval-scan-start"]')).toBeNull();
+    await act(async () => showQr()!.click());
+    await flush();
+    expect(offers).toBe(1);
+    rows = [];
+    await tick(2000);
+    await flush();
+    expect(document.querySelector('[data-testid="e2ee-instant-qr"]')).not.toBeNull();
+    submitted = true;
+    await tick(900);
+    await flush();
+    expect(offers).toBe(1);
+    expect(approvals).toEqual([
+      { pairingString: CODE, requestId: 'request-1', workspaceIds: ['w1', 'w2'] },
+    ]);
+    expect(document.body.textContent).toContain('e2ee.instantQr.joined');
+  });
+
+  it('on a phone approves by scanning the new screen, ignoring another request without using an attempt', async () => {
+    const restoreCamera = withCamera();
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { ForceMobileLayoutProvider } = await import('../src/hooks/use-mobile');
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const entered: [string, string][] = [];
+    const runtime = {
+      pendingAutomaticPairing: async () => (entered.length ? [] : [review]),
+      approveAutomaticPairing: async (id: string, code: string) => {
+        entered.push([id, code]);
+      },
+      declineAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    const scanStart = () =>
+      document.querySelector<HTMLButtonElement>('[data-testid="e2ee-approval-scan-start"]');
+    try {
+      await act(async () =>
+        root.render(
+          <ForceMobileLayoutProvider force>
+            <E2eeAutomaticPairingInbox runtime={runtime} />
+          </ForceMobileLayoutProvider>
+        )
+      );
+      await flush();
+      await act(async () => scanStart()!.click());
+      await act(async () => qr.scan!('lody://auto-pair?id=someone-else&code=123456'));
+      await flush();
+      expect(entered).toEqual([]);
+      expect(document.body.textContent).toContain('e2ee.auto.scan.otherRequest');
+      await act(async () => scanStart()!.click());
+      await act(async () => qr.scan!('lody://auto-pair?id=request&code=654321'));
+      await flush();
+      // Scanning is entering the shown code: the host still compares it before signing.
+      expect(entered).toEqual([['request', '654321']]);
+    } finally {
+      focus.mockRestore();
+      restoreCamera();
+    }
+  });
+
+  it('on a new phone explains the wait, then joins by scanning without ending discovery early', async () => {
+    const restoreCamera = withCamera();
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { ForceMobileLayoutProvider } = await import('../src/hooks/use-mobile');
+    const calls: string[] = [];
+    let status: E2eeAccountPairingRequestState['status'] = 'waiting';
+    const request = (): E2eeAccountPairingRequestState => ({
+      expiresAt: NOW + 600_000,
+      status,
+      workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: status === 'joined' ? 'joined' : 'pending' }],
+    });
+    const runtime = {
+      automaticPairingState: async () => {
+        calls.push('state');
+        return {
+          id: 'request',
+          workspaceId: 'w1',
+          workspaceName: 'Alpha',
+          deviceName: 'Phone',
+          comparisonCode: null,
+          expiresAt: NOW + 300_000,
+          phase: 'preparing',
+        };
+      },
+      cancelAutomaticPairing: async () => {
+        calls.push('cancel');
+      },
+      requestAccountPairing: async (input: { pairingString?: string }) => {
+        calls.push(`request:${input.pairingString}`);
+        return request();
+      },
+      accountPairingRequest: async () => request(),
+    } as unknown as E2eeWorkspaceRuntime;
+    let joined = 0;
+    try {
+      await act(async () =>
+        root.render(
+          <ForceMobileLayoutProvider force>
+            <E2eeAutomaticPairingPage
+              runtime={runtime}
+              workspaceId="w1"
+              onJoined={() => (joined += 1)}
+              onBack={() => {}}
+            />
+          </ForceMobileLayoutProvider>
+        )
+      );
+      await flush();
+      expect(text()).toContain('e2ee.auto.awaiting.title');
+      expect(text()).not.toContain('···');
+      await click('e2ee.auto.scanJoin');
+      await act(async () => qr.scan!(`lody://pair/${CODE.replace(/-/g, '')}`));
+      await flush();
+      expect(calls).toContain(`request:lody://pair/${CODE.replace(/-/g, '')}`);
+      expect(text()).toContain('e2ee.instantQr.scannedJoining');
+      const polled = calls.filter((call) => call === 'state').length;
+      await tick(2000);
+      // Automatic discovery waits, and stays open, while the scanned join settles.
+      expect(calls.filter((call) => call === 'state').length).toBe(polled);
+      expect(calls).not.toContain('cancel');
+      expect(joined).toBe(0);
+      status = 'joined';
+      await tick(800);
+      await flush();
+      expect(joined).toBe(1);
+      expect(calls.at(-1)).toBe('cancel');
+    } finally {
+      restoreCamera();
+    }
+  });
+
+  it('on a new computer shows a QR code for a phone beside the typed code, and no camera', async () => {
+    const restoreCamera = withCamera();
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { ForceDesktopLayoutProvider } = await import('../src/hooks/use-mobile');
+    const runtime = {
+      automaticPairingState: async () => ({
+        id: 'request',
+        workspaceId: 'w1',
+        workspaceName: 'Alpha',
+        deviceName: 'Desk',
+        comparisonCode: '123456',
+        expiresAt: NOW + 300_000,
+        phase: 'waiting',
+      }),
+      requestAccountPairing: async () => ({}),
+      accountPairingRequest: async () => null,
+    } as unknown as E2eeWorkspaceRuntime;
+    try {
+      await act(async () =>
+        root.render(
+          <ForceDesktopLayoutProvider>
+            <E2eeAutomaticPairingPage
+              runtime={runtime}
+              workspaceId="w1"
+              onJoined={() => {}}
+              onBack={() => {}}
+            />
+          </ForceDesktopLayoutProvider>
+        )
+      );
+      await flush();
+      expect(qr.payloads.at(-1)).toBe('lody://auto-pair?id=request&code=123456');
+      expect(text()).toContain('123 456');
+      expect(text()).toContain('e2ee.auto.showCode.desktop');
+      expect(text()).not.toContain('e2ee.auto.scanPrompt');
+    } finally {
+      restoreCamera();
+    }
+  });
+
+  it('names a refused request instead of reporting a connection problem', async () => {
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let failure: unknown = Object.assign(new Error('rejected'), {
+      data: { code: 'e2ee_invalid-input' },
+    });
+    const runtime = {
+      automaticPairingState: async () => {
+        throw failure;
+      },
+      startAutomaticPairing: async () => {
+        throw failure;
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={runtime}
+          workspaceId="w1"
+          onJoined={() => {}}
+          onBack={() => {}}
+        />
+      )
+    );
+    await flush();
+    expect(text()).toContain('e2ee.accountPair.error.failed');
+    expect(text()).not.toContain('e2ee.auto.connectionRetry');
+    failure = new TypeError('Failed to fetch');
+    await tick(2000);
+    await flush();
+    expect(text()).toContain('e2ee.auto.connectionRetry');
+  });
 });

@@ -813,9 +813,6 @@ describe('encrypted workspace settings', () => {
     });
     try {
       await render();
-      await click('e2ee.security.openConsole');
-      for (let tick = 0; tick < 5; tick++) await act(async () => {});
-      expect(page()).not.toContain('e2ee.console.quick.recovery');
       await openConsole('recovery');
       for (let tick = 0; tick < 5; tick++) await act(async () => {});
       expect(page()).toContain('e2ee.console.recoveryUnavailable');
@@ -1092,6 +1089,31 @@ describe('encrypted workspace settings', () => {
       (button) => button.textContent === 'e2ee.security.revoke'
     );
     expect(revoke?.disabled).toBe(true);
+  });
+  it('adds a device from the General card and keeps one way to add it on the Devices tab', async () => {
+    const personalPairing = () =>
+      document.body.querySelector('[data-testid="e2ee-personal-pairing-state"]');
+    Object.assign(platform.e2eeWorkspaces!.runtime!, {
+      preparePersonalJoin: async () => ({}),
+      claimPersonalJoin: async () => ({}),
+      cancelPersonalJoin: async () => {},
+    });
+    await render();
+    await click('e2ee.security.addDevice');
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(
+      document.body.querySelector('[data-console-tab="devices"]')?.getAttribute('aria-current')
+    ).toBe('page');
+    // A host without account pairing keeps the per-workspace exchange.
+    expect(personalPairing()).not.toBeNull();
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    platform.e2eeWorkspaces!.runtime!.inspectAccountPairing = async () => null;
+    await render();
+    await click('e2ee.security.addDevice');
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(page()).toContain('synthetic-machine');
+    expect(personalPairing()).toBeNull();
   });
   it('keeps the ordinary General page and leaves encrypted team management to the console', async () => {
     state = { ...state, rotationRequired: false };

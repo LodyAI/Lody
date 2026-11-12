@@ -94,9 +94,12 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   only `cancelled` writes the terminal receipt that settles it. The old credential is
   pinned to that membership, so the new one gets a replacement identity, activated only
   after its own verified admission. An admitted or still-live join keeps refusing.
-- Automatic pairing approval signs only after the person types the code the new
-  device shows and it equals this device's derived code. Reviews never expose that
-  code, and the third wrong entry ends the request on the approver before any signing.
+- Automatic pairing approval signs only after the person enters the code the new
+  device shows, typed or scanned from that screen, and it equals this device's derived
+  code. Reviews never expose that code, and the third wrong entry ends the request on
+  the approver before any signing. An approver shows its own account pairing QR code
+  only after an explicit action, never because a request arrived; a request verified
+  under that code is signed for every listed workspace without another confirmation.
 
 - Management exposes last-personal-device risk from the verified ledger and requires
   explicit recovery-only confirmation before signing its revocation. Restores report

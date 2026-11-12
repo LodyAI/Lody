@@ -1,5 +1,9 @@
 import { E2eeAutomaticPairingPage } from '@/components/pages/e2ee-automatic-pairing';
-import { E2eeRemoteMachinePairing } from '@/components/pages/e2ee-remote-machine-pairing';
+import {
+  E2eeRemoteMachineDisclosure,
+  E2eeRemoteMachinePairing,
+} from '@/components/pages/e2ee-remote-machine-pairing';
+import { E2eeAddDeviceCard } from '@/components/pages/e2ee-instant-qr';
 import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery';
 
 import { E2eeTeamSettingsHost } from '@/components/settings/e2ee-team-settings';
@@ -26,7 +30,6 @@ import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
 import {
-  E2eeAccountPairingApprove,
   E2eeAccountPairingKeyRetry,
   E2eeAccountPairingRequest,
 } from '@/components/pages/e2ee-account-pairing';
@@ -931,10 +934,12 @@ export function E2eeWorkspaceConsole({
         )}
         {port?.runtime && accountId && current?.history?.locallyPinned && (
           <E2eeConsoleSection tab="devices">
-            <E2eeAccountPairingApprove key={identity + ':account-pairing'} runtime={port.runtime} />
+            <E2eeAddDeviceCard key={identity + ':account-pairing'} runtime={port.runtime} />
           </E2eeConsoleSection>
         )}
-        {port?.runtime && accountId && (
+        {/* The per-workspace exchange is only for hosts without account pairing;
+            beside it, it would be a second, competing way to add the same device. */}
+        {port?.runtime && accountId && !port.runtime.inspectAccountPairing && (
           <E2eeConsoleSection tab="devices">
             <E2eePersonalPairing
               key={identity}
@@ -951,13 +956,16 @@ export function E2eeWorkspaceConsole({
             />
           </E2eeConsoleSection>
         )}
-        {port?.runtime && current?.history?.locallyPinned && (
+        {sections}
+        {port?.runtime?.beginRemoteMachinePairing && current?.history?.locallyPinned && (
           <E2eeConsoleSection tab="devices">
-            <E2eeRemoteMachinePairing
-              key={identity + ':remote-machine'}
-              workspaceId={workspaceId}
-              runtime={port.runtime}
-            />
+            <E2eeRemoteMachineDisclosure>
+              <E2eeRemoteMachinePairing
+                key={identity + ':remote-machine'}
+                workspaceId={workspaceId}
+                runtime={port.runtime}
+              />
+            </E2eeRemoteMachineDisclosure>
           </E2eeConsoleSection>
         )}
         {port && current?.history?.locallyPinned && (
@@ -970,7 +978,6 @@ export function E2eeWorkspaceConsole({
             />
           </E2eeConsoleSection>
         )}
-        {sections}
       </E2eeWorkspaceControlPage>
     </>
   );

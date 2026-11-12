@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Repeated manual exchanges made second-device access cumbersome. The 128-bit secret-transfer protocol is implemented; the owner now chose automatic requests, a comparison code and one approval for the current workspace. The automatic implementation adds a committed ephemeral channel while retaining the existing admission journals, MACs and custody. Its approximately 20-bit visual comparison has a different security bound from manual secret transfer, so the protocol increment remains draft and native rollout is tracked separately from fixture verification.
+Repeated manual exchanges made second-device access cumbersome. The 128-bit secret-transfer protocol is implemented; the owner now chose automatic requests, a comparison code and one approval for the current workspace. The automatic implementation adds a committed ephemeral channel while retaining the existing admission journals, MACs and custody. Its approximately 20-bit visual comparison has a different security bound from manual secret transfer, so the protocol increment remains draft and native rollout is tracked separately from fixture verification. A 2026-11-12 owner request adds scan-to-join in the reverse direction, which signs without a further confirmation; its cost is that anyone who sees the shown code can admit a device.
 
 ## Problem
 
@@ -282,3 +282,11 @@ The real coordinator/HMAC workflow tests and native-host fixture cover admission
 Running desktop apps can show one generic OS notification per locally verified request while backgrounded; only clicking it focuses Lody. Discovery uses a live query subscription, with scoped polling on subscription failure and while waiting for native progress. No new APNs/FCM path wakes a suspended mobile app.
 
 Approvals and their inbox hold [private telemetry surface leases](../../implemented/bug-fix/2026-10-29-workspace-telemetry-privacy.md) even above an ordinary workspace. Disposal occurs once admission is verified; waiting for a delayed content key does not retain the temporary pairing secret.
+
+## Instant QR join (2026-11-12)
+
+The owner asked that a phone join right after scanning, with no further step (session `207baaf6`, 2026-11-12). In the reverse direction the approving device now signs every listed workspace as soon as a request under its own displayed code verifies; the code is shown only after an explicit click, in the console's Add device card or in the new-device dialog, and never automatically when a request arrives. That click, together with the person pointing their phone at the screen, replaces the warning and per-workspace selection. The trade-off is exposure of the displayed bearer secret: screen sharing or a camera that captures it within ten minutes admits the viewer's device, so revealing on click (rather than on an incoming request that an attacker holding the password can trigger) is the remaining guard. Approval stays single-flight per offer, and the new device keeps the automatic discovery row open until the scanned join reports joined, so the approver's dialog is not closed mid-signing.
+
+A new computer also shows `lody://auto-pair?id=…&code=…` beside its six-digit comparison code. A phone approving the request scans it instead of typing; a scan for another request sends nothing, and a matching scan submits the code to the same local comparison and attempt counter. Phones scan and computers show: a desktop never offers its webcam as the primary action.
+
+Component tests in `packages/components/tests/e2ee-account-pairing.test.tsx` cover the single approval without a click, the scanned join that leaves discovery open, the request-id check and the desktop/phone layouts. Real-camera decoding on iOS/Android and packaged-app behavior are unverified.

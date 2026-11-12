@@ -4,12 +4,14 @@ import { Accordion } from '@lody/ui/accordion';
 import { Alert } from '@lody/ui/alert';
 import { Avatar } from '@lody/ui/avatar';
 import { Button } from '@lody/ui/button';
+import { Collapsible } from '@lody/ui/collapsible';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { Children, Fragment, isValidElement, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Check,
+  ChevronDown,
   ChevronLeft,
   CircleHelp,
   LayoutDashboard,
@@ -327,31 +329,6 @@ const styles = stylex.create({
   heroText: { display: 'flex', flexDirection: 'column', minWidth: 0, flexGrow: 1 },
   heroTitle: { fontWeight: 600 },
   heroHelp: { color: colors.secondaryLabel, fontSize: type.subheadlineSize },
-  quick: {
-    display: 'grid',
-    gridTemplateColumns: {
-      default: 'repeat(4, minmax(0, 1fr))',
-      '@media (max-width: 720px)': 'repeat(2, minmax(0, 1fr))',
-    },
-    gap: space[2],
-  },
-  quickItem: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: space[2],
-    padding: space[3],
-    borderRadius: radius.large,
-    borderWidth: 0,
-    backgroundColor: colors.elevatedBackground,
-    boxShadow: shadow.card,
-    color: colors.label,
-    font: 'inherit',
-    fontWeight: 500,
-    textAlign: 'start',
-    cursor: 'pointer',
-  },
-  quickIcon: { color: colors.secondaryLabel },
   checkMark: {
     display: 'inline-grid',
     placeItems: 'center',
@@ -366,17 +343,6 @@ const styles = stylex.create({
   },
   checkMarkDone: { borderColor: colors.success, backgroundColor: colors.success },
   checkDoneText: { color: colors.secondaryLabel },
-  linkButton: {
-    marginInlineStart: 'auto',
-    borderWidth: 0,
-    padding: 0,
-    background: 'none',
-    color: colors.secondaryLabel,
-    font: 'inherit',
-    fontSize: type.footnoteSize,
-    fontWeight: 400,
-    cursor: 'pointer',
-  },
 });
 
 const TAB_ICONS: Record<E2eeConsoleTab, LucideIcon> = {
@@ -911,14 +877,20 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
     </>
   );
 
+  // The full record, with hashes and fields, is for auditing: closed until asked for.
+  // It stays mounted so its loaded pages and open rows survive closing it.
   const historySection = history && overview && (
     <section aria-label={t('e2ee.control.history')} {...stylex.props(styles.section)}>
-      <h2 {...stylex.props(styles.sectionHeading)}>
-        {t('e2ee.control.history')}
-        <span {...stylex.props(styles.count)}>
-          {history.view.length < total ? `${history.view.length} / ${total}` : total}
-        </span>
-      </h2>
+      <Collapsible.Root>
+        <Collapsible.Trigger
+          render={<Button variant="ghost" size="small" data-testid="e2ee-history-toggle" />}
+        >
+          {t('e2ee.control.historyToggle', {
+            shown: history.view.length < total ? `${history.view.length} / ${total}` : total,
+          })}
+          <ChevronDown size={14} aria-hidden="true" />
+        </Collapsible.Trigger>
+        <Collapsible.Panel keepMounted>
       <div {...stylex.props(styles.history)}>
         <Accordion.Root multiple>
           {history.records.map((record, position) => {
@@ -977,28 +949,10 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           {history.continuityPending && <span>{t('e2ee.control.continuityPending')}</span>}
         </div>
       )}
+        </Collapsible.Panel>
+      </Collapsible.Root>
     </section>
   );
-
-  const recent =
-    history && overview
-      ? history.records
-          .map((record, position) => ({ record, event: overview.events[position] }))
-          .slice(-3)
-          .reverse()
-      : [];
-
-  const quickActions: { tab: E2eeConsoleTab; label: string; icon: LucideIcon }[] = [
-    ...(mayManage
-      ? [{ tab: 'members' as const, label: t('e2ee.console.quick.invite'), icon: Users }]
-      : []),
-    { tab: 'devices', label: t('e2ee.console.quick.addDevice'), icon: MonitorSmartphone },
-    { tab: 'security', label: t('e2ee.console.quick.compare'), icon: ShieldCheck },
-    // Only a host that composes recovery can set it up; elsewhere the tab explains why not.
-    ...(sections.has('recovery')
-      ? [{ tab: 'recovery' as const, label: t('e2ee.console.quick.recovery'), icon: LifeBuoy }]
-      : []),
-  ];
 
   // Getting started follows creation, so it is shown only on the creating device, the one
   // place this account's membership is known from the ledger itself.
@@ -1084,48 +1038,6 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
         )}
         {sections.get('overview')}
         {gettingStarted}
-        {history && overview && (
-          <section aria-label={t('e2ee.console.quick.title')} {...stylex.props(styles.section)}>
-            <h2 {...stylex.props(styles.sectionHeading)}>{t('e2ee.console.quick.title')}</h2>
-            <div {...stylex.props(styles.quick)}>
-              {quickActions.map((action) => (
-                <button
-                  key={action.tab + action.label}
-                  type="button"
-                  onClick={() => setTab(action.tab)}
-                  {...stylex.props(styles.quickItem)}
-                >
-                  <action.icon size={18} aria-hidden="true" {...stylex.props(styles.quickIcon)} />
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-        {recent.length > 0 && (
-          <section aria-label={t('e2ee.console.recent')} {...stylex.props(styles.section)}>
-            <h2 {...stylex.props(styles.sectionHeading)}>
-              {t('e2ee.console.recent')}
-              <button
-                type="button"
-                onClick={() => setTab('security')}
-                {...stylex.props(styles.linkButton)}
-              >
-                {t('e2ee.console.viewAll', { count: total })}
-              </button>
-            </h2>
-            <ul {...stylex.props(styles.list)}>
-              {recent.map(({ record, event }) => (
-                <li key={record.hash} {...stylex.props(styles.memberRow)}>
-                  <span {...stylex.props(styles.eventIndex)}>{record.index + 1}</span>
-                  <span {...stylex.props(styles.eventText)}>
-                    {eventSentence(t, names.name, event)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
       </>
     ),
     members: (

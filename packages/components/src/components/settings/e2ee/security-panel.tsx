@@ -9,6 +9,7 @@ import { Info, KeyRound, ShieldCheck, ShieldQuestion, UserPlus } from 'lucide-re
 import { Tooltip } from '@lody/ui/tooltip';
 import { useState, type ReactNode } from 'react';
 import { Dialog } from '@lody/ui/dialog';
+import { Badge } from '@lody/ui/badge';
 import { CompactSection, CompactRow } from '../compact-layout';
 
 const styles = stylex.create({
@@ -187,7 +188,7 @@ export function E2eeSecurityPanel({
   onUpdate: () => void;
   onRetry: () => void;
   /** Opens the console, on a tab when the item names one. */
-  onOpenConsole?: (tab?: 'members') => void;
+  onOpenConsole?: (tab?: 'members' | 'devices') => void;
 }) {
   const { t } = useTranslation();
   const error = effectiveError(state, actionError);
@@ -209,8 +210,22 @@ export function E2eeSecurityPanel({
         >
           {/* The primary step leads, so a wrapped row on a phone never strands the
               help icon in the glyph column. */}
+          {/* Adding a device is the everyday task; everything else is one step further. */}
+          {onOpenConsole && state && (
+            <Button
+              data-testid="e2ee-security-add-device"
+              disabled={busy}
+              onClick={() => onOpenConsole('devices')}
+            >
+              {t('e2ee.security.addDevice')}
+            </Button>
+          )}
           {onOpenConsole && !cardOpensConsole && (
-            <Button disabled={busy} onClick={() => onOpenConsole()}>
+            <Button
+              variant={state ? 'secondary' : 'primary'}
+              disabled={busy}
+              onClick={() => onOpenConsole()}
+            >
               {t('e2ee.security.openConsole')}
             </Button>
           )}
@@ -280,12 +295,13 @@ export function E2eeDevicesPanel({
               key={device.key}
               label={device.machineId ?? t(`e2ee.values.${device.kind}`)}
               helper={
-                <span {...stylex.props(styles.key)}>
-                  {device.key.slice(0, 12)}
-                  {device.self ? ` · ${t('e2ee.security.thisDevice')}` : ''}
+                // A short suffix tells devices apart; the full key is on hover.
+                <span title={device.key} {...stylex.props(styles.key)}>
+                  {`…${device.key.slice(-6)}`}
                 </span>
               }
             >
+              {device.self && <Badge>{t('e2ee.security.thisDevice')}</Badge>}
               {device.mayRevoke && (
                 <Button
                   data-testid="e2ee-device-revoke"
