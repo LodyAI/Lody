@@ -110,6 +110,9 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpoch
 
 换代纪元密钥（`publish`），或在一条签名记录中移除成员并换代（`publishRemoving`，仅 owner）。
 
+本地候选信封列表使用独立的规范 CBOR 限制：最多 4096 个信封，编码后不超过 2 MiB。
+账本记录和背书快照仍保留数组最多 32 项的限制。
+
 ```text
 生成密钥 → 封装历史包 → 签名记录 → 为每台设备生成信封
 → 保存候选（由 CandidateProtector 保护）并回读

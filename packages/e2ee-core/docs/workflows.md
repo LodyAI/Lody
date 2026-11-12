@@ -167,6 +167,10 @@ _Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`,
 Rotates the epoch key (`publish`), or removes a member and rotates in one
 signed record (`publishRemoving`, owner only).
 
+Local candidate envelope lists use their own canonical CBOR budget: at most 4096
+envelopes and 2 MiB encoded bytes. Ledger records and endorsed snapshots keep
+their 32-item array limit.
+
 ```text
 generate key → seal history packet → sign record → envelope per device
 → save candidate (protected by CandidateProtector) and read it back

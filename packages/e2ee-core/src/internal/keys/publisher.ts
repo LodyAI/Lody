@@ -1,7 +1,12 @@
 import { Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as Bytes from '../foundation/bytes';
-import { bytesEqual, decodeSnapshotCbor, encodeCbor, encodeSnapshotCbor } from '../foundation/cbor';
+import {
+  bytesEqual,
+  decodeCandidateEnvelopesCbor,
+  encodeCbor,
+  encodeCandidateEnvelopesCbor,
+} from '../foundation/cbor';
 import { copyEpochKeyBytes, disposeEpochKey } from '../foundation/epoch-key';
 import { keyId } from '../foundation/identifiers';
 import {
@@ -271,7 +276,7 @@ export class EpochPublisher extends Context.Service<
         return undefined;
       });
       const group = (row: EpochCandidateRow): EpochStagedGroup => {
-        const decoded = Result.getOrThrow(decodeSnapshotCbor(row.envelopes));
+        const decoded = Result.getOrThrow(decodeCandidateEnvelopesCbor(row.envelopes));
         if (!Array.isArray(decoded)) throw fail('corrupt');
         const envelopes = decoded.map((item) => {
           if (
@@ -631,7 +636,7 @@ export class EpochPublisher extends Context.Service<
         );
         yield* Effect.fromResult(authenticateEpochStagedGroup(proposed, originals, true));
         const envelopeBytes = yield* Effect.fromResult(
-          encodeSnapshotCbor(
+          encodeCandidateEnvelopesCbor(
             originals.envelopes.map((item) => [fromHex(item.recipient), item.frame])
           )
         );

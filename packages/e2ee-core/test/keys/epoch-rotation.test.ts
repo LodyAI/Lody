@@ -79,7 +79,7 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-function fixture(kind: 0 | 1 | 2 = 0) {
+function fixture(kind: 0 | 1 | 2 = 0, activeDevices = 2) {
   const f = envelopeFixture(kind),
     native = synthetic();
   const dir = mkdtempSync(path.join(tmpdir(), 'e2ee-epoch-rotation-'));
@@ -109,8 +109,8 @@ function fixture(kind: 0 | 1 | 2 = 0) {
     persist();
   };
   let revokedSeed = 30;
-  const requestRotation = () => {
-    const device = memberDevice(++revokedSeed),
+  const admitDevice = (seed: number) => {
+    const device = memberDevice(seed),
       membership = view.inspectState().owner;
     const proof = device.signBytes(
       ok(
@@ -123,15 +123,25 @@ function fixture(kind: 0 | 1 | 2 = 0) {
         })
       )
     );
-    for (const operation of [
-      [4, 0, device.publicKey.toBytes(), device.encryptionPublicKey.toBytes(), proof],
-      [5, device.publicKey.toBytes()],
-    ] as const) {
-      const body = ok(encodeCbor([view.head.toBytes(), f.owner.publicKey.toBytes(), operation]));
-      append(ok(encodeCbor([ok(decodeCbor(body)), f.owner.signBytes(recordSigningBytes(body))])));
-    }
+    const operation = [
+      4,
+      0,
+      device.publicKey.toBytes(),
+      device.encryptionPublicKey.toBytes(),
+      proof,
+    ] as const;
+    const body = ok(encodeCbor([view.head.toBytes(), f.owner.publicKey.toBytes(), operation]));
+    append(ok(encodeCbor([ok(decodeCbor(body)), f.owner.signBytes(recordSigningBytes(body))])));
+    return device;
+  };
+  const requestRotation = () => {
+    const device = admitDevice(++revokedSeed);
+    const operation = [5, device.publicKey.toBytes()] as const;
+    const body = ok(encodeCbor([view.head.toBytes(), f.owner.publicKey.toBytes(), operation]));
+    append(ok(encodeCbor([ok(decodeCbor(body)), f.owner.signBytes(recordSigningBytes(body))])));
   };
   requestRotation();
+  for (let index = 2; index < activeDevices; index++) admitDevice(50 + index);
   const groups = new Map<string, EpochStagedGroup>();
   let stageFailure = false,
     stageRewrite = false;
@@ -877,8 +887,9 @@ describe('durable local epoch rotation', () => {
       )
     );
   });
-  it('persists and actually opens one candidate before CAS; lost ACK keeps original and explicit ACK releases the next epoch', async () => {
-    const f = fixture();
+  it.each([2, 35])('publishes and ACKs for %i devices', async (activeDevices) => {
+    const f = fixture(0, activeDevices);
+    expect(f.view().inspectState().devices.size).toBe(activeDevices);
     f.mode('lost-ack');
     await Effect.runPromise(
       Effect.scoped(
@@ -886,6 +897,10 @@ describe('durable local epoch rotation', () => {
           const { rotation, installed, journal } = yield* f.open();
           const result = yield* rotation.publish();
           expect(result).toMatchObject({ outcome: 'Committed', epoch: 1, binding: 'current' });
+          const group = (yield* f.staging.readGroup(ok(getCommittedEpochStagingKey(f.view(), 1))))!;
+          expect(group.envelopes.map((item) => item.recipient).sort()).toEqual(
+            [...f.view().inspectState().devices.keys()].sort()
+          );
           const first = f.row()!;
           expect(first.record).toEqual(Buffer.from(result.record));
           expect(first.outcome).toBe('Committed');
@@ -922,48 +937,62 @@ describe('durable local epoch rotation', () => {
       )
     );
   });
-  it('failed transport and process reopen use original bytes without a usable signer, then retain originals after ACK', async () => {
-    const f = fixture();
-    f.mode('unavailable');
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const { rotation } = yield* f.open();
-          failureCode(yield* Effect.exit(rotation.publish()), 'unconfirmed');
-        })
-      )
-    );
-    const before = f.row()!;
-    expect(before.outcome).toBeNull();
-    expect(f.signed()).toBe(1);
-    expect(f.records()).toHaveLength(4);
-    const config = path.join(path.dirname(f.files.candidate), 'child.json');
-    writeFileSync(
-      config,
-      JSON.stringify({
-        genesis: Buffer.from(f.context.genesis.toBytes()).toString('hex'),
-        publisher: Buffer.from(f.owner.publicKey.toBytes()).toString('hex'),
-        files: f.files,
-        initial: f.records().map((r) => Buffer.from(r).toString('hex')),
-        candidate: before.record.toString('hex'),
-      }),
-      { mode: 0o600 }
-    );
-    const child = await runNativeChild(
-      process.execPath,
-      ['--import', 'tsx', fileURLToPath(new URL('./rotation-reopen.mts', import.meta.url)), config],
-      { cwd: fileURLToPath(new URL('../..', import.meta.url)) }
-    );
-    expect(child.status, child.stderr).toBe(0);
-    const output = JSON.parse(child.stdout.trim());
-    expect(output).toMatchObject({ outcome: 'Committed', epoch: 1, signed: 0, consumed: 1 });
-    expect(output.record).toBe(before.record.toString('hex'));
-    const after = f.row()!;
-    expect(after.record).toEqual(before.record);
-    expect(after.blob).toEqual(before.blob);
-    expect(after.consumed).toBe(1);
-    expect(JSON.parse(readFileSync(f.files.history, 'utf8'))).toHaveLength(5);
-  });
+  it.each(['transport', 'staging'] as const)(
+    'replays a 35-device candidate after failed %s and process reopen without a usable signer',
+    async (failure) => {
+      const f = fixture(0, 35);
+      const initialLength = f.records().length;
+      expect(f.view().inspectState().devices.size).toBe(35);
+      if (failure === 'transport') f.mode('unavailable');
+      else f.stageFailure(true);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { rotation } = yield* f.open();
+            failureCode(
+              yield* Effect.exit(rotation.publish()),
+              failure === 'transport' ? 'unconfirmed' : 'unavailable'
+            );
+          })
+        )
+      );
+      const before = f.row()!;
+      expect(before.outcome).toBeNull();
+      expect(f.signed()).toBe(1);
+      expect(f.records()).toHaveLength(initialLength);
+      const config = path.join(path.dirname(f.files.candidate), 'child.json');
+      writeFileSync(
+        config,
+        JSON.stringify({
+          genesis: Buffer.from(f.context.genesis.toBytes()).toString('hex'),
+          publisher: Buffer.from(f.owner.publicKey.toBytes()).toString('hex'),
+          files: f.files,
+          initial: f.records().map((r) => Buffer.from(r).toString('hex')),
+          candidate: before.record.toString('hex'),
+        }),
+        { mode: 0o600 }
+      );
+      const child = await runNativeChild(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          fileURLToPath(new URL('./rotation-reopen.mts', import.meta.url)),
+          config,
+        ],
+        { cwd: fileURLToPath(new URL('../..', import.meta.url)) }
+      );
+      expect(child.status, child.stderr).toBe(0);
+      const output = JSON.parse(child.stdout.trim());
+      expect(output).toMatchObject({ outcome: 'Committed', epoch: 1, signed: 0, consumed: 1 });
+      expect(output.record).toBe(before.record.toString('hex'));
+      const after = f.row()!;
+      expect(after.record).toEqual(before.record);
+      expect(after.blob).toEqual(before.blob);
+      expect(after.consumed).toBe(1);
+      expect(JSON.parse(readFileSync(f.files.history, 'utf8'))).toHaveLength(initialLength + 1);
+    }
+  );
   it('candidate SQL IGNORE and rewrite roll back before submitting; original installation failure resumes safely', async () => {
     const f = fixture();
     await Effect.runPromise(
