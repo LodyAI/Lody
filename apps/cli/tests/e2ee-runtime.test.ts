@@ -7697,6 +7697,23 @@ describe('machine execution authorization freshness', () => {
         })
       ));
 
+    it('keeps owner session reads for 24 hours, including after execution expires', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          for (const time of [5 * HOUR, 24 * HOUR - 1]) {
+            at(io, time);
+            expect(
+              yield* gate.authorizeSessionRead('workspace', fixture.sender, 'session')
+            ).toMatchObject({ _tag: 'Authorized' });
+          }
+          at(io, 24 * HOUR);
+          expect(yield* gate.authorizeSessionRead('workspace', fixture.sender, 'session')).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      ));
+
     it('ends a window on any other read failure until a read succeeds', () =>
       withOutage(({ fixture, gate, io }) =>
         Effect.gen(function* () {
@@ -7905,6 +7922,79 @@ describe('machine execution authorization freshness', () => {
           });
         })
       ));
+
+    it('keeps shared execution and session reads within 15 minutes without an extended-window notice', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'execution-outage-shared-'));
+      try {
+        await execute(
+          Effect.gen(function* () {
+            const { fixture, makeGate, io } = yield* executionFixture(directory, 3);
+            const state = fixture.current.inspectState();
+            const member = [...state.devices].find(
+              ([, device]) =>
+                state.members.get(hex(device.membershipId.toBytes()))?.role === 'member'
+            );
+            if (!member) throw new Error('missing member device');
+            const [requester] = member;
+            let shared = true;
+            const notices: boolean[] = [];
+            const gate = yield* makeGate(
+              () => Effect.succeed({ allowed: shared, isCurrent: () => shared }),
+              (active) => notices.push(active),
+              (_device, session) =>
+                Effect.succeed({ allowed: shared && session === 'shared', isCurrent: () => shared })
+            );
+            yield* gate.refreshLedger;
+            io.respond = async () => {
+              throw new CloudE2eeLedgerOutage();
+            };
+            at(io, 60_000);
+            const execution = yield* gate.authorizeExecution('workspace', requester);
+            const read = yield* gate.authorizeSessionRead('workspace', requester, 'shared');
+            expect(execution).toMatchObject({ _tag: 'Authorized', principal: 'member' });
+            expect(read).toMatchObject({ _tag: 'Authorized' });
+            if (execution._tag !== 'Authorized' || read._tag !== 'Authorized')
+              throw new Error('missing shared grants');
+            expect(execution.isCurrent?.()).toBe(true);
+            expect(read.isCurrent?.()).toBe(true);
+            expect(
+              yield* gate.authorizeSessionRead('workspace', requester, 'private')
+            ).toMatchObject({ _tag: 'Denied' });
+            shared = false;
+            expect(execution.isCurrent?.()).toBe(false);
+            expect(read.isCurrent?.()).toBe(false);
+            expect(yield* gate.authorizeExecution('workspace', requester)).toMatchObject({
+              _tag: 'Denied',
+            });
+            expect(
+              yield* gate.authorizeSessionRead('workspace', requester, 'shared')
+            ).toMatchObject({ _tag: 'Denied' });
+            shared = true;
+            at(io, FIFTEEN_MINUTES - 1);
+            expect(yield* gate.authorizeExecution('workspace', requester)).toMatchObject({
+              _tag: 'Authorized',
+            });
+            expect(
+              yield* gate.authorizeSessionRead('workspace', requester, 'shared')
+            ).toMatchObject({ _tag: 'Authorized' });
+            at(io, FIFTEEN_MINUTES);
+            expect(execution.isCurrent?.()).toBe(false);
+            expect(read.isCurrent?.()).toBe(false);
+            expect(yield* gate.authorizeExecution('workspace', requester)).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+            expect(yield* gate.authorizeSessionRead('workspace', requester, 'shared')).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+            expect(notices).toEqual([]);
+          })
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
 
     it('keeps another member at 15 minutes', async () => {
       const directory = await mkdtemp(join(tmpdir(), 'execution-outage-member-'));

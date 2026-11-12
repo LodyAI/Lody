@@ -258,8 +258,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
             : ('member' as const);
         const windowMs =
           principal === 'member'
-            ? 0
-            : access === 'read'
+            ? ttl
+            : access === 'read' || access === 'session-read'
               ? OUTAGE_READ_WINDOW_MS
               : OUTAGE_EXECUTION_WINDOW_MS;
         const current = (at: Stamp) => {
@@ -353,7 +353,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         // Bounded cache; eviction can only require an earlier authenticated reread.
         if (grants.size >= 1024) grants.clear();
         if (relaxed) {
-          if (!noticed) {
+          if (principal === 'owner' && !noticed) {
             noticed = true;
             // The window runs from the last successful latest read, never from now.
             options.onWindowNotice?.(true, {
