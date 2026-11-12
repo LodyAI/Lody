@@ -9064,10 +9064,15 @@ it.each([false, true])(
   }
 );
 
-it.each(['team', 'individual', 'private'] as const)(
-  'uses the same expiring session-read admission for the Roost history method (%s)',
-  async (audience) => {
-    const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+it.each(
+  (['streams', 'iroh'] as const).flatMap((route) =>
+    (['team', 'individual', 'private'] as const).map((audience) => ({ route, audience }))
+  )
+)(
+  'uses the same expiring session-read admission for history ($route, $audience)',
+  async ({ route, audience }) => {
+    const { makeEncryptedFeatureReceiver, makeEncryptedFeatureAuthorization } =
+      await import('../src/lib/e2ee/feature-rpc');
     const { E2eeFeatureInputSchema } = await import('@lody/shared/e2ee-rpc');
     const directory = await mkdtemp(join(tmpdir(), 'backend-neutral-history-'));
     const outcome = Promise.withResolvers<'published' | 'denied'>();
@@ -9152,18 +9157,21 @@ it.each(['team', 'individual', 'private'] as const)(
             journal: () => {
               throw new Error('history must not enter the execution journal');
             },
-            // No general read/execution permission: only exact-session admission may pass.
-            authorize: gate.authorizeOwnedExecution,
-            authorizeRead: gate.authorizeRead,
-            authorizeHistoryRead: (workspace, device, session) =>
-              gate.authorizeSessionRead(workspace, device, session).pipe(
-                Effect.tap((verdict) =>
-                  Effect.sync(() => {
-                    if (verdict._tag === 'Denied') outcome.resolve('denied');
-                  })
-                )
-              ),
-            authoritySignal: () => new AbortController().signal,
+            ...makeEncryptedFeatureAuthorization({
+              authorization: {
+                ...gate,
+                authorizeSessionRead: (workspace, device, session, owner) =>
+                  gate.authorizeSessionRead(workspace, device, session, owner).pipe(
+                    Effect.tap((verdict) =>
+                      Effect.sync(() => {
+                        if (verdict._tag === 'Denied') outcome.resolve('denied');
+                      })
+                    )
+                  ),
+              },
+              executionAuthoritySignal: () => new AbortController().signal,
+              resolveHistoryTarget: async () => ({ rootSessionId: 'roost-root' }),
+            }),
             isOpen: () => true,
             handle: async (request, context) => {
               if (request.method !== 'session/history-read' || !context.authority?.isCurrent())
@@ -9172,21 +9180,40 @@ it.each(['team', 'individual', 'private'] as const)(
               bodies.push(result);
               return { ok: true, result };
             },
-            client: {
-              ensureJsonStream: async () => {},
-              appendJson: async () => {
-                outcome.resolve('published');
-                return '1';
-              },
-              readJsonLive: async () => {
-                throw new Error('unused');
-              },
-            },
+            client:
+              route === 'streams'
+                ? {
+                    ensureJsonStream: async () => {},
+                    appendJson: async () => {
+                      outcome.resolve('published');
+                      return '1';
+                    },
+                    readJsonLive: async () => {
+                      throw new Error('unused');
+                    },
+                  }
+                : undefined,
           });
-          yield* feature({ id: input.requestId, frame: 'synthetic' });
+          const delivered: Uint8Array[] = [];
+          yield* feature(
+            { id: input.requestId, frame: 'synthetic' },
+            route === 'iroh'
+              ? {
+                  deliver: async (_id, frame) => {
+                    delivered.push(frame);
+                    outcome.resolve('published');
+                  },
+                  end: async () => {
+                    outcome.resolve('denied');
+                  },
+                }
+              : undefined
+          );
           expect(yield* Effect.promise(() => outcome.promise)).toBe(
             audience === 'private' ? 'denied' : 'published'
           );
+          if (route === 'iroh')
+            expect(delivered).toEqual(audience === 'private' ? [] : [new Uint8Array(143).fill(1)]);
         })
       );
       if (audience === 'private') expect(bodies).toEqual([]);

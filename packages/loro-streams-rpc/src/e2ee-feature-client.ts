@@ -58,7 +58,7 @@ export function makeE2eeFeatureRpcClient(options: {
   requesterDevice: string;
   originals: E2eeRpcStore['Service'];
   authorizeRequest: (input: E2eeFeatureInput) => Effect.Effect<void, unknown>;
-  targetSigner: (machineId: string) => Effect.Effect<string, unknown>;
+  targetSigner: (machineId: string, sharedTarget: boolean) => Effect.Effect<string, unknown>;
   binding: (resource: string) => Effect.Effect<Binding, unknown, Scope.Scope>;
 }) {
   options = Object.freeze({
@@ -264,7 +264,8 @@ export function makeE2eeFeatureRpcClient(options: {
     if (args.request.workspaceId !== options.workspaceId)
       return yield* Effect.fail(new Error('e2ee_feature_scope'));
     const machineId = args.request.machineId;
-    const signer = yield* options.targetSigner(machineId);
+    const sharedTarget = args.request.method === 'session/history-read';
+    const signer = yield* options.targetSigner(machineId, sharedTarget);
     let saved = yield* options.originals.read('sent', key(args));
     if (!saved) {
       yield* Effect.uninterruptible(
@@ -438,7 +439,7 @@ export function makeE2eeFeatureRpcClient(options: {
       Effect.uninterruptible(
         Effect.scoped(
           Effect.gen(function* () {
-            if ((yield* options.targetSigner(machineId)) !== options.requesterDevice)
+            if ((yield* options.targetSigner(machineId, false)) !== options.requesterDevice)
               return yield* Effect.fail(new Error('e2ee_rpc_target_changed'));
             const responseId = resultKey(request);
             const saved = yield* completeResponse(
@@ -524,7 +525,8 @@ export function makeE2eeFeatureRpcClient(options: {
     if (
       !saved ||
       saved.target !== args.request.machineId ||
-      saved.signer !== (yield* options.targetSigner(saved.target))
+      saved.signer !==
+        (yield* options.targetSigner(saved.target, args.request.method === 'session/history-read'))
     )
       return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
     const original = yield* openFrames(saved.target, unpackFrames(saved.frame));

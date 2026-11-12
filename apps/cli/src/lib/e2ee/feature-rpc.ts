@@ -10,6 +10,56 @@ import type {
 import type { AuthorizeEncryptedExecution } from './agent-execution';
 import { RealtimeJournal, type RealtimeStartPermit } from './realtime-journal';
 import type { EncryptedReplySink } from './realtime-rpc';
+import type { makeCliE2eeExecutionAuthorization } from './execution-authorization';
+
+/** Shared authorization wiring for Streams and sink-carrying Iroh receivers.
+ * Resolve the actual session target on every check, including before publication. */
+export function makeEncryptedFeatureAuthorization(options: {
+  authorization: Pick<
+    Effect.Success<ReturnType<typeof makeCliE2eeExecutionAuthorization>>,
+    | 'authorizeOwnedExecution'
+    | 'authorizeRead'
+    | 'authorizeExecution'
+    | 'authorizeSessionRead'
+    | 'authoritySignal'
+  >;
+  executionAuthoritySignal: () => AbortSignal;
+  resolveHistoryTarget?: (
+    sessionId: string
+  ) => Promise<{ rootSessionId: string; sessionOwnerUserId?: string; localProjectId?: string }>;
+}) {
+  const { authorization, resolveHistoryTarget } = options;
+  return {
+    authorize: authorization.authorizeOwnedExecution,
+    authorizeRead: authorization.authorizeRead,
+    authorizeHistoryRead: Effect.fnUntraced(function* (
+      workspaceId: string,
+      requester: string,
+      sessionId: string
+    ) {
+      if (!resolveHistoryTarget)
+        return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+      const target = yield* Effect.tryPromise({
+        try: () => resolveHistoryTarget(sessionId),
+        catch: (cause) => cause,
+      });
+      const editing = yield* authorization.authorizeExecution(
+        workspaceId,
+        requester,
+        target.localProjectId
+      );
+      if (editing._tag === 'Authorized') return editing;
+      return yield* authorization.authorizeSessionRead(
+        workspaceId,
+        requester,
+        target.rootSessionId,
+        target.sessionOwnerUserId
+      );
+    }),
+    authoritySignal: () =>
+      AbortSignal.any([options.executionAuthoritySignal(), authorization.authoritySignal]),
+  };
+}
 
 /** A reply sink that owns its stream: `end` finishes it once no reply will follow. */
 export type EncryptedFeatureReplySink = EncryptedReplySink & { end(): Promise<void> };

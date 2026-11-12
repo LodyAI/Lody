@@ -9,7 +9,11 @@ import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2
 import { openSqliteMachineSharingStore } from '@lody/e2ee-machine-sharing/sqlite';
 import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
 import { getScheduleIdFromRoomId, type ScheduleAuthorizationRequest } from '@lody/shared';
-import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
+import {
+  makeEncryptedFeatureReceiver,
+  makeEncryptedFeatureAuthorization,
+  type EncryptedFeatureHandler,
+} from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
 import { runMachineIrohListener } from './iroh-listener';
 import { loadIrohNative, proxyUrlFromEnv } from '@lody/iroh-native';
@@ -1616,6 +1620,11 @@ async function openWorkspaceOwned(
       run(
         Effect.gen(function* () {
           if (rpcFiber || closed) return;
+          const featureAuthorization = makeEncryptedFeatureAuthorization({
+            authorization: opened.executionAuthorization,
+            executionAuthoritySignal: () => opened.runtime.executionAuthoritySignal(),
+            resolveHistoryTarget,
+          });
           let attempts = 0;
           rpcFiber = yield* Effect.forkIn(
             Effect.scoped(
@@ -1661,34 +1670,7 @@ async function openWorkspaceOwned(
                       machineId,
                       native: dispatchNative,
                       journal: rpcJournal,
-                      authorize: opened.executionAuthorization.authorizeOwnedExecution,
-                      authorizeRead: opened.executionAuthorization.authorizeRead,
-                      authorizeHistoryRead: (workspaceId, requester, sessionId) =>
-                        Effect.gen(function* () {
-                          if (!resolveHistoryTarget)
-                            return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
-                          const target = yield* Effect.tryPromise({
-                            try: () => resolveHistoryTarget(sessionId),
-                            catch: (cause) => cause,
-                          });
-                          const editing = yield* opened.executionAuthorization.authorizeExecution(
-                            workspaceId,
-                            requester,
-                            target.localProjectId
-                          );
-                          if (editing._tag === 'Authorized') return editing;
-                          return yield* opened.executionAuthorization.authorizeSessionRead(
-                            workspaceId,
-                            requester,
-                            target.rootSessionId,
-                            target.sessionOwnerUserId
-                          );
-                        }),
-                      authoritySignal: () =>
-                        AbortSignal.any([
-                          opened.runtime.executionAuthoritySignal(),
-                          opened.executionAuthorization.authoritySignal,
-                        ]),
+                      ...featureAuthorization,
                       isOpen: () => !closed,
                       handle: handleFeature,
                       client,
@@ -1760,13 +1742,7 @@ async function openWorkspaceOwned(
                       machineId,
                       native: dispatchNative,
                       journal: rpcJournal,
-                      authorize: opened.executionAuthorization.authorizeOwnedExecution,
-                      authorizeRead: opened.executionAuthorization.authorizeRead,
-                      authoritySignal: () =>
-                        AbortSignal.any([
-                          opened.runtime.executionAuthoritySignal(),
-                          opened.executionAuthorization.authoritySignal,
-                        ]),
+                      ...featureAuthorization,
                       isOpen: () => !closed,
                       handle: handleFeature,
                     })

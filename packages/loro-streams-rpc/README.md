@@ -93,6 +93,11 @@ codec with read authority and no execution journal. See the
 room boundaries and acceptance limits are recorded in the
 [availability decision](../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md).
 
+`session/history-read` also permits requests to another member's machine, including
+from Guests. Preparation, retained-request reuse and response verification keep the
+same target signer. Streams and Iroh receivers share the actual-session authorization
+check; other feature methods retain the same-member machine restriction.
+
 The optional personal-device host in [`@lody/e2ee-client`](../e2ee-client/README.md)
 uses `ClientRpcOriginalStore`/IndexedDB for the same encrypted RPC implementation.
 A sent-original race returns the first winner; changed incoming or response bytes

@@ -17,6 +17,8 @@ import { Result } from 'effect';
 import { verifyExecutionIntent } from '@lody/e2ee-core/protocol';
 import { decodeE2eeIntentRecord, E2EE_INTENT_KIND, turnExecutionDigest } from '@lody/shared';
 import { copyEpochKeyBytes } from '../../e2ee-core/src/internal/foundation/epoch-key';
+import { E2eeFeatureInputSchema } from '@lody/shared/e2ee-rpc';
+import { SessionIdSchema } from '@lody/shared';
 
 const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
 const fixture = () => {
@@ -661,6 +663,67 @@ describe('trusted-host encrypted dispatch originals', () => {
     ).rejects.toThrow();
   });
 });
+
+it.each(['member', 'guest'] as const)(
+  'reads shared history across machine memberships with retained originals (%s)',
+  async (role) => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    if (role === 'guest') f.ledger.append([3, new Uint8Array(16).fill(13), 3]);
+    const sender = f.native('teammate');
+    const input = E2eeFeatureInputSchema.parse({
+      requestId: 'ac'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'session/history-read' as const,
+        params: { sessionId: f.input.sessionId, query: { kind: 'count' as const } },
+      },
+    });
+    const original = await Effect.runPromise(sender.prepareFeature(input));
+    const reopened = f.native('teammate');
+    expect(await Effect.runPromise(reopened.prepareFeature(input))).toEqual(original);
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    if (!opened) throw new Error('missing shared history request');
+    expect(opened.input).toEqual(input);
+    const result = {
+      ok: true as const,
+      result: {
+        type: 'session/history-read_response' as const,
+        sessionId: SessionIdSchema.parse(f.input.sessionId),
+        success: true,
+        result: 7,
+        historyRevision: 1,
+        historyCount: 7,
+      },
+    };
+    const frames = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, result)
+    );
+    expect(
+      await Effect.runPromise(
+        reopened.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+      )
+    ).toEqual(result);
+    for (const request of [
+      { method: 'machine/status' as const, params: { includeDisk: true } },
+      { method: 'machine/ping' as const, params: { requestId: 'ping' } },
+    ] as const) {
+      await expect(
+        Effect.runPromise(
+          sender.prepareFeature({
+            requestId: 'ad'.repeat(16),
+            request: {
+              workspaceId: f.workspaceId,
+              machineId: f.machineId,
+              ...request,
+            },
+          })
+        )
+      ).rejects.toThrow('e2ee_machine_not_owned');
+    }
+  }
+);
 
 it('protects feature requests and chunked results with workspace signatures and exact retained originals', async () => {
   const f = fixture();
