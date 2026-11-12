@@ -188,6 +188,9 @@
     <string name="chat_free_turn_limit_reached">This Free session has reached 30 user turns. The message was not sent; your draft is saved.</string>
     <string name="create_free_session_limit_reached">This Free workspace has reached 200 sessions. The new session was not created.</string>
     <string name="chat_workspace_payment_required">Finish setting up this workspace before creating or sending sessions.</string>
+    <string name="chat_free_turn_limit_title">Free session limit</string>
+    <string name="chat_free_turn_limit_body">This Free session has reached %d messages, so the message field is closed.</string>
+    <string name="chat_composer_quota_closed">Message limit reached</string>
     <string name="create_search_branches">Search branches</string>
     <string name="create_more_branches">More branches…</string>
     <string name="create_mode_auto">Auto</string>

@@ -48,6 +48,10 @@ open class WebViewRuntime internal constructor(
         }
         // Only the cloud runtime reads the plan; without it the free-turn notice stays hidden.
         RuntimeCommand.WorkspacePlan -> RuntimeResult.Plan(null)
+        is RuntimeCommand.TurnQuota -> {
+            val value = call("turnQuota", JSONArray().put(command.sessionId).put(command.billing ?: JSONObject.NULL), CommandDeadline.QUERY) as JSONObject
+            RuntimeResult.Sent(value.optString("state", "allowed"), value.optString("reason").ifBlank { null })
+        }
         is RuntimeCommand.SetTabClosed -> {
             call("setTabClosed", JSONArray().put(command.id).put(command.closed), CommandDeadline.WRITE)
             RuntimeResult.Accepted

@@ -68,6 +68,13 @@ export function createCommands(runtime, sendTurn, identity) {
    }
    return runtime.mentionCatalog({workspaceId:scope.workspaceId,userId:scope.userId,category,...fields});
   },
+  // iOS `turnQuota`: whether the free-plan turn quota still admits a turn, checked before native
+  // uploads attachments that a refused send would waste. A read; the send checks again.
+  async turnQuota(sessionId,entitlement) {
+   if(typeof sessionId!=='string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId))throw Error('invalid_request');
+   const result=await runtime.checkTurnQuota({sessionId,billingEntitlement:billingEntitlement(entitlement)});
+   return {state:result?.state==='not_sent'?'not_sent':'allowed',...(result?.state==='not_sent'&&typeof result.reason==='string'?{reason:result.reason}:{})};
+  },
   // A text turn in an existing conversation. The stable turn id lets upstream reject a
   // duplicate; nothing here retries, and an uncertain write reports `unknown`.
   async sendText(input,signal) {

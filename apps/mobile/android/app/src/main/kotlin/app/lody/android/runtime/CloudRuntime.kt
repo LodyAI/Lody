@@ -39,6 +39,8 @@ sealed interface RuntimeCommand {
     data class SendText(val request: SendTextRequest, val billing: org.json.JSONObject? = null) : RuntimeCommand
     /** The workspace's plan tier (`free` / `plus` / `enterprise`) for the free-turn notice; null when unknown. Read only. */
     data object WorkspacePlan : RuntimeCommand
+    /** The free-plan turn quota alone (upstream `checkTurnQuota`), before attachments upload; answers [RuntimeResult.Sent]. Read only. */
+    data class TurnQuota(val sessionId: String, val billing: org.json.JSONObject? = null) : RuntimeCommand
     data class WatchSession(val id: String) : RuntimeCommand
     data class LoadOlderSession(val id: String) : RuntimeCommand
     data class RetryPendingInput(val sessionId: String, val inputId: String) : RuntimeCommand

@@ -74,6 +74,8 @@ export function contractBridge(runtime, emit) {
   createSession:args=>invoke('createSession',{...args,billingEntitlement:args.billingEntitlement??null}),
   editSession:args=>invoke('editSession',{...args,billingEntitlement:args.billingEntitlement??null}),
   forkSession:args=>invoke('forkSession',args),
+  // The free-plan turn quota alone (no write), asked before native uploads a turn's attachments.
+  checkTurnQuota:args=>invoke('checkTurnQuota',{sessionId:args.sessionId,billingEntitlement:args.billingEntitlement??null}),
   setTabClosed:args=>invoke('setTabClosed',args),
   archiveSession:args=>invoke('archiveSession',args),
   createTab:args=>invoke('createTab',args),

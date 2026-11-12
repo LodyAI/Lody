@@ -437,6 +437,17 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             // The Guide preference steers the running reply when the agent can; otherwise it queues.
             val guide = busy && capability?.steer == true && AppPreferences.queuedMessageBehavior(appContext) == AppPreferences.GUIDE
             val queue = busy && !guide
+            // iOS `turnQuota`: a refused turn must not upload its attachments first. A failed check
+            // admits it; the send checks the quota again.
+            val early = if (files.isEmpty()) null else try { repository.turnQuota(scope, id) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            quotaFailure(early)?.let { copy ->
+                outgoing = outgoing.map { if (it.turnId == turnId) it.copy(delivery = Delivery.Failed) else it }
+                if (prompt.isEmpty() && attachments.isEmpty()) { prompt = text; field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)); attachments = files }
+                snackbar.showSnackbar(appContext.getString(copy))
+                return@launch
+            }
             val blocks = try { repository.upload(scope, id, files) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
@@ -731,6 +742,19 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 ?.let { DevicePlatform.ANDROID to it }
     }
     if (choosingDevice) DevicePreviewChooser(onPick = { choosingDevice = false; openDevice(it) }, onDismiss = { choosingDevice = false })
+    // iOS `announceQuota`: once per visit, a Free session found already at its limit explains why
+    // the composer is closed; reaching the limit while here is told by the notice alone.
+    var quotaEntry by remember(id, scope) { mutableStateOf<Boolean?>(null) }
+    var quotaAlert by remember(id, scope) { mutableStateOf(false) }
+    LaunchedEffect(freeQuota, quotaLocked) {
+        if (quotaEntry == null && freeQuota) { quotaEntry = quotaLocked; quotaAlert = quotaLocked }
+    }
+    if (quotaAlert) AlertDialog(
+        onDismissRequest = { quotaAlert = false },
+        title = { Text(stringResource(R.string.chat_free_turn_limit_title)) },
+        text = { Text(stringResource(R.string.chat_free_turn_limit_body, FREE_SESSION_TURN_LIMIT)) },
+        confirmButton = { TextButton(onClick = { quotaAlert = false }) { Text(stringResource(R.string.preview_ok)) } },
+    )
     if (simulatorUpgrade) AlertDialog(
         onDismissRequest = { simulatorUpgrade = false },
         text = { Text(stringResource(R.string.preview_ios_upgrade, context.machineName)) },
@@ -864,6 +888,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 onFocusChange = { composerFocused = it },
                 referencePresentation = mentions.presentation(LodyTheme.colors.accentOnSubtle, LodyTheme.colors.accentSubtle),
                 enabled = canSend,
+                quotaLocked = quotaLocked,
                 agentCliType = session?.cliType,
                 agentType = session?.agentType,
                 roleEmoji = activeRole?.role?.emoji,
@@ -1196,12 +1221,15 @@ internal fun ChatComposer(
     onSend: () -> Unit,
     onStop: () -> Unit,
     usage: app.lody.android.runtime.SessionUsage? = null,
+    /** The Free session reached its turn limit, so the closed composer says so instead of "connecting". */
+    quotaLocked: Boolean = false,
 ) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
     // Web: "Work with <assistant>" — the Agent Role when one is, else the conversation's agent.
     val workWith = roleName ?: agentName
     val placeholder = when {
+        quotaLocked -> stringResource(R.string.chat_composer_quota_closed)
         !enabled -> stringResource(R.string.chat_composer_unavailable)
         workWith.isNullOrEmpty() -> stringResource(R.string.chat_composer_placeholder)
         else -> stringResource(R.string.create_composer_placeholder_agent, workWith)
