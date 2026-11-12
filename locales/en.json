@@ -6647,5 +6647,16 @@
   "sidebar.localProjects.startCoordinator": "Start coordinator conversation",
   "chat.coordinator.heading": "Start a coordinator conversation",
   "chat.coordinator.unsupportedAgent": "This agent cannot run a coordinator conversation: it must accept a system prompt, and its machine must run a recent Lody.",
-  "chat.coordinator.noAgent": "No agent here can run a coordinator conversation. It needs an agent that accepts a system prompt; an agent reports this after it has started a conversation or been refreshed in Settings."
+  "chat.coordinator.noAgent": "No agent here can run a coordinator conversation. It needs an agent that accepts a system prompt; an agent reports this after it has started a conversation or been refreshed in Settings.",
+  "projectMode.board.title": "All conversations",
+  "projectMode.board.needsYou": "Needs you",
+  "projectMode.board.working": "In progress",
+  "projectMode.board.unread": "Unread",
+  "projectMode.board.done": "Done",
+  "projectMode.board.empty": "Nothing here",
+  "projectMode.board.createdManually": "Created manually",
+  "projectMode.sidebar.projects": "Projects",
+  "projectMode.sidebar.conversations": "Conversations",
+  "projectMode.sidebar.allProjects": "All projects",
+  "projectMode.sidebar.noProjects": "No projects yet. Add a folder or link a repository."
 }

@@ -35,6 +35,7 @@ import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   findFreshSessionPresenceState,
+  isCoordinatorSession,
   machineSupportsLocalProjectRemovalProtocol,
   resolveProjectGitHubRepo,
   resolveSessionHistoryBackendKind,
@@ -92,6 +93,17 @@ import {
   setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
+import {
+  coordinatorProjectKeyId,
+  findProjectCoordinatorSession,
+  getSessionCoordinatorProjectKey,
+  type CoordinatorProjectKey,
+} from '@/components/project-mode/project-board-model';
+import {
+  SidebarProjectList,
+  SidebarProjectViewSwitch,
+  type SidebarProjectListItem,
+} from '@/components/project-mode/sidebar-project-list';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
@@ -118,6 +130,7 @@ import {
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
+  sidebarProjectViewAtom,
   sidebarShowBranchNamesAtom,
   sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
@@ -2983,6 +2996,127 @@ export function LoroAppSidebar({
       }),
     [catalogLocalProjectSections, projectGroupSessions, projectGroupStates, workspaceProjects]
   );
+  // ── Project mode prototype (Developer mode) ──
+  const [sidebarProjectView, setSidebarProjectView] = useAtom(sidebarProjectViewAtom);
+  const showProjectList = developerModeEnabled && sidebarProjectView === 'projects';
+  const projectModeProjects = useMemo(() => {
+    if (!showProjectList) return [];
+    const projects = new Map<
+      string,
+      { key: CoordinatorProjectKey; item: SidebarProjectListItem }
+    >();
+    for (const section of catalogLocalProjectSections) {
+      if (!section.machineId) continue;
+      for (const project of section.projects) {
+        const key: CoordinatorProjectKey = {
+          kind: 'local',
+          machineId: section.machineId,
+          localProjectId: project.id,
+        };
+        projects.set(coordinatorProjectKeyId(key), {
+          key,
+          item: {
+            id: coordinatorProjectKeyId(key),
+            kind: 'local',
+            name: project.name,
+            detail: section.machineDisplayName,
+            activity: null,
+          },
+        });
+      }
+    }
+    const sessionsByProject = new Map<string, SessionMeta[]>();
+    for (const session of sessions) {
+      if (session.parentSessionId) continue;
+      const key = getSessionCoordinatorProjectKey(session);
+      if (!key) continue;
+      const id = coordinatorProjectKeyId(key);
+      if (key.kind === 'github' && !projects.has(id)) {
+        projects.set(id, {
+          key,
+          item: { id, kind: 'github', name: key.repoFullName, detail: null, activity: null },
+        });
+      }
+      const list = sessionsByProject.get(id);
+      if (list) list.push(session);
+      else sessionsByProject.set(id, [session]);
+    }
+    return Array.from(projects.values()).map(({ key, item }) => {
+      const projectSessions = sessionsByProject.get(item.id) ?? [];
+      return {
+        key,
+        item: {
+          ...item,
+          activity: summarizeLocalSessionsActivity(
+            projectSessions,
+            childSessionsByParent,
+            liveSessionStatuses,
+            sendStates
+          ),
+        },
+      };
+    });
+  }, [
+    catalogLocalProjectSections,
+    childSessionsByParent,
+    liveSessionStatuses,
+    sendStates,
+    sessions,
+    showProjectList,
+  ]);
+  const projectModeItems = useMemo(
+    () => projectModeProjects.map((project) => project.item),
+    [projectModeProjects]
+  );
+  const selectedProjectModeId = useMemo(() => {
+    if (!showProjectList) return null;
+    const selected = selectedSessionId
+      ? allActiveSessions.find((session) => session.id === selectedSessionId)
+      : undefined;
+    if (selected && isCoordinatorSession(selected)) {
+      const key = getSessionCoordinatorProjectKey(selected);
+      return key ? coordinatorProjectKeyId(key) : null;
+    }
+    const search = location.search as Record<string, unknown>;
+    if (search.coordinator === true || search.coordinator === 'true') {
+      if (search.context === 'local' && typeof search.machine === 'string')
+        return `local:${search.machine}:${String(search.project)}`;
+      if (search.context === 'github' && typeof search.repo === 'string')
+        return `github:${search.repo}`;
+    }
+    return null;
+  }, [allActiveSessions, location.search, selectedSessionId, showProjectList]);
+  const handleSelectProjectModeProject = useCallback(
+    (id: string) => {
+      if (!workspaceSlug) return;
+      const project = projectModeProjects.find((entry) => entry.item.id === id);
+      if (!project) return;
+      closeMobileDrawer();
+      const coordinator = findProjectCoordinatorSession(allActiveSessions, project.key, userId);
+      if (coordinator) {
+        void router.navigate({
+          to: '/$workspaceName/sessions/$sessionId',
+          params: { workspaceName: workspaceSlug, sessionId: coordinator.id },
+        });
+        return;
+      }
+      void router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: workspaceSlug },
+        search:
+          project.key.kind === 'local'
+            ? {
+                context: 'local' as const,
+                machine: project.key.machineId,
+                project: project.key.localProjectId,
+                coordinator: true,
+              }
+            : { context: 'github' as const, repo: project.key.repoFullName, coordinator: true },
+      });
+    },
+    [allActiveSessions, closeMobileDrawer, projectModeProjects, router, userId, workspaceSlug]
+  );
+
   // Filter after pinned trees and opened-by placement have assigned each row
   // its final group. Keep the catalog above for Updated/Pinned and saved order.
   const localProjectSections = useMemo(
@@ -3993,6 +4127,20 @@ export function LoroAppSidebar({
         // header inset so the sidebar's first row aligns with the top bar.
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
+        navAccessory={
+          developerModeEnabled ? (
+            <SidebarProjectViewSwitch value={sidebarProjectView} onChange={setSidebarProjectView} />
+          ) : undefined
+        }
+        listOverride={
+          showProjectList ? (
+            <SidebarProjectList
+              items={projectModeItems}
+              selectedId={selectedProjectModeId}
+              onSelect={handleSelectProjectModeProject}
+            />
+          ) : undefined
+        }
         topContent={
           <>
             <E2eeDeviceRequestsButton className="mb-2 w-full justify-start" />
