@@ -145,6 +145,9 @@ describe('sidebar navigation model', () => {
       { ...updatedItem('unread', at(4)), hasUnreadMessages: true },
       { ...updatedItem('open-pr', at(5)), prStatus: 'open', prCiState: 'p' },
       { ...updatedItem('merged', at(22)), prStatus: 'merged' },
+      { ...updatedItem('failed', at(6)), hasFailedTurn: true },
+      // Working again after a failure: the agent may be fixing it.
+      { ...updatedItem('retrying', at(21)), hasFailedTurn: true, isWorking: true },
     ];
 
     const items = buildSidebarNavigationItems({
@@ -154,17 +157,19 @@ describe('sidebar navigation model', () => {
     });
     const ids = sessionIds(items);
     // Needs you (newest first), just finished, open pull requests, running, then idle.
-    expect(ids.slice(0, 6)).toEqual([
+    expect(ids.slice(0, 8)).toEqual([
+      'failed',
       'draft',
       'ci-failed',
       'waiting',
       'unread',
       'open-pr',
       'running',
+      'retrying',
     ]);
     // A merged pull request is idle; idle alone folds to its first 20 rows.
-    expect(ids.slice(6)).toHaveLength(20);
-    expect(ids[6]).toBe('merged');
+    expect(ids.slice(8)).toHaveLength(20);
+    expect(ids[8]).toBe('merged');
     expect(items.find((item) => item.kind === 'session' && item.sessionId === 'unread')).toEqual({
       kind: 'session',
       sessionId: 'unread',
@@ -181,8 +186,8 @@ describe('sidebar navigation model', () => {
       },
     });
     const foldedIds = sessionIds(folded);
-    expect(foldedIds.slice(0, 3)).toEqual(['unread', 'open-pr', 'running']);
-    expect(foldedIds).toHaveLength(3 + 22);
+    expect(foldedIds.slice(0, 4)).toEqual(['unread', 'open-pr', 'running', 'retrying']);
+    expect(foldedIds).toHaveLength(4 + 22);
   });
 
   it('matches collapsed sections and each list preview limit', () => {

@@ -26,6 +26,8 @@ export type SidebarStatusGroupInput = {
   isWorking?: boolean;
   isWaitingPermission?: boolean;
   hasUnreadMessages?: boolean;
+  /** The latest turn ended in failure (`hasFailedLatestTurn`). */
+  hasFailedTurn?: boolean;
   prStatus?: PrStatus | null;
   prCiState?: SessionPullRequestCiState | null;
   prReadiness?: SessionPullRequestReadiness | null;
@@ -61,10 +63,13 @@ function toHomeNowPr(input: SidebarStatusGroupInput): HomeNowPr | null {
 }
 
 /**
- * Every row lands in exactly one group. Rows the new-chat page leaves out (quiet for days, or
- * whose pull request is merged or closed) are idle here: the sidebar lists every session.
+ * Every row lands in exactly one group. A failed latest turn needs the person unless the agent
+ * is already working again, as on mobile Home. Rows the new-chat page leaves out (quiet for
+ * days, or whose pull request is merged or closed) are idle here: the sidebar lists every
+ * session.
  */
 export function sidebarStatusGroup(input: SidebarStatusGroupInput): SidebarStatusGroup {
+  if (input.hasFailedTurn && !input.isWorking) return 'attention';
   const reason = homeNowReason(
     {
       id: '',

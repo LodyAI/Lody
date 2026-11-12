@@ -1736,6 +1736,7 @@ describe('SessionDispatchWatcher', () => {
     );
     expect(upsertDocMeta).toHaveBeenCalledWith(roomId, {
       lastHandledUserMsgId: 'turn-denied',
+      lastFailedUserMsgId: 'turn-denied',
       processingUserMsgId: undefined,
     });
     // A definitive denial must be surfaced to the user, not silently marked

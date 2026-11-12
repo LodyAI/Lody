@@ -146,6 +146,8 @@ export type SidebarUpdatedItem = {
   hasUnreadMessages?: boolean;
   isOffline?: boolean;
   isWaitingPermission?: boolean;
+  /** The latest turn ended in failure; the Status view files the row under Needs you. */
+  hasFailedTurn?: boolean;
   prStatus?: PrStatus | null;
   prCiState?: SessionPullRequestCiState | null;
   prReadiness?: SessionPullRequestReadiness | null;

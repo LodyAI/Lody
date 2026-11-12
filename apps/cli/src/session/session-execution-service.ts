@@ -3962,7 +3962,7 @@ export class SessionExecutionService {
     // another turn's handled/processing pointers with this interrupted turn.
     await this.upsertSessionMeta(sessionId, {
       ...(!meta?.lastHandledUserMsgId || meta.lastHandledUserMsgId === userTurnId
-        ? { lastHandledUserMsgId: userTurnId }
+        ? { lastHandledUserMsgId: userTurnId, lastFailedUserMsgId: userTurnId }
         : {}),
       ...(meta?.processingUserMsgId === userTurnId ? { processingUserMsgId: undefined } : {}),
     });
@@ -6633,6 +6633,7 @@ export class SessionExecutionService {
     await this.setTerminalUserTurnStatus(sessionId, sessionDoc, userTurnId, 'failed');
     await this.upsertSessionMeta(sessionId, {
       lastHandledUserMsgId: userTurnId,
+      lastFailedUserMsgId: userTurnId,
       processingUserMsgId: undefined,
     });
   }

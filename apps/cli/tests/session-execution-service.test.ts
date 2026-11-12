@@ -4109,6 +4109,7 @@ describe('SessionExecutionService', () => {
       expect.any(String),
       expect.objectContaining({
         lastHandledUserMsgId: 'turn-user-1',
+        lastFailedUserMsgId: 'turn-user-1',
         processingUserMsgId: undefined,
       })
     );
@@ -8613,6 +8614,7 @@ describe('SessionExecutionService', () => {
     expect(sessionManager.createSession).toHaveBeenCalledTimes(expectedCreateSessionCalls);
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-restore-fail', {
       lastHandledUserMsgId: 'turn-restore-fail',
+      lastFailedUserMsgId: 'turn-restore-fail',
       processingUserMsgId: undefined,
     });
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
@@ -8707,6 +8709,7 @@ describe('SessionExecutionService', () => {
       );
       expect(upsertDocMeta).toHaveBeenCalledWith('session-session-pending-init-fail', {
         lastHandledUserMsgId: 'turn-pending-init-fail',
+        lastFailedUserMsgId: 'turn-pending-init-fail',
         processingUserMsgId: undefined,
       });
       expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
@@ -9013,6 +9016,7 @@ describe('SessionExecutionService', () => {
     );
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-pre-prompt-fail', {
       lastHandledUserMsgId: 'turn-pre-prompt-fail',
+      lastFailedUserMsgId: 'turn-pre-prompt-fail',
       processingUserMsgId: undefined,
     });
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
