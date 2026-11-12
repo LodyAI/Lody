@@ -69,7 +69,15 @@ describe('portable account pairing requester', () => {
     const [workspace] = await Effect.runPromise(requester()());
     await Effect.runPromise(workspace!.identity());
     expect(calls).toEqual([
-      { kind: 'prepare', value: { genesisRecordHex: hex(f.genesisRecord), membershipId } },
+      {
+        kind: 'prepare',
+        value: {
+          genesisRecordHex: hex(f.genesisRecord),
+          membershipId,
+          // The same verified history, so the host can classify a revoked identity.
+          history: [expect.objectContaining({ startIndex: 0, nextCursor: null })],
+        },
+      },
     ]);
     // Another account finds no membership and prepares nothing.
     const [other] = await Effect.runPromise(requester('acc2')());

@@ -33,6 +33,7 @@ import {
   LedgerSync,
   LedgerViewSource,
   LedgerViewSourceError,
+  type ClientInstallation,
 } from '@lody/e2ee-core/services';
 import {
   PersonalHostPlatform,
@@ -57,7 +58,8 @@ import {
   type PersonalPairingOffer,
 } from './pairing';
 import { openPersonalSession } from './session';
-import { fail } from './errors';
+import { fail, verifiedAccessLoss } from './errors';
+import { boundedBy } from './deadline';
 import { toHex, fromHex } from './bytes';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { qualifyPersonalLedgerOrigin } from './ledger';
@@ -71,8 +73,14 @@ export const ACCOUNT_PAIRING_ENDORSER = '00'.repeat(32);
  * request and reopen finds the same identity and journal. */
 export function accountPairingOffer(
   scope: { readonly workspaceId: string; readonly genesis: Bytes.GenesisHash },
-  pin: { readonly genesisRecordHex: string; readonly membershipId: string }
+  pin: { readonly genesisRecordHex: string; readonly membershipId: string },
+  /** The lowercase signing key of the revoked identity this request replaces. Each
+   * replacement gets its own fixed session, so the revoked key is never reused. */
+  replacing?: string
 ): PersonalPairingOffer {
+  const session = replacing
+    ? `lody-e2ee/account-pairing-session/v1\0${scope.workspaceId}\0replaces\0${replacing}`
+    : `lody-e2ee/account-pairing-session/v1\0${scope.workspaceId}`;
   return {
     version: 1,
     workspaceId: scope.workspaceId,
@@ -80,9 +88,7 @@ export function accountPairingOffer(
     genesisRecordHex: pin.genesisRecordHex,
     endorser: ACCOUNT_PAIRING_ENDORSER,
     membershipId: pin.membershipId,
-    pairingSessionId: toHex(
-      sha256(new TextEncoder().encode(`lody-e2ee/account-pairing-session/v1\0${scope.workspaceId}`))
-    ).slice(0, 32),
+    pairingSessionId: toHex(sha256(new TextEncoder().encode(session))).slice(0, 32),
   };
 }
 const parse = <A>(v: Uint8Array) =>
@@ -129,6 +135,10 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     serial = yield* Semaphore.make(1);
   let closed = false;
   const guard = Effect.suspend(() => (closed ? Effect.fail(fail('closed')) : Effect.void));
+  // Remote calls run under the host's serial permit: each is bounded so a stalled relay
+  // releases it. Originals are retained before every call; a retry resends those exact
+  // bytes, and an unknown outcome never prepares another identity or key package.
+  const bounded = boundedBy(platform.deadlines);
   const close = yield* Effect.cached(
     Effect.uninterruptible(
       Effect.gen(function* () {
@@ -296,7 +306,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         if (chunks) proof = yield* Effect.forEach(chunks, (chunk) => parse(chunk));
         else {
           yield* guard;
-          const source = yield* history(identity.credential);
+          const source = yield* bounded(history(identity.credential));
           yield* guard;
           proof = yield* Effect.fromResult(captureHistoryPages(source));
         }
@@ -344,7 +354,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         if (row.receipt) response = yield* parse<PersonalExchangeResponse>(row.receipt);
         else {
           yield* guard;
-          response = yield* exchange({ ...original, action });
+          response = yield* bounded(exchange({ ...original, action }));
           yield* guard;
           response = yield* Effect.try({
             try: () => {
@@ -524,6 +534,79 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       );
       return undefined;
     });
+  const hasCode = (code: string) => (error: unknown) =>
+    typeof error === 'object' && error !== null && (error as { code?: unknown }).code === code;
+  /** This installation's account-pairing originals: the offer its current identity was
+   * requested under, and the replacement candidate requested for it, if any. */
+  const accountOriginals = (current: ClientInstallation) =>
+    Effect.gen(function* () {
+      const self = toHex(current.binding.device.toBytes());
+      const successor = accountPairingOffer(
+        platform.scope,
+        { genesisRecordHex: '', membershipId: '' },
+        self
+      ).pairingSessionId;
+      let own: PersonalPairingOffer | null = null,
+        candidate: PersonalPairingOffer | null = null;
+      let cursor: string | null = null;
+      for (let page = 0; page < 256; page++) {
+        const listed: Effect.Success<ReturnType<ClientPairingOriginalStore['Service']['list']>> =
+          yield* pairings.list(current.binding, cursor, 64);
+        for (const entry of listed.entries) {
+          if (entry.key.purpose !== 'request') continue;
+          const saved = yield* parse<{
+            binding?: { device?: unknown; installationId?: unknown };
+            offer?: PersonalPairingOffer;
+          }>(entry.value.original);
+          if (saved.offer?.endorser !== ACCOUNT_PAIRING_ENDORSER) continue;
+          const mine =
+            saved.binding?.device === self &&
+            saved.binding.installationId === current.binding.installationId;
+          if (mine) own = saved.offer;
+          else if (saved.offer.pairingSessionId === successor) candidate = saved.offer;
+        }
+        if (listed.next === null) break;
+        if (page === 255 || listed.next === cursor) return yield* fail('corrupt');
+        cursor = listed.next;
+      }
+      return { own, candidate, self };
+    });
+  /** The identity account pairing works with. A replacement is created only when the
+   * complete signed history, verified here from the pinned genesis, classifies the
+   * current identity as revoked or its member removed; the revoked key is never reused.
+   * Without that evidence the current or pending identity is reused as before. */
+  const accountIdentity = (
+    pin: { genesisRecordHex: string; membershipId: string },
+    history?: unknown
+  ) =>
+    Effect.gen(function* () {
+      const base = accountPairingOffer(platform.scope, pin);
+      const current = yield* installations.read();
+      if (!current || current.phase !== 'ready') return yield* prepare(base);
+      const { own, candidate, self } = yield* accountOriginals(current);
+      if (candidate) return yield* prepare(candidate, true, true);
+      if (history !== undefined) {
+        const view = yield* verifyPersonalHistory(base, history);
+        if (verifiedAccessLoss(view, self))
+          return yield* prepare(accountPairingOffer(platform.scope, pin, self), true);
+      }
+      return yield* prepare(own ?? base);
+    });
+  /** Opening a retained account-pairing offer: an approved replacement candidate is
+   * opened (and activated); otherwise the identity it was requested under. */
+  const accountOpen = (offer: PersonalPairingOffer, existingOnly: boolean) =>
+    Effect.gen(function* () {
+      const retainedOrNew = (selected: PersonalPairingOffer) =>
+        existingOnly ? prepareRetained(selected) : prepare(selected);
+      const current = yield* installations.read();
+      if (!current || current.phase !== 'ready') return yield* retainedOrNew(offer);
+      const { own, candidate } = yield* accountOriginals(current);
+      if (candidate) {
+        const p = yield* prepare(candidate, true, true);
+        if (yield* pairings.load(key(p, 'approval'))) return p;
+      }
+      return yield* retainedOrNew(own ?? offer);
+    });
   /** Account pairing: verify an invitation for the given endorser against this
    * device's prepared identity, and retain it as the approval original. */
   const acceptAccount = (input: {
@@ -533,7 +616,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     endorser: string;
   }) =>
     Effect.gen(function* () {
-      const p = yield* prepare(accountPairingOffer(platform.scope, input));
+      const p = yield* accountIdentity(input);
       if (yield* pairings.load(key(p, 'approval'))) return yield* loadApproval(p);
       const descriptor = {
         kind: 'snapshot' as const,
@@ -587,7 +670,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     pages: unknown;
     offer?: PersonalPairingOffer;
   }) =>
-    Effect.flatMap(prepare(input.offer ?? accountPairingOffer(platform.scope, input)), (p) =>
+    Effect.flatMap(input.offer ? prepare(input.offer) : accountIdentity(input), (p) =>
       acceptHistoryFor(p, input.pages)
     );
   /** An existing identity for this offer, current or the replacement candidate a member
@@ -624,7 +707,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         )
           return yield* fail('scope-mismatch');
         const current = () =>
-          Effect.flatMap(input.pages(), (pages) => verifyPersonalHistory(offer, pages));
+          Effect.flatMap(bounded(input.pages()), (pages) => verifyPersonalHistory(offer, pages));
         const initial = yield* current();
         const user = yield* Effect.fromResult(accountUserId(platform.scope.accountId));
         const member = initial.inspectState().members.get(pin.membershipId);
@@ -670,7 +753,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
             const approval = yield* acceptAccountHistory({
               ...pin,
               offer,
-              pages: yield* input.pages(),
+              pages: yield* bounded(input.pages()),
             });
             // Only the admitted session installs recovered opaque keys, through the same
             // InstalledEpochKeys commitment/protection/readback boundary as normal reception.
@@ -759,10 +842,12 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           const port = platform.members;
           if (!port?.retire) return yield* fail('unsupported');
           yield* guard;
-          const reply = yield* port.retire({
-            token: saved.offer!.token,
-            keyPackageHex: saved.keyPackageHex!,
-          });
+          const reply = yield* bounded(
+            port.retire({
+              token: saved.offer!.token,
+              keyPackageHex: saved.keyPackageHex!,
+            })
+          );
           yield* guard;
           if (reply.state !== 'cancelled') return yield* fail('conflict');
           yield* pairings.compareAndSet(entry.key, entry.value.revision, {
@@ -830,7 +915,9 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         if (!saved || saved.keyPackageHex !== keyPackageHex) return yield* fail('conflict');
       }
       yield* guard;
-      const reply = yield* ports.submit({ token: offer.token, keyPackageHex: saved.keyPackageHex });
+      const reply = yield* bounded(
+        ports.submit({ token: offer.token, keyPackageHex: saved.keyPackageHex })
+      );
       yield* guard;
       if (
         reply.accountId !== platform.scope.accountId ||
@@ -876,7 +963,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         return { state: 'committed' as const };
       }
       yield* guard;
-      const reply = yield* ports.claim({ workspaceId: p.binding.workspaceId, requestId });
+      const reply = yield* bounded(ports.claim({ workspaceId: p.binding.workspaceId, requestId }));
       yield* guard;
       if (
         reply.accountId !== platform.scope.accountId ||
@@ -890,7 +977,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       const pages = yield* withIdentity(p, (identity) =>
         Effect.gen(function* () {
           yield* guard;
-          const pages = yield* history(identity.credential);
+          const pages = yield* bounded(history(identity.credential));
           yield* guard;
           return pages;
         })
@@ -928,8 +1015,10 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     restoreRecovery: (input: PersonalHostRecoveryInput) => run(restoreRecovery(input)),
     /** Account pairing: create or reuse this workspace's identity for a verified
      * genesis record and membership. Protection comes from the platform's custody. */
-    prepareAccount: (pin: { genesisRecordHex: string; membershipId: string }) =>
-      run(prepare(accountPairingOffer(platform.scope, pin)).pipe(Effect.map(publicPrepared))),
+    /** `history`, when given, is the complete public signed history; it is verified here
+     * and only decides whether a revoked identity gets its replacement. */
+    prepareAccount: (pin: { genesisRecordHex: string; membershipId: string; history?: unknown }) =>
+      run(accountIdentity(pin, pin.history).pipe(Effect.map(publicPrepared))),
     acceptAccount: (input: Parameters<typeof acceptAccount>[0]) =>
       run(Effect.asVoid(acceptAccount(input))),
     acceptAccountHistory: (input: Parameters<typeof acceptAccountHistory>[0]) =>
@@ -938,10 +1027,10 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       run(prepare(offer, replacement).pipe(Effect.map(publicPrepared))),
     begin: (offer: PersonalPairingOffer, replacement = false) =>
       run(Effect.flatMap(prepare(offer, replacement), (p) => exchangeOriginal(p, 'begin'))),
-    claim: (offer: PersonalPairingOffer, replacement = false) =>
+    claim: (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
       run(
         Effect.gen(function* () {
-          const p = yield* prepare(offer, replacement);
+          const p = yield* prepare(offer, replacement, existingOnly);
           const existing = yield* pairings.load(key(p, 'approval'));
           if (existing) {
             yield* loadApproval(p);
@@ -952,8 +1041,12 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           return result;
         })
       ),
-    cancel: (offer: PersonalPairingOffer, replacement = false) =>
-      run(Effect.flatMap(prepare(offer, replacement), (p) => exchangeOriginal(p, 'cancel'))),
+    cancel: (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
+      run(
+        Effect.flatMap(prepare(offer, replacement, existingOnly), (p) =>
+          exchangeOriginal(p, 'cancel')
+        )
+      ),
     scope: platform.scope,
     capabilities: Object.freeze({
       rpc: !!platform.rpc,
@@ -968,9 +1061,11 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         Effect.gen(function* () {
           // A member join's replacement identity opens, and is activated, from its offer.
           const p =
-              existingOnly && !replacement
-                ? yield* prepareRetained(offer)
-                : yield* prepare(offer, replacement, existingOnly),
+              !replacement && offer.endorser === ACCOUNT_PAIRING_ENDORSER
+                ? yield* accountOpen(offer, existingOnly)
+                : existingOnly && !replacement
+                  ? yield* prepareRetained(offer)
+                  : yield* prepare(offer, replacement, existingOnly),
             approval = yield* loadApproval(p);
           yield* activateReplacement(p, approval);
           yield* guard;
