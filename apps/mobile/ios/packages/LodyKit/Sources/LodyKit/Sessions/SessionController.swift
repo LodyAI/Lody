@@ -444,7 +444,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         [weak self] _ in self?.openProjectFiles(title: String(localized: "files.title", bundle: .lody))
       })
     }
-    var children: [UIMenuElement] = changes + devicePreviewMenu()
+    var children: [UIMenuElement] = changes
     children.append(UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
       self?.find(query: "", keyboard: true)
     })
