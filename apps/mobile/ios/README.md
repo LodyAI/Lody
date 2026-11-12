@@ -185,14 +185,14 @@ secondary-label grey (links use web’s muted light/dark blue); fenced code reta
 and colours. With MarkdownView's shared code colour, a list or quote containing a
 fence keeps its original code colours throughout that block.
 
-In compact Chats Home, project grouping reveals an opaque project index while
-scrolling, over the existing full-width list. Tap a logo or scrub the rail to jump
+In Chats Home (compact, and the iPad / iPhone Duo split column), project grouping
+reveals an opaque project index while scrolling, over the list. Tap a logo or scrub the rail to jump
 through committed rendered sections, including Pinned and unassigned chats. Only
 the visible 56 pt rail intercepts touches; no index recognizer is installed on rows.
 It stays visible through dragging/deceleration and for 0.8 seconds after scrolling
 or scrubbing ends. Renewed interaction invalidates pending dismissal. Snapshot
 replacement, backgrounding, detachment and size changes cancel the interaction.
-Search, time/status groupings and the iPad sidebar retain their existing lists.
+Search and time/status groupings retain their existing lists.
 VoiceOver adjustment follows rendered group order. Repository identities flow from
 catalog `repoFullName` through the root row to cached GitHub owner avatars, displayed
 in dedicated 24 pt image views at full opacity; projects without artwork use one

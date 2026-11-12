@@ -82,7 +82,6 @@ checks = {
         'Chrome/WorkspaceSwitcherPanel.swift',
         'Sessions/SessionListView.swift',
         'LodyTint.swift',
-        'List/LodyRowDensity.swift',
         'List/LodyListCellBackground.swift',
         'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift',
         'List/LodyListSectionAnimation.swift',

@@ -412,7 +412,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       content.onToggle = { [weak self] in self?.toggleOutline(id) }
     }
     cell.contentConfiguration = content
-    cell.textLeading = LodySessionRowView.textLeading(for: row, density: .regular)
+    cell.textLeading = LodySessionRowView.textLeading(for: row)
     cell.accessories = []
     cell.accessibilityIdentifier = row.id
     cell.accessibilityTraits = row.action ? .button : .staticText

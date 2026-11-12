@@ -38,7 +38,6 @@ class ProjectController: UIViewController {
     list.frame = view.bounds
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.accessibilityIdentifier = "ipad-project-list"
-    list.setContentStyle(true)
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
     view.addSubview(list)
     observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyProjectGroupsDidChange]).map { name in
@@ -83,8 +82,6 @@ class ProjectController: UIViewController {
     } else if !connected() {
       placeholder = "project.offline"
     }
-    list.setPreviewUserId(state.userId)
-    list.setPreviewWorkspaceId(state.workspaceId)
     list.setPlaceholder(String(localized: String.LocalizationValue(placeholder), bundle: .lody))
     list.setSections(sections)
   }
