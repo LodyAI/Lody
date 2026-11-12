@@ -63,6 +63,7 @@ export type PersonalKeyPorts = Exclude<
  * waits never hold session locks; any failure means "use Streams RPC". */
 export interface PersonalIrohEndpoint {
   hasConnection(endpointId: string): Promise<boolean>;
+  connectionPath?(endpointId: string): Promise<'direct' | 'relay' | 'none'>;
   warm(endpointId: string, timeoutMs: number): Promise<void>;
   call(
     endpointId: string,

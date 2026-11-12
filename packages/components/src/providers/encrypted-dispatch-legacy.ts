@@ -1,3 +1,4 @@
+import { recordIrohObservation, hasIrohDailyRecorder } from '../lib/iroh-daily';
 import { Effect, Exit, Fiber, Scope } from 'effect';
 import type {
   E2eeDispatchInput,
@@ -52,6 +53,7 @@ export function createEncryptedDispatchLegacy(options: {
   client: (signal: AbortSignal) => Promise<LoroStreamsJsonStreamClient>;
   /** Preferred route when the host has one; Streams RPC remains the fallback. */
   iroh?: {
+    path?: (machineId: string) => Promise<'direct' | 'relay' | 'none'>;
     ready: (machineId: string) => Promise<boolean>;
     call: (
       machineId: string,
@@ -151,9 +153,39 @@ export function createEncryptedDispatchLegacy(options: {
     timeoutMs: number
   ): Promise<Reply | undefined> => {
     const iroh = options.iroh;
-    if (!iroh || closed || (original.frames && original.frames.length !== 1)) return undefined;
+    if (closed) return undefined;
+    const record = (
+      outcome: import('../lib/iroh-daily').IrohOutcome,
+      extra: Pick<
+        import('../lib/iroh-daily').IrohObservation,
+        'elapsedMs' | 'path' | 'connected'
+      > = {}
+    ) =>
+      recordIrohObservation({
+        kind: call.kind,
+        outcome,
+        target: original.targetMachineId,
+        ...extra,
+      });
+    if (original.frames && original.frames.length !== 1) {
+      record('chunked');
+      return undefined;
+    }
+    if (!iroh) {
+      record('unavailable');
+      return undefined;
+    }
     // Route evidence only: why this request continues on Streams, never the frame.
+    let connected = false;
     const fallback = (reason: 'not-ready' | 'call-failed' | 'unverified') => {
+      record(
+        reason === 'not-ready'
+          ? 'fallback_not_ready'
+          : reason === 'call-failed'
+            ? 'fallback_call_failed'
+            : 'fallback_unverified',
+        { connected }
+      );
       console.debug('[e2ee-rpc-timing]', {
         stage: 'iroh-fallback',
         reason,
@@ -171,10 +203,12 @@ export function createEncryptedDispatchLegacy(options: {
       }),
     ]).finally(() => clearTimeout(budget));
     if (!ready) return fallback('not-ready');
+    connected = true;
     // The renderer owns the deadline: the host may first wait for its account lock,
     // and that wait must not hold the same original back from Streams. A late iroh
     // delivery is deduplicated by the receiver.
     let deadline: ReturnType<typeof setTimeout> | undefined;
+    const started = performance.now();
     const frames = await Promise.race([
       iroh
         .call(
@@ -187,6 +221,7 @@ export function createEncryptedDispatchLegacy(options: {
         deadline = setTimeout(() => resolve(undefined), timeoutMs);
       }),
     ]).finally(() => clearTimeout(deadline));
+    const elapsedMs = performance.now() - started;
     // A late reply or a broken connection; the same original continues on Streams.
     if (!frames) return closed ? undefined : fallback('call-failed');
     if (call.kind === 'dispatch') {
@@ -203,6 +238,24 @@ export function createEncryptedDispatchLegacy(options: {
           ? await options.accept(original.targetMachineId, call.input, frame).catch(() => undefined)
           : await options.acceptFeature?.(call.input, frame).catch(() => undefined);
       if (reply) {
+        if (hasIrohDailyRecorder()) {
+          let pathTimer: ReturnType<typeof setTimeout> | undefined;
+          const path = Promise.race([
+            Promise.resolve()
+              .then(() => iroh.path?.(original.targetMachineId) ?? 'none')
+              .catch(() => 'none' as const),
+            new Promise<'none'>((resolve) => {
+              pathTimer = setTimeout(() => resolve('none'), IROH_READY_BUDGET_MS);
+            }),
+          ])
+            .then((value) =>
+              value === 'direct' || value === 'relay' ? value : ('unknown' as const)
+            )
+            .finally(() => clearTimeout(pathTimer));
+          // Enqueue the observation now to preserve ordering with the next request.
+          // Its path settles under the statistics lock, never on the RPC hot path.
+          record('iroh_ok', { elapsedMs, path });
+        }
         // Route evidence only: which transport answered, never the frame.
         console.debug('[e2ee-rpc-timing]', {
           stage: 'iroh-reply',

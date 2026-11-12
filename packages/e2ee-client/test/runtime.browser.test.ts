@@ -329,8 +329,12 @@ it.each(['chromium', 'webkit'] as const)(
       expect(await good(page, 'rpc')).toEqual(rpc);
       // Native iroh port: no connection yet, so this request uses Streams and a
       // background dial starts; the next request uses iroh.
+      expect(await good(page, 'irohPath')).toBe('none');
+      // A passive query must not open the endpoint or start a dial.
+      expect(await good(page, 'irohEvidence')).not.toHaveProperty('opener');
       expect(await good(page, 'irohReady')).toBe(false);
       expect(await good(page, 'irohReady')).toBe(true);
+      expect(await good(page, 'irohPath')).toBe('direct');
       expect(await good(page, 'irohCall')).toEqual(['cd'.repeat(150)]);
       const iroh = (await good(page, 'irohEvidence')) as {
         opener: string;

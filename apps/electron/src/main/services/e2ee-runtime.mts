@@ -2220,6 +2220,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
        * Resolves the machine's iroh route under the host lock without any network
        * wait. Callers run the route's `ready`/`call` after releasing every lock.
        */
+      irohPeek: (workspaceId: string, targetMachineId: string) =>
+        run(
+          Effect.gen(function* () {
+            const entry = entries.get(workspaceId)
+            return entry?.iroh ? yield* entry.iroh.peek(targetMachineId) : undefined
+          })
+        ),
       irohPrepare: (workspaceId: string, targetMachineId: string) =>
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>

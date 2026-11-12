@@ -102,6 +102,24 @@ encrypted workspaces once all platforms can use a device-to-device route.
   it. Capacitor serializes the argument, so one unwipeable JavaScript string of the
   seed lives until garbage collection; the owner accepted that cost (2026-11-10).
 
+- **Daily device diagnostics.** Telemetry-capable desktop/iOS/Android clients count
+  dispatch and feature outcomes locally across workspaces: verified iroh replies,
+  not-ready (previously reached or never reached), call failures, unverifiable
+  replies, missing capability, and deliberately chunked Streams calls. Successful
+  calls also count latency buckets below 200 ms, below 800 ms, or at least 800 ms,
+  and the selected direct/relay/unknown path. `connectionPath` reads an existing
+  connection's `Connection::paths()` snapshot without dialing; core, napi and
+  uniffi expose only `direct | relay | none`, never addresses.
+  A shared localStorage record is serialized by Web Locks; missing locks disable
+  diagnostics without affecting RPC. Salted target digests never leave the device.
+  Counters saturate at one million. Startup, foreground, online and hourly checks
+  enqueue one `e2ee/iroh_daily` after 24 hours, then reset counters; offline days
+  remain one window. A persisted pending snapshot freezes the window before SDK enqueue; failed
+  enqueue retains it, and crash retries use the same random SDK event UUID. A final SDK property allowlist drops workspace groups, URLs and IP metadata.
+  The event carries only fixed counters, platform,
+  app version and window times. OSS local composition and machine CLI never run
+  these counters. This is SDK enqueue evidence, not server ingestion acknowledgement.
+
 ## Evidence
 
 Inspected iroh source at v1.4.1:

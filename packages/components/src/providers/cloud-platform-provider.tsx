@@ -363,6 +363,7 @@ export function CloudPlatformProvider({
                 native.signScheduleDeclaration(workspaceId, document, manualRunKey),
               acceptDispatchResponse: (workspaceId, machineId, input, frame) =>
                 native.acceptDispatchResponse(workspaceId, machineId, input, frame),
+              irohPath: (workspaceId, machineId) => native.irohPath(workspaceId, machineId),
               irohReady: (workspaceId, machineId) => native.irohReady(workspaceId, machineId),
               irohCall: (workspaceId, machineId, envelope, timeoutMs) =>
                 native.irohCall(workspaceId, machineId, envelope, timeoutMs),

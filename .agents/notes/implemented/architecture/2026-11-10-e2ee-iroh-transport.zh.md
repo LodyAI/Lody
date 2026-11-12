@@ -79,6 +79,20 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
   状态、发送、接收），插件从不回传种子。Capacitor 会序列化参数，因此会留下一份无法
   擦除的 JavaScript 种子字符串，直到被垃圾回收；owner 接受这一代价（2026-11-10）。
 
+- **设备每日统计。** 有遥测能力的桌面、iOS、Android 客户端在设备本地跨工作区累计
+  dispatch / feature 的结果：已验证的 iroh 回复、未就绪（曾连通或从未连通）、调用失败、
+  回复未验证、缺少能力，以及按设计走 Streams 的多帧请求。成功调用还统计低于 200 ms、
+  低于 800 ms、至少 800 ms 的延迟分档，以及选中的直连、中继或未知路径。
+  `connectionPath` 只读取已有连接的 `Connection::paths()` 快照，不拨号；core、napi、
+  uniffi 只暴露 `direct | relay | none`，不暴露地址。
+  Web Locks 串行修改同源共享的 localStorage；缺锁时停用统计，不影响 RPC。
+  加盐目标摘要只留在本地。各计数上限为一百万。启动、回到前台、联网和每小时检查时，
+  满 24 小时才入队一条 `e2ee/iroh_daily`，随后清零；离线多天仍合并成一个区间。
+  先持久化待发快照以冻结区间；SDK 未接受入队则保留快照，崩溃重试使用同一个随机的 SDK 事件 UUID。
+  SDK 最终属性白名单剔除工作区 group、URL 和 IP 元数据。
+  事件只携带固定计数、平台、应用版本和区间时间。OSS 本地版和机器端 CLI 不运行计数。
+  入队成功不等于服务端已接收。
+
 ## 依据
 
 检查过的 iroh v1.4.1 源码：

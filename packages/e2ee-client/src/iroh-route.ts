@@ -25,6 +25,8 @@ export function makePersonalIrohRoute(
   warming: Set<string>
 ) {
   return {
+    path: async () =>
+      endpoint.connectionPath?.(key).catch(() => 'none' as const) ?? ('none' as const),
     /** Live connection? Never waits for a dial; starts at most one background dial. */
     ready: async (): Promise<boolean> => {
       if (await endpoint.hasConnection(key).catch(() => false)) return true;

@@ -90,14 +90,29 @@ impl MobileIrohEndpoint {
 
     /// Whether a live connection exists; never waits for a dial in progress.
     pub async fn has_connection(&self, endpoint_id: String) -> Result<bool, IrohError> {
-        Ok(self.inner.has_connection(&target(&endpoint_id)?.endpoint_id).await)
+        Ok(self
+            .inner
+            .has_connection(&target(&endpoint_id)?.endpoint_id)
+            .await)
+    }
+
+    /// Selected path of an existing connection; never dials.
+    pub async fn connection_path(&self, endpoint_id: String) -> Result<String, IrohError> {
+        Ok(self
+            .inner
+            .connection_path(&target(&endpoint_id)?.endpoint_id)
+            .await
+            .to_owned())
     }
 
     /// Prepares a connection; errors once `timeout_ms` passes without one.
     pub async fn warm(&self, endpoint_id: String, timeout_ms: u32) -> Result<(), IrohError> {
         Ok(self
             .inner
-            .warm(&target(&endpoint_id)?, Duration::from_millis(timeout_ms.into()))
+            .warm(
+                &target(&endpoint_id)?,
+                Duration::from_millis(timeout_ms.into()),
+            )
             .await?)
     }
 
@@ -204,7 +219,9 @@ mod tests {
         })
         .await
         .unwrap();
-        let mobile = open_mobile_endpoint(vec![22; 32], vec![], None, None).await.unwrap();
+        let mobile = open_mobile_endpoint(vec![22; 32], vec![], None, None)
+            .await
+            .unwrap();
         // Mobile dials by key only; reach the loopback listener through its core.
         let call = mobile
             .inner

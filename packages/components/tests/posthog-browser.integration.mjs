@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { build } from 'vite';
 import { chromium, webkit } from '@playwright/test';
 
+const dailyOnly = process.argv.includes('--daily-only');
 const root = fileURLToPath(new URL('..', import.meta.url));
 const require = createRequire(import.meta.url);
 const sdkDir = fileURLToPath(
@@ -25,8 +26,9 @@ const result = await build({
     write: false,
     minify: false,
     lib: { entry: `${root}/tests/posthog-browser.fixture.ts`, formats: ['es'] },
-    rolldownOptions: { output: { codeSplitting: false } },
+    rollupOptions: { output: { inlineDynamicImports: true } },
   },
+  worker: { format: 'es' },
   logLevel: 'error',
 });
 const bundle = (Array.isArray(result) ? result[0] : result).output.find(
@@ -113,10 +115,13 @@ const allEvents = () =>
 const wire = () => JSON.stringify(allEvents());
 
 async function setup(browser, shell = 'web', late = false, compressed = false) {
-  const page = await browser.newPage({
-    userAgent:
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
-  });
+  const context = browser.newContext
+    ? await browser.newContext({
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
+      })
+    : browser;
+  const page = await context.newPage();
   if (compressed)
     await page.addInitScript(() => {
       const Native = window.CompressionStream;
@@ -266,9 +271,90 @@ try {
     const browser = await engine.launch({ headless: true });
     try {
       for (const shell of shells) {
+        if (dailyOnly && shell === 'web') continue;
         received.length = 0;
         const { page } = await setup(browser, shell);
         try {
+          if (shell !== 'web' && !negative) {
+            const { page: peer } = await setup(page.context(), shell);
+            try {
+              for (const windowPage of [page, peer])
+                await windowPage.evaluate((platform) => {
+                  window.dailyNow = 1000;
+                  window.posthog.group('workspace', 'DAILY_WORKSPACE_SECRET');
+                  window.daily = window.createIrohDaily({
+                    now: () => window.dailyNow,
+                    storage: localStorage,
+                    exclusive: (run) => navigator.locks.request('daily-browser-test', run),
+                    digest: async (text) =>
+                      Array.from(
+                        new Uint8Array(
+                          await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+                        ),
+                        (b) => b.toString(16).padStart(2, '0')
+                      ).join(''),
+                    random: () => crypto.randomUUID(),
+                    online: () => true,
+                    enqueue: (props, uuid) =>
+                      !!window.posthog.capture('e2ee/iroh_daily', props, {
+                        uuid,
+                        $set: { workspaceId: 'DAILY_WORKSPACE_SECRET' },
+                        $set_once: { url: location.href },
+                      }),
+                    platform: platform === 'electron' ? 'desktop' : platform,
+                    version: () => '1.2.3',
+                  });
+                }, shell);
+              await Promise.all(
+                [page, peer].map((windowPage) =>
+                  windowPage.evaluate(() =>
+                    Promise.all(
+                      Array.from({ length: 25 }, () =>
+                        window.daily.record({
+                          kind: 'dispatch',
+                          outcome: 'iroh_ok',
+                          target: 'DAILY_TARGET_SECRET',
+                          elapsedMs: 100,
+                          path: 'direct',
+                        })
+                      )
+                    )
+                  )
+                )
+              );
+              await Promise.all(
+                [page, peer].map((windowPage) =>
+                  windowPage.evaluate(async () => {
+                    window.dailyNow += 24 * 60 * 60 * 1000;
+                    await window.daily.check();
+                    await window.daily.check();
+                    window.flush();
+                  })
+                )
+              );
+              await barrier(page);
+              await barrier(peer);
+              const daily = received
+                .flatMap((entry) => entry.events)
+                .filter((event) => event.event === 'e2ee/iroh_daily');
+              assert.equal(daily.length, 1);
+              assert.equal(daily[0].properties.dispatch_iroh_ok, 50);
+              assert.equal(daily[0].properties.dispatch_direct, 50);
+              assert.equal(daily[0].properties.platform, shell === 'electron' ? 'desktop' : shell);
+              assert.equal(daily[0].properties.$groups, undefined);
+              assert.equal(daily[0].$set, undefined);
+              assert.equal(daily[0].$set_once, undefined);
+              assert.equal(daily[0].properties.$geoip_disable, true);
+              assert(!JSON.stringify(daily[0]).includes('DAILY_WORKSPACE_SECRET'));
+              assert(!JSON.stringify(daily[0]).includes('DAILY_TARGET_SECRET'));
+              assert(!JSON.stringify(daily[0]).includes(origin));
+              console.log(`${name}/${shell}: daily real SDK + cross-window Web Locks PASS`);
+            } finally {
+              await page.evaluate(() => window.posthog.resetGroups());
+              await peer.close();
+            }
+          }
+          if (dailyOnly) continue;
           await page.evaluate(() => {
             window.privateDom('UNKNOWN_SECRET');
             window.capturedUnknown = window.posthog.captureException(
@@ -403,6 +489,7 @@ try {
           await page.close();
         }
       }
+      if (dailyOnly) continue;
       received.length = 0;
       const compressedPage = (await setup(browser, 'web', false, true)).page;
       try {

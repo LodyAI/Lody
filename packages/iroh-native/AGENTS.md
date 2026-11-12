@@ -49,3 +49,11 @@ rationale: [iroh transport decision](../../.agents/notes/implemented/architectur
   ([iroh #4555](https://github.com/n0-computer/iroh/issues/4555)); the Android
   emulator returns EIO and stalled every call past the dispatch deadline. Re-enable
   it only on an iroh release that reads the limit per send.
+
+- `connectionPath` reads `Connection::paths()` and reports only the selected
+  `direct`, `relay` or `none` path. It never dials, waits for a dial, or exposes
+  addresses. Missing host support is an unknown diagnostic, never an RPC failure.
+- Personal clients with telemetry accumulate fixed dispatch/feature counters in
+  device-local storage under a Web Lock, across workspaces and windows. They
+  enqueue at most one `e2ee/iroh_daily` per 24 hours. Target digests remain local;
+  local OSS composition and machine CLI do no counting or reporting.

@@ -227,13 +227,16 @@ const IROH_ROUTE_BUDGET_MS = 250
 async function irohRoute(
   id: ReturnType<typeof sender>,
   workspaceId: string,
-  targetMachineId: string
+  targetMachineId: string,
+  passive = false
 ) {
   const target = irohTargetSchema.parse({ workspaceId, targetMachineId })
   return withDesktopE2eeAccount(
     (owner) =>
       owner.readers.get(target.workspaceId)?.has(id)
-        ? owner.host.irohPrepare(target.workspaceId, target.targetMachineId)
+        ? passive
+          ? owner.host.irohPeek(target.workspaceId, target.targetMachineId)
+          : owner.host.irohPrepare(target.workspaceId, target.targetMachineId)
         : refuseUnopened(owner, target.workspaceId),
     target.workspaceId,
     false
@@ -2926,6 +2929,12 @@ export class E2eeIpc extends ProductWindowIpcService {
   async irohReady(workspaceId: string, targetMachineId: string) {
     const route = await irohRoute(sender(), workspaceId, targetMachineId)
     return route ? route.ready() : false
+  }
+  /** Selected path only; route resolution retains the caller's reader checks. */
+  @IpcMethod()
+  async irohPath(workspaceId: string, targetMachineId: string) {
+    const route = await irohRoute(sender(), workspaceId, targetMachineId, true)
+    return route ? route.path() : ('none' as const)
   }
   /** Carries one prepared `{id, frame}` envelope; returns reply frames for the
    * renderer to verify with the existing accept methods. Never prepares or signs.

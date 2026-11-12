@@ -251,6 +251,7 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
           call(raw.prepareFeature(...args)),
         acceptFeatureResponse: (...args: Parameters<RawSession['acceptFeatureResponse']>) =>
           call(raw.acceptFeatureResponse(...args)),
+        irohPath: (...args: Parameters<RawSession['irohPath']>) => call(raw.irohPath(...args)),
         irohRoute: (...args: Parameters<RawSession['irohRoute']>) => call(raw.irohRoute(...args)),
         document: (...args: Parameters<RawSession['document']>) =>
           call(

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { installIrohDailyRecorder, type IrohObservation } from '../src/lib/iroh-daily';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { createEncryptedDispatchLegacy } from '../src/providers/encrypted-dispatch-legacy';
 
@@ -136,6 +137,18 @@ it.each([
 );
 
 describe('iroh route', () => {
+  let observations: IrohObservation[];
+  let observed: ReturnType<typeof Promise.withResolvers<void>>;
+  let removeRecorder: () => void;
+  beforeEach(() => {
+    observations = [];
+    observed = Promise.withResolvers<void>();
+    removeRecorder = installIrohDailyRecorder(async (observation) => {
+      observations.push({ ...observation, path: await observation.path });
+      observed.resolve();
+    });
+  });
+  afterEach(() => removeRecorder());
   const ack = {
     type: 'session/dispatch-turn_response' as const,
     sessionId: 'session-1',
@@ -145,6 +158,7 @@ describe('iroh route', () => {
   };
   const setup = (options: {
     ready: boolean;
+    path?: () => Promise<'direct' | 'relay' | 'none'>;
     call?: () => Promise<string[]>;
     frames?: string[];
   }) => {
@@ -179,6 +193,7 @@ describe('iroh route', () => {
       },
       client: async () => client,
       iroh: {
+        path: options.path,
         ready: async () => options.ready,
         call: async (machineId, envelope) => {
           calls.push({ machineId, envelope });
@@ -190,7 +205,7 @@ describe('iroh route', () => {
   };
 
   it('sends the exact original over a live iroh connection and verifies its reply', async () => {
-    const t = setup({ ready: true });
+    const t = setup({ ready: true, path: async () => 'direct' });
     try {
       const prepared = await t.dispatcher.prepare('machine-1', input('one'));
       expect(await prepared.send()).toEqual(ack);
@@ -200,30 +215,44 @@ describe('iroh route', () => {
       // An unverifiable reply is skipped; only the verified ACK is returned.
       expect(t.accepted).toEqual(['00'.repeat(150), 'ef'.repeat(150)]);
       expect(t.appendedFrames).toEqual([]);
+      await observed.promise;
+      expect(observations).toMatchObject([
+        { kind: 'dispatch', outcome: 'iroh_ok', path: 'direct' },
+      ]);
     } finally {
       await t.dispatcher.close();
     }
   });
 
   it.each([
-    { name: 'no live connection', ready: false, call: undefined },
+    { name: 'no live connection', ready: false, call: undefined, outcome: 'fallback_not_ready' },
     {
       name: 'a failed iroh call',
+      outcome: 'fallback_call_failed',
       ready: true,
       call: () => Promise.reject(new Error('iroh_call')),
     },
-    { name: 'no verifiable reply', ready: true, call: async () => [] },
-  ])('falls back to Streams with the same original after $name', async ({ ready, call }) => {
-    const t = setup({ ready, ...(call ? { call } : {}) });
-    try {
-      const prepared = await t.dispatcher.prepare('machine-1', input('one'));
-      void prepared.send().catch(() => null);
-      expect(await t.appended.promise).toEqual({ id: '44'.repeat(16), frame: 'ab'.repeat(200) });
-      expect(t.calls.length).toBe(ready ? 1 : 0);
-    } finally {
-      await t.dispatcher.close();
+    {
+      name: 'no verifiable reply',
+      ready: true,
+      call: async () => [],
+      outcome: 'fallback_unverified',
+    },
+  ])(
+    'falls back to Streams with the same original after $name',
+    async ({ ready, call, outcome }) => {
+      const t = setup({ ready, ...(call ? { call } : {}) });
+      try {
+        const prepared = await t.dispatcher.prepare('machine-1', input('one'));
+        void prepared.send().catch(() => null);
+        expect(await t.appended.promise).toEqual({ id: '44'.repeat(16), frame: 'ab'.repeat(200) });
+        expect(t.calls.length).toBe(ready ? 1 : 0);
+        expect(observations).toMatchObject([{ kind: 'dispatch', outcome }]);
+      } finally {
+        await t.dispatcher.close();
+      }
     }
-  });
+  );
 
   it('keeps chunked originals on Streams', async () => {
     const frames = ['ab'.repeat(200), 'cd'.repeat(200)];
@@ -233,6 +262,7 @@ describe('iroh route', () => {
       void prepared.send().catch(() => null);
       expect(await t.appended.promise).toEqual({ id: '44'.repeat(16), frame: frames[0] });
       expect(t.calls).toEqual([]);
+      expect(observations).toMatchObject([{ kind: 'dispatch', outcome: 'chunked' }]);
     } finally {
       await t.dispatcher.close();
     }
