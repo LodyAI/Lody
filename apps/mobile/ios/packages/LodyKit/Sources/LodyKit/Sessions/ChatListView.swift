@@ -45,11 +45,16 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   /// Openers whose nested chats are hidden; default unfolded, as on web. Stored per device.
   private var foldedOpeners = Set(UserDefaults.standard.stringArray(forKey: ChatListView.foldedKey) ?? [])
   private static let foldedKey = "homeFoldedOpeners"
+  /// Home group labels the person collapsed; their headers stay, their rows leave the list.
+  private let groupFolds = ChatGroupFolds()
+  /// Whether the projection has any row, collapsed or not (the empty-state text hides otherwise).
+  private var hasRows = false
   /// UIKit owns a single section header and its push-off at the next section.
-  /// Search labels remain in the flow.
+  /// Search labels remain in the flow and never collapse.
   var pinsGroupLabels = true {
     didSet {
       guard pinsGroupLabels != oldValue else { return }
+      groupFolds.enabled = pinsGroupLabels
       collection.collectionViewLayout.invalidateLayout()
       updateBackdrop()
     }
@@ -67,6 +72,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       guard archivedStyle != oldValue else { return }
       backgroundColor = archivedStyle ? LodyUIColor.bgArchived : LodyUIColor.bgBase
       topBackdrop.archived = archivedStyle
+      groupFolds.scope = archivedStyle ? "archived:" : ""
       var snapshot = dataSource.snapshot()
       snapshot.reconfigureItems(snapshot.itemIdentifiers)
       dataSource.apply(snapshot, animatingDifferences: false)
@@ -128,8 +134,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       let id = self?.dataSource.sectionIdentifier(for: path.section)
       let title = id.flatMap { self?.titles[$0] } ?? ""
       let repository = id.flatMap { self?.titleRepositories[$0] } ?? ""
+      guard let folds = self?.groupFolds else { return }
       view.contentConfiguration = UIHostingConfiguration {
-        SectionTitle(text: title, repository: repository)
+        SectionTitle(text: title, repository: repository, folds: folds, groupId: id ?? "") { [weak self] in
+          if let id { self?.toggleGroup(id) }
+        }
       }
       .margins(.all, 0)
       view.backgroundConfiguration = .clear()
@@ -196,6 +205,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     sectionGeneration += 1
     let generation = sectionGeneration
     lastSections = sections
+    hasRows = sections.contains { !$0.rows.isEmpty }
     var snapshot = NSDiffableDataSourceSnapshot<String, Item>()
     var next: [Item: Entry] = [:]
     var nextTitles: [String: String] = [:]
@@ -209,6 +219,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
          let repository = section.rows.first?.repository, !repository.isEmpty {
         nextRepositories[section.id] = repository
       }
+      // A collapsed group keeps its label, which UIKit still lays out for an empty section.
+      if !(nextTitles[section.id] ?? "").isEmpty, groupFolds.isCollapsed(section.id) { continue }
       let children = section.rows.contains { !$0.parent }
       for row in section.rows {
         let item = Item(section: section.id, row: row.id)
@@ -261,7 +273,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     let snapshot = dataSource.snapshot()
     let sections = Dictionary(lastSections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let items: [InboxProjectIndex.Item] = projectIndexEnabled ? snapshot.sectionIdentifiers.compactMap { id in
-      guard let section = sections[id], snapshot.numberOfItems(inSection: id) > 0 else { return nil }
+      // Collapsed groups have no items but stay destinations through their label.
+      guard let section = sections[id] else { return nil }
       let tints = section.rows.flatMap { [$0.imageTint, $0.collapsedImageTint] }
       let tint = ["danger", "warning", "blue"].first(where: tints.contains)
         ?? (section.rows.contains(where: \.unread) ? "blue" : "")
@@ -303,17 +316,25 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   private func jumpToSection(_ id: String) {
     guard projectIndexEnabled, !applyingSections else { return }
     let snapshot = dataSource.snapshot()
-    guard snapshot.sectionIdentifiers.contains(id), let item = snapshot.itemIdentifiers(inSection: id).first,
-      let path = dataSource.indexPath(for: item),
-      let attributes = collection.layoutAttributesForItem(at: path) else { return }
+    guard let sectionIndex = snapshot.indexOfSection(id) else { return }
     // Item geometry is unpinned and belongs to the committed snapshot. Never query
     // supplementary attributes with a path retained across a diffable update.
-    let headerHeight = collection.collectionViewLayout.layoutAttributesForSupplementaryView(
-      ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: path.section)
-    )?.frame.height ?? 0
+    let header = collection.collectionViewLayout.layoutAttributesForSupplementaryView(
+      ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: sectionIndex)
+    )
+    let top: CGFloat
+    if let item = snapshot.itemIdentifiers(inSection: id).first, let path = dataSource.indexPath(for: item),
+       let attributes = collection.layoutAttributesForItem(at: path) {
+      top = attributes.frame.minY - (header?.frame.height ?? 0)
+    } else if let header, snapshot.numberOfItems(inSection: id) == 0 {
+      // A collapsed group has only its label; with no rows below it the label is not pinned.
+      top = header.frame.minY
+    } else {
+      return
+    }
     let lower = -collection.adjustedContentInset.top
     let upper = max(lower, collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
-    let y = min(upper, max(lower, attributes.frame.minY - headerHeight - collection.adjustedContentInset.top))
+    let y = min(upper, max(lower, top - collection.adjustedContentInset.top))
     collection.setContentOffset(CGPoint(x: collection.contentOffset.x, y: y), animated: false)
     collection.layoutIfNeeded()
   }
@@ -321,6 +342,12 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   private func toggleOpener(_ id: String) {
     if foldedOpeners.remove(id) == nil { foldedOpeners.insert(id) }
     UserDefaults.standard.set(Array(foldedOpeners).sorted(), forKey: Self.foldedKey)
+    setSections(lastSections)
+  }
+
+  /// The label's chevron turns while the group's rows animate out of or into the list.
+  private func toggleGroup(_ id: String) {
+    groupFolds.toggle(id)
     setSections(lastSections)
   }
 
@@ -361,7 +388,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 
   private func updatePlaceholder() {
     placeholder.text = placeholderText
-    placeholder.isHidden = !entries.isEmpty || placeholderText.isEmpty
+    placeholder.isHidden = hasRows || placeholderText.isEmpty
   }
 
   // MARK: Cells
@@ -884,30 +911,76 @@ private struct MoreRowContent: View {
   }
 }
 
+/// Home group labels the person collapsed, stored per device by section id. Headers observe it,
+/// so a toggle turns the chevron of the label already on screen.
+@MainActor @Observable
+private final class ChatGroupFolds {
+  private static let key = "homeCollapsedGroups"
+  private var collapsed = Set(UserDefaults.standard.stringArray(forKey: ChatGroupFolds.key) ?? [])
+  /// Home labels collapse; search labels do not.
+  var enabled = true
+  /// Archived buckets reuse the activity ids, so they fold separately.
+  var scope = ""
+
+  func isCollapsed(_ id: String) -> Bool { enabled && collapsed.contains(scope + id) }
+
+  func toggle(_ id: String) {
+    let key = scope + id
+    if collapsed.remove(key) == nil { collapsed.insert(key) }
+    UserDefaults.standard.set(Array(collapsed).sorted(), forKey: Self.key)
+  }
+}
+
 private struct SectionTitle: View {
   let text: String
   var repository = ""
+  let folds: ChatGroupFolds
+  let groupId: String
+  let onToggle: () -> Void
 
   var body: some View {
     if text.isEmpty {
       Color.clear.frame(height: LodySpacing.sm)
-    } else {
-      HStack(spacing: LodySpacing.xs) {
-        if !repository.isEmpty {
-          // The project's logo in its original colours, unlike the muted row marks.
-          RepositoryIcon(repository: repository, muted: false)
-        }
-        Text(text)
-          .lodyTextStyle(.groupLabel)
-          .foregroundStyle(LodyColor.textTertiary)
+    } else if folds.enabled {
+      let collapsed = folds.isCollapsed(groupId)
+      Button(action: onToggle) {
+        label(chevron: collapsed)
+          .contentShape(Rectangle())
       }
-      .padding(.horizontal, LodyLayout.listEdgeX)
-      .padding(.top, LodySpacing.xs)
-      .padding(.bottom, LodySpacing.xs)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .buttonStyle(.plain)
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(.isHeader)
+      .accessibilityValue(String(localized: String.LocalizationValue(collapsed ? "native.list.collapsed" : "native.list.expanded"), bundle: .lody))
+    } else {
+      label(chevron: nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
+  }
+
+  /// `chevron` is the collapsed state when the group can fold: pointing down while open, right when collapsed.
+  private func label(chevron collapsed: Bool?) -> some View {
+    HStack(spacing: LodySpacing.xs) {
+      if !repository.isEmpty {
+        // The project's logo in its original colours, unlike the muted row marks.
+        RepositoryIcon(repository: repository, muted: false)
+      }
+      Text(text)
+        .lodyTextStyle(.groupLabel)
+        .foregroundStyle(LodyColor.textTertiary)
+      if let collapsed {
+        Image(systemName: "chevron.right")
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(LodyColor.textTertiary)
+          .rotationEffect(.degrees(collapsed ? 0 : 90))
+          .animation(LodySpring.snappy, value: collapsed)
+          .accessibilityHidden(true)
+      }
+    }
+    .padding(.horizontal, LodyLayout.listEdgeX)
+    .padding(.top, LodySpacing.xs)
+    .padding(.bottom, LodySpacing.xs)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 

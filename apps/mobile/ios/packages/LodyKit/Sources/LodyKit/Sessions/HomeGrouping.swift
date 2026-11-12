@@ -48,17 +48,18 @@ enum HomeArchive {
   }
 }
 
-/// "By status" groups, most pressing first. Mirrors web `lib/home-now.ts`: every chat lands in
-/// exactly one group, under the first reason that applies.
+/// "By status" groups in display order. Classification mirrors web `lib/home-now.ts`: every chat
+/// lands in exactly one group, under the first reason that applies (see `init`). Running chats are
+/// listed just above idle ones, after the groups that need a look.
 enum HomeStatusGroup: String, CaseIterable, Sendable {
   /// Failed, waiting on the person, CI failed on an idle chat's open PR, or a draft PR.
   case attention
   /// Finished since the person last looked.
   case finished
-  /// Working, even when unread or its CI is red: it may be fixing exactly that.
-  case running
   /// An open pull request with passing or pending CI.
   case pullRequest
+  /// Working, even when unread or its CI is red: it may be fixing exactly that.
+  case running
   /// Everything else, including chats whose PR is merged or closed.
   case idle
 

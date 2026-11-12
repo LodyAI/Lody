@@ -57,6 +57,8 @@
     <string name="home_group_running">运行中</string>
     <string name="home_group_pull_request">PR 进行中</string>
     <string name="home_group_idle">空闲</string>
+    <string name="home_group_expand">展开分组</string>
+    <string name="home_group_collapse">收起分组</string>
     <string name="home_group_show_less">收起</string>
     <string name="home_ci_pass">CI 通过</string>
     <string name="home_ci_fail">CI 失败</string>
