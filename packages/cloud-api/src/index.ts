@@ -430,22 +430,8 @@ type UpcomingInvoicePreview = {
  * workspaces and gift/enterprise entitlements that are not billed per seat;
  * `billed` quotes the prorated charge applied when the invitation is accepted.
  */
-export type SeatInvitePreview =
-  | { status: 'not_billed'; reason: 'free' | 'covered'; availableSeats?: number }
-  | {
-      status: 'billed';
-      addedSeats?: number;
-      paymentAction?: 'method_required' | 'payment_required' | 'refresh';
-      invoiceAt?: number | null;
-      interval: BillingInterval;
-      unitAmount: number | null;
-      proratedAmount: number | null;
-      currentPeriodEnd: number | null;
-      seatCount: number;
-      nextSeatCount: number;
-      nextRenewalAmount: number | null;
-      currency?: string;
-    };
+export type { SeatInvitePreview } from './seat-invite-preview';
+import type { SeatInvitePreview } from './seat-invite-preview';
 
 export type CloudApi = {
   e2eeMachineSharing: {

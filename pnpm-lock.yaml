@@ -997,6 +997,9 @@ importers:
       convex:
         specifier: 'catalog:'
         version: 1.33.1(react@19.2.0)
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
