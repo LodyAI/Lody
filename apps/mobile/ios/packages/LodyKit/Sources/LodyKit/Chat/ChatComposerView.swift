@@ -271,6 +271,17 @@ final class ChatComposerInput: TextView {
     return (try? exporter.export(editor)) ?? (text ?? "")
   }
 
+  /// The chips' UTF-16 ranges in `text`, so the sent bubble draws the same chips over the
+  /// shown text before the runtime's own reference spans arrive.
+  var chipReferences: [[String: Any]] {
+    var result: [[String: Any]] = []
+    textStorage.enumerateAttribute(.lodyReferenceChip, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
+      guard value != nil, range.length > 0 else { return }
+      result.append(["start": range.location, "end": NSMaxRange(range), "kind": "mention"])
+    }
+    return result
+  }
+
   /// The labels of the chips in the editor, in document order.
   private var referenceLabels: [String] {
     var labels: [String] = []
@@ -2047,6 +2058,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let body = input.markdown
     let payload: [String: Any] = [
       "id": id, "queue": queued, "guide": guiding, "text": body, "displayText": input.text ?? body,
+      "references": input.text == nil ? [] : input.chipReferences,
       "startedAt": Date().timeIntervalSince1970 * 1000,
       "attachments": attachments.map {
         ["id": $0.id, "name": $0.name, "uri": $0.url.absoluteString, "kind": $0.isImage ? "image" : "file"]

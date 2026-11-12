@@ -314,7 +314,11 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                 sessionId, turnId, target.projectId.takeUnless { target.chat }, chosen.machineId, chosen.id, mentions.resolve(prompt), branch.takeIf { github }, target.worktree, modelId, modeId, effort,
                 agentRoleId = activeRole?.role?.id,
                 configOptionValues = activeRole?.let { CreateSessionModel.roleChoice(it.target).options }.orEmpty(),
-            )
+            ).let { request ->
+                // The first bubble shows the prompt as composed, chips included, not its tokens.
+                val (shown, references) = mentions.shown(prompt)
+                request.copy(displayText = shown, displayReferences = references)
+            }
             dismissKeyboard()
             val picked = attachments
             // Recorded when a chat is started, never when a value changes (web).

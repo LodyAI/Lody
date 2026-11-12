@@ -229,7 +229,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             "queued" -> Delivery.Queued
             "unknown" -> Delivery.Unknown
             else -> Delivery.Failed
-        }, it.request.attachments.map { block -> MessageAttachment(block.optString("fileName", block.optString("name", "attachment")), block.optString("type") == "image") })
+        }, it.request.attachments.map { block -> MessageAttachment(block.optString("fileName", block.optString("name", "attachment")), block.optString("type") == "image") },
+            it.request.displayText?.let { shown -> shown to it.request.displayReferences })
     }
     val pending = remember(firstTurn, outgoing, authorsByMessage) {
         (listOfNotNull(firstTurn) + outgoing).filter { it.turnId !in authorsByMessage }
@@ -242,7 +243,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 entry.copy(who = senderIdentity(userId, context.me, members[userId ?: context.me?.id], memberLabel, entry.who.time))
             } else entry
         } + pending.map {
-            ChatEntry.User(it.turnId, mentions.presentation(androidx.compose.ui.graphics.Color.Unspecified).filter(androidx.compose.ui.text.AnnotatedString(it.text)).text.text, senderIdentity(null, context.me, members[context.me?.id], memberLabel, turnTime(it.at)), it.delivery, it.attachments)
+            // The composer's own labels and chips (the new chat's first turn carries them, as this
+            // conversation's catalog may not list its references yet); else this composer's.
+            val (text, references) = it.shown ?: mentions.shown(it.text)
+            ChatEntry.User(it.turnId, text, senderIdentity(null, context.me, members[context.me?.id], memberLabel, turnTime(it.at)), it.delivery, it.attachments, references)
         }
     }
     val creationUnconfirmed = creation != null && creation.request.turnId !in forgotten && creation.state !in setOf("accepted", "queued") && creation.request.turnId !in authorsByMessage
@@ -1149,7 +1153,11 @@ private fun RoundButton(icon: ImageVector, label: String, modifier: Modifier = M
     }
 }
 
-private data class Outgoing(val turnId: String, val text: String, val at: String, val delivery: Delivery, val attachments: List<MessageAttachment> = emptyList())
+private data class Outgoing(
+    val turnId: String, val text: String, val at: String, val delivery: Delivery, val attachments: List<MessageAttachment> = emptyList(),
+    /** Text and chip ranges as the sending composer showed them, when it recorded them. */
+    val shown: Pair<String, List<app.lody.android.runtime.MessageReference>>? = null,
+)
 
 internal fun delivery(status: String) = when (status) {
     // Execution failure/cancellation still acknowledges receipt, as on desktop.
