@@ -180,3 +180,28 @@ export function e2eeCreationChoice(input: {
 export function isE2eeCreationNotEnabled(error: unknown): boolean {
   return e2eeCreationErrorCode(error) === 'e2ee_creation_not_enabled';
 }
+
+export type PendingE2eeRequestLists = {
+  active: PendingE2eeWorkspace[];
+  archived: PendingE2eeWorkspace[];
+};
+
+/** Keep the previous lists when storage holds the same requests, so re-reading
+ * storage never re-renders a form for an unchanged list. */
+export function keepSameRequestLists(
+  previous: PendingE2eeRequestLists,
+  next: PendingE2eeRequestLists
+): PendingE2eeRequestLists {
+  const same = (a: PendingE2eeWorkspace[], b: PendingE2eeWorkspace[]) =>
+    a.length === b.length &&
+    a.every(
+      (item, index) =>
+        item.accountId === b[index]!.accountId &&
+        item.requestId === b[index]!.requestId &&
+        item.name === b[index]!.name &&
+        item.slug === b[index]!.slug
+    );
+  return same(previous.active, next.active) && same(previous.archived, next.archived)
+    ? previous
+    : next;
+}

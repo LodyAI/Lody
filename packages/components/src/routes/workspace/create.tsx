@@ -19,8 +19,10 @@ import {
   isE2eeCreationNotEnabled,
 } from '@/lib/create-e2ee-workspace';
 import {
-  listPendingE2eeWorkspaces,
+  isPendingE2eeCreationStorageKey,
+  listPendingE2eeWorkspacesByArchive,
   savePendingE2eeWorkspace,
+  setPendingE2eeWorkspaceArchived,
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -141,7 +143,9 @@ function CreateWorkspaceAuthed({
   const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
   const [encrypted, setEncrypted] = useState(false);
   const [pendingCreation, setPendingCreation] = useState<PendingE2eeWorkspace | null>(null);
+  // Default list only; archived requests stay saved and are listed separately.
   const [pendingRequests, setPendingRequests] = useState<PendingE2eeWorkspace[]>([]);
+  const [archivedRequests, setArchivedRequests] = useState<PendingE2eeWorkspace[]>([]);
   const [intentAccount, setIntentAccount] = useState<string | null>(null);
   const [intentReadFailed, setIntentReadFailed] = useState(false);
   const submitInFlight = useRef(false);
@@ -198,20 +202,46 @@ function CreateWorkspaceAuthed({
     featureEnabled: creationEnabled,
     selected: encrypted,
     resumable: Boolean(currentPending),
-    savedRequests: pendingRequests.length,
+    savedRequests: pendingRequests.length + archivedRequests.length,
   });
   const useEncryption = creationChoice.encrypt;
+  const pendingCreationRef = useRef(pendingCreation);
+  pendingCreationRef.current = pendingCreation;
+  // Leave the selected saved request without touching it: the form starts a new,
+  // independent intent. Never used for a request this page is still submitting.
+  const detachFromRequest = useCallback(() => {
+    setPendingCreation(null);
+    setWorkspaceName('');
+    resetWorkspaceSlug();
+    setEncrypted(creationEnabled);
+  }, [creationEnabled, resetWorkspaceSlug]);
+  const applyRequestLists = useCallback(
+    (lists: { active: PendingE2eeWorkspace[]; archived: PendingE2eeWorkspace[] }) => {
+      setPendingRequests(lists.active);
+      setArchivedRequests(lists.archived);
+      const selected = pendingCreationRef.current;
+      if (
+        selected &&
+        !submitInFlight.current &&
+        lists.archived.some((request) => request.requestId === selected.requestId)
+      )
+        detachFromRequest();
+    },
+    [detachFromRequest]
+  );
   useEffect(() => {
     setPendingCreation(null);
     setPendingRequests([]);
+    setArchivedRequests([]);
     setCreating(false);
     setEncrypted(false);
     setIntentReadFailed(false);
     if (!accountId) return;
     try {
-      const requests = listPendingE2eeWorkspaces(localStorage, accountId);
-      setPendingRequests(requests);
-      const pending = requests[0] ?? null;
+      const lists = listPendingE2eeWorkspacesByArchive(localStorage, accountId);
+      setPendingRequests(lists.active);
+      setArchivedRequests(lists.archived);
+      const pending = lists.active[0] ?? null;
       setPendingCreation(pending);
       setWorkspaceName(pending?.name ?? '');
       if (pending) setWorkspaceSlug(pending.slug);
@@ -225,9 +255,9 @@ function CreateWorkspaceAuthed({
   useEffect(() => {
     if (!accountId) return undefined;
     const refresh = (event: StorageEvent) => {
-      if (event.key !== null && !event.key.startsWith('lody-e2ee-pending-creation:')) return;
+      if (!isPendingE2eeCreationStorageKey(event.key)) return;
       try {
-        setPendingRequests(listPendingE2eeWorkspaces(localStorage, accountId));
+        applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
         setIntentReadFailed(false);
       } catch {
         setIntentReadFailed(true);
@@ -235,7 +265,7 @@ function CreateWorkspaceAuthed({
     };
     window.addEventListener('storage', refresh);
     return () => window.removeEventListener('storage', refresh);
-  }, [accountId]);
+  }, [accountId, applyRequestLists]);
   // Individual unreadable intents stay isolated in storage. A failure to read
   // storage itself still blocks encrypted creation because intent durability
   // cannot be established.
@@ -475,7 +505,7 @@ function CreateWorkspaceAuthed({
         // Persist before generating an identity or sending a request. A lost
         // response reuses these exact fields after reload, including its slug.
         savePendingE2eeWorkspace(localStorage, intent);
-        setPendingRequests(listPendingE2eeWorkspaces(localStorage, accountId));
+        applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
         setIntentReadFailed(false);
         setPendingCreation(intent);
         const result = await createPreparedE2eeWorkspace(port, localStorage, intent);
@@ -566,10 +596,16 @@ function CreateWorkspaceAuthed({
       let removed = false;
       if (useEncryption && currentPending) {
         try {
-          const requests = listPendingE2eeWorkspaces(localStorage, accountId);
-          setPendingRequests(requests);
-          removed = !requests.some((request) => request.requestId === currentPending.requestId);
+          const lists = listPendingE2eeWorkspacesByArchive(localStorage, accountId);
+          setPendingRequests(lists.active);
+          setArchivedRequests(lists.archived);
+          const same = (request: PendingE2eeWorkspace) =>
+            request.requestId === currentPending.requestId;
+          removed = !lists.active.some(same) && !lists.archived.some(same);
           if (removed) setPendingCreation(null);
+          // Another window archived it while this submit ran: the late result stays
+          // in the archive instead of reviving the row or holding this form.
+          else if (lists.archived.some(same)) detachFromRequest();
         } catch {
           // Storage stays authoritative; the next page load reads it again.
         }
@@ -593,6 +629,27 @@ function CreateWorkspaceAuthed({
     } finally {
       submitInFlight.current = false;
       if (accountRef.current === accountId) setCreating(false);
+    }
+  };
+
+  const handleArchiveRequest = (requestId: string, archived: boolean) => {
+    if (!accountId || submitInFlight.current || creating || intentAccount !== accountId) return;
+    const request = (archived ? pendingRequests : archivedRequests).find(
+      (item) => item.requestId === requestId && item.accountId === accountId
+    );
+    if (!request) return;
+    try {
+      setPendingE2eeWorkspaceArchived(localStorage, request, archived);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to change saved creation request archive:', err);
+      setError(t('e2ee.create.archiveFailed'));
+    }
+    try {
+      applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
+      setIntentReadFailed(false);
+    } catch {
+      setIntentReadFailed(true);
     }
   };
 
@@ -632,6 +689,9 @@ function CreateWorkspaceAuthed({
             paidRequired={paidRequired}
             onChange={setEncrypted}
             requests={pendingRequests.filter((request) => request.accountId === accountId)}
+            archivedRequests={archivedRequests.filter((request) => request.accountId === accountId)}
+            onArchiveRequest={(requestId) => handleArchiveRequest(requestId, true)}
+            onRestoreRequest={(requestId) => handleArchiveRequest(requestId, false)}
             selectedRequestId={currentPending?.requestId ?? null}
             onSelectRequest={(requestId) => {
               const pending = pendingRequests.find(

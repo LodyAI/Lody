@@ -1,6 +1,6 @@
 import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { useAtomValue } from 'jotai';
@@ -16,13 +16,18 @@ import {
   e2eeCreationAvailability,
   e2eeCreationIntent,
   isE2eeCreationNotEnabled,
+  keepSameRequestLists,
   pendingCreationRemoved,
+  type PendingE2eeRequestLists,
 } from '@/lib/create-e2ee-workspace';
 import {
-  listPendingE2eeWorkspaces,
+  isPendingE2eeCreationStorageKey,
+  listPendingE2eeWorkspacesByArchive,
   savePendingE2eeWorkspace,
+  setPendingE2eeWorkspaceArchived,
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
+import { E2eeCreationRequestList } from '@/components/pages/e2ee-creation-request-list';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
@@ -34,6 +39,8 @@ import { AlertDialog } from '@/ui/dialog';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { cn } from '@/lib/utils';
+
+const NO_REQUESTS: PendingE2eeRequestLists = { active: [], archived: [] };
 
 export type MobileCreateWorkspaceSheetProps = {
   open: boolean;
@@ -79,6 +86,7 @@ export function MobileCreateWorkspaceSheet({
   const [creating, setCreating] = useState(false);
   const [encrypted, setEncrypted] = useState(false);
   const [pendingCreation, setPendingCreation] = useState<PendingE2eeWorkspace | null>(null);
+  const [requestLists, setRequestLists] = useState<PendingE2eeRequestLists>(NO_REQUESTS);
   const submitInFlight = useRef(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [intentReadFailed, setIntentReadFailed] = useState(false);
@@ -109,9 +117,15 @@ export function MobileCreateWorkspaceSheet({
   // Recover the exact saved intent on every open. A lost create response must
   // retry this requestId, name and handle, never mint a second device identity.
   useEffect(() => {
-    if (!open || !accountId) return;
+    if (!open || !accountId) {
+      setRequestLists(NO_REQUESTS);
+      return;
+    }
     try {
-      const pending = listPendingE2eeWorkspaces(localStorage, accountId)[0] ?? null;
+      const lists = listPendingE2eeWorkspacesByArchive(localStorage, accountId);
+      setRequestLists((previous) => keepSameRequestLists(previous, lists));
+      // Archived requests stay saved but are never resumed automatically.
+      const pending = lists.active[0] ?? null;
       setPendingCreation(pending);
       setResumeNoticeShown(Boolean(pending));
       setIntentReadFailed(false);
@@ -125,6 +139,77 @@ export function MobileCreateWorkspaceSheet({
       setIntentReadFailed(true);
     }
   }, [accountId, open, setSlug]);
+
+  const pendingCreationRef = useRef(pendingCreation);
+  pendingCreationRef.current = pendingCreation;
+  // Leave the selected saved request untouched and start an independent new intent.
+  // Never used for a request this sheet is still submitting.
+  const detachFromRequest = useCallback(() => {
+    setPendingCreation(null);
+    setResumeNoticeShown(false);
+    setName('');
+    setEncrypted(false);
+    resetSlug();
+  }, [resetSlug]);
+  const refreshRequestLists = useCallback(
+    (owner: string) => {
+      try {
+        const lists = listPendingE2eeWorkspacesByArchive(localStorage, owner);
+        setRequestLists((previous) => keepSameRequestLists(previous, lists));
+        setIntentReadFailed(false);
+        const selected = pendingCreationRef.current;
+        if (
+          selected &&
+          !submitInFlight.current &&
+          lists.archived.some((request) => request.requestId === selected.requestId)
+        )
+          detachFromRequest();
+        return lists;
+      } catch {
+        setIntentReadFailed(true);
+        return null;
+      }
+    },
+    [detachFromRequest]
+  );
+  useEffect(() => {
+    if (!open || !accountId) return undefined;
+    const refresh = (event: StorageEvent) => {
+      if (isPendingE2eeCreationStorageKey(event.key)) refreshRequestLists(accountId);
+    };
+    window.addEventListener('storage', refresh);
+    return () => window.removeEventListener('storage', refresh);
+  }, [accountId, open, refreshRequestLists]);
+
+  const handleArchiveRequest = (requestId: string, archived: boolean) => {
+    if (!accountId || creating || submitInFlight.current) return;
+    const request = (archived ? requestLists.active : requestLists.archived).find(
+      (item) => item.requestId === requestId && item.accountId === accountId
+    );
+    if (!request) return;
+    try {
+      setPendingE2eeWorkspaceArchived(localStorage, request, archived);
+      setCreateError(null);
+    } catch (err) {
+      console.error('Failed to change saved creation request archive:', err);
+      setCreateError(t('e2ee.create.archiveFailed'));
+    }
+    refreshRequestLists(accountId);
+  };
+
+  const handleSelectRequest = (requestId: string) => {
+    if (creating || submitInFlight.current || !accountId) return;
+    const request = requestLists.active.find(
+      (item) => item.requestId === requestId && item.accountId === accountId
+    );
+    if (!request) return;
+    setPendingCreation(request);
+    setResumeNoticeShown(true);
+    setName(request.name);
+    setSlug(request.slug);
+    setEncrypted(true);
+    setCreateError(null);
+  };
 
   // Account changes drop only this component's recovered intent. The saved
   // request stays on disk for that same account's next open.
@@ -170,6 +255,7 @@ export function MobileCreateWorkspaceSheet({
       setName('');
       setEncrypted(false);
       setPendingCreation(null);
+      setRequestLists(NO_REQUESTS);
       setResumeNoticeShown(false);
       setCreateError(null);
       resetSlug();
@@ -197,6 +283,7 @@ export function MobileCreateWorkspaceSheet({
         savePendingE2eeWorkspace(localStorage, intent);
         submitted = intent;
         setPendingCreation(intent);
+        refreshRequestLists(accountId);
         const created = await createPreparedE2eeWorkspace(port, localStorage, intent);
         handleClose(false);
         onCreated?.(created.slug, created.workspaceId);
@@ -211,9 +298,17 @@ export function MobileCreateWorkspaceSheet({
         const removed = Boolean(
           submitted && pendingCreationRemoved(localStorage, accountId, submitted.requestId)
         );
+        const lists = accountId ? refreshRequestLists(accountId) : null;
         if (removed) {
           setPendingCreation(null);
           setResumeNoticeShown(false);
+        } else if (
+          submitted &&
+          lists?.archived.some((request) => request.requestId === submitted?.requestId)
+        ) {
+          // Archived in another window during this submit: keep it archived and
+          // free this form instead of reviving the request here.
+          detachFromRequest();
         } else if (!isE2eeCreationNotEnabled(err)) {
           setResumeNoticeShown(true);
         }
@@ -300,6 +395,16 @@ export function MobileCreateWorkspaceSheet({
                     ) : null}
                   </Alert.Root>
                 ) : null}
+
+                <E2eeCreationRequestList
+                  requests={requestLists.active}
+                  archivedRequests={requestLists.archived}
+                  selectedRequestId={pendingOwned ? (pendingCreation?.requestId ?? null) : null}
+                  disabled={creating}
+                  onSelectRequest={handleSelectRequest}
+                  onArchiveRequest={(requestId) => handleArchiveRequest(requestId, true)}
+                  onRestoreRequest={(requestId) => handleArchiveRequest(requestId, false)}
+                />
 
                 <div className="space-y-1.5">
                   <UiField.Label
@@ -479,6 +584,7 @@ export function MobileCreateWorkspaceSheet({
                     setCreateError(null);
                     resetSlug();
                     setDiscardConfirmOpen(false);
+                    if (accountId) refreshRequestLists(accountId);
                   }}
                 >
                   {t('e2ee.create.discardConfirmAction', 'Discard request')}
