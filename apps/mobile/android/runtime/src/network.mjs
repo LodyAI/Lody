@@ -4,7 +4,7 @@ import {contractBridge} from './contract-bridge.mjs';
 import '../vendor/cloud-runtime/src/runtime/index.ts';
 import {createDispatcher,HOST_PROTOCOL,CORE_CAPABILITIES} from './dispatch.mjs';
 import {createReadAccess} from './read-access.mjs';
-import {createCommands} from './create-commands.mjs';
+import {createCommands,billingEntitlement} from './create-commands.mjs';
 import {controlTurn,itemDetail,sendTurn,stopSessions} from '../vendor/cloud-runtime/src/runtime/session.ts';
 import {cloudCommands} from './cloud-commands.mjs';
 import {providerCommands} from './provider-commands.mjs';
@@ -33,7 +33,7 @@ const detail={
  archiveSession:(sessionId,archived)=>{if(!identity)throw Error("not_connected");if(typeof archived!=='boolean')throw Error('invalid_action');return runtime.archiveSession({workspaceId:identity.workspaceId,sessionId,archived});},
  messageAction: (kind, input) => {
   if (!identity || !input || !['edit','fork'].includes(kind) || !['read','send'].includes(input.action)) throw Error('invalid_action');
-  const args={...input,workspaceId:identity.workspaceId,userId:identity.userId};
+  const args={...input,workspaceId:identity.workspaceId,userId:identity.userId,billingEntitlement:billingEntitlement(input.billingEntitlement)};
   return kind==='edit' ? runtime.editSession(args) : runtime.forkSession(args);
  },
  createTab:(parentSessionId,sessionId,title,preferRoost)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.createTab({workspaceId:scope.workspaceId,parentSessionId,sessionId,title,preferRoost:preferRoost===true});},
@@ -61,4 +61,4 @@ const sendWithReferences = args => sendTurn(args, async text => {
  return {text:expanded,spans:referenceSpans(expanded,items)};
 });
 globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...proposalCommands(runtime,()=>identity),...providerCommands(runtime,()=>identity),...roleCommands(runtime,()=>identity),...shortcutCommands(runtime,()=>identity),...detail});
-emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','archiveSession','schedules','scheduleDetail','scheduleCommand','decideProposal','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings','sessionPreview','iosSimulatorControl','androidEmulatorControl','previewTokenReply']});
+emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','turnQuota','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','archiveSession','schedules','scheduleDetail','scheduleCommand','decideProposal','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings','sessionPreview','iosSimulatorControl','androidEmulatorControl','previewTokenReply']});

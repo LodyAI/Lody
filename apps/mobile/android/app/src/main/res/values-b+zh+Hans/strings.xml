@@ -178,6 +178,17 @@
     <string name="chat_attach_remove">移除</string>
     <string name="chat_attach_limit">每条消息最多 8 张图片和 8 个文件。</string>
     <string name="chat_attach_failed">附件上传失败，消息未发送。</string>
+    <string name="chat_attach_too_large">文件不能超过 %1$d MB：%2$s</string>
+    <plurals name="chat_free_turns_remaining">
+        <item quantity="other">免费会话 · 还可发送 %d 条消息</item>
+    </plurals>
+    <string name="chat_free_turn_limit">免费会话 · 已达到 %d 条消息上限</string>
+    <string name="chat_free_turn_limit_reached">此免费会话已达到 30 轮用户对话上限。消息未发送，草稿已保存。</string>
+    <string name="create_free_session_limit_reached">此免费工作区已达到 200 个会话上限，新会话未创建。</string>
+    <string name="chat_workspace_payment_required">请先完成工作区设置，再创建会话或发送消息。</string>
+    <string name="chat_free_turn_limit_title">免费会话已到上限</string>
+    <string name="chat_free_turn_limit_body">这个免费会话已达到 %d 条消息上限，输入栏已关闭。</string>
+    <string name="chat_composer_quota_closed">已达到消息上限</string>
     <string name="create_search_branches">搜索分支</string>
     <string name="create_more_branches">更多分支…</string>
     <string name="create_mode_auto">Auto</string>

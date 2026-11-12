@@ -34,8 +34,13 @@ sealed interface RuntimeCommand {
     data class GetCreationOptions(val projectId: String?, val agentConfigId: String? = null) : RuntimeCommand
     /** The workspace's Agent Roles readable by this user. Read only. */
     data object ListAgentRoles : RuntimeCommand
-    data class CreateAndSend(val request: CreateRequest) : RuntimeCommand
-    data class SendText(val request: SendTextRequest) : RuntimeCommand
+    /** [billing]: the workspace plan projection the cloud runtime reads per write (null fails open). */
+    data class CreateAndSend(val request: CreateRequest, val billing: org.json.JSONObject? = null) : RuntimeCommand
+    data class SendText(val request: SendTextRequest, val billing: org.json.JSONObject? = null) : RuntimeCommand
+    /** The workspace's plan tier (`free` / `plus` / `enterprise`) for the free-turn notice; null when unknown. Read only. */
+    data object WorkspacePlan : RuntimeCommand
+    /** The free-plan turn quota alone (upstream `checkTurnQuota`), before attachments upload; answers [RuntimeResult.Sent]. Read only. */
+    data class TurnQuota(val sessionId: String, val billing: org.json.JSONObject? = null) : RuntimeCommand
     data class WatchSession(val id: String) : RuntimeCommand
     data class LoadOlderSession(val id: String) : RuntimeCommand
     data class RetryPendingInput(val sessionId: String, val inputId: String) : RuntimeCommand
@@ -65,7 +70,7 @@ sealed interface RuntimeCommand {
     data class ShortcutBody(val id: String) : RuntimeCommand
     /** Stops the watched session's running turn (upstream `controlTurn`). A write, never retried. */
     data class StopTurn(val sessionId: String, val machineId: String, val turnId: String) : RuntimeCommand
-    data class MessageAction(val kind: String, val payload: org.json.JSONObject) : RuntimeCommand
+    data class MessageAction(val kind: String, val payload: org.json.JSONObject, val billing: org.json.JSONObject? = null) : RuntimeCommand
     /** The workspace's schedules and the zones their rules are authored in. Read only. */
     data object ListSchedules : RuntimeCommand
     /** One schedule with its prompt, model, mode and project. Read only. */
@@ -107,6 +112,7 @@ sealed interface RuntimeResult {
     /** A proposal's recorded outcome (`saved` / `created` / `dismissed`). */
     data class ProposalDecided(val outcome: String, val scheduleId: String? = null) : RuntimeResult
     data class Created(val value: CreationReceipt) : RuntimeResult
+    data class Plan(val tier: String?) : RuntimeResult
     /** Upstream send state (`sent` / `queued` / `not_sent` / `unknown`); a machine ACK is delivery only. */
     data class Sent(val state: String, val reason: String? = null) : RuntimeResult
     data object Accepted : RuntimeResult
@@ -353,6 +359,8 @@ data class SessionSnapshot(
     val preview: BrowserPreview? = null,
     val historyHasMore: Boolean = false,
     val historyLoading: Boolean = false,
+    /** User turns plus queued inputs, as the free-plan turn quota counts them; null when unknown. */
+    val billableTurnCount: Int? = null,
 )
 sealed interface RuntimeEvent {
     data class ProvidersChanged(val machineId: String) : RuntimeEvent
@@ -376,6 +384,8 @@ data class OwnedRuntimeState(val scope: RuntimeScope? = null, val status: Runtim
 /** Stage-2 port. Phase 1 has no credential provider implementation or cloud capability. */
 fun interface GrantProvider { suspend fun request(scope: RuntimeScope): ShortLivedGrant }
 /** Makes one allow-listed `promptShortcuts:*` Convex call for [scope] with the verified account; throws on failure. */
+/** Reads [scope]'s workspace plan projection with the verified account; null (or a throw) fails open. */
+fun interface BillingProvider { suspend fun entitlement(scope: RuntimeScope): org.json.JSONObject? }
 fun interface ShortcutCloudProvider { suspend fun call(scope: RuntimeScope, operation: String, args: org.json.JSONObject): Any? }
 /**
  * Mints one preview-control request token for [scope] with the verified account: the token string,

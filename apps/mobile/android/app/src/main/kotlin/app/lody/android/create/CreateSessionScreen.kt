@@ -184,10 +184,12 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     catch (_: Exception) { null }
                 }
             }
-            val merged = attachments + picked
+            val oversized = picked.filter(SessionAttachmentUploads::oversized)
+            val merged = attachments + (picked - oversized.toSet())
             val kept = merged.filter { it.image }.take(8) + merged.filter { !it.image }.take(8)
             attachments = merged.filter { it in kept }
-            if (kept.size < merged.size) snackbar.showSnackbar(attachLimit)
+            if (oversized.isNotEmpty()) snackbar.showSnackbar(context.getString(R.string.chat_attach_too_large, SessionAttachmentUploads.FILE_LIMIT_MB, oversized.first().name))
+            else if (kept.size < merged.size) snackbar.showSnackbar(attachLimit)
             else if (picked.size < uris.size) snackbar.showSnackbar(uploadFailed)
         }
     }
