@@ -33,7 +33,7 @@ import {
 } from '@lody/e2ee-client/vault-replacement'
 import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/services'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { open, rename, rm, type FileHandle } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { Effect, Exit, Layer, Result, type Scope } from 'effect'
@@ -636,7 +636,14 @@ export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
         genesis: anchor.genesis,
         pages: () => readRecoveryHistory(input.history)
       })
-      let admission = ''
+      // Identity-bound across first admission, failed adoption and later R-only key repair.
+      const pairingSessionId = createHash('sha256')
+        .update('lody-e2ee/recovery-personal-join/v1\0')
+        .update(anchor.genesis.toBytes())
+        .update(device.publicKey.toBytes())
+        .update(anchor.recovery.toBytes())
+        .digest('hex')
+        .slice(0, 32)
       return {
         personalSigner: device,
         personal: { ...device, encryptionPublicKey: device.enc },
@@ -656,7 +663,7 @@ export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
         }),
         submitOriginalAsRecovery: (record, _identity, credential) =>
           Effect.gen(function* () {
-            admission = hexOf(hashRecordBytes(record).toBytes())
+            const admission = hexOf(hashRecordBytes(record).toBytes())
             // A retry after a failed install: the admission already landed.
             const pages = yield* readRecoveryHistory(input.history)
             if (pages.some((page) => page.recordsHex.includes(hexOf(record)))) {
@@ -684,7 +691,7 @@ export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
               genesisRecordHex,
               membershipId,
               endorser: hexOf(anchor.recovery.toBytes()),
-              pairingSessionId: admission.slice(0, 32),
+              pairingSessionId,
               pages,
               recovered
             })
@@ -734,3 +741,76 @@ export const inspectRecoveryFile = (io: RecoveryVaultIo & { readonly file: Uint8
       ),
     (file) => Effect.sync(() => file.fill(0))
   )
+
+/** Adopt verified recovery history once, or repair keys on the existing completed identity.
+ * Only missing identity permits preparing a join; corruption and foreign pins propagate.
+ * All history is already fetched, so this local owner turn performs no network work. */
+export const adoptRecoveredWorkspace = Effect.fnUntraced(function* (input: {
+  readonly workspaceId: string
+  readonly genesisHash: string
+  readonly join: {
+    readonly genesisRecordHex: string
+    readonly membershipId: string
+    readonly endorser: string
+    readonly pairingSessionId: string
+    readonly pages: readonly import('@lody/cloud-api').E2eeWorkspaceHistoryPage[]
+    readonly recovered: readonly (readonly [number, Bytes.EpochKey])[]
+  }
+  readonly bootstrap: Pick<
+    Effect.Success<ReturnType<typeof import('./e2ee-bootstrap.mjs').makeDesktopE2eeBootstrap>>,
+    'creationFor' | 'prepareRecoveryPersonalJoin' | 'acceptPersonalHistory'
+  >
+  readonly host: Pick<
+    Effect.Success<ReturnType<typeof import('./e2ee-runtime.mjs').makeDesktopE2eeRuntimeHost>>,
+    'open' | 'ingestLedgerRecords' | 'installRecoveredKeys'
+  >
+}) {
+  const { workspaceId, genesisHash, join, bootstrap, host } = input
+  const existing = yield* Effect.result(bootstrap.creationFor(workspaceId))
+  if (Result.isSuccess(existing)) {
+    if (
+      existing.success.genesisHash !== genesisHash ||
+      Buffer.from(existing.success.record).toString('hex') !== join.genesisRecordHex
+    )
+      return yield* Effect.fail({ code: 'conflict' })
+  } else {
+    const error = existing.failure
+    if (
+      !(
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'missing-binding'
+      )
+    )
+      return yield* Effect.fail(error)
+    yield* bootstrap.prepareRecoveryPersonalJoin(
+      {
+        version: 1,
+        workspaceId,
+        genesisHash,
+        genesisRecordHex: join.genesisRecordHex,
+        endorser: join.endorser,
+        membershipId: join.membershipId,
+        pairingSessionId: join.pairingSessionId
+      },
+      join.pages
+    )
+    yield* bootstrap.acceptPersonalHistory(workspaceId, join.pages)
+  }
+  let current = yield* host.open(workspaceId)
+  if (current.genesisHash !== genesisHash) return yield* Effect.fail({ code: 'conflict' })
+  for (const page of join.pages) {
+    // A completed snapshot origin need not retain the earlier prefix. Feed only
+    // the verified suffix, retaining each original page's exact end locator.
+    const end = page.startIndex + page.recordsHex.length
+    if (end <= current.length) continue
+    const start = Math.max(page.startIndex, current.length)
+    current = yield* host.ingestLedgerRecords(workspaceId, {
+      ...page,
+      startIndex: start,
+      recordsHex: page.recordsHex.slice(start - page.startIndex)
+    })
+  }
+  yield* host.installRecoveredKeys(workspaceId, join.recovered)
+})

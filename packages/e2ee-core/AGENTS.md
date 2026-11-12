@@ -59,3 +59,9 @@ and drains admitted reads before returning; index mutations retain their mutex a
 
 The reference mailbox limits each sender to 16 non-rejected envelopes per current
 slot revision; repairs retain historical originals and rejected-digest entries.
+
+Recovery admission may use the highest authenticated committed epoch and its history,
+or the authenticated recovery identity at epoch zero. Report partial key recovery;
+never equate restored governance with current-key readiness. New owner transfers
+require a successor personal device, and last-personal revocation requires explicit
+recovery-loss confirmation in the workflow. Preserve v1 replay rules.

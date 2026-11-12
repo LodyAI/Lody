@@ -297,7 +297,7 @@ See the [pairing decision and protocol review limit](../../.agents/notes/propose
 `prepareVaultRestore` builds a restore plan from an unlocked vault on a device that knows
 nothing about the workspace. The genesis comes only from the authenticated package, and
 the platform's ports open after that. Core then verifies the ledger, the package checkpoint
-and the current-epoch commitment before R admits the new device. No product flow calls it
+and a committed epoch commitment before R admits the new device. No product flow calls it
 yet. [Spec](../../specs/e2ee/recovery-vault.md).
 
 ## Replace a whole vault
@@ -339,11 +339,13 @@ and installs recovered opaque keys through the normal `InstalledEpochKeys`
 commitment/protection/readback boundary. Failed installation remains retryable on
 the same identity. No signer, private key, R or V is returned. The application owns
 vault session lifetime, transports, account guards, entry pins and product rollout.
-Recovery remains opt-in; opening an existing identity does not trigger it.
+Recovery remains opt-in; opening an existing identity does not trigger it. A missing or invalid current envelope permits recovery through the highest available committed key and its verified history; epoch zero also permits authenticated admission without a key. `partialEpochKey` reports newer keys still needing repair or abandonment. Governance admission does not establish current-key readiness. The restore journal stays `partial` until R supplies the current key; another restore resumes the admitted identity without another admission. Epoch-zero delivery still in flight stays `Pending`.
 
 An admitted session exposes explicit `setupRecovery`: signing and installed keys
 stay inside its owned boundary, and the result is recoverable only after core's
-real recovery test. `restoreRecovery` accepts an exact retained offer for a device
+real recovery test. Its key maintenance reads the latest verified epoch after setup
+advances the ledger. Recovery history rejects empty/incomplete pages and verifies
+the first page's declared checkpoint against the complete signed history. `restoreRecovery` accepts an exact retained offer for a device
 whose protected identity remains but workspace keys are missing; package pins still
 must match, and recovery never replaces the identity.
 
@@ -356,3 +358,5 @@ consent and returns true only for a ready workspace. It never starts account pai
 Other-device approval remains a separate choice.
 
 The personal-device session exposes `abandonEpoch(baseEpoch)` through the same Owner-only staged publisher after declaring capability 2, without requiring the current epoch key. Callers own evidence display and explicit confirmation; exact-original retries and history recovery remain in core.
+
+Management rechecks the verified ledger before signing: ownership transfer requires a personal device of the target, and removing the last personal device requires `{ confirmedRecoveryOnly: true }`. The management view exposes `requiresRecoveryConfirmation` for the device dialog; an unconfirmed programmatic call fails with `recovery-only-confirmation-required`.

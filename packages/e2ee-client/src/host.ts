@@ -675,7 +675,11 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
             // Only the admitted session installs recovered opaque keys, through the same
             // InstalledEpochKeys commitment/protection/readback boundary as normal reception.
             yield* openPersonalSession(p, approval, keys.entries()).pipe(Effect.provide(base));
-            return { outcome: 'Committed' as const, offer };
+            return {
+              outcome: 'Committed' as const,
+              partialEpochKey: result.partialEpochKey,
+              offer,
+            };
           })
         );
       })

@@ -142,6 +142,10 @@ export interface E2eeManagementState {
     machineId: string | null;
     self: boolean;
     mayRevoke: boolean;
+    /** Removing this member's last personal device leaves recovery credentials as its only way back. */
+    requiresRecoveryConfirmation?: boolean;
+    /** Whether this member has an active recovery device in the verified ledger. */
+    recoveryDeviceAvailable?: boolean;
   }[];
 }
 /** Purpose-limited account-pairing admission signing. It exposes only the operations
@@ -197,7 +201,11 @@ export interface E2eeWorkspaceRuntime
 
   managementState?(workspaceId: string): Promise<E2eeManagementState>;
   updateKeys?(workspaceId: string): Promise<void>;
-  revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
+  revokeDevice?(
+    workspaceId: string,
+    signingPublicKey: string,
+    confirmation?: { confirmedRecoveryOnly: true }
+  ): Promise<void>;
   /** Explicit management intent; the host signs once and retains the exact original. */
   removeMember?(workspaceId: string, membershipId: string): Promise<void>;
   /** Owner-only Admin promotion/demotion, checked against the latest verified ledger. */

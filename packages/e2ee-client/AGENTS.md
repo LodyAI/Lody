@@ -97,3 +97,8 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Automatic pairing approval signs only after the person types the code the new
   device shows and it equals this device's derived code. Reviews never expose that
   code, and the third wrong entry ends the request on the approver before any signing.
+
+- Management exposes last-personal-device risk from the verified ledger and requires
+  explicit recovery-only confirmation before signing its revocation. Restores report
+  partial epoch-key recovery separately from admission and content readiness, and
+  retain its retryable journal until the current epoch key is installed.

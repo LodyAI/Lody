@@ -61,6 +61,7 @@ import {
   recentAccountSecurityEvents,
   recoveryReplacementPlan,
   recoveryRestoreTarget,
+  adoptRecoveredWorkspace,
   recoveryVaultEnabled,
   recoveryVaultFailure,
   restoreAccountWorkspaces,
@@ -3505,10 +3506,18 @@ export class E2eeIpc extends ProductWindowIpcService {
     await this.manage(workspaceId, { type: 'rotate' })
   }
   @IpcMethod()
-  async revokeDevice(workspaceId: string, signingPublicKey: string) {
+  async revokeDevice(
+    workspaceId: string,
+    signingPublicKey: string,
+    confirmation?: { confirmedRecoveryOnly: true }
+  ) {
     if (typeof signingPublicKey !== 'string' || !/^[0-9a-f]{64}$/.test(signingPublicKey))
       throw new Error('e2ee_invalid-input')
-    await this.manage(workspaceId, { type: 'revoke', target: signingPublicKey })
+    await this.manage(workspaceId, {
+      type: 'revoke',
+      target: signingPublicKey,
+      confirmedRecoveryOnly: confirmation?.confirmedRecoveryOnly === true
+    })
   }
   @IpcMethod()
   async status(workspaceId: string) {
@@ -4018,19 +4027,12 @@ export class E2eeIpc extends ProductWindowIpcService {
                       Effect.tryPromise(() =>
                         withDesktopE2eeAccount(
                           (owner) =>
-                            Effect.gen(function* () {
-                              yield* owner.bootstrap.preparePersonalJoin({
-                                version: 1,
-                                workspaceId: row.id,
-                                genesisHash: row.genesisHash,
-                                genesisRecordHex: join.genesisRecordHex,
-                                endorser: join.endorser,
-                                membershipId: join.membershipId,
-                                pairingSessionId: join.pairingSessionId
-                              })
-                              yield* owner.bootstrap.acceptPersonalHistory(row.id, join.pages)
-                              yield* owner.host.open(row.id)
-                              yield* owner.host.installRecoveredKeys(row.id, join.recovered)
+                            adoptRecoveredWorkspace({
+                              workspaceId: row.id,
+                              genesisHash: row.genesisHash,
+                              join,
+                              bootstrap: owner.bootstrap,
+                              host: owner.host
                             }),
                           row.id
                         )

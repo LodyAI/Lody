@@ -5,9 +5,24 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { Deferred, Effect, Fiber, Result, Scope, Exit, Tracer } from 'effect';
+import { Deferred, Effect, Fiber, Result, Scope, Exit, Tracer, Context, Layer } from 'effect';
 import { SubmissionJournal, LedgerLog, LedgerLogError } from '@lody/e2ee-core/services';
-import { LedgerSubmission } from '@lody/e2ee-core';
+import {
+  Bytes,
+  LedgerFeed,
+  VerifiedLedger,
+  LedgerSubmission,
+  makeWorkspaceRecovery,
+  memoryRecoveryEpochKeys,
+} from '@lody/e2ee-core';
+import { createRecoveryVault } from '../../src/internal/recovery/vault';
+import { canonical, parseCanonical } from '../../src/internal/recovery/crypto';
+import { prepareDeviceAdmission, prepareLedgerCommand } from '../../src/internal/ledger/admission';
+import { signLedgerRecord } from '../../src/internal/ledger/signing';
+import { signLedgerSnapshot, type SnapshotTrust } from '@lody/e2ee-core/protocol';
+import { verifyLedger, restoreVerifiedState, type LedgerView } from '../../src/internal/ledger';
+import { WorkspaceScope, LedgerViewSource, LedgerViewSourceError } from '../../src/services';
+import { sqliteLedgerFeedStore, sqliteLedgerPinStore } from '../../src/adapters/node-sqlite';
 import { submissionLayer, submitRecord, resumeSubmission, acknowledgeSubmission } from './fixture';
 import { sqliteSubmissionJournal } from '@lody/e2ee-core/adapters/node-sqlite';
 import { openSqliteStore } from '@lody/e2ee-core/internal';
@@ -54,6 +69,263 @@ const using = <A, E, R>(
   );
 
 describe('durable submission', () => {
+  it.each(['displaced', 'registration', 'recoverable'] as const)(
+    'recovers legacy setup at %s after history retention',
+    async (stage) => {
+      const f = fixture();
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const ok = Result.getOrThrow;
+              const rows = new Map<string, Uint8Array>();
+              const entries = new Map<
+                string,
+                { entryId: string; revision: number; body: Uint8Array }
+              >();
+              let index: { entryId: string; revision: number; body: Uint8Array } | null = null;
+              const local = {
+                read: (key: string) => Effect.sync(() => rows.get(key) ?? null),
+                compareAndSwap: (key: string, expected: Uint8Array | null, next: Uint8Array) =>
+                  Effect.sync(() => {
+                    expect(rows.get(key) ?? null).toEqual(expected);
+                    rows.set(key, next.slice());
+                    return 'Committed' as const;
+                  }),
+                list: (prefix: string) =>
+                  Effect.sync(() =>
+                    [...rows]
+                      .filter(([key]) => key.startsWith(prefix))
+                      .map(([key, value]) => ({ key, value }))
+                  ),
+              };
+              const { vault } = yield* createRecoveryVault({
+                locator: 'synthetic',
+                local,
+                store: {
+                  putImmutable: (_id, entry) =>
+                    Effect.sync(() => {
+                      entries.set(entry.entryId, entry);
+                    }),
+                  readEntry: (_id, key) => Effect.sync(() => entries.get(key) ?? null),
+                  readIndex: () => Effect.sync(() => index),
+                  compareAndSwapIndex: (_id, _expected, next) =>
+                    Effect.sync(() => {
+                      index = next;
+                      return 'Committed' as const;
+                    }),
+                  deleteUnreferenced: () => Effect.void,
+                },
+              });
+              const signer = {
+                publicKey: ok(Bytes.signingPublicKey(owner.pk)),
+                sign: (bytes: Uint8Array) => Effect.succeed(ok(Bytes.signature(owner.sign(bytes)))),
+              };
+              const installed = memoryRecoveryEpochKeys();
+              yield* Effect.addFinalizer(() => Effect.sync(() => installed.dispose()));
+              let conflict = true;
+              let compactView: LedgerView | undefined;
+              const input = {
+                vault,
+                local,
+                genesis: anchor,
+                membershipId: ok(Bytes.membershipId(filled(10, 16))),
+                personalSigner: signer,
+                installed,
+                ledger: () =>
+                  Effect.sync(() =>
+                    ok(
+                      compactView
+                        ? Result.succeed(compactView)
+                        : verifyLedger({
+                            anchor,
+                            records: f.remote.read(),
+                            checkpoint: checkpoint(f.remote.read()),
+                          })
+                    )
+                  ),
+                trust: {
+                  source: 'synthetic',
+                  genesisRecord: genesis,
+                  head: Buffer.from(hashRecordBytes(genesis).toBytes()).toString('hex'),
+                  length: 1,
+                },
+                fetchCurrentEnvelope: () => Effect.succeed({ pending: true as const }),
+                submitOriginal: (record: Uint8Array) =>
+                  conflict
+                    ? Effect.succeed({ outcome: 'Conflict' as const, record })
+                    : using(
+                        f,
+                        Effect.gen(function* () {
+                          const result = yield* submitRecord(anchor, record);
+                          yield* acknowledgeSubmission(anchor, result);
+                          return result;
+                        })
+                      ),
+              };
+              const workflow = yield* makeWorkspaceRecovery(input);
+              expect((yield* workflow.setup()).outcome).toBe('Conflict');
+              const [key, raw] = [...rows].find(([key]) => key.includes('/workspace/'))!;
+              const legacy = parseCanonical(raw) as Record<string, unknown>;
+              const original = legacy.record as Uint8Array;
+              delete legacy.recordPosition;
+              rows.set(key, canonical(legacy));
+              if (stage !== 'displaced') f.remote.append(original);
+              const view = yield* input.ledger();
+              const peer = keys(2);
+              const command = yield* prepareDeviceAdmission({
+                genesis: anchor,
+                membershipId: input.membershipId,
+                encryptionPublicKey: ok(Bytes.encryptionPublicKey(filled(102))),
+                kind: 'personal',
+                signer: {
+                  publicKey: ok(Bytes.signingPublicKey(peer.pk)),
+                  sign: (bytes) => Effect.succeed(ok(Bytes.signature(peer.sign(bytes)))),
+                },
+              });
+              f.remote.append(
+                yield* signLedgerRecord(
+                  ok(prepareLedgerCommand(view, signer.publicKey, command)),
+                  signer
+                )
+              );
+              if (stage !== 'displaced') {
+                // The original admission landed, but its early hashes are no longer
+                // retained. Exercise both the unfinished and already-finished journal.
+                legacy.stage = stage;
+                rows.set(key, canonical(legacy));
+                let snapOrigin!: {
+                  view: LedgerView;
+                  bytes: Uint8Array;
+                  trust: SnapshotTrust;
+                };
+                for (let n = 0; n < 34; n++) {
+                  const device = keys(n + 3);
+                  const signer = {
+                    publicKey: ok(Bytes.signingPublicKey(device.pk)),
+                    sign: (bytes: Uint8Array) =>
+                      Effect.succeed(ok(Bytes.signature(device.sign(bytes)))),
+                  };
+                  const admission = yield* prepareDeviceAdmission({
+                    genesis: anchor,
+                    membershipId: input.membershipId,
+                    encryptionPublicKey: ok(Bytes.encryptionPublicKey(filled(n + 3))),
+                    kind: 'personal',
+                    signer,
+                  });
+                  for (const command of n === 33
+                    ? [admission]
+                    : [admission, { _tag: 'RevokeDevice', target: signer.publicKey } as const]) {
+                    const view = yield* input.ledger();
+                    f.remote.append(
+                      yield* signLedgerRecord(
+                        ok(prepareLedgerCommand(view, input.personalSigner.publicKey, command)),
+                        input.personalSigner
+                      )
+                    );
+                  }
+                  if (n === 0) {
+                    const snapView = yield* input.ledger();
+                    const endorsed = yield* signLedgerSnapshot({
+                      signer: input.personalSigner,
+                      ledger: () => Effect.succeed(snapView),
+                    });
+                    snapOrigin = {
+                      view: snapView,
+                      bytes: endorsed.snapshot,
+                      trust: {
+                        source: 'external-confirmation',
+                        genesis: anchor,
+                        head: snapView.head,
+                        length: snapView.length,
+                        endorser: input.personalSigner.publicKey,
+                        membershipId: input.membershipId,
+                        role: 'owner',
+                        kind: 'personal',
+                        headSignature: endorsed.headSignature,
+                      },
+                    };
+                  }
+                }
+                const stores = Layer.mergeAll(
+                  sqliteLedgerFeedStore({
+                    path: path.join(f.dir, 'feed.sqlite'),
+                    mode: 'create-or-open',
+                  }),
+                  sqliteLedgerPinStore({
+                    path: path.join(f.dir, 'pin.sqlite'),
+                    mode: 'create-or-open',
+                  })
+                ).pipe(Layer.provideMerge(Layer.succeed(WorkspaceScope, { genesis: anchor })));
+                const context = yield* Layer.build(
+                  LedgerFeed.layer({
+                    origin: {
+                      kind: 'snapshot',
+                      snapshot: {
+                        bytes: snapOrigin.bytes,
+                        trust: snapOrigin.trust,
+                        offset: 'retained:snap',
+                      },
+                    },
+                    expected: { head: snapOrigin.view.head, length: snapOrigin.view.length },
+                    budget: { maxRecords: 1000, maxBytes: 1_000_000 },
+                  }).pipe(Layer.provide(stores))
+                );
+                const feed = Context.get(context, LedgerFeed);
+                yield* feed.accept(
+                  {
+                    requestOffset: 'retained:snap',
+                    nextOffset: 'retained:end',
+                    records: f.remote.read().slice(snapOrigin.view.length),
+                    upToDate: true,
+                  },
+                  checkpoint(f.remote.read())
+                );
+                const verified = VerifiedLedger.layer.pipe(
+                  Layer.provide(stores),
+                  Layer.provide(
+                    Layer.succeed(LedgerViewSource, {
+                      current: () =>
+                        feed.current().pipe(
+                          Effect.map((state) => state.view),
+                          Effect.mapError((cause) => new LedgerViewSourceError({ cause }))
+                        ),
+                    })
+                  )
+                );
+                const saved = yield* feed.rebase().pipe(Effect.provide(verified));
+                compactView = ok(restoreVerifiedState(saved.state));
+                expect(compactView.historyStart).toBeGreaterThan(2);
+                conflict = false;
+                const reopened = yield* makeWorkspaceRecovery(input);
+                // This fixture deliberately holds R's envelope; setup succeeds up to
+                // that independent wait rather than failing on missing old hashes.
+                expect(yield* reopened.setup()).toMatchObject({
+                  outcome: 'Pending',
+                  status: { paired: true },
+                });
+                const completed = parseCanonical(rows.get(key)!) as Record<string, unknown>;
+                expect(completed.record).toBeNull();
+                expect(completed.recordPosition).toBeNull();
+                expect(completed.recoveryDevice).toBeDefined();
+                return;
+              }
+              const reopened = yield* makeWorkspaceRecovery(input);
+              expect((yield* reopened.setup()).outcome).toBe('Conflict');
+              const updated = parseCanonical(rows.get(key)!) as Record<string, unknown>;
+              expect(updated.recordPosition).toBe(3);
+              expect(updated.record).not.toEqual(original);
+              conflict = false;
+              expect((yield* reopened.setup()).status.paired).toBe(true);
+              expect(f.remote.read()).toHaveLength(3);
+            })
+          )
+        );
+      } finally {
+        f.close();
+      }
+    }
+  );
   it('traces pending and acknowledgement while retaining then consuming the committed original', async () => {
     const f = fixture();
     const spans: Tracer.Span[] = [];

@@ -263,8 +263,7 @@ current (setup, test, replace, skip) and performs a restore. `revokeOtherRecover
 revokes every other recovery device of the membership from the verified ledger, for
 whole-vault replacement. A restore stops unless the
 ledger contains the package's `head` and `length` checkpoint. A recovery device
-admits a new personal device, then that device installs every epoch key.
-Each private package is canonical CBOR with `formatVersion: 1`; a missing or
+admits a new personal device after installing authenticated epoch keys. It tries the current epoch first, then the highest available committed epoch and its complete history chain. Missing or invalid envelopes do not prevent admission when an older committed key is available; at epoch zero the authenticated recovery identity alone permits admission. `partialEpochKey` distinguishes this governance recovery from current-key readiness; `epoch` is the highest recovered epoch, or null if none. Newer epochs still need repair or abandonment; account restore retains a retryable `partial` marker until current-key recovery finishes. An epoch-zero envelope still in flight remains `Pending` without admitting a zero-key device. Ledger, native-crypto and storage failures remain failures. Each private package is canonical CBOR with `formatVersion: 1`; a missing or
 other version, or private keys that are not the exact 48-byte RFC 8410 PKCS#8
 Ed25519/X25519 encodings, fail with `invalid-input` before upload and on read.
 `deriveRecoveryAccessCredential` derives R's service access credential (HKDF-SHA256
@@ -274,6 +273,18 @@ public key). Setup passes its SHA-256 to `submitOriginal` with R's admission and
 `registerRecoveryCredential` before submitting, because its ledger port carries no credential. The
 scheme is specified in the whitepaper's backup and recovery section and
 [recovery vault](../../../specs/e2ee/recovery-vault.md).
+
+Setup, personal restore and replacement revocation retain their signed originals
+on Pending or an unproven Conflict. Only verified history showing a different
+record at the saved position permits a new signature with the same device keys.
+If retention removed that hash, a genuine view at or beyond the position can
+instead prove the admission never happened through its complete device history,
+or the revocation never happened through the target's still-active state;
+CAS replaces the local journal before the next invocation submits it. Legacy setup
+journals recover the position from the signed predecessor in verified history
+only while registration is pending. An already active R reconciles its original
+submission even when retention removed the admission hash. Finished setup clears
+the original and position, retaining R's public key for explicit abandonment.
 
 ## Documents
 
@@ -367,6 +378,8 @@ Desktop error classification, independent paging and terminal acknowledgement ar
 
 A recovery restore may repair a currently admitted personal identity that has lost
 its installed keys. After verifying the recovery device, package checkpoint and
-current epoch envelope, it requires the exact current personal signing/encryption
+available committed epoch envelope (or the authenticated epoch-zero recovery identity), it requires the exact current personal signing/encryption
 keys and membership. It installs through the caller's normal installed-key boundary
 without another admission; a revoked or mismatched identity gains no authority.
+
+New `WorkspaceControl.execute` ownership transfers require an active personal device of the successor. Revoking a member's last personal device requires `confirmedRecoveryOnly: true`; this acknowledgement is workflow metadata and never enters signed v1 bytes. Existing v1 records still replay under their original rules, including the owner governance check.

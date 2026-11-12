@@ -587,6 +587,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           devices: [...state.devices].map(([key, entry]) => ({
             key,
             kind: entry.kind,
+            recoveryDeviceAvailable: [...state.devices.values()].some(
+              (other) => other.kind === 'recovery' && other.membershipId.equals(entry.membershipId)
+            ),
+            requiresRecoveryConfirmation:
+              entry.kind === 'personal' &&
+              ![...state.devices.entries()].some(
+                ([otherKey, other]) =>
+                  otherKey !== key &&
+                  other.kind === 'personal' &&
+                  other.membershipId.equals(entry.membershipId)
+              ),
             machineId: entry.machineId ?? null,
             self: key === toHex(device.publicKey.toBytes()),
             mayRevoke: Result.isSuccess(
@@ -938,7 +949,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                   fetchCurrentEnvelope: (...args) =>
                     Effect.gen(function* () {
                       // A failed independent receive/repair must not hide an already delivered R envelope.
-                      yield* Effect.exit(maintenance!(view.inspectState().epoch.number));
+                      yield* Effect.exit(
+                        Effect.gen(function* () {
+                          const latest = yield* admitted();
+                          return yield* maintenance!(latest.inspectState().epoch.number);
+                        })
+                      );
                       return yield* input.fetchCurrentEnvelope(...args);
                     }),
                 });

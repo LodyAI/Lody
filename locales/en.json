@@ -1,4 +1,9 @@
 {
+  "e2ee.security.lastPersonalNoRecovery": "This member has no active recovery device. Removing their last personal device will leave them unable to regain encrypted access without being removed and invited again.",
+  "e2ee.recovery.restorePartial": "{{name}}: device restored. Newer workspace keys still need repair or epoch abandonment.",
+  "e2ee.security.lastPersonalTitle": "Remove your last personal device?",
+  "e2ee.security.lastPersonalWarning": "This is your last signed-in personal device. After removing it, you can regain access only with your recovery password or Passkey. Confirm that you still have usable recovery credentials.",
+  "e2ee.members.transferNeedsPersonal": "Ask this member to sign in on desktop and finish encrypted device setup before transferring ownership.",
   "machinePairing.unixShell": "macOS / Linux",
   "machinePairing.windowsShell": "Windows (PowerShell)",
   "schedules.filter.owner": "Owner",

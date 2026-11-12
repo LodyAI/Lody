@@ -821,6 +821,18 @@ it.each([
       sameIdentity: true,
     },
   },
+  {
+    options: { runtime: true, governance: true },
+    expected: { ok: true, guarded: true, removed: true },
+  },
+  {
+    options: { blockedEpoch: 'missing' as const },
+    expected: { ok: true, sealed: true, partialEpochKey: true },
+  },
+  {
+    options: { blockedEpoch: 'corrupt' as const },
+    expected: { ok: true, sealed: true, partialEpochKey: true },
+  },
   { options: { setup: true }, expected: { ok: true, sealed: true, recoveryVerified: true } },
   { options: { repair: true }, expected: { ok: true, sealed: true, noDuplicateAdmission: true } },
   { options: { repair: true, revokePersonal: true }, expected: { ok: false } },
@@ -865,7 +877,7 @@ it.each([
           options
         )
       ).toMatchObject(expected);
-      if (expected.ok)
+      if (expected.ok && !('governance' in options))
         expect(
           await page.evaluate(() => (globalThis as HostGlobal).HostFixture.reopenRecoveredBrowser())
         ).toMatchObject({ usableEpoch: 0 });

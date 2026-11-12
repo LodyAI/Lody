@@ -98,6 +98,10 @@ interface PersonalJoins {
     unknown
   >
   prepare(offer: PersonalPairingOffer): Effect.Effect<PersonalJoinPrepared, unknown>
+  prepareRecovery(
+    offer: PersonalPairingOffer,
+    pages: readonly E2eeWorkspaceHistoryPage[]
+  ): Effect.Effect<PersonalJoinPrepared, unknown>
   retire(workspaceId: string, pairingSessionId: string): Effect.Effect<void, unknown>
   accept(workspaceId: string, invitationHex: string): Effect.Effect<void, unknown>
   acceptHistory(
@@ -161,7 +165,7 @@ export function makeDesktopPersonalJoins(input: {
     db.prepare('SELECT * FROM personal_joins WHERE workspace_id=?').get(workspaceId) as
       | { pin: string; request_hex: string | null; invitation_hex: string | null }
       | undefined
-  const prepare = Effect.fnUntraced(function* (source: PersonalPairingOffer) {
+  const prepare = Effect.fnUntraced(function* (source: PersonalPairingOffer, recovery = false) {
     const parsed = PersonalPairingOfferSchema.safeParse(source)
     if (!parsed.success || custody.protection !== 'os-keystore')
       return yield* Effect.fail(fail('invalid-input'))
@@ -177,25 +181,60 @@ export function makeDesktopPersonalJoins(input: {
     })
     const encoded = JSON.stringify(pin)
     const row = yield* sql(() => {
+      const old = rowFor(pin.workspaceId)
       const retired = db
         .prepare(
           'SELECT pin,request_hex FROM retired_personal_joins WHERE workspace_id=? ORDER BY rowid DESC LIMIT 1'
         )
         .get(pin.workspaceId)
-      if (retired) {
+      if (retired && old?.pin !== encoded) {
         const previous = PersonalPairingOfferSchema.parse(JSON.parse(String(retired.pin)))
         if (
           Object.keys(previous).some(
             (key) =>
               key !== 'pairingSessionId' &&
+              (!recovery || key !== 'endorser') &&
               previous[key as keyof PersonalPairingOffer] !== pin[key as keyof PersonalPairingOffer]
           )
         )
           throw fail('conflict')
-        if (previous.pairingSessionId === pin.pairingSessionId) throw fail('conflict')
+        if (!recovery && previous.pairingSessionId === pin.pairingSessionId) throw fail('conflict')
       }
-      const old = rowFor(pin.workspaceId)
-      if (old && old.pin !== encoded) throw fail('conflict')
+      if (old && old.pin !== encoded) {
+        const previous = PersonalPairingOfferSchema.parse(JSON.parse(old.pin))
+        if (
+          !recovery ||
+          old.invitation_hex ||
+          db
+            .prepare('SELECT 1 FROM personal_join_histories WHERE workspace_id=?')
+            .get(pin.workspaceId) ||
+          previous.workspaceId !== pin.workspaceId ||
+          previous.genesisHash !== pin.genesisHash ||
+          previous.genesisRecordHex !== pin.genesisRecordHex ||
+          previous.membershipId !== pin.membershipId
+        )
+          throw fail('conflict')
+        // Preserve the abandoned request before replacing only its unfinished binding.
+        db.exec('BEGIN IMMEDIATE')
+        try {
+          db.prepare(
+            'INSERT OR IGNORE INTO retired_personal_joins(workspace_id,pin,request_hex) VALUES(?,?,?)'
+          ).run(pin.workspaceId, old.pin, old.request_hex)
+          const saved = db
+            .prepare(
+              'SELECT request_hex FROM retired_personal_joins WHERE workspace_id=? AND pin=?'
+            )
+            .get(pin.workspaceId, old.pin)
+          if (!saved || saved.request_hex !== old.request_hex) throw fail('corrupt')
+          db.prepare(
+            'UPDATE personal_joins SET pin=?,request_hex=NULL WHERE workspace_id=? AND pin=?'
+          ).run(encoded, pin.workspaceId, old.pin)
+          db.exec('COMMIT')
+        } catch (error) {
+          db.exec('ROLLBACK')
+          throw error
+        }
+      }
       db.prepare('INSERT OR IGNORE INTO personal_joins(workspace_id,pin) VALUES(?,?)').run(
         pin.workspaceId,
         encoded
@@ -204,7 +243,11 @@ export function makeDesktopPersonalJoins(input: {
       if (stored.pin !== encoded) throw fail('conflict')
       return {
         ...stored,
-        retiredRequest: retired?.request_hex ? decodeRequest(String(retired.request_hex)) : null
+        retiredRequest: old?.request_hex
+          ? decodeRequest(old.request_hex)
+          : retired?.request_hex
+            ? decodeRequest(String(retired.request_hex))
+            : null
       }
     })
     // Both originals are durable before the signed public request can leave this host.
@@ -447,7 +490,23 @@ export function makeDesktopPersonalJoins(input: {
             : {})
         }
       }),
-    prepare,
+    prepare: (offer) => prepare(offer),
+    prepareRecovery: Effect.fnUntraced(function* (source, pages) {
+      const pin = yield* sql(() => PersonalPairingOfferSchema.parse(source))
+      const view = yield* verifyMemberHistory(pin, pages)
+      const device = yield* custody.openDevice(
+        Result.getOrThrow(Bytes.genesisHash(raw(pin.genesisHash)))
+      )
+      const admitted = view.inspectState().devices.get(hex(device.publicKey.toBytes()))
+      if (
+        !admitted ||
+        admitted.kind !== 'personal' ||
+        hex(admitted.membershipId.toBytes()) !== pin.membershipId ||
+        !admitted.encryptionPublicKey.equals(device.enc)
+      )
+        return yield* Effect.fail(fail('invalid-ledger'))
+      return yield* prepare(pin, true)
+    }),
     retire: (workspaceId: string, pairingSessionId: string) =>
       sql(() => {
         const row = rowFor(workspaceId)

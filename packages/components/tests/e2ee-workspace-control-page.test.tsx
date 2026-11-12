@@ -499,7 +499,7 @@ it('lets only the owner transfer ownership, after a confirmation that states the
     membershipId: '56'.repeat(16),
     userId: '67'.repeat(32),
     role: 'admin' as const,
-    devices: [],
+    devices: [] as { key: string; kind: 'personal' | 'recovery' }[],
   };
   const management = (actorRole: 'owner' | 'admin') => ({
     actorRole,
@@ -535,7 +535,15 @@ it('lets only the owner transfer ownership, after a confirmation that states the
   expect(workspace.owner).toBe('self');
   const confirmation = document.querySelector('[role="dialog"]')?.textContent ?? '';
   // The confirmation describes the transfer, not a removal.
-  expect(confirmation).toContain('e2ee.members.transferLead');
+  expect(confirmation).toContain('e2ee.members.transferNeedsPersonal');
+  const blocked = document.querySelector(
+    '[data-testid="e2ee-member-transfer-confirm"]'
+  ) as HTMLButtonElement;
+  expect(blocked.disabled).toBe(true);
+  await act(async () => blocked.click());
+  expect(workspace.owner).toBe('self');
+  member.devices.push({ key: '78'.repeat(32), kind: 'personal' });
+  await openMenu('owner');
   expect(confirmation).not.toContain('e2ee.members.removeLead');
   expect(confirmation).toContain('e2ee.members.transferEffectOwner');
   expect(confirmation).toContain('e2ee.members.transferEffectYou');

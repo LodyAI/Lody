@@ -16,7 +16,10 @@ import type { RecoveryPlan, RecoveryPort } from '../src/components/settings/e2ee
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '../src/atoms/settings';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
-import { E2eeSecurityPanel } from '../src/components/settings/e2ee/security-panel';
+import {
+  E2eeSecurityPanel,
+  E2eeDevicesPanel,
+} from '../src/components/settings/e2ee/security-panel';
 const navigation = vi.hoisted(() => ({ target: null as unknown }));
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => async (target: unknown) => {
@@ -472,6 +475,7 @@ describe('recovery vault settings actions', () => {
           outcome: 'restored',
           results: [
             { name: 'Workspace b', outcome: 'Unconfirmed' },
+            { name: 'Workspace partial', outcome: 'Committed', partialEpochKey: true },
             { name: 'Workspace c', outcome: 'not-backed-up' },
           ],
         }),
@@ -488,6 +492,7 @@ describe('recovery vault settings actions', () => {
       await view.click('e2ee.recovery.restore');
       // A wait that timed out is still waiting, and an uncovered workspace is not a failure.
       expect(view.text).toContain('e2ee.recovery.restoreWaiting');
+      expect(view.text).toContain('e2ee.recovery.restorePartial');
       expect(view.text).toContain('e2ee.recovery.restoreNotBackedUp');
       expect(view.text).not.toContain('e2ee.recovery.restoreFailed');
     } finally {
@@ -1148,3 +1153,70 @@ describe('encrypted workspace settings', () => {
     expect(container.querySelector('[role=status]')).toBeNull();
   });
 });
+
+it.each([true, false])(
+  'keeps the last personal device until loss of access is confirmed (recovery available: %s)',
+  async (recoveryDeviceAvailable) => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const revoked: { key: string; confirmed: boolean }[] = [];
+    try {
+      await act(async () =>
+        root.render(
+          <E2eeDevicesPanel
+            state={{
+              epoch: 1,
+              rotationRequired: false,
+              mayRotate: true,
+              updatePending: false,
+              devices: [
+                {
+                  key: 'ab'.repeat(32),
+                  kind: 'personal',
+                  machineId: null,
+                  self: true,
+                  mayRevoke: true,
+                  requiresRecoveryConfirmation: true,
+                  recoveryDeviceAvailable,
+                },
+              ],
+            }}
+            onUpdate={() => {}}
+            onRetry={() => {}}
+            onRevoke={(key, confirmation) => {
+              revoked.push({ key, confirmed: confirmation?.confirmedRecoveryOnly === true });
+            }}
+          />
+        )
+      );
+      const remove = container.querySelector(
+        '[data-testid="e2ee-device-revoke"]'
+      ) as HTMLButtonElement;
+      await act(async () => remove.click());
+      expect(revoked).toEqual([]);
+      expect(
+        document.querySelector('[data-testid="e2ee-last-personal-confirm"]')?.textContent
+      ).toContain(
+        recoveryDeviceAvailable
+          ? 'e2ee.security.lastPersonalWarning'
+          : 'e2ee.security.lastPersonalNoRecovery'
+      );
+      const cancel = [...document.body.querySelectorAll('button')].find(
+        (button) => button.textContent === 'common.cancel'
+      )!;
+      await act(async () => cancel.click());
+      expect(revoked).toEqual([]);
+      await act(async () => remove.click());
+      await act(async () =>
+        (
+          document.querySelector('[data-testid="e2ee-last-personal-revoke"]') as HTMLButtonElement
+        ).click()
+      );
+      expect(revoked).toEqual([{ key: 'ab'.repeat(32), confirmed: true }]);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  }
+);

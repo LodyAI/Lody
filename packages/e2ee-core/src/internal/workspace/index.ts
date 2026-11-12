@@ -470,7 +470,7 @@ export class E2eeWorkspace {
           });
           const keys: Array<readonly [number, Bytes.EpochKey]> = [];
           yield* Effect.gen(function* () {
-            if (result.outcome === 'Committed')
+            if (result.outcome === 'Committed' && result.epoch !== null)
               for (let epoch = 0; epoch <= result.epoch; epoch++)
                 keys.push([epoch, yield* plan.workflow.installed.read(epoch)]);
           }).pipe(
@@ -516,7 +516,12 @@ export class E2eeWorkspace {
               return undefined;
             })
           );
-          return { outcome: 'Committed' as const, epoch: restored.result.epoch, workspace };
+          return {
+            outcome: 'Committed' as const,
+            epoch: restored.result.epoch,
+            partialEpochKey: restored.result.partialEpochKey,
+            workspace,
+          };
         }),
       (restored) =>
         Effect.sync(() => {

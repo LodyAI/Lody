@@ -159,7 +159,9 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 ## 恢复
 
-`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。passkey 需要一次报告 `enabled: true` 的注册，以及一次带用户验证并返回 32 字节 `results.first` 的认证；WebAuthn 在认证时从不报告 `enabled`。所有 ceremony 都使用 `vaultPrfInput()`，`user.id` 为 `passkeyUserHandle(vaultId)`，所以没有恢复文件的新设备可以从 ceremony 得知保险库。加密索引列出每个 passkey，CAS 引用它的包装，服务端不能把它当作未引用条目删除。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复。整库换新时，`revokeOtherRecoveryDevices` 依据已验证的账本撤销这个成员的其他恢复设备。恢复时：账本必须包含恢复包的 `head` 和 `length` 检查点，否则停止；恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。passkey 需要一次报告 `enabled: true` 的注册，以及一次带用户验证并返回 32 字节 `results.first` 的认证；WebAuthn 在认证时从不报告 `enabled`。所有 ceremony 都使用 `vaultPrfInput()`，`user.id` 为 `passkeyUserHandle(vaultId)`，所以没有恢复文件的新设备可以从 ceremony 得知保险库。加密索引列出每个 passkey，CAS 引用它的包装，服务端不能把它当作未引用条目删除。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复。整库换新时，`revokeOtherRecoveryDevices` 依据已验证的账本撤销这个成员的其他恢复设备。恢复时：账本必须包含恢复包的 `head` 和 `length` 检查点，否则停止；恢复先尝试当前代次，再尝试最高可用已提交代次，并验证、安装其完整历史链。当前信封缺失或无效时，只要旧代次可用，仍可接纳新个人设备；epoch 0 时，经过验证的恢复身份本身即可接纳。`partialEpochKey` 表示只恢复了治理入口，较新代次仍需修复或废弃；`epoch` 为最高恢复代次，没有密钥时为 null。账号恢复的进度保持为可重试的 `partial`，直到补齐当前代次密钥。epoch 0 的信封投递在途时保持 `Pending`，不接纳零密钥设备。账本、本机加密能力与存储故障仍会失败。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+
+设置、个人设备恢复和替换时的撤销操作在 Pending 或尚未证实的 Conflict 后保留签名原件。只有已验证历史证明原位置被其他记录占据，才可使用同一组设备密钥重签。压缩裁剪了该位置的哈希时，位置之后的真实视图可用完整设备历史证明目标从未被准入，或用目标仍有效的状态证明撤销从未发生；本地日志通过 CAS 替换后，由下一次调用提交。旧设置日志仅在未完成登记时回推位置；R 已有效时，即使准入哈希被裁剪，也可在原件提交对账后完成。完成登记后清理原件与位置，单独保留 R 公钥供显式放弃流程使用。
 
 ## 文档
 
@@ -223,6 +225,8 @@ UTF-8 字段（工作区 ID、目标机器 ID、作用域、消息 ID，各不�
 桌面维护的错误分类、独立分页与终态消费见[收发钥可用性](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.zh.md)。`MailboxInstallError.cryptographicRejection` 仅标记信封验证阶段确定的拒绝；本地写入、报告签名和未知原生错误不能授权拒绝信封。
 
 恢复也可以修复已获准、但本地工作区密钥丢失的个人设备。验证恢复设备、
-包内检查点与当前密钥信封后，必须匹配当前个人设备的签名、公钥和成员身份，
+包内检查点与可用已提交代次信封（epoch 0 也可仅验证恢复身份）后，必须匹配当前个人设备的签名、公钥和成员身份，
 再通过原有密钥安装边界恢复，不重复接纳设备。已撤销或身份不匹配的设备不会
 因此获得权限。
+
+`WorkspaceControl.execute` 发起所有者转让时，要求目标至少有一台活跃个人设备。撤销成员最后一台个人设备需要 `confirmedRecoveryOnly: true`；该确认仅用于工作流，不进入 v1 签名字节。已有 v1 记录仍按原规则回放，保留所有者治理设备检查。

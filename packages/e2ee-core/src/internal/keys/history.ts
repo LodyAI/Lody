@@ -184,6 +184,7 @@ export function openHistoryPacket(input: {
  * Authenticate `latestKey` at `startEpoch` (the view's current epoch by default),
  * then verify every link/commitment down to zero, or return no keys.
  * Requires a genuine full verified view and 0 <= startEpoch <= its current epoch.
+ * The caller owns returned keys.
  */
 export function recoverLedgerHistory(
   view: LedgerView,

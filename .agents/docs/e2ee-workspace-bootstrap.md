@@ -119,6 +119,23 @@ Workspace lists (desktop switcher, mobile sheet, onboarding) show a lock from th
 
 Failures are classified before any recovery is offered. Server history that does not verify, network and authentication failures only offer refresh and diagnostics. Readable identity conflicts remain possible substitutions or downgrades and have no automatic reset. An unreadable renderer pin or known-encrypted marker can be rebuilt from the same account/workspace native verified ledger only when all readable identity records agree with that genesis. Recovery archives every damaged original before any replacement and never learns a replacement pin from the server. Recovery first removes unreadable optional caches and re-reads evidence; readable evidence retries without native access. Only damaged sticky markers, and the admission of a non-encrypted answer described above, use expected-account-bound `readIdentity`. That IPC reads verified local identity under the account lock, preserves existing readers and closes a cold temporary read before replying, without granting status/content access. Admission Retry and native ledger entry use this repair; missing native identity or a conflict directs the user to compare codes on a trusted paired device and re-pair only after confirming identity. A progress conflict (rollback or fork against this device's observed checkpoint) offers a two-step reset of observed progress for that one workspace, meant only after support confirms the server history. Unreadable optional caches (mode proofs and observed checkpoints) can be deleted; pins, known-encrypted and rejected-mode markers and creation intents never are. Retrying a plaintext mode-admission failure caused by an unreadable cache removes only those entries and re-reads storage in place. "Copy diagnostics" produces a report with identifiers, hashes, counts, build information and error codes; it excludes account IDs, keys, signatures and record bodies, and stays visible when clipboard access is denied.
 
+## Recovery adoption and key repair
+
+Desktop recovery keeps a completed workspace identity and its original continuity anchor,
+even when the vault now names a different recovery device. `adoptRecoveredWorkspace`
+opens that retained identity, feeds only the newly verified history suffix and installs
+recovered keys through the normal commitment checks. It does not prepare another join.
+A partial restore remains retryable until the current key is installed.
+
+For an unfinished personal join, `prepareRecoveryPersonalJoin` first verifies signed
+history proving that the retained personal signing and encryption keys are admitted to
+the expected membership. Only the same workspace, genesis record and membership may
+be rebound to the recovery endorser/session. The old public pin and request are archived
+before the unfinished row changes, and the existing private identity and credential stay
+in custody. Invitations, completed history anchors, foreign bindings and unreadable
+identity evidence cannot be overwritten through this path. Ordinary pairing retains
+its existing conflict and exact-original retry behavior.
+
 ## Remaining integration
 
 Recovery enrollment, approved device joining, ledger mutations, protected data transports and all-platform custody remain separate batches. Closing the creation option preserves existing control access and pending reconciliation. This preview does not establish production deployment, native OS keychain usability, recovery coverage, or encrypted real-time collaboration.
