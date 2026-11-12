@@ -28,7 +28,11 @@ use iroh::{
         Connection, PortmapperConfig, QuicTransportConfig, RecvStream, SendStream, VarInt, presets,
     },
 };
-use tokio::sync::{Mutex, mpsc, watch};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt},
+    sync::{Mutex, mpsc, watch},
+    task::JoinSet,
+};
 use zeroize::Zeroizing;
 
 /// ALPN identifying the Lody encrypted RPC protocol, version 1.
@@ -41,10 +45,15 @@ pub const MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024 + 4096;
 pub const INCOMING_QUEUE: usize = 128;
 /// Concurrent request streams one peer may open on a listening endpoint.
 pub const MAX_CONCURRENT_STREAMS_PER_PEER: u32 = 32;
+/// Includes incoming handshakes, before a remote identity is available.
+pub const MAX_INCOMING_CONNECTIONS: usize = 64;
+pub const MAX_INCOMING_CONNECTIONS_PER_PEER: usize = 4;
+const INITIAL_MESSAGE_CAPACITY: usize = 16 * 1024;
 const READ_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const RESET_QUEUE_FULL: u32 = 1;
 const RESET_CANCELLED: u32 = 2;
 const CLOSE_NORMAL: u32 = 0;
+const CLOSE_CONNECTION_LIMIT: u32 = 3;
 
 /// Stable failure codes exposed to hosts. Callers branch on the code; the
 /// message is diagnostic only and never contains key material.
@@ -323,7 +332,8 @@ impl LodyEndpoint {
         if self.endpoint.is_closed() || *self.closed.borrow() {
             return Err(EndpointError::Closed);
         }
-        let id = EndpointId::from_bytes(&target.endpoint_id).map_err(|_| EndpointError::InvalidKey)?;
+        let id =
+            EndpointId::from_bytes(&target.endpoint_id).map_err(|_| EndpointError::InvalidKey)?;
         let slot = self
             .connections
             .lock()
@@ -431,25 +441,105 @@ fn with_test_tls(builder: iroh::endpoint::Builder, _insecure: bool) -> iroh::end
     builder
 }
 
+/// Admission happens before spawning or handshaking. Peer IDs are retained only
+/// while an admitted connection is alive; cancellation releases both limits.
+#[derive(Default)]
+struct ConnectionLimits(StdMutex<ConnectionCounts>);
+
+#[derive(Default)]
+struct ConnectionCounts {
+    total: usize,
+    peers: HashMap<EndpointId, usize>,
+}
+
+impl ConnectionLimits {
+    fn try_acquire(self: &Arc<Self>) -> Option<ConnectionPermit> {
+        let mut counts = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if counts.total >= MAX_INCOMING_CONNECTIONS {
+            return None;
+        }
+        counts.total += 1;
+        Some(ConnectionPermit {
+            limits: self.clone(),
+            remote: None,
+        })
+    }
+}
+
+struct ConnectionPermit {
+    limits: Arc<ConnectionLimits>,
+    remote: Option<EndpointId>,
+}
+
+impl ConnectionPermit {
+    fn admit_peer(&mut self, remote: EndpointId) -> bool {
+        debug_assert!(self.remote.is_none());
+        let mut counts = self.limits.0.lock().unwrap_or_else(|e| e.into_inner());
+        let count = counts.peers.entry(remote).or_default();
+        if *count >= MAX_INCOMING_CONNECTIONS_PER_PEER {
+            return false;
+        }
+        *count += 1;
+        self.remote = Some(remote);
+        true
+    }
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        let mut counts = self.limits.0.lock().unwrap_or_else(|e| e.into_inner());
+        counts.total -= 1;
+        if let Some(remote) = self.remote {
+            let count = counts.peers.get_mut(&remote).expect("admitted peer");
+            *count -= 1;
+            if *count == 0 {
+                counts.peers.remove(&remote);
+            }
+        }
+    }
+}
+
 async fn accept_loop(endpoint: Endpoint, tx: mpsc::Sender<IncomingRequest>) {
+    let limits = Arc::new(ConnectionLimits::default());
+    let mut tasks = JoinSet::new();
     while let Some(incoming) = endpoint.accept().await {
+        while tasks.try_join_next().is_some() {}
+        // Do not spawn waiters: even incomplete handshakes consume a slot.
+        let Some(mut permit) = limits.try_acquire() else {
+            incoming.refuse();
+            continue;
+        };
         let tx = tx.clone();
-        tokio::spawn(async move {
+        tasks.spawn(async move {
             let Ok(accepting) = incoming.accept() else {
                 return;
             };
-            let Ok(conn) = accepting.await else {
+            let Ok(Ok(conn)) = tokio::time::timeout(READ_REQUEST_TIMEOUT, accepting).await else {
                 return;
             };
             if conn.alpn() != ALPN {
                 conn.close(VarInt::from_u32(CLOSE_NORMAL), b"alpn");
                 return;
             }
+            if !permit.admit_peer(conn.remote_id()) {
+                conn.close(
+                    VarInt::from_u32(CLOSE_CONNECTION_LIMIT),
+                    b"connection limit",
+                );
+                return;
+            }
             conn.set_max_concurrent_bi_streams(VarInt::from_u32(MAX_CONCURRENT_STREAMS_PER_PEER));
             let remote = *conn.remote_id().as_bytes();
-            while let Ok((send, mut recv)) = conn.accept_bi().await {
+            let _permit = permit;
+            let mut streams = JoinSet::new();
+            loop {
+                let stream = tokio::select! {
+                    stream = conn.accept_bi() => stream,
+                    _ = streams.join_next(), if !streams.is_empty() => continue,
+                };
+                let Ok((send, mut recv)) = stream else { break };
                 let tx = tx.clone();
-                tokio::spawn(async move {
+                streams.spawn(async move {
                     let body =
                         match tokio::time::timeout(READ_REQUEST_TIMEOUT, read_message(&mut recv))
                             .await
@@ -458,8 +548,7 @@ async fn accept_loop(endpoint: Endpoint, tx: mpsc::Sender<IncomingRequest>) {
                             _ => return,
                         };
                     let request = IncomingRequest { remote, body, send };
-                    if let Err(mpsc::error::TrySendError::Full(mut rejected)) =
-                        tx.try_send(request)
+                    if let Err(mpsc::error::TrySendError::Full(mut rejected)) = tx.try_send(request)
                     {
                         let _ = rejected.send.reset(VarInt::from_u32(RESET_QUEUE_FULL));
                     }
@@ -483,21 +572,39 @@ async fn write_message(send: &mut SendStream, message: &[u8]) -> Result<(), Endp
 }
 
 async fn read_message(recv: &mut RecvStream) -> Result<Option<Vec<u8>>, EndpointError> {
-    let mut len = [0u8; 4];
-    match recv.read_exact(&mut len).await {
-        Ok(()) => {}
-        Err(iroh::endpoint::ReadExactError::FinishedEarly(0)) => return Ok(None),
-        Err(e) => return Err(EndpointError::Stream(e.to_string())),
-    }
-    let len = u32::from_be_bytes(len) as usize;
-    if len > MAX_MESSAGE_BYTES {
+    let result = read_frame(recv).await;
+    if matches!(result, Err(EndpointError::TooLarge)) {
         let _ = recv.stop(VarInt::from_u32(RESET_CANCELLED));
-        return Err(EndpointError::TooLarge);
     }
-    let mut body = vec![0u8; len];
-    recv.read_exact(&mut body)
+    result
+}
+
+async fn read_frame(recv: &mut (impl AsyncRead + Unpin)) -> Result<Option<Vec<u8>>, EndpointError> {
+    let mut len = [0u8; 4];
+    // Only EOF before the first header byte is a clean end of replies.
+    if recv
+        .read(&mut len[..1])
+        .await
+        .map_err(|e| EndpointError::Stream(e.to_string()))?
+        == 0
+    {
+        return Ok(None);
+    }
+    recv.read_exact(&mut len[1..])
         .await
         .map_err(|e| EndpointError::Stream(e.to_string()))?;
+    let len = u32::from_be_bytes(len) as usize;
+    if len > MAX_MESSAGE_BYTES {
+        return Err(EndpointError::TooLarge);
+    }
+    let mut body = Vec::with_capacity(len.min(INITIAL_MESSAGE_CAPACITY));
+    recv.take(len as u64)
+        .read_to_end(&mut body)
+        .await
+        .map_err(|e| EndpointError::Stream(e.to_string()))?;
+    if body.len() != len {
+        return Err(EndpointError::Stream("truncated message body".into()));
+    }
     Ok(Some(body))
 }
 

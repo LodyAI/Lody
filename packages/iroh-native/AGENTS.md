@@ -23,6 +23,10 @@ rationale: [iroh transport decision](../../.agents/notes/implemented/architectur
 - Absence of the module, relays or a live connection means "use Streams RPC". Never
   let opening, dialing or a failed call delay an available later route, and retry
   only with the same original envelope.
+- Listeners admit at most 64 incoming connections including handshakes, and at
+  most four established connections per EndpointId. Refuse excess connections
+  without spawning waiters. Length headers must not trigger full-body allocation;
+  grow buffers only as payload arrives and reject truncated bodies.
 - Keep the iroh floor at 1.4.1 or later and follow upstream security advisories.
   Mobile bindings must disable port mapping and `fast-apple-datapath`.
   `Cargo.lock` holds `libc` at 0.2.189: 0.2.190 limits `in6_ifreq` to macOS, which
