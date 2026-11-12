@@ -4,9 +4,11 @@ import SwiftUI
 import UIKit
 
 /// iPhone Schedules tab, in the Chats list's design language: the Chats header without a title
-/// (workspace capsule, search filtering by name), then a plain list without separators grouped by
-/// state like Chats' status grouping (Needs attention, Active, Paused, Ended; empty groups hidden)
-/// under the same group labels. Rows match chat rows: name (dimmed once ended) with the state in
+/// (workspace capsule, search filtering by name, a view menu with a Show finished switch), then a
+/// plain list without separators grouped as on web into Scheduled tasks and Scheduled messages
+/// (empty groups hidden) under Chats-style group labels; within a group, what needs a look first,
+/// then active, paused and ended. Ended schedules (they will not run again) are hidden unless the
+/// view menu shows them. Rows match chat rows: name (dimmed once ended) with the state in
 /// words trailing (tinted only for attention); a footnote line with the kind glyph, frequency and
 /// computer; the reason when it needs a look. Trailing swipe and the context menu run, pause /
 /// resume, open the last chat and delete (always confirmed); the row opens
@@ -14,7 +16,7 @@ import UIKit
 /// workspace change.
 @MainActor
 final class SchedulesController: UIViewController, UICollectionViewDelegate {
-  private typealias Section = RuntimeContract.ScheduleStateGroup
+  private typealias Section = ScheduleListSection
 
   private let source: SessionSource
   private let service: ScheduleService
@@ -83,7 +85,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(elementKind: UICollectionView.elementKindSectionHeader) {
       [weak self] header, _, indexPath in
       guard let self, let section = self.data.sectionIdentifier(for: indexPath.section) else { return }
-      header.contentConfiguration = UIHostingConfiguration { ScheduleSectionTitle(text: ScheduleTone.label(section)) }
+      header.contentConfiguration = UIHostingConfiguration { ScheduleSectionTitle(text: section.label) }
         .margins(.all, 0)
       header.backgroundConfiguration = .clear()
       header.accessibilityIdentifier = "schedules-section:" + section.rawValue
@@ -197,7 +199,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   // MARK: Rendering
 
   private func wireChrome() {
-    chrome.showsViewMenu = false
+    chrome.pageMenu = { [weak self] in self?.viewMenu() ?? UIMenu() }
     chrome.selectWorkspace = { id in
       guard NativeHomeFixture.active else {
         CatalogSession.shared.selectWorkspace(id)
@@ -243,13 +245,16 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let searched = term.isEmpty ? all : all.filter { $0.title.localizedCaseInsensitiveContains(term) }
     let previous = items
     items = Dictionary(all.map { ($0.scheduleId, $0) }, uniquingKeysWith: { first, _ in first })
-    // Needing a look first, then active, paused and ended; the runtime's order within each group.
+    let shown = ScheduleFinishedVisibility.shown ? searched : searched.filter { $0.state.group != .ended }
+    // Tasks, then messages; within each, needing a look first, then active, paused and ended,
+    // keeping the runtime's order inside a state.
     var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
-    for group in ScheduleTone.order {
-      let ids = searched.filter { $0.state.group == group }.map(\.scheduleId)
+    for section in Section.allCases {
+      let members = shown.filter { Section($0) == section }
+      let ids = ScheduleTone.order.flatMap { group in members.filter { $0.state.group == group }.map(\.scheduleId) }
       guard !ids.isEmpty else { continue }
-      snapshot.appendSections([group])
-      snapshot.appendItems(ids, toSection: group)
+      snapshot.appendSections([section])
+      snapshot.appendItems(ids, toSection: section)
     }
     let changed = snapshot.itemIdentifiers.filter { id in
       guard let before = previous[id] else { return false }
@@ -277,6 +282,17 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
         error.button = retry
         error.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.reload() }
         configuration = error
+      } else if !ScheduleFinishedVisibility.shown, result?.items.contains(where: { $0.state.group == .ended }) == true,
+                term.isEmpty || result?.items.contains(where: { $0.title.localizedCaseInsensitiveContains(term) }) == true {
+        // Everything left (or matching) has finished and is hidden by the view menu.
+        var none = UIContentUnavailableConfiguration.empty()
+        none.image = LodyIcon.clock.uiImage
+        none.text = ScheduleFormat.text("finishedHidden")
+        var show = UIButton.Configuration.bordered()
+        show.title = ScheduleFormat.text("view.showFinished")
+        none.button = show
+        none.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.setFinishedShown(true) }
+        configuration = none
       } else if !term.isEmpty {
         var none = UIContentUnavailableConfiguration.search()
         none.text = ScheduleFormat.text("noMatches")
@@ -318,6 +334,24 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     cell.accessibilityValue = [ScheduleFormat.detail(item, zone: zone), status.label, status.detail ?? ""]
       .filter { !$0.isEmpty }.joined(separator: ", ")
     cell.accessibilityIdentifier = "schedule:" + item.scheduleId
+  }
+
+  /// The trailing view menu: one Show finished switch, uncached so its check follows the stored
+  /// value each time the menu opens.
+  private func viewMenu() -> UIMenu {
+    UIMenu(children: [UIDeferredMenuElement.uncached { completion in
+      let shown = ScheduleFinishedVisibility.shown
+      completion([UIAction(
+        title: ScheduleFormat.text("view.showFinished"), image: UIImage(systemName: "checkmark.circle"),
+        state: shown ? .on : .off
+      ) { [weak self] _ in self?.setFinishedShown(!shown) }])
+    }])
+  }
+
+  private func setFinishedShown(_ value: Bool) {
+    guard value != ScheduleFinishedVisibility.shown else { return }
+    ScheduleFinishedVisibility.shown = value
+    render()
   }
 
   // MARK: Actions

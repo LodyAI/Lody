@@ -31411,6 +31411,40 @@
           }
         }
       }
+    },
+    "schedules.view.showFinished": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show finished"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示已结束"
+          }
+        }
+      }
+    },
+    "schedules.finishedHidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finished schedules are hidden"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已结束的定时项已隐藏"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
