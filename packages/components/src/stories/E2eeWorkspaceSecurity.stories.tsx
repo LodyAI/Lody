@@ -79,3 +79,25 @@ export const SettingsEntryAttention: Story = {
     </span>
   ),
 };
+
+/** Clicking remove opens the same explicit recovery-credential warning as production. */
+export const LastPersonalDevice: Story = {
+  ...ConsoleDevices,
+  args: {
+    state: {
+      ...state,
+      rotationRequired: false,
+      devices: [
+        {
+          key: 'a1'.repeat(32),
+          kind: 'personal',
+          machineId: null,
+          self: true,
+          mayRevoke: true,
+          requiresRecoveryConfirmation: true,
+        },
+        { key: 'c3'.repeat(32), kind: 'recovery', machineId: null, self: false, mayRevoke: false },
+      ],
+    },
+  },
+};

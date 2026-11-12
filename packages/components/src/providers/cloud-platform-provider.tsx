@@ -344,8 +344,8 @@ export function CloudPlatformProvider({
                 native.admitLocalAgent(workspaceId, pairingSessionId),
               managementState: (workspaceId) => native.managementState(workspaceId),
               updateKeys: (workspaceId) => native.updateKeys(workspaceId),
-              revokeDevice: (workspaceId, signingPublicKey) =>
-                native.revokeDevice(workspaceId, signingPublicKey),
+              revokeDevice: (workspaceId, signingPublicKey, confirmation) =>
+                native.revokeDevice(workspaceId, signingPublicKey, confirmation),
               refresh: (workspaceId, options) => native.refresh(workspaceId, options),
               contentStreamsToken: (workspaceId, rejectedToken, requestSnapshotFor, rpcOnly) =>
                 native.contentStreamsToken(workspaceId, rejectedToken, requestSnapshotFor, rpcOnly),

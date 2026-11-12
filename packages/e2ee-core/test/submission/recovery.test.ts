@@ -19,6 +19,7 @@ import { createRecoveryVault } from '../../src/internal/recovery/vault';
 import { canonical, parseCanonical } from '../../src/internal/recovery/crypto';
 import { prepareDeviceAdmission, prepareLedgerCommand } from '../../src/internal/ledger/admission';
 import { signLedgerRecord } from '../../src/internal/ledger/signing';
+import { signLedgerSnapshot, type SnapshotTrust } from '@lody/e2ee-core/protocol';
 import { verifyLedger, restoreVerifiedState, type LedgerView } from '../../src/internal/ledger';
 import { WorkspaceScope, LedgerViewSource, LedgerViewSourceError } from '../../src/services';
 import { sqliteLedgerFeedStore, sqliteLedgerPinStore } from '../../src/adapters/node-sqlite';
@@ -193,7 +194,12 @@ describe('durable submission', () => {
                 // retained. Exercise both the unfinished and already-finished journal.
                 legacy.stage = stage;
                 rows.set(key, canonical(legacy));
-                for (let n = 0; n < 33; n++) {
+                let snapOrigin!: {
+                  view: LedgerView;
+                  bytes: Uint8Array;
+                  trust: SnapshotTrust;
+                };
+                for (let n = 0; n < 34; n++) {
                   const device = keys(n + 3);
                   const signer = {
                     publicKey: ok(Bytes.signingPublicKey(device.pk)),
@@ -203,11 +209,11 @@ describe('durable submission', () => {
                   const admission = yield* prepareDeviceAdmission({
                     genesis: anchor,
                     membershipId: input.membershipId,
-                    encryptionPublicKey: ok(Bytes.encryptionPublicKey(filled(n + 103))),
+                    encryptionPublicKey: ok(Bytes.encryptionPublicKey(filled(n + 3))),
                     kind: 'personal',
                     signer,
                   });
-                  for (const command of n === 32
+                  for (const command of n === 33
                     ? [admission]
                     : [admission, { _tag: 'RevokeDevice', target: signer.publicKey } as const]) {
                     const view = yield* input.ledger();
@@ -217,6 +223,28 @@ describe('durable submission', () => {
                         input.personalSigner
                       )
                     );
+                  }
+                  if (n === 0) {
+                    const snapView = yield* input.ledger();
+                    const endorsed = yield* signLedgerSnapshot({
+                      signer: input.personalSigner,
+                      ledger: () => Effect.succeed(snapView),
+                    });
+                    snapOrigin = {
+                      view: snapView,
+                      bytes: endorsed.snapshot,
+                      trust: {
+                        source: 'external-confirmation',
+                        genesis: anchor,
+                        head: snapView.head,
+                        length: snapView.length,
+                        endorser: input.personalSigner.publicKey,
+                        membershipId: input.membershipId,
+                        role: 'owner',
+                        kind: 'personal',
+                        headSignature: endorsed.headSignature,
+                      },
+                    };
                   }
                 }
                 const stores = Layer.mergeAll(
@@ -231,17 +259,24 @@ describe('durable submission', () => {
                 ).pipe(Layer.provideMerge(Layer.succeed(WorkspaceScope, { genesis: anchor })));
                 const context = yield* Layer.build(
                   LedgerFeed.layer({
-                    origin: { kind: 'genesis', record: genesis },
-                    expected: checkpoint([genesis]),
+                    origin: {
+                      kind: 'snapshot',
+                      snapshot: {
+                        bytes: snapOrigin.bytes,
+                        trust: snapOrigin.trust,
+                        offset: 'retained:snap',
+                      },
+                    },
+                    expected: { head: snapOrigin.view.head, length: snapOrigin.view.length },
                     budget: { maxRecords: 1000, maxBytes: 1_000_000 },
                   }).pipe(Layer.provide(stores))
                 );
                 const feed = Context.get(context, LedgerFeed);
                 yield* feed.accept(
                   {
-                    requestOffset: '-1',
+                    requestOffset: 'retained:snap',
                     nextOffset: 'retained:end',
-                    records: f.remote.read(),
+                    records: f.remote.read().slice(snapOrigin.view.length),
                     upToDate: true,
                   },
                   checkpoint(f.remote.read())

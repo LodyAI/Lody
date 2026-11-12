@@ -96,6 +96,8 @@ export type RecoverySetupResult = {
   readonly recoverable: boolean;
 };
 export type RecoveryRestoreResult = {
+  /** Admission succeeded with newer epoch keys still awaiting repair. */
+  readonly partialEpochKey?: boolean;
   readonly name: string;
   readonly outcome: RecoveryCommitOutcome;
 };

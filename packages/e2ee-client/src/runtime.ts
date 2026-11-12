@@ -994,13 +994,14 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           })
         )
       ),
-    revokeDevice: (id, key) =>
+    revokeDevice: (id, key, confirmation) =>
       run(
         withSession(id, (session) =>
           Effect.gen(function* () {
             if (!/^[0-9a-f]{64}$/.test(key)) return yield* fail('invalid-input');
             yield* finish(session, {
               _tag: 'RevokeDevice',
+              confirmedRecoveryOnly: confirmation?.confirmedRecoveryOnly === true,
               target: Result.getOrThrow(Bytes.signingPublicKey(fromHex(key))),
             });
             return undefined;

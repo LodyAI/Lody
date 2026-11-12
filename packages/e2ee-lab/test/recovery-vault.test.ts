@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Context, Effect, Layer, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bytes, LedgerFeed, VerifiedLedger, type LedgerView } from '@lody/e2ee-core';
-import { encodeCbor } from '@lody/e2ee-core/protocol';
+import { encodeCbor, signLedgerSnapshot, type SnapshotTrust } from '@lody/e2ee-core/protocol';
 import {
   E2eePasskeyCancelled,
   enrollVaultPasskey,
@@ -201,21 +201,52 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
     }
   });
   const compact = Effect.fnUntraced(function* () {
+    const prefix = f.records.slice(0, f.records.length - 64);
+    const snapView = ok(
+      verifyLedger({
+        anchor: f.initial.genesis,
+        records: prefix,
+        checkpoint: { head: hashRecordBytes(prefix[prefix.length - 1]!), length: prefix.length },
+      })
+    );
+    const endorsed = yield* signLedgerSnapshot({
+      signer: f.owner,
+      ledger: () => Effect.succeed(snapView),
+    });
+    const trust: SnapshotTrust = {
+      source: 'external-confirmation',
+      genesis: f.initial.genesis,
+      head: snapView.head,
+      length: snapView.length,
+      endorser: f.owner.publicKey,
+      membershipId: f.membership,
+      role: 'owner',
+      kind: 'personal',
+      headSignature: endorsed.headSignature,
+    };
     const stores = Layer.mergeAll(
       sqliteLedgerFeedStore({ path: join(dir, 'compact-feed.sqlite'), mode: 'create-or-open' }),
       sqliteLedgerPinStore({ path: join(dir, 'compact-pin.sqlite'), mode: 'create-or-open' })
     ).pipe(Layer.provideMerge(Layer.succeed(WorkspaceScope, { genesis: f.initial.genesis })));
     const context = yield* Layer.build(
       LedgerFeed.layer({
-        origin: { kind: 'genesis', record: f.initial.record },
-        expected: { head: hashRecordBytes(f.initial.record), length: 1 },
+        origin: {
+          kind: 'snapshot',
+          snapshot: { bytes: endorsed.snapshot, trust, offset: 'compact:snap' },
+        },
+        expected: { head: snapView.head, length: snapView.length },
         budget: { maxRecords: 1000, maxBytes: 1_000_000 },
       }).pipe(Layer.provide(stores))
     );
     const feed = Context.get(context, LedgerFeed);
     const full = f.view();
     yield* feed.accept(
-      { requestOffset: '-1', nextOffset: 'compact:end', records: f.records, upToDate: true },
+      {
+        requestOffset: 'compact:snap',
+        nextOffset: 'compact:end',
+        records: f.records.slice(prefix.length),
+        upToDate: true,
+      },
       { head: full.head, length: full.length }
     );
     const verified = VerifiedLedger.layer.pipe(
@@ -1761,7 +1792,12 @@ describe('encrypted recovery vault and genuine workflow', () => {
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
             expect(yield* run()).toEqual([
-              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
             ]);
             expect(adoptions).toBe(2);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
@@ -1825,7 +1861,12 @@ describe('encrypted recovery vault and genuine workflow', () => {
               restoreVaultWorkspaces({ vault, local: r.local, targets: [target()] });
             // The old vault restores and finishes.
             expect(yield* run(r.oldVault.vault)).toEqual([
-              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             // Finished work is not repeated.
@@ -1843,7 +1884,12 @@ describe('encrypted recovery vault and genuine workflow', () => {
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
             failInstall = false;
             expect(yield* run(r.newVault.vault)).toEqual([
-              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             expect(yield* run(r.newVault.vault)).toEqual([]);
@@ -1936,7 +1982,12 @@ describe('encrypted recovery vault and genuine workflow', () => {
             // Once the check works again, the retry restores it.
             identity = false;
             expect(yield* run()).toEqual([
-              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
             ]);
             expect(connected).toBe(1);
           })

@@ -87,7 +87,10 @@ type Result =
         | 'e2ee.recovery.passkeyRemoved'
         | 'e2ee.recovery.passkeyRemoveIncomplete';
     }
-  | { kind: 'restored'; results: readonly { name: string; outcome: string }[] }
+  | {
+      kind: 'restored';
+      results: readonly { name: string; outcome: string; partialEpochKey?: boolean }[];
+    }
   | { kind: 'setupAll'; done: number; failed: readonly string[] }
   | { kind: 'created'; vaultId: string }
   | { kind: 'opened'; vaultId: string; count: number }
@@ -565,7 +568,9 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
               <li key={row.name}>
                 {t(
                   row.outcome === 'Committed'
-                    ? 'e2ee.recovery.restoreDone'
+                    ? row.partialEpochKey
+                      ? 'e2ee.recovery.restorePartial'
+                      : 'e2ee.recovery.restoreDone'
                     : row.outcome === 'Pending' || row.outcome === 'Unconfirmed'
                       ? 'e2ee.recovery.restoreWaiting'
                       : row.outcome === 'not-backed-up'

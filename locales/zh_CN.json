@@ -1,4 +1,9 @@
 {
+  "e2ee.security.lastPersonalNoRecovery": "该成员没有活跃的恢复设备。移除最后一台个人设备后，需要管理员将其移除并重新邀请，才能找回加密访问权限。",
+  "e2ee.recovery.restorePartial": "{{name}}：设备已恢复，较新的工作区密钥仍需修复或废弃对应代次。",
+  "e2ee.security.lastPersonalTitle": "移除最后一台个人设备？",
+  "e2ee.security.lastPersonalWarning": "这是你最后一台已登录的个人设备，移除后你将只能通过恢复密码或 Passkey 重新找回权限，请确认你仍保有可用的恢复凭据。",
+  "e2ee.members.transferNeedsPersonal": "请先让对方在桌面端登录并完成加密设备初始化后再转让所有者。",
   "machinePairing.unixShell": "macOS / Linux",
   "machinePairing.windowsShell": "Windows (PowerShell)",
   "schedules.filter.owner": "归属",

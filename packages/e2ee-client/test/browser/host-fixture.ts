@@ -2688,6 +2688,8 @@ export const runtimeReader = {
  * Remote maps are synthetic; custody/installation are actual browser IndexedDB. */
 export async function recoverBrowser(
   options: {
+    blockedEpoch?: 'missing' | 'corrupt';
+    governance?: boolean;
     wrongAccount?: boolean;
     failInstall?: boolean;
     resume?: boolean;
@@ -2759,13 +2761,23 @@ export async function recoverBrowser(
         const sourceKeys = memoryRecoveryEpochKeys();
         yield* Effect.addFinalizer(() => Effect.sync(() => sourceKeys.dispose()));
         yield* sourceKeys.saveAndReload(0, key);
+        let retainedEnvelope: { sender: Bytes.SigningPublicKey; frame: Uint8Array } | undefined;
         const envelope: import('@lody/e2ee-core').WorkspaceRecoveryInput['fetchCurrentEnvelope'] = (
           recipient,
           _epoch,
           identity,
           credential
-        ) =>
-          prepareEpochEnvelope({
+        ) => {
+          if (options.blockedEpoch && view().inspectState().epoch.number > 0) {
+            credential.fill(0);
+            if (_epoch === 0) return Effect.succeed(retainedEnvelope!);
+            return Effect.succeed(
+              options.blockedEpoch === 'missing'
+                ? { pending: true as const }
+                : { sender: owner.publicKey, frame: new Uint8Array([1, 2, 3]) }
+            );
+          }
+          return prepareEpochEnvelope({
             context: {
               genesis: view().genesis,
               epoch: Result.getOrThrow(Bytes.epochNumber(0)),
@@ -2776,9 +2788,10 @@ export async function recoverBrowser(
             signer: owner,
             ledger: () => Effect.succeed(view()),
           }).pipe(
-            Effect.map((frame) => ({ sender: owner.publicKey, frame })),
+            Effect.map((frame) => (retainedEnvelope = { sender: owner.publicKey, frame })),
             Effect.ensuring(Effect.sync(() => credential.fill(0)))
           );
+        };
         const setup = yield* makeWorkspaceRecovery({
           vault,
           local,
@@ -2802,6 +2815,28 @@ export async function recoverBrowser(
             }),
         });
         yield* setup.setup();
+        if (options.blockedEpoch) {
+          const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72)));
+          const genesis = view().genesis;
+          const body = Result.getOrThrow(
+            encodeCbor([
+              view().head.toBytes(),
+              owner.publicKey.toBytes(),
+              [
+                7,
+                1,
+                Result.getOrThrow(commitEpochKey(genesis, 1, next)).toBytes(),
+                Result.getOrThrow(
+                  sealHistoryPacket({ genesis, epoch: 1, currentKey: next, previousKey: key })
+                ),
+              ],
+            ])
+          );
+          records.push(
+            yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner)
+          );
+          retain();
+        }
         const reference = (yield* vault.readIndex()).value.entries[0];
         if (options.revokedRecovery) {
           const recovery = [...view().inspectState().devices].find(
@@ -2885,6 +2920,25 @@ export async function recoverBrowser(
             runtime.open(offer.workspaceId, undefined, 'abc', 'recovery-reader')
           );
           const before = yield* Effect.tryPromise(() => runtime.status(offer.workspaceId));
+          if (options.governance) {
+            yield* Effect.tryPromise(() =>
+              runtime.revokeDevice!(offer.workspaceId, toHex(owner.publicKey.toBytes()))
+            );
+            const selfKey = before.signingPublicKey!;
+            const denied = yield* Effect.result(
+              Effect.tryPromise(() => runtime.revokeDevice!(offer.workspaceId, selfKey))
+            );
+            const stillAdmitted = view().inspectState().devices.has(selfKey);
+            yield* Effect.tryPromise(() =>
+              runtime.revokeDevice!(offer.workspaceId, selfKey, { confirmedRecoveryOnly: true })
+            );
+            return {
+              ok: true,
+              guarded: Result.isFailure(denied) && stillAdmitted,
+              removed: !view().inspectState().devices.has(selfKey),
+            };
+          }
+
           const backedUp = yield* personalRuntimeRecovery(runtime)!.setup({
             vault,
             local,
@@ -3018,6 +3072,7 @@ export async function recoverBrowser(
         return {
           ok: true,
           outcome: result.success.outcome,
+          partialEpochKey: result.success.partialEpochKey,
           length: current.view.length,
           sealed: frame.sealed.length > 64,
           noDuplicateAdmission: records.length === admittedCount,

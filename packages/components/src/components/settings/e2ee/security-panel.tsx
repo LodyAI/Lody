@@ -7,7 +7,8 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Info, KeyRound, ShieldCheck, ShieldQuestion, UserPlus } from 'lucide-react';
 import { Tooltip } from '@lody/ui/tooltip';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { Dialog } from '@lody/ui/dialog';
 import { CompactSection, CompactRow } from '../compact-layout';
 
 const styles = stylex.create({
@@ -257,10 +258,11 @@ export function E2eeDevicesPanel({
   onRetry,
 }: PanelState & {
   onUpdate: () => void;
-  onRevoke: (key: string) => void;
+  onRevoke: (key: string, confirmation?: { confirmedRecoveryOnly: true }) => void;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const error = effectiveError(state, actionError);
   const updating = busy || !!state?.updateInProgress;
   return (
@@ -290,7 +292,11 @@ export function E2eeDevicesPanel({
                   data-device-key={device.key}
                   variant="secondary"
                   disabled={updating}
-                  onClick={() => onRevoke(device.key)}
+                  onClick={() =>
+                    device.requiresRecoveryConfirmation
+                      ? setConfirmKey(device.key)
+                      : onRevoke(device.key)
+                  }
                 >
                   {t('e2ee.security.revoke')}
                 </Button>
@@ -299,6 +305,42 @@ export function E2eeDevicesPanel({
           ))}
         </CompactSection>
       )}
+      <Dialog.Root
+        open={confirmKey !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmKey(null);
+        }}
+      >
+        <Dialog.Content data-testid="e2ee-last-personal-confirm" width={440}>
+          <Dialog.Header>
+            <Dialog.Title>{t('e2ee.security.lastPersonalTitle')}</Dialog.Title>
+            <Dialog.Description>
+              {t(
+                state?.devices.find((device) => device.key === confirmKey)
+                  ?.recoveryDeviceAvailable === false
+                  ? 'e2ee.security.lastPersonalNoRecovery'
+                  : 'e2ee.security.lastPersonalWarning'
+              )}
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Footer>
+            <Button variant="ghost" disabled={updating} onClick={() => setConfirmKey(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              tone="destructive"
+              disabled={updating}
+              data-testid="e2ee-last-personal-revoke"
+              onClick={() => {
+                if (confirmKey) onRevoke(confirmKey, { confirmedRecoveryOnly: true });
+                setConfirmKey(null);
+              }}
+            >
+              {t('e2ee.security.revoke')}
+            </Button>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </div>
   );
 }

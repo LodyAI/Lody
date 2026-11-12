@@ -705,6 +705,11 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     retirePersonalJoin: (workspaceId: string, pairingSessionId: string) =>
       withLock(joins.retire(workspaceId, pairingSessionId)),
     preparePersonalJoin: (offer: PersonalPairingOffer) => withLock(joins.prepare(offer)),
+    /** Recovery alone may rebind an unfinished join after verifying this device's admission. Completed anchors remain immutable. */
+    prepareRecoveryPersonalJoin: (
+      offer: PersonalPairingOffer,
+      pages: readonly E2eeWorkspaceHistoryPage[]
+    ) => withLock(joins.prepareRecovery(offer, pages)),
     /** The new device a restore admits through R; see `recoveryIdentity`. */
     recoveryIdentity: (pin: {
       genesisHash: string

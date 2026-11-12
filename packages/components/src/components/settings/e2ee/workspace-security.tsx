@@ -136,11 +136,11 @@ function SecuritySettings({
                         {...panelState}
                         onRetry={retry}
                         onUpdate={update}
-                        onRevoke={(key) => {
+                        onRevoke={(key, confirmation) => {
                           void perform(async () => {
                             if (!scope.native?.revokeDevice)
                               throw new Error('e2ee_management_unauthorized');
-                            await scope.native.revokeDevice(scope.workspaceId!, key);
+                            await scope.native.revokeDevice(scope.workspaceId!, key, confirmation);
                           });
                         }}
                       />

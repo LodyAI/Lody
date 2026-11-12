@@ -1535,6 +1535,18 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             devices: [...state.devices].map(([key, entry]) => ({
               key,
               kind: entry.kind,
+              recoveryDeviceAvailable: [...state.devices.values()].some(
+                (other) =>
+                  other.kind === 'recovery' && other.membershipId.equals(entry.membershipId)
+              ),
+              requiresRecoveryConfirmation:
+                entry.kind === 'personal' &&
+                ![...state.devices.entries()].some(
+                  ([otherKey, other]) =>
+                    otherKey !== key &&
+                    other.kind === 'personal' &&
+                    other.membershipId.equals(entry.membershipId)
+                ),
               machineId: entry.machineId ?? null,
               self: key === ownKey,
               mayRevoke: Result.isSuccess(

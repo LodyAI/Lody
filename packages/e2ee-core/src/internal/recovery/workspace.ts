@@ -1,7 +1,8 @@
-import { Clock, Effect, Result, Schema, Semaphore } from 'effect';
+import { Clock, Data, Effect, Result, Schema, Semaphore } from 'effect';
 import * as Bytes from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
 import { copyEpochKeyBytes, disposeEpochKey } from '../foundation/epoch-key';
+import { ContentError } from '../foundation/errors';
 import {
   epochHistoryPacket,
   hasVerifiedCheckpoint,
@@ -15,8 +16,12 @@ import { decodeRecord } from '../ledger/records';
 import { signLedgerRecord } from '../ledger/signing';
 import type { DeviceSigner } from '../foundation/signing';
 import { openEpochEnvelope, authenticateEpochEnvelopeSignature } from '../keys/envelope';
-import { authenticateEpochStagedGroup, type EpochStagedGroup } from '../keys/staging';
-import { openEpochKeyHpke } from '../crypto/hpke';
+import {
+  authenticateEpochStagedGroup,
+  EpochStagingError,
+  type EpochStagedGroup,
+} from '../keys/staging';
+import { openEpochKeyHpke, HpkePrimitiveError } from '../crypto/hpke';
 import { commitEpochKey, recoverLedgerHistory } from '../keys/history';
 import {
   canonical,
@@ -45,11 +50,11 @@ export type RecoverySubmitResult = {
 };
 /** SHA-256 of R's derived service access credential, registered with R's admission append. */
 export type RecoveryCredentialRegistration = { readonly recoveryCredentialHash: Uint8Array };
-/** The current epoch-key envelope addressed to a recovery device, as fetched during restore. */
+/** A requested committed epoch-key envelope addressed to a recovery device. */
 export type RecoveryEnvelope =
   | { readonly sender: Bytes.SigningPublicKey; readonly frame: Uint8Array }
   | { readonly staged: EpochStagedGroup }
-  /** Not delivered yet. Nothing failed: the caller reports Pending and retries. */
+  /** Not delivered yet. Setup retries; restore may try an older committed epoch. */
   | { readonly pending: true };
 /** Everything the recovery workflow of one workspace needs: the vault session, local journal, identity, ledger, submission and envelope fetch. */
 export interface WorkspaceRecoveryInput {
@@ -119,6 +124,7 @@ const RestoreSchema = Schema.Struct({
 });
 const isPending = (error: unknown) =>
   error instanceof RecoveryVaultError && error.code === 'pending';
+class RecoveryEpochUnavailable extends Data.TaggedError('RecoveryEpochUnavailable') {}
 /** A resumable four-step owner. Only encrypted vault entries, original signed
  * records and non-secret progress reach local storage. Genuine ledger facts and
  * actual HPKE/commitment checks establish paired/enveloped/recoverable separately. */
@@ -239,70 +245,115 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
     );
   const openCurrent = Effect.fnUntraced(function* (
     identity: RecoveryIdentity,
-    onEnvelope?: (epoch: number) => Effect.Effect<void, unknown>
+    onEnvelope?: (epoch: number) => Effect.Effect<void, unknown>,
+    requestedEpoch?: number
   ) {
     const before = yield* current();
     if (!active(before, identity)) return yield* vaultError('unauthorized');
-    const epoch = before.inspectState().epoch.number,
-      remote = yield* fetch(
+    const epoch = requestedEpoch ?? before.inspectState().epoch.number;
+    const keyValue = yield* Effect.gen(function* () {
+      const remote = yield* fetch(
         identity.publicKey,
         epoch,
         identity,
         new Uint8Array(credentials.get(identity)!)
       );
-    if ('pending' in remote) return yield* vaultError('pending');
-    let keyValue: Bytes.EpochKey;
-    if ('staged' in remote) {
-      const qualified = yield* Effect.fromResult(
-        authenticateEpochStagedGroup(before, remote.staged)
-      );
-      if (qualified.group.epoch !== epoch) return yield* vaultError('authentication');
-      const row = qualified.group.envelopes.find(
-        (item) => item.recipient === hex(identity.publicKey.toBytes())
-      );
-      if (!row) return yield* vaultError('missing');
-      const context = {
-        genesis,
-        epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
-        sender: qualified.sender,
-        recipient: identity.publicKey,
-      };
-      const payload = yield* Effect.fromResult(
-        authenticateEpochEnvelopeSignature(context, row.frame)
-      );
-      keyValue = yield* openEpochKeyHpke(
-        identity.encryption,
-        identity.encryptionPublicKey,
-        context,
-        payload
-      );
-    } else {
-      keyValue = yield* openEpochEnvelope({
-        context: {
+      if ('pending' in remote) return yield* vaultError('pending');
+      let keyValue: Bytes.EpochKey;
+      if ('staged' in remote) {
+        const qualified = yield* Effect.fromResult(
+          authenticateEpochStagedGroup(before, remote.staged)
+        );
+        if (qualified.group.epoch !== epoch) return yield* vaultError('authentication');
+        const row = qualified.group.envelopes.find(
+          (item) => item.recipient === hex(identity.publicKey.toBytes())
+        );
+        if (!row) return yield* vaultError('missing');
+        const context = {
+          genesis,
+          epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
+          sender: qualified.sender,
+          recipient: identity.publicKey,
+        };
+        const payload = yield* Effect.fromResult(
+          authenticateEpochEnvelopeSignature(context, row.frame)
+        );
+        keyValue = yield* openEpochKeyHpke(
+          identity.encryption,
+          identity.encryptionPublicKey,
+          context,
+          payload
+        );
+      } else if (epoch !== before.inspectState().epoch.number) {
+        // Historical key possession grants no sender authority. Its signature binds
+        // routing; the genuine committed epoch's preimage authenticates the key below.
+        const context = {
           genesis,
           epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
           sender: remote.sender,
           recipient: identity.publicKey,
-        },
-        pair: identity.encryption,
-        frame: remote.frame,
-        ledger: current,
-      });
-    }
+        };
+        const payload = yield* Effect.fromResult(
+          authenticateEpochEnvelopeSignature(context, remote.frame)
+        );
+        keyValue = yield* openEpochKeyHpke(
+          identity.encryption,
+          identity.encryptionPublicKey,
+          context,
+          payload
+        );
+      } else {
+        keyValue = yield* openEpochEnvelope({
+          context: {
+            genesis,
+            epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
+            sender: remote.sender,
+            recipient: identity.publicKey,
+          },
+          pair: identity.encryption,
+          frame: remote.frame,
+          ledger: current,
+        });
+      }
+      return keyValue;
+    }).pipe(
+      Effect.catchIf(
+        (error) =>
+          requestedEpoch !== undefined &&
+          ((error instanceof RecoveryVaultError &&
+            (['missing', 'authentication'].includes(error.code) ||
+              (error.code === 'pending' && epoch !== 0))) ||
+            error instanceof ContentError ||
+            error instanceof EpochStagingError ||
+            (error instanceof HpkePrimitiveError &&
+              ['open-failed', 'invalid-input', 'recipient-mismatch'].includes(error.code))),
+        () => Effect.fail(new RecoveryEpochUnavailable())
+      )
+    );
     return yield* Effect.acquireUseRelease(
       Effect.succeed(keyValue),
       (latest) =>
         Effect.gen(function* () {
           const after = yield* current();
-          if (!active(after, identity) || after.inspectState().epoch.number !== epoch)
+          if (
+            !active(after, identity) ||
+            after.inspectState().epoch.number !== before.inspectState().epoch.number
+          )
             return yield* vaultError('unauthorized');
           const fact = yield* Effect.fromResult(epochHistoryPacket(after, epoch)),
             commitment = yield* Effect.fromResult(commitEpochKey(genesis, epoch, latest));
-          if (!fact.commitment.equals(commitment)) return yield* vaultError('authentication');
+          if (!fact.commitment.equals(commitment))
+            return yield* requestedEpoch !== undefined
+              ? new RecoveryEpochUnavailable()
+              : vaultError('authentication');
           if (onEnvelope) yield* onEnvelope(epoch);
           // Validate the complete signed history before the first durable save.
           return yield* Effect.acquireUseRelease(
-            Effect.fromResult(recoverLedgerHistory(after, latest)),
+            Effect.fromResult(recoverLedgerHistory(after, latest, epoch)).pipe(
+              Effect.mapError((error) =>
+                requestedEpoch !== undefined ? new RecoveryEpochUnavailable() : error
+              )
+            ),
             (keys) =>
               Effect.gen(function* () {
                 yield* installed.saveAndReload(epoch, latest);
@@ -599,19 +650,44 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         if (!(yield* Effect.fromResult(hasVerifiedCheckpoint(view, checkpoint))))
           return yield* vaultError('authentication');
         const personal = request.personal;
-        const opened = yield* openCurrent(identity).pipe(
-          Effect.catchIf(isPending, () => Effect.succeed(null))
-        );
-        if (opened === null)
-          return { outcome: 'Pending' as const, epoch: view.inspectState().epoch.number };
-        const epoch = opened;
+        // Try committed epochs newest first. Only missing or invalid envelope/key
+        // evidence permits fallback; ledger, network and storage failures propagate.
+        let epoch: number | null = null;
+        for (let candidate = view.inspectState().epoch.number; candidate >= 0; candidate--) {
+          const opened = yield* openCurrent(identity, undefined, candidate).pipe(
+            Effect.catchIf(isPending, () => Effect.succeed('pending' as const)),
+            Effect.catchIf(
+              (error) => error instanceof RecoveryEpochUnavailable,
+              () => Effect.succeed(null)
+            )
+          );
+          if (opened === 'pending')
+            return {
+              outcome: 'Pending' as const,
+              epoch: view.inspectState().epoch.number,
+              partialEpochKey: true,
+            };
+          if (opened !== null) {
+            epoch = opened;
+            break;
+          }
+        }
+        // At epoch zero the authenticated vault identity and active R suffice to
+        // regain governance for invalid key evidence. In-flight delivery above stays Pending.
+        if (epoch === null && view.inspectState().epoch.number !== 0)
+          return {
+            outcome: 'Pending' as const,
+            epoch: view.inspectState().epoch.number,
+            partialEpochKey: true,
+          };
+        const partialEpochKey = epoch !== view.inspectState().epoch.number;
         if (
           personal.publicKey.equals(identity.publicKey) ||
           personal.encryptionPublicKey.equals(identity.encryptionPublicKey)
         )
           return yield* vaultError('invalid-input');
         // A retained, currently admitted personal identity may have lost its local
-        // installed key. R has authenticated the current epoch above; restore the
+        // installed key. R has authenticated available committed keys above; restore the
         // key without a duplicate admission. Retired/foreign/mismatched identities
         // still follow the normal rejection path and can never be revived here.
         const retained = view.inspectState().devices.get(hex(personal.publicKey.toBytes()));
@@ -625,6 +701,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           return {
             outcome: 'Committed' as const,
             epoch,
+            partialEpochKey,
             personal: personal.publicKey,
             role: view.inspectState().members.get(hex(membership.toBytes()))!.role,
           };
@@ -691,7 +768,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
               if (!read || !bytesEqual(read, next)) return yield* vaultError('storage');
             }
           }
-          return { outcome: result.outcome, epoch };
+          return { outcome: result.outcome, epoch, partialEpochKey };
         }
         const after = yield* current(),
           device = after.inspectState().devices.get(hex(personal.publicKey.toBytes()));
@@ -711,6 +788,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         return {
           outcome: 'Committed' as const,
           epoch,
+          partialEpochKey,
           personal: personal.publicKey,
           role: after.inspectState().members.get(hex(membership.toBytes()))!.role,
         };

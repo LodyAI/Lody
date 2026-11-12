@@ -89,3 +89,188 @@ describe('independently imported workspace invitations', () => {
     ).toBe(true);
   });
 });
+
+describe('workspace governance safeguards', () => {
+  it('requires explicit confirmation for the last personal device while keeping v1 replay compatible', async () => {
+    const { WorkspaceControl, LedgerSubmission } = await import('@lody/e2ee-core');
+    const { DeviceIdentity, LedgerSync } = await import('@lody/e2ee-core/services');
+    const { Layer } = await import('effect');
+    const f = envelopeFixture(2); // Owner personal device plus an active recovery device.
+    const records: Uint8Array[] = f.records();
+    const { verifyLedger, hashRecordBytes } = await import('@lody/e2ee-core/protocol');
+    const view = () =>
+      ok(
+        verifyLedger({
+          anchor: f.context.genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
+        })
+      );
+    const state = () =>
+      Effect.sync(() => ({ view: view(), bootstrap: false, offset: String(records.length) }));
+    const layer = WorkspaceControl.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(DeviceIdentity, {
+            signer: f.owner.signer,
+            encryptionKeyPair: {} as CryptoKeyPair,
+          }),
+          Layer.succeed(LedgerSync, { current: state, refresh: state }),
+          Layer.succeed(LedgerSubmission, {
+            pending: () => Effect.succeed({ record: null, outcome: null, checkpoint: null }),
+            resume: () => Effect.succeed(null),
+            acknowledge: () => Effect.void,
+            submit: (record) =>
+              Effect.sync(() => {
+                records.push(record);
+                view();
+                return { outcome: 'Committed' as const, record };
+              }),
+          })
+        )
+      )
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const control = yield* WorkspaceControl;
+          const rejected = yield* Effect.result(
+            control.execute({ _tag: 'RevokeDevice', target: f.owner.publicKey })
+          );
+          expect(
+            Result.isFailure(rejected) && (rejected.failure as { reason: string }).reason
+          ).toBe('recovery-only-confirmation-required');
+          expect(view().inspectState().devices.size).toBe(2);
+          yield* control.execute({
+            _tag: 'RevokeDevice',
+            target: f.owner.publicKey,
+            confirmedRecoveryOnly: true,
+          });
+          expect(view().inspectState().devices.size).toBe(1);
+        })
+      ).pipe(Effect.provide(layer))
+    );
+  });
+});
+
+it('refuses a recovery-only successor without changing v1 history rules, then transfers after personal admission', async () => {
+  const { WorkspaceControl, LedgerSubmission } = await import('@lody/e2ee-core');
+  const { DeviceIdentity, LedgerSync } = await import('@lody/e2ee-core/services');
+  const { Layer } = await import('effect');
+  const {
+    prepareJoinRequest,
+    prepareLedgerCommand,
+    prepareDeviceAdmission,
+    signLedgerRecord,
+    verifyLedger,
+    hashRecordBytes,
+  } = await import('@lody/e2ee-core/protocol');
+  const f = envelopeFixture();
+  const records: Uint8Array[] = f.records();
+  const view = () =>
+    ok(
+      verifyLedger({
+        anchor: f.context.genesis,
+        records,
+        checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
+      })
+    );
+  const bob = f.ed(23),
+    recovery = f.ed(24),
+    personal = f.ed(25);
+  const member = ok(Bytes.membershipId(new Uint8Array(16).fill(23)));
+  const encryptionPublicKey = ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(23)));
+  const append = (
+    signer: typeof f.owner.signer,
+    command: Parameters<typeof prepareLedgerCommand>[2]
+  ) =>
+    Effect.gen(function* () {
+      records.push(
+        yield* signLedgerRecord(ok(prepareLedgerCommand(view(), signer.publicKey, command)), signer)
+      );
+      view();
+    });
+  const state = () =>
+    Effect.sync(() => ({ view: view(), bootstrap: false, offset: String(records.length) }));
+  const layer = WorkspaceControl.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(DeviceIdentity, {
+          signer: f.owner.signer,
+          encryptionKeyPair: {} as CryptoKeyPair,
+        }),
+        Layer.succeed(LedgerSync, { current: state, refresh: state }),
+        Layer.succeed(LedgerSubmission, {
+          pending: () => Effect.succeed({ record: null, outcome: null, checkpoint: null }),
+          resume: () => Effect.succeed(null),
+          acknowledge: () => Effect.void,
+          submit: (record) =>
+            Effect.sync(() => {
+              records.push(record);
+              view();
+              return { outcome: 'Committed' as const, record };
+            }),
+        })
+      )
+    )
+  );
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const request = yield* prepareJoinRequest({
+          genesis: f.context.genesis,
+          requestId: ok(Bytes.requestId(new Uint8Array(16).fill(23))),
+          userId: ok(Bytes.userId(new Uint8Array(32).fill(23))),
+          encryptionPublicKey,
+          expiresAt: null,
+          signer: bob.signer,
+        });
+        yield* append(f.owner.signer, { _tag: 'AdmitMember', membershipId: member, request });
+        yield* append(
+          bob.signer,
+          yield* prepareDeviceAdmission({
+            genesis: f.context.genesis,
+            membershipId: member,
+            encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(24))),
+            kind: 'recovery',
+            signer: recovery.signer,
+          })
+        );
+        yield* append(bob.signer, { _tag: 'RevokeDevice', target: bob.publicKey });
+        const command = { _tag: 'TransferOwner' as const, successorMembershipId: member };
+        // Legacy v1 still authorizes and replays this record; only new workflow intent is refused.
+        expect(Result.isSuccess(prepareLedgerCommand(view(), f.owner.publicKey, command))).toBe(
+          true
+        );
+        const control = yield* WorkspaceControl;
+        const rejected = yield* Effect.result(control.execute(command));
+        expect(Result.isFailure(rejected) && (rejected.failure as { reason: string }).reason).toBe(
+          'owner-personal-device-required'
+        );
+        expect(view().inspectState().owner.equals(member)).toBe(false);
+        yield* append(
+          recovery.signer,
+          yield* prepareDeviceAdmission({
+            genesis: f.context.genesis,
+            membershipId: member,
+            encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(25))),
+            kind: 'personal',
+            signer: personal.signer,
+          })
+        );
+        yield* control.execute(command);
+        expect(view().inspectState().owner.equals(member)).toBe(true);
+        yield* append(personal.signer, {
+          _tag: 'TransferOwner',
+          successorMembershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(10))),
+        });
+        yield* append(personal.signer, { _tag: 'RevokeDevice', target: recovery.publicKey });
+        yield* append(personal.signer, { _tag: 'RevokeDevice', target: personal.publicKey });
+        const noDevices = yield* Effect.result(control.execute(command));
+        expect(
+          Result.isFailure(noDevices) && (noDevices.failure as { reason: string }).reason
+        ).toBe('owner-personal-device-required');
+      })
+    ).pipe(Effect.provide(layer))
+  );
+});
