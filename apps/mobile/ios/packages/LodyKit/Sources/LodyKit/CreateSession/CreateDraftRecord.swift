@@ -15,7 +15,10 @@ struct CreateDraftRecord {
   ) {
     let agent = draft.agent
     let message = payload["text"] as? String ?? ""
-    let title = Self.title(message, fallback: label("session.newTitle"))
+    // The composer's shown text (chips as their labels, e.g. an Agent Role's emoji and name)
+    // titles the chat and fills the local bubble; the wire text keeps the tokens.
+    let shown = (payload["displayText"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    let title = Self.title(shown ?? message, fallback: label("session.newTitle"))
     let session = Self.object([
       ("id", Self.string(draft.sessionId)),
       ("projectId", Self.string(draft.projectId ?? "\(agent.machineId):unassigned")),
@@ -55,7 +58,7 @@ struct CreateDraftRecord {
     let choiceFields = Self.fields(CreateJSON.encode(draft.choice))
     var sendChoice = choiceFields
     if let effort = draft.reasoningEffortConfigId { sendChoice.append(("reasoningEffortConfigId", Self.string(effort))) }
-    let send = Self.object([
+    var sendFields: [(String, String)] = [
       ("id", Self.string(payload["id"] as? String ?? "")),
       ("text", Self.string(message)),
       ("startedAt", Self.number(payload["startedAt"])),
@@ -63,7 +66,13 @@ struct CreateDraftRecord {
       ("phase", Self.string("waiting")),
       ("choice", Self.object(sendChoice)),
       ("creation", Self.string(Self.object(creation))),
-    ] + (draft.agentRoleId.map { [("agentRoleId", Self.string($0))] } ?? []))
+    ]
+    if let role = draft.agentRoleId { sendFields.append(("agentRoleId", Self.string(role))) }
+    if let shown {
+      sendFields.append(("displayText", Self.string(shown)))
+      if let references = payload["references"] as? [Any] { sendFields.append(("references", Self.raw(references))) }
+    }
+    let send = Self.object(sendFields)
     recordJSON = Self.object([("session", session), ("send", send)])
     let projectName = draft.projectId?.isEmpty == false ? draft.projectName : label("inbox.section.chat")
     createdJSON = Self.object([

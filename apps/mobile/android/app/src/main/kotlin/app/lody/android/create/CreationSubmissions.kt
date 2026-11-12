@@ -14,7 +14,7 @@ class CreationSubmissions(
     data class Submission(val scope: RuntimeScope, val request: CreateRequest, val at: String, val state: String = "sending", val reason: String? = null) {
         val session get() = CatalogSession(
             request.sessionId, request.machineId, request.projectId ?: "${request.machineId}:unassigned",
-            request.text.take(200), "idle", false, false, at,
+            (request.displayText ?: request.text).take(200), "idle", false, false, at,
         )
     }
     private val mutable = MutableStateFlow<Map<String, Submission>>(emptyMap())
