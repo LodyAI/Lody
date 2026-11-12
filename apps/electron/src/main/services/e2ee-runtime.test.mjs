@@ -4752,3 +4752,114 @@ void test('an iroh call that outlives its budget is cancelled and rejects for St
   t.mock.timers.tick(800)
   await assert.rejects(pending, /iroh_timeout/)
 })
+
+void test('desktop status skips an abandoned retained write hint with only K1 installed', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory),
+        prepared = yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const genesis = Result.getOrThrow(
+        Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+      )
+      const signer = yield* owner.custody.openDevice(genesis),
+        records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+      let view = Result.getOrThrow(
+        verifyLedger({
+          anchor: genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records[0]), length: 1 }
+        })
+      )
+      const append = Effect.fnUntraced(function* (op) {
+        const body = Result.getOrThrow(
+          encodeCbor([view.head.toBytes(), signer.publicKey.toBytes(), op])
+        )
+        const record = yield* signLedgerRecord(
+          Result.getOrThrow(prepareLedgerRecord(view, body)),
+          signer
+        )
+        records.push(record)
+        view = Result.getOrThrow(
+          extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+        )
+      })
+      const ports = Layer.mergeAll(
+        desktopE2eePorts(owner.custody, signer),
+        Layer.succeed(WorkspaceScope, { genesis }),
+        Layer.succeed(LedgerViewSource, { current: () => Effect.succeed(view) }),
+        Layer.succeed(LedgerPinStore, {
+          read: () => Effect.succeed(null),
+          write: () => Effect.void
+        })
+      )
+      const path = join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+      const keys = Context.get(
+        yield* Layer.build(
+          InstalledEpochKeys.layer.pipe(
+            Layer.provideMerge(sqliteInstalledKeyStore({ path, mode: 'open' })),
+            Layer.provideMerge(VerifiedLedger.layer),
+            Layer.provideMerge(ports)
+          )
+        ),
+        InstalledEpochKeys
+      )
+      const key1 = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(71))),
+        key2 = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(72)))
+      try {
+        const base = yield* keys.read(0)
+        try {
+          yield* append([
+            7,
+            1,
+            Result.getOrThrow(commitEpochKey(genesis, 1, key1)).toBytes(),
+            Result.getOrThrow(
+              sealHistoryPacket({ genesis, epoch: 1, currentKey: key1, previousKey: base })
+            )
+          ])
+          yield* keys.saveAndReload(1, key1)
+          const db = new DatabaseSync(path)
+          try {
+            db.exec('DELETE FROM installed_epoch_keys WHERE epoch = 0')
+          } finally {
+            db.close()
+          }
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 0)
+          )
+          assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, 1)
+          yield* append([9, [2]])
+          yield* append([
+            11,
+            2,
+            Result.getOrThrow(commitEpochKey(genesis, 2, key2)).toBytes(),
+            0,
+            Result.getOrThrow(
+              sealHistoryPacket({
+                genesis,
+                epoch: 2,
+                baseEpoch: 0,
+                currentKey: key2,
+                previousKey: base
+              })
+            )
+          ])
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 0)
+          )
+          assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, null)
+          assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, null)
+          yield* keys.check(1) // Historical key installation remains intact.
+        } finally {
+          disposeEpochKey(base)
+        }
+      } finally {
+        disposeEpochKey(key1)
+        disposeEpochKey(key2)
+      }
+    })
+  )
+})

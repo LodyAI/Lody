@@ -595,7 +595,7 @@ describe('durable full-history feed boundary', () => {
       genesis: f.context.genesis,
       genesisRecord: f.genesisRecord,
       expected,
-      budget: { maxRecords: 2, maxBytes: 100000 },
+      budget: { maxRecords: 1, maxBytes: 100000 },
     };
     const page = {
       requestOffset: '-1',

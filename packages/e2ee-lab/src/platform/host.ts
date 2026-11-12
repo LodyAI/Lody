@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { Data, Effect, Result, Schema, Semaphore } from 'effect';
 import { Bytes } from '@lody/e2ee-core';
 import type { makeLabCredentials } from './credentials';
-import type { makeLabControlGateway } from './control-gateway';
+import { LabControlGatewayError, type makeLabControlGateway } from './control-gateway';
 import { makeLabOperations } from './operation-scope';
 import { LabCallbackRunner } from './run';
 import { dispatchLabMailbox, type LabMailboxHost } from './mailbox-http';
@@ -453,42 +453,55 @@ export function makeLabHttpHost(input: {
             else
               respond(
                 response,
-                result.failure instanceof LabHttpError ||
-                  result.failure instanceof LabStreamReadError ||
-                  result.failure instanceof LabContentGatewayError
-                  ? result.failure.status
-                  : result.failure instanceof LabJoinError ||
-                      result.failure instanceof LabWorkspaceError ||
-                      result.failure instanceof LabWorkspaceCreationError
-                    ? result.failure.code === 'conflict'
-                      ? 409
-                      : result.failure.code === 'invalid-input'
-                        ? 400
+                result.failure instanceof LabControlGatewayError
+                  ? result.failure.code === 'self-service-rate-limited'
+                    ? 429
+                    : result.failure.code === 'quota-storage'
+                      ? 500
+                      : result.failure.code === 'closed'
+                        ? 503
                         : result.failure.code === 'transport'
                           ? 502
-                          : ['storage', 'corrupt'].includes(result.failure.code)
-                            ? 500
-                            : result.failure.code === 'closed'
-                              ? 503
-                              : 403
-                    : result.failure instanceof LabEpochStagingError
-                      ? result.failure.code === 'storage' || result.failure.code === 'corrupt'
-                        ? 500
-                        : result.failure.code === 'closed'
-                          ? 503
-                          : result.failure.code === 'invalid-input'
-                            ? 400
-                            : 409
-                      : result.failure instanceof LabEpochStagingHttpError
-                        ? result.failure.code === 'invalid-request'
+                          : 403
+                  : result.failure instanceof LabHttpError ||
+                      result.failure instanceof LabStreamReadError ||
+                      result.failure instanceof LabContentGatewayError
+                    ? result.failure.status
+                    : result.failure instanceof LabJoinError ||
+                        result.failure instanceof LabWorkspaceError ||
+                        result.failure instanceof LabWorkspaceCreationError
+                      ? result.failure.code === 'conflict'
+                        ? 409
+                        : result.failure.code === 'invalid-input'
                           ? 400
-                          : result.failure.code === 'unauthorized'
-                            ? 403
-                            : result.failure.code === 'closed'
-                              ? 503
-                              : 502
-                        : 403,
-                { error: 'refused' }
+                          : result.failure.code === 'transport'
+                            ? 502
+                            : ['storage', 'corrupt'].includes(result.failure.code)
+                              ? 500
+                              : result.failure.code === 'closed'
+                                ? 503
+                                : 403
+                      : result.failure instanceof LabEpochStagingError
+                        ? result.failure.code === 'storage' || result.failure.code === 'corrupt'
+                          ? 500
+                          : result.failure.code === 'closed'
+                            ? 503
+                            : result.failure.code === 'invalid-input'
+                              ? 400
+                              : 409
+                        : result.failure instanceof LabEpochStagingHttpError
+                          ? result.failure.code === 'invalid-request'
+                            ? 400
+                            : result.failure.code === 'unauthorized'
+                              ? 403
+                              : result.failure.code === 'closed'
+                                ? 503
+                                : 502
+                          : 403,
+                result.failure instanceof LabControlGatewayError &&
+                  result.failure.code === 'self-service-rate-limited'
+                  ? { error: result.failure.code, retryAt: result.failure.retryAt }
+                  : { error: 'refused' }
               );
           },
           () => respond(response, 503, { error: 'unavailable' })

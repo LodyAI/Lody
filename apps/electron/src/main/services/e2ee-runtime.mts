@@ -37,6 +37,7 @@ import {
   type WorkspaceRecoveryInput
 } from '@lody/e2ee-core'
 import {
+  epochHistoryPacket,
   Bytes,
   ContentError,
   LedgerError,
@@ -1322,6 +1323,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               candidate >= 0;
               candidate -= 1
             ) {
+              const packet = epochHistoryPacket(state.view, candidate)
+              if (Result.isFailure(packet) || packet.success.abandoned) continue
               const older = yield* Effect.result(keys.check(candidate))
               if (Result.isSuccess(older)) {
                 writeEpoch = candidate

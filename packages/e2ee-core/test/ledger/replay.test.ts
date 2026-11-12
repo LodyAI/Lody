@@ -42,7 +42,20 @@ function keys(n: number) {
   );
   return {
     pk,
-    enc: filled(n + 100),
+    enc: new Uint8Array(
+      createPublicKey(
+        createPrivateKey({
+          key: Buffer.concat([
+            Buffer.from('302e020100300506032b656e04220420', 'hex'),
+            Buffer.alloc(32, n),
+          ]),
+          format: 'der',
+          type: 'pkcs8',
+        })
+      )
+        .export({ format: 'der', type: 'spki' })
+        .subarray(-32)
+    ),
     sign: (message: Uint8Array) => new Uint8Array(sign(null, message, privateKey)),
   };
 }
@@ -1266,8 +1279,8 @@ describe('authenticated snapshot migration reproduction', () => {
       code(Snapshots.verifyLedgerSnapshot({ ...data, snapshot: ok(encodeSnapshotCbor(root)) }))
     ).toBe('bad-signature');
     // Validly signed bodies of another version (1 was the pre-compact layout) are rejected.
-    expect((ok(decodeSnapshotCbor(data.proposal.bodyBytes)) as CborValue[])[0]).toBe(4);
-    for (const version of [1, 2, 3, 6])
+    expect((ok(decodeSnapshotCbor(data.proposal.bodyBytes)) as CborValue[])[0]).toBe(5);
+    for (const version of [1, 2, 3, 4, 6])
       expect(
         code(
           Snapshots.verifyLedgerSnapshot(
@@ -2278,7 +2291,7 @@ describe('retained verified state', () => {
       code(Ledger.restoreVerifiedState({ ...saved, bytes: saved.bytes.subarray(0, 40) }))
     ).not.toBe('accepted');
     // Current-only: a row written before version 2 (or by a newer client) is rebuilt by full replay.
-    for (const version of [1, 2, 3, 6]) {
+    for (const version of [1, 2, 3, 4, 6]) {
       const stale = new Uint8Array(saved.bytes);
       expect(stale[1]).toBe(5);
       stale[1] = version;
@@ -2368,12 +2381,13 @@ describe('frozen ledger v1 compatibility', () => {
     ).toEqual(expected.machineBindings);
   });
 
-  it('stops at a genuine capability declaration as an upgrade, with its position', () => {
-    const all = Ledger.verifyLedger({ anchor, records, checkpoint: checkpoint(records) });
-    expect(Result.isFailure(all) && all.failure).toMatchObject(ledgerV1.expected.failure);
+  it('keeps the frozen declaration bytes verifiable after capability 2 becomes supported', () => {
+    const all = ok(Ledger.verifyLedger({ anchor, records, checkpoint: checkpoint(records) }));
+    expect(all.inspectState().capabilities).toContain(2);
     const before = ok(prefix(ledgerV1.expected.verifiedLength));
-    const extended = Ledger.extendLedger(before, records.slice(-1), checkpoint(records));
-    expect(Result.isFailure(extended) && extended.failure).toMatchObject(ledgerV1.expected.failure);
+    expect(
+      ok(Ledger.extendLedger(before, records.slice(-1), checkpoint(records))).head.equals(all.head)
+    ).toBe(true);
     expect(before.length).toBe(ledgerV1.expected.verifiedLength);
   });
 
@@ -2820,7 +2834,7 @@ describe('independent removal command and state integrity', () => {
     o.append(owner, [9, [1]]);
     const view = ok(o.verify());
     for (const [caps, expected] of [
-      [[2], 'upgrade-required'],
+      [[3], 'upgrade-required'],
       [[1, 1], 'canonical'],
       [[0], 'canonical'],
       [[1, 0], 'canonical'],
@@ -2842,5 +2856,231 @@ describe('independent removal command and state integrity', () => {
       });
       expect(code(Snapshots.verifyLedgerSnapshot(snapshot))).toBe(expected);
     }
+  });
+});
+
+describe('capability 2 control-plane recovery', () => {
+  it('requires a prior capability and an Owner personal device, and validates the abandoned interval', () => {
+    for (const scenario of [
+      'undeclared',
+      'admin',
+      'machine',
+      'recovery',
+      'base-current',
+      'next-gap',
+      'reused',
+    ] as const) {
+      const o = org();
+      if (scenario !== 'undeclared') o.append(owner, [9, [2]]);
+      o.append(owner, o.join(bob, 11));
+      o.append(owner, [3, id(11), 1]);
+      o.append(owner, o.device(machine, 1));
+      o.append(owner, o.device(recovery, 2));
+      o.append(owner, [7, 1, filled(21), filled(22, 72)]);
+      const signer =
+        scenario === 'admin'
+          ? bob
+          : scenario === 'machine'
+            ? machine
+            : scenario === 'recovery'
+              ? recovery
+              : owner;
+      o.append(signer, [
+        11,
+        scenario === 'next-gap' ? 3 : 2,
+        filled(scenario === 'reused' ? 21 : 23),
+        scenario === 'base-current' ? 1 : 0,
+        filled(24, 72),
+      ]);
+      expect(code(o.verify())).toBe(
+        scenario === 'undeclared' || scenario === 'base-current' || scenario === 'next-gap'
+          ? 'invalid-operation'
+          : scenario === 'reused'
+            ? 'replay'
+            : 'unauthorized'
+      );
+    }
+  });
+
+  it('preserves abandonment links and commitments through retained state and signed snapshots', async () => {
+    const f = envelopeFixture();
+    const next = ok(Bytes.epochKey(filled(41))),
+      latest = ok(Bytes.epochKey(filled(42)));
+    f.append([9, [2]]);
+    f.append([
+      7,
+      1,
+      ok(EpochKeys.commitEpochKey(f.context.genesis, 1, next)).toBytes(),
+      filled(1, 72),
+    ]);
+    f.append([7, 2, filled(43), filled(2, 72)]);
+    const packet = ok(
+      EpochKeys.sealHistoryPacket({
+        genesis: f.context.genesis,
+        epoch: 3,
+        baseEpoch: 0,
+        currentKey: latest,
+        previousKey: f.secret,
+      })
+    );
+    f.append([
+      11,
+      3,
+      ok(EpochKeys.commitEpochKey(f.context.genesis, 3, latest)).toBytes(),
+      0,
+      packet,
+    ]);
+    const view = f.view();
+    const scope = {
+      genesis: hex(f.context.genesis),
+      epoch: 1,
+      resource: 'abandoned-document',
+      purpose: 'doc-update' as const,
+    };
+    const documentKey = ok(EpochKeys.deriveDocumentKey(scope, next));
+    try {
+      const refused = await Effect.runPromise(
+        Effect.result(
+          EpochKeys.sealDocument({
+            scope,
+            documentKey,
+            signer: f.owner.signer,
+            ledger: () => Effect.succeed(view),
+            plaintext: filled(1, 1),
+          })
+        )
+      );
+      expect(Result.isFailure(refused) && refused.failure).toMatchObject({ code: 'unauthorized' });
+    } finally {
+      EpochKeys.disposeDocumentKey(documentKey);
+    }
+    const restored = ok(Ledger.restoreVerifiedState(ok(Ledger.exportVerifiedState(view))));
+    for (const candidate of [
+      view,
+      restored,
+      ok(
+        Snapshots.verifyLedgerSnapshot(
+          endorsed(view, { pk: f.owner.raw, enc: new Uint8Array(32), sign: f.owner.signBytes })
+        )
+      ),
+    ]) {
+      expect(ok(Ledger.epochHistoryPacket(candidate, 1)).abandoned).toBe(true);
+      expect(ok(Ledger.epochHistoryPacket(candidate, 2)).abandoned).toBe(true);
+      expect(ok(Ledger.epochHistoryPacket(candidate, 3)).baseEpoch).toBe(0);
+      const history = ok(EpochKeys.recoverLedgerHistory(candidate, latest));
+      expect([...history.keys()]).toEqual([3, 0]);
+      expect(
+        ok(EpochKeys.commitEpochKey(candidate.genesis, 0, history.get(0)!)).equals(
+          ok(Ledger.epochHistoryPacket(candidate, 0)).commitment
+        )
+      ).toBe(true);
+    }
+    for (const change of [
+      { epoch: 4, baseEpoch: 0 },
+      { epoch: 3, baseEpoch: 1 },
+      { epoch: 3, baseEpoch: 0, genesis: ok(Bytes.genesisHash(filled(88))) },
+    ]) {
+      expect(
+        Result.isFailure(
+          EpochKeys.openHistoryPacket({
+            currentKey: latest,
+            packet,
+            genesis: f.context.genesis,
+            ...change,
+          })
+        )
+      ).toBe(true);
+    }
+    f.append([11, 4, filled(44), 1, filled(3, 72)]);
+    expect(() => f.view()).toThrow();
+  });
+
+  it('bounds active and cumulative devices per member instance only after declaration', () => {
+    const o = org();
+    o.append(owner, [9, [2]]);
+    let view = ok(o.verify());
+    const apply = (op: readonly CborValue[]) => {
+      const record = o.append(owner, op);
+      const result = Ledger.extendLedger(view, [record], checkpoint(o.records));
+      if (Result.isSuccess(result)) view = result.success;
+      else o.records.pop();
+      return result;
+    };
+    const active: Keys[] = [];
+    for (let index = 0; index < 31; index++) {
+      const target = keys(30 + index);
+      active.push(target);
+      expect(code(apply(o.device(target, 0)))).toBe('accepted');
+    }
+    expect(view.inspectState().devices.size).toBe(32);
+    expect(code(apply(o.device(keys(61), 0)))).toBe('device-quota-exceeded');
+    for (const target of active) expect(code(apply([5, target.pk]))).toBe('accepted');
+    for (let index = 31; index < 127; index++) {
+      const target = keys(30 + index);
+      expect(code(apply(o.device(target, 0)))).toBe('accepted');
+      expect(code(apply([5, target.pk]))).toBe('accepted');
+    }
+    expect(code(apply(o.device(keys(157), 0)))).toBe('device-quota-exceeded');
+    expect(code(apply([7, 1, filled(21), filled(22, 72)]))).toBe('accepted');
+    const legacy = org();
+    for (let index = 0; index < 33; index++)
+      legacy.append(owner, legacy.device(keys(30 + index), 0));
+    expect(ok(legacy.verify()).inspectState().devices.size).toBe(34);
+  });
+
+  it('keeps more than 32 abandonment links in current-only snapshot and retained byte tables', () => {
+    const f = envelopeFixture();
+    f.append([9, [2]]);
+    for (let i = 0; i < 40; i++) {
+      f.append([7, 2 * i + 1, filled(100 + 2 * i), filled(1, 72)]);
+      f.append([11, 2 * i + 2, filled(101 + 2 * i), 2 * i, filled(2, 72)]);
+    }
+    const view = f.view();
+    const snapshot = ok(
+      Snapshots.verifyLedgerSnapshot(
+        endorsed(view, { pk: f.owner.raw, enc: new Uint8Array(32), sign: f.owner.signBytes })
+      )
+    );
+    const retained = ok(Ledger.restoreVerifiedState(ok(Ledger.exportVerifiedState(view))));
+    for (const candidate of [snapshot, retained]) {
+      expect(ok(Ledger.epochHistoryPacket(candidate, 80)).baseEpoch).toBe(78);
+      for (let epoch = 0; epoch <= 80; epoch++)
+        expect(ok(Ledger.epochHistoryPacket(candidate, epoch)).abandoned).toBe(epoch % 2 === 1);
+    }
+  });
+
+  it('permits Guest personal pairing but rejects new Guest machine and recovery admissions after declaration', () => {
+    for (const kind of [0, 1, 2]) {
+      const o = org();
+      o.append(owner, o.join(bob, 11));
+      o.append(owner, [3, id(11), 3]);
+      o.append(owner, [9, [2]]);
+      o.append(bob, o.device(phone, kind, id(11)));
+      expect(code(o.verify())).toBe(kind === 0 ? 'accepted' : 'unauthorized');
+    }
+  });
+
+  it('rejects low-order keys at genesis, member consent and device admission', () => {
+    const low = new Uint8Array(32);
+    low[0] = 1;
+    const g = signed([1, owner.pk, filled(10), id(10), low, filled(20)], owner);
+    expect(
+      code(
+        Ledger.verifyLedger({
+          anchor: ok(Bytes.genesisHash(Ledger.hashRecordBytes(g).toBytes())),
+          records: [g],
+          checkpoint: checkpoint([g]),
+        })
+      )
+    ).toBe('invalid-key');
+    for (const kind of [0, 1, 2]) {
+      const o = org();
+      const bad = { ...phone, enc: low };
+      o.append(owner, o.device(bad, kind));
+      expect(code(o.verify())).toBe('invalid-key');
+    }
+    const o = org();
+    o.append(owner, o.join({ ...bob, enc: low }, 11));
+    expect(code(o.verify())).toBe('invalid-key');
   });
 });

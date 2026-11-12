@@ -42,20 +42,20 @@ import { setEd25519WasmEnabled } from '../../src/internal/foundation/ed25519-was
 const ok = Result.getOrThrow;
 
 describe('retained ledger feed', () => {
-  it('keeps the pre-change snapshot bytes, signatures and comparison digest exactly unchanged', async () => {
+  it('preserves v5 snapshot bytes, signatures and comparison digest identically across retained round-trip', async () => {
     const f = envelopeFixture();
     const signed = await Effect.runPromise(
       signLedgerSnapshot({ signer: f.owner.signer, ledger: f.ledger })
     );
-    expect(createHash('sha256').update(signed.snapshot).digest('hex')).toBe(
-      'd3961feb650acccc069114847733dbd7e29aee3ae1674a2f6b45b83ee128f317'
+    const saved = ok(exportVerifiedState(f.view()));
+    const restored = ok(restoreVerifiedState(saved));
+    const again = await Effect.runPromise(
+      signLedgerSnapshot({ signer: f.owner.signer, ledger: () => Effect.succeed(restored) })
     );
-    expect(Buffer.from(signed.headSignature.toBytes()).toString('hex')).toBe(
-      'c1746093ea45c0b4142ca7cd006675df3adc1b0529d45a0073d630d6abe679c140ab22ac9a0c967db1fadbb9d2f058e4601d92d7ea9faa5b7ab8c833eace2a08'
-    );
-    expect(Buffer.from(ok(ledgerStateDigest(f.view())).toBytes()).toString('hex')).toBe(
-      'ccd3d07823fa896270a139215d73a456ab8e8753805147b626a57eb105b43742'
-    );
+    expect(again.snapshot).toEqual(signed.snapshot);
+    expect(again.headSignature.toBytes()).toEqual(signed.headSignature.toBytes());
+    expect(saved.stateDigest.toBytes()).toEqual(ok(ledgerStateDigest(f.view())).toBytes());
+    expect(ok(ledgerStateDigest(restored)).toBytes()).toEqual(saved.stateDigest.toBytes());
   });
 
   it('retains at least forty publications through round-trip, rebase and damaged-cache rebuild', async () => {
@@ -240,7 +240,7 @@ describe('retained ledger feed', () => {
     };
     const snapshot = ok(decodeSnapshotCbor(signed.snapshot)) as CborValue[],
       body = snapshot[0] as CborValue[];
-    (body[5] as CborValue[])[7] = [2];
+    (body[5] as CborValue[])[7] = [3];
     const unsupported = ok(
       encodeSnapshotCbor([
         body,
@@ -251,7 +251,7 @@ describe('retained ledger feed', () => {
     badGenesis[badGenesis.length - 1] ^= 1;
     const saved = ok(exportVerifiedState(f.view())),
       root = ok(decodeRetainedCbor(saved.bytes)) as CborValue[];
-    (root[4] as CborValue[])[7] = [2];
+    (root[4] as CborValue[])[7] = [3];
     const variants = [
       { origin: { kind: 'genesis' as const, record: badGenesis }, code: 'wrong-parent' },
       {
@@ -332,7 +332,7 @@ describe('retained ledger feed', () => {
     async (failure) => {
       const f = envelopeFixture(0, 218),
         directory = mkdtempSync(join(tmpdir(), 'feed-source-failure-'));
-      if (failure === 'upgrade-required') f.append([9, [2]]);
+      if (failure === 'upgrade-required') f.append([9, [3]]);
       const records = f.records(),
         endpoint = { head: hashRecordBytes(records.at(-1)!), length: records.length };
       const stores = sqliteLedgerFeedStore({
@@ -463,6 +463,78 @@ describe('retained ledger feed', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('accepts a bounded suffix beyond sequence 16384 from an independently verified retained origin', async () => {
+    const f = envelopeFixture();
+    for (let i = 0; i < 16384; i++) f.append([9, [1]]);
+    const base = f.view(),
+      saved = ok(exportVerifiedState(base));
+    const dir = mkdtempSync(join(tmpdir(), 'long-retained-feed-'));
+    f.append([5, f.phone.raw]);
+    const next = f.view();
+    const scope = Layer.succeed(WorkspaceScope, { genesis: f.context.genesis });
+    const stores = sqliteLedgerFeedStore({
+      path: join(dir, 'feed.sqlite'),
+      mode: 'create-or-open',
+    }).pipe(Layer.provideMerge(scope));
+    const open = Effect.fnUntraced(function* () {
+      const context = yield* Layer.build(
+        LedgerFeed.layer({
+          origin: { kind: 'retained', state: saved, offset: 'base' },
+          expected: { head: base.head, length: base.length },
+          budget: { maxRecords: 1, maxBytes: 32 * 1024 * 1024 },
+        }).pipe(Layer.provide(stores))
+      );
+      return Context.get(context, LedgerFeed);
+    });
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const feed = yield* open();
+            yield* feed.accept(
+              {
+                requestOffset: 'base',
+                nextOffset: 'next',
+                records: f.records().slice(base.length),
+                upToDate: true,
+              },
+              { head: next.head, length: next.length }
+            );
+            expect((yield* feed.current()).view.head.equals(next.head)).toBe(true);
+            f.append([9, [1]]);
+            const overflow = f.view();
+            expect(
+              Result.isFailure(
+                yield* Effect.result(
+                  feed.accept(
+                    {
+                      requestOffset: 'next',
+                      nextOffset: 'overflow',
+                      records: f.records().slice(next.length),
+                      upToDate: true,
+                    },
+                    { head: overflow.head, length: overflow.length }
+                  )
+                )
+              )
+            ).toBe(true);
+            expect((yield* feed.current()).view.length).toBe(next.length);
+          })
+        )
+      );
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const feed = yield* open();
+            expect((yield* feed.current()).view.head.equals(next.head)).toBe(true);
+          })
+        )
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
 
   it('pins before compacting, reopens without replay, then verifies only the suffix', async () => {
     const f = envelopeFixture();

@@ -11,7 +11,18 @@ import { LedgerSubmission } from '@lody/e2ee-core';
 import { submissionLayer, submitRecord, resumeSubmission, acknowledgeSubmission } from './fixture';
 import { sqliteSubmissionJournal } from '@lody/e2ee-core/adapters/node-sqlite';
 import { openSqliteStore } from '@lody/e2ee-core/internal';
-import { anchor, checkpoint, filled, genesis, host, keys, owner, rotate, signed } from './fixture';
+import {
+  anchor,
+  checkpoint,
+  filled,
+  genesis,
+  host,
+  keys,
+  owner,
+  rotate,
+  signed,
+  selfAdmission,
+} from './fixture';
 import { hashRecordBytes } from '../../src/internal/ledger';
 const fixture = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'p09-'));
@@ -749,3 +760,92 @@ it('Scope interruption during CAS retains pending; next Scope reopens and recove
       })
     )
   ));
+
+it('retains a previously uncertain original even when a later attempt is explicitly rate limited', async () => {
+  const f = fixture();
+  try {
+    const record = selfAdmission();
+    let limit = false;
+    const remote = LedgerLog.of({
+      ...f.remote.service,
+      appendCas: () =>
+        Effect.fail(
+          limit
+            ? new LedgerLogError({ reason: 'self-service-rate-limited', retryAt: 3600000 })
+            : new LedgerLogError()
+        ),
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          expect(errorCode(yield* Effect.result(submitRecord(anchor, record)))).toBe('unconfirmed');
+          limit = true;
+          expect(errorCode(yield* Effect.result(resumeSubmission(anchor)))).toBe('unconfirmed');
+          const entry = yield* (yield* SubmissionJournal).load(anchor);
+          expect(entry.record).toEqual(record);
+          expect(entry.outcome).toBeNull();
+        }).pipe((work) => using(f, work, remote))
+      )
+    );
+  } finally {
+    f.close();
+  }
+});
+
+it('does not clear a quota-refused slot after another attempt changed its durable revision', async () => {
+  const f = fixture();
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const journal = yield* SubmissionJournal,
+            record = rotate(),
+            point = checkpoint([genesis]);
+          const created = yield* journal.prepare(anchor, record);
+          const first = yield* journal.observe(anchor, record, null, point);
+          expect(first).toBe(created! + 1);
+          yield* journal.observe(anchor, record, point, point);
+          expect(yield* journal.rejectUnsent(anchor, record, point, first)).toBe(false);
+          expect((yield* journal.load(anchor)).record).toEqual(record);
+        }).pipe(Effect.provide(sqliteSubmissionJournal({ path: f.journal })))
+      )
+    );
+  } finally {
+    f.close();
+  }
+});
+
+it('adds attempt revisions without losing an existing SQLite pending original or its checkpoint', async () => {
+  const f = fixture(),
+    record = selfAdmission();
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const journal = yield* SubmissionJournal;
+          yield* journal.prepare(anchor, record);
+          yield* journal.observe(anchor, record, null, checkpoint([genesis]));
+        }).pipe(Effect.provide(sqliteSubmissionJournal({ path: f.journal })))
+      )
+    );
+    const db = new Database(f.journal);
+    try {
+      db.exec('ALTER TABLE submission_journal DROP COLUMN revision');
+    } finally {
+      db.close();
+    }
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const journal = yield* SubmissionJournal;
+          const entry = yield* journal.load(anchor);
+          expect(entry.record).toEqual(record);
+          expect(entry.checkpoint).toEqual(checkpoint([genesis]));
+          expect(yield* journal.prepare(anchor, record)).toBeNull();
+        }).pipe(Effect.provide(sqliteSubmissionJournal({ path: f.journal })))
+      )
+    );
+  } finally {
+    f.close();
+  }
+});

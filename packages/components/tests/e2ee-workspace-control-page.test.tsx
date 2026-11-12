@@ -8,10 +8,22 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
+import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { Result } from 'effect';
+import {
+  encodeCbor,
+  hashRecordBytes,
+  recordSigningBytes,
+  type CborValue,
+} from '@lody/e2ee-core/protocol';
 import { join } from 'node:path';
 import { E2eeWorkspaceControlPage } from '../src/components/pages/e2ee-workspace-control-page';
-import { appendLedgerHistory, type VerifiedLedgerHistory } from '../src/lib/e2ee-ledger-history';
+import {
+  appendLedgerHistory,
+  bytesToHex,
+  type VerifiedLedgerHistory,
+} from '../src/lib/e2ee-ledger-history';
 import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
 import { ledgerVerificationCode } from '../src/lib/e2ee-ledger-verification';
 
@@ -167,10 +179,38 @@ describe('encrypted workspace control page reading', () => {
     genesisHash: vector.anchor,
     localPin,
   });
-  // The final record declares an unsupported capability after independent removal.
+  // Append an unsupported capability record signed by Carol (the current Owner at vector end).
+  const carolKey = createPrivateKey({
+    key: Buffer.concat([
+      Buffer.from('302e020100300506032b657004220420', 'hex'),
+      Buffer.alloc(32, 3),
+    ]),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  const carolPublicKey = new Uint8Array(
+    createPublicKey(carolKey).export({ format: 'der', type: 'spki' }).subarray(-32)
+  );
+  const futureBody: CborValue = [
+    new Uint8Array(Buffer.from(vector.records.at(-1)!.hash, 'hex')),
+    carolPublicKey,
+    [9, [3]],
+  ];
+  const futureBodyBytes = Result.getOrThrow(encodeCbor(futureBody));
+  const futureRecord = Result.getOrThrow(
+    encodeCbor([
+      futureBody,
+      new Uint8Array(sign(null, recordSigningBytes(futureBodyBytes), carolKey)),
+    ])
+  );
+  const futureHash = bytesToHex(hashRecordBytes(futureRecord).toBytes());
   const full = appendLedgerHistory(
     null,
-    page(vector.records.length, vector.records.at(-1)!.hash),
+    {
+      ...page(vector.records.length, vector.records.at(-1)!.hash),
+      checkpoint: { headHash: futureHash, length: vector.records.length + 1 },
+      recordsHex: [...vector.records.map((record) => record.hex), bytesToHex(futureRecord)],
+    },
     expected(vector.anchor)
   );
   const history = (localPin: string | null) =>

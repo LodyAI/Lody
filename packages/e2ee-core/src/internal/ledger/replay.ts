@@ -66,6 +66,37 @@ export interface LedgerView {
   /** Verified current/historical classification of a signing key, for an exact local refusal. */
   classifyDevice?: (key: string) => 'active' | 'revoked' | 'member-removed' | 'unknown';
 }
+// Derived interval lookup is cached per immutable genuine state, so ordinary
+// history recovery does not repeatedly scan every epoch publication.
+const abandonmentRanges = new WeakMap<InternalState, readonly (readonly [number, number])[]>();
+function abandonedAt(state: InternalState, epoch: number): boolean {
+  let ranges = abandonmentRanges.get(state);
+  if (!ranges) {
+    const merged: [number, number][] = [];
+    const links = [...state.historyPackets]
+      .flatMap(([, row]) =>
+        row.baseEpoch === undefined ? [] : [[row.baseEpoch + 1, row.epoch - 1] as [number, number]]
+      )
+      .sort(([a], [b]) => a - b);
+    for (const [start, end] of links) {
+      const last = merged.at(-1);
+      if (last && start <= last[1] + 1) last[1] = Math.max(last[1], end);
+      else merged.push([start, end]);
+    }
+    ranges = merged;
+    abandonmentRanges.set(state, ranges);
+  }
+  let left = 0,
+    right = ranges.length;
+  while (left < right) {
+    const middle = (left + right) >>> 1;
+    const [start, end] = ranges[middle]!;
+    if (epoch < start) right = middle;
+    else if (epoch > end) left = middle + 1;
+    else return true;
+  }
+  return false;
+}
 // Closure-backed objects have no reflective constructor or exposed live state.
 const states = new WeakMap<object, InternalState>();
 function viewOf(state: InternalState): LedgerView {
@@ -137,6 +168,7 @@ function replay(
         if (!state) return yield* fail('genesis-mismatch');
         yield* applyAuthorizedOrdinary(state, body);
         if (
+          body.operation.type === 'abandonEpoch' ||
           body.operation.type === 'publishEpoch' ||
           body.operation.type === 'removeMemberAndPublishEpoch'
         )
@@ -418,7 +450,11 @@ export function epochHistoryPacket(
     );
     const row = stateGet(state.historyPackets, number);
     return row
-      ? Object.freeze({ ...row, packet: copyBytes(row.packet) })
+      ? Object.freeze({
+          ...row,
+          packet: copyBytes(row.packet),
+          abandoned: abandonedAt(state, number),
+        })
       : yield* fail('unauthorized');
   });
 }

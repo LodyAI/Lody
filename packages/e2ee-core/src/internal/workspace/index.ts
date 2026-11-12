@@ -390,6 +390,7 @@ export const makeE2eeWorkspace = Effect.fn('E2eeWorkspace.acquire')(function* (
         acknowledge: (result: Parameters<typeof control.acknowledge>[0]) =>
           ordered(control.acknowledge(result)),
         rotate: () => ordered(publisher.publish()),
+        abandonEpoch: (baseEpoch: number) => ordered(publisher.publishAbandoning(baseEpoch)),
         removeMember: (membershipId: Bytes.MembershipId) =>
           ordered(publisher.publishRemoving(membershipId)),
         resumeRotation: () => ordered(publisher.resume()),

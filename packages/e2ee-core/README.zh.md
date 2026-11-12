@@ -189,3 +189,5 @@ pnpm --filter @lody/e2ee-core test:browser-custody
 可选 [`@lody/e2ee-client`](../e2ee-client/README.zh.md) 通过这些端口组合个人设备审批、
 打开、收钥、管理与 RPC；公开审批分页证据和加密 RPC 原件使用稳定客户端存储，
 store 仍不授予权限。这不启用产品 runtime 装配或原生移动端保管。
+
+Owner 个人设备可通过 `EpochPublisher.publishAbandoning(baseEpoch)` 从持有的旧代钥恢复不可用代次；须先声明能力 2。见[控制面可用性](../../specs/e2ee/control-plane-availability.zh.md)。

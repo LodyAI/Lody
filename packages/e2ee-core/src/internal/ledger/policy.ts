@@ -49,6 +49,10 @@ export interface DeviceRecord {
 /** Signed ledger fact; packet validity/preimage is checked by the key workflow. */
 export interface EpochHistoryPacket {
   readonly epoch: number;
+  /** Present only on an abandonment link; otherwise the predecessor is epoch - 1. */
+  readonly baseEpoch?: number;
+  /** Derived from verified abandonment links; never a stored authority. */
+  readonly abandoned?: boolean;
   readonly commitment: Bytes.EpochCommitment;
   /** Epoch zero has no previous key: its packet is empty. */
   readonly packet: Uint8Array;
@@ -83,7 +87,7 @@ export interface InternalState {
 }
 const id = (value: { toBytes(): Uint8Array }) => keyId(value.toBytes());
 /** Capability codes this verifier implements. Adding one also adds its state and snapshot field. */
-export const SUPPORTED_CAPABILITIES: ReadonlySet<number> = new Set([1]);
+export const SUPPORTED_CAPABILITIES: ReadonlySet<number> = new Set([1, 2]);
 export function genesisState(
   body: Extract<RecordBody, { type: 'genesis' }>,
   genesis: Bytes.GenesisHash,
@@ -233,6 +237,20 @@ export function applyOperation(
         break;
       }
       case 'admitDevice': {
+        if (HashSet.has(s.capabilities, 2)) {
+          if (member.role === 'guest' && op.kind !== 'personal') return yield* fail('unauthorized');
+          const historical = [...s.deviceHistory].filter(([, d]) =>
+            d.membershipId.equals(actor.membershipId)
+          ).length;
+          const active = [...s.devices].filter(([, d]) =>
+            d.membershipId.equals(actor.membershipId)
+          ).length;
+          if (
+            historical >= 128 ||
+            (active >= 32 && !(op.kind === 'machine' && op.replaces != null))
+          )
+            return yield* fail('device-quota-exceeded');
+        }
         if (
           actor.kind === 'machine' ||
           (actor.kind === 'recovery' && op.kind !== 'personal') ||
@@ -350,6 +368,7 @@ export function applyOperation(
         s.epoch = Object.freeze({ ...s.epoch, rotationRequired: true });
         break;
       }
+      case 'abandonEpoch':
       case 'publishEpoch':
       case 'removeMemberAndPublishEpoch': {
         if (op.type === 'removeMemberAndPublishEpoch') {
@@ -359,6 +378,20 @@ export function applyOperation(
             !HashMap.has(s.members, id(op.membershipId))
           )
             return yield* fail('unauthorized');
+        } else if (op.type === 'abandonEpoch') {
+          if (!HashSet.has(s.capabilities, 2)) return yield* fail('invalid-operation');
+          if (!owner) return yield* fail('unauthorized');
+          if (op.baseEpoch >= s.epoch.number) return yield* fail('invalid-operation');
+          // A recovery link cannot select a key already abandoned by an earlier link.
+          if (
+            [...s.historyPackets].some(
+              ([, row]) =>
+                row.baseEpoch !== undefined &&
+                op.baseEpoch > row.baseEpoch &&
+                op.baseEpoch < row.epoch
+            )
+          )
+            return yield* fail('invalid-operation');
         } else if (!manage) return yield* fail('unauthorized');
         if (op.epoch !== s.epoch.number + 1) return yield* fail('invalid-operation');
         if (HashSet.has(s.usedCommitments, id(op.commitment))) return yield* fail('replay');
@@ -371,6 +404,7 @@ export function applyOperation(
           op.epoch,
           Object.freeze({
             epoch: op.epoch,
+            ...(op.type === 'abandonEpoch' ? { baseEpoch: op.baseEpoch } : {}),
             commitment: op.commitment,
             packet: copyBytes(op.previousEpochKey),
           })

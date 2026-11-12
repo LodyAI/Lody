@@ -25,6 +25,7 @@ import {
   WorkspaceControl,
 } from '@lody/e2ee-core';
 import {
+  epochHistoryPacket,
   getCommittedEpochStagingKey,
   requireLedgerContinuation,
   decodeRecord,
@@ -387,6 +388,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           const installed = Context.get(ctx, InstalledEpochKeys);
           let usableEpoch: number | null = null;
           for (let epoch = state.epoch.number; epoch >= 0; epoch--) {
+            const packet = epochHistoryPacket(view, epoch);
+            if (Result.isFailure(packet) || packet.success.abandoned) continue;
             const checked = yield* Effect.result(installed.check(epoch));
             if (Result.isSuccess(checked)) {
               usableEpoch = epoch;
@@ -1042,6 +1045,16 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             ownSubmission.pipe(
               Effect.andThen(
                 withKeys((ctx) => Context.get(ctx, EpochPublisher).publishRemoving(membership))
+              )
+            )
+          )
+        ),
+      abandonEpoch: (baseEpoch: number) =>
+        run(
+          serial.withPermit(
+            ownSubmission.pipe(
+              Effect.andThen(
+                withKeys((ctx) => Context.get(ctx, EpochPublisher).publishAbandoning(baseEpoch))
               )
             )
           )

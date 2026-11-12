@@ -953,3 +953,18 @@ describe('account user ID encoding', () => {
     expect(decoded((b) => (b[31] = 1))).toBe('canonical');
   });
 });
+
+it('rejects the complete canonical X25519 low-order set and noncanonical field aliases', () => {
+  const rejected = [
+    '00'.repeat(32),
+    '01' + '00'.repeat(31),
+    'e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800',
+    '5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157',
+    ...['ec', 'ed', 'ee'].map((prefix) => prefix + 'ff'.repeat(30) + '7f'),
+    '09' + '00'.repeat(30) + '80',
+    'ff'.repeat(32),
+  ];
+  for (const value of rejected)
+    expect(Result.isFailure(Bytes.encryptionPublicKey(hex(value)))).toBe(true);
+  expect(Result.isSuccess(Bytes.encryptionPublicKey(hex('09' + '00'.repeat(31))))).toBe(true);
+});
