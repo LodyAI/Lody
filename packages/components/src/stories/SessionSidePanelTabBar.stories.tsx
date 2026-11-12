@@ -60,7 +60,10 @@ function SidePanelTabBarStory() {
 
   return (
     <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[620px] flex-col overflow-hidden border-l border-border/70 bg-background">
+      <div
+        data-testid="side-panel-story-frame"
+        className="flex h-[520px] w-[620px] flex-col overflow-hidden border-l border-border/70 bg-background"
+      >
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -129,7 +132,10 @@ function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | 
 
   return (
     <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[720px] flex-col overflow-hidden border-l border-border/70 bg-background">
+      <div
+        data-testid="side-panel-story-frame"
+        className="flex h-[520px] w-[720px] flex-col overflow-hidden border-l border-border/70 bg-background"
+      >
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
