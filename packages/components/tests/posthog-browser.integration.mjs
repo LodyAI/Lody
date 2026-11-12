@@ -2,7 +2,7 @@
 // installing Playwright Chromium/WebKit. --negative-control must fail.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { once } from 'node:events';
+import { EventEmitter, on, once } from 'node:events';
 import { gunzipSync } from 'node:zlib';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +35,7 @@ const bundle = (Array.isArray(result) ? result[0] : result).output.find(
   (file) => file.type === 'chunk'
 ).code;
 const received = [];
+const ingestion = new EventEmitter();
 let currentDistinctId;
 let rejectNextSnapshot = false;
 const handleRequest = async (req, res) => {
@@ -87,6 +88,7 @@ const handleRequest = async (req, res) => {
       events = JSON.parse(Buffer.from(new URLSearchParams(raw).get('data'), 'base64').toString());
     }
     received.push({ path: url.pathname, events: Array.isArray(events) ? events : [events] });
+    ingestion.emit('batch');
     res.setHeader('Content-Type', 'application/json');
     if (url.pathname === '/s/' && rejectNextSnapshot) {
       rejectNextSnapshot = false;
@@ -391,11 +393,19 @@ try {
             response.url().includes('/s/')
           );
           await flushRecording(page);
-          await page.evaluate(() =>
-            window.posthog.captureException(new Error('ordinary error preserved'))
+          const ordinaryUuid = await page.evaluate(
+            () => window.posthog.captureException(new Error('ordinary error preserved'))?.uuid
           );
+          assert.ok(ordinaryUuid, 'ordinary exception accepted by SDK');
           await barrier(page);
           await ordinaryResponse;
+          // Exceptions have their own SDK batch; a replay/barrier response does
+          // not establish that this event has reached the loopback receiver.
+          if (!allEvents().some((event) => event.uuid === ordinaryUuid)) {
+            for await (const _ of on(ingestion, 'batch', { signal: AbortSignal.timeout(15_000) })) {
+              if (allEvents().some((event) => event.uuid === ordinaryUuid)) break;
+            }
+          }
           assert.ok(
             allEvents().some((event) => event.event === '$snapshot'),
             'confirmed ordinary workspace must record'

@@ -331,7 +331,8 @@ it.each(['chromium', 'webkit'] as const)(
       // background dial starts; the next request uses iroh.
       expect(await good(page, 'irohPath')).toBe('none');
       // A passive query must not open the endpoint or start a dial.
-      expect(await good(page, 'irohEvidence')).not.toHaveProperty('opener');
+      const passiveEvidence = (await good(page, 'irohEvidence')) as { opener?: unknown };
+      expect(passiveEvidence.opener).toBeUndefined();
       expect(await good(page, 'irohReady')).toBe(false);
       expect(await good(page, 'irohReady')).toBe(true);
       expect(await good(page, 'irohPath')).toBe('direct');
