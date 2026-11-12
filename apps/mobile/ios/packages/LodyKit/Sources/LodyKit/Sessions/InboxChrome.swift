@@ -24,8 +24,8 @@ final class InboxChrome {
   var searchChanged: ((String) -> Void)?
   /// Replaces the iPhone view menu (the Projects tab has its own choices).
   var compactMenu: (() -> UIMenu)?
-  /// Pages without view choices (Schedules) show only search on the trailing edge.
-  var showsViewMenu = true
+  /// Replaces the view menu on every size class for pages with their own choices (Schedules).
+  var pageMenu: (() -> UIMenu)?
   private static let views = [
     (mode: 0, key: "inbox.settings.view.projects", icon: "folder"),
     (mode: 1, key: "inbox.settings.view.activity", icon: "clock"),
@@ -129,7 +129,7 @@ final class InboxChrome {
     let filter = filterItem ?? UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal.decrease"), menu: nil)
     filter.tintColor = .label
     filter.accessibilityLabel = String(localized: "inbox.settings.section.view", bundle: .lody)
-    filter.menu = regular ? filterMenu(mode: model.mode, sort: model.sort) : (compactMenu?() ?? compactViewMenu())
+    filter.menu = pageMenu?() ?? (regular ? filterMenu(mode: model.mode, sort: model.sort) : (compactMenu?() ?? compactViewMenu()))
     let settingsItem = self.settingsItem ?? UIBarButtonItem(customView: settingsSlot)
     // iPad keeps integrated search in the navigation bar, so the sidebar hosts its own bottom field.
     if regular, header.search === search { header.search = nil }
@@ -137,7 +137,6 @@ final class InboxChrome {
     // iPhone reaches Settings from the bottom tabs; iPad keeps the gear beside the view menu.
     // Right items run from the trailing edge: iPhone shows search, then the view menu (design).
     var right = regular ? [settingsItem, filter] : [filter, host.navigationItem.searchBarPlacementBarButtonItem]
-    if !showsViewMenu { right.removeAll { $0 === filter } }
     (workspaceItem, self.settingsItem, filterItem) = (left[0], settingsItem, filter)
     let shownLeft = searching && !regular ? [] : left
     if header.leftItems ?? [] != shownLeft { header.leftItems = shownLeft.isEmpty ? nil : shownLeft }

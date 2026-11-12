@@ -614,13 +614,13 @@
     <string name="chat_operation_reply_truncated">此保存的回复在传递前已被截断。</string>
     <string name="chat_relation_waiting">需要输入</string>
     <string name="chat_relation_unread">未读</string>
-    <string name="schedules_overview_active">已启用</string>
-    <string name="schedules_overview_attention">需关注</string>
-    <string name="schedules_overview_paused">已暂停</string>
-    <string name="schedules_overview_ended">已结束</string>
     <string name="schedules_section_task">任务</string>
     <string name="schedules_section_when">时间</string>
     <string name="schedules_section_run_with">运行配置</string>
+    <string name="schedules_section_tasks">定时任务</string>
+    <string name="schedules_section_messages">定时消息</string>
+    <string name="schedules_view_show_finished">显示已结束</string>
+    <string name="schedules_finished_hidden">已结束的定时项已隐藏</string>
     <string name="settings_personal">个人</string>
     <string name="settings_preferences">偏好设置</string>
     <string name="settings_preferences_hint">语言、通知与会话行为</string>

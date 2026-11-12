@@ -272,6 +272,8 @@ fun ChatListScreen(
     } }
     // The view menu's Archived switch (iOS `HomeArchive`): in memory, so every launch opens on open chats.
     var archived by remember { mutableStateOf(false) }
+    // The Schedules view menu's Show finished switch: in memory, so ended schedules start hidden.
+    var showFinished by remember { mutableStateOf(false) }
     val sections = remember(state.snapshot, grouping, owner, archived) { state.snapshot?.let { ChatListModel.home(it, grouping, owner, archived = archived) }.orEmpty() }
     val archivedTimeline = remember(state.snapshot, archived) { if (archived) state.snapshot?.let { ChatListModel.timeline(it, archived = true) }.orEmpty() else emptyList() }
 
@@ -328,9 +330,11 @@ fun ChatListScreen(
                     }
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
-                // Schedules keeps the Chats header (workspace, sync, search) without a title or view menu.
+                // Schedules keeps the Chats header (workspace, sync, search) with its own view menu.
                 tab == HomeTab.Schedules -> Box {
-                    HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {}
+                    HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {
+                        ScheduleViewMenu(showFinished) { showFinished = it }
+                    }
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
                 else -> TitleTopBar(stringResource(tab.label), onBack = null)
@@ -366,7 +370,7 @@ fun ChatListScreen(
                 }
             }
             tab == HomeTab.Schedules -> app.lody.android.schedules.SchedulesList(
-                scheduleList, if (searching) query else "", padding,
+                scheduleList, if (searching) query else "", showFinished, { showFinished = true }, padding,
                 onOpen = { scheduleEditor = it.scheduleId },
                 onNew = { scheduleEditor = NEW_SCHEDULE },
                 onOpenSession = onOpenSession,
@@ -573,6 +577,43 @@ private fun ViewMenu(
                 Switch(checked = archived, onCheckedChange = null)
             }
             Spacer(Modifier.height(LodySpacing.xs))
+        }
+    }
+}
+
+/** The Schedules view menu: one Show finished switch; off hides schedules that will not run again. */
+@Composable
+private fun ScheduleViewMenu(showFinished: Boolean, onShowFinished: (Boolean) -> Unit) {
+    val colors = LodyTheme.colors
+    var open by remember { mutableStateOf(false) }
+    val label = stringResource(R.string.home_view)
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.semantics { contentDescription = label }) {
+            Glyph(LodyIcons.Filter, colors.iconPrimary)
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(LodyRadius.lg),
+            containerColor = colors.bgOverlay,
+            tonalElevation = 0.dp,
+            shadowElevation = LodyElevations.md.blur / 2,
+            border = BorderStroke(0.5.dp, colors.borderSubtle),
+            modifier = Modifier.width(MenuWidth),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = LodySize.controlMd)
+                    .toggleable(value = showFinished, role = Role.Switch) { onShowFinished(it) }
+                    .padding(horizontal = LodySpacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
+            ) {
+                Glyph(LodyIcons.Check, colors.iconSecondary, LodyIconSize.sm)
+                Text(stringResource(R.string.schedules_view_show_finished), style = LodyTheme.typography.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                Switch(checked = showFinished, onCheckedChange = null)
+            }
         }
     }
 }
