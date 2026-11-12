@@ -35,7 +35,13 @@ final class LodyShell {
       headerVariant: "transparent"
     )
     let page = LodyPageController(spec: spec, inSheet: target !== navigation, content: content)
-    push(page, on: target)
+    if target !== base {
+      // Leaving a tab for the outer Home stack: the page carries its own bar (`LodyPageStackHost`).
+      let host = LodyPageController(spec: spec, inSheet: target !== navigation, content: LodyPageStackHost(root: page))
+      push(host, on: target)
+    } else {
+      push(page, on: target)
+    }
     return page
   }
 
@@ -139,7 +145,9 @@ final class LodyShell {
     guard let page = Self.page(of: controller) else { return }
     if HomeController.current?.closePanel(from: page) == true { return }
     guard let navigation = page.navigationController else { return }
-    if navigation.viewControllers.first === page { navigation.presentingViewController?.dismiss(animated: true) }
+    if navigation.viewControllers.first === page, let host = navigation.parent as? LodyPageStackHost {
+      close(from: host, crossfade: crossfade)
+    } else if navigation.viewControllers.first === page { navigation.presentingViewController?.dismiss(animated: true) }
     else if crossfade {
       let fade = CATransition()
       fade.type = .fade
