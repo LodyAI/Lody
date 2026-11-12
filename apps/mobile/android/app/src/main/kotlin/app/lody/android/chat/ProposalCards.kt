@@ -3,6 +3,7 @@ package app.lody.android.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -123,11 +125,14 @@ private fun ProposalCardView(card: ProposalCard, meId: String?, decide: Proposal
                     onClick = { submit(true) }, enabled = allowed && !pending, shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(containerColor = colors.bgInverse, contentColor = colors.textInverse),
                 ) {
-                    if (pending) {
-                        LodyLoadingIndicator(Modifier.size(LodyIconSize.sm), color = colors.textInverse)
-                        Spacer(Modifier.width(LodySpacing.xs))
+                    // Spinner replaces the label while pending; the invisible label keeps the button's width.
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(if (card.isRole) R.string.chat_proposal_save else R.string.chat_proposal_create),
+                            Modifier.alpha(if (pending) 0f else 1f),
+                        )
+                        if (pending) LodyLoadingIndicator(Modifier.size(LodyIconSize.sm), color = colors.textInverse)
                     }
-                    Text(stringResource(if (card.isRole) R.string.chat_proposal_save else R.string.chat_proposal_create))
                 }
             }
         }

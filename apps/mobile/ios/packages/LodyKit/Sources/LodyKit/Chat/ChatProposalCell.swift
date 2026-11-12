@@ -17,6 +17,8 @@ final class ChatProposalCell: UICollectionViewCell {
   private let dismissButton = UIButton(type: .system)
   private let confirmButton = UIButton(type: .system)
   private var row: ChatRow?
+  /// Sizes the confirm capsule from its title even while the spinner replaces it.
+  private var confirmTitleForLayout = ""
   /// `true` accepts (Save / Create), `false` dismisses.
   var onDecision: ((Bool) -> Void)?
   var onOpenSchedule: ((String) -> Void)?
@@ -64,8 +66,14 @@ final class ChatProposalCell: UICollectionViewCell {
     var confirmTitle = Self.text(proposal.isRole ? "native.chat.proposal.save" : "native.chat.proposal.create")
     if actions.open { confirmTitle = Self.text("native.chat.proposal.open") }
     var confirm = Self.button(confirmTitle, primary: actions.decide, traits: traits)
-    confirm.showsActivityIndicator = pending
+    if pending {
+      // Spinner alone: indicator plus title overflowed the title-sized capsule and wrapped it.
+      confirm.title = nil
+      confirm.showsActivityIndicator = true
+    }
     confirmButton.configuration = confirm
+    confirmTitleForLayout = confirmTitle
+    confirmButton.accessibilityLabel = confirmTitle
     dismissButton.isEnabled = !pending && row.proposalDecidable
     confirmButton.isEnabled = actions.open || (!pending && row.proposalDecidable)
     card.accessibilityIdentifier = row.id
@@ -271,7 +279,7 @@ final class ChatProposalCell: UICollectionViewCell {
       let title = button.configuration?.title ?? ""
       return max(64, ceil((title as NSString).size(withAttributes: [.font: font]).width) + 40)
     }
-    let confirmWidth = fit(confirmButton)
+    let confirmWidth = max(64, ceil((confirmTitleForLayout as NSString).size(withAttributes: [.font: font]).width) + 40)
     confirmButton.frame = CGRect(x: width - Self.inset - confirmWidth, y: y, width: confirmWidth, height: 44)
     let dismissWidth = fit(dismissButton)
     dismissButton.frame = CGRect(x: confirmButton.frame.minX - 8 - dismissWidth, y: y, width: dismissWidth, height: 44)
