@@ -927,6 +927,19 @@ export const UpdatedMode: Story = {
 };
 
 /**
+ * The "Status" organize mode: the Updated rows split into Needs you, Just
+ * finished, Open pull requests, Running and Idle, as on mobile Home. Empty
+ * groups are skipped; only Idle folds behind "Show all".
+ */
+export const StatusMode: Story = {
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...UpdatedMode.args!,
+    organizeMode: 'status',
+  },
+};
+
+/**
  * Full review surface for Updated mode. It keeps the mixed project list,
  * Pinned section, Chats, local project, repository avatars, active row, and
  * status variants beside the same production-mirroring session-page harness

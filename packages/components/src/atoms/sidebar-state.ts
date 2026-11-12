@@ -310,12 +310,14 @@ export const sidebarLastWidthAtom = atomWithStorage<number>(
 // Sidebar Organize Mode (Workspace vs Updated)
 // ============================================================================
 
-export type SidebarOrganizeMode = 'workspace' | 'updated';
+export type SidebarOrganizeMode = 'workspace' | 'updated' | 'status';
 
 /**
  * How the sidebar groups items.
  * - 'workspace' = group by Chats / Local Projects / GitHub Worktrees (default)
  * - 'updated'   = single flat list sorted by latest-update recency
+ * - 'status'    = the Updated rows split into status groups (needs you, just
+ *                 finished, open pull requests, running, idle), as on mobile Home
  */
 export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
   'lody-sidebar-organize-mode',
@@ -348,9 +350,10 @@ export const sidebarShowBranchNamesAtom = atomWithStorage<boolean>(
 );
 
 /**
- * Per-bucket collapse state for the Updated organize mode.
- * Keyed by the single 'all' bucket; value is whether collapsed. (Persisted
- * entries from the retired today/week/older buckets are simply ignored.)
+ * Per-bucket collapse state for the Updated and Status organize modes.
+ * Keyed by Updated's single 'all' bucket and by each status group; value is
+ * whether collapsed. (Persisted entries from the retired today/week/older
+ * buckets are simply ignored.)
  */
 export const sidebarUpdatedBucketCollapseStateAtom = atomWithStorage<Record<string, boolean>>(
   'lody-sidebar-updated-bucket-collapse',
@@ -358,11 +361,11 @@ export const sidebarUpdatedBucketCollapseStateAtom = atomWithStorage<Record<stri
 );
 
 /**
- * Per-bucket "show all" state for the Updated organize mode. Buckets above the
- * preview threshold default to a compact preview; this map records which
- * buckets the user has explicitly expanded. Mirrors the pattern that
- * `sidebarShowFullListAtom` uses for Workspace task groups, but keyed by the
- * single 'all' bucket.
+ * Per-bucket "show all" state for the Updated and Status organize modes.
+ * Buckets above the preview threshold default to a compact preview; this map
+ * records which buckets the user has explicitly expanded. Mirrors the pattern
+ * that `sidebarShowFullListAtom` uses for Workspace task groups, keyed by
+ * Updated's 'all' bucket and Status's 'idle' group (the only one that folds).
  */
 export const sidebarUpdatedBucketShowFullStateAtom = atomWithStorage<Record<string, boolean>>(
   'lody-sidebar-updated-bucket-show-full',

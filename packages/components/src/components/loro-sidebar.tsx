@@ -216,13 +216,14 @@ export interface LoroSidebarProps {
   /**
    * How sidebar contents are grouped. 'workspace' (default) keeps the existing Chats /
    * Local Projects / GitHub Worktrees layout. 'updated' renders {@link updatedItems} as
-   * a single flat recency-sorted "Chats" list — when 'updated' is selected,
-   * {@link topContent} and {@link sessionListProps} are not rendered.
+   * a single flat recency-sorted "Chats" list; 'status' renders the same items split
+   * into status groups. In either, {@link topContent} and {@link sessionListProps}
+   * are not rendered.
    */
   organizeMode?: LoroSidebarOrganizeMode;
   /** Current chat scope (My Tasks / All Tasks). Surfaced in the footer filter popover. */
   chatScope?: LoroSidebarChatScope;
-  /** Items rendered when {@link organizeMode} is 'updated'. */
+  /** Items rendered when {@link organizeMode} is 'updated' or 'status'. */
   updatedItems?: SidebarUpdatedItem[];
   /** Pinned sessions rendered as a dedicated section above every organize mode. */
   pinnedItems?: SidebarUpdatedItem[];
@@ -416,6 +417,7 @@ const defaultLabels: LoroSidebarLabels = {
     detailsHeading: 'Details',
     organizeProject: 'Project',
     organizeUpdated: 'Updated',
+    organizeStatus: 'Status',
     updatedProjectNames: 'Show Project',
     showBranchNames: 'Show Branch',
     showMyTasks: 'My Tasks',
@@ -1617,7 +1619,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   now={now}
                   isMobile={isMobile}
                   showPinnedIcon={false}
-                  showProjectContext={organizeMode === 'updated' && showUpdatedProjectNames}
+                  showProjectContext={organizeMode !== 'workspace' && showUpdatedProjectNames}
                   selectedItemId={updatedSelectedItemId ?? null}
                   collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
                   labels={{
@@ -1640,7 +1642,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 />
               </div>
             ) : null}
-            {organizeMode === 'updated' ? (
+            {organizeMode !== 'workspace' ? (
               // Design intent: 'updated' mode is a flat firehose of recent
               // sessions. It deliberately drops Workspace-mode structure
               // (per-repo groups with collapse/reorder, per-project headers
@@ -1651,7 +1653,8 @@ export const LoroSidebar = memo(function LoroSidebar({
               // Per-row actions (rename, pin, archive, copy URL, copy branch,
               // open PR) are wired through the props below so the two modes
               // are at parity for individual sessions even though section-
-              // level affordances diverge.
+              // level affordances diverge. 'status' mode lists the same rows,
+              // split into status groups.
               !hasPinnedItems || updatedIsLoading || Boolean(updatedItems?.length) ? (
                 <div className={hasPinnedItems ? undefined : 'pt-1'}>
                   <SidebarUpdatedSessionList
@@ -1659,6 +1662,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     now={now}
                     isMobile={isMobile}
                     isLoading={updatedIsLoading}
+                    grouping={organizeMode === 'status' ? 'status' : 'recency'}
                     showProjectContext={showUpdatedProjectNames}
                     selectedItemId={updatedSelectedItemId ?? null}
                     labels={mergedLabels.updated}
