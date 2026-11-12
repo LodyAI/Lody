@@ -3532,6 +3532,7 @@ export class MessageHandler {
           }
         },
       },
+      awaitTurnHistoryGate: (sessionId) => this.awaitTurnHistoryGate(sessionId),
       recordChatFailure: async (sessionDoc, reason, message, code) =>
         await this.recordChatFailure(sessionDoc, reason, message, code),
       recordSessionStopFailure: async (sessionId, turnId, failure) =>
@@ -7488,25 +7489,47 @@ export class MessageHandler {
   /** See `DaemonWorkspace.classifyEncryptedDerivation`. Every failure is a refusal. */
   private async classifyEncryptedDerivation(
     origin: { sessionId: string; userTurnId: string },
-    target: { machineId: string }
-  ): Promise<'owner' | 'member'> {
+    target: { machineId: string; userTurnId: string }
+  ): Promise<
+    'owner' | { principal: 'owner' | 'member'; origin: { sessionId: string; userTurnId: string } }
+  > {
     const gate = this.encryptedExecution;
     if (!gate) throw new Error('e2ee_derivation_unavailable');
-    const live = this.executionService.reserveEncryptedDerivation(
-      origin.sessionId as SessionId,
-      origin.userTurnId
+    const sessionId = origin.sessionId as SessionId;
+    const active = this.executionService.getActiveInvocationContext(sessionId);
+    const live =
+      active?.sourceTurnId === origin.userTurnId
+        ? this.executionService.getEncryptedControlPrincipal(sessionId)?.kind
+        : undefined;
+    const resolved = await Effect.runPromise(gate.resolveDerivationOrigin(origin)).catch(
+      () => undefined
     );
-    if (live?.kind === 'owner') return 'owner';
-    // The signed origin decides; a live member reservation alone is not proof.
-    const verified = await Effect.runPromise(gate.classifyOrigin(origin)).catch(
-      () => 'denied' as const
-    );
-    return decideEncryptedDerivation({
-      live: live?.kind,
-      verified,
+    const principal = decideEncryptedDerivation({
+      live,
+      verified: resolved?.principal ?? 'denied',
       targetMachineId: target.machineId,
       machineId: this.machineId,
     });
+    if (
+      live &&
+      this.executionService.getActiveInvocationContext(sessionId)?.sourceTurnId !==
+        origin.userTurnId
+    )
+      throw new Error('e2ee_derivation_denied');
+    // Only an authorized same-machine member request spends a write slot.
+    if (
+      principal === 'member' &&
+      !this.executionService.reserveEncryptedDerivation(
+        sessionId,
+        origin.userTurnId,
+        JSON.stringify([target.machineId, target.userTurnId])
+      )
+    )
+      throw new Error('e2ee_derivation_denied');
+    // Cross-machine Owner delegation keeps the existing machine-signed path.
+    // Its target cannot verify this machine's local derivation provenance.
+    if (principal === 'owner' && target.machineId !== this.machineId) return 'owner';
+    return resolved?.origin ? { principal, origin: resolved.origin } : 'owner';
   }
 
   private readActiveInvocation(sessionId: SessionId): SessionActiveInvocationContextResult {

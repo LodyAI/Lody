@@ -51,6 +51,6 @@ Translation: current
 
 不声称做过两名成员、两台机器的真实产品运行。
 
-- 笔记：[机器共享](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.zh.md)（细节、上限和攻击者模型）、[账本绑定](../../.agents/notes/proposed/architecture/2026-10-27-e2ee-machine-ledger-binding.zh.md)、[派生工作](../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.zh.md)。
+- 笔记：[机器共享](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.zh.md)（细节、上限和攻击者模型）、[账本绑定](../../.agents/notes/proposed/architecture/2026-10-27-e2ee-machine-ledger-binding.zh.md)、[派生工作](../../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.zh.md)。
 - PR：[#2014](https://github.com/LodyAI/Lody/pull/2014)、[#2018](https://github.com/LodyAI/Lody/pull/2018)、[#2033](https://github.com/LodyAI/Lody/pull/2033)、[#2144](https://github.com/LodyAI/Lody/pull/2144)、[#2147](https://github.com/LodyAI/Lody/pull/2147)、[#2171](https://github.com/LodyAI/Lody/pull/2171)、[#2175](https://github.com/LodyAI/Lody/pull/2175)。
 - 测试：[core](../../packages/e2ee-core/test/machine-sharing.test.ts)、[host](../../packages/e2ee-machine-sharing/test/host.test.ts)、[可见性](../../packages/components/tests/encrypted-shared-machines.test.ts)、[CLI 执行](../../apps/cli/tests/session-execution-service.test.ts)。
