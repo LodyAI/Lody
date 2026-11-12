@@ -7,6 +7,7 @@ import type { Logger } from '@/utils/logger';
 import type { AuthMethod } from '@agentclientprotocol/sdk';
 import { shutdownLocalAcpAgent, startLocalAcpAgent } from '@/agent/acp-runner';
 import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from '@/agent/claude-env-conflict';
+import { normalizeAgentProcessEnv } from '@/agent/setting';
 import type { ManagedRuntimeProgressCallback } from '@/agent/managed-agent-runtime';
 import { AcpAuthenticationRequiredError } from '@/agent/agent-client';
 import type { CodexProfileExecution } from './codex-profile-runtime';
@@ -61,15 +62,17 @@ export async function fetchAcpCapabilities(
 ): Promise<FetchedAcpCapabilities> {
   options.signal?.throwIfAborted();
   const mergedProbeEnv: NodeJS.ProcessEnv = env ? { ...process.env, ...env } : process.env;
-  const probeEnv: NodeJS.ProcessEnv =
+  const probeEnv = normalizeAgentProcessEnv(
     shouldScrubClaudeAuthEnv(cliType, agentType) && env
       ? scrubInheritedClaudeAuthEnv(mergedProbeEnv, env)
-      : mergedProbeEnv;
+      : mergedProbeEnv
+  );
   const authentication = await probeBuiltinAuthentication({
     cliType,
     agentType,
     runtimeOverrides,
     env: probeEnv,
+    userExplicitEnv: env,
     onManagedRuntimeProgress: options.onManagedRuntimeProgress,
     signal: options.signal,
     logger,
@@ -105,6 +108,7 @@ export async function fetchAcpCapabilities(
         magpieGatewayUrl: options.magpieGatewayUrl,
         workdir,
         env: probeEnv,
+        userExplicitEnv: env,
         onManagedRuntimeProgress: options.onManagedRuntimeProgress,
         signal: options.signal,
         logger,
