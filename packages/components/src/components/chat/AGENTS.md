@@ -26,7 +26,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
   its value equals `visibleLocalMachineId`, never by ownership or Private access.
 - The sharing-review landing notice has two distinct durable actions: dismissal
   keeps the current source revision quiet, while "Don't remind me again"
-  suppresses that user's notice for the workspace across future revisions.
+  suppresses that user's notice for the workspace across future revisions. The
+  composer notice concerns only the selected machine and projects the user owns;
+  unrelated private resources remain in the workspace Inbox review.
 - The composer box border is 1px. Light fill is `--composer`, dark fill is
   `bg-input/90`; it stays `rounded-2xl` with a soft wide lift
   (`COMPOSER_ELEVATION_CLASS`). The session info bar shares the light fill and
