@@ -7,6 +7,8 @@ struct LodyMenuItem: Equatable {
   var selected = false
   var photo: String = ""
   var monogram: String = ""
+  var encrypted = false
+  var retrySelection = false
 }
 
 struct LodyMenuAvatar {

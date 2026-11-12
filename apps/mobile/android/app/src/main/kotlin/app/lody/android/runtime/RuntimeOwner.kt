@@ -6,7 +6,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Account/workspace lease. All mutations run on the injected platform executor. */
-class RuntimeOwner(private val factory: (RuntimeScope) -> CloudRuntime, private val dispatcher: CoroutineDispatcher) {
+class RuntimeOwner(private val factory: (RuntimeScope) -> CloudRuntime, private val dispatcher: CoroutineDispatcher, private val admit: (RuntimeScope) -> Unit = {}) {
     private class Lease(val runtime: CloudRuntime, val job: CompletableJob, val tasks: CoroutineScope)
     private var current: Lease? = null
     private var active = true
@@ -17,6 +17,7 @@ class RuntimeOwner(private val factory: (RuntimeScope) -> CloudRuntime, private 
     val events: Flow<ScopedRuntimeEvent> = mutableEvents.asSharedFlow()
     suspend fun activate(scope: RuntimeScope) = withContext(dispatcher) {
         mutex.withLock {
+            admit(scope)
             if (current?.runtime?.scope == scope) return@withLock
             withContext(NonCancellable) { release() }
             val runtime = factory(scope)
@@ -42,6 +43,7 @@ class RuntimeOwner(private val factory: (RuntimeScope) -> CloudRuntime, private 
         mutex.withLock { this@RuntimeOwner.active = active; current?.runtime?.setActive(active) }
     }
     suspend fun <T> use(scope: RuntimeScope, block: suspend (CloudRuntime) -> T): T = withContext(dispatcher) {
+        admit(scope)
         val lease = current?.takeIf { it.runtime.scope == scope } ?: throw scopeChanged()
         val task = lease.tasks.async { block(lease.runtime) }
         try {

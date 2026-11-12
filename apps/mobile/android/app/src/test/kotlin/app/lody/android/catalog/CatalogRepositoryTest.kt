@@ -9,7 +9,7 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class CatalogRepositoryTest {
- private val user=Account("u","User",listOf(Workspace("w","Work"),Workspace("x","Other")))
+ private var user=Account("u","User",listOf(Workspace("w","Work", contentMode = WorkspaceContentMode.PLAINTEXT),Workspace("x","Other", contentMode = WorkspaceContentMode.PLAINTEXT)))
  private val key=RuntimeScope("u","w")
  private val snapshot=CatalogSnapshot(50,listOf(CatalogProject("p","m","Cached project","/fixture")),emptyList(),listOf("m"))
  private class Store(var context:AccountContext?, val values:MutableMap<RuntimeScope,SavedCatalog> = mutableMapOf()):CatalogStore {
@@ -118,6 +118,69 @@ class CatalogRepositoryTest {
   runtime.source.emit(RuntimeEvent.SyncFailed("network_unavailable"));runCurrent()
   assertEquals(ConnectionPhase.UNAVAILABLE,repo.state.value.phase)
   blocked.complete(Unit);runCurrent();assertEquals(51L,store.values[key]!!.snapshot.revision)
+  repo.disconnect()
+ }
+
+ @Test fun encryptedAndUnknownSelectionRetirePlaintextRuntimeAndNeverExposeCachedContent()=runTest {
+  user = user.copy(workspaces = user.workspaces + listOf(Workspace("secret", "Secret", contentMode = WorkspaceContentMode.E2EE), Workspace("unknown", "Unknown")))
+  val store=Store(AccountContext(user))
+  val account=account(backgroundScope,store){ShortLivedGrant("short","https://streams.example.org",60)}
+  account.restore().join()
+  val owner=RuntimeOwner({Runtime(it)},StandardTestDispatcher(testScheduler))
+  val repo=CatalogRepository(account,owner,backgroundScope,store){_,_->}
+  repo.select(user.workspaces.first()).join();runCurrent()
+  assertEquals(key,owner.state.value.scope)
+  for(workspace in user.workspaces.takeLast(2)) {
+   store.values[RuntimeScope("u",workspace.id)] = SavedCatalog(snapshot,123)
+   repo.select(workspace).join();runCurrent()
+   assertNull(owner.state.value.scope)
+   assertNull(repo.state.value.snapshot)
+   assertEquals(ConnectionPhase.UNAVAILABLE,repo.state.value.phase)
+   assertEquals(if(workspace.contentMode == WorkspaceContentMode.E2EE) "workspace_e2ee_unsupported" else "workspace_mode_unconfirmed",repo.state.value.failure)
+  }
+  repo.disconnect()
+ }
+
+ @Test fun modeRetryKeepsAccountConnectionAndNewSelectionAcrossOfflineFailure()=runTest {
+  var rows=listOf(Workspace("w","Work",contentMode=WorkspaceContentMode.PLAINTEXT),Workspace("target","Target"))
+  var offline=false
+  val refreshEntered=CompletableDeferred<Unit>();val release=CompletableDeferred<Unit>()
+  val api=object:CloudAuthApi {
+   override suspend fun account(credential:Credential)=Account("u","User",rows)
+   override suspend fun workspaceModes(credential:Credential, workspaces:List<Workspace>):List<Workspace> {
+    if(offline) throw java.io.IOException("offline")
+    refreshEntered.complete(Unit);release.await()
+    rows=rows.map {it.copy(contentMode=WorkspaceContentMode.PLAINTEXT)}
+    return rows
+   }
+   override suspend fun grant(credential:Credential,workspaceId:String)=ShortLivedGrant("short","https://streams.example.org",60)
+   override suspend fun signOut(credential:Credential)=Unit
+  }
+  val credentials=object:CredentialStore {
+   override suspend fun read()=Credential("fixture")
+   override suspend fun write(credential:Credential)=Unit
+   override suspend fun clear()=error("A retry must never clear credentials")
+  }
+  val store=Store(AccountContext(Account("u","User",rows)))
+  val account=AccountController(api,credentials,backgroundScope,store)
+  account.restore().join()
+  val owner=RuntimeOwner({Runtime(it)},StandardTestDispatcher(testScheduler))
+  val repo=CatalogRepository(account,owner,backgroundScope,store){_,_->}
+  repo.select(rows.first()).join();runCurrent()
+  val generation=owner.state.value.status.generation
+  offline=true
+  account.refreshWorkspaceModes().join();runCurrent()
+  assertTrue(account.state.value.verified);assertFalse(account.state.value.busy)
+  assertEquals(key,owner.state.value.scope);assertEquals(generation,owner.state.value.status.generation)
+  repo.select(rows.last()).join();runCurrent()
+  assertEquals("target",store.context?.workspaceId)
+  offline=false
+  val retry=account.refreshWorkspaceModes();refreshEntered.await()
+  assertEquals("target",repo.state.value.workspace?.id);assertTrue(account.state.value.verified)
+  release.complete(Unit);retry.join();runCurrent()
+  assertEquals("target",repo.state.value.workspace?.id)
+  assertEquals(RuntimeScope("u","target"),owner.state.value.scope)
+  assertEquals("target",store.context?.workspaceId)
   repo.disconnect()
  }
 

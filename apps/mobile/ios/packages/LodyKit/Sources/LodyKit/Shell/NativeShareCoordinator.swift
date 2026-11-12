@@ -3,6 +3,7 @@ import UIKit
 
 @MainActor
 final class NativeShareCoordinator {
+  var workspaceMode: (String) -> WorkspaceContentMode = { WorkspaceModePins.shared.mode($0) }
   private var drain: Task<Void, Never>?
   private var form: LodyPageController?
   private var prefetch: Task<Void, Never>?
@@ -25,7 +26,8 @@ final class NativeShareCoordinator {
 
   func reconcile() {
     let state = SessionSource.live.state
-    guard !state.key.isEmpty else {
+    guard !state.key.isEmpty, workspaceMode(state.workspaceId) == .plaintext else {
+      ShareStore.clearCatalog()
       stop()
       return
     }
@@ -42,6 +44,17 @@ final class NativeShareCoordinator {
       for entry in ShareStore.pending() where !failed.contains(entry.id) {
         guard !Task.isCancelled else { return }
         let account = AuthSession.shared.snapshot.account
+        if let account, entry.userId == account.user.id,
+          account.workspaces.contains(where: { $0.id == entry.workspaceId }) {
+          switch workspaceMode(entry.workspaceId) {
+          case .e2ee:
+            ShareStore.remove(entry.id)
+            toast("workspace.e2ee.unsupported")
+            continue
+          case .unknown: continue
+          case .plaintext: break
+          }
+        }
         switch ShareInboxRouting.resolve(user: account?.user.id ?? "", workspaces: account?.workspaces.map(\.id) ?? [],
           selected: state.workspaceId, loading: state.loading, entryUser: entry.userId, entryWorkspace: entry.workspaceId) {
         case .discard: ShareStore.remove(entry.id); continue
@@ -81,12 +94,13 @@ final class NativeShareCoordinator {
     guard key != optionsKey else { return }
     optionsKey = key
     prefetch?.cancel()
+    let workspaceMode = self.workspaceMode
     prefetch = Task { [weak self] in
       for project in [nil] + projects.prefix(10).map({ Optional($0.id) }) {
-        guard !Task.isCancelled, SessionSource.live.state.key == state.key else { return }
+        guard !Task.isCancelled, SessionSource.live.state.key == state.key, workspaceMode(state.workspaceId) == .plaintext else { return }
         do {
           let options = try await CreateSessionService.live.options(state.workspaceId, project)
-          guard !Task.isCancelled, SessionSource.live.state.key == state.key else { return }
+          guard !Task.isCancelled, SessionSource.live.state.key == state.key, workspaceMode(state.workspaceId) == .plaintext else { return }
           try ShareStore.writeOptions(options, target: project ?? "chat")
         } catch { self?.report(error, operation: "options") }
       }
@@ -94,6 +108,7 @@ final class NativeShareCoordinator {
   }
 
   private func deliver(_ entry: ShareManifest, scope: String) async {
+    guard workspaceMode(entry.workspaceId) == .plaintext else { return }
     let adopted: ShareManifest
     do { adopted = try ShareStore.adopt(entry.id) }
     catch {
@@ -118,7 +133,7 @@ final class NativeShareCoordinator {
         report(error, operation: "selection")
       }
     }
-    guard !Task.isCancelled, SessionSource.live.state.key == scope else { return }
+    guard !Task.isCancelled, SessionSource.live.state.key == scope, workspaceMode(adopted.workspaceId) == .plaintext else { return }
     guard available, let draft = adopted.draft else {
       do {
         var fields: [String: Any] = ["workspaceId": adopted.workspaceId, "context": adopted.context,
@@ -142,7 +157,7 @@ final class NativeShareCoordinator {
     do { try await OutboxSession.shared.put(user: adopted.userId, workspace: adopted.workspaceId, json: record.recordJSON).value }
     catch { failed.insert(entry.id); toast("shareInbox.saveFailed"); report(error, operation: "persist"); return }
     ShareStore.remove(entry.id)
-    guard !Task.isCancelled, SessionSource.live.state.key == scope else { return }
+    guard !Task.isCancelled, SessionSource.live.state.key == scope, workspaceMode(adopted.workspaceId) == .plaintext else { return }
     LodyShell.shared.openSessionFromExternal(draft.sessionId)
   }
 

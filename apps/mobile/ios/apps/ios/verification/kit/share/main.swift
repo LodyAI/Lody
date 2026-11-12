@@ -97,37 +97,47 @@ struct ShareCheckAccount {
 @MainActor enum AuthSession {
   struct Snapshot { var account: ShareCheckAccount? }
   static var shared: AuthSession.Type { Self.self }
-  static let snapshot = Snapshot()
+  static var snapshot = Snapshot()
 }
 @MainActor enum CatalogSession {
   static var shared: CatalogSession.Type { Self.self }
-  static func selectWorkspace(_ id: String) { fatalError("Unexpected workspace routing") }
+  static var selections: [String] = []
+  static var onSelect: ((String) -> Void)?
+  static func selectWorkspace(_ id: String) { selections.append(id); onSelect?(id) }
 }
 @MainActor final class LodyPageController { var onClose: (() -> Void)? }
 @MainActor enum LodyShell {
   static var shared: LodyShell.Type { Self.self }
   static func close(from: LodyPageController) { fatalError("Unexpected form") }
-  static func openSessionFromExternal(_ id: String) { fatalError("Unexpected navigation") }
+  static var onOpen: ((String) -> Void)?
+  static func openSessionFromExternal(_ id: String) { onOpen?(id) }
 }
 @MainActor enum SessionNavigation {
   static func handle(_ name: String, _ fields: [String: Any]) throws -> LodyPageController? { fatalError("Unexpected form") }
 }
 @MainActor enum CreateSessionService {
   static var live: CreateSessionService.Type { Self.self }
-  static func options(_ workspace: String, _ project: String?) async throws -> CreationOptions { fatalError("Unexpected network") }
-}
-struct CreateDraftRecord {
-  let recordJSON: String
-  init(draft: CreateSessionDraft, payload: [String: Any]) { fatalError("Unexpected delivery") }
+  static var response: CreationOptions?
+  static func options(_ workspace: String, _ project: String?) async throws -> CreationOptions {
+    guard let response else { fatalError("Unexpected network") }
+    return response
+  }
 }
 @MainActor enum OutboxSession {
   static var shared: OutboxSession.Type { Self.self }
-  static func put(user: String, workspace: String, json: String) throws -> Task<Void, Error> { fatalError("Unexpected delivery") }
+  static func put(user: String, workspace: String, json: String) throws -> Task<Void, Error> {
+    guard let record = OutboxRecord.decode(json) else { fatalError("Invalid delivered draft") }
+    return Task {
+      let file = root.appendingPathComponent("delivered-" + record.sessionId + ".json")
+      try Data(json.utf8).write(to: file, options: .atomic)
+    }
+  }
 }
 @MainActor enum LodyToastOverlay {
   enum Kind { case error }
   static var shared: LodyToastOverlay.Type { Self.self }
-  static func show(message: String, kind: Kind) { fatalError("Unexpected delivery toast") }
+  static var messages: [String] = []
+  static func show(message: String, kind: Kind) { messages.append(message) }
 }
 @MainActor enum DiagnosticsStore {
   static var shared: DiagnosticsStore.Type { Self.self }
@@ -140,6 +150,8 @@ defer {
   else { UserDefaults.standard.removeObject(forKey: "inboxProjectSort") }
 }
 let coordinator = NativeShareCoordinator()
+var shareMode: WorkspaceContentMode = .plaintext
+coordinator.workspaceMode = { _ in shareMode }
 defer { coordinator.stop() }
 SessionSource.live.state = SessionListState(key: "u1:w1", userId: "u1", workspaceId: "w1", catalog: SessionCatalog(
   projects: [SessionProject(id: "p1", name: "Alpha"), SessionProject(id: "p2", name: "Beta")],
@@ -203,4 +215,65 @@ ShareStore.clear()
 coordinator.reconcile()
 check(ShareStore.catalog()?.userId == "u2", "stop allows the same scope to restore its cleared persisted catalog")
 coordinator.stop()
-print("PASS: production share coordinator scope, sorting, status, archive, labels, persistence retry and reset")
+shareMode = .e2ee
+coordinator.reconcile()
+check(ShareStore.catalog() == nil, "Encrypted workspaces cannot export an extension catalog")
+shareMode = .unknown
+coordinator.reconcile()
+check(ShareStore.catalog() == nil, "Unknown workspaces cannot export an extension catalog")
+print("PASS: production share coordinator scope, sorting, status, archive, labels, persistence retry, reset and encrypted/unknown exclusion")
+
+// Drive the real pending manifests, routing, draft construction and disk delivery.
+// Complete on either navigation outcome, so an accidental switch fails without sleeps.
+ShareStore.clear()
+let queueCoordinator = NativeShareCoordinator()
+defer { queueCoordinator.stop() }
+var modes: [String: WorkspaceContentMode] = ["waiting": .unknown, "encrypted": .e2ee, "plain": .plaintext]
+queueCoordinator.workspaceMode = { modes[$0] ?? .unknown }
+AuthSession.snapshot = .init(account: ShareCheckAccount(user: .init(id: "share-user"), workspaces: ["waiting", "encrypted", "plain"].map { .init(id: $0) }))
+SessionSource.live.state = SessionListState(key: "share-user:plain", userId: "share-user", workspaceId: "plain", catalog: SessionCatalog(), loading: false, connected: false)
+CreateSessionService.response = options
+func queued(_ workspace: String, time: Double, user: String = "share-user") -> ShareManifest {
+  let draft = CreateSessionDraft(sessionId: "session-" + workspace, userId: user, workspaceId: workspace,
+    projectId: "p1", projectName: "Alpha", agent: options.agents[0], choice: ModelChoice())
+  return ShareManifest(id: UUID().uuidString.lowercased(), createdAt: time, userId: user, workspaceId: workspace,
+    projectId: "p1", context: "project", text: "Share to " + workspace, attachments: [], draft: draft)
+}
+let foreign = queued("encrypted", time: 0, user: "different-account")
+let unknown = queued("waiting", time: 1)
+let encrypted = queued("encrypted", time: 2)
+let plain = queued("plain", time: 3)
+for entry in [foreign, unknown, encrypted, plain] { try ShareStore.enqueue(entry, files: []) }
+CatalogSession.selections = []
+LodyToastOverlay.messages = []
+let firstOutcome = await withCheckedContinuation { (done: CheckedContinuation<String, Never>) in
+  CatalogSession.onSelect = { done.resume(returning: "switched:" + $0) }
+  LodyShell.onOpen = { done.resume(returning: "delivered:" + $0) }
+  queueCoordinator.reconcile()
+}
+queueCoordinator.stop()
+CatalogSession.onSelect = nil; LodyShell.onOpen = nil
+check(firstOutcome == "delivered:session-plain", "Blocked entries must not route away before a later plaintext entry is delivered: " + firstOutcome)
+check(CatalogSession.selections.isEmpty && SessionSource.live.state.workspaceId == "plain", "The current plaintext workspace remains selected")
+check(ShareStore.pending().map(\.id) == [unknown.id], "Unknown stays durable; encrypted, foreign-account and delivered plaintext entries leave the queue")
+check(!FileManager.default.fileExists(atPath: root.appendingPathComponent("inbox/" + encrypted.id).path), "Removing encrypted manifests also clears their captured attachments")
+let delivered = OutboxRecord.decode(try String(contentsOf: root.appendingPathComponent("delivered-session-plain.json"), encoding: .utf8))
+check(delivered?.send["text"] == .string("Share to plain"), "The later ordinary share reaches the native outbox persistence port")
+check(LodyToastOverlay.messages.count == 1, "Only the owned encrypted entry reports unsupported delivery")
+print("PASS: unknown and encrypted Share entries cannot switch away from plaintext or block later delivery; unknown stays queued and encrypted is removed")
+
+// Once classification succeeds, the retained unknown entry may route and deliver normally.
+modes["waiting"] = .plaintext
+let retryOutcome = await withCheckedContinuation { (done: CheckedContinuation<String, Never>) in
+  CatalogSession.onSelect = { id in
+    SessionSource.live.state.workspaceId = id
+    SessionSource.live.state.key = "share-user:" + id
+  }
+  LodyShell.onOpen = { done.resume(returning: $0) }
+  queueCoordinator.wake()
+}
+queueCoordinator.stop()
+CatalogSession.onSelect = nil; LodyShell.onOpen = nil
+check(retryOutcome == "session-waiting" && ShareStore.pending().isEmpty, "Confirmed plaintext admission releases the retained share")
+check(CatalogSession.selections == ["waiting"], "Only a now-admitted workspace can trigger an automatic switch")
+print("PASS: a retained unknown Share entry delivers after explicit plaintext classification")

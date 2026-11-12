@@ -111,8 +111,44 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
   return (dispatcher, store, disk)
 }
 
+// The production submit method runs against injected mode and actual OutboxStore ports.
+@MainActor struct CreateSessionService {
+  var workspaceMode: (String) -> WorkspaceContentMode
+  var put: (String, String, String) -> Task<Void, Error>
+}
+
 @main struct OutboxCheck {
   @MainActor static func main() async throws {
+    let admissionDisk = Disk()
+    let admissionStore = OutboxStore(key: "pending-sends:u:guarded", generation: 0, persistence: admissionDisk.persistence, awaitingConfirmation: "waiting")
+    var mode: WorkspaceContentMode = .unknown
+    let service = CreateSessionService(workspaceMode: { _ in mode }, put: { _, _, json in
+      guard let record = OutboxRecord.decode(json) else { return Task { throw OutboxError.invalidRecord } }
+      return admissionStore.put(record)
+    })
+    let json = String(decoding: try JSONEncoder().encode(record("blocked-prompt")), as: UTF8.self)
+    for blocked in [WorkspaceContentMode.e2ee, .unknown] {
+      mode = blocked
+      do { _ = try service.submit(user: "u", workspace: "guarded", json: json); preconditionFailure("Blocked creation entered the outbox") }
+      catch WorkspaceContentError.blocked { }
+      precondition(admissionStore.snapshot.records.isEmpty && admissionDisk.values.isEmpty, "Encrypted/unknown creation must not publish or persist prompt/attachments")
+    }
+    mode = .plaintext
+    try await service.submit(user: "u", workspace: "guarded", json: json).value
+    precondition(admissionDisk.records("pending-sends:u:guarded").count == 1 && admissionStore.snapshot.records.count == 1)
+    print("PASS: production CreateSessionService.submit blocks encrypted/unknown prompts before outbox publication and persistence; plaintext still writes")
+    let lateDisk = Disk(), hydration = Gate()
+    lateDisk.hydration["late-admission"] = hydration
+    var admitted = true
+    let lateStore = OutboxStore(key: "late-admission", generation: 0, persistence: lateDisk.persistence, awaitingConfirmation: "waiting", admit: {
+      if !admitted { throw WorkspaceContentError.blocked }
+    })
+    let queued = lateStore.put(record("queued-before-encryption"))
+    admitted = false; hydration.open()
+    do { try await queued.value; preconditionFailure("A queued plaintext write must recheck admission") }
+    catch WorkspaceContentError.blocked { }
+    precondition(lateDisk.values.isEmpty, "Encryption discovered before queued write admission must prevent disk persistence")
+    print("PASS: queued outbox writes recheck mode immediately before persistence without blocking cleanup")
     try await pendingSends()
     try await dispatch()
     try await foreground()

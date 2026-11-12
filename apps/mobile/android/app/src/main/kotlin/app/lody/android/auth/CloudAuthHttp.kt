@@ -1,13 +1,17 @@
 package app.lody.android.auth
 
 import app.lody.android.runtime.ShortLivedGrant
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 
 internal class HttpReply(val status: Int, val body: String)
 internal fun interface AuthTransport { suspend fun request(path: String, credential: Credential?, body: String?): HttpReply }
-internal class CloudAuthHttp(private val transport: AuthTransport) : CloudAuthApi {
+internal class CloudAuthHttp(private val pins: WorkspaceModePins, private val transport: AuthTransport) : CloudAuthApi {
+    override fun workspaceMode(workspaceId: String) = pins.mode(workspaceId)
     private suspend fun request(path: String, credential: Credential? = null, body: JSONObject? = null, polling: Boolean = false): String {
         val reply = transport.request(path, credential, body?.toString())
         if (!polling && reply.status == 401) throw AuthFailure("auth_expired")
@@ -57,20 +61,73 @@ internal class CloudAuthHttp(private val transport: AuthTransport) : CloudAuthAp
         val session = request("/api/auth/get-session", credential)
         if (session == "null") throw AuthFailure("auth_expired")
         val workspaces = request("/api/auth/organization/list", credential)
-        return decode {
+        val account = decode {
             val user = JSONObject(session).getJSONObject("user")
             val list = JSONArray(workspaces)
             require(list.length() <= 1000)
             Account(
                 user.text("id"),
                 user.optString("name").ifBlank { "Lody account" },
-                (0 until list.length()).map { list.getJSONObject(it).let { row -> Workspace(row.text("id"), row.text("name"), httpsImage(row.optString("logo")), row.optString("slug").takeIf { it.isNotBlank() && it != "null" }) } },
+                (0 until list.length()).map { list.getJSONObject(it).let { row -> Workspace(row.text("id"), row.text("name"), httpsImage(row.optString("logo")), row.optString("slug").takeIf { it.isNotBlank() && it != "null" },
+                    if (row.optString("contentMode") == "e2ee" || !row.isNull("genesisHash")) WorkspaceContentMode.E2EE else WorkspaceContentMode.UNKNOWN,
+                    row.optString("genesisHash").takeUnless { it.isBlank() || it == "null" }) } },
                 httpsImage(user.optString("image")),
                 user.optString("email").takeUnless { it == "null" }.orEmpty(),
             )
         }
+        return account.copy(workspaces = workspaceModes(credential, account.workspaces))
+    }
+    override suspend fun workspaceModes(credential: Credential, workspaces: List<Workspace>): List<Workspace> {
+        val rows = workspaces.map { row ->
+            val mode = try { pins.observe(row.id, if (row.contentMode == WorkspaceContentMode.E2EE || row.genesisHash != null) WorkspaceContentMode.E2EE else WorkspaceContentMode.UNKNOWN, row.genesisHash) }
+                catch (_: Exception) { pins.mode(row.id) }
+            row.copy(contentMode = mode)
+        }
+        if (rows.all { it.contentMode == WorkspaceContentMode.E2EE }) return rows
+        // One budget includes JWT acquisition, semaphore wait and each workspace query.
+        return try { withTimeout(6000) {
+            val auth = JSONObject(request("/api/auth/convex/token", credential))
+            val bearer = Credential(auth.text("token"))
+            val permits = Semaphore(4)
+            coroutineScope {
+                rows.map { row -> async {
+                    if (row.contentMode == WorkspaceContentMode.E2EE) row
+                    else permits.withPermit {
+                        try {
+                            val (mode, genesis) = describe(bearer, row.id)
+                            currentCoroutineContext().ensureActive()
+                            if (mode == WorkspaceContentMode.UNKNOWN) pins.rejectPlaintext(row.id)
+                            row.copy(contentMode = pins.observe(row.id, mode, genesis), genesisHash = genesis ?: row.genesisHash)
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { row.copy(contentMode = pins.mode(row.id)) }
+                    }
+                } }.awaitAll()
+            }
+        } } catch (_: TimeoutCancellationException) { currentCoroutineContext().ensureActive(); rows.map { it.copy(contentMode = pins.mode(it.id)) } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { rows.map { it.copy(contentMode = pins.mode(it.id)) } }
+    }
+    private suspend fun describe(bearer: Credential, id: String): Pair<WorkspaceContentMode, String?> {
+        val raw = request("/api/query", bearer, JSONObject().put("path", "e2eeWorkspaces:describe")
+            .put("format", "convex_encoded_json").put("args", JSONArray().put(JSONObject().put("workspaceId", id))))
+        return decode {
+            val reply = JSONObject(raw)
+            require(reply.getString("status") == "success")
+            val value = reply.getJSONObject("value")
+            require(value.getString("workspaceId") == id)
+            val genesis = value.optString("genesisHash").takeUnless { it.isBlank() || it == "null" }
+            val noCrypto = !value.has("genesisHash") && !value.has("cryptoOrgId")
+            val mode = when {
+                value.optString("contentMode") == "e2ee" || genesis != null -> WorkspaceContentMode.E2EE
+                value.optString("contentMode") == "plaintext" && value.optInt("contentModeVersion") == 1 && noCrypto && !value.has("admission") -> WorkspaceContentMode.PLAINTEXT
+                value.optString("admission") == "legacy-unclassified" && noCrypto && !value.has("contentMode") && !value.has("contentModeVersion") -> WorkspaceContentMode.PLAINTEXT
+                else -> WorkspaceContentMode.UNKNOWN
+            }
+            mode to genesis
+        }
     }
     override suspend fun grant(credential: Credential, workspaceId: String): ShortLivedGrant {
+        if (pins.mode(workspaceId) != WorkspaceContentMode.PLAINTEXT) throw AuthFailure("workspace_mode_unconfirmed")
         val body = request("/api/loro-streams/token", credential, JSONObject().put("workspaceId", workspaceId))
         return decode {
             val data = JSONObject(body)

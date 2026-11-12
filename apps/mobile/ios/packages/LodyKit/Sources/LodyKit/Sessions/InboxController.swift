@@ -52,6 +52,10 @@ final class InboxController: UIViewController {
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated {
           self?.render(onlyIfContentChanged: name == .lodyCatalogDidChange || name == .lodySessionCatalogPreviewDidChange)
+          if name == UIApplication.didBecomeActiveNotification, self?.source === SessionSource.live,
+             self?.source.state.workspace?.resolvedMode == .unknown {
+            Task { await AuthSession.shared.refreshWorkspaceModes() }
+          }
         }
       }
     }
@@ -88,6 +92,7 @@ final class InboxController: UIViewController {
     if state.userId.isEmpty {
       chrome.update(nil)
       list.setPlaceholder("")
+      list.setRetry(nil)
     } else {
       chrome.update(InboxChrome.Model(
         accountEmail: state.accountEmail,
@@ -97,6 +102,8 @@ final class InboxController: UIViewController {
         mode: mode, sort: sort, connection: syncState(state)
       ))
       if term.isEmpty { list.setPlaceholder(listPlaceholder(state)) }
+      let unknown = source === SessionSource.live && state.workspace?.resolvedMode == .unknown
+      list.setRetry(unknown && term.isEmpty ? { Task { await AuthSession.shared.refreshWorkspaceModes() } } : nil)
     }
     // Presence and connection updates still refresh chrome, but cannot change rows.
     // Explicit renders bypass this guard for search results, identities and watermarks.
@@ -236,6 +243,13 @@ final class InboxController: UIViewController {
   }
 
   private func listPlaceholder(_ state: SessionListState) -> String {
+    if source === SessionSource.live, let workspace = AuthSession.shared.snapshot.account?.workspaces.first(where: { $0.id == state.workspaceId }) {
+      switch workspace.resolvedMode {
+      case .e2ee: return String(localized: "workspace.e2ee.unsupported", bundle: .lody)
+      case .unknown: return String(localized: "workspace.mode.unknown", bundle: .lody)
+      case .plaintext: break
+      }
+    }
     if state.loading { return String(localized: "sessions.placeholder.loading", bundle: .lody) }
     if !state.connected { return String(localized: "sessions.placeholder.offline", bundle: .lody) }
     let empty = HomeArchive.shown ? "home.archived.empty" : "sessions.placeholder.empty"
@@ -321,7 +335,7 @@ final class InboxController: UIViewController {
 
   func newSession() {
     let state = source.state
-    guard state.workspace != nil else {
+    guard state.workspace?.resolvedMode == .plaintext else {
       LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: .neutral)
       return
     }

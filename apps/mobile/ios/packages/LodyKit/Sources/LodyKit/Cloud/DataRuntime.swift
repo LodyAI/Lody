@@ -83,6 +83,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     })
   }
   func start(workspace: String, owner: String, userId: String) {
+    guard WorkspaceModePins.shared.mode(workspace) == .plaintext else { stop(); return }
     disposeView()
     if self.workspace != workspace || self.userId != userId {
       sessionId = nil; sessionSnapshot = nil; retainedSessions = []; reservedSessions = []; billing.clear()
