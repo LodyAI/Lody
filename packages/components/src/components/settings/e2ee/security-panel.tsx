@@ -11,6 +11,7 @@ import { useState, type ReactNode } from 'react';
 import { Dialog } from '@lody/ui/dialog';
 import { Badge } from '@lody/ui/badge';
 import { CompactSection, CompactRow } from '../compact-layout';
+import { E2eeWaitingRequestsCallout } from '@/components/pages/e2ee-instant-qr';
 
 const styles = stylex.create({
   panel: { display: 'flex', flexDirection: 'column', gap: space[4] },
@@ -249,6 +250,7 @@ export function E2eeSecurityPanel({
           onUpdate={onUpdate}
           onReview={onOpenConsole && (() => onOpenConsole('members'))}
         />
+        <E2eeWaitingRequestsCallout />
         {error && (
           <ErrorRow
             error={error}

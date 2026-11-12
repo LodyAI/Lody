@@ -6668,5 +6668,13 @@
   "e2ee.remoteMachine.disclosure": "连接远程服务器 / CLI 机器",
   "e2ee.control.historyToggle": "查看加密变更记录（{{shown}}）",
   "e2ee.machineSharing.details": "技术详情",
-  "e2ee.security.addDevice": "添加新设备"
+  "e2ee.security.addDevice": "添加新设备",
+  "e2ee.approvalGuide.automatic": "返回自动配对",
+  "e2ee.instantQr.unavailable": "这台设备无法解锁所申请的 {{count}} 个工作区（{{names}}），请在拥有它们的设备上批准。",
+  "e2ee.instantQr.partial": "另一台设备已把这台手机加入其他工作区，但无法解锁当前工作区。请在拥有此工作区的设备上批准。",
+  "e2ee.instantQr.wrongRole": "这个二维码供已登录设备扫描确认。在这台新设备上，请扫已登录电脑上显示的二维码。",
+  "e2ee.instantQr.linkJoined": "这台设备已加入，工作区会在密钥到达后打开。",
+  "e2ee.auto.scan.wrongRole": "这个二维码是给新设备扫的。请扫新设备屏幕上的二维码。",
+  "e2ee.auto.scopeWithQr": "扫描二维码会把你的手机加入此设备上的加密工作区；输入 6 位码只批准当前工作区。",
+  "e2ee.addDevice.waiting": "等待批准的设备：{{count}}"
 }

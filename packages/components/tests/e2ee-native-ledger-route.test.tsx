@@ -762,6 +762,33 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
   expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
 });
 
+it('stops reopening a host that keeps refusing a revoked identity and offers re-pairing', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  let opens = 0;
+  // Every reopen reaches the same revoked identity again: one retry, then guidance.
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      opens += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_device_revoked');
+    },
+    refresh: async () => local.status,
+    close: async () => {},
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  for (let turn = 0; turn < 20; turn++) await act(async () => {});
+  expect(opens).toBe(2);
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
+});
+
 it.each(['describe', 'history'] as const)(
   'reopens a confirmed closed reader before obsolete public %s returns',
   async (paused) => {

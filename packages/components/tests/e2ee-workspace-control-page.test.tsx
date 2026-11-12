@@ -555,3 +555,62 @@ it('lets only the owner transfer ownership, after a confirmation that states the
   expect(workspace.owner).toBe(member.membershipId);
   expect(document.querySelector('[data-testid="e2ee-member-transfer-dialog"]')).toBeNull();
 });
+
+describe('QR camera', () => {
+  const mount = async (getUserMedia: (constraints: MediaStreamConstraints) => Promise<unknown>) => {
+    const { useQrCamera } = await import('../src/components/pages/e2ee-ledger-verification');
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    const states: string[] = [];
+    function Probe() {
+      const { video, state } = useQrCamera(true, () => {});
+      states.push(state);
+      return <video ref={video} />;
+    }
+    const host = document.createElement('div');
+    document.body.append(host);
+    const probeRoot = createRoot(host);
+    await act(async () => probeRoot.render(<Probe />));
+    for (let turn = 0; turn < 5; turn++) await act(async () => {});
+    return {
+      states,
+      unmount: async () => {
+        await act(async () => probeRoot.unmount());
+        host.remove();
+        delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+      },
+    };
+  };
+  const failure = (name: string) => Object.assign(new Error(name), { name });
+
+  it('never asks a camera that was denied a second time', async () => {
+    const asked: MediaStreamConstraints[] = [];
+    const probe = await mount(async (constraints) => {
+      asked.push(constraints);
+      throw failure('NotAllowedError');
+    });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.video).toMatchObject({
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 720 },
+    });
+    expect(probe.states.at(-1)).toBe('unavailable');
+    await probe.unmount();
+  });
+
+  it('retries with plain video only when the rear-camera request cannot be met', async () => {
+    const asked: MediaStreamConstraints[] = [];
+    const probe = await mount(async (constraints) => {
+      asked.push(constraints);
+      throw failure(asked.length === 1 ? 'OverconstrainedError' : 'NotReadableError');
+    });
+    expect(asked.map((constraints) => constraints.video)).toEqual([
+      expect.objectContaining({ facingMode: { ideal: 'environment' } }),
+      true,
+    ]);
+    expect(probe.states.at(-1)).toBe('unavailable');
+    await probe.unmount();
+  });
+});

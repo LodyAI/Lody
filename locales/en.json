@@ -6681,5 +6681,13 @@
   "e2ee.remoteMachine.disclosure": "Connect a remote server or CLI machine",
   "e2ee.control.historyToggle": "View encryption change history ({{shown}})",
   "e2ee.machineSharing.details": "Technical details",
-  "e2ee.security.addDevice": "Add device"
+  "e2ee.security.addDevice": "Add device",
+  "e2ee.approvalGuide.automatic": "Back to automatic pairing",
+  "e2ee.instantQr.unavailable": "This device can’t unlock {{count}} of the requested workspaces ({{names}}). Approve them from a device that has them.",
+  "e2ee.instantQr.partial": "Your other device added this phone to other workspaces but can’t unlock this one. Approve it from a device that has this workspace.",
+  "e2ee.instantQr.wrongRole": "That code is for a signed-in device to approve with. On this new device, scan the QR code shown on your signed-in computer.",
+  "e2ee.instantQr.linkJoined": "This device joined. Your workspaces open as their keys arrive.",
+  "e2ee.auto.scan.wrongRole": "That code is for the new device to scan. Scan the QR code on the new device’s screen instead.",
+  "e2ee.auto.scopeWithQr": "Scanning the QR code adds your phone to the encrypted workspaces on this device. Typing the 6-digit code approves only this workspace.",
+  "e2ee.addDevice.waiting": "Devices waiting for approval: {{count}}"
 }

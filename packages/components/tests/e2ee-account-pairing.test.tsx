@@ -1212,7 +1212,7 @@ describe('instant QR join and form-factor pairing', () => {
     }
   });
 
-  it('keeps a revealed QR code through its request leaving the list, then approves the scanning phone on a desktop', async () => {
+  it('on a computer shows the QR code with the request at once, keeps it through the request leaving, and approves the scanning phone', async () => {
     const { E2eeAutomaticPairingInbox } =
       await import('../src/components/pages/e2ee-automatic-pairing');
     const { ForceDesktopLayoutProvider } = await import('../src/hooks/use-mobile');
@@ -1234,8 +1234,10 @@ describe('instant QR join and form-factor pairing', () => {
         return { workspaces: [{ workspaceId: 'w1', outcome: 'admitted' }] };
       },
     } as unknown as E2eeWorkspaceRuntime;
-    const showQr = () =>
-      document.querySelector<HTMLButtonElement>('[data-testid="e2ee-approval-show-qr"]');
+    // Settings is open: the request still presents over it.
+    const settings = document.createElement('div');
+    settings.setAttribute('role', 'dialog');
+    document.body.append(settings);
     await act(async () =>
       root.render(
         <ForceDesktopLayoutProvider>
@@ -1244,13 +1246,15 @@ describe('instant QR join and form-factor pairing', () => {
       )
     );
     await flush();
-    // The secret is shown only on request; the typed-code path stays right below.
-    expect(offers).toBe(0);
+    // No click reveals the code (owner decision); the typed-code path stays below it, and
+    // the scope says what each path grants.
+    expect(offers).toBe(1);
+    expect(document.querySelector('[data-testid="e2ee-approval-show-qr"]')).toBeNull();
     expect(document.querySelector('[data-testid="e2ee-approval-code"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="e2ee-approval-scan-start"]')).toBeNull();
-    await act(async () => showQr()!.click());
-    await flush();
-    expect(offers).toBe(1);
+    expect(document.body.textContent).toContain('e2ee.auto.scopeWithQr');
+    expect(document.body.textContent).not.toContain('e2ee.auto.currentWorkspaceOnly');
+    settings.remove();
     rows = [];
     await tick(2000);
     await flush();
@@ -1450,5 +1454,270 @@ describe('instant QR join and form-factor pairing', () => {
     await tick(2000);
     await flush();
     expect(text()).toContain('e2ee.auto.connectionRetry');
+  });
+});
+
+describe('pairing hardening', () => {
+  const flush = async () => {
+    for (let turn = 0; turn < 6; turn++) await act(async () => {});
+  };
+  const review = {
+    id: 'request',
+    requestId: 'native-request',
+    workspaceId: 'w1',
+    workspaceName: 'Synthetic team',
+    deviceName: 'Phone',
+    expiresAt: NOW + 600_000,
+    phase: 'waiting' as const,
+  };
+  const withCamera = () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: async () => ({}) },
+    });
+    return () => delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+  };
+
+  it('approves a request from a link opened by the system camera once that request is fetched', async () => {
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let rows: (typeof review)[] = [];
+    const entered: [string, string][] = [];
+    const runtime = {
+      pendingAutomaticPairing: async () => rows,
+      approveAutomaticPairing: async (id: string, code: string) => {
+        entered.push([id, code]);
+      },
+      declineAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    // The app was woken by the link before the request reached this device.
+    (window as { __LODY_PENDING_E2EE_PAIR_URL__?: string }).__LODY_PENDING_E2EE_PAIR_URL__ =
+      'lody://auto-pair?id=request&code=246810';
+    await act(async () => root.render(<E2eeAutomaticPairingInbox runtime={runtime} />));
+    await flush();
+    expect(entered).toEqual([]);
+    rows = [review];
+    await tick(2000);
+    await flush();
+    expect(entered).toEqual([['request', '246810']]);
+    // A link for a request this device does not have sends nothing.
+    await act(async () =>
+      window.dispatchEvent(
+        new CustomEvent('lody:e2ee-pair-url', {
+          detail: { url: 'lody://auto-pair?id=someone-else&code=135790' },
+        })
+      )
+    );
+    await flush();
+    expect(entered).toEqual([['request', '246810']]);
+  });
+
+  it('keeps a device that joined by code from popping its request up afterwards', async () => {
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { E2eeAddDeviceCard } = await import('../src/components/pages/e2ee-instant-qr');
+    let submitted = false;
+    const runtime = {
+      pendingAutomaticPairing: async () => [review],
+      approveAutomaticPairing: async () => {},
+      declineAutomaticPairing: async () => {},
+      accountPairingCode: async () => ({ pairingString: CODE, expiresAt: NOW + 600_000 }),
+      inspectAccountPairing: async () =>
+        submitted
+          ? {
+              requestId: 'request-1',
+              deviceName: 'Phone',
+              approximateLocation: null,
+              requestedAt: NOW,
+              expiresAt: NOW + 600_000,
+              workspaces: [{ workspaceId: 'w1', name: 'Alpha' }],
+              unavailable: [{ workspaceId: 'w9', name: 'Omega' }],
+            }
+          : null,
+      approveAccountPairing: async () => ({
+        workspaces: [{ workspaceId: 'w1', outcome: 'admitted' }],
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    // A pairing surface (the console's own code) is already open: the popup waits.
+    const surface = document.createElement('div');
+    surface.setAttribute('data-e2ee-pairing-surface', '');
+    document.body.append(surface);
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingInbox runtime={runtime}>
+          <E2eeAddDeviceCard runtime={runtime} defaultShowQr />
+        </E2eeAutomaticPairingInbox>
+      )
+    );
+    await flush();
+    expect(document.querySelector('[data-testid="e2ee-approval-code"]')).toBeNull();
+    // The waiting request is reachable from the card.
+    expect(document.querySelector('[data-testid="e2ee-waiting-requests"]')).not.toBeNull();
+    submitted = true;
+    await tick(900);
+    await flush();
+    expect(text()).toContain('e2ee.instantQr.joined');
+    expect(text()).toContain('e2ee.instantQr.unavailable {"count":1,"names":"Omega"}');
+    surface.remove();
+    await tick(2000);
+    await flush();
+    expect(document.querySelector('[data-testid="e2ee-approval-code"]')).toBeNull();
+  });
+
+  it('names a code for the other role instead of calling it unreadable', async () => {
+    const restoreCamera = withCamera();
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { ForceMobileLayoutProvider } = await import('../src/hooks/use-mobile');
+    const runtime = {
+      automaticPairingState: async () => ({
+        id: 'request',
+        workspaceId: 'w1',
+        workspaceName: 'Alpha',
+        deviceName: 'Phone',
+        comparisonCode: null,
+        expiresAt: NOW + 300_000,
+        phase: 'preparing',
+      }),
+      requestAccountPairing: vi.fn(),
+      accountPairingRequest: async () => null,
+    } as unknown as E2eeWorkspaceRuntime;
+    try {
+      await act(async () =>
+        root.render(
+          <ForceMobileLayoutProvider force>
+            <E2eeAutomaticPairingPage
+              runtime={runtime}
+              workspaceId="w1"
+              onJoined={() => {}}
+              onBack={() => {}}
+            />
+          </ForceMobileLayoutProvider>
+        )
+      );
+      await flush();
+      await click('e2ee.auto.scanJoin');
+      await act(async () => qr.scan!('lody://auto-pair?id=request&code=123456'));
+      await flush();
+      expect(text()).toContain('e2ee.instantQr.wrongRole');
+      expect(runtime.requestAccountPairing).not.toHaveBeenCalled();
+    } finally {
+      restoreCamera();
+    }
+  });
+
+  it('lets a scanned join be cancelled or end on a partial join, then ends its own request', async () => {
+    const restoreCamera = withCamera();
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { ForceMobileLayoutProvider } = await import('../src/hooks/use-mobile');
+    const calls: string[] = [];
+    let workspaces: E2eeAccountPairingRequestState['workspaces'] = [
+      { workspaceId: 'w1', name: 'Alpha', state: 'pending' },
+      { workspaceId: 'w2', name: 'Beta', state: 'pending' },
+    ];
+    const request = (): E2eeAccountPairingRequestState => ({
+      expiresAt: NOW + 600_000,
+      status: 'waiting',
+      workspaces,
+    });
+    const runtime = {
+      automaticPairingState: async () => {
+        calls.push('state');
+        return {
+          id: 'request',
+          workspaceId: 'w1',
+          workspaceName: 'Alpha',
+          deviceName: 'Phone',
+          comparisonCode: null,
+          expiresAt: NOW + 300_000,
+          phase: 'preparing',
+        };
+      },
+      cancelAutomaticPairing: async () => {
+        calls.push('cancelAutomatic');
+      },
+      requestAccountPairing: async () => request(),
+      accountPairingRequest: async () => request(),
+      cancelAccountPairing: async () => {
+        calls.push('cancelAccount');
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    const scan = async () => {
+      await click('e2ee.auto.scanJoin');
+      await act(async () => qr.scan!(`lody://pair/${CODE.replace(/-/g, '')}`));
+      await flush();
+    };
+    try {
+      await act(async () =>
+        root.render(
+          <ForceMobileLayoutProvider force>
+            <E2eeAutomaticPairingPage
+              runtime={runtime}
+              workspaceId="w1"
+              onJoined={() => {}}
+              onBack={() => {}}
+            />
+          </ForceMobileLayoutProvider>
+        )
+      );
+      await flush();
+      await scan();
+      await click('common.cancel');
+      expect(calls).toContain('cancelAccount');
+      expect(calls).not.toContain('cancelAutomatic');
+      // The automatic request resumes.
+      const before = calls.filter((call) => call === 'state').length;
+      await tick(2000);
+      expect(calls.filter((call) => call === 'state').length).toBeGreaterThan(before);
+      calls.length = 0;
+      await scan();
+      workspaces = [
+        { workspaceId: 'w1', name: 'Alpha', state: 'pending' },
+        { workspaceId: 'w2', name: 'Beta', state: 'joined' },
+      ];
+      for (let poll = 0; poll < 5; poll++) await tick(800);
+      await flush();
+      expect(text()).toContain('e2ee.instantQr.partial');
+      expect(calls).toContain('cancelAccount');
+    } finally {
+      restoreCamera();
+    }
+  });
+
+  it('leaves for code pairing at once even when the relay cannot confirm the cancellation', async () => {
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { ForceDesktopLayoutProvider } = await import('../src/hooks/use-mobile');
+    let manual = 0;
+    const runtime = {
+      automaticPairingState: async () => ({
+        id: 'request',
+        workspaceId: 'w1',
+        workspaceName: 'Alpha',
+        deviceName: 'Desk',
+        comparisonCode: null,
+        expiresAt: NOW + 300_000,
+        phase: 'preparing',
+      }),
+      // Offline: the relay mutation never settles.
+      cancelAutomaticPairing: () => new Promise(() => {}),
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () =>
+      root.render(
+        <ForceDesktopLayoutProvider>
+          <E2eeAutomaticPairingPage
+            runtime={runtime}
+            workspaceId="w1"
+            onJoined={() => {}}
+            onBack={() => {}}
+            onManual={() => (manual += 1)}
+          />
+        </ForceDesktopLayoutProvider>
+      )
+    );
+    await flush();
+    await click('e2ee.auto.offline');
+    expect(manual).toBe(1);
   });
 });

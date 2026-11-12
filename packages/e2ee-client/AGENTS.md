@@ -97,9 +97,9 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Automatic pairing approval signs only after the person enters the code the new
   device shows, typed or scanned from that screen, and it equals this device's derived
   code. Reviews never expose that code, and the third wrong entry ends the request on
-  the approver before any signing. An approver shows its own account pairing QR code
-  only after an explicit action, never because a request arrived; a request verified
-  under that code is signed for every listed workspace without another confirmation.
+  the approver before any signing. A request verified under an approver's own shown
+  account pairing QR code is signed for every listed workspace without another
+  confirmation; showing it on a computer as a request arrives is an owner decision.
 
 - Management exposes last-personal-device risk from the verified ledger and requires
   explicit recovery-only confirmation before signing its revocation. Restores report

@@ -83,6 +83,8 @@ export interface E2eeWorkspaceConsoleProps {
   /** Leaves the modal; the page returns to an ordinary workspace instead. */
   onClose?: () => void;
   initialTab?: E2eeConsoleTab;
+  /** Opened through "Add device": the Devices tab shows its pairing code at once. */
+  showPairingCode?: boolean;
   /** Host-owned content for console tabs, wrapped in `E2eeConsoleSection`. */
   sections?: ReactNode;
   /** Host app-update check, shown on failures that an update resolves. */
@@ -98,6 +100,7 @@ export function E2eeWorkspaceConsole({
   presentation,
   onClose,
   initialTab,
+  showPairingCode,
   sections,
   onCheckForUpdates,
   recoveryReady,
@@ -135,6 +138,10 @@ export function E2eeWorkspaceConsole({
   const [directoryRevision, setDirectoryRevision] = useState(0);
   // The joining device starts on the approval guide; details reveal the full ledger page.
   const [showDetails, setShowDetails] = useState(false);
+  // The person chose code pairing over the automatic request; scoped to one workspace.
+  const [manualPairingFor, setManualPairingFor] = useState<string | null>(null);
+  // A revoked identity is reopened once without it; a second refusal is final.
+  const revokedRetry = useRef<string | null>(null);
   useEffect(() => {
     const reconnect = () => setGeneration((value) => value + 1);
     window.addEventListener('online', reconnect);
@@ -142,6 +149,7 @@ export function E2eeWorkspaceConsole({
   }, []);
   const identity = JSON.stringify([accountId, workspaceId]);
   const scope = JSON.stringify([accountId, workspaceId, generation]);
+  const manualPairing = manualPairingFor === identity;
   const scopeRef = useRef(scope);
   const readOwner = useRef<{ publish?: () => Promise<void> } | null>(null);
   scopeRef.current = scope;
@@ -464,6 +472,7 @@ export function E2eeWorkspaceConsole({
           workspaceId,
           history
         );
+        revokedRetry.current = null;
         setState({
           scope,
           identity,
@@ -497,7 +506,24 @@ export function E2eeWorkspaceConsole({
           // A revoked device keeps its membership: reopen without this identity,
           // which lands in the existing re-pairing guidance instead of removal.
           if (!isE2eeMemberRemoved(error)) {
-            if (!disposed) setGeneration((value) => value + 1);
+            if (disposed) return;
+            if (revokedRetry.current !== identity) {
+              revokedRetry.current = identity;
+              setGeneration((value) => value + 1);
+              return;
+            }
+            // A host that keeps refusing the revoked identity stops here and offers
+            // re-pairing instead of reopening in a loop.
+            setState((previous) =>
+              previous.scope === scope
+                ? {
+                    ...previous,
+                    history: null,
+                    loading: false,
+                    failure: { kind: 'approval-required', code: 'device-revoked' },
+                  }
+                : previous
+            );
             return;
           }
           if (!disposed)
@@ -752,8 +778,9 @@ export function E2eeWorkspaceConsole({
     // failure keeps the full page with its repair actions.
     (!current.failure || current.failure.kind === 'approval-required') &&
     !current.custodyFailure &&
-    !current.history?.locallyPinned &&
-    current.nativeStatus?.deviceKind !== 'personal'
+    // A revoked device, including the one that created the workspace, pairs again.
+    ((!current.history?.locallyPinned && current.nativeStatus?.deviceKind !== 'personal') ||
+      (current.failure?.kind === 'approval-required' && current.failure.code === 'device-revoked'))
   );
   if (
     (awaitingApproval ||
@@ -762,6 +789,7 @@ export function E2eeWorkspaceConsole({
         !current?.failure &&
         !current?.custodyFailure)) &&
     !showDetails &&
+    !manualPairing &&
     port?.runtime?.startAutomaticPairing &&
     accountId
   )
@@ -774,7 +802,7 @@ export function E2eeWorkspaceConsole({
         keyFailure={accountPairingKeyFailed}
         onRetryKeys={retryAccountPairingKey}
         onBack={backToWorkspaces}
-        onManual={() => setShowDetails(true)}
+        onManual={() => setManualPairingFor(identity)}
         {...(recoveryEnabled && desktopE2ee
           ? {
               lostAll: {
@@ -794,6 +822,9 @@ export function E2eeWorkspaceConsole({
         onRefresh={refresh}
         onShowDetails={() => setShowDetails(true)}
         onBack={backToWorkspaces}
+        {...(manualPairing && port.runtime.startAutomaticPairing
+          ? { onAutomatic: () => setManualPairingFor(null) }
+          : {})}
       >
         <E2eeAccountPairingRequest
           key={identity + ':account-pairing'}
@@ -833,6 +864,8 @@ export function E2eeWorkspaceConsole({
           />
         )}
       <E2eeWorkspaceControlPage
+        // Tabs and open disclosures belong to one workspace.
+        key={identity}
         memberManagement={
           current?.scope === scope &&
           !current.loading &&
@@ -934,7 +967,11 @@ export function E2eeWorkspaceConsole({
         )}
         {port?.runtime && accountId && current?.history?.locallyPinned && (
           <E2eeConsoleSection tab="devices">
-            <E2eeAddDeviceCard key={identity + ':account-pairing'} runtime={port.runtime} />
+            <E2eeAddDeviceCard
+              key={identity + ':account-pairing'}
+              runtime={port.runtime}
+              defaultShowQr={showPairingCode === true}
+            />
           </E2eeConsoleSection>
         )}
         {/* The per-workspace exchange is only for hosts without account pairing;
@@ -959,7 +996,7 @@ export function E2eeWorkspaceConsole({
         {sections}
         {port?.runtime?.beginRemoteMachinePairing && current?.history?.locallyPinned && (
           <E2eeConsoleSection tab="devices">
-            <E2eeRemoteMachineDisclosure>
+            <E2eeRemoteMachineDisclosure key={identity + ':remote-machine-disclosure'}>
               <E2eeRemoteMachinePairing
                 key={identity + ':remote-machine'}
                 workspaceId={workspaceId}
