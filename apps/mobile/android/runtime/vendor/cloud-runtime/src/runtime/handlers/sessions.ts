@@ -168,6 +168,7 @@ export function registerSessions(
           userId: state.userId,
           preferRoost: args.preferRoost,
           title: args.title,
+          billingEntitlement: args.billingEntitlement,
           tabContext: {
             parentSessionId: owner.id,
             projectId: session.projectId,

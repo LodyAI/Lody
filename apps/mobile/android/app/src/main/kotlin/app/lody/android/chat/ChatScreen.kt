@@ -408,7 +408,11 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                         val result = repository.createTab(scope, id, target, newTabTitle)
                         when (result.state) {
                             "created" -> { attemptedTab = null; onSelectTab(target) }
-                            "rejected" -> { attemptedTab = null; snackbar.showSnackbar(tabFailure) }
+                            "rejected" -> {
+                                attemptedTab = null
+                                // A Tab is a session: the free-plan session quota names its own refusal.
+                                snackbar.showSnackbar(quotaFailure(result.reason)?.let { appContext.getString(it) } ?: tabFailure)
+                            }
                             else -> snackbar.showSnackbar(tabUnknown)
                         }
                     } catch (cancelled: CancellationException) { throw cancelled }
