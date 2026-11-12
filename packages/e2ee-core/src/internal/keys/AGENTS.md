@@ -52,7 +52,9 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
   unpublished keys or re-sign an uncertain record. Delete staged
   groups only for a genuine different commitment at the same epoch, by the group's
   signing device. Storage never supplies ledger authority.
-- `InstalledEpochHistory` recovers from the installed latest key only, verifies the
+- `InstalledEpochHistory` recovers from the highest installed key at or below the
+  verified ledger's current epoch, skipping only missing keys while searching.
+  Recovering a missing key requires a starting epoch above the requested one. It verifies the
   whole chain before writes, wipes copies on every exit and retries only genuinely
   missing keys. It restores no envelopes, publishes nothing, selects no vault.
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Effect, Result, Fiber, Exit } from 'effect';
 import {
   mkdtempSync,
@@ -242,7 +243,10 @@ describe('machine E2EE custody', () => {
 
   it('refuses a symlink KEK and never downgrades an existing OS-protected custody', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'machine-keyring-'));
-    const secrets = new Map<string, string>();
+    const account = createHash('sha256').update(directory).digest('hex');
+    // An existing v1 password entry must remain readable by both old and new CLI.
+    const legacyPassword = 'a5'.repeat(32);
+    const secrets = new Map<string, string>([[account, legacyPassword]]);
     let locked = false;
     const keyring: MachineKeyring = async (account) => ({
       getPassword: async () => {
@@ -257,17 +261,44 @@ describe('machine E2EE custody', () => {
         secrets.delete(account);
       },
     });
+    const allocations = vi.spyOn(Buffer, 'from');
     try {
-      await Effect.runPromise(
+      const retained = await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const custody = yield* makeCliE2eeCustody({ directory, keyring });
             expect(custody.protection).toBe('os-keystore');
-            yield* custody.createDevice(genesis);
+            const device = yield* custody.createDevice(genesis);
+            return {
+              key: device.publicKey.toBytes(),
+              credential: yield* custody.prepareDeviceCredential(genesis, device.publicKey),
+            };
           })
         )
       );
       const original = readFileSync(join(directory, 'kek.safe-storage'));
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({ directory, keyring });
+            const device = yield* custody.openDevice(genesis);
+            expect(device.publicKey.toBytes()).toEqual(retained.key);
+            expect(yield* custody.prepareDeviceCredential(genesis, device.publicKey)).toEqual(
+              retained.credential
+            );
+          })
+        )
+      );
+      // Inspect real buffers allocated while decoding the retained wrapping key.
+      for (let i = 0; i < allocations.mock.calls.length; i++) {
+        const args = allocations.mock.calls[i];
+        if (args?.[0] === legacyPassword && args[1] === 'hex') {
+          const result = allocations.mock.results[i];
+          if (result?.type === 'return') expect(result.value).toEqual(Buffer.alloc(32));
+        }
+      }
+      expect(secrets).toEqual(new Map([[account, legacyPassword]]));
+      expect(readFileSync(join(directory, 'kek.safe-storage'))).toEqual(original);
       locked = true;
       expect(
         Result.isFailure(
@@ -289,6 +320,7 @@ describe('machine E2EE custody', () => {
         )
       ).toBe(true);
     } finally {
+      allocations.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });

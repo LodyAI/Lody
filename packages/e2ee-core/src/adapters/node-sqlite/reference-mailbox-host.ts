@@ -110,7 +110,7 @@ export const makeSqliteKeyMailbox = Effect.fnUntraced(function* (input: {
       connection.exec(`
     CREATE TABLE mailbox_meta (id INTEGER PRIMARY KEY CHECK(id=1), genesis TEXT NOT NULL, head BLOB, count INTEGER);
     CREATE TABLE mailbox_slots(epoch INTEGER NOT NULL,recipient TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,reported_revision INTEGER,PRIMARY KEY(epoch,recipient));
-    CREATE TABLE mailbox_envelopes(epoch INTEGER NOT NULL,recipient TEXT NOT NULL,sender TEXT NOT NULL,id TEXT NOT NULL,digest TEXT NOT NULL,frame BLOB NOT NULL CHECK(length(frame) BETWEEN 1 AND 512),PRIMARY KEY(epoch,recipient,sender,digest),UNIQUE(epoch,sender,id));
+    CREATE TABLE mailbox_envelopes(epoch INTEGER NOT NULL,recipient TEXT NOT NULL,sender TEXT NOT NULL,id TEXT NOT NULL,digest TEXT NOT NULL,frame BLOB NOT NULL CHECK(length(frame) BETWEEN 1 AND 512),revision INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(epoch,recipient,sender,digest),UNIQUE(epoch,sender,id));
     CREATE TABLE mailbox_reports(epoch INTEGER NOT NULL,recipient TEXT NOT NULL,digest TEXT NOT NULL,report BLOB NOT NULL CHECK(length(report) BETWEEN 1 AND 512),PRIMARY KEY(epoch,recipient,digest));
     CREATE TABLE mailbox_rejected(epoch INTEGER NOT NULL,recipient TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(epoch,recipient,digest));
     CREATE TABLE mailbox_repairs(epoch INTEGER NOT NULL,recipient TEXT NOT NULL,id TEXT NOT NULL,rejected TEXT,PRIMARY KEY(epoch,recipient,id));
@@ -126,6 +126,17 @@ export const makeSqliteKeyMailbox = Effect.fnUntraced(function* (input: {
     },
     error: (code) => new MailboxError({ code }),
   });
+  // Serialize the additive migration with other openers. Legacy rows have no
+  // delivery-round evidence: retain them at revision zero, including rejections.
+  yield* sql(() =>
+    db
+      .transaction(() => {
+        const columns = db.pragma('table_info(mailbox_envelopes)') as { name: string }[];
+        if (!columns.some((column) => column.name === 'revision'))
+          db.exec('ALTER TABLE mailbox_envelopes ADD COLUMN revision INTEGER NOT NULL DEFAULT 0');
+      })
+      .immediate()
+  );
   let closed = false;
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -234,7 +245,7 @@ export const makeSqliteKeyMailbox = Effect.fnUntraced(function* (input: {
                 yield* sql(() => {
                   guard();
                   db.transaction(() => {
-                    slot(routing.epoch, routing.recipient);
+                    const { revision } = slot(routing.epoch, routing.recipient);
                     const prior = db
                       .prepare(
                         'SELECT digest FROM mailbox_envelopes WHERE epoch=? AND sender=? AND id=?'
@@ -253,22 +264,26 @@ export const makeSqliteKeyMailbox = Effect.fnUntraced(function* (input: {
                     if (!existing) {
                       const { count } = db
                         .prepare(
-                          'SELECT count(*) AS count FROM mailbox_envelopes e WHERE epoch=? AND recipient=? AND sender=? AND NOT EXISTS(SELECT 1 FROM mailbox_rejected r WHERE r.epoch=e.epoch AND r.recipient=e.recipient AND r.digest=e.digest)'
+                          'SELECT count(*) AS count FROM mailbox_envelopes e WHERE epoch=? AND recipient=? AND sender=? AND revision=? AND NOT EXISTS(SELECT 1 FROM mailbox_rejected r WHERE r.epoch=e.epoch AND r.recipient=e.recipient AND r.digest=e.digest)'
                         )
-                        .get(routing.epoch, routing.recipient, self) as { count: number };
+                        .get(routing.epoch, routing.recipient, self, revision) as { count: number };
                       if (count >= 16) throw new MailboxError({ code: 'replay' });
                       db.prepare(
-                        'INSERT INTO mailbox_envelopes(epoch,recipient,sender,id,digest,frame) VALUES(?,?,?,?,?,?) ON CONFLICT(epoch,recipient,sender,digest) DO NOTHING'
-                      ).run(routing.epoch, routing.recipient, self, id, digest, frame);
+                        'INSERT INTO mailbox_envelopes(epoch,recipient,sender,id,digest,frame,revision) VALUES(?,?,?,?,?,?,?) ON CONFLICT(epoch,recipient,sender,digest) DO NOTHING'
+                      ).run(routing.epoch, routing.recipient, self, id, digest, frame, revision);
                     }
                     const stored = db
                       .prepare(
-                        'SELECT frame FROM mailbox_envelopes WHERE epoch=? AND recipient=? AND sender=? AND digest=?'
+                        'SELECT frame,revision FROM mailbox_envelopes WHERE epoch=? AND recipient=? AND sender=? AND digest=?'
                       )
                       .get(routing.epoch, routing.recipient, self, digest) as
-                      | { frame: unknown }
+                      | { frame: unknown; revision: unknown }
                       | undefined;
-                    if (!(stored?.frame instanceof Uint8Array) || !bytesEqual(stored.frame, frame))
+                    if (
+                      !(stored?.frame instanceof Uint8Array) ||
+                      !bytesEqual(stored.frame, frame) ||
+                      (!existing && stored.revision !== revision)
+                    )
                       throw new MailboxError({ code: 'corrupt' });
                   }).immediate();
                 });

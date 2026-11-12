@@ -166,17 +166,25 @@ export function openHistoryPacket(input: {
     previous?.fill(0);
   }
 }
-/** All links/commitments from a real full verified view, or no returned keys. */
+/**
+ * Authenticate `latestKey` at `startEpoch` (the view's current epoch by default),
+ * then verify every link/commitment down to zero, or return no keys.
+ * Requires a genuine full verified view and 0 <= startEpoch <= its current epoch.
+ */
 export function recoverLedgerHistory(
   view: LedgerView,
-  latestKey: Bytes.EpochKey
+  latestKey: Bytes.EpochKey,
+  startEpoch?: number
 ): Result.Result<ReadonlyMap<number, Bytes.EpochKey>, EpochKeyError> {
   const scratch = new Map<number, Uint8Array>();
   try {
     // Authenticate the view before inspecting any property.
     const zero = epochHistoryPacket(view, 0);
     if (Result.isFailure(zero)) return fail('unauthorized');
-    const latestEpoch = view.inspectState().epoch.number;
+    const currentEpoch = view.inspectState().epoch.number;
+    const latestEpoch = startEpoch === undefined ? currentEpoch : startEpoch;
+    if (Result.isFailure(Bytes.epochNumber(latestEpoch)) || latestEpoch > currentEpoch)
+      return fail('invalid-input');
     const copied = material(latestKey);
     if (Result.isFailure(copied)) return Result.fail(copied.failure);
     scratch.set(latestEpoch, copied.success);

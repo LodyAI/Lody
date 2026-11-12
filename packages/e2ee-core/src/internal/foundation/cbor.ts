@@ -305,6 +305,17 @@ export const decodeMachineSharingCbor = (input: unknown): Result<CborValue> =>
 export const encodeMachineSharingCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
   encodeBounded(value, 256 * 1024, 4096, 256);
 
+/** Local candidate envelope lists share staging's 4096-recipient limit, independently of ledger/snapshot arrays. */
+export const decodeCandidateEnvelopesCbor = (input: unknown): Result<CborValue> =>
+  decodeBounded(input, MAX_SNAPSHOT_BYTES, 4096, MAX_SNAPSHOT_BYTES);
+/** Preserve canonical candidate bytes and verify the bounded round trip before persistence. */
+export const encodeCandidateEnvelopesCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
+  Result.gen(function* () {
+    const bytes = yield* encodeBounded(value, MAX_SNAPSHOT_BYTES, 4096, MAX_SNAPSHOT_BYTES);
+    yield* decodeCandidateEnvelopesCbor(bytes);
+    return bytes;
+  });
+
 /** Separate fixed snapshot budget; ordinary record limits remain unchanged. Its state is a few arrays of byte-string tables. */
 export const decodeSnapshotCbor = (input: unknown): Result<CborValue> =>
   decodeBounded(input, MAX_SNAPSHOT_BYTES, MAX_ARRAY_LENGTH, MAX_SNAPSHOT_BYTES);

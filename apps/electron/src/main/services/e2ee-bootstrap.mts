@@ -279,7 +279,13 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
       state.credential_hash === null
         ? (yield* custody.prepareDeviceCredential(genesis, device.publicKey)).credential
         : yield* custody.deviceCredential(genesis, device.publicKey)
-    const hash = createHash('sha256').update(Buffer.from(credential, 'hex')).digest('hex')
+    const credentialBytes = Buffer.from(credential, 'hex')
+    let hash: string
+    try {
+      hash = createHash('sha256').update(credentialBytes).digest('hex')
+    } finally {
+      credentialBytes.fill(0)
+    }
     if (state.credential_hash !== null && state.credential_hash !== hash)
       return yield* fail('corrupt')
     yield* sql(() =>

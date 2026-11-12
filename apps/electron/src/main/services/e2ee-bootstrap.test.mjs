@@ -85,6 +85,13 @@ function stored(directory) {
 
 void test('creation retains real native device keys and epoch0 before returning a verifiable genesis; reopen is exact', async (t) => {
   const directory = await fixture(t)
+  const decodedCredentials = []
+  const originalFrom = Buffer.from
+  t.mock.method(Buffer, 'from', function (...args) {
+    const buffer = Reflect.apply(originalFrom, Buffer, args)
+    if (args[1] === 'hex' && buffer.length === 32) decodedCredentials.push(buffer)
+    return buffer
+  })
   const first = await prepare(directory)
   assert.deepEqual(
     Object.keys(first).sort(),
@@ -118,6 +125,12 @@ void test('creation retains real native device keys and epoch0 before returning 
   assert.ok(row.epoch_blob instanceof Uint8Array)
   assert.ok(row.epoch_blob.length > 32)
   assert.deepEqual(await prepare(directory), first)
+  // Public genesis/signing hashes may also be decoded; only credential hashes
+  // match this persisted creation binding. Inspect actual retained allocations.
+  for (const buffer of decodedCredentials) {
+    const hash = createHash('sha256').update(buffer).digest('hex')
+    assert.notEqual(hash, first.deviceCredentialHash, 'decoded credential survived hashing')
+  }
 })
 
 void test('concurrent calls on one owner reuse one original, and immutable intent conflicts preserve it', async (t) => {
