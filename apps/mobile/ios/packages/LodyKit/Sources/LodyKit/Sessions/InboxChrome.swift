@@ -10,30 +10,18 @@ final class InboxChrome {
     var selected: AuthWorkspace?
     var devices: InboxDevices
     var running = 0
-    var mode: Int
-    var sort: InboxSort
     var connection: HomeSyncState = .live
   }
 
   var selectWorkspace: ((String) -> Void)?
-  var setView: ((Int) -> Void)?
-  var setSort: ((InboxSort) -> Void)?
   var openSettings: (() -> Void)?
   var openDebug: (() -> Void)?
   var newSession: (() -> Void)?
   var searchChanged: ((String) -> Void)?
-  /// Replaces the iPhone view menu (the Projects tab has its own choices).
+  /// Replaces the Chats view menu (the Projects tab has its own choices).
   var compactMenu: (() -> UIMenu)?
   /// Replaces the view menu on every size class for pages with their own choices (Schedules).
   var pageMenu: (() -> UIMenu)?
-  private static let views = [
-    (mode: 0, key: "inbox.settings.view.projects", icon: "folder"),
-    (mode: 1, key: "inbox.settings.view.activity", icon: "clock"),
-    (mode: 2, key: "inbox.settings.view.chat", icon: "bubble.left"),
-  ]
-  private static let sorts: [(sort: InboxSort, icon: String)] = [
-    (.name, "textformat"), (.activity, "clock"), (.urgency, "exclamationmark.circle"),
-  ]
 
   private weak var host: UIViewController?
   private var header: LodyNavigationHeader?
@@ -129,7 +117,8 @@ final class InboxChrome {
     let filter = filterItem ?? UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal.decrease"), menu: nil)
     filter.tintColor = .label
     filter.accessibilityLabel = String(localized: "inbox.settings.section.view", bundle: .lody)
-    filter.menu = pageMenu?() ?? (regular ? filterMenu(mode: model.mode, sort: model.sort) : (compactMenu?() ?? compactViewMenu()))
+    // Every size class shares the Chats view menu (grouping, scope, row details, archive).
+    filter.menu = pageMenu?() ?? compactMenu?() ?? viewMenu()
     let settingsItem = self.settingsItem ?? UIBarButtonItem(customView: settingsSlot)
     // iPad keeps integrated search in the navigation bar, so the sidebar hosts its own bottom field.
     if regular, header.search === search { header.search = nil }
@@ -244,11 +233,11 @@ final class InboxChrome {
     header.leftItems = value ? nil : [workspaceItem]
   }
 
-  /// iPhone view menu: toggles for what each chat row's second line shows. Built when the menu
+  /// Chats view menu: toggles for what each chat row's second line shows. Built when the menu
   /// opens (uncached) so the checkmarks always match the stored choice, and a tap closes the menu:
   /// keeping it open never redrew the checkmark (UIKit shows a copy of the actions), so the
   /// setting changed while the check stayed put.
-  private func compactViewMenu() -> UIMenu {
+  private func viewMenu() -> UIMenu {
     let options: [(ChatRowDetails, String, String)] = [
       (.project, "home.view.project", "folder"),
       (.pullRequest, "home.view.pullRequest", "arrow.triangle.pull"),
@@ -349,21 +338,6 @@ final class InboxChrome {
         UIView.animate(withDuration: layoutDuration, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState], animations: changes)
       }
     } else { changes() }
-  }
-
-  private func filterMenu(mode: Int, sort: InboxSort) -> UIMenu {
-    let views = Self.views.map { view in
-      UIAction(title: String(localized: String.LocalizationValue(view.key), bundle: .lody), image: UIImage(systemName: view.icon), state: mode == view.mode ? .on : .off) {
-        [weak self] _ in self?.setView?(view.mode)
-      }
-    }
-    let sorts = Self.sorts.map { item in
-      UIAction(
-        title: String(localized: String.LocalizationValue("inbox.settings.sort." + item.sort.rawValue), bundle: .lody), image: UIImage(systemName: item.icon),
-        state: sort == item.sort ? .on : .off
-      ) { [weak self] _ in self?.setSort?(item.sort) }
-    }
-    return UIMenu(children: views + [UIMenu(options: .displayInline, children: sorts), Self.archiveToggle()])
   }
 
   /// The Archived switch: on, the list shows only archived chats on a darker, greyer page.

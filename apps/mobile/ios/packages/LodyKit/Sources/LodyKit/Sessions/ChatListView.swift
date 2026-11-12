@@ -2,7 +2,7 @@ import LodyDesignSystem
 import SwiftUI
 import UIKit
 
-// The iPhone Home list in the mobile design language. Reference design:
+// The Home list in the mobile design language, on iPhone and in the iPad / iPhone Duo split. Reference design:
 // the native mobile chat-list layout.
 //
 // It renders the same `InboxSections` projection as the other list hosts and emits
@@ -75,6 +75,17 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       groupFolds.scope = archivedStyle ? "archived:" : ""
       var snapshot = dataSource.snapshot()
       snapshot.reconfigureItems(snapshot.itemIdentifiers)
+      dataSource.apply(snapshot, animatingDifferences: false)
+    }
+  }
+  /// The conversation shown beside the list (iPad and unfolded iPhone Duo split); it stays highlighted.
+  var selectedRowId = "" {
+    didSet {
+      guard selectedRowId != oldValue else { return }
+      var snapshot = dataSource.snapshot()
+      let affected = snapshot.itemIdentifiers.filter { $0.row == selectedRowId || $0.row == oldValue }
+      guard !affected.isEmpty else { return }
+      snapshot.reconfigureItems(affected)
       dataSource.apply(snapshot, animatingDifferences: false)
     }
   }
@@ -394,9 +405,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     // iOS highlights rows on press; Android uses ripple.
     // The archived page is already as grey as fill.pressed, so it highlights with a translucent fill.
     let pressed = archivedStyle ? LodyUIColor.fillSelected : LodyUIColor.fillPressed
+    let current = entry.kind == .session && entry.row.id == selectedRowId
+    cell.accessibilityTraits = current ? [.button, .selected] : .button
     cell.configurationUpdateHandler = { cell, state in
       var background = UIBackgroundConfiguration.clear()
-      background.backgroundColor = state.isHighlighted || state.isSelected ? pressed : .clear
+      background.backgroundColor = state.isHighlighted || state.isSelected ? pressed : current ? LodyUIColor.fillSelected : .clear
       cell.backgroundConfiguration = background
     }
   }

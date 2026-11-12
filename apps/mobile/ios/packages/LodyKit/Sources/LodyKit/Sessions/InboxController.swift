@@ -6,9 +6,6 @@ final class InboxController: UIViewController {
   let source: SessionSource
   private let chrome = InboxChrome()
   private lazy var actions = SessionActions(source: source)
-  private var mode = InboxController.storedIndex("inboxView")
-  private var sort = InboxSort.allCases[InboxController.storedIndex("inboxProjectSort")]
-  private var expanded = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
   private var query = ""
   /// The status view's quiet group shows everything; not persisted, so it opens folded.
   private var idleExpanded = false
@@ -40,11 +37,9 @@ final class InboxController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    loadPreferences()
     list.frame = view.bounds
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.accessibilityIdentifier = "ipad-inbox-list"
-    list.setContentStyle(true)
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
     view.addSubview(list)
     wireChrome()
@@ -60,10 +55,6 @@ final class InboxController: UIViewController {
       }
     }
     registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitHorizontalSizeClass.self]) { (self: Self, _: UITraitCollection) in self.render() }
-    // UI Verify can reset the prefs after this controller has already read them.
-    observers.append(NotificationCenter.default.addObserver(forName: .lodyInboxPreferencesReset, object: nil, queue: .main) {
-      [weak self] _ in MainActor.assumeIsolated { self?.reloadPreferences() }
-    })
   }
 
   override func viewDidLayoutSubviews() {
@@ -75,7 +66,7 @@ final class InboxController: UIViewController {
   override func didMove(toParent parent: UIViewController?) {
     super.didMove(toParent: parent)
     if let parent {
-      chrome.attach(to: parent, content: self, scrollView: list.sidebarScrollView)
+      chrome.attach(to: parent, content: self, scrollView: list.scrollView)
       render()
     } else {
       chrome.detach()
@@ -99,7 +90,7 @@ final class InboxController: UIViewController {
         workspaces: state.workspaces, selected: state.workspace,
         devices: InboxDevices(catalog: state.catalog, presence: state.presence),
         running: state.catalog.sessions.filter { !$0.archived && SessionState($0) == .live }.count,
-        mode: mode, sort: sort, connection: syncState(state)
+        connection: syncState(state)
       ))
       if term.isEmpty { list.setPlaceholder(listPlaceholder(state)) }
       let unknown = source === SessionSource.live && state.workspace?.resolvedMode == .unknown
@@ -134,8 +125,7 @@ final class InboxController: UIViewController {
     }, uniquingKeysWith: { _, new in new }) : [:]
     list.setOwners(owners)
     loadViews(state)
-    list.setProjectIndexEnabled(!state.userId.isEmpty && !HomeArchive.shown && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && traitCollection.horizontalSizeClass != .regular && HomeGrouping.stored == .project)
+    list.setProjectIndexEnabled(!state.userId.isEmpty && !HomeArchive.shown && term.isEmpty && HomeGrouping.stored == .project)
     guard !state.userId.isEmpty else {
       list.setSections([])
       return
@@ -145,8 +135,6 @@ final class InboxController: UIViewController {
     var catalog = state.catalog.viewed(views)
     // The Archived switch narrows every view, search included, to archived chats.
     if archived { catalog.sessions = catalog.sessions.filter(\.archived) }
-    list.setPreviewUserId(state.userId)
-    list.setPreviewWorkspaceId(state.workspaceId)
     list.setPinsGroupLabels(term.isEmpty)
     guard term.isEmpty else {
       renderSearch(term, state: state, catalog: catalog)
@@ -156,31 +144,13 @@ final class InboxController: UIViewController {
       list.setSections(InboxSections.archived(catalog, owner: HomeScope.stored == .mine ? state.userId : nil))
       return
     }
-    // iPhone Home groups by the view menu's choice (time / project / status).
-    if traitCollection.horizontalSizeClass != .regular {
-      let owner = HomeScope.stored == .mine ? state.userId : nil
-      list.setSections(InboxSections.home(catalog, grouping: HomeGrouping.stored, owner: owner, idleExpanded: idleExpanded))
-      return
-    }
-    let pinOrder = pinOrder(state, catalog: catalog)
-    if mode == 0 {
-      // Project groups without conversations still list, as projects without any do.
-      let groups = source === SessionSource.live ? ProjectGroupStore.shared.merged(catalog) : catalog
-      list.setSections(InboxSections.projects(groups, expanded: expanded, sort: sort, pinOrder: pinOrder))
-    } else {
-      list.setSections(InboxSections.inbox(catalog, chatOnly: mode == 2, pinOrder: pinOrder))
-    }
+    // Every size class groups by the view menu's choice (time / project / status).
+    let owner = HomeScope.stored == .mine ? state.userId : nil
+    list.setSections(InboxSections.home(catalog, grouping: HomeGrouping.stored, owner: owner, idleExpanded: idleExpanded))
   }
 
   private func wireChrome() {
     chrome.selectWorkspace = { [weak self] id in self?.selectWorkspace(id) }
-    chrome.setView = { [weak self] mode in self?.setView(mode) }
-    chrome.setSort = { [weak self] sort in
-      guard let self else { return }
-      self.sort = sort
-      UserDefaults.standard.set(InboxSort.allCases.firstIndex(of: sort) ?? 0, forKey: "inboxProjectSort")
-      self.render()
-    }
     // The application shell owns these presentations so external links can dismiss them.
     chrome.openSettings = { [weak self] in
       LodyShell.shared.openPage("settings", options: ["present": true], from: self?.parent)
@@ -256,17 +226,6 @@ final class InboxController: UIViewController {
     return String(localized: String.LocalizationValue(empty), bundle: .lody)
   }
 
-  private func pinOrder(_ state: SessionListState, catalog: SessionCatalog) -> [String] {
-    let key = "inboxPinOrder.\(state.userId).\(state.workspaceId)"
-    let stored = state.workspaceId.isEmpty ? [] : UserDefaults.standard.stringArray(forKey: key) ?? []
-    let activity = Dictionary(catalog.sessions.map { ($0.id, $0.activityAt) }, uniquingKeysWith: { first, _ in first })
-    let order = InboxSections.reconcilePinOrder(
-      stored, pinned: catalog.sessions.filter(\.pinned).map(\.id), activity: { activity[$0] ?? 0 }
-    )
-    if !state.workspaceId.isEmpty, order != stored { UserDefaults.standard.set(order, forKey: key) }
-    return order
-  }
-
   private func loadViews(_ state: SessionListState) {
     if state.key != viewsKey {
       viewsKey = state.key
@@ -286,7 +245,7 @@ final class InboxController: UIViewController {
     guard let id = body["id"] as? String else { return }
     switch name {
     case "rowPress":
-      if consume(id, expanded: body["expanded"] as? Bool ?? true) { return }
+      if consume(id) { return }
       let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
       actions.open(id, findQuery: term.isEmpty ? nil : term, from: self)
     case "rowAction":
@@ -297,32 +256,12 @@ final class InboxController: UIViewController {
     }
   }
 
-  private func consume(_ id: String, expanded open: Bool) -> Bool {
-    if id == InboxSections.idleMoreId {
-      idleExpanded.toggle()
-      render()
-      return true
-    }
-    if id == "view:\(InboxSections.chatId)" {
-      setView(2)
-      return true
-    }
-    if id.hasPrefix("toggle:") {
-      let project = String(id.dropFirst(7))
-      expanded[project] = open
-      var stored = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
-      stored[project] = open
-      UserDefaults.standard.set(stored, forKey: "inboxExpansion")
-      render()
-      return true
-    }
-    return InboxSections.isChatRow(id)
-  }
-
-  private func setView(_ next: Int) {
-    mode = next
-    UserDefaults.standard.set(next, forKey: "inboxView")
+  private func consume(_ id: String) -> Bool {
+    // The Chats pseudo-project has no page of its own.
+    guard id == InboxSections.idleMoreId else { return InboxSections.isChatRow(id) }
+    idleExpanded.toggle()
     render()
+    return true
   }
 
   private func selectWorkspace(_ id: String) {
@@ -341,24 +280,4 @@ final class InboxController: UIViewController {
     }
     SessionActions.create(["workspaceId": state.workspaceId, "zoomSourceLabel": String(localized: "tabs.newSession", bundle: .lody)])
   }
-
-  private func loadPreferences() {
-    mode = Self.storedIndex("inboxView")
-    sort = InboxSort.allCases[Self.storedIndex("inboxProjectSort")]
-    expanded = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
-  }
-
-  private func reloadPreferences() {
-    loadPreferences()
-    render()
-  }
-
-  private static func storedIndex(_ key: String) -> Int {
-    let value = UserDefaults.standard.integer(forKey: key)
-    return (0...2).contains(value) ? value : 0
-  }
-}
-
-extension Notification.Name {
-  static let lodyInboxPreferencesReset = Notification.Name("LodyInboxPreferencesReset")
 }

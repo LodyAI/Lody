@@ -144,7 +144,6 @@ targets:
           - List/LodyListSectionAnimation.swift
           - List/LodyProgressRowView.swift
           - List/LodyProjectRowView.swift
-          - List/LodyRowDensity.swift
           - List/LodySessionRowView.swift
           - List/LodyStatusGlyph.swift
           - Text/TextSearch.swift

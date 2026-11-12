@@ -128,7 +128,7 @@ final class ProjectsListController: UIViewController, UICollectionViewDelegate {
       workspaces: state.workspaces, selected: state.workspace,
       devices: InboxDevices(catalog: state.catalog, presence: state.presence),
       running: state.catalog.sessions.filter { !$0.archived && SessionState($0) == .live }.count,
-      mode: 0, sort: .activity, connection: state.connected ? (state.loading ? .syncing : .live) : .connecting
+      connection: state.connected ? (state.loading ? .syncing : .live) : .connecting
     ))
     let owner = HomeScope.stored == .mine ? state.userId : nil
     let next = ProjectCards.build(state.catalog, owner: owner, source: .stored, hideEmpty: ProjectSource.hidesEmpty, query: query)

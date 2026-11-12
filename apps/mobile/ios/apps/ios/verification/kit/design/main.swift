@@ -79,32 +79,12 @@ precondition(LodyDesign.font(.subheadline, size: 15, weight: .semibold, compatib
 
 precondition(LodyDesign.Rail.center == 24 && LodyDesign.Rail.text == 46)
 precondition(LodyDesign.Rail.childCenter == 46 && LodyDesign.Rail.childText == 62)
-precondition(LodyDesign.Rail.compactCenter == 10 && LodyDesign.Rail.trailing == 16)
+precondition(LodyDesign.Rail.trailing == 16)
 precondition(LodyDesign.Rail.groupGap > LodyDesign.Rail.sectionGap && LodyDesign.Rail.sectionGap >= 8,
              "Groups stand further apart than sibling projects")
-precondition(LodyDesign.Rail.compactGroupGap > LodyDesign.Rail.compactSectionGap && LodyDesign.Rail.compactGroupGap < LodyDesign.Rail.groupGap,
-             "The sidebar keeps the gap hierarchy at a denser scale")
 precondition(LodyDesign.Rail.groupGap <= 16, "Labeled groups sit one small step apart; the header label already marks the break")
-precondition(LodyDesign.Rail.bandGap < LodyDesign.Rail.sectionGap && LodyDesign.Rail.compactBandGap < LodyDesign.Rail.compactSectionGap,
+precondition(LodyDesign.Rail.bandGap < LodyDesign.Rail.sectionGap,
              "Banded groups need less air than labeled ones")
-func hue(_ color: UIColor, _ traits: UITraitCollection) -> CGFloat {
-  var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-  color.resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
-  return max(r, g, b) - min(r, g, b)
-}
-for traits in [light, dark, lightHigh, darkHigh] {
-  precondition(hue(.lodySidebar, traits) <= 2.0 / 255, "The sidebar canvas is neutral, not the bluish system gray")
-  precondition(hue(.lodySelection, traits) == 0, "Sidebar selection is a neutral wash")
-  precondition(!same(.lodySidebar, .secondarySystemBackground, traits))
-}
-precondition(luminance(UIColor.lodySidebar.resolvedColor(with: light)) < luminance(UIColor.lodyBackground.resolvedColor(with: light)),
-             "The light sidebar sits just below the white detail")
-for style in ["soft", "black"] {
-  UserDefaults.standard.set(style, forKey: "darkBackground")
-  precondition(luminance(UIColor.lodySidebar.resolvedColor(with: dark)) > luminance(UIColor.lodyBackground.resolvedColor(with: dark)),
-               "The dark sidebar lifts above the \(style) detail")
-}
-UserDefaults.standard.removeObject(forKey: "darkBackground")
 let savedAccent = UserDefaults.standard.object(forKey: "accentColor")
 for legacy in ["", "blue", "purple", "pink", "#FFFFAA", "#123ABC", "unknown"] {
   UserDefaults.standard.set(legacy, forKey: "accentColor")
