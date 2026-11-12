@@ -92,20 +92,19 @@ async fn dial_reaches_a_peer_homed_on_any_configured_relay() {
         .await
         .unwrap();
     assert!(listener.online(WAIT).await);
-    let dialer = LodyEndpoint::open(config(
-        5,
-        false,
-        vec![url_a.to_string(), url_b.to_string()],
-    ))
-    .await
-    .unwrap();
+    let dialer = LodyEndpoint::open(config(5, false, vec![url_a.to_string(), url_b.to_string()]))
+        .await
+        .unwrap();
     let server = serve(listener.clone());
     let target = Target {
         endpoint_id: public(4),
         direct_addrs: Vec::new(),
     };
     let call = dialer.call(&target, b"relay", WAIT).await.unwrap();
-    assert_eq!(collect(call).await, vec![b"yaler".to_vec(), b"done".to_vec()]);
+    assert_eq!(
+        collect(call).await,
+        vec![b"yaler".to_vec(), b"done".to_vec()]
+    );
     listener.close().await;
     dialer.close().await;
     assert_eq!(server.await.unwrap(), vec![public(5)]);
@@ -174,4 +173,136 @@ async fn rejected_request_resets_the_dialer_stream() {
     assert!(matches!(reply, Err(EndpointError::Stream(_))));
     listener.close().await;
     dialer.close().await;
+}
+
+#[tokio::test]
+async fn framing_preserves_boundaries_empty_messages_and_maximum_payloads() {
+    let payload = vec![42; MAX_MESSAGE_BYTES];
+    let mut wire = (payload.len() as u32).to_be_bytes().to_vec();
+    wire.extend_from_slice(&payload);
+    wire.extend_from_slice(&0u32.to_be_bytes());
+    wire.extend_from_slice(&3u32.to_be_bytes());
+    wire.extend_from_slice(b"end");
+    let mut input = wire.as_slice();
+    assert_eq!(read_frame(&mut input).await.unwrap(), Some(payload));
+    assert_eq!(read_frame(&mut input).await.unwrap(), Some(vec![]));
+    assert_eq!(read_frame(&mut input).await.unwrap(), Some(b"end".to_vec()));
+    assert_eq!(read_frame(&mut input).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn truncated_headers_and_large_bodies_are_stream_errors() {
+    for bytes in [vec![0], vec![0, 0, 0]] {
+        assert!(matches!(
+            read_frame(&mut bytes.as_slice()).await,
+            Err(EndpointError::Stream(_))
+        ));
+    }
+    for received in [0, 1, INITIAL_MESSAGE_CAPACITY + 1] {
+        let mut wire = (MAX_MESSAGE_BYTES as u32).to_be_bytes().to_vec();
+        wire.resize(4 + received, 42);
+        assert!(matches!(
+            read_frame(&mut wire.as_slice()).await,
+            Err(EndpointError::Stream(_))
+        ));
+    }
+    let oversized = ((MAX_MESSAGE_BYTES + 1) as u32).to_be_bytes();
+    assert_eq!(
+        read_frame(&mut oversized.as_slice()).await,
+        Err(EndpointError::TooLarge)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn header_only_large_request_uses_small_buffer_until_read_timeout() {
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+    };
+    use tokio::io::ReadBuf;
+
+    // Deliver only a length prefix, then stall. Observe the destination offered
+    // to the stalled read, catching a full-size body allocation at this boundary.
+    struct HeaderOnly<'a> {
+        header: &'a [u8],
+        stalled: bool,
+    }
+    impl AsyncRead for HeaderOnly<'_> {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            if self.header.is_empty() {
+                assert!(buf.remaining() <= INITIAL_MESSAGE_CAPACITY);
+                self.stalled = true;
+                return Poll::Pending;
+            }
+            let len = buf.remaining().min(self.header.len());
+            buf.put_slice(&self.header[..len]);
+            self.header = &self.header[len..];
+            Poll::Ready(Ok(()))
+        }
+    }
+    let header = (MAX_MESSAGE_BYTES as u32).to_be_bytes();
+    let mut input = HeaderOnly {
+        header: &header,
+        stalled: false,
+    };
+    assert!(
+        tokio::time::timeout(READ_REQUEST_TIMEOUT, read_frame(&mut input))
+            .await
+            .is_err()
+    );
+    assert!(input.stalled);
+}
+
+#[test]
+fn incoming_connection_budget_includes_handshakes_and_releases_failed_attempts() {
+    let limits = Arc::new(ConnectionLimits::default());
+    let mut pending: Vec<_> = (0..MAX_INCOMING_CONNECTIONS)
+        .map(|_| limits.try_acquire().expect("handshake admitted"))
+        .collect();
+    assert!(limits.try_acquire().is_none());
+    drop(pending.pop()); // failed handshake
+    let replacement = limits.try_acquire().expect("failed handshake freed slot");
+    assert!(limits.try_acquire().is_none());
+    drop((replacement, pending));
+    assert_eq!(limits.0.lock().unwrap().total, 0);
+    assert!(limits.0.lock().unwrap().peers.is_empty());
+}
+
+#[tokio::test]
+async fn peer_connection_limit_isolated_and_released_on_task_cancellation() {
+    let limits = Arc::new(ConnectionLimits::default());
+    let remote = EndpointId::from_bytes(&public(20)).unwrap();
+    let other = EndpointId::from_bytes(&public(21)).unwrap();
+    let mut active: Vec<_> = (0..MAX_INCOMING_CONNECTIONS_PER_PEER)
+        .map(|_| {
+            let mut permit = limits.try_acquire().unwrap();
+            assert!(permit.admit_peer(remote));
+            permit
+        })
+        .collect();
+    let mut rejected = limits.try_acquire().unwrap();
+    assert!(!rejected.admit_peer(remote));
+    drop(rejected);
+    let mut independent = limits.try_acquire().unwrap();
+    assert!(independent.admit_peer(other));
+
+    let held = active.pop().unwrap();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let _held = held;
+        started.send(()).unwrap();
+        std::future::pending::<()>().await;
+    });
+    ready.await.unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let mut replacement = limits.try_acquire().unwrap();
+    assert!(replacement.admit_peer(remote));
+    drop((replacement, active, independent));
+    assert_eq!(limits.0.lock().unwrap().total, 0);
+    assert!(limits.0.lock().unwrap().peers.is_empty());
 }

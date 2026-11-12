@@ -16,4 +16,4 @@ url.workspace = true
 
 [dev-dependencies]
 iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper", "test-utils"] }
-tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macros", "test-util"] }
