@@ -161,23 +161,41 @@ describe('iroh route', () => {
     path?: () => Promise<'direct' | 'relay' | 'none'>;
     call?: () => Promise<string[]>;
     frames?: string[];
+    unavailable?: boolean;
+    streamsFail?: boolean;
+    streamsUnverified?: boolean;
+    clientFail?: boolean;
   }) => {
     const appended = Promise.withResolvers<{ id: string; frame: string }>();
     const appendedFrames: { id: string; frame: string }[] = [];
     const calls: { machineId: string; envelope: { id: string; frame: string } }[] = [];
     const accepted: string[] = [];
+    const readerReady = Promise.withResolvers<void>();
+    let replyBatch: (batch: { messages: unknown[] }) => void;
     const client = {
       ensureJsonStream: async () => undefined,
       readJsonLive: (
         _stream: string,
         _state: unknown,
-        _batch: unknown,
+        onBatch: typeof replyBatch,
         options: { signal: AbortSignal }
-      ) =>
-        new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve())),
+      ) => {
+        replyBatch = onBatch;
+        readerReady.resolve();
+        return new Promise<void>((resolve) =>
+          options.signal.addEventListener('abort', () => resolve())
+        );
+      },
       appendJson: async (_stream: string, value: { id: string; frame: string }) => {
         appendedFrames.push(value);
         appended.resolve(value);
+        if (options.streamsFail) throw new Error('streams rejected');
+        await readerReady.promise;
+        replyBatch({
+          messages: [
+            { id: value.id, frame: (options.streamsUnverified ? '00' : 'ef').repeat(150) },
+          ],
+        });
       },
     } as unknown as LoroStreamsJsonStreamClient;
     const dispatcher = createEncryptedDispatchLegacy({
@@ -191,15 +209,20 @@ describe('iroh route', () => {
         if (frame !== 'ef'.repeat(150)) throw new Error('e2ee_rpc_response_invalid');
         return ack;
       },
-      client: async () => client,
-      iroh: {
-        path: options.path,
-        ready: async () => options.ready,
-        call: async (machineId, envelope) => {
-          calls.push({ machineId, envelope });
-          return options.call ? options.call() : ['00'.repeat(150), 'ef'.repeat(150)];
-        },
+      client: async () => {
+        if (options.clientFail) throw new Error('streams token unavailable');
+        return client;
       },
+      iroh: options.unavailable
+        ? undefined
+        : {
+            path: options.path,
+            ready: async () => options.ready,
+            call: async (machineId, envelope) => {
+              calls.push({ machineId, envelope });
+              return options.call ? options.call() : ['00'.repeat(150), 'ef'.repeat(150)];
+            },
+          },
     });
     return { dispatcher, appended, appendedFrames, calls, accepted };
   };
@@ -244,22 +267,122 @@ describe('iroh route', () => {
       const t = setup({ ready, ...(call ? { call } : {}) });
       try {
         const prepared = await t.dispatcher.prepare('machine-1', input('one'));
-        void prepared.send().catch(() => null);
+        const result = await prepared.send();
+        expect(result).toEqual(ack);
+        await observed.promise;
         expect(await t.appended.promise).toEqual({ id: '44'.repeat(16), frame: 'ab'.repeat(200) });
         expect(t.calls.length).toBe(ready ? 1 : 0);
-        expect(observations).toMatchObject([{ kind: 'dispatch', outcome }]);
+        expect(observations).toMatchObject([
+          { kind: 'dispatch', outcome, streams: { success: true } },
+        ]);
       } finally {
         await t.dispatcher.close();
       }
     }
   );
 
+  it.each([false, true])(
+    'only verified Streams replies count as success after fallback (append failure: %s)',
+    async (streamsFail) => {
+      const t = setup({ ready: false, streamsFail });
+      try {
+        const prepared = await t.dispatcher.prepare('machine-1', input('one'));
+        const result = await prepared.send();
+        await observed.promise;
+        expect(result).toEqual(streamsFail ? null : ack);
+        expect(observations).toMatchObject([
+          { outcome: 'fallback_not_ready', streams: { success: !streamsFail } },
+        ]);
+      } finally {
+        await t.dispatcher.close();
+      }
+    }
+  );
+
+  it('an E2EE client without iroh still counts the completed Streams route', async () => {
+    const t = setup({ ready: false, unavailable: true });
+    try {
+      const prepared = await t.dispatcher.prepare('machine-1', input('one'));
+      expect(await prepared.send()).toEqual(ack);
+      await observed.promise;
+      expect(observations).toMatchObject([{ outcome: 'unavailable', streams: { success: true } }]);
+    } finally {
+      await t.dispatcher.close();
+    }
+  });
+
+  it('a Streams initialization failure remains a failed fallback attempt instead of disappearing', async () => {
+    const t = setup({ ready: false, clientFail: true });
+    try {
+      const prepared = await t.dispatcher.prepare('machine-1', input('one'));
+      await expect(prepared.send()).rejects.toThrow();
+      await observed.promise;
+      expect(observations).toMatchObject([
+        { outcome: 'fallback_not_ready', streams: { success: false } },
+      ]);
+    } finally {
+      await t.dispatcher.close();
+    }
+  });
+
+  it('unverified Streams replies time out without increasing successful replies', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const t = setup({ ready: false, streamsUnverified: true });
+    try {
+      const prepared = await t.dispatcher.prepare('machine-1', input('one'));
+      const sending = prepared.send();
+      await t.appended.promise;
+      await vi.advanceTimersByTimeAsync(800);
+      expect(await sending).toBeNull();
+      await observed.promise;
+      expect(observations).toMatchObject([
+        { outcome: 'fallback_not_ready', streams: { success: false } },
+      ]);
+    } finally {
+      await t.dispatcher.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancelling after iroh readiness but before Streams excludes the unfinished encrypted request', async () => {
+    const abort = new AbortController();
+    const dispatcher = createEncryptedDispatchLegacy({
+      workspaceId: 'cancelled-e2ee-telemetry',
+      prepare: async () => original('77'.repeat(16)),
+      accept: async () => ack,
+      prepareFeature: async () => original('77'.repeat(16)),
+      acceptFeature: async () => ({ ok: true }),
+      client: async () => {
+        throw new Error('Streams must not be opened');
+      },
+      iroh: {
+        ready: async () => {
+          abort.abort();
+          return false;
+        },
+        call: async () => [],
+      },
+    });
+    try {
+      await expect(
+        dispatcher.requestFeature(
+          { machineId: 'machine-1', type: 'machine/get-features' } as never,
+          { signal: abort.signal, requestId: '77'.repeat(16) }
+        )
+      ).rejects.toThrow('e2ee_rpc_aborted');
+      expect(observations).toEqual([]);
+    } finally {
+      await dispatcher.close();
+    }
+  });
+
   it('keeps chunked originals on Streams', async () => {
     const frames = ['ab'.repeat(200), 'cd'.repeat(200)];
     const t = setup({ ready: true, frames });
     try {
       const prepared = await t.dispatcher.prepare('machine-1', input('one'));
-      void prepared.send().catch(() => null);
+      expect(await prepared.send()).toEqual(ack);
+      await observed.promise;
       expect(await t.appended.promise).toEqual({ id: '44'.repeat(16), frame: frames[0] });
       expect(t.calls).toEqual([]);
       expect(observations).toMatchObject([{ kind: 'dispatch', outcome: 'chunked' }]);

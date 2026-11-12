@@ -54,6 +54,13 @@ rationale: [iroh transport decision](../../.agents/notes/implemented/architectur
   `direct`, `relay` or `none` path. It never dials, waits for a dial, or exposes
   addresses. Missing host support is an unknown diagnostic, never an RPC failure.
 - Personal clients with telemetry accumulate fixed dispatch/feature counters in
-  device-local storage under a Web Lock, across workspaces and windows. They
+  device-local storage under a Web Lock, across E2EE workspaces and windows.
+  No completed E2EE RPC means no report checks. Ordinary RPC never counts.
+  Primary totals and kind-prefixed distributions are `iroh_attempts`, `iroh_ready`,
+  `iroh_success`, `streams_attempts`, `streams_success`, `fallback_streams_attempts`,
+  `fallback_streams_success`. Commit each completed route atomically; exclude a
+  cancelled request that never reached Streams. Preserve success <= ready <=
+  attempts and fallback attempts = iroh attempts - iroh success. Streams success
+  requires a verified reply; caller durable dispatch is outside this diagnostic. They
   enqueue at most one `e2ee/iroh_daily` per 24 hours. Target digests remain local;
   local OSS composition and machine CLI do no counting or reporting.

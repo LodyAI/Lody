@@ -341,6 +341,13 @@ try {
                 .filter((event) => event.event === 'e2ee/iroh_daily');
               assert.equal(daily.length, 1);
               assert.equal(daily[0].properties.dispatch_iroh_ok, 50);
+              assert.equal(daily[0].properties.iroh_attempts, 50);
+              assert.equal(daily[0].properties.iroh_ready, 50);
+              assert.equal(daily[0].properties.iroh_success, 50);
+              assert.equal(daily[0].properties.streams_attempts, 0);
+              assert.equal(daily[0].properties.streams_success, 0);
+              assert.equal(daily[0].properties.fallback_streams_attempts, 0);
+              assert.equal(daily[0].properties.fallback_streams_success, 0);
               assert.equal(daily[0].properties.dispatch_direct, 50);
               assert.equal(daily[0].properties.platform, shell === 'electron' ? 'desktop' : shell);
               assert.equal(daily[0].properties.$groups, undefined);

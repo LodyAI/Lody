@@ -1,4 +1,10 @@
-import { recordIrohObservation, hasIrohDailyRecorder } from '../lib/iroh-daily';
+import {
+  recordIrohObservation,
+  hasIrohDailyRecorder,
+  rememberIrohConnection,
+  wasIrohConnected,
+  type IrohObservation,
+} from '../lib/iroh-daily';
 import { Effect, Exit, Fiber, Scope } from 'effect';
 import type {
   E2eeDispatchInput,
@@ -151,40 +157,43 @@ export function createEncryptedDispatchLegacy(options: {
     original: E2eePreparedDispatch,
     call: Call,
     timeoutMs: number
-  ): Promise<Reply | undefined> => {
+  ): Promise<{ reply?: Reply; observation: IrohObservation } | undefined> => {
     const iroh = options.iroh;
     if (closed) return undefined;
     const record = (
       outcome: import('../lib/iroh-daily').IrohOutcome,
       extra: Pick<
         import('../lib/iroh-daily').IrohObservation,
-        'elapsedMs' | 'path' | 'connected'
+        'elapsedMs' | 'path' | 'connected' | 'knownAtFallback'
       > = {}
     ) =>
-      recordIrohObservation({
+      ({
         kind: call.kind,
         outcome,
         target: original.targetMachineId,
         ...extra,
-      });
+      }) satisfies IrohObservation;
     if (original.frames && original.frames.length !== 1) {
-      record('chunked');
-      return undefined;
+      return { observation: record('chunked') };
     }
     if (!iroh) {
-      record('unavailable');
-      return undefined;
+      return { observation: record('unavailable') };
     }
     // Route evidence only: why this request continues on Streams, never the frame.
     let connected = false;
     const fallback = (reason: 'not-ready' | 'call-failed' | 'unverified') => {
-      record(
+      const observation = record(
         reason === 'not-ready'
           ? 'fallback_not_ready'
           : reason === 'call-failed'
             ? 'fallback_call_failed'
             : 'fallback_unverified',
-        { connected }
+        {
+          connected,
+          ...(reason === 'not-ready'
+            ? { knownAtFallback: wasIrohConnected(original.targetMachineId) }
+            : {}),
+        }
       );
       console.debug('[e2ee-rpc-timing]', {
         stage: 'iroh-fallback',
@@ -193,7 +202,7 @@ export function createEncryptedDispatchLegacy(options: {
         requestId: original.requestId,
         at: Date.now(),
       });
-      return undefined;
+      return { observation };
     };
     let budget: ReturnType<typeof setTimeout> | undefined;
     const ready = await Promise.race([
@@ -204,6 +213,7 @@ export function createEncryptedDispatchLegacy(options: {
     ]).finally(() => clearTimeout(budget));
     if (!ready) return fallback('not-ready');
     connected = true;
+    rememberIrohConnection(original.targetMachineId);
     // The renderer owns the deadline: the host may first wait for its account lock,
     // and that wait must not hold the same original back from Streams. A late iroh
     // delivery is deduplicated by the receiver.
@@ -238,6 +248,7 @@ export function createEncryptedDispatchLegacy(options: {
           ? await options.accept(original.targetMachineId, call.input, frame).catch(() => undefined)
           : await options.acceptFeature?.(call.input, frame).catch(() => undefined);
       if (reply) {
+        let observation: IrohObservation = record('iroh_ok', { elapsedMs });
         if (hasIrohDailyRecorder()) {
           let pathTimer: ReturnType<typeof setTimeout> | undefined;
           const path = Promise.race([
@@ -254,7 +265,7 @@ export function createEncryptedDispatchLegacy(options: {
             .finally(() => clearTimeout(pathTimer));
           // Enqueue the observation now to preserve ordering with the next request.
           // Its path settles under the statistics lock, never on the RPC hot path.
-          record('iroh_ok', { elapsedMs, path });
+          observation = record('iroh_ok', { elapsedMs, path });
         }
         // Route evidence only: which transport answered, never the frame.
         console.debug('[e2ee-rpc-timing]', {
@@ -263,10 +274,53 @@ export function createEncryptedDispatchLegacy(options: {
           requestId: original.requestId,
           at: Date.now(),
         });
-        return reply;
+        return { reply, observation };
       }
     }
     return fallback('unverified');
+  };
+  // A route is counted only once it finishes. Cancellation before Streams send
+  // excludes the whole unfinished request, including its preceding iroh attempt.
+  const viaStreams = async (
+    original: E2eePreparedDispatch,
+    call: Call,
+    observation: IrohObservation | undefined,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ) => {
+    let attempted = false;
+    let entered = false;
+    let success = false;
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          if (closed) return yield* Effect.fail(new Error('e2ee_rpc_closed'));
+          if (signal?.aborted) return yield* Effect.fail(new Error('e2ee_rpc_aborted'));
+          entered = true;
+          const client = yield* channel(original);
+          if (closed) return yield* Effect.fail(new Error('e2ee_rpc_closed'));
+          if (signal?.aborted) return yield* Effect.fail(new Error('e2ee_rpc_aborted'));
+          attempted = true;
+          const reply = yield* client.send(original, call, timeoutMs);
+          success = !!reply && (call.kind === 'dispatch' ? 'type' in reply : 'ok' in reply);
+          return reply;
+        })
+      );
+      return result;
+    } finally {
+      // Setup failures are real Streams attempts too. Only an explicit cancel
+      // before channel.send excludes the unfinished route (owner 2026-11-12).
+      if (observation && (attempted || (entered && !closed && !signal?.aborted))) {
+        recordIrohObservation({ ...observation, streams: { success } });
+        console.debug('[e2ee-rpc-timing]', {
+          stage: 'streams-result',
+          kind: call.kind,
+          requestId: original.requestId,
+          success,
+          at: Date.now(),
+        });
+      }
+    }
   };
   const requestFeature = async (
     request: LocalMachineRpcRequest,
@@ -296,19 +350,17 @@ export function createEncryptedDispatchLegacy(options: {
     optionsForRequest.onPrepared?.(original.requesterDevice);
     if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
     const fast = await viaIroh(original, { kind: 'feature', input }, request.timeoutMs ?? 30_000);
-    if (fast && 'ok' in fast) return fast;
+    if (fast?.reply && 'ok' in fast.reply) {
+      recordIrohObservation(fast.observation);
+      return fast.reply;
+    }
     if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const client = yield* channel(original);
-        if (optionsForRequest.signal?.aborted)
-          return yield* Effect.fail(new Error('e2ee_rpc_aborted'));
-        return yield* client.send(
-          original,
-          { kind: 'feature', input },
-          request.timeoutMs ?? 30_000
-        );
-      })
+    const result = await viaStreams(
+      original,
+      { kind: 'feature', input },
+      fast?.observation,
+      request.timeoutMs ?? 30_000,
+      optionsForRequest.signal
     );
     return result && 'ok' in result
       ? result
@@ -319,17 +371,13 @@ export function createEncryptedDispatchLegacy(options: {
     send: () => {
       const send = async () => {
         const fast = await viaIroh(original, { kind: 'dispatch', input }, 800);
-        if (fast && 'type' in fast) return fast;
-        return streams();
+        if (fast?.reply && 'type' in fast.reply) {
+          recordIrohObservation(fast.observation);
+          return fast.reply;
+        }
+        const result = await viaStreams(original, { kind: 'dispatch', input }, fast?.observation);
+        return result && 'type' in result ? result : null;
       };
-      const streams = () =>
-        Effect.runPromise(
-          Effect.gen(function* () {
-            const client = yield* channel(original);
-            const result = yield* client.send(original, { kind: 'dispatch', input });
-            return result && 'type' in result ? result : null;
-          })
-        );
       if (!effects) return send();
       // A duplicate may settle before the original append. Retain its accounting
       // until every sender settles, and count chunked requests only once.

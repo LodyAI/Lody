@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import {
   createIrohDaily,
+  observeIrohDaily,
   IROH_DAY_MS,
   IROH_STATS_KEY,
   installIrohDailyRecorder,
@@ -76,6 +78,119 @@ const success = {
 } as const;
 
 describe('device iroh daily product diagnostics', () => {
+  it('a device with no completed encrypted RPC never starts report checks or emits daily events', async () => {
+    vi.useFakeTimers();
+    const fixture = device();
+    const daily = createIrohDaily(fixture.options);
+    const reporting = observeIrohDaily(daily, window, document);
+    try {
+      await daily.hasActivity();
+      expect(vi.getTimerCount()).toBe(0);
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('focus'));
+      fixture.advance(4 * IROH_DAY_MS);
+      await vi.advanceTimersByTimeAsync(4 * IROH_DAY_MS);
+      await daily.check();
+      expect(fixture.events).toEqual([]);
+      expect(fixture.saved.size).toBe(0);
+      await daily.record(success);
+      reporting.activate();
+      await daily.hasActivity();
+      expect(vi.getTimerCount()).toBe(1);
+      reporting.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      reporting.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('completed E2EE routes keep attempts/success pairs and the fallback subset in the same daily window', async () => {
+    const fixture = device();
+    const daily = createIrohDaily(fixture.options);
+    await daily.record(success);
+    for (const outcome of [
+      'fallback_not_ready',
+      'fallback_call_failed',
+      'fallback_unverified',
+      'unavailable',
+      'chunked',
+    ] as const)
+      for (const success of [true, false])
+        await daily.record({
+          kind: 'feature',
+          outcome,
+          connected: outcome === 'fallback_call_failed' || outcome === 'fallback_unverified',
+          target: 'local-only',
+          streams: { success },
+        });
+    fixture.advance(IROH_DAY_MS);
+    await daily.check();
+    const event = fixture.events[0]!;
+    expect(event).toMatchObject({
+      iroh_attempts: 7,
+      iroh_ready: 5,
+      iroh_success: 1,
+      streams_attempts: 10,
+      streams_success: 5,
+      fallback_streams_attempts: 6,
+      fallback_streams_success: 3,
+      dispatch_iroh_attempts: 1,
+      dispatch_iroh_ready: 1,
+      dispatch_iroh_success: 1,
+      feature_iroh_attempts: 6,
+      feature_iroh_ready: 4,
+      feature_iroh_success: 0,
+      feature_streams_attempts: 10,
+      feature_streams_success: 5,
+      feature_fallback_streams_attempts: 6,
+      feature_fallback_streams_success: 3,
+    });
+    for (const kind of ['dispatch', 'feature']) {
+      const n = (key: string) => event[`${kind}_${key}`] as number;
+      expect(n('iroh_success')).toBeLessThanOrEqual(n('iroh_ready'));
+      expect(n('iroh_ready')).toBeLessThanOrEqual(n('iroh_attempts'));
+      expect(n('fallback_streams_attempts')).toBe(n('iroh_attempts') - n('iroh_success'));
+      expect(n('fallback_streams_attempts')).toBeLessThanOrEqual(n('streams_attempts'));
+      expect(n('fallback_streams_success')).toBeLessThanOrEqual(n('streams_success'));
+    }
+  });
+
+  it('not-ready remembers connectivity at route selection even while an earlier route is unfinished', async () => {
+    const fixture = device();
+    const daily = createIrohDaily(fixture.options);
+    const cold = daily.wasConnected('target');
+    await daily.rememberConnection('target');
+    expect(await daily.hasActivity()).toBe(false);
+    fixture.advance(2 * IROH_DAY_MS);
+    const warm = daily.wasConnected('target');
+    await daily.record({
+      kind: 'feature',
+      outcome: 'fallback_not_ready',
+      target: 'target',
+      knownAtFallback: warm,
+      streams: { success: true },
+    });
+    // This earlier cold decision must not be rewritten by the later connection.
+    await daily.record({
+      kind: 'dispatch',
+      outcome: 'fallback_not_ready',
+      target: 'target',
+      knownAtFallback: cold,
+      streams: { success: true },
+    });
+    await daily.check();
+    expect(fixture.events).toEqual([]);
+    fixture.advance(IROH_DAY_MS);
+    await daily.check();
+    expect(fixture.events[0]).toMatchObject({
+      feature_fallback_not_ready_known: 1,
+      feature_fallback_not_ready_never: 0,
+      dispatch_fallback_not_ready_never: 1,
+    });
+    expect(JSON.stringify([...fixture.saved.values()])).not.toContain('target');
+  });
+
   it('accumulates across windows, waits 24h, enqueues one aggregate and clears only its counters', async () => {
     const fixture = device();
     const a = createIrohDaily(fixture.options);
@@ -90,7 +205,12 @@ describe('device iroh daily product diagnostics', () => {
     await Promise.all([
       a.check(),
       b.check(),
-      a.record({ kind: 'feature', outcome: 'chunked', target: 'other' }),
+      a.record({
+        kind: 'feature',
+        outcome: 'chunked',
+        target: 'other',
+        streams: { success: true },
+      }),
     ]);
     expect(fixture.events).toHaveLength(1);
     expect(fixture.events[0]).toMatchObject({
@@ -105,7 +225,12 @@ describe('device iroh daily product diagnostics', () => {
     });
     const state = JSON.parse(fixture.saved.get(IROH_STATS_KEY)!);
     expect(state.counts).toMatchObject({ feature_chunked: 1, dispatch_iroh_ok: 0 });
-    await b.record({ kind: 'feature', outcome: 'fallback_not_ready', target: 'private-machine' });
+    await b.record({
+      kind: 'feature',
+      outcome: 'fallback_not_ready',
+      target: 'private-machine',
+      streams: { success: true },
+    });
     fixture.advance(IROH_DAY_MS);
     await b.check();
     expect(fixture.events[1]).toMatchObject({
@@ -153,13 +278,24 @@ describe('device iroh daily product diagnostics', () => {
       'unavailable',
       'chunked',
     ] as const)
-      await daily.record({ kind: 'feature', outcome, target: 'never-seen' });
+      await daily.record({
+        kind: 'feature',
+        outcome,
+        target: 'never-seen',
+        streams: { success: false },
+      });
     await daily.record(success);
     await daily.record({ ...success, elapsedMs: 200, path: 'relay' });
     await daily.record({ ...success, elapsedMs: 800, path: 'unknown' });
-    await daily.record({ kind: 'dispatch', outcome: 'fallback_not_ready', target: success.target });
+    await daily.record({
+      kind: 'dispatch',
+      outcome: 'fallback_not_ready',
+      target: success.target,
+      streams: { success: true },
+    });
     const state = JSON.parse(fixture.saved.get(IROH_STATS_KEY)!);
     state.counts.dispatch_iroh_ok = 1_000_000;
+    state.counts.dispatch_iroh_attempts = 1_000_000;
     state.counts.workspaceId = 'must-not-leave';
     fixture.saved.set(IROH_STATS_KEY, JSON.stringify(state));
     await daily.record(success);
@@ -167,10 +303,10 @@ describe('device iroh daily product diagnostics', () => {
     await daily.check();
     expect(fixture.events[0]).toMatchObject({
       dispatch_iroh_ok: 1_000_000,
-      dispatch_lt200: 2,
+      dispatch_lt200: 1,
       dispatch_lt800: 1,
       dispatch_ge800: 1,
-      dispatch_direct: 2,
+      dispatch_direct: 1,
       dispatch_relay: 1,
       dispatch_unknown: 1,
       dispatch_fallback_not_ready_known: 1,
@@ -245,8 +381,19 @@ describe('device iroh daily product diagnostics', () => {
     const fixture = device();
     const daily = createIrohDaily(fixture.options);
     for (const outcome of ['fallback_call_failed', 'fallback_unverified'] as const) {
-      await daily.record({ kind: 'dispatch', outcome, connected: true, target: outcome });
-      await daily.record({ kind: 'dispatch', outcome: 'fallback_not_ready', target: outcome });
+      await daily.record({
+        kind: 'dispatch',
+        outcome,
+        connected: true,
+        target: outcome,
+        streams: { success: false },
+      });
+      await daily.record({
+        kind: 'dispatch',
+        outcome: 'fallback_not_ready',
+        target: outcome,
+        streams: { success: true },
+      });
     }
     fixture.advance(IROH_DAY_MS);
     await daily.check();

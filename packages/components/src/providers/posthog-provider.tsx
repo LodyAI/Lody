@@ -1,4 +1,4 @@
-import { createIrohDaily, installIrohDailyRecorder } from '@/lib/iroh-daily';
+import { createIrohDaily, installIrohDailyRecorder, observeIrohDaily } from '@/lib/iroh-daily';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { isElectronRenderer } from '@/lib/electron';
 import { isNativeAppShell, isIOSRuntimeEnvironment } from '@/lib/native-platform';
@@ -94,8 +94,10 @@ function IrohDailyReporting() {
     )
       return;
     let active = true;
+    let reporting: ReturnType<typeof observeIrohDaily> | undefined;
     const daily = createIrohDaily({
       enabled: () => active,
+      onActivity: () => reporting?.activate(),
       now: Date.now,
       storage: localStorage,
       exclusive: async (run) => await navigator.locks.request('lody:iroh-daily', run),
@@ -117,25 +119,12 @@ function IrohDailyReporting() {
         readNativeAppInfo().version ??
         (typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'unknown'),
     });
-    const remove = installIrohDailyRecorder(daily.record);
-    const check = () => {
-      void daily.check().catch(() => undefined);
-    };
-    const foreground = () => {
-      if (document.visibilityState === 'visible') check();
-    };
-    window.addEventListener('online', check);
-    window.addEventListener('focus', check);
-    document.addEventListener('visibilitychange', foreground);
-    const timer = setInterval(check, 60 * 60 * 1000);
-    check();
+    const remove = installIrohDailyRecorder(daily.record, daily);
+    reporting = observeIrohDaily(daily, window, document);
     return () => {
       active = false;
       remove();
-      clearInterval(timer);
-      window.removeEventListener('online', check);
-      window.removeEventListener('focus', check);
-      document.removeEventListener('visibilitychange', foreground);
+      reporting?.dispose();
     };
   }, []);
   return null;
