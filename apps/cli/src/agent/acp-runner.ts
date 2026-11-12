@@ -115,6 +115,7 @@ export type CreateAcpClientOptions = {
   };
   modelId?: AgentClientOptions['modelId'];
   configOptionValues?: AgentClientOptions['configOptionValues'];
+  systemPrompt?: AgentClientOptions['systemPrompt'];
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   resumeSessionId?: ACPSessionId;
@@ -165,6 +166,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     agentConfig: options.agentConfig,
     modelId: options.modelId,
     configOptionValues: options.configOptionValues,
+    systemPrompt: options.systemPrompt,
     resolveWorktreeProject: options.resolveWorktreeProject,
     resolveAdditionalDirectories: options.resolveAdditionalDirectories,
     launcher: options.launcher,

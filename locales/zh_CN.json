@@ -6630,5 +6630,9 @@
   "settings.integrations.github.installErrors.unknown": "无法连接此安装。请重新开始连接或联系支持。",
   "settings.integrations.github.retryInstallation": "重试安装",
   "desktopGithubInstall.failedDescription": "安装未连接。请打开 Lody 桌面端查看错误并重试。",
-  "settings.integrations.github.installErrors.managementRequired": "请使用安装所有者或该组织当前管理员的 GitHub 账号重新授权，然后重试。"
+  "settings.integrations.github.installErrors.managementRequired": "请使用安装所有者或该组织当前管理员的 GitHub 账号重新授权，然后重试。",
+  "sidebar.localProjects.startCoordinator": "开始协调者对话",
+  "chat.coordinator.heading": "开始一个协调者对话",
+  "chat.coordinator.unsupportedAgent": "这个 Agent 不能运行协调者对话：它必须支持系统提示词，并且所在机器需要运行较新版本的 Lody。",
+  "chat.coordinator.noAgent": "这里没有能运行协调者对话的 Agent。协调者需要支持系统提示词的 Agent；Agent 在启动过一次对话或在设置中刷新后才会报告这一点。"
 }

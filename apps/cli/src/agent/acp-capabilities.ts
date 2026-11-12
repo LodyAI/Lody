@@ -197,6 +197,7 @@ export async function fetchAcpCapabilities(
         ...normalizeAcpSessionCapabilities(sessionResponse, {
           sessionFork: client.supportsSessionFork?.() === true,
           sessionTitle: client.supportsSessionTitleGeneration(),
+          systemPrompt: client.supportsSystemPrompt(),
           rateLimits:
             client.getRateLimitsCapability() ??
             (isAntigravityRegistryAgent({ cliType, agentType })

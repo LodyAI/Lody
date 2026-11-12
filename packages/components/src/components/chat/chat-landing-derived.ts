@@ -657,6 +657,11 @@ export type ChatLandingSearch = {
   repo?: string;
   /** Project group id, with `context: 'group'`. */
   group?: string;
+  /**
+   * Developer mode: the next conversation started here is a coordinator. A mode of
+   * the page, not a one-shot event, so selection mirroring keeps it.
+   */
+  coordinator?: true;
 };
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
@@ -674,6 +679,9 @@ export function parseChatLandingSearch(search: Record<string, unknown>): ChatLan
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
     group: typeof search.group === 'string' ? search.group : undefined,
+    ...(search.coordinator === true || search.coordinator === 'true'
+      ? { coordinator: true as const }
+      : {}),
   };
 }
 

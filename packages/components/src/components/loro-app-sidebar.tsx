@@ -80,6 +80,7 @@ import {
   setMobileDrawerOpenAtom,
   userAtom,
   WORKSPACE_FOCUS_SCOPES,
+  developerModeEnabledAtom,
 } from '@/atoms';
 import {
   activeWorkspaceRuntimeAtom,
@@ -195,6 +196,7 @@ import {
   FolderOpen,
   GripVertical,
   MoreHorizontal,
+  Network,
   Settings2,
   Folders,
   Pencil,
@@ -896,6 +898,8 @@ export type LocalProjectItemProps = {
   toggleLabel: string;
   onNavigateProject: (machineId: MachineId, localProjectId: string) => void;
   onNewChatInProject?: (machineId: MachineId, localProjectId: string) => void;
+  /** Developer mode only: opens the new-chat page in coordinator mode for this project. */
+  onStartCoordinatorInProject?: (machineId: MachineId, localProjectId: string) => void;
   onOpenProjectSettings?: (machineId: MachineId, localProjectId: string) => void;
   /** Opens the project editor seeded with this folder, to add more repositories. */
   onEditProject?: (machineId: MachineId, localProjectId: string, name: string) => void;
@@ -1006,6 +1010,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   toggleLabel,
   onNavigateProject,
   onNewChatInProject,
+  onStartCoordinatorInProject,
   onOpenProjectSettings,
   onEditProject,
   onRevealProject,
@@ -1130,9 +1135,14 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   );
   const revealPath = onRevealProject && formattedPath ? formattedPath : null;
   const editProjectLabel = t('sidebar.localProjects.editProject', 'Edit project…');
+  const startCoordinatorLabel = t(
+    'sidebar.localProjects.startCoordinator',
+    'Start coordinator conversation'
+  );
   const showProjectMenu =
     !isMobile &&
     (canRemoveProject ||
+      Boolean(onStartCoordinatorInProject) ||
       Boolean(onOpenProjectSettings) ||
       Boolean(onEditProject) ||
       Boolean(revealPath) ||
@@ -1323,6 +1333,16 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           </Tooltip.Root>
           {showProjectMenu ? (
             <ContextMenu.Content className="min-w-[180px]">
+              {onStartCoordinatorInProject && projectCanNavigate ? (
+                <ContextMenu.Item
+                  icon={Network}
+                  onClick={() => {
+                    onStartCoordinatorInProject(machineId, project.id);
+                  }}
+                >
+                  {startCoordinatorLabel}
+                </ContextMenu.Item>
+              ) : null}
               {onEditProject && projectCanNavigate ? (
                 <ContextMenu.Item
                   icon={Folders}
@@ -2139,6 +2159,25 @@ export function LoroAppSidebar({
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
         search: { context: 'local' as const, machine: machineId, project: localProjectId },
+      });
+    },
+    [closeMobileDrawer, router, workspaceSlug]
+  );
+
+  const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
+  const handleStartCoordinatorInProject = useCallback(
+    (machineId: MachineId, localProjectId: string) => {
+      if (!workspaceSlug) return;
+      closeMobileDrawer();
+      void router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: workspaceSlug },
+        search: {
+          context: 'local' as const,
+          machine: machineId,
+          project: localProjectId,
+          coordinator: true,
+        },
       });
     },
     [closeMobileDrawer, router, workspaceSlug]
@@ -3243,6 +3282,9 @@ export function LoroAppSidebar({
                               // New Chat selects a target; it must not fork or clear
                               // the workspace-owned Chat Landing draft.
                               onNewChatInProject={handleNavigateToProject}
+                              onStartCoordinatorInProject={
+                                developerModeEnabled ? handleStartCoordinatorInProject : undefined
+                              }
                               onOpenProjectSettings={handleOpenProjectSettings}
                               onEditProject={handleEditLocalProject}
                               onRevealProject={

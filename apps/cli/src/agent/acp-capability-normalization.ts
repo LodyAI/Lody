@@ -19,6 +19,8 @@ export type AcpCapabilitiesResult = {
   sessionFork: boolean;
   acknowledgedSteer: boolean;
   sessionTitle?: boolean;
+  /** Runtime advertised standard ACP `sessionCapabilities.systemPrompt`. */
+  systemPrompt?: boolean;
   rateLimits?: LodyRateLimitsCapability;
   goalActions?: SessionGoalAction[];
   modelReasoningEfforts?: Record<string, string[]>;
@@ -200,6 +202,7 @@ export function normalizeAcpSessionCapabilities(
     sessionFork?: boolean;
     acknowledgedSteer?: boolean;
     sessionTitle?: boolean;
+    systemPrompt?: boolean;
     rateLimits?: LodyRateLimitsCapability;
     goalActions?: SessionGoalAction[];
     /** The agent that answered; decides whether legacy `model[effort]` ids apply. */
@@ -241,6 +244,7 @@ export function normalizeAcpSessionCapabilities(
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
     sessionTitle: lifecycleCapabilities.sessionTitle === true,
+    systemPrompt: lifecycleCapabilities.systemPrompt === true,
     rateLimits: lifecycleCapabilities.rateLimits,
     ...(lifecycleCapabilities.goalActions?.length
       ? { goalActions: lifecycleCapabilities.goalActions }

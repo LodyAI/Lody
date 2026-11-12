@@ -52,6 +52,7 @@ function createSuccessfulStartupResult(
     agentProcess: {} as never,
     client: {
       supportsSessionTitleGeneration: () => false,
+      supportsSystemPrompt: () => false,
       getRateLimitsCapability: () => undefined,
       supportsAcknowledgedSteer: () => false,
       getGoalCapability: () => undefined,

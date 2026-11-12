@@ -6643,5 +6643,9 @@
   "settings.integrations.github.installErrors.unknown": "The installation could not be connected. Start a new connection or contact support.",
   "settings.integrations.github.retryInstallation": "Retry installation",
   "desktopGithubInstall.failedDescription": "The installation was not connected. Open Lody Desktop to review the error and retry.",
-  "settings.integrations.github.installErrors.managementRequired": "Reauthorize with the installation owner’s GitHub account or an active organization administrator, then retry."
+  "settings.integrations.github.installErrors.managementRequired": "Reauthorize with the installation owner’s GitHub account or an active organization administrator, then retry.",
+  "sidebar.localProjects.startCoordinator": "Start coordinator conversation",
+  "chat.coordinator.heading": "Start a coordinator conversation",
+  "chat.coordinator.unsupportedAgent": "This agent cannot run a coordinator conversation: it must accept a system prompt, and its machine must run a recent Lody.",
+  "chat.coordinator.noAgent": "No agent here can run a coordinator conversation. It needs an agent that accepts a system prompt; an agent reports this after it has started a conversation or been refreshed in Settings."
 }

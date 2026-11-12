@@ -1,4 +1,8 @@
-import { resolveSessionConversationConfig, type MemoryBinding } from '@lody/shared';
+import {
+  readSessionCoordinatorKind,
+  resolveSessionConversationConfig,
+  type MemoryBinding,
+} from '@lody/shared';
 import {
   buildPendingUserHistoryEntry,
   getServerNow,
@@ -535,6 +539,7 @@ export class SessionEditAndResendService {
         agentConfigId: meta.agentConfigId,
         agentCliType: meta.cliType,
         agentType: meta.agentType,
+        coordinator: readSessionCoordinatorKind(meta),
         memory,
         mcpServerIds,
         customAcp: agentConfig.customAcp,

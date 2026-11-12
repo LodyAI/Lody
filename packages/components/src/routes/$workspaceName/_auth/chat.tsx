@@ -27,9 +27,12 @@ function ChatRoute() {
   // a visit to a new page, so the mirror always replaces.
   const handleSelectionUrlSync = useCallback(
     (selectionSearch: ChatLandingSearch) => {
-      void navigate({ search: selectionSearch, replace: true });
+      void navigate({
+        search: search.coordinator ? { ...selectionSearch, coordinator: true } : selectionSearch,
+        replace: true,
+      });
     },
-    [navigate]
+    [navigate, search.coordinator]
   );
 
   /* On mobile the home/project landing is owned by `MobileWorkspaceStack` (so
@@ -61,6 +64,7 @@ function ChatRoute() {
         preSelectedProject={search.project}
         preSelectedRepo={search.repo}
         preSelectedGroup={search.group}
+        coordinator={search.coordinator === true}
         onSelectionUrlSync={handleSelectionUrlSync}
       />
     </div>

@@ -9,7 +9,12 @@ import {
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
-import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
+import {
+  bindAgentRoleTarget,
+  canStartCoordinatorSession,
+  SESSION_COORDINATOR_MARKER,
+  snapshotAgentRole,
+} from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -99,6 +104,7 @@ import {
   bugReportDialogOpenAtom,
   chatLandingSessionStateAtomFamily,
   getAllAgentConfigAtom,
+  developerModeEnabledAtom,
   inboxFeatureEnabledAtom,
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
@@ -466,6 +472,12 @@ interface ChatLandingProps {
   /** Project group id, with `preSelectedContext: 'group'`. */
   preSelectedGroup?: string;
   /**
+   * Developer mode only: start a coordinator conversation. The agent list holds only
+   * configurations whose machine supports coordinators and whose runtime accepts
+   * an ACP system prompt.
+   */
+  coordinator?: boolean;
+  /**
    * Mirrors the composer's effective selection back into the chat-route URL
    * (with `replace`) once the URL names a selection. Passed by the desktop
    * chat route only; mobile keeps its base-context model.
@@ -639,6 +651,7 @@ function WorkspaceChatLanding({
   preSelectedProject,
   preSelectedRepo,
   preSelectedGroup,
+  coordinator: coordinatorRequested = false,
   onSelectionUrlSync,
 }: ChatLandingProps) {
   // A Project group runs on top of the plain chat context: every existing
@@ -714,7 +727,8 @@ function WorkspaceChatLanding({
     controlConnectionState === 'idle' ||
     controlConnectionState === 'connecting' ||
     controlConnectionState === 'syncing';
-  const executorConfigs = useAtomValue(getAllAgentConfigAtom);
+  const allExecutorConfigs = useAtomValue(getAllAgentConfigAtom);
+  const coordinatorMode = useAtomValue(developerModeEnabledAtom) && coordinatorRequested;
   const { workspaceId } = useResolvedWorkspaceScope();
   const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
   const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
@@ -733,6 +747,18 @@ function WorkspaceChatLanding({
     isLoading: visibleMachinesLoading,
   } = visibleMachineIndex;
   const visibleMachineIds = useMemo(() => Array.from(machines.keys()), [machines]);
+  // A coordinator needs both a daemon that delivers its system prompt and an agent
+  // that accepts one over ACP; nothing else may be chosen for it.
+  const executorConfigs = useMemo(
+    () =>
+      coordinatorMode
+        ? allExecutorConfigs.filter((config) => {
+            const machine = machines.get(config.machineId);
+            return canStartCoordinatorSession(machine, machine?.acpCapabilities?.[config.id]);
+          })
+        : allExecutorConfigs,
+    [allExecutorConfigs, coordinatorMode, machines]
+  );
   const pendingLocalProjectRemovals = usePendingLocalProjectRemovals(visibleMachineIds);
   useLocalProjectRemovalResultNotifications(visibleMachineIds);
   const visibleLocalProjects = useVisibleLocalProjectsFromMachineIndex(visibleMachineIndex);
@@ -3193,6 +3219,19 @@ function WorkspaceChatLanding({
       setComposerError(t('chat.validation.missingMachine'));
       return;
     }
+    if (
+      coordinatorMode &&
+      !canStartCoordinatorSession(machine, machine.acpCapabilities?.[selectedConfig.id])
+    ) {
+      captureSessionInputBlocked('missing_agent_config');
+      setComposerError(
+        t(
+          'chat.coordinator.unsupportedAgent',
+          'This agent cannot run a coordinator conversation: it must accept a system prompt, and its machine must run a recent Lody.'
+        )
+      );
+      return;
+    }
     if ((!currentUser && runtime?.contentMode !== 'e2ee') || !userId || !workspaceId) {
       captureSessionInputBlocked('missing_context');
       setComposerError(t('chat.validation.missingContext'));
@@ -3390,6 +3429,7 @@ function WorkspaceChatLanding({
           ...(activeAgentRole
             ? { agentRoleId: activeAgentRole.id, agentRoleRevision: activeAgentRole.revision }
             : {}),
+          ...(coordinatorMode ? { coordinator: SESSION_COORDINATOR_MARKER } : {}),
         },
         pendingHistoryEntry,
         attachments
@@ -4610,22 +4650,35 @@ function WorkspaceChatLanding({
                   'Update Lody on this machine to use its copies of these repositories.'
                 )
               : null;
+  const coordinatorAgentStatus =
+    coordinatorMode && !selectedConfig
+      ? {
+          message: t(
+            'chat.coordinator.noAgent',
+            'No agent here can run a coordinator conversation. It needs an agent that accepts a system prompt; an agent reports this after it has started a conversation or been refreshed in Settings.'
+          ),
+          tone: 'warning' as const,
+        }
+      : null;
   const visibleComposerStatus = projectGroupStatusMessage
     ? { message: projectGroupStatusMessage, tone: 'warning' as const }
-    : getChatLandingVisibleComposerStatus({
+    : (coordinatorAgentStatus ??
+      getChatLandingVisibleComposerStatus({
         contextType,
         composerStatus,
         localGitStateError,
         selectedMachineProjectStatus: selectedMachineProjectStatusMessage
           ? { message: selectedMachineProjectStatusMessage, tone: 'warning' }
           : null,
-      });
+      }));
 
   // ── Title ──
   // Rotate the landing heading once per (UTC) day: stable within a day, no
   // flicker across re-renders, no Math.random().
   const headings = [t('chat.heading'), t('chat.heading2')];
-  const title = headings[Math.floor(getServerNow() / 86_400_000) % headings.length];
+  const title = coordinatorMode
+    ? t('chat.coordinator.heading', 'Start a coordinator conversation')
+    : headings[Math.floor(getServerNow() / 86_400_000) % headings.length];
   const mobileHomeMachines = useMemo<MobileHomeMachine[]>(() => {
     return Array.from(machines.entries())
       .map(([machineId, machine]) => ({

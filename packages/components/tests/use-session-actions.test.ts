@@ -38,6 +38,8 @@ import {
   createSessionControlPlaneMirror,
   isLoroRepoDocDeleted,
   machineFlockKeys,
+  readSessionCoordinatorKind,
+  SESSION_COORDINATOR_MARKER,
   type LocalProjectId,
   readSessionOperationTargets,
   isSessionCollaborationStopped,
@@ -1978,6 +1980,28 @@ describe('useSessionActions', () => {
     expect(meta).toMatchObject({ id: sessionId });
     expect(meta).not.toHaveProperty('baseBranch');
     expect(meta.project).toMatchObject({ branch: selector });
+  });
+
+  it('writes the coordinator marker with the first turn and leaves ordinary sessions unmarked', async () => {
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime);
+    const coordinatorId = 'session-coordinator' as SessionId;
+    const ordinaryId = 'session-ordinary' as SessionId;
+
+    const coordinator = await actions.startSession(
+      { ...createSessionPayload(coordinatorId), coordinator: SESSION_COORDINATOR_MARKER },
+      userInput('plan the release')
+    );
+    await actions.startSession(createSessionPayload(ordinaryId), userInput('fix the bug'));
+
+    // The daemon reads the marker from the same metadata write that names the first turn.
+    expect(metaRepo.getSession(coordinatorId)).toMatchObject({
+      coordinator: { version: 1 },
+      latestUserMsgId: coordinator.historyEntry.id,
+    });
+    expect(readSessionCoordinatorKind(metaRepo.getSession(coordinatorId))).toBe('v1');
+    expect(metaRepo.getSession(ordinaryId)).not.toHaveProperty('coordinator');
   });
 
   const userInput = (text: string) =>

@@ -106,6 +106,10 @@ function buildSessionCreateResult(
   if (payload.parentSessionId) {
     sessionMeta.parentSessionId = payload.parentSessionId;
   }
+  // Written once at creation; the owning daemon delivers the coordinator system prompt.
+  if (payload.coordinator) {
+    sessionMeta.coordinator = payload.coordinator;
+  }
   // Where this session came from, not how it runs: the launch config above is
   // already frozen, so nothing re-reads the mutable Role catalog from these.
   if (payload.agentRoleId) {

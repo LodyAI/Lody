@@ -16,7 +16,7 @@ Translation: current
 3. 没有任务状态，也没有「子对话卡住了」通知协调者的通道。
 4. 没有项目页，右侧 tab 里放不了独立对话。
 
-本文是提案。前两轮问题 owner 已答复（见「已确定」）；第 4 轮起方向有调整：协调者复用已有 provider，第一版直接写产品代码（见「已确定（第 4 轮答复）」）。之后各步的契约尚未设计。
+本文是提案。前两轮问题 owner 已答复（见「已确定」）；第 4 轮起方向有调整：协调者复用已有 provider，第一版直接写产品代码（见「已确定（第 4 轮答复）」）。第一版已经做好：对话上有协调者标记，System Prompt 通过 ACP 交给 agent，入口在开发者模式后面，且只提供支持它的 agent（见「第一版的实际做法」）。之后各步的契约尚未设计。
 
 ## 已确定（owner 在需求里定的）
 
@@ -73,10 +73,10 @@ Translation: current
 
 | # | 缺什么 | 现状 | 影响 |
 | --- | --- | --- | --- |
-| A1 | System Prompt 通道 | Role 的 `promptPrefix` 只是拼在用户消息前面；`buildPrompt` 里还留着 `TODO: use system prompt`。 | 没法可靠地把它约束成「只协调、不干活、快速回应」。 |
+| A1 | System Prompt 通道 | Role 的 `promptPrefix` 只是拼在用户消息前面；`buildPrompt` 里还留着 `TODO: use system prompt`。协调者对话现在通过 ACP 拿到自己的 System Prompt（见「第一版的实际做法」），其他对话仍然没有。 | 没法可靠地把它约束成「只协调、不干活、快速回应」。 |
 | A2 | 内置工具白名单 | 代码里找不到任何 provider 的 allowed/disallowed tools 传递。Role 只能固定模型和权限模式。 | 协调者仍然能改文件、跑命令。 |
 | A3 | 按对话裁剪 Lody MCP 工具 | 工具表静态注册，所有对话看到同一套（含归档、Role、MCP 配置、模拟器预览等）。 | 协调者工具太多，慢且容易跑偏。 |
-| A4 | 「协调者」对话类型 | `SessionMeta` 没有 kind 字段，没有系统内置 Role。 | 界面和运行时认不出哪个对话是协调者，无法给它专用布局和专用限制。 |
+| A4 | 「协调者」对话类型 | 现在有 `SessionMeta.coordinator: { version: 1 }`；除了下发提示词没有别处读它，所以还没有专用布局和专用限制。 | 界面和运行时认不出哪个对话是协调者，无法给它专用布局和专用限制。 |
 | A5 | 长期对话的上下文控制 | 每批完成结果最多 64 KiB 进历史；没有针对协调者的压缩或项目记忆。 | 协调者活得越久越慢，和「极快回应」冲突。 |
 
 ### B. 协调方式
@@ -196,7 +196,7 @@ Web 移动端先做（复用共享组件），iOS / Android 原生各自排期�
 
 ## 协调者 System Prompt（第一版）
 
-这是给协调者对话的系统提示词初稿，由起草者提供，owner 可以直接改。它通过 ACP 在创建对话时交给 agent，不拼进用户消息。提示词用英文写，并要求协调者用用户的语言回复。
+这是给协调者对话的系统提示词初稿，由起草者提供，owner 可以直接改。每次建立这个对话的 agent 会话（新建、load、resume、fork）时通过 ACP 交给 agent，不拼进用户消息。实际发出的是仓库里的 `apps/cli/src/session/coordinator-system-prompt.md`，要改就改这个文件。提示词用英文写，并要求协调者用用户的语言回复。
 
 ```text
 You are the coordinator for this project in Lody. The user talks only to you. You do
@@ -264,6 +264,17 @@ When the user asks how things are going
   - 提示词文本进仓库。
 - 第一版不包含：项目页和看板、侧边栏「项目 / 对话」切换、任务卡、新的 MCP 工具、工具白名单、权限继承、手机端。协调者暂时只靠提示词约束自己不动手。
 
+## 第一版的实际做法
+
+- **标记。** `SessionMeta.coordinator: { version: 1 }`，和第一条消息的元数据一起写一次，所以在普通、E2EE 和 Roost 工作区里都和 `project` 走同一条元数据路径。协调者的 fork（Side Chat 和新 worktree fork）会复制标记，因为它们延续同一段对话。机器不认识的标记版本会让启动失败，而不是不带提示词照常运行。
+- **下发。** 机器把提示词作为 ACP `systemPrompt`（`append` 模式）放进 `session/new`、`session/load`、`session/resume`、`session/fork`，包括编辑重发时的替换会话。append 保留 provider 自己的指令、工具和权限。其他对话不发 `systemPrompt`，请求不变。
+- **支持判断。** agent 在 `initialize` 里声明 `agentCapabilities.sessionCapabilities.systemPrompt`（各适配器实现的 ACP 不稳定字段）就算支持。不声明时启动以 `ACP_SYSTEM_PROMPT_UNSUPPORTED` 失败，不退回到拼进用户消息。探测和对话启动都会把结果记在 agent 配置能力条目的 `systemPrompt` 上。
+- **哪些 provider。** 按当前固定的适配器提交（2026-11-12）看源码：Claude（append 和 override）、Codex（只有 append）、DeepSeek Harness、Pi，以及绑定了会话运行时的 Kimi 都声明了。Grok 和 Devin 转发上游 CLI 的能力，Lody Agent（Sorbet）不在本仓库发布；这几个只能看运行时探测结果。没有对任何 provider 做端到端运行。
+- **门槛。** 新增机器协议能力 `coordinatorSessions`，表示这台机器会下发提示词。界面只在机器声明了它、且该 agent 配置的能力条目里 `systemPrompt: true` 时，才让它当协调者。这个字段出现之前写的条目算不支持，直到该配置启动过一次对话或在设置里刷新。旧机器和旧客户端不会碰到它们不认识的标记。
+- **入口。** 打开开发者模式后，本地项目行的菜单里有「开始协调者对话」。它打开带 `coordinator=true` 的新对话页，只列出符合条件的 agent，发第一条消息时写入标记。GitHub 仓库和多仓库项目暂时没有入口。
+
+需要 owner 确认的决定：fork 保留标记；入口只给本地项目；在协调者页面选了 Role 时，Role 的 `promptPrefix` 仍和其他地方一样加在第一条消息前面；没有提升能力缓存版本，所以已有条目要启动一次对话或刷新后才符合条件。
+
 ## 权限继承的现状（留给第 2 步）
 
 用 Role 创建子对话时，子对话的权限模式取自那个 Role 自己固定的运行配置，和创建者无关（`apps/cli/src/mcp/README.md`「Role dispatch」）。不同 provider 的模式名也不通用，协调者（Lody Agent）的模式没法原样套到 Codex 或 Claude Code 的子对话上。做「继承」时要先定这个对应关系。
@@ -281,4 +292,4 @@ When the user asks how things are going
 
 ## 验证范围
 
-以上现状来自阅读文档和代码，没有运行任何流程。未核实的两点：完成回执是否唤醒空闲父对话。Lody Agent 的 System Prompt 和工具白名单接口由 owner 另行添加，本文未涉及其实现。相关的既有讨论见 [会话关系 Spec](../../../../specs/session-relations.md) 末尾提到的 #529（worker 状态汇总、未读路由、worker 面板）。
+以上现状来自阅读文档和代码，没有运行任何流程。第一版由单元测试覆盖请求构造、能力记录和元数据写入（`apps/cli/src/agent/agent-client-session-start.test.ts`、`apps/cli/src/lib/loro/machine-document-capabilities.test.ts`、`packages/components/tests/use-session-actions.test.ts`），没有在测试里让真实 provider 收到提示词。未核实的两点：完成回执是否唤醒空闲父对话。Lody Agent 的 System Prompt 和工具白名单接口由 owner 另行添加，本文未涉及其实现。相关的既有讨论见 [会话关系 Spec](../../../../specs/session-relations.md) 末尾提到的 #529（worker 状态汇总、未读路由、worker 面板）。

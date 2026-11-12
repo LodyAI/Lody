@@ -450,6 +450,11 @@ export type AcpCapabilityCacheEntry = {
   sessionFork?: boolean;
   /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
   sessionTitle?: boolean;
+  /**
+   * True only when the runtime advertised standard ACP `sessionCapabilities.systemPrompt`,
+   * which a coordinator conversation requires. Absent means unknown or unsupported.
+   */
+  systemPrompt?: boolean;
   rateLimits?: LodyRateLimitsCapability;
   /** True only when the runtime advertised Lody's acknowledged steering extension. */
   acknowledgedSteer?: boolean;

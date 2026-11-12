@@ -41,6 +41,11 @@ export interface SessionConfig {
   project?: ProjectRef;
   projectRun?: import('@lody/shared').SessionProjectRun;
   /**
+   * From `SessionMeta.coordinator`. A coordinator sends its system prompt over ACP on
+   * every session establishment; absent or `none` leaves the conversation unchanged.
+   */
+  coordinator?: import('@lody/shared').SessionCoordinatorKind;
+  /**
    * Encrypted turns: rejects execution inputs outside the authorized project scope.
    * Called on every Project group or parent project read from synced metadata,
    * because those can change after authorization.

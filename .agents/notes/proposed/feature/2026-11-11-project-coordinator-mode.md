@@ -16,7 +16,7 @@ Spawning child conversations, PR/CI observation and grouping by project already 
 3. There is no task status, and no channel that tells the coordinator a child is stuck.
 4. There is no project page, and an independent conversation cannot be hosted in a right-hand tab.
 
-This is a proposal. Round 4 changed direction: the coordinator reuses the existing providers and the first version is product code (see "Settled (round 4)"). The contracts for the later steps are not designed yet.
+This is a proposal. Round 4 changed direction: the coordinator reuses the existing providers and the first version is product code (see "Settled (round 4)"). That first version is built: a coordinator marker on the conversation and its system prompt delivered over ACP, offered behind Developer mode only for agents that accept it (see "First version as built"). The contracts for the later steps are not designed yet.
 
 ## Settled (stated by the owner in the request)
 
@@ -73,10 +73,10 @@ A "project" has three forms today: a local project (one directory on one machine
 
 | # | Missing | State | Effect |
 | --- | --- | --- | --- |
-| A1 | System prompt channel | A Role's `promptPrefix` is only placed in front of the user message; `buildPrompt` still carries `TODO: use system prompt`. | It cannot be reliably constrained to "coordinate only, do no work, respond fast". |
+| A1 | System prompt channel | A Role's `promptPrefix` is only placed in front of the user message; `buildPrompt` still carries `TODO: use system prompt`. Coordinator conversations now get theirs over ACP (see "First version as built"); other conversations still have none. | It cannot be reliably constrained to "coordinate only, do no work, respond fast". |
 | A2 | Builtin tool allowlist | No provider path passes allowed or disallowed tools. A Role can only pin the model and permission mode. | The coordinator can still edit files and run commands. |
 | A3 | Per-conversation Lody MCP tool subset | Tools are registered statically; every conversation sees the same set, including archive, Role, MCP configuration and simulator previews. | Too many tools for the coordinator: slower and easier to drift. |
-| A4 | A "coordinator" conversation type | `SessionMeta` has no kind field and there is no system-owned Role. | The UI and runtime cannot tell which conversation is the coordinator, so it cannot get a dedicated layout or dedicated limits. |
+| A4 | A "coordinator" conversation type | Now `SessionMeta.coordinator: { version: 1 }`; nothing reads it except prompt delivery, so there is no dedicated layout or limit yet. | The UI and runtime cannot tell which conversation is the coordinator, so it cannot get a dedicated layout or dedicated limits. |
 | A5 | Context control for a long-lived conversation | Each completion batch adds up to 64 KiB to history; there is no coordinator-specific compaction or project memory. | The longer the coordinator lives the slower it gets, which conflicts with fast responses. |
 
 ### B. Coordination
@@ -196,7 +196,7 @@ Known limits of single-shot communication, accepted for the prototype:
 
 ## Coordinator system prompt (first version)
 
-This is the drafter's first system prompt for the coordinator conversation; the owner can edit it directly. It is handed to the agent over ACP when the conversation is created and is not concatenated into the user message. It is written in English and tells the coordinator to answer in the user's language.
+This is the drafter's first system prompt for the coordinator conversation; the owner can edit it directly. It is handed to the agent over ACP each time the conversation's agent session is established (new, load, resume and fork) and is not concatenated into the user message. The repository copy, `apps/cli/src/session/coordinator-system-prompt.md`, is what ships; edit that file. It is written in English and tells the coordinator to answer in the user's language.
 
 ```text
 You are the coordinator for this project in Lody. The user talks only to you. You do
@@ -264,6 +264,17 @@ All of these are the owner's decisions. The first two replace the earlier statem
   - the prompt text stored in the repository.
 - Excluded from the first version: the project page and board, the sidebar Projects / Conversations switch, the task card, new MCP tools, a tool allowlist, permission inheritance, and mobile. For now only the prompt keeps the coordinator from doing work itself.
 
+## First version as built
+
+- **Marker.** `SessionMeta.coordinator: { version: 1 }`, written once with the first turn's metadata, so it travels the same metadata path as `project` in ordinary, E2EE and Roost workspaces. Forks of a coordinator (Side Chat and new-worktree forks) copy it, because they continue the same transcript. A marker version the daemon does not know fails the start instead of running without the prompt.
+- **Delivery.** The daemon passes the prompt as ACP `systemPrompt` in `append` mode on `session/new`, `session/load`, `session/resume` and `session/fork`, including edit-and-resend replacements. Append keeps the provider's own instructions, tools and permissions. Other conversations send no `systemPrompt`; their requests are unchanged.
+- **Support.** An agent supports it when `initialize` advertises `agentCapabilities.sessionCapabilities.systemPrompt` (the unstable ACP field the adapters implement). Without it, startup fails with `ACP_SYSTEM_PROMPT_UNSUPPORTED`; there is no fallback into the user message. Probes and session starts record the result as `systemPrompt` on the agent configuration's capability entry.
+- **Which providers.** At the pinned adapter commits (2026-11-12) the source advertises it for Claude (append and override), Codex (append only), DeepSeek Harness, Pi, and Kimi when its session runtime is bound. Grok and Devin forward their upstream CLI's capabilities, and the Lody Agent (Sorbet) is published outside this repository; for those only the runtime probe decides. No provider was run end to end.
+- **Gate.** A new `coordinatorSessions` machine protocol capability says the daemon delivers the prompt. The renderer offers an agent configuration for a coordinator only when its machine advertises that capability and its capability entry has `systemPrompt: true`. Entries written before this field count as unsupported until the configuration starts a conversation or is refreshed in Settings. Older daemons and clients never see a marker they do not understand.
+- **Entry point.** With Developer mode on, a local project row's menu has "Start coordinator conversation". It opens the new-chat page with `coordinator=true`, which lists only eligible agents and writes the marker when the first message is sent. GitHub repositories and multi-repository projects have no entry yet.
+
+Decisions for the owner to check: forks keep the marker; the entry exists only for local projects; a Role picked on the coordinator page still adds its `promptPrefix` to the first message, as it does everywhere else; the capability cache version was not bumped, so existing entries need one session start or refresh before they qualify.
+
 ## Permission inheritance today (left to step 2)
 
 When a child is created with a Role, its permission mode comes from that Role's own pinned run configuration and is unrelated to the creator (`apps/cli/src/mcp/README.md`, "Role dispatch"). Mode names also differ between providers, so the coordinator's (Lody Agent) mode cannot be applied as-is to a Codex or Claude Code child. Inheritance needs that mapping decided first.
@@ -279,4 +290,4 @@ When a child is created with a Role, its permission mode comes from that Role's 
 
 ## Verification limits
 
-The current state above comes from reading documents and code; no flow was run. One point is unverified: whether a completion receipt wakes an idle parent. The Lody Agent's system prompt and tool allowlist interfaces are added separately by the owner and their implementation is not covered here. Related earlier discussion is #529, cited at the end of the [session relations Spec](../../../../specs/session-relations.md) (worker status aggregation, unread routing, worker panels).
+The current state above comes from reading documents and code; no flow was run. The first version is covered by unit tests of request construction, capability recording and metadata writes (`apps/cli/src/agent/agent-client-session-start.test.ts`, `apps/cli/src/lib/loro/machine-document-capabilities.test.ts`, `packages/components/tests/use-session-actions.test.ts`); no real provider received the prompt in a test. One point is unverified: whether a completion receipt wakes an idle parent. The Lody Agent's system prompt and tool allowlist interfaces are added separately by the owner and their implementation is not covered here. Related earlier discussion is #529, cited at the end of the [session relations Spec](../../../../specs/session-relations.md) (worker status aggregation, unread routing, worker panels).
