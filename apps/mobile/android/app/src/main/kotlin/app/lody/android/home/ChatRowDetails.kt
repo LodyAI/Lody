@@ -26,19 +26,20 @@ object HomeGroupings {
     private const val KEY = "chatGrouping"
     private const val SCOPE = "chatScope"
 
-    /** Defaults to the team so nothing disappears unasked. */
+    /** Defaults to My tasks: a new person starts on their own chats. */
     fun loadScope(context: Context): HomeScope {
         val stored = context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(SCOPE, null)
-        return HomeScope.entries.firstOrNull { it.key == stored } ?: HomeScope.Team
+        return HomeScope.entries.firstOrNull { it.key == stored } ?: HomeScope.Mine
     }
 
     fun saveScope(context: Context, scope: HomeScope) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(SCOPE, scope.key).apply()
     }
 
+    /** Defaults to status, so what needs the person leads. */
     fun load(context: Context): HomeGrouping {
         val stored = context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY, null)
-        return HomeGrouping.entries.firstOrNull { it.key == stored } ?: HomeGrouping.Time
+        return HomeGrouping.entries.firstOrNull { it.key == stored } ?: HomeGrouping.Status
     }
 
     fun save(context: Context, grouping: HomeGrouping) {
