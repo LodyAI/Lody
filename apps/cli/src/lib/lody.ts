@@ -153,6 +153,7 @@ export class Lody {
         throw new Error('e2ee_workspace_unavailable');
       const { openCliE2eeWorkspaceLegacy } = await import('./e2ee/workspace-legacy');
       e2ee = await openCliE2eeWorkspaceLegacy({
+        machineId: options.machineId,
         accountId: options.userId,
         workspaceId: options.workspaceId,
         genesisHash: options.genesisHash,

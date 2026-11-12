@@ -514,6 +514,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       PS1: '',
       PROMPT_COMMAND: '',
       LODY_SESSION_ID: this.sessionId,
+      LODY_AGENT_SESSION_ID: this.sessionId,
       LODY_WORKSPACE_SESSION_ID: workspaceSessionId,
       LODY_AGENT_ROLE_ID: this.config.agentRoleId || undefined,
       LODY_PARENT_SESSION_ID: this.config.parentSessionId || undefined,

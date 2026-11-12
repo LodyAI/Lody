@@ -34,6 +34,7 @@
   Retired cache cleanup must fail closed.
 - Iroh and Streams receivers share journal claims and live write completions, registered before
   invocation. Only ownerless uncertain writes return errors; see [iroh rules](../../../../../packages/iroh-native/AGENTS.md).
+- Follow [Schedule rules](../schedules/AGENTS.md).
 - No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
   plaintext publish/receive allowlists, ordinary adaptor/90s TTL.
 - `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.

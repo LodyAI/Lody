@@ -98,6 +98,7 @@ function harness(d = document()) {
     },
     pause: () => {
       d.definition.enabled = false;
+      d.definition.activationId = `${d.definition.activationId}-paused`;
       row = buildScheduleRegistryRow(d);
     },
   };
@@ -161,6 +162,32 @@ describe('Schedule worker handoff', () => {
     expect(findNextDispatchableUserTurn([turn], { latestUserMsgId: 'turn' } as never)?.id).toBe(
       'turn'
     );
+  });
+  it('revokes a queued manual run when paused before handoff', async () => {
+    const h = harness();
+    h.d.definition.trigger = { kind: 'manual' };
+    const row = buildScheduleRegistryRow(h.d);
+    h.store.planManual('workspace', h.d, row.definitionFingerprint, 'manual', 1);
+    h.pause();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { manual: true, state: 'skipped', errorCode: 'ACTIVATION_REVOKED' },
+    ]);
+    expect(h.store.unfinished('workspace')).toEqual([]);
+  });
+  it('dispatches a new manual run while automatic scheduling stays paused', async () => {
+    const h = harness();
+    h.pause();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toEqual([]);
+    const row = buildScheduleRegistryRow(h.d);
+    h.store.planManual('workspace', h.d, row.definitionFingerprint, 'after-pause', 1);
+    await h.engine.evaluate();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { manual: true, activationId: h.d.definition.activationId, state: 'dispatched' },
+    ]);
+    expect(h.d.definition.enabled).toBe(false);
   });
   it('retains prepared input when scheduling is disabled', async () => {
     const h = harness();
