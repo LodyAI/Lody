@@ -17,6 +17,8 @@ import {
   possessionSigningBytes,
   recordSigningBytes,
   verifyLedger,
+  restoreVerifiedState,
+  exportVerifiedState,
   type LedgerView,
 } from '../../src/internal/ledger';
 import {
@@ -25,7 +27,17 @@ import {
   prepareLedgerCommand,
 } from '../../src/internal/ledger/admission';
 import { prepareLedgerRecord, signLedgerRecord } from '../../src/internal/ledger/signing';
-import { SubmissionJournal, LedgerLog, LedgerLogError } from '../../src/services';
+import {
+  SubmissionJournal,
+  LedgerLog,
+  LedgerLogError,
+  WorkspaceScope,
+  LedgerViewSource,
+  LedgerViewSourceError,
+} from '../../src/services';
+import { signLedgerSnapshot, verifyLedgerSnapshot } from '../../src/protocol';
+import { LedgerFeed, VerifiedLedger } from '../../src/index';
+import { sqliteLedgerFeedStore, sqliteLedgerPinStore } from '../../src/adapters/node-sqlite';
 import { sqliteSubmissionJournal } from '../../src/adapters/node-sqlite/submission-journal';
 import {
   getCommittedEpochStagingKey,
@@ -293,6 +305,228 @@ const failureCode = (exit: Exit.Exit<unknown, unknown>, code: string) => {
   if (Exit.isFailure(exit)) expect(JSON.stringify(exit.cause)).toContain(code);
 };
 describe('durable local epoch rotation', () => {
+  it('rebases with a staged candidate, pending submission and pending receiver, preserving every original', async () => {
+    const f = fixture(),
+      pair = await recipientPair();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          let compacted = f.view();
+          const lookup = () =>
+            Effect.sync(() => (compacted.head.equals(f.view().head) ? compacted : f.view()));
+          const stores = Layer.mergeAll(
+            sqliteLedgerFeedStore({
+              path: path.join(path.dirname(f.files.keys), 'feed.sqlite'),
+              mode: 'create-or-open',
+            }),
+            sqliteLedgerPinStore({
+              path: path.join(path.dirname(f.files.keys), 'feed-pin.sqlite'),
+              mode: 'create-or-open',
+            })
+          ).pipe(Layer.provideMerge(Layer.succeed(WorkspaceScope, { genesis: f.context.genesis })));
+          const ctx = yield* Layer.build(
+            LedgerFeed.layer({
+              origin: { kind: 'genesis', record: f.genesisRecord },
+              expected: { head: hashRecordBytes(f.genesisRecord), length: 1 },
+              budget: { maxRecords: 100, maxBytes: 1_000_000 },
+            }).pipe(Layer.provide(stores))
+          );
+          const feed = Context.get(ctx, LedgerFeed);
+          const verified = VerifiedLedger.layer.pipe(
+            Layer.provide(stores),
+            Layer.provide(
+              Layer.succeed(LedgerViewSource, {
+                current: () =>
+                  Effect.map(feed.current(), (state) => state.view).pipe(
+                    Effect.mapError((cause) => new LedgerViewSourceError({ cause }))
+                  ),
+              })
+            )
+          );
+          const rebase = Effect.fnUntraced(function* () {
+            const state = yield* feed.current(),
+              records = f.records();
+            yield* feed.accept(
+              {
+                requestOffset: state.offset,
+                nextOffset: 'after:' + records.length,
+                records: state.bootstrap ? records : records.slice(state.view.length),
+                upToDate: true,
+              },
+              { head: f.view().head, length: records.length }
+            );
+            const saved = yield* feed.rebase().pipe(Effect.provide(verified));
+            compacted = ok(restoreVerifiedState(saved.state));
+          });
+          const { rotation, journal } = yield* f.open('create', { lookup });
+          f.stageFailure(true);
+          expect(Result.isFailure(yield* Effect.result(rotation.publish()))).toBe(true);
+          const original = f.row()!;
+          yield* rebase(); // candidate has been protected, but no submission yet
+          f.stageFailure(false);
+          f.mode('unavailable');
+          expect(Result.isFailure(yield* Effect.result(rotation.resume()))).toBe(true);
+          expect((yield* journal.load(f.context.genesis)).record).toEqual(
+            new Uint8Array(original.record)
+          );
+          yield* rebase(); // exact pending parent and all checkpoint hashes survive
+          f.mode('ok');
+          expect(yield* rotation.resume()).toMatchObject({ outcome: 'Committed', epoch: 1 });
+          yield* rebase();
+          expect(ok(getCommittedEpochStagingKey(compacted, 1)).recordHash).toBe(
+            Buffer.from(hashRecordBytes(original.record).toBytes()).toString('hex')
+          );
+          const group = [...f.groups.values()][0]!;
+          let refuseProtection = true;
+          const receiver = yield* makeSqliteEpochReceiver({
+            path: path.join(path.dirname(f.files.keys), 'receive.sqlite'),
+            mode: 'create',
+            genesis: f.context.genesis,
+            signer: f.phone.signer,
+            pair,
+            ledger: lookup,
+            keyStore: {
+              path: path.join(path.dirname(f.files.keys), 'recipient.sqlite'),
+              mode: 'create',
+              protector: {
+                ...f.native.protector,
+                protect: (body) =>
+                  refuseProtection
+                    ? Promise.reject(new Error('injected protection failure'))
+                    : f.native.protector.protect(body),
+              },
+            },
+            remote: {
+              status: (slot) =>
+                Effect.succeed({ ...slot, revision: 0, status: 'EnvelopeStored' as const }),
+              report: () => Effect.void,
+            },
+          });
+          expect(
+            Result.isFailure(
+              yield* Effect.result(
+                receiver.receive(
+                  f.owner.publicKey,
+                  group.envelopes.find(
+                    (row) => row.recipient === Buffer.from(f.phone.raw).toString('hex')
+                  )!.frame
+                )
+              )
+            )
+          ).toBe(true);
+          yield* rebase(); // receive journal now owns the original ciphertext
+          refuseProtection = false;
+          expect(yield* receiver.resume()).toMatchObject({ processed: 1, blocked: [] });
+          const key = yield* receiver.installedEpochKeys.read(1);
+          expect(ok(commitEpochKey(f.context.genesis, 1, key))).toEqual(
+            compacted.inspectState().epoch.keyCommitment
+          );
+          disposeEpochKey(key);
+          expect(f.row()!.record).toEqual(original.record);
+          expect(f.row()!.blob).toEqual(original.blob);
+        })
+      )
+    );
+  });
+
+  it('installs the current epoch from a mailbox after snapshot cold start, then accepts a later publication', async () => {
+    const f = fixture(),
+      pair = await recipientPair();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation } = yield* f.open();
+          const first = yield* rotation.publish();
+          const signed = yield* signLedgerSnapshot({ signer: f.owner.signer, ledger: f.lookup });
+          let view = ok(
+            verifyLedgerSnapshot({
+              snapshot: signed.snapshot,
+              trust: {
+                source: 'external-confirmation',
+                genesis: f.context.genesis,
+                endorser: f.owner.publicKey,
+                membershipId: f.view().inspectState().owner,
+                role: 'owner',
+                kind: 'personal',
+                head: signed.head,
+                length: signed.length,
+                headSignature: signed.headSignature,
+              },
+            })
+          );
+          expect(Result.isFailure(getCommittedEpochStagingKey(view, 1))).toBe(true);
+          // Local export must not alter the remote bytes or endorsement signature.
+          const retained = ok(exportVerifiedState(view));
+          view = ok(restoreVerifiedState(retained));
+          const again = yield* signLedgerSnapshot({
+            signer: f.owner.signer,
+            ledger: () => Effect.succeed(view),
+          });
+          expect(again.snapshot).toEqual(signed.snapshot);
+          expect(again.headSignature.toBytes()).toEqual(signed.headSignature.toBytes());
+          const phone = Buffer.from(f.phone.raw).toString('hex');
+          const currentGroup = () =>
+            [...f.groups.values()].find(
+              (group) => group.epoch === view.inspectState().epoch.number
+            )!;
+          const root = path.join(path.dirname(f.files.keys), 'cold');
+          const receiver = yield* makeSqliteRecipientMailbox({
+            path: root + '-receive.sqlite',
+            mode: 'create',
+            genesis: f.context.genesis,
+            signer: f.phone.signer,
+            pair,
+            ledger: () => Effect.succeed(view),
+            keyStore: {
+              path: root + '-keys.sqlite',
+              mode: 'create',
+              protector: f.native.protector,
+            },
+            repairStore: { path: root + '-repair.sqlite', mode: 'create' },
+            remote: {
+              status: (slot) =>
+                Effect.succeed({ ...slot, revision: 0, status: 'EnvelopeStored' as const }),
+              report: () => Effect.void,
+              repair: () => Effect.void,
+              fetch: () =>
+                Effect.succeed({
+                  items: [
+                    {
+                      sender: Buffer.from(f.owner.raw).toString('hex'),
+                      frame: currentGroup().envelopes.find((row) => row.recipient === phone)!.frame,
+                    },
+                  ],
+                  next: null,
+                }),
+            },
+          });
+          expect(yield* receiver.fetchAndInstall()).toMatchObject({ processed: 1, next: null });
+          const key = yield* receiver.installedEpochKeys.read(1);
+          expect(ok(commitEpochKey(f.context.genesis, 1, key))).toEqual(
+            view.inspectState().epoch.keyCommitment
+          );
+          disposeEpochKey(key);
+          yield* rotation.acknowledge(first!);
+          f.requestRotation();
+          yield* rotation.publish();
+          view = ok(
+            extendLedger(view, f.records().slice(view.length), {
+              head: f.view().head,
+              length: f.view().length,
+            })
+          );
+          expect(Result.isSuccess(getCommittedEpochStagingKey(view, 2))).toBe(true);
+          expect(yield* receiver.fetchAndInstall()).toMatchObject({ processed: 1, next: null });
+          const next = yield* receiver.installedEpochKeys.read(2);
+          expect(ok(commitEpochKey(f.context.genesis, 2, next))).toEqual(
+            view.inspectState().epoch.keyCommitment
+          );
+          disposeEpochKey(next);
+        })
+      )
+    );
+  });
+
   it('checks real staging signatures and contexts without granting current-epoch permission', async () => {
     const f = fixture();
     await Effect.runPromise(

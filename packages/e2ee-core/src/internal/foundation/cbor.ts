@@ -320,7 +320,7 @@ export const encodeCandidateEnvelopesCbor = (value: CborValue): Result<Uint8Arra
 export const decodeSnapshotCbor = (input: unknown): Result<CborValue> =>
   decodeBounded(input, MAX_SNAPSHOT_BYTES, MAX_ARRAY_LENGTH, MAX_SNAPSHOT_BYTES);
 /** A party's own retained ledger state (never exchanged): a larger budget than an endorsed snapshot. */
-export const MAX_RETAINED_STATE_BYTES = 16 * 1024 * 1024;
+export const MAX_RETAINED_STATE_BYTES = 64 * 1024 * 1024;
 export const decodeRetainedCbor = (input: unknown): Result<CborValue> =>
   decodeBounded(input, MAX_RETAINED_STATE_BYTES, MAX_ARRAY_LENGTH, MAX_RETAINED_STATE_BYTES);
 export const encodeRetainedCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>

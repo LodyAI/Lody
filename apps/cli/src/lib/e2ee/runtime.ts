@@ -555,12 +555,24 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
           const updatedVerifiedView = yield* verified.current();
           options.onVerifiedLedger?.(updatedVerifiedView, executionGeneration);
           if (length - compactedAt >= 64) {
-            const origin = yield* feed
-              .rebase()
-              .pipe(Effect.provideService(VerifiedLedger, verified));
-            yield* sql(() =>
-              db.prepare('UPDATE cache SET origin=? WHERE id=1').run(encodeOrigin(origin))
+            const compacted = yield* Effect.result(
+              Effect.gen(function* () {
+                const origin = yield* feed
+                  .rebase()
+                  .pipe(Effect.provideService(VerifiedLedger, verified));
+                yield* sql(() =>
+                  db.prepare('UPDATE cache SET origin=? WHERE id=1').run(encodeOrigin(origin))
+                );
+              })
             );
+            if (Result.isFailure(compacted)) {
+              // Only safe diagnostics: the accepted ledger and pin remain durable.
+              yield* Effect.sync(() =>
+                console.warn('[E2EE] Ledger compaction pending', {
+                  code: 'e2ee_ledger_compaction_pending',
+                })
+              ).pipe(Effect.ignoreCause);
+            }
             compactedAt = length;
           }
           return yield* status();

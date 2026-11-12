@@ -15,7 +15,7 @@ import { retainedSigningPublicKey } from '../foundation/owned-bytes';
 import { verifySignature } from '../foundation/signature';
 import { LedgerError } from './errors';
 import { decodeMachineId, encodeMachineId } from './machine-id';
-import { fail, type DeviceKind, type Role } from './records';
+import { hashRecordBytes, fail, type DeviceKind, type Role } from './records';
 import {
   SUPPORTED_CAPABILITIES,
   hashAt,
@@ -36,18 +36,11 @@ const lift = <A>(r: Result.Result<A, { readonly code: LedgerError['code'] }>) =>
  * cannot restore those facts and are rejected without migration.
  */
 const SNAPSHOT_BODY_VERSION = 4;
-/** Retained envelope version; the digest body shares it so the digest is derivable from retained bytes. */
-const RETAINED_VERSION = 4;
+/** Local-only envelope. Snapshot bodies, comparison digests and signature domains remain v4. */
+const RETAINED_VERSION = 5;
 const DIGEST_DOMAIN = 'snapshot-digest/v4';
 const digestOfBody = (body: Uint8Array) =>
   lift(Bytes.recordHash(sha256(concat([domain(DIGEST_DOMAIN), body]))));
-/**
- * Deterministic CBOR: the digest body `[4, genesis, length, head, S]` is the
- * retained array `[4, genesis, length, head, S, verification]` with a 5-element
- * head and without its last one-byte element, so the digest needs no second encoding.
- */
-const retainedDigest = (bytes: Uint8Array) =>
-  digestOfBody(concat([Uint8Array.of(0x85), bytes.subarray(1, bytes.length - 1)]));
 const array = (v: CborValue | undefined): Result.Result<readonly CborValue[], LedgerError> =>
   Array.isArray(v) ? Result.succeed(v) : fail('canonical');
 const uint = (v: CborValue | undefined): Result.Result<number, LedgerError> =>
@@ -276,7 +269,7 @@ export function stateDigestOf(s: InternalState): Result.Result<Bytes.RecordHash,
     const head = hashAt(s, s.hashes.length - 1)!;
     const body = yield* lift(
       encodeSnapshotCbor([
-        RETAINED_VERSION,
+        SNAPSHOT_BODY_VERSION,
         s.genesis.toBytes(),
         s.hashesOffset + s.hashes.length,
         head.toBytes(),
@@ -331,9 +324,23 @@ export function encodeRetainedState(
         head.toBytes(),
         authState(s),
         verifications.indexOf(s.verification),
+        s.hashesOffset,
+        concat(Array.from(s.hashes, (hash) => hash.toBytes())),
+        concat(
+          Array.from(s.epochPublications ?? HashMap.empty<number, Uint8Array>())
+            .sort(([a], [b]) => a - b)
+            .map(([epoch, record]) => {
+              const row = new Uint8Array(6 + record.length);
+              const fields = new DataView(row.buffer);
+              fields.setUint32(0, epoch);
+              fields.setUint16(4, record.length);
+              row.set(record, 6);
+              return row;
+            })
+        ),
       ])
     );
-    return { bytes, stateDigest: yield* retainedDigest(bytes) };
+    return { bytes, stateDigest: yield* stateDigestOf(s) };
   });
 }
 /**
@@ -357,8 +364,9 @@ export function decodeRetainedState(
       const length = expected.length;
       if (!Number.isSafeInteger(length) || length < 1) return yield* fail('checkpoint-mismatch');
       const root = yield* array(yield* lift(decodeRetainedCbor(bytes)));
-      if (root.length !== 6) return yield* fail('canonical');
-      if ((yield* uint(root[0])) !== RETAINED_VERSION) return yield* fail('unknown-version');
+      const version = yield* uint(root[0]);
+      if (version !== RETAINED_VERSION) return yield* fail('unknown-version');
+      if (root.length !== 9) return yield* fail('canonical');
       if (!bytesEqual(yield* exact(root[1], 32), genesis.toBytes()))
         return yield* fail('wrong-anchor');
       if (
@@ -375,9 +383,59 @@ export function decodeRetainedState(
         verification,
         retained: true,
       });
+      const offset = yield* uint(root[6]);
+      const hashes = root[7];
+      if (
+        !(hashes instanceof Uint8Array) ||
+        hashes.length === 0 ||
+        hashes.length % 32 !== 0 ||
+        offset + hashes.length / 32 !== length
+      )
+        return yield* fail('canonical');
+      const restored: Bytes.RecordHash[] = [];
+      for (let index = 0; index < hashes.length; index += 32)
+        restored.push(yield* lift(Bytes.recordHash(hashes.subarray(index, index + 32))));
+      if (
+        !restored.at(-1)!.equals(head) ||
+        (offset === 0 && !bytesEqual(restored[0]!.toBytes(), genesis.toBytes()))
+      )
+        return yield* fail('checkpoint-mismatch');
+      const knownHashes = new Set(restored.map(id));
+      state.hashesOffset = offset;
+      state.hashes = Chunk.fromIterable(restored);
+      const publications = root[8];
+      if (!(publications instanceof Uint8Array)) return yield* fail('canonical');
+      const fields = new DataView(
+        publications.buffer,
+        publications.byteOffset,
+        publications.byteLength
+      );
+      let previous = 0;
+      let records = HashMap.empty<number, Uint8Array>();
+      for (let at = 0; at < publications.length;) {
+        if (publications.length - at < 6) return yield* fail('canonical');
+        const epoch = fields.getUint32(at),
+          size = fields.getUint16(at + 4);
+        at += 6;
+        if (
+          epoch <= previous ||
+          epoch > state.epoch.number ||
+          size < 1 ||
+          size > 8192 ||
+          size > publications.length - at
+        )
+          return yield* fail('canonical');
+        const record = publications.slice(at, at + size);
+        if (!knownHashes.has(id(hashRecordBytes(record))))
+          return yield* fail('checkpoint-mismatch');
+        previous = epoch;
+        records = HashMap.set(records, epoch, record);
+        at += size;
+      }
+      state.epochPublications = records;
       if (expected.stateDigest) {
         const stored = yield* lift(Bytes.recordHash(expected.stateDigest.toBytes()));
-        if (!stored.equals(yield* retainedDigest(bytes)))
+        if (!stored.equals(yield* stateDigestOf(state)))
           return yield* fail('state-digest-mismatch');
       }
       return state;

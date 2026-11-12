@@ -3045,6 +3045,71 @@ describe('machine E2EE local runtime', () => {
     }
   });
 
+  it.each(['feed', 'origin'] as const)(
+    'keeps accepted ledger progress when auxiliary %s compaction storage fails',
+    async (fault) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-compaction-'));
+      const warnings: unknown[] = [];
+      const warn = vi.spyOn(console, 'warn').mockImplementation((...args) => {
+        warnings.push(args);
+      });
+      try {
+        const fixture = await execute(setup(directory, 71));
+        const openRuntime = Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(fixture.genesis);
+          return yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord: fixture.genesisRecord,
+          });
+        });
+        await execute(
+          Effect.gen(function* () {
+            const runtime = yield* openRuntime;
+            const history = new DatabaseSync(join(directory, 'runtime', 'history.sqlite'));
+            const cache = history.prepare('SELECT name FROM cache WHERE id=1').get();
+            if (!cache || typeof cache.name !== 'string') throw new Error('missing feed cache');
+            const feed = new DatabaseSync(join(directory, 'runtime', cache.name));
+            const db = fault === 'feed' ? feed : history;
+            db.exec(
+              `CREATE TRIGGER fail_compaction BEFORE UPDATE OF origin ON ${fault === 'feed' ? 'feed_meta' : 'cache'} BEGIN SELECT RAISE(ABORT,'synthetic auxiliary failure'); END`
+            );
+            try {
+              yield* runtime.ingest(page(fixture.records, 0, 64));
+              yield* runtime.ingest(page(fixture.records, 64, 70));
+              expect((yield* runtime.status()).length).toBe(70);
+              expect(history.prepare('SELECT COUNT(*) AS n FROM records').get()?.n).toBe(70);
+              yield* runtime.ingest(page(fixture.records, 70));
+              expect((yield* runtime.status()).length).toBe(71);
+              expect(warnings).toEqual([
+                ['[E2EE] Ledger compaction pending', { code: 'e2ee_ledger_compaction_pending' }],
+              ]);
+            } finally {
+              db.exec('DROP TRIGGER fail_compaction');
+              feed.close();
+              history.close();
+            }
+          })
+        );
+        await execute(
+          Effect.gen(function* () {
+            const runtime = yield* openRuntime;
+            expect((yield* runtime.status()).length).toBe(71);
+          })
+        );
+      } finally {
+        warn.mockRestore();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each(['history', 'pin'] as const)(
     'classifies authoritative %s damage without replacing originals or trusted pins',
     async (damage) => {

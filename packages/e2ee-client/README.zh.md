@@ -115,7 +115,9 @@ readerLeases: preallocated-v1 接受 open 第四个参数中的唯一调用标�
 `personalLedgerControl({ approval })` 通过注入的 `LedgerFeedStore`、
 `LedgerPinStore`、`SubmissionJournal`、`LedgerLog`、`LedgerFeedSource`、
 `WorkspaceScope` 组合持久 `LedgerFeed`。feed/pin 使用稳定数据库，提交槽按身份实例
-独立。刷新有界，验证每条后缀后才持久化位置，不 reset 或 rebase 损坏行。
+独立。刷新有界，验证每条后缀后才持久化位置。feed 同时获得独立 pin 和数据源，
+旧格式或损坏缓存仅在完整重放证明最高检查点后才能重建；身份、pin 和未决日志
+保持不变，重建缓存不授予准入。
 
 显式 `prepare(offer, true)` 准备受保护替换候选，旧指针保持 current。第二个未决候选
 会被拒绝。替换打开要求桌面重新批准的完整历史，以及成功的 pin/origin 验证；之后才

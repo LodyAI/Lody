@@ -116,6 +116,8 @@ No network under locks; drain before release.
 Bad keys allow ledger open; core repairs.
 Isolate verification/storage errors; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
+Compaction failures warn without undoing accepted sync; retry after 64 more records,
+preserving originals and pins.
 Conflicts refuse fallback. Failed close retains its fence; report restart-required.
 Opens join a still-closing workspace's drain once, outside the lock; never `closed`.
 Fixed cloud refs; auth/bound/abort; fence late disposed calls.

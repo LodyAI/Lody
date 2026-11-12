@@ -311,6 +311,45 @@ it.each(['chromium', 'webkit'] as const)(
       expect((await api(page, 'snapshot')).value.feed.tail.count).toBe(1);
       await stop(page);
 
+      // Origin replacement and covered-row deletion roll back together, including recovery.
+      for (const action of ['rebase', 'rebuild']) {
+        await boot(page, 'atomic-' + action);
+        for (const step of ['initialize', 'append', 'readPin']) await api(page, step);
+        await api(page, 'writePin', 1);
+        const before = await rawFeed(page, 'atomic-' + action);
+        await page.evaluate(() => {
+          const put = IDBObjectStore.prototype.put;
+          (globalThis as any).restorePut = () => {
+            IDBObjectStore.prototype.put = put;
+          };
+          IDBObjectStore.prototype.put = function (...args) {
+            if (this.name === 'feed')
+              throw new DOMException('synthetic quota', 'QuotaExceededError');
+            return Reflect.apply(put, this, args);
+          };
+        });
+        expect((await api(page, action)).reason).toBe('capacity');
+        await page.evaluate(() => (globalThis as any).restorePut());
+        expect(await rawFeed(page, 'atomic-' + action)).toEqual(before);
+        await stop(page);
+        await boot(page, 'atomic-' + action, undefined, 'open-existing');
+        expect((await api(page, 'readPin')).value.length).toBe(2);
+        expect((await api(page, action)).ok).toBe(true);
+        expect((await api(page, 'restore')).value.length).toBe(2);
+        await stop(page);
+      }
+
+      // The retained-origin limit follows the feed budget, rather than the unrelated 16 MiB blob limit.
+      await boot(page, 'large-origin');
+      await api(page, 'initialize');
+      await api(page, 'append');
+      const large = { size: 17 * 1024 * 1024, count: 2, records: 0 };
+      expect((await api(page, 'largeRebase')).value).toEqual(large);
+      await stop(page);
+      await boot(page, 'large-origin', undefined, 'open-existing');
+      expect((await api(page, 'largeSize')).value).toEqual(large);
+      await stop(page);
+
       // Hold a genuine native transaction using test-only requests, then close its owner.
       await boot(page, 'closing');
       await page.evaluate(() => {

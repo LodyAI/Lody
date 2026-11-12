@@ -1,14 +1,16 @@
 import { Effect, Layer } from 'effect';
-import { bytesEqual } from '../../internal/foundation/cbor';
+import { bytesEqual, MAX_RETAINED_STATE_BYTES } from '../../internal/foundation/cbor';
 import { LocalStoreError } from '../../services/errors';
 import { LedgerFeedStore, type LedgerFeedTail } from '../../services/stores';
 import { WorkspaceScope } from '../../services/workspace';
 import { openSqliteStore, type SqliteFileOptions } from './store';
 
 const APPLICATION_ID = 0x4c454633;
-const MAX_ORIGIN_BYTES = 16 * 1024 * 1024;
+const MAX_ORIGIN_BYTES = MAX_RETAINED_STATE_BYTES;
 const fail = (reason: LocalStoreError['reason']) =>
   new LocalStoreError({ store: 'LedgerFeedStore', reason });
+const metaTable = (name: string) =>
+  `CREATE TABLE ${name}(id INTEGER PRIMARY KEY CHECK(id=1),genesis BLOB NOT NULL CHECK(length(genesis)=32),origin BLOB CHECK(origin IS NULL OR length(origin) BETWEEN 1 AND ${MAX_ORIGIN_BYTES}),origin_count INTEGER,head BLOB,count INTEGER,offset TEXT,bootstrap INTEGER,bytes INTEGER)`;
 const sameTail = (a: LedgerFeedTail, b: LedgerFeedTail) =>
   bytesEqual(a.head, b.head) &&
   a.count === b.count &&
@@ -32,7 +34,7 @@ export const sqliteLedgerFeedStore = (options: SqliteFileOptions) =>
         version: 1,
         error: fail,
         initialize(connection) {
-          connection.exec(`CREATE TABLE feed_meta(id INTEGER PRIMARY KEY CHECK(id=1),genesis BLOB NOT NULL CHECK(length(genesis)=32),origin BLOB CHECK(origin IS NULL OR length(origin) BETWEEN 1 AND ${MAX_ORIGIN_BYTES}),origin_count INTEGER,head BLOB,count INTEGER,offset TEXT,bootstrap INTEGER,bytes INTEGER);
+          connection.exec(`${metaTable('feed_meta')};
             CREATE TABLE feed_records(position INTEGER PRIMARY KEY,record BLOB NOT NULL CHECK(length(record) BETWEEN 1 AND 8192));`);
           connection.prepare('INSERT INTO feed_meta(id,genesis) VALUES(1,?)').run(genesis);
         },
@@ -42,6 +44,19 @@ export const sqliteLedgerFeedStore = (options: SqliteFileOptions) =>
             | undefined;
           if (!(row?.genesis instanceof Uint8Array) || !bytesEqual(row.genesis, genesis))
             throw fail('corrupt');
+          // Widen only the old local byte constraint. Originals, layout and pins stay unchanged.
+          const schema = connection
+            .prepare("SELECT sql FROM sqlite_schema WHERE name='feed_meta' AND type='table'")
+            .get() as { sql?: string } | undefined;
+          if (schema?.sql?.includes('BETWEEN 1 AND 16777216'))
+            connection
+              .transaction(() => {
+                connection.exec(`${metaTable('feed_meta_expanded')};
+              INSERT INTO feed_meta_expanded SELECT * FROM feed_meta;
+              DROP TABLE feed_meta;
+              ALTER TABLE feed_meta_expanded RENAME TO feed_meta;`);
+              })
+              .immediate();
         },
       });
       const sql = <A>(work: () => A) =>
@@ -130,6 +145,41 @@ export const sqliteLedgerFeedStore = (options: SqliteFileOptions) =>
               })
               .immediate()
           ),
+        rebuild: (expected, origin, originCount, tail) =>
+          sql(() =>
+            db
+              .transaction(() => {
+                const stored = meta();
+                if (!stored || !sameTail(stored.tail, expected)) throw fail('conflict');
+                if (
+                  !(origin instanceof Uint8Array) ||
+                  origin.length < 1 ||
+                  origin.length > MAX_ORIGIN_BYTES ||
+                  originCount !== tail.count ||
+                  tail.count < expected.count ||
+                  tail.bootstrap ||
+                  tail.bytes !== origin.length ||
+                  (tail.count === expected.count && !bytesEqual(tail.head, expected.head))
+                )
+                  throw fail('corrupt');
+                db.prepare('UPDATE feed_meta SET origin=?,origin_count=? WHERE id=1').run(
+                  origin,
+                  originCount
+                );
+                db.prepare('DELETE FROM feed_records').run();
+                writeTail(tail);
+                const after = meta();
+                if (
+                  !after ||
+                  !bytesEqual(after.origin, origin) ||
+                  after.originCount !== originCount ||
+                  !sameTail(after.tail, tail) ||
+                  db.prepare('SELECT 1 FROM feed_records LIMIT 1').get()
+                )
+                  throw fail('corrupt');
+              })
+              .immediate()
+          ),
         rebase: (expected, origin, originCount, tail) =>
           sql(() =>
             db
@@ -148,6 +198,22 @@ export const sqliteLedgerFeedStore = (options: SqliteFileOptions) =>
                   tail.bytes !== origin.length
                 )
                   throw fail('corrupt');
+                const rows = db
+                  .prepare('SELECT position,record FROM feed_records ORDER BY position')
+                  .all() as { position: unknown; record: unknown }[];
+                let bytes = stored.origin.length;
+                if (rows.length !== expected.count - stored.originCount) throw fail('corrupt');
+                rows.forEach((row, index) => {
+                  if (
+                    row.position !== stored.originCount + index + 1 ||
+                    !(row.record instanceof Uint8Array) ||
+                    row.record.length < 1 ||
+                    row.record.length > 8192
+                  )
+                    throw fail('corrupt');
+                  bytes += row.record.length;
+                });
+                if (bytes !== expected.bytes) throw fail('corrupt');
                 db.prepare('UPDATE feed_meta SET origin=?,origin_count=? WHERE id=1').run(
                   origin,
                   originCount
