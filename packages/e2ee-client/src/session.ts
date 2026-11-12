@@ -938,7 +938,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                   fetchCurrentEnvelope: (...args) =>
                     Effect.gen(function* () {
                       // A failed independent receive/repair must not hide an already delivered R envelope.
-                      yield* Effect.exit(maintenance!(view.inspectState().epoch.number));
+                      yield* Effect.exit(
+                        Effect.gen(function* () {
+                          const latest = yield* admitted();
+                          return yield* maintenance!(latest.inspectState().epoch.number);
+                        })
+                      );
                       return yield* input.fetchCurrentEnvelope(...args);
                     }),
                 });

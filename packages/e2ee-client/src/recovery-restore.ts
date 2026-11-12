@@ -1,6 +1,6 @@
 /** Authenticated recovery helpers for personal-device hosts. Explicit recovery
  * preserves admission and custody checks; product rollout belongs to the host. */
-import { Effect, Exit, Result, type Scope } from 'effect';
+import { Effect, Exit, Result, Schema, type Scope } from 'effect';
 import {
   Bytes,
   makeWorkspaceRecovery,
@@ -11,7 +11,7 @@ import {
   type WorkspaceRecoveryInput,
   type WorkspaceRestorePlan,
 } from '@lody/e2ee-core';
-import { hashRecordBytes, verifyLedger, wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
+import { verifyLedger, wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
 import { fromHex } from './bytes';
 
 /** Workspaces this vault can restore: the live entries of its authenticated index. */
@@ -117,6 +117,8 @@ export const readRecoveryHistory = Effect.fnUntraced(function* <P extends Recove
   return pages;
 });
 
+const RecoveryCheckpointSchema = Schema.Struct({ headHash: Schema.String, length: Schema.Number });
+
 /** Replay the complete served history from the package's genesis. Each call rereads it,
  * because a restore must see its own admission. */
 export const recoveryLedger =
@@ -127,16 +129,43 @@ export const recoveryLedger =
   () =>
     Effect.gen(function* () {
       const pages = yield* input.pages();
-      if (pages[0]?.startIndex !== 0)
-        return yield* Effect.fail(new RecoveryVaultError({ code: 'authentication' }));
-      const records = pages.flatMap((page) => page.recordsHex).map(fromHex);
-      return yield* Effect.fromResult(
-        verifyLedger({
-          anchor: input.genesis,
-          records,
-          checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
-        })
-      );
+      const { records, checkpoint } = yield* Effect.try({
+        try: () => {
+          const first = pages[0];
+          const point = Result.getOrThrow(
+            Schema.decodeUnknownResult(RecoveryCheckpointSchema)(first?.checkpoint)
+          );
+          if (
+            !Number.isSafeInteger(point.length) ||
+            point.length < 1 ||
+            pages.at(-1)?.nextCursor !== null
+          )
+            throw new Error('invalid recovery checkpoint');
+          const records: Uint8Array[] = [];
+          for (const page of pages) {
+            const boundary = Result.getOrThrow(
+              Schema.decodeUnknownResult(RecoveryCheckpointSchema)(page.checkpoint)
+            );
+            if (
+              page.startIndex !== records.length ||
+              boundary.headHash !== point.headHash ||
+              boundary.length !== point.length
+            )
+              throw new Error('inconsistent recovery page');
+            records.push(...page.recordsHex.map(fromHex));
+          }
+          if (records.length !== point.length) throw new Error('incomplete recovery history');
+          return {
+            records,
+            checkpoint: {
+              head: Result.getOrThrow(Bytes.recordHash(fromHex(point.headHash))),
+              length: point.length,
+            },
+          };
+        },
+        catch: () => new RecoveryVaultError({ code: 'authentication' }),
+      });
+      return yield* Effect.fromResult(verifyLedger({ anchor: input.genesis, records, checkpoint }));
     }) as Effect.Effect<LedgerView, unknown>;
 
 const restoreProgressKey = (workspaceId: string) => `restore-progress/${workspaceId}`;

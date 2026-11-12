@@ -264,6 +264,17 @@ revokes every other recovery device of the membership from the verified ledger, 
 whole-vault replacement. A restore stops unless the
 ledger contains the package's `head` and `length` checkpoint. A recovery device
 admits a new personal device, then that device installs every epoch key.
+Setup, personal restore and replacement revocation retain their signed originals
+on Pending or an unproven Conflict. Only verified history showing a different
+record at the saved position permits a new signature with the same device keys.
+If retention removed that hash, a genuine view at or beyond the position can
+instead prove the admission never happened through its complete device history,
+or the revocation never happened through the target's still-active state;
+CAS replaces the local journal before the next invocation submits it. Legacy setup
+journals recover the position from the signed predecessor in verified history
+only while registration is pending. An already active R reconciles its original
+submission even when retention removed the admission hash. Finished setup clears
+the original and position, retaining R's public key for explicit abandonment.
 Each private package is canonical CBOR with `formatVersion: 1`; a missing or
 other version, or private keys that are not the exact 48-byte RFC 8410 PKCS#8
 Ed25519/X25519 encodings, fail with `invalid-input` before upload and on read.

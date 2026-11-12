@@ -343,7 +343,9 @@ Recovery remains opt-in; opening an existing identity does not trigger it.
 
 An admitted session exposes explicit `setupRecovery`: signing and installed keys
 stay inside its owned boundary, and the result is recoverable only after core's
-real recovery test. `restoreRecovery` accepts an exact retained offer for a device
+real recovery test. Its key maintenance reads the latest verified epoch after setup
+advances the ledger. Recovery history rejects empty/incomplete pages and verifies
+the first page's declared checkpoint against the complete signed history. `restoreRecovery` accepts an exact retained offer for a device
 whose protected identity remains but workspace keys are missing; package pins still
 must match, and recovery never replaces the identity.
 

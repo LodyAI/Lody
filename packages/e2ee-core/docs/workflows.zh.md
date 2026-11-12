@@ -161,6 +161,8 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 `RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。passkey 需要一次报告 `enabled: true` 的注册，以及一次带用户验证并返回 32 字节 `results.first` 的认证；WebAuthn 在认证时从不报告 `enabled`。所有 ceremony 都使用 `vaultPrfInput()`，`user.id` 为 `passkeyUserHandle(vaultId)`，所以没有恢复文件的新设备可以从 ceremony 得知保险库。加密索引列出每个 passkey，CAS 引用它的包装，服务端不能把它当作未引用条目删除。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复。整库换新时，`revokeOtherRecoveryDevices` 依据已验证的账本撤销这个成员的其他恢复设备。恢复时：账本必须包含恢复包的 `head` 和 `length` 检查点，否则停止；恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
 
+设置、个人设备恢复和替换时的撤销操作在 Pending 或尚未证实的 Conflict 后保留签名原件。只有已验证历史证明原位置被其他记录占据，才可使用同一组设备密钥重签。压缩裁剪了该位置的哈希时，位置之后的真实视图可用完整设备历史证明目标从未被准入，或用目标仍有效的状态证明撤销从未发生；本地日志通过 CAS 替换后，由下一次调用提交。旧设置日志仅在未完成登记时回推位置；R 已有效时，即使准入哈希被裁剪，也可在原件提交对账后完成。完成登记后清理原件与位置，单独保留 R 公钥供显式放弃流程使用。
+
 ## 文档
 
 文档内容使用 content v0：签名头部，以由纪元密钥派生的文档密钥做 XChaCha20-Poly1305 加密，AAD 绑定用途。
