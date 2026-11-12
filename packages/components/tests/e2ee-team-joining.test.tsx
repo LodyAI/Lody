@@ -13,6 +13,7 @@ import { E2eeMemberJoin } from '../src/components/pages/e2ee-member-join';
 import {
   E2eeTeamSettings,
   E2eeTeamSettingsHost,
+  memberInvitationUrl,
 } from '../src/components/settings/e2ee-team-settings';
 import {
   E2eeTeamInboxHost,
@@ -22,6 +23,7 @@ import {
   desktopMemberJoinLink,
   memberJoinPath,
   parseMemberOffer,
+  sameMemberOffer,
 } from '../src/lib/e2ee-member-offer';
 import { resolveDesktopInviteDeepLinkPath } from '../src/lib/desktop-invite-deep-link';
 vi.mock('react-i18next', () => {
@@ -757,6 +759,71 @@ describe('encrypted team joining', () => {
       expect(create()).toBeUndefined();
     }
   );
+  it('matches signed pending offers with unsigned link pins in either order', () => {
+    const signed = { ...offer, signature: 'aa'.repeat(64) };
+    const parsed = parseMemberOffer(JSON.stringify(signed))!;
+    expect(parsed).toEqual(offer);
+    expect(sameMemberOffer(signed, parsed)).toBe(true);
+    expect(sameMemberOffer(parsed, signed)).toBe(true);
+    expect(sameMemberOffer(signed, { ...offer, signature: 'bb'.repeat(64) })).toBe(true);
+  });
+  it.each([
+    ['version', 2],
+    ['workspaceId', 'other'],
+    ['genesisHash', '99'.repeat(32)],
+    ['genesisRecordHex', 'cdef'],
+    ['endorser', '99'.repeat(32)],
+    ['token', '99'.repeat(32)],
+    ['mode', 'email'],
+    ['expiresAt', 3000],
+  ])('rejects a different %s when matching invitation pins', (key, value) => {
+    const changed = { ...offer, [key]: value } as E2eeMemberOffer;
+    expect(sameMemberOffer(offer, changed)).toBe(false);
+    expect(sameMemberOffer(changed, offer)).toBe(false);
+  });
+  it.each([2049, 8192])('accepts a %i-byte genesis through link and desktop handoff', (size) => {
+    const large = {
+      ...offer,
+      genesisRecordHex: 'ab'.repeat(size),
+      workspaceId: 'a'.repeat(128),
+      expiresAt: Number.MAX_SAFE_INTEGER,
+    };
+    expect(parseMemberOffer(JSON.stringify(large))).toEqual(large);
+    expect(resolveDesktopInviteDeepLinkPath(desktopMemberJoinLink(large))).toBe(
+      memberJoinPath(large)
+    );
+  });
+  it.each([
+    { genesisRecordHex: 'ab'.repeat(8193) },
+    { genesisRecordHex: '' },
+    { genesisRecordHex: 'abc' },
+    { genesisRecordHex: 'AB' },
+    { workspaceId: '' },
+    { workspaceId: 'a'.repeat(129) },
+    { workspaceId: 'team/name' },
+    { workspaceId: 'team name' },
+    { expiresAt: 0 },
+    { expiresAt: -1 },
+    { expiresAt: 1.5 },
+    { expiresAt: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects invitation pins outside the protocol bounds (case %#)', (invalid) => {
+    expect(parseMemberOffer(JSON.stringify({ ...offer, ...invalid }))).toBeNull();
+  });
+  it('accepts the minimum expiry and workspace identifier alphabet, but bounds total input', () => {
+    const minimum = { ...offer, workspaceId: 'Team_123-abc', expiresAt: 1 };
+    expect(parseMemberOffer(JSON.stringify(minimum))).toEqual(minimum);
+    expect(parseMemberOffer(JSON.stringify(offer).padEnd(20481, ' '))).toBeNull();
+  });
+  it('publishes only unsigned pins in browser, settings and desktop invitation links', () => {
+    const signed = { ...offer, signature: 'aa'.repeat(64), needsReissue: true };
+    for (const link of [memberJoinPath(signed), memberInvitationUrl(signed)]) {
+      const url = new URL(link, 'https://synthetic.test');
+      expect(JSON.parse(new URLSearchParams(url.hash.slice(1)).get('e2ee')!)).toEqual(offer);
+    }
+    const desktop = new URL(desktopMemberJoinLink(signed));
+    expect(JSON.parse(desktop.searchParams.get('memberOffer')!)).toEqual(offer);
+    expect(signed.signature).toBe('aa'.repeat(64));
+  });
   it('preserves independent genesis pins through desktop handoff and rejects a different token', () => {
     const path = resolveDesktopInviteDeepLinkPath(desktopMemberJoinLink(offer));
     expect(path).toBe(memberJoinPath(offer));
