@@ -38,7 +38,7 @@ import './zoomable-image-viewer.css';
  *
  * `react-photo-view@1.2.7` is patched in root `patches/` to hard-clamp the
  * minimum pinch scale at `1`. Do not replace that with an outer
- * `overlayRender`/React state clamp; that fights PhotoView's touch state.
+ * React state clamp (`overlayRender` here only captures `changeIndex`); that fights PhotoView's touch state.
  *
  * On a desktop-shaped surface the same viewer presents as a LIGHTBOX rather
  * than a full-bleed takeover (`zoomable-image-viewer.css`): the photo keeps an
@@ -476,12 +476,20 @@ function OpenZoomableImageViewer({
   );
   const { context, refs, elements } = useFloating({ open: true });
   const loops = images.length > 3;
-  const move = (offset: number) =>
-    onIndexChange?.(
-      loops
-        ? (index + offset + images.length) % images.length
-        : Math.max(0, Math.min(images.length - 1, index + offset))
-    );
+  // react-photo-view positions photos from its own internal offset, which only its
+  // `changeIndex` updates; calling `onIndexChange` directly would change the
+  // counter while the picture stayed put. Capture it from the overlay render prop.
+  const sliderChangeIndexRef = useRef<((index: number, pause?: boolean) => void) | null>(null);
+  const move = (offset: number) => {
+    const target = loops
+      ? index + offset
+      : Math.max(0, Math.min(images.length - 1, index + offset));
+    if (sliderChangeIndexRef.current) {
+      sliderChangeIndexRef.current(target, true);
+    } else {
+      onIndexChange?.(loops ? (target + images.length) % images.length : target);
+    }
+  };
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   useImagePreviewContextMenu(images, allowExport);
@@ -552,6 +560,10 @@ function OpenZoomableImageViewer({
             onClose={onClose}
             index={index}
             bannerVisible={false}
+            overlayRender={({ onIndexChange: changeIndex }) => {
+              sliderChangeIndexRef.current = changeIndex;
+              return null;
+            }}
             {...(onIndexChange ? { onIndexChange } : {})}
             maskClosable
             // The photo itself is the pan/zoom surface. Letting a tap close it makes
