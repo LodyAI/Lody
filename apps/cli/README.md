@@ -92,8 +92,9 @@ unknown results are not automatically retried. Restart owners after reset. Retry
 this command completes an interrupted reset using the same archive path.
 
 A clock error asks you to calibrate the system clock. Without trusted reference time,
-a bad observation can still reject new claims in its workspace until explicit reset;
-other workspaces and completed evidence remain available. Empty interrupted first
+claims use the current local clock, so correcting a bad forward observation recovers
+new claims without reset. Started request IDs still cannot execute twice, and
+completed evidence remains available. Empty interrupted first
 creation initializes automatically. An unknown schema is archived and reported,
 then waits for explicit reset. An incomplete current-format store still retires all
 readable request keys before archival; unreadable current request keys refuse reset

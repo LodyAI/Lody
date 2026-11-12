@@ -1,6 +1,6 @@
 # E2EE foundation boundary
 
-Status: approved
+Status: draft
 Translation: current
 
 Approved revision: [`122dfeaf`](https://github.com/LodyAI/Lody/blob/122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1/specs/e2ee-foundations.md)
@@ -358,7 +358,8 @@ it. When a read gets no answer, the machine's own member keeps the longer window
 counted from the same start. Intersect with request/upstream deadlines and reserve clock/stop margin;
 never wait on network under a global account lock. Restart discards this grant
 and requires online authenticated revalidation before new remote execution.
-Rollback or uncertain suspend/resume elapsed time invalidates the live cache.
+Use the greater wall/monotonic elapsed time, as specified in the outage decision;
+suspend or a wall-clock correction alone does not invalidate the live cache.
 Retained checkpoints and journal timestamps cannot restore execution freshness.
 Offline documents/editing and retained results remain available; expired freshness
 blocks new remote execution, not unrelated local work. Revalidation never restarts
@@ -367,11 +368,13 @@ an uncertain operation.
 The journal's **persistent expiry clock is a different mechanism**, not an
 execution grant. Per the owner decision of 2026-11-10 (approved), it applies only to
 feature requests: execution records carry no deadline, so no clock, skew check or floor
-applies to them. Current schema 3 retains a nondecreasing floor per
-`(genesis, workspaceId)` across reopen. With an independently authenticated current
-reference, claim rejects local time or the retained floor more than 600,000 ms
+applies to them. Current schema 3 retains an observation per `(genesis, workspaceId)` across
+reopen. With an independently authenticated current reference, claim rejects local time or the retained floor more than 600,000 ms
 ahead; accepted claims use `max(reference, retainedFloor)`. Without a reference,
-use `max(localNow, retainedFloor)` in that workspace. Never use frame timestamps
+use `localNow` and replace the observation, so an untrusted local peak cannot
+lock new requests after clock correction. A corrected clock may admit a previously
+unclaimed frame again within its original deadline; durable IDs still prevent
+any already-started request from executing twice. Never use frame timestamps
 as trusted time. Explicit evidence-preserving reset can clear a poisoned floor
 while retaining retired request IDs; it neither renews original deadlines nor
 restores freshness or replay authority. Follow the public

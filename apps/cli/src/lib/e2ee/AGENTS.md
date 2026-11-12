@@ -40,7 +40,7 @@
   No auto-replace/GC/archive replay/import. Exact originals/first outcome;
   uncertain=unknown/no takeover; independent IDs. Floors: genesis/workspace.
   Feature writes reject local >10min ahead of authenticated now, never frame
-  time; no reference: scoped max/reset. Execution records (`expiresAt` 0) skip that clock. Reset: stop owners, archive/new ID;
+  time; no reference: current local time, no retained peak. Execution records (`expiresAt` 0) skip that clock. Reset: stop owners, archive/new ID;
   keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
   failed main close. Bound permits/cleanup; reply before send; exact retries.
   `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer + host

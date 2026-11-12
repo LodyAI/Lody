@@ -558,7 +558,9 @@ export class RealtimeJournal {
               : 0;
             if (reference !== undefined && previous - reference > 600_000)
               throw new RealtimeJournalError('clock_skew');
-            const now = Math.max(reference ?? current, previous);
+            // Unauthenticated local peaks must not survive a clock correction.
+            // Durable request IDs, rather than wall time, prevent repeat execution.
+            const now = reference === undefined ? current : Math.max(reference, previous);
             db.prepare(`INSERT INTO realtime_clock (genesis, workspace_id, observed_at) VALUES (?, ?, ?)
               ON CONFLICT(genesis, workspace_id) DO UPDATE SET observed_at = excluded.observed_at`).run(
               request.genesis,

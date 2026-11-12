@@ -7697,6 +7697,23 @@ describe('machine execution authorization freshness', () => {
         })
       ));
 
+    it('keeps owner session reads for 24 hours, including after execution expires', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          for (const time of [5 * HOUR, 24 * HOUR - 1]) {
+            at(io, time);
+            expect(
+              yield* gate.authorizeSessionRead('workspace', fixture.sender, 'session')
+            ).toMatchObject({ _tag: 'Authorized' });
+          }
+          at(io, 24 * HOUR);
+          expect(yield* gate.authorizeSessionRead('workspace', fixture.sender, 'session')).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      ));
+
     it('ends a window on any other read failure until a read succeeds', () =>
       withOutage(({ fixture, gate, io }) =>
         Effect.gen(function* () {
@@ -7742,14 +7759,61 @@ describe('machine execution authorization freshness', () => {
       }
     });
 
-    it('ends a window when the clocks disagree about elapsed time', () =>
+    it('keeps execution and reads after a 30-minute suspend, then expires on wall time', () =>
       withOutage(({ fixture, gate, io }) =>
         Effect.gen(function* () {
-          io.monotonic = FIFTEEN_MINUTES;
-          io.wall = 2 * HOUR;
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+          io.wall = 30 * 60_000;
+          io.monotonic = 5_000;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.wall = 4 * HOUR - 1;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.wall++;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Denied',
-            reason: 'unavailable',
+          });
+          io.wall = 24 * HOUR - 1;
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.wall++;
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+        })
+      ));
+
+    it('uses monotonic elapsed time through a three-minute NTP rollback', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          io.wall = -3 * 60_000;
+          io.monotonic = 5_000;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.monotonic = 4 * HOUR - 1;
+          io.wall = io.monotonic - 3 * 60_000;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.monotonic++;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          io.monotonic = 24 * HOUR - 1;
+          io.wall = io.monotonic - 3 * 60_000;
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          io.monotonic++;
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
           });
         })
       ));
@@ -7831,51 +7895,21 @@ describe('machine execution authorization freshness', () => {
         })
       ));
 
-    it('needs a successful read after the clocks disagree', () =>
-      withOutage(({ fixture, gate, io }) =>
-        Effect.gen(function* () {
-          at(io, FIFTEEN_MINUTES);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
-            _tag: 'Authorized',
-          });
-          at(io, FIFTEEN_MINUTES + 120_000);
-          io.wall += 2 * HOUR;
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
-            _tag: 'Denied',
-            reason: 'unavailable',
-          });
-          at(io, FIFTEEN_MINUTES + 240_000);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
-            _tag: 'Denied',
-            reason: 'unavailable',
-          });
-          io.respond = async () => page(fixture.records);
-          at(io, FIFTEEN_MINUTES + 360_000);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
-            _tag: 'Authorized',
-          });
-        })
-      ));
-
-    it('ends the window when a held authorization sees the clocks disagree', () =>
+    it('keeps a held authorization through suspend and clock correction', () =>
       withOutage(({ fixture, gate, io }) =>
         Effect.gen(function* () {
           at(io, FIFTEEN_MINUTES);
           const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
           if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
-          io.wall += 2 * HOUR;
-          expect(granted.isCurrent?.()).toBe(false);
-          at(io, FIFTEEN_MINUTES + 120_000);
-          expect(granted.isCurrent?.()).toBe(false);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
-            _tag: 'Denied',
-            reason: 'unavailable',
-          });
-          io.respond = async () => page(fixture.records);
-          at(io, FIFTEEN_MINUTES + 240_000);
+          io.wall += 30 * 60_000;
+          expect(granted.isCurrent?.()).toBe(true);
+          io.wall -= 3 * 60_000;
+          expect(granted.isCurrent?.()).toBe(true);
           expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
+          io.monotonic = 4 * HOUR;
+          expect(granted.isCurrent?.()).toBe(false);
         })
       ));
 
@@ -7905,6 +7939,79 @@ describe('machine execution authorization freshness', () => {
           });
         })
       ));
+
+    it('keeps shared execution and session reads within 15 minutes without an extended-window notice', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'execution-outage-shared-'));
+      try {
+        await execute(
+          Effect.gen(function* () {
+            const { fixture, makeGate, io } = yield* executionFixture(directory, 3);
+            const state = fixture.current.inspectState();
+            const member = [...state.devices].find(
+              ([, device]) =>
+                state.members.get(hex(device.membershipId.toBytes()))?.role === 'member'
+            );
+            if (!member) throw new Error('missing member device');
+            const [requester] = member;
+            let shared = true;
+            const notices: boolean[] = [];
+            const gate = yield* makeGate(
+              () => Effect.succeed({ allowed: shared, isCurrent: () => shared }),
+              (active) => notices.push(active),
+              (_device, session) =>
+                Effect.succeed({ allowed: shared && session === 'shared', isCurrent: () => shared })
+            );
+            yield* gate.refreshLedger;
+            io.respond = async () => {
+              throw new CloudE2eeLedgerOutage();
+            };
+            at(io, 60_000);
+            const execution = yield* gate.authorizeExecution('workspace', requester);
+            const read = yield* gate.authorizeSessionRead('workspace', requester, 'shared');
+            expect(execution).toMatchObject({ _tag: 'Authorized', principal: 'member' });
+            expect(read).toMatchObject({ _tag: 'Authorized' });
+            if (execution._tag !== 'Authorized' || read._tag !== 'Authorized')
+              throw new Error('missing shared grants');
+            expect(execution.isCurrent?.()).toBe(true);
+            expect(read.isCurrent?.()).toBe(true);
+            expect(
+              yield* gate.authorizeSessionRead('workspace', requester, 'private')
+            ).toMatchObject({ _tag: 'Denied' });
+            shared = false;
+            expect(execution.isCurrent?.()).toBe(false);
+            expect(read.isCurrent?.()).toBe(false);
+            expect(yield* gate.authorizeExecution('workspace', requester)).toMatchObject({
+              _tag: 'Denied',
+            });
+            expect(
+              yield* gate.authorizeSessionRead('workspace', requester, 'shared')
+            ).toMatchObject({ _tag: 'Denied' });
+            shared = true;
+            at(io, FIFTEEN_MINUTES - 1);
+            expect(yield* gate.authorizeExecution('workspace', requester)).toMatchObject({
+              _tag: 'Authorized',
+            });
+            expect(
+              yield* gate.authorizeSessionRead('workspace', requester, 'shared')
+            ).toMatchObject({ _tag: 'Authorized' });
+            at(io, FIFTEEN_MINUTES);
+            expect(execution.isCurrent?.()).toBe(false);
+            expect(read.isCurrent?.()).toBe(false);
+            expect(yield* gate.authorizeExecution('workspace', requester)).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+            expect(yield* gate.authorizeSessionRead('workspace', requester, 'shared')).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+            expect(notices).toEqual([]);
+          })
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
 
     it('keeps another member at 15 minutes', async () => {
       const directory = await mkdtemp(join(tmpdir(), 'execution-outage-member-'));
@@ -8610,7 +8717,7 @@ describe('machine execution authorization freshness', () => {
     }
   });
 
-  it('rejects rollback, corrupted pages and reads that exhaust their freshness budget; keeps other owners usable', async () => {
+  it('rejects ledger rollback, corrupted pages and exhausted reads; tolerates wall-clock correction', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'execution-isolation-'));
     try {
       await execute(
@@ -8646,9 +8753,13 @@ describe('machine execution authorization freshness', () => {
           ).toMatchObject({
             _tag: 'Authorized',
           });
-          // Wall-clock rollback cannot lengthen the monotonic lease.
-          first.io.wall -= 1;
+          // A wall-clock correction keeps the fresh grant, but cannot extend its monotonic limit.
+          first.io.wall -= 3 * 60_000;
           first.io.offline = true;
+          expect(
+            yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
+          ).toMatchObject({ _tag: 'Authorized' });
+          first.io.monotonic += 900_000;
           expect(
             yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
           ).toMatchObject({ _tag: 'Denied' });
@@ -9064,10 +9175,15 @@ it.each([false, true])(
   }
 );
 
-it.each(['team', 'individual', 'private'] as const)(
-  'uses the same expiring session-read admission for the Roost history method (%s)',
-  async (audience) => {
-    const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+it.each(
+  (['streams', 'iroh'] as const).flatMap((route) =>
+    (['team', 'individual', 'private'] as const).map((audience) => ({ route, audience }))
+  )
+)(
+  'uses the same expiring session-read admission for history ($route, $audience)',
+  async ({ route, audience }) => {
+    const { makeEncryptedFeatureReceiver, makeEncryptedFeatureAuthorization } =
+      await import('../src/lib/e2ee/feature-rpc');
     const { E2eeFeatureInputSchema } = await import('@lody/shared/e2ee-rpc');
     const directory = await mkdtemp(join(tmpdir(), 'backend-neutral-history-'));
     const outcome = Promise.withResolvers<'published' | 'denied'>();
@@ -9152,18 +9268,21 @@ it.each(['team', 'individual', 'private'] as const)(
             journal: () => {
               throw new Error('history must not enter the execution journal');
             },
-            // No general read/execution permission: only exact-session admission may pass.
-            authorize: gate.authorizeOwnedExecution,
-            authorizeRead: gate.authorizeRead,
-            authorizeHistoryRead: (workspace, device, session) =>
-              gate.authorizeSessionRead(workspace, device, session).pipe(
-                Effect.tap((verdict) =>
-                  Effect.sync(() => {
-                    if (verdict._tag === 'Denied') outcome.resolve('denied');
-                  })
-                )
-              ),
-            authoritySignal: () => new AbortController().signal,
+            ...makeEncryptedFeatureAuthorization({
+              authorization: {
+                ...gate,
+                authorizeSessionRead: (workspace, device, session, owner) =>
+                  gate.authorizeSessionRead(workspace, device, session, owner).pipe(
+                    Effect.tap((verdict) =>
+                      Effect.sync(() => {
+                        if (verdict._tag === 'Denied') outcome.resolve('denied');
+                      })
+                    )
+                  ),
+              },
+              executionAuthoritySignal: () => new AbortController().signal,
+              resolveHistoryTarget: async () => ({ rootSessionId: 'roost-root' }),
+            }),
             isOpen: () => true,
             handle: async (request, context) => {
               if (request.method !== 'session/history-read' || !context.authority?.isCurrent())
@@ -9172,21 +9291,40 @@ it.each(['team', 'individual', 'private'] as const)(
               bodies.push(result);
               return { ok: true, result };
             },
-            client: {
-              ensureJsonStream: async () => {},
-              appendJson: async () => {
-                outcome.resolve('published');
-                return '1';
-              },
-              readJsonLive: async () => {
-                throw new Error('unused');
-              },
-            },
+            client:
+              route === 'streams'
+                ? {
+                    ensureJsonStream: async () => {},
+                    appendJson: async () => {
+                      outcome.resolve('published');
+                      return '1';
+                    },
+                    readJsonLive: async () => {
+                      throw new Error('unused');
+                    },
+                  }
+                : undefined,
           });
-          yield* feature({ id: input.requestId, frame: 'synthetic' });
+          const delivered: Uint8Array[] = [];
+          yield* feature(
+            { id: input.requestId, frame: 'synthetic' },
+            route === 'iroh'
+              ? {
+                  deliver: async (_id, frame) => {
+                    delivered.push(frame);
+                    outcome.resolve('published');
+                  },
+                  end: async () => {
+                    outcome.resolve('denied');
+                  },
+                }
+              : undefined
+          );
           expect(yield* Effect.promise(() => outcome.promise)).toBe(
             audience === 'private' ? 'denied' : 'published'
           );
+          if (route === 'iroh')
+            expect(delivered).toEqual(audience === 'private' ? [] : [new Uint8Array(143).fill(1)]);
         })
       );
       if (audience === 'private') expect(bodies).toEqual([]);
