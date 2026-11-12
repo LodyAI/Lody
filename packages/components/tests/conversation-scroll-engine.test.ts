@@ -241,6 +241,123 @@ describe('following', () => {
   });
 });
 
+describe('manual disclosures', () => {
+  const header: SimRow = {
+    key: 'tool-header',
+    turnId: 'tool-turn',
+    turnIndex: 20,
+    itemIndex: 0,
+    height: 32,
+    estimate: 32,
+  };
+  const prefix = turnRows(
+    20,
+    () => 100,
+    () => 100
+  );
+  const tail = turnRows(
+    3,
+    () => 100,
+    () => 100,
+    'tail'
+  );
+  const rows = (expanded: boolean) => [
+    ...prefix,
+    { ...header, height: expanded ? 832 : 32 },
+    ...tail,
+  ];
+  const screenY = (sim: ScrollSim) => sim.contentTop + 2000 - sim.readScrollTop();
+  const setup = () => {
+    const sim = new ScrollSim(rows(false), V);
+    sim.render();
+    sim.settle();
+    return sim;
+  };
+
+  it('holds the clicked header when expanding from follow and while later output grows', () => {
+    const sim = setup();
+    const before = screenY(sim);
+    sim.task(() => sim.controller.preserveDisclosure(header.key, 0));
+    sim.render(rows(true));
+    sim.settle();
+    expect(sim.controller.mode).toBe('read');
+    expect(screenY(sim)).toBe(before);
+    sim.render([
+      ...rows(true),
+      ...turnRows(
+        2,
+        () => 200,
+        () => 200,
+        'new-output'
+      ),
+    ]);
+    sim.settle();
+    expect(screenY(sim)).toBe(before);
+    expectHealthy(sim);
+  });
+
+  it('does not let the previous downward scroll end resume following after a toggle', () => {
+    const sim = setup();
+    sim.task(() => sim.controller.release('reader-up'));
+    sim.nativeScroll(sim.readScrollTop() - 100);
+    sim.settle();
+    sim.controller.onReaderInput(false);
+    sim.nativeScroll(sim.maxTop());
+    sim.settle();
+    sim.task(() => sim.controller.preserveDisclosure(header.key, 0));
+    sim.task(() => sim.controller.onScrollEnd());
+    expect(sim.controller.mode).toBe('read');
+    const before = screenY(sim);
+    sim.render(rows(true));
+    sim.settle();
+    expect(screenY(sim)).toBe(before);
+    expectHealthy(sim);
+  });
+
+  it('reserves bounded space when a collapse near the end would clamp away the header', () => {
+    const sim = setup();
+    sim.task(() => sim.controller.preserveDisclosure(header.key, 0));
+    sim.render(rows(true));
+    sim.settle();
+    sim.controller.onReaderInput(false);
+    sim.nativeScroll(sim.readScrollTop() + screenY(sim) - 20);
+    sim.settle();
+    expect(screenY(sim)).toBe(20);
+    sim.task(() => sim.controller.preserveDisclosure(header.key, 0));
+    sim.render(rows(false));
+    sim.settle();
+    expect(screenY(sim)).toBe(20);
+    expect(sim.replyRoom).toBeGreaterThan(0);
+    expect(sim.replyRoom).toBeLessThanOrEqual(V);
+    sim.controller.onReaderInput(true);
+    sim.nativeScroll(sim.readScrollTop() - 100);
+    sim.settle();
+    expect(sim.replyRoom).toBeLessThan(224);
+    sim.task(() => sim.controller.scrollToBottom());
+    sim.settle();
+    expect(sim.replyRoom).toBe(0);
+    expect(sim.controller.mode).toBe('follow');
+    expectHealthy(sim);
+  });
+
+  it.each([false, true])(
+    'only reveals a mobile preview when details are entirely outside (hidden=%s)',
+    (hidden) => {
+      const sim = setup();
+      sim.controller.onReaderInput(true);
+      if (hidden) sim.nativeScroll(sim.readScrollTop() - (V - screenY(sim) - 32));
+      sim.settle();
+      const before = screenY(sim);
+      sim.task(() => sim.controller.preserveDisclosure(header.key, 0, 32));
+      sim.render(rows(true));
+      sim.settle();
+      expect(screenY(sim)).toBe(hidden ? before - 96 : before);
+      expect(sim.controller.mode).toBe('read');
+      expectHealthy(sim);
+    }
+  );
+});
+
 describe('reading', () => {
   it('keeps the row under the reader in place when rows above change size or expand', () => {
     let rows = turnRows(

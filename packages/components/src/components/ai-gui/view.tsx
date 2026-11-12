@@ -1883,10 +1883,8 @@ export const SessionChatStreamView = forwardRef<
             [groupKey]: expanded,
           },
         });
-        // Toggling must not scroll: the header stays where the reader clicked
-        // and the rows open or fold beneath it. The scroll engine keeps a
-        // non-following reader from being pulled to the end by the commit's
-        // observer deliveries; a reader following the tail is left there.
+        // The disclosure marker lets the scroll engine hold the clicked header
+        // before these rows change, including when the reader was following.
         setAssistantExpansionVersion((version) => version + 1);
       },
       []
@@ -4934,6 +4932,7 @@ function ProcessDisclosureButton({
         onExpandedChange(next);
       }}
       aria-expanded={expanded}
+      data-conversation-disclosure="group"
     >
       {/* Label first on every layout: it starts on the prose rail, and the
           chevron (always shown on touch, hover-only on desktop) trails it. */}
@@ -7622,6 +7621,7 @@ const CollapsibleCard = ({
         )}
         onClick={canToggle ? () => setExpanded(!isExpanded) : onActivate}
         aria-expanded={canToggle ? isExpanded : undefined}
+        data-conversation-disclosure={canToggle ? 'inline' : undefined}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {canToggle && showDisclosureIcon ? (

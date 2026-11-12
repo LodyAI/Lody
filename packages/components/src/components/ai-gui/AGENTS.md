@@ -16,6 +16,7 @@ Ownership: [README.md](README.md).
   facts; its selection has no history lease.
   Map history indexes to rows. Collapsed activity is one row; expanded details
   are siblings, never nested scrollers or fixed-height panels.
+  Manual disclosure scrolling follows [the header-position contract](README.md#manual-disclosures).
 - Native selection retains its row corridor and history leases: hold prose/folding,
   keep actions live, release on clear. [Contract](README.md#native-text-selection).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
