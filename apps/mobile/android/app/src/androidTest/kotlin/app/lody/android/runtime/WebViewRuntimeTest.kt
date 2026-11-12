@@ -66,6 +66,32 @@ class WebViewRuntimeTest {
         waitFor(runtime) { it.phase==RuntimePhase.READY && it.acknowledgements>0 }
         main { assertEquals(generation,runtime.status.generation); assertEquals(0,runtime.status.automaticRestarts) }
     }
+    @Test fun catalogAlreadyPostedAtSuspensionKeepsItsRevisionPairWithoutRebuilding() = withRuntime { diagnostics ->
+        val runtime = diagnostics.runtime
+        val received = java.util.concurrent.CopyOnWriteArrayList<RuntimeEmission>()
+        val latch = CountDownLatch(2)
+        lateinit var subscription: AutoCloseable
+        var generation = 0L
+        main {
+            generation = runtime.status.generation
+            subscription = runtime.observeEvents { received.add(it); latch.countDown() }
+            val catalog = org.json.JSONObject().put("type", "catalog").put("revision", 1)
+                .put("catalog", """{"projects":[],"sessions":[],"machineIds":[]}""")
+            runtime.request("event", JSONArray().put(catalog)) {}
+            runtime.request("event", JSONArray().put(org.json.JSONObject().put("type", "synced").put("revision", 1).put("streams", 1))) {}
+            // Bridge callbacks run on this same executor, after suspension is applied.
+            runtime.setActive(false)
+        }
+        try {
+            assertTrue("Catalog pair was dropped during suspension", latch.await(10, TimeUnit.SECONDS))
+            assertEquals(listOf(generation, generation), received.map { it.generation })
+            assertTrue(received[0].event is RuntimeEvent.CatalogUpdated)
+            assertTrue(received[1].event is RuntimeEvent.Synced)
+            main { assertEquals(RuntimePhase.SUSPENDED, runtime.status.phase); runtime.setActive(true) }
+            waitFor(runtime) { it.phase == RuntimePhase.READY && it.acknowledgements > 0 }
+            main { assertEquals(generation, runtime.status.generation); assertEquals(0, runtime.status.automaticRestarts) }
+        } finally { main { subscription.close() } }
+    }
     @Test fun navigationCannotEscapeTheBundledDocument() = withRuntime { diagnostics ->
         main { diagnostics.runtime.request("navigate") {} }
         waitFor(diagnostics.runtime) { it.blockedNavigations>0 }
@@ -77,6 +103,7 @@ class WebViewRuntimeTest {
     @Test fun nativeWatchdogRecoversWhenJavascriptStopsResponding() = withRuntime { diagnostics ->
         main { diagnostics.stall {} }
         waitFor(diagnostics.runtime) { it.automaticRestarts==1 && it.phase==RuntimePhase.READY }
+        main { assertEquals("watchdog_timeout", diagnostics.runtime.status.recoveryReason) }
     }
     @Test fun pendingCommandsHaveNativeTimeouts() = withRuntime { diagnostics ->
         val latch=CountDownLatch(1)

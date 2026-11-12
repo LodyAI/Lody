@@ -8,8 +8,8 @@ Read before changing the catalog repository, its stores, persistence or connecti
 
 - Cached account/workspace context is unverified. Grant requests require online account validation. Login switching, logout and credential revocation cancel owned work before clearing projections. Network failures retain cached display, never label it LIVE.
 
-- Only a matching catalog + synced event pair may persist. Stamp `RuntimeEmission.generation` at native receipt before buffering; never infer the origin generation at collection time. Revisions restart per generation.
+- Only a matching catalog + synced event pair may persist. Stamp `RuntimeEmission.generation` at native receipt before buffering; never infer the origin generation at collection time. Revisions restart per generation. Preserve the confirmed sync or failure across same-generation suspension; READY alone cannot clear either. Catalog pairs already posted before suspension remain consumable, with PAUSED presentation until foreground resumes. Unchanged confirmed snapshots do not rewrite the cache unless a previous write failed.
 
 - Persist with a scope-owned conflated worker; disk latency must not backpressure cloud event delivery. Cancel and join the worker before clearing/switching its scope.
 
-- RuntimeLifecycle owns one process-lifetime network subscription. Network validation is a recovery hint for an unavailable read lease, not proof of cloud liveness; backgrounding never registers another callback or starts recovery work.
+- RuntimeLifecycle owns one process-lifetime network subscription. Network validation is a recovery hint for an unavailable read lease, not proof of cloud liveness; backgrounding never registers another callback or starts recovery work. Preserve a matching STARTING, READY or SUSPENDED lease while its runtime owns transient read/grant retries. A terminal `catalog_limit` failure ends the catalog watcher even when the WebView remains READY, so a foreground/network hint may replace that lease. Later transient failures must not overwrite that terminal recovery reason within the same generation. Otherwise replace only an absent or unusable lease.

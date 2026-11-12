@@ -20,6 +20,8 @@ data class RuntimeStatus(
     val generation: Long = 0,
     val acknowledgements: Int = 0,
     val automaticRestarts: Int = 0,
+    /** Last automatic recovery's fixed code; retained after the replacement becomes ready. */
+    val recoveryReason: String? = null,
     val blockedNavigations: Int = 0,
     val failure: String? = null,
     val capabilities: Set<String> = emptySet(),
