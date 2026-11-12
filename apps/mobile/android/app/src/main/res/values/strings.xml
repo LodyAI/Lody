@@ -57,6 +57,8 @@
     <string name="home_group_running">Running</string>
     <string name="home_group_pull_request">Open pull requests</string>
     <string name="home_group_idle">Idle</string>
+    <string name="home_group_expand">Expand group</string>
+    <string name="home_group_collapse">Collapse group</string>
     <string name="home_group_show_less">Show less</string>
     <string name="home_ci_pass">CI passed</string>
     <string name="home_ci_fail">CI failed</string>

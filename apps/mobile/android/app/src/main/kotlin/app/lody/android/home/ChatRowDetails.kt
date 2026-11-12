@@ -60,6 +60,19 @@ object FoldedOpeners {
     }
 }
 
+/** Home group labels the person collapsed, by section id; archived buckets are prefixed. iOS: `ChatGroupFolds`. */
+object CollapsedGroups {
+    private const val FILE = "home"
+    private const val KEY = "collapsedGroups"
+
+    fun load(context: Context): Set<String> =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getStringSet(KEY, null)?.toSet().orEmpty()
+
+    fun save(context: Context, ids: Set<String>) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putStringSet(KEY, ids).apply()
+    }
+}
+
 object ChatRowDetails {
     private const val FILE = "home"
     private const val KEY = "chatRowDetails"
