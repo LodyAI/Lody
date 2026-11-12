@@ -14,6 +14,8 @@ import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
 import {
   createPreparedE2eeWorkspace,
+  deleteSavedE2eeCreation,
+  E2eeCreationDeleteError,
   e2eeCreationChoice,
   e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
@@ -153,6 +155,7 @@ function CreateWorkspaceAuthed({
   const postHog = usePostHog();
   const {
     createOrganization,
+    deleteOrganization,
     organizations,
     loading: organizationsLoading,
     activeOrganization,
@@ -178,6 +181,7 @@ function CreateWorkspaceAuthed({
   );
   const [workspaceName, setWorkspaceName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [billingInterval, setBillingInterval] = useState<'month' | 'year'>('year');
   const creationAvailability = useCloudQuery(
@@ -234,6 +238,7 @@ function CreateWorkspaceAuthed({
     setPendingRequests([]);
     setArchivedRequests([]);
     setCreating(false);
+    setDeletingRequestId(null);
     setEncrypted(false);
     setIntentReadFailed(false);
     if (!accountId) return;
@@ -632,8 +637,61 @@ function CreateWorkspaceAuthed({
     }
   };
 
-  const handleArchiveRequest = (requestId: string, archived: boolean) => {
+  const handleDeleteRequest = async (requestId: string) => {
     if (!accountId || submitInFlight.current || creating || intentAccount !== accountId) return;
+    const request = [...pendingRequests, ...archivedRequests].find(
+      (item) => item.requestId === requestId && item.accountId === accountId
+    );
+    const port = platform.e2eeWorkspaces;
+    if (!request) return;
+    if (!port?.prepareCreation) {
+      setError(t('e2ee.create.deleteFailed'));
+      return;
+    }
+    submitInFlight.current = true;
+    setDeletingRequestId(requestId);
+    setError(null);
+    try {
+      await deleteSavedE2eeCreation({
+        port,
+        storage: localStorage,
+        pending: request,
+        deleteWorkspace: deleteOrganization,
+        isCurrent: () => accountRef.current === accountId,
+      });
+      if (accountRef.current !== accountId) return;
+      if (pendingCreationRef.current?.requestId === requestId) detachFromRequest();
+    } catch (err) {
+      if (accountRef.current !== accountId) return;
+      console.error('Failed to delete saved creation request:', err);
+      setError(
+        err instanceof E2eeCreationDeleteError && err.stage === 'delete'
+          ? t('e2ee.create.deleteWorkspaceFailed')
+          : t('e2ee.create.deleteFailed')
+      );
+    } finally {
+      submitInFlight.current = false;
+      if (accountRef.current === accountId) {
+        setDeletingRequestId(null);
+        try {
+          applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
+          setIntentReadFailed(false);
+        } catch {
+          setIntentReadFailed(true);
+        }
+      }
+    }
+  };
+
+  const handleArchiveRequest = (requestId: string, archived: boolean) => {
+    if (
+      !accountId ||
+      submitInFlight.current ||
+      creating ||
+      deletingRequestId ||
+      intentAccount !== accountId
+    )
+      return;
     const request = (archived ? pendingRequests : archivedRequests).find(
       (item) => item.requestId === requestId && item.accountId === accountId
     );
@@ -672,6 +730,7 @@ function CreateWorkspaceAuthed({
       fieldsDisabled={Boolean(currentPending)}
       submitDisabled={
         !accountId ||
+        deletingRequestId !== null ||
         intentBlocked ||
         intentAccount !== accountId ||
         (useEncryption &&
@@ -692,12 +751,16 @@ function CreateWorkspaceAuthed({
             archivedRequests={archivedRequests.filter((request) => request.accountId === accountId)}
             onArchiveRequest={(requestId) => handleArchiveRequest(requestId, true)}
             onRestoreRequest={(requestId) => handleArchiveRequest(requestId, false)}
+            onDeleteRequest={(requestId) => {
+              void handleDeleteRequest(requestId);
+            }}
+            deletingRequestId={deletingRequestId}
             selectedRequestId={currentPending?.requestId ?? null}
             onSelectRequest={(requestId) => {
               const pending = pendingRequests.find(
                 (request) => request.requestId === requestId && request.accountId === accountId
               );
-              if (!pending || creating) return;
+              if (!pending || creating || deletingRequestId) return;
               setPendingCreation(pending);
               setWorkspaceName(pending.name);
               setWorkspaceSlug(pending.slug);

@@ -2,7 +2,10 @@ import type { PlatformE2eeWorkspaces } from '@lody/platform';
 import {
   clearPendingE2eeWorkspace,
   listPendingE2eeWorkspaces,
+  listPendingE2eeWorkspacesByArchive,
   saveE2eeGenesisPin,
+  savePendingE2eeWorkspace,
+  setPendingE2eeWorkspaceArchived,
   retainWorkspaceModeProof,
   type PendingE2eeWorkspace,
 } from './e2ee-workspace-storage';
@@ -19,6 +22,8 @@ const UNRESERVED_REFUSALS = new Set([
   'e2ee_genesis_already_bound',
   'e2ee_account_identity_conflict',
   'workspace_slug_taken',
+  // Checked only after no retained reservation exists for the request ID.
+  'free_workspace_limit_reached',
 ]);
 
 /** The server error code of a Convex error, if any. */
@@ -50,32 +55,12 @@ export function pendingCreationRemoved(
   }
 }
 
-/** Destructive discard runs only after the explicit confirmation. */
-export function clearConfirmedPendingCreation(
-  storage: Storage,
-  pending: PendingE2eeWorkspace | null,
-  confirmed: boolean
-): boolean {
-  if (!confirmed || !pending) return false;
-  clearPendingE2eeWorkspace(storage, pending);
-  return true;
-}
-
 /** Only the account that saved this request may resume or discard it. */
 export function canResumePendingCreation(
   pending: PendingE2eeWorkspace | null,
   accountId: string | null
 ): boolean {
   return Boolean(pending && accountId && pending.accountId === accountId);
-}
-
-/** While a submit is in flight, the discard action stays unavailable. */
-export function canDiscardPendingCreation(
-  creating: boolean,
-  pending: PendingE2eeWorkspace | null,
-  accountId: string | null
-): boolean {
-  return !creating && canResumePendingCreation(pending, accountId);
 }
 
 /** A pending request has already been submitted: its slug and free slot may
@@ -204,4 +189,59 @@ export function keepSameRequestLists(
   return same(previous.active, next.active) && same(previous.archived, next.archived)
     ? previous
     : next;
+}
+
+/** Which step of a saved-request deletion failed. `reconcile`: the server result of
+ * the request could not be confirmed. `delete`: the request had created a workspace
+ * that could not be deleted. Either way the saved request is kept. */
+export class E2eeCreationDeleteError extends Error {
+  constructor(
+    readonly stage: 'reconcile' | 'delete',
+    options?: ErrorOptions
+  ) {
+    super(`Saved encrypted creation request could not be deleted (${stage})`, options);
+    this.name = 'E2eeCreationDeleteError';
+  }
+}
+
+/**
+ * Delete a saved creation request for good, including any workspace it already
+ * created on the server, so it no longer occupies a workspace slot.
+ *
+ * The server may hold a reservation (and therefore a workspace) even when this
+ * device never saw the result, so the same request is first reconciled with its
+ * original identity. A refusal proving nothing was reserved removes it locally;
+ * a created workspace goes through the ordinary workspace deletion. Any unknown
+ * outcome keeps the request saved (and archived, if it was) and throws.
+ */
+export async function deleteSavedE2eeCreation(input: {
+  port: PlatformE2eeWorkspaces;
+  storage: Storage;
+  pending: PendingE2eeWorkspace;
+  deleteWorkspace: (workspaceId: string) => Promise<unknown>;
+  /** False once the signed-in account changed; a created workspace is then kept. */
+  isCurrent: () => boolean;
+}): Promise<{ deletedWorkspaceId: string | null }> {
+  const { port, storage, pending } = input;
+  const wasArchived = listPendingE2eeWorkspacesByArchive(storage, pending.accountId).archived.some(
+    (request) => request.requestId === pending.requestId
+  );
+  let workspaceId: string;
+  try {
+    workspaceId = (await createPreparedE2eeWorkspace(port, storage, pending)).workspaceId;
+  } catch (cause) {
+    if (pendingCreationRemoved(storage, pending.accountId, pending.requestId))
+      return { deletedWorkspaceId: null };
+    throw new E2eeCreationDeleteError('reconcile', { cause });
+  }
+  try {
+    if (!input.isCurrent()) throw new Error('Account changed');
+    await input.deleteWorkspace(workspaceId);
+  } catch (cause) {
+    // The workspace exists; keep the request so deletion can be retried here.
+    savePendingE2eeWorkspace(storage, pending);
+    if (wasArchived) setPendingE2eeWorkspaceArchived(storage, pending, true);
+    throw new E2eeCreationDeleteError('delete', { cause });
+  }
+  return { deletedWorkspaceId: workspaceId };
 }

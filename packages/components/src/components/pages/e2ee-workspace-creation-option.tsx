@@ -79,6 +79,8 @@ export function E2eeWorkspaceCreationOption(props: {
   onSelectRequest?: (requestId: string) => void;
   onArchiveRequest?: (requestId: string) => void;
   onRestoreRequest?: (requestId: string) => void;
+  onDeleteRequest?: (requestId: string) => void;
+  deletingRequestId?: string | null;
   defaultArchiveOpen?: boolean;
   onNewRequest?: () => void;
   /** Stop resuming the selected saved request (kept in the list) and edit freely. */
@@ -157,14 +159,24 @@ export function E2eeWorkspaceCreationOption(props: {
             onSelectRequest={(requestId) => props.onSelectRequest?.(requestId)}
             onArchiveRequest={(requestId) => props.onArchiveRequest?.(requestId)}
             onRestoreRequest={(requestId) => props.onRestoreRequest?.(requestId)}
+            onDeleteRequest={(requestId) => props.onDeleteRequest?.(requestId)}
+            deletingRequestId={props.deletingRequestId ?? null}
           />
           {props.onNewRequest && (
-            <Button variant="ghost" disabled={props.disabled} onClick={props.onNewRequest}>
+            <Button
+              variant="ghost"
+              disabled={props.disabled || Boolean(props.deletingRequestId)}
+              onClick={props.onNewRequest}
+            >
               {t('e2ee.create.newRequest')}
             </Button>
           )}
           {props.onSetAside && (
-            <Button variant="ghost" disabled={props.disabled} onClick={props.onSetAside}>
+            <Button
+              variant="ghost"
+              disabled={props.disabled || Boolean(props.deletingRequestId)}
+              onClick={props.onSetAside}
+            >
               {t('e2ee.create.setAside')}
             </Button>
           )}

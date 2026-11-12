@@ -39,6 +39,8 @@ const fixture = vi.hoisted(() => ({
   referralListeners: new Set<() => void>(),
   createOrganization: undefined as unknown as (name: string, slug: string) => Promise<unknown>,
   create: undefined as unknown as PlatformE2eeWorkspaces['create'],
+  // Synthetic server workspaces that count against the account's allowance.
+  serverWorkspaces: new Set<string>(),
 }));
 
 vi.mock('@tanstack/react-router', async (original) => ({
@@ -125,6 +127,9 @@ vi.mock('@/hooks/useStableSession', () => ({
 vi.mock('@/hooks/useOrganization', () => ({
   useOrganization: () => ({
     createOrganization: (name: string, slug: string) => fixture.createOrganization(name, slug),
+    deleteOrganization: async (id: string) => {
+      if (!fixture.serverWorkspaces.delete(id)) throw new Error('no such workspace');
+    },
     organizations: fixture.organizations,
     loading: false,
     activeOrganization: fixture.activeOrganization,
@@ -155,7 +160,10 @@ vi.mock('../src/providers/convex-provider', () => ({
   },
 }));
 vi.mock('@/lib/native-platform', () => ({ isNativeAppShell: () => false }));
-vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => false }));
+vi.mock('@/lib/electron', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/electron')>()),
+  isElectronRenderer: () => false,
+}));
 vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => false }));
 
 import { Route } from '../src/routes/workspace/create';
@@ -179,6 +187,7 @@ beforeEach(() => {
   fixture.activeOrganization = null;
   fixture.creationEnabled = false;
   fixture.referralLead = false;
+  fixture.serverWorkspaces = new Set();
   stable.availability.canCreateFree = true;
   fixture.createOrganization = vi.fn(async (name: string, slug: string) => ({
     id: 'w',
@@ -573,5 +582,67 @@ describe('archiving saved encrypted creation requests', () => {
     expect(byArchive()).toEqual({ active: [pending], archived: [] });
     expect(input('workspace-name').value).toBe('Saved');
     expect(input('workspace-name').disabled).toBe(true);
+  });
+});
+
+describe('permanently deleting saved encrypted creation requests', () => {
+  const hash = 'bb'.repeat(32);
+  const confirmDelete = async (requestId: string) => {
+    await act(async () => rowButton(requestId, 'e2ee.create.deleteRequest')!.click());
+    await act(async () => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="e2ee-creation-delete-confirm"]')!
+        .click();
+    });
+  };
+
+  it('deletes an archived request and the workspace it already created on the server', async () => {
+    fixture.creationEnabled = true;
+    savePendingE2eeWorkspace(localStorage, pending);
+    setPendingE2eeWorkspaceArchived(localStorage, pending, true);
+    // The request was reserved although this device never saw the result.
+    fixture.serverWorkspaces.add('workspace-1');
+    fixture.create = vi.fn(async (request) => ({
+      workspaceId: 'workspace-1',
+      name: request.name,
+      slug: request.slug,
+      contentMode: 'e2ee' as const,
+      contentModeVersion: 1 as const,
+      genesisHash: hash,
+      cryptoOrgId: hash,
+      activation: 'control-only' as const,
+    }));
+    await render();
+    await act(async () => {
+      container!
+        .querySelector<HTMLButtonElement>('[data-testid="e2ee-creation-archived-toggle"]')!
+        .click();
+    });
+    await confirmDelete('request-1');
+    expect(fixture.serverWorkspaces.size).toBe(0);
+    expect(byArchive()).toEqual({ active: [], archived: [] });
+    expect(container!.querySelector('[data-request-id="request-1"]')).toBeNull();
+    expect(container!.textContent).not.toContain('e2ee.create.delete');
+  });
+
+  it('deletes the selected request, frees the form, and keeps it when the result is unknown', async () => {
+    fixture.creationEnabled = true;
+    const second = { accountId: 'account', requestId: 'request-2', name: 'Second', slug: 'second' };
+    savePendingE2eeWorkspace(localStorage, pending);
+    savePendingE2eeWorkspace(localStorage, second);
+    fixture.create = vi.fn(async (request) => {
+      if (request.requestId === 'request-2') throw new Error('reply lost');
+      // Never reserved: the server refuses a new reservation at the allowance limit.
+      throw Object.assign(new Error('limit'), { data: { code: 'free_workspace_limit_reached' } });
+    });
+    await render();
+    expect(input('workspace-name').value).toBe('Saved');
+    await confirmDelete('request-2');
+    expect(container!.textContent).toContain('e2ee.create.deleteFailed');
+    expect(byArchive().active).toEqual([pending, second]);
+    await confirmDelete('request-1');
+    expect(byArchive()).toEqual({ active: [second], archived: [] });
+    expect(input('workspace-name').disabled).toBe(false);
+    expect(input('workspace-name').value).toBe('');
   });
 });

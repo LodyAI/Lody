@@ -9,10 +9,10 @@ import { useCloudQuery, usePlatform } from '@lody/platform/react';
 import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import {
-  canDiscardPendingCreation,
   canResumePendingCreation,
-  clearConfirmedPendingCreation,
   createPreparedE2eeWorkspace,
+  deleteSavedE2eeCreation,
+  E2eeCreationDeleteError,
   e2eeCreationAvailability,
   e2eeCreationIntent,
   isE2eeCreationNotEnabled,
@@ -35,7 +35,6 @@ import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Switch } from '@lody/ui/switch';
 import { Alert } from '@lody/ui/alert';
-import { AlertDialog } from '@/ui/dialog';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { cn } from '@/lib/utils';
@@ -78,7 +77,7 @@ export function MobileCreateWorkspaceSheet({
   const { t } = useTranslation();
   const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
   const maxHeight = useFoldAwareSheetHeight(92, true);
-  const { createOrganization } = useOrganization();
+  const { createOrganization, deleteOrganization } = useOrganization();
   const platform = usePlatform();
   const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
   const accountId = useE2eeAccountId(creationEnabled);
@@ -90,7 +89,9 @@ export function MobileCreateWorkspaceSheet({
   const submitInFlight = useRef(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [intentReadFailed, setIntentReadFailed] = useState(false);
-  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
+  const accountRef = useRef(accountId);
+  accountRef.current = accountId;
   // Presentation only: keeps the "continuing a saved request" notice steady
   // through a retry instead of flashing it in for a first-time submit.
   const [resumeNoticeShown, setResumeNoticeShown] = useState(false);
@@ -181,8 +182,47 @@ export function MobileCreateWorkspaceSheet({
     return () => window.removeEventListener('storage', refresh);
   }, [accountId, open, refreshRequestLists]);
 
-  const handleArchiveRequest = (requestId: string, archived: boolean) => {
+  const handleDeleteRequest = async (requestId: string) => {
     if (!accountId || creating || submitInFlight.current) return;
+    const request = [...requestLists.active, ...requestLists.archived].find(
+      (item) => item.requestId === requestId && item.accountId === accountId
+    );
+    const port = platform.e2eeWorkspaces;
+    if (!request) return;
+    if (!port?.prepareCreation) {
+      setCreateError(t('e2ee.create.deleteFailed'));
+      return;
+    }
+    submitInFlight.current = true;
+    setDeletingRequestId(requestId);
+    setCreateError(null);
+    try {
+      await deleteSavedE2eeCreation({
+        port,
+        storage: localStorage,
+        pending: request,
+        deleteWorkspace: deleteOrganization,
+        isCurrent: () => accountRef.current === accountId,
+      });
+      if (accountRef.current !== accountId) return;
+      if (pendingCreationRef.current?.requestId === requestId) detachFromRequest();
+    } catch (err) {
+      if (accountRef.current !== accountId) return;
+      console.error('Failed to delete saved creation request:', err);
+      setCreateError(
+        err instanceof E2eeCreationDeleteError && err.stage === 'delete'
+          ? t('e2ee.create.deleteWorkspaceFailed')
+          : t('e2ee.create.deleteFailed')
+      );
+    } finally {
+      submitInFlight.current = false;
+      setDeletingRequestId(null);
+      if (accountRef.current === accountId) refreshRequestLists(accountId);
+    }
+  };
+
+  const handleArchiveRequest = (requestId: string, archived: boolean) => {
+    if (!accountId || creating || deletingRequestId || submitInFlight.current) return;
     const request = (archived ? requestLists.active : requestLists.archived).find(
       (item) => item.requestId === requestId && item.accountId === accountId
     );
@@ -198,7 +238,7 @@ export function MobileCreateWorkspaceSheet({
   };
 
   const handleSelectRequest = (requestId: string) => {
-    if (creating || submitInFlight.current || !accountId) return;
+    if (creating || deletingRequestId || submitInFlight.current || !accountId) return;
     const request = requestLists.active.find(
       (item) => item.requestId === requestId && item.accountId === accountId
     );
@@ -224,6 +264,7 @@ export function MobileCreateWorkspaceSheet({
     !!name.trim() &&
     slugReady &&
     !creating &&
+    !deletingRequestId &&
     !intentReadFailed &&
     (!pendingCreation || pendingOwned) &&
     (!encrypted || encryptionSupported);
@@ -374,25 +415,6 @@ export function MobileCreateWorkspaceSheet({
                   <Alert.Root tone="neutral" data-testid="mobile-create-workspace-resume">
                     <Alert.Title>{t('e2ee.create.savedRequest')}</Alert.Title>
                     <Alert.Description>{t('e2ee.create.pending')}</Alert.Description>
-                    {pendingOwned ? (
-                      <Alert.Actions>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          tone="destructive"
-                          size="small"
-                          disabled={
-                            !canDiscardPendingCreation(creating, pendingCreation, accountId)
-                          }
-                          onClick={() => {
-                            if (creating) return;
-                            setDiscardConfirmOpen(true);
-                          }}
-                        >
-                          {t('e2ee.create.discardPending')}
-                        </Button>
-                      </Alert.Actions>
-                    ) : null}
                   </Alert.Root>
                 ) : null}
 
@@ -404,6 +426,10 @@ export function MobileCreateWorkspaceSheet({
                   onSelectRequest={handleSelectRequest}
                   onArchiveRequest={(requestId) => handleArchiveRequest(requestId, true)}
                   onRestoreRequest={(requestId) => handleArchiveRequest(requestId, false)}
+                  onDeleteRequest={(requestId) => {
+                    void handleDeleteRequest(requestId);
+                  }}
+                  deletingRequestId={deletingRequestId}
                 />
 
                 <div className="space-y-1.5">
@@ -557,41 +583,6 @@ export function MobileCreateWorkspaceSheet({
               </Button>
             ) : null}
           </div>
-
-          <AlertDialog.Root open={discardConfirmOpen} onOpenChange={setDiscardConfirmOpen}>
-            <AlertDialog.Content>
-              <AlertDialog.Header>
-                <AlertDialog.Title>
-                  {t('e2ee.create.discardConfirmTitle', 'Discard saved creation request?')}
-                </AlertDialog.Title>
-                <AlertDialog.Description>
-                  {t(
-                    'e2ee.create.discardConfirmDescription',
-                    'This removes the only saved request for this workspace on this device. It cannot be undone.'
-                  )}
-                </AlertDialog.Description>
-              </AlertDialog.Header>
-              <AlertDialog.Footer>
-                <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
-                <AlertDialog.Action
-                  variant="destructive"
-                  onClick={() => {
-                    if (!clearConfirmedPendingCreation(localStorage, pendingCreation, true)) return;
-                    setPendingCreation(null);
-                    setResumeNoticeShown(false);
-                    setName('');
-                    setEncrypted(false);
-                    setCreateError(null);
-                    resetSlug();
-                    setDiscardConfirmOpen(false);
-                    if (accountId) refreshRequestLists(accountId);
-                  }}
-                >
-                  {t('e2ee.create.discardConfirmAction', 'Discard request')}
-                </AlertDialog.Action>
-              </AlertDialog.Footer>
-            </AlertDialog.Content>
-          </AlertDialog.Root>
         </div>
       </DrawerContent>
     </Drawer>

@@ -13,12 +13,16 @@ import {
 
 const state = vi.hoisted(() => ({
   createPrepared: vi.fn(),
+  // Synthetic server: the reservation outcome and the workspaces it holds.
+  serverCreate: vi.fn(),
+  serverWorkspaces: new Set<string>(),
 }));
 const labels: Record<string, string> = {
   'common.cancel': 'Cancel',
   'common.create': 'Create',
-  'e2ee.create.discardPending': 'Discard saved request',
-  'e2ee.create.discardConfirmAction': 'Discard request',
+  'e2ee.create.deleteRequest': 'Delete',
+  'e2ee.create.deleteConfirmAction': 'Delete request',
+  'e2ee.create.deleteFailed': 'Delete not confirmed',
   'e2ee.create.resume': 'Continue saved creation',
   'e2ee.create.archiveRequest': 'Archive',
   'e2ee.create.restoreRequest': 'Restore',
@@ -44,7 +48,16 @@ vi.mock('@/lib/utils', () => ({
 }));
 vi.mock('@lody/platform/react', () => ({
   useCloudQuery: () => ({ canCreateFree: true }),
-  usePlatform: () => ({ e2eeWorkspaces: { prepareCreation: async () => ({}) } }),
+  usePlatform: () => ({
+    e2eeWorkspaces: {
+      prepareCreation: async (input: object) => ({
+        ...input,
+        genesisRecordHex: 'aa',
+        genesisHashHex: 'bb'.repeat(32),
+      }),
+      create: (...args: unknown[]) => state.serverCreate(...args),
+    },
+  }),
 }));
 // Real storage and request logic; only the host/cloud round trip is replaced.
 vi.mock('@/lib/create-e2ee-workspace', async (importOriginal) => ({
@@ -62,7 +75,12 @@ vi.mock('../src/components/mobile/use-vertical-division', () => ({
   useFoldAwareSheetHeight: () => 90,
 }));
 vi.mock('../src/hooks/useOrganization', () => ({
-  useOrganization: () => ({ createOrganization: vi.fn() }),
+  useOrganization: () => ({
+    createOrganization: vi.fn(),
+    deleteOrganization: async (id: string) => {
+      if (!state.serverWorkspaces.delete(id)) throw new Error('no such workspace');
+    },
+  }),
 }));
 vi.mock('../src/hooks/useWorkspaceSlugField', async () => {
   const { useCallback, useState } = await import('react');
@@ -152,6 +170,8 @@ beforeEach(() => {
   localStorage.clear();
   account.id = 'account-A';
   state.createPrepared.mockReset();
+  state.serverCreate.mockReset();
+  state.serverWorkspaces = new Set();
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -212,16 +232,53 @@ describe('mobile encrypted workspace sheet', () => {
     expect(lists()).toEqual({ active: [], archived: [] });
   });
 
-  it('does not clear the saved request when the discard confirmation is cancelled', async () => {
+  it('does not delete the saved request when the delete confirmation is cancelled', async () => {
     await renderWithPending();
-    await act(async () => {
-      button('Discard saved request')!.click();
-    });
+    await act(async () => rowButton(pending.requestId, 'Delete')!.click());
     expect(container.querySelector('[data-confirm-discard]')).toBeTruthy();
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-confirm-cancel]')!.click();
     });
     expect(lists().active).toEqual([pending]);
+  });
+
+  it('deletes the resumed request with the workspace it created and frees the form', async () => {
+    const hash = 'bb'.repeat(32);
+    state.serverWorkspaces.add('workspace-1');
+    state.serverCreate.mockImplementation(async (request: typeof pending) => ({
+      workspaceId: 'workspace-1',
+      name: request.name,
+      slug: request.slug,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash: hash,
+      cryptoOrgId: hash,
+      activation: 'control-only',
+    }));
+    await renderWithPending();
+    await act(async () => rowButton(pending.requestId, 'Delete')!.click());
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-confirm-discard]')!.click();
+    });
+    expect(state.serverWorkspaces.size).toBe(0);
+    expect(lists()).toEqual({ active: [], archived: [] });
+    expect(nameField().disabled).toBe(false);
+    expect(nameField().value).toBe('');
+    expect(button('Continue saved creation')).toBeUndefined();
+  });
+
+  it('keeps the request and reports it when the server result cannot be confirmed', async () => {
+    state.serverWorkspaces.add('workspace-1');
+    state.serverCreate.mockRejectedValue(new Error('reply lost'));
+    await renderWithPending();
+    await act(async () => rowButton(pending.requestId, 'Delete')!.click());
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-confirm-discard]')!.click();
+    });
+    expect(container.textContent).toContain('Delete not confirmed');
+    expect(state.serverWorkspaces.has('workspace-1')).toBe(true);
+    expect(lists().active).toEqual([pending]);
+    expect(nameField().value).toBe('Saved workspace');
   });
 
   it('archives the resumed request, frees the form, and restores the same request after reopening', async () => {

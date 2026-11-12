@@ -3,9 +3,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   createPreparedE2eeWorkspace,
-  canDiscardPendingCreation,
   canResumePendingCreation,
-  clearConfirmedPendingCreation,
+  deleteSavedE2eeCreation,
+  E2eeCreationDeleteError,
   e2eeCreationAvailability,
   e2eeCreationIntent,
   pendingCreationRemoved,
@@ -92,20 +92,14 @@ describe('pending creation account ownership', () => {
     slug: 'saved-slug',
   };
 
-  it('only resumes and discards for the saved account', () => {
+  it('only resumes for the saved account', () => {
     expect(canResumePendingCreation(pending, 'account-A')).toBe(true);
     expect(canResumePendingCreation(pending, 'account-B')).toBe(false);
     expect(canResumePendingCreation(pending, null)).toBe(false);
-    expect(canDiscardPendingCreation(false, pending, 'account-B')).toBe(false);
-  });
-
-  it('disables discard while a submit is creating', () => {
-    expect(canDiscardPendingCreation(false, pending, 'account-A')).toBe(true);
-    expect(canDiscardPendingCreation(true, pending, 'account-A')).toBe(false);
   });
 });
 
-describe('pending removal and destructive confirmation', () => {
+describe('pending removal', () => {
   const pending = {
     accountId: 'account-A',
     requestId: 'saved-request-remove',
@@ -119,15 +113,6 @@ describe('pending removal and destructive confirmation', () => {
     expect(pendingCreationRemoved(localStorage, 'account-A', pending.requestId)).toBe(false);
     clearPendingE2eeWorkspace(localStorage, pending);
     expect(pendingCreationRemoved(localStorage, 'account-A', pending.requestId)).toBe(true);
-  });
-
-  it('does not clear the request until the discard is confirmed', () => {
-    localStorage.clear();
-    savePendingE2eeWorkspace(localStorage, pending);
-    expect(clearConfirmedPendingCreation(localStorage, pending, false)).toBe(false);
-    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toHaveLength(1);
-    expect(clearConfirmedPendingCreation(localStorage, pending, true)).toBe(true);
-    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toHaveLength(0);
   });
 });
 
@@ -242,5 +227,132 @@ describe('archiving saved creation requests', () => {
     expect(
       localStorage.getItem('lody-e2ee-pending-creation-archived:account-A:request-1')
     ).toBeNull();
+  });
+});
+
+describe('permanently deleting a saved creation request', () => {
+  const request = {
+    accountId: 'account-A',
+    requestId: 'request-delete',
+    name: 'Staging check',
+    slug: 'staging-check',
+  };
+  const hash = 'ab'.repeat(32);
+
+  /** A synthetic server: one workspace per reserved request, counted against a free allowance. */
+  function fakeServer(options: { reserved: boolean; limitReached?: boolean; lost?: boolean }) {
+    const workspaces = new Set<string>(options.reserved ? ['workspace-reserved'] : []);
+    const port = {
+      prepareCreation: async (input: typeof request) => ({
+        ...input,
+        genesisRecordHex: 'aa',
+        genesisHashHex: hash,
+        deviceCredentialHash: 'ee',
+      }),
+      create: async () => {
+        if (options.lost) throw new Error('reply lost');
+        if (!workspaces.has('workspace-reserved')) {
+          if (options.limitReached)
+            throw Object.assign(new Error('limit'), {
+              data: { code: 'free_workspace_limit_reached' },
+            });
+          workspaces.add('workspace-reserved');
+        }
+        return {
+          workspaceId: 'workspace-reserved',
+          name: request.name,
+          slug: request.slug,
+          contentMode: 'e2ee' as const,
+          contentModeVersion: 1 as const,
+          genesisHash: hash,
+          cryptoOrgId: hash,
+          activation: 'control-only' as const,
+        };
+      },
+    } as unknown as PlatformE2eeWorkspaces;
+    return { workspaces, port };
+  }
+
+  it('deletes the workspace a reserved request created so it no longer uses an allowance slot', async () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, request);
+    setPendingE2eeWorkspaceArchived(localStorage, request, true);
+    const server = fakeServer({ reserved: true });
+    const result = await deleteSavedE2eeCreation({
+      port: server.port,
+      storage: localStorage,
+      pending: request,
+      deleteWorkspace: async (id) => server.workspaces.delete(id),
+      isCurrent: () => true,
+    });
+    expect(result).toEqual({ deletedWorkspaceId: 'workspace-reserved' });
+    expect(server.workspaces.size).toBe(0);
+    expect(listPendingE2eeWorkspacesByArchive(localStorage, 'account-A')).toEqual({
+      active: [],
+      archived: [],
+    });
+  });
+
+  it('removes an unreserved request without creating anything when the allowance is full', async () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, request);
+    const server = fakeServer({ reserved: false, limitReached: true });
+    const result = await deleteSavedE2eeCreation({
+      port: server.port,
+      storage: localStorage,
+      pending: request,
+      deleteWorkspace: async () => {
+        throw new Error('nothing to delete');
+      },
+      isCurrent: () => true,
+    });
+    expect(result).toEqual({ deletedWorkspaceId: null });
+    expect(server.workspaces.size).toBe(0);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([]);
+  });
+
+  it('keeps the archived request when the server result cannot be confirmed', async () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, request);
+    setPendingE2eeWorkspaceArchived(localStorage, request, true);
+    const server = fakeServer({ reserved: true, lost: true });
+    const error = await deleteSavedE2eeCreation({
+      port: server.port,
+      storage: localStorage,
+      pending: request,
+      deleteWorkspace: async (id) => server.workspaces.delete(id),
+      isCurrent: () => true,
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(E2eeCreationDeleteError);
+    expect((error as E2eeCreationDeleteError).stage).toBe('reconcile');
+    expect(server.workspaces.has('workspace-reserved')).toBe(true);
+    expect(listPendingE2eeWorkspacesByArchive(localStorage, 'account-A').archived).toEqual([
+      request,
+    ]);
+  });
+
+  it.each([
+    ['the workspace deletion fails', true],
+    ['the account changed before deletion', false],
+  ])('keeps the request for retry when %s', async (_label, current) => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, request);
+    setPendingE2eeWorkspaceArchived(localStorage, request, true);
+    const server = fakeServer({ reserved: true });
+    const error = await deleteSavedE2eeCreation({
+      port: server.port,
+      storage: localStorage,
+      pending: request,
+      deleteWorkspace: async () => {
+        throw new Error('delete refused');
+      },
+      isCurrent: () => current,
+    }).catch((caught: unknown) => caught);
+    expect((error as E2eeCreationDeleteError).stage).toBe('delete');
+    expect(server.workspaces.has('workspace-reserved')).toBe(true);
+    expect(listPendingE2eeWorkspacesByArchive(localStorage, 'account-A')).toEqual({
+      active: [],
+      archived: [request],
+    });
   });
 });
