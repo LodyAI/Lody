@@ -150,6 +150,7 @@ final class LodyPageController: UIViewController {
     closed = true
     let completion = onClose
     onClose = nil; onResult = nil; onCallback = nil
+    (content as? LodyPageStackHost)?.closePages()
     completion?()
     NotificationCenter.default.post(name: .lodyPageDidClose, object: self)
   }
