@@ -86,8 +86,10 @@ open class WebViewRuntime internal constructor(
             })
         }
         // Schedule failures arrive in-band as `{error}` (business faults with the runtime's code).
-        RuntimeCommand.ListSchedules -> RuntimeResult.Schedules(ScheduleJson.list(ScheduleJson.checked(call("schedules", deadline = CommandDeadline.QUERY))))
-        is RuntimeCommand.ScheduleDetail -> RuntimeResult.Schedule(ScheduleJson.detail(ScheduleJson.checked(call("scheduleDetail", JSONArray().put(command.scheduleId), CommandDeadline.QUERY))))
+        // Reads replay the whole registry stream under the runtime's own 40 s budget (45 s contract,
+        // which iOS waits for); this deadline only fences a lost reply and must not end first.
+        RuntimeCommand.ListSchedules -> RuntimeResult.Schedules(ScheduleJson.list(ScheduleJson.checked(call("schedules", deadline = CommandDeadline.SCHEDULE_READ))))
+        is RuntimeCommand.ScheduleDetail -> RuntimeResult.Schedule(ScheduleJson.detail(ScheduleJson.checked(call("scheduleDetail", JSONArray().put(command.scheduleId), CommandDeadline.SCHEDULE_READ))))
         is RuntimeCommand.ScheduleCommand -> {
             val value = ScheduleJson.checked(call("scheduleCommand", JSONArray().put(ScheduleJson.command(command.request)), CommandDeadline.WRITE))
             RuntimeResult.ScheduleWritten(value.optString("scheduleId").ifEmpty { command.request.scheduleId })
