@@ -48,9 +48,13 @@ const styles = stylex.create({
   tree: { maxHeight: 320, overflowY: 'auto', padding: space[1.5] },
   scroll: { minWidth: 0, width: '100%' },
   hiddenTrack: { display: 'none' },
-  row: { display: 'flex', gap: space[1], width: 'max-content', padding: `calc(${space[1]} / 2)` },
-  pill: { flex: '0 0 auto', maxWidth: '24ch' },
-  title: { maxWidth: '16ch' },
+  // Pills share the row's width equally and only overflow into the
+  // horizontal scroll once they reach `pill.minWidth`.
+  row: { display: 'flex', gap: space[1], padding: `calc(${space[1]} / 2)` },
+  pill: { flex: '1 1 0', minWidth: '18ch' },
+  // A zero intrinsic width keeps long titles from widening the scroll
+  // content (`fit-content`); the title still grows into the pill and truncates.
+  title: { width: 0 },
   current: { backgroundColor: colors.selectedFill },
   fade: (left: string, right: string) => ({
     maskImage: `linear-gradient(to right, transparent, black ${left}, black calc(100% - ${right}), transparent)`,
@@ -378,7 +382,7 @@ function RelationPill({
       data-session-relation-row={session.id}
       onClick={() => onOpenSession(target)}
       className={cn(
-        'flex h-7 min-w-0 items-center gap-2 rounded-md border border-border/60 px-2 text-left text-xs transition-colors',
+        'flex h-7 items-center gap-2 rounded-md border border-border/60 px-2 text-left text-xs transition-colors',
         stylex.props(styles.pill, isCurrent && styles.current).className,
         !isCurrent && 'hover:bg-muted-foreground/10'
       )}
