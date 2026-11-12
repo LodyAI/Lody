@@ -72,7 +72,24 @@ const machineKeyringOperation = (
       catch: () => failure('corrupt'),
     });
   });
+// Decode directly into owned memory; Buffer.from(hex, 'hex') uses the shared slab.
+const decodeHex = (value: string): Uint8Array => {
+  if (!/^(?:[0-9a-f]{2})*$/.test(value)) throw failure('corrupt');
+  const bytes = new Uint8Array(value.length / 2);
+  const nibble = (code: number) => (code <= 57 ? code - 48 : code - 87);
+  for (let i = 0; i < bytes.length; i++)
+    bytes[i] = (nibble(value.charCodeAt(i * 2)) << 4) | nibble(value.charCodeAt(i * 2 + 1));
+  return bytes;
+};
 const failure = (code: NodeE2eeCustodyError['code']) => new NodeE2eeCustodyError({ code });
+const randomSecretHex = () => {
+  const bytes = randomBytes(32);
+  try {
+    return bytes.toString('hex');
+  } finally {
+    bytes.fill(0);
+  }
+};
 // Effect 4.0.2's mapError/result can discard mixed Fail+Die causes. An unresolved
 // process tree is a recovery owner, never an ordinary keyring-unavailable result.
 const processFailure = (cause: Cause.Cause<unknown>) =>
@@ -291,7 +308,7 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
     );
     if (originals) return yield* failure('identity-lost');
     const probeId = `probe:${randomBytes(16).toString('hex')}`;
-    const probe = randomBytes(32).toString('hex');
+    const probe = randomSecretHex();
     const available = yield* Effect.gen(function* () {
       const probed = yield* Effect.result(
         Effect.gen(function* () {
@@ -322,17 +339,18 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
   yield* Effect.addFinalizer(() => Effect.sync(() => key?.fill(0)));
   if (protection === 'os-keystore') {
     const account = createHash('sha256').update(directory).digest('hex');
+    // Preserve the v1 hex password format so older CLI versions can still reopen it.
     let encoded = yield* callKeyring(account, 'get');
     if (encoded === undefined) {
       if (yield* native(() => exists(join(directory, 'kek.safe-storage'))))
         return yield* failure('identity-lost');
-      const original = randomBytes(32).toString('hex');
+      const original = randomSecretHex();
       yield* callKeyring(account, 'set', original);
       encoded = yield* callKeyring(account, 'get');
       if (encoded !== original) return yield* failure('unavailable');
     }
     if (encoded === undefined || !/^[0-9a-f]{64}$/.test(encoded)) return yield* failure('corrupt');
-    key = new Uint8Array(Buffer.from(encoded, 'hex'));
+    key = decodeHex(encoded);
   }
 
   const wrappingKey = key;
@@ -342,12 +360,15 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
     protection === 'file'
       ? {
           protection,
-          wrap: async (value) => Buffer.from(value, 'hex'),
+          wrap: async (value) => decodeHex(value),
           unwrap: async (blob) => {
             await privatePath(directory, true);
             await privatePath(join(directory, 'kek.safe-storage'));
             if (blob.length !== 32) throw failure('corrupt');
-            return { result: Buffer.from(blob).toString('hex'), shouldReEncrypt: false };
+            return {
+              result: Buffer.from(blob.buffer, blob.byteOffset, blob.byteLength).toString('hex'),
+              shouldReEncrypt: false,
+            };
           },
         }
       : {
@@ -356,7 +377,7 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
             const nonce = randomBytes(12);
             const cipher = createCipheriv('aes-256-gcm', wrappingKey ?? new Uint8Array(), nonce);
             cipher.setAAD(aad);
-            const plaintext = Buffer.from(value, 'hex');
+            const plaintext = decodeHex(value);
             try {
               const body = Buffer.concat([cipher.update(plaintext), cipher.final()]);
               return new Uint8Array(Buffer.concat([nonce, cipher.getAuthTag(), body]));
@@ -373,11 +394,17 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
             );
             cipher.setAAD(aad);
             cipher.setAuthTag(blob.subarray(12, 28));
-            const plaintext = Buffer.concat([cipher.update(blob.subarray(28)), cipher.final()]);
+            const plaintext = cipher.update(blob.subarray(28));
+            let final: Buffer | undefined;
             try {
-              return { result: plaintext.toString('hex'), shouldReEncrypt: false };
+              final = cipher.final();
+              return {
+                result: plaintext.toString('hex') + final.toString('hex'),
+                shouldReEncrypt: false,
+              };
             } finally {
               plaintext.fill(0);
+              final?.fill(0);
             }
           },
         };

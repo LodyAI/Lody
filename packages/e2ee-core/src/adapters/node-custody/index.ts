@@ -130,8 +130,17 @@ const remove = (file: string) =>
   unlink(file).catch((cause: NodeJS.ErrnoException) => {
     if (cause.code !== 'ENOENT') throw cause;
   });
-const kekDigest = (plaintext: string) => {
-  const key = Buffer.from(plaintext, 'hex');
+// Decode directly into owned memory; Buffer.from(hex, 'hex') uses the shared slab.
+const decodeHex = (value: string): Uint8Array => {
+  if (!/^(?:[0-9a-f]{2})*$/.test(value)) throw fail('corrupt');
+  const bytes = new Uint8Array(value.length / 2);
+  const nibble = (code: number) => (code <= 57 ? code - 48 : code - 87);
+  for (let i = 0; i < bytes.length; i++)
+    bytes[i] = (nibble(value.charCodeAt(i * 2)) << 4) | nibble(value.charCodeAt(i * 2 + 1));
+  return bytes;
+};
+const secretDigest = (plaintext: string) => {
+  const key = decodeHex(plaintext);
   try {
     return createHash('sha256').update(key).digest('hex');
   } finally {
@@ -141,7 +150,7 @@ const kekDigest = (plaintext: string) => {
 const wrapper = (value: unknown): Uint8Array => {
   if (typeof value !== 'string' || !/^(?:[0-9a-f]{2}){1,8192}$/.test(value))
     throw fail('rewrap-failed');
-  return new Uint8Array(Buffer.from(value, 'hex'));
+  return decodeHex(value);
 };
 /** SQLite's OS lock dies with its process; the persistent file is not a lease. */
 async function lockInitialization(path: string) {
@@ -208,7 +217,7 @@ async function recoverRewrap(path: string, unwrap: KekWrapper['unwrap']) {
     replacement = wrapper(value.replacement);
   const validate = async (encoded: Uint8Array) => {
     const opened = await unwrap(Buffer.from(encoded));
-    if (!/^[0-9a-f]{64}$/.test(opened.result) || kekDigest(opened.result) !== value.digest)
+    if (!/^[0-9a-f]{64}$/.test(opened.result) || secretDigest(opened.result) !== value.digest)
       throw fail('rewrap-failed');
   };
   let current: Uint8Array | undefined;
@@ -260,7 +269,7 @@ async function rewrapKek(
       JSON.stringify({
         original: Buffer.from(original).toString('hex'),
         replacement: Buffer.from(replacement).toString('hex'),
-        digest: kekDigest(plaintext),
+        digest: secretDigest(plaintext),
       })
     );
     // The journal reaches disk before the retained wrapper can change.
@@ -386,7 +395,11 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
             throw fail('identity-lost');
           const candidate = random(new Uint8Array(32));
           try {
-            const encoded = await wrap(Buffer.from(candidate).toString('hex'));
+            const encoded = await wrap(
+              Buffer.from(candidate.buffer, candidate.byteOffset, candidate.byteLength).toString(
+                'hex'
+              )
+            );
             if (!(encoded instanceof Uint8Array) || encoded.length < 1 || encoded.length > 8192)
               throw fail('corrupt');
             await publish(file, encoded);
@@ -395,11 +408,13 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           }
           wrapped = await readOwned(file, 8192);
         }
-        const recovered = await unwrap(Buffer.from(wrapped));
+        const recovered = await unwrap(
+          Buffer.from(wrapped.buffer, wrapped.byteOffset, wrapped.byteLength)
+        );
         if (!/^[0-9a-f]{64}$/.test(recovered.result)) throw fail('corrupt');
         if (recovered.shouldReEncrypt)
           await rewrapKek(file, wrapped, recovered.result, wrap, unwrap);
-        kek = new Uint8Array(Buffer.from(recovered.result, 'hex'));
+        kek = decodeHex(recovered.result);
         // Native strings/handles cannot be deterministically erased. Never log or
         // persist this decrypted string; owned byte copies are cleared on close.
       } finally {
@@ -628,7 +643,9 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
     const file = pathFor(genesis, value.kind);
     if (!value.bound) {
       if (!value.signingBytes || !value.encryptionBytes) throw fail('closed');
-      const body = new Uint8Array(Buffer.concat([value.signingBytes, value.encryptionBytes]));
+      const body = new Uint8Array(value.signingBytes.length + value.encryptionBytes.length);
+      body.set(value.signingBytes);
+      body.set(value.encryptionBytes, value.signingBytes.length);
       try {
         await publish(
           file,
@@ -697,7 +714,11 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           return undefined;
         throw fail('corrupt');
       }
-      return Buffer.from(opened.body).toString('hex');
+      return Buffer.from(
+        opened.body.buffer,
+        opened.body.byteOffset,
+        opened.body.byteLength
+      ).toString('hex');
     } finally {
       opened.body.fill(0);
     }
@@ -714,9 +735,7 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           if (retained !== undefined)
             return {
               credential: retained,
-              credentialHash: createHash('sha256')
-                .update(Buffer.from(retained, 'hex'))
-                .digest('hex'),
+              credentialHash: secretDigest(retained),
             };
           const raw = random(new Uint8Array(32));
           try {
@@ -728,9 +747,7 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           if (credential === undefined) throw fail('corrupt');
           return {
             credential,
-            credentialHash: createHash('sha256')
-              .update(Buffer.from(credential, 'hex'))
-              .digest('hex'),
+            credentialHash: secretDigest(credential),
           };
         })
       ),
