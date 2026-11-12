@@ -1,5 +1,7 @@
 import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notifications';
 import { useState } from 'react';
+import { useAtomValue } from 'jotai';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { Dialog } from '@lody/ui/dialog';
 import { useWorkspaceRecoveryReady } from './recovery-vault-section';
 import { useE2eeRecoverySection } from './recovery-host';
@@ -48,6 +50,8 @@ function SecuritySettings({
   // The proxy is new on every call; keep one.
   const [updater] = useState(() => getIpcServices()?.updater);
   const RecoverySection = useE2eeRecoverySection();
+  // Display names only; the verified ledger still decides which machine rows exist.
+  const machines = useAtomValue(getMachineMetaMapAtom);
   const joinRequests = useMemberJoinAttention(
     scope.native,
     scope.workspaceId,
@@ -143,6 +147,8 @@ function SecuritySettings({
                       <E2eeDevicesPanel
                         {...panelState}
                         directory={scope.directory}
+                        localProfile={scope.localProfile}
+                        machines={machines}
                         onRetry={retry}
                         onUpdate={update}
                         onRevoke={(key, confirmation) => {
