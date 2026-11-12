@@ -35,7 +35,7 @@ Loro / Durable Streams 直接提供这些能力：`@lody/e2ee-core/adapters/loro
 1. `envelopeRouting(frame)` 必须得到 `sender = 主体` 且属于本工作区。
 2. 在当前视图下：发送者是有资格的当前设备（恢复设备不能发送），接收者是当前设备，纪元是当前纪元。可选层：`authenticateEpochEnvelope(view, context, frame)` 另外验证信封签名。
 3. `id` 是 16 字节投递 ID（十六进制）。已存在且摘要不同的 `(epoch, sender, id)` 拒绝（`replay`）；完全相同的字节为空操作。
-4. 每个发送者、接收者、纪元最多保留 16 个有效（未被拒绝）信封，拒绝第 17 个不同的帧。
+4. 每个发送者、接收者、纪元的当前修复 revision 最多允许 16 个未被拒绝的信封，第 17 个不同的帧会被拒绝。新信封在检查配额的同一事务中记录槽位 revision。历史信封继续可读，保留投递 ID 和摘要黑名单，但不占新 revision 的配额；原件重试不改变其 revision。SQLite 参考宿主为已有库补加 revision 列；旧信封无法确定投递轮次，统一保留在 revision 0。
 
 **`read(id)`**：返回主体在当前纪元以 `id` 存入的帧，或空。
 

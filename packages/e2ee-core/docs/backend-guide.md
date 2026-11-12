@@ -67,8 +67,14 @@ server.
 3. `id` is the 16-byte delivery id (hex). An existing `(epoch, sender, id)`
    with a different digest is refused (`replay`). The same bytes again are a
    no-op.
-4. Keep at most 16 live (non-rejected) envelopes per sender, recipient and
-   epoch. Refuse the 17th distinct frame.
+4. Keep at most 16 non-rejected envelopes per sender, recipient, epoch and
+   current repair revision. Stamp new envelopes with the slot revision inside
+   the quota-check transaction. Historical envelopes remain readable and keep
+   their delivery IDs and rejected-digest entries, but do not consume the new
+   revision quota. Exact retries do not change an envelope's revision. Refuse
+   the 17th distinct frame in the current revision.
+   The SQLite reference host adds a revision column to existing databases;
+   legacy envelopes retain revision zero because their delivery round is unknown.
 
 **`read(id)`** — return the frame the principal stored under `id` for the
 current epoch, or nothing.
