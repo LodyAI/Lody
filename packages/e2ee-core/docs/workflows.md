@@ -83,6 +83,14 @@ packets from the newest installed key, save the recovered older keys and
 return the one requested. Corrupt, permission and storage failures are never
 "recovered". This restores installed history only; it is not a vault.
 
+Recovery searches downward from the ledger's current epoch for the highest
+installed key, so older history remains readable while the current envelope is
+still in transit. A missing requested key needs an installed key at a higher
+epoch. Only missing records permit continuing the search; every other failure
+propagates. `recoverLedgerHistory(view, key, startEpoch?)` authenticates the
+starting key against that epoch's verified commitment, including epoch zero;
+omitting `startEpoch` selects the view's current epoch.
+
 ## KeyReceiver
 
 _Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`,

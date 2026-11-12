@@ -56,6 +56,8 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`�
 
 `InstalledEpochHistory.read(epoch)` 返回已安装的密钥。只有该密钥确实缺失时，才从最新已安装的密钥出发验证整条签名历史包链，保存恢复出的旧密钥，并返回所请求的那个。损坏、权限和存储失败从不被“恢复”。这只恢复已安装的历史，不是 vault。
 
+恢复从账本当前 Epoch 向下寻找本地已安装的最高 Epoch 密钥，因此当前信封尚未送达时仍可读取旧历史。请求的密钥缺失时，必须有更高 Epoch 的已安装密钥才能回溯。查找只跳过缺失记录，其他错误直接上抛。`recoverLedgerHistory(view, key, startEpoch?)` 使用对应 Epoch 的已验证承诺校验起始密钥，包括 Epoch 0；省略 `startEpoch` 时使用账本当前 Epoch。
+
 ## KeyReceiver
 
 _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`KeyMailbox`、`ReceiveJournal`。_

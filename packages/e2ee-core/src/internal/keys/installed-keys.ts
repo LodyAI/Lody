@@ -313,12 +313,20 @@ export class InstalledEpochHistory extends Context.Service<
         yield* gate.guard;
         return view;
       });
-      const recover = (view: LedgerView) =>
+      const newestInstalled = Effect.fnUntraced(function* (view: LedgerView, minimum: number) {
+        for (let epoch = view.inspectState().epoch.number; epoch >= minimum; epoch--) {
+          const result = yield* Effect.result(installed.read(epoch));
+          if (Result.isSuccess(result)) return { epoch, key: result.success };
+          if (result.failure.reason !== 'missing-key') return yield* result.failure;
+        }
+        return yield* fail('missing-key');
+      });
+      const recover = (view: LedgerView, minimum = Math.min(1, view.inspectState().epoch.number)) =>
         Effect.acquireUseRelease(
-          installed.read(view.inspectState().epoch.number),
-          (latest) =>
+          newestInstalled(view, minimum),
+          ({ epoch: startEpoch, key: latest }) =>
             Effect.acquireUseRelease(
-              Effect.fromResult(recoverLedgerHistory(view, latest)),
+              Effect.fromResult(recoverLedgerHistory(view, latest, startEpoch)),
               (keys) =>
                 Effect.gen(function* () {
                   for (const [epoch, key] of keys) {
@@ -332,7 +340,7 @@ export class InstalledEpochHistory extends Context.Service<
                   for (const key of keys.values()) disposeEpochKey(key);
                 })
             ),
-          (latest) => Effect.sync(() => disposeEpochKey(latest))
+          ({ key }) => Effect.sync(() => disposeEpochKey(key))
         );
       return InstalledEpochHistory.of({
         recover: Effect.fn('@lody/e2ee-core/InstalledEpochHistory.recover')(function* () {
@@ -356,7 +364,7 @@ export class InstalledEpochHistory extends Context.Service<
                 Result.mapError(Bytes.epochNumber(epoch), () => fail('invalid-input'))
               );
               if (epoch > view.inspectState().epoch.number) return yield* existing.failure;
-              yield* recover(view);
+              yield* recover(view, epoch + 1);
               const recovered = yield* installed.read(epoch);
               if (gate.isClosed()) {
                 disposeEpochKey(recovered);
