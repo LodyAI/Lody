@@ -28,7 +28,8 @@ internal fun PreferencesScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
     var behavior by remember { mutableStateOf(AppPreferences.queuedMessageBehavior(context)) }
-    var developer by remember { mutableStateOf(RoostPreferences.developer(context)) }
+    // Developer mode is switched on Settings Home; this page only reads it to gate the beta group.
+    val developer = remember { RoostPreferences.developer(context) }
     var roost by remember { mutableStateOf(RoostPreferences.experiment(context)) }
     var menu by remember { mutableStateOf(false) }
     BackHandler(onBack = onBack)
@@ -80,16 +81,6 @@ internal fun PreferencesScreen(onBack: () -> Unit) {
                             }
                         }
                     }
-                }
-            }
-            item {
-                SettingsGroup(stringResource(R.string.settings_developer)) {
-                    SettingsLine(stringResource(R.string.settings_developer_mode), LodyIcons.Settings, trailing = {
-                        Switch(checked = developer, onCheckedChange = {
-                            developer = it
-                            RoostPreferences.setDeveloper(context, it)
-                        })
-                    })
                 }
             }
             if (developer) {

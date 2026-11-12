@@ -26,11 +26,17 @@ class SettingsController: UIViewController {
     // The main page shares the Chats list's design language; inner pages keep the flat settings rows.
     list.setChatStyle(true)
     list.forwarded = { [weak self] name, body in
-      guard name == "rowPress", let id = body["id"] as? String else { return }
-      self?.open(id)
+      guard let self, let id = body["id"] as? String else { return }
+      if name == "rowToggle", id == "developer-mode", let value = body["value"] as? Bool {
+        LodyPreferences.saveDeveloperMode(value)
+        // Render now so the switch keeps the requested value instead of flicking back until the change notification.
+        self.render()
+      } else if name == "rowPress" {
+        self.open(id)
+      }
     }
     view.addSubview(list)
-    for name in source.changes + [UIApplication.didBecomeActiveNotification] {
+    for name in source.changes + [UIApplication.didBecomeActiveNotification, .lodyPreferencesDidChange] {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.render() }
       })

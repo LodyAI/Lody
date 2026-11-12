@@ -624,7 +624,6 @@
     <string name="settings_personal">个人</string>
     <string name="settings_preferences">偏好设置</string>
     <string name="settings_preferences_hint">语言、通知与会话行为</string>
-    <string name="settings_developer">开发者</string>
     <string name="settings_developer_mode">开发者模式</string>
     <string name="settings_roost_history">Roost 历史记录（测试）</string>
     <string name="settings_roost_history_hint">新会话在所选电脑支持时使用 Roost；已有会话保留原有历史记录。</string>

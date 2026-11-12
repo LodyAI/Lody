@@ -8,6 +8,7 @@ enum SettingsSections {
       section("account", rows: [accountRow(account)]),
       section("personal", header: text("section.personal"), rows: [
         row("preferences", text("preferences.title"), subtitle: text("preferences.subtitle"), image: "slider.horizontal.3"),
+        developerModeRow(),
       ]),
     ]
     if account != nil {
@@ -64,6 +65,13 @@ enum SettingsSections {
     return section(
       "remote", header: String.localizedStringWithFormat(String(localized: "settings.section.workspaceNamed", bundle: .lody), String(describing: workspace.name)), footer: footer, rows: rows
     )
+  }
+
+  private static func developerModeRow() -> LodyListRow {
+    var result = row("developer-mode", text("developerMode"), image: "hammer", navigates: false)
+    result.disclosure = false
+    result.toggle = LodyPreferences.developerModeEnabled
+    return result
   }
 
   private static func section(_ id: String, header: String = "", footer: String = "", rows: [LodyListRow]) -> LodyListSection {
