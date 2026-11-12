@@ -354,3 +354,5 @@ its caller releases only its own reader after completion. Web's optional
 `openBrowserRecovery(workspaceId)` opens an in-app surface after personal-computer
 consent and returns true only for a ready workspace. It never starts account pairing.
 Other-device approval remains a separate choice.
+
+The personal-device session exposes `abandonEpoch(baseEpoch)` through the same Owner-only staged publisher after declaring capability 2, without requiring the current epoch key. Callers own evidence display and explicit confirmation; exact-original retries and history recovery remain in core.

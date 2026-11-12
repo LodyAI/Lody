@@ -55,7 +55,7 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   recomputed from the bytes after decoding. Restore results equal full replay.
 - State formats are versioned and current-only. Local retained v5 preserves existing
   verified hashes and publication originals through compaction; it never invents
-  pre-snapshot evidence. Remote snapshot bodies and comparison digests stay v4.
+  pre-snapshot evidence. Snapshot bodies, digests and local retained envelopes use v5.
   Changing authorization state `S` bumps its wire formats together; local evidence
   changes only the retained envelope.
 - `VerifiedLedger` is the single rollback guard: genuine view, same workspace,
@@ -77,4 +77,6 @@ it never clears pins or workflow journals. Verification provenance is never upgr
   Only a same-member personal device can atomically replace its exact active machine;
   retain old keys/history. rotationRequired advises key updates; it must not block sends.
   Current-only, no legacy
-  machine record reader. Snapshot/digest v4 and retained v5 preserve every historical binding.
+  machine record reader. Snapshot/retained/digest v5 preserve every historical binding.
+
+- Capability 2 enables Owner-personal tag11 abandonment and per-membership 32-active/128-lifetime device limits. Preserve earlier replay rules; retain abandoned keys and author history, but refuse new seals in abandoned epochs. Snapshot/retained/digest v5 retain every explicit base-epoch link.

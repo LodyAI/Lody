@@ -41,6 +41,8 @@ acknowledge(r):  释放已完成的结果
 
 签名设备在此期间被吊销时，记录以 `Conflict` 结束，不会重新签名。日志记住观察到的最新检查点，拒绝已回滚的日志。
 
+自助设备记录若在 CAS 前明确收到 `LedgerLogError.reason = self-service-rate-limited`，P09 仅在本次新建槽位的首次尝试且修订号未被其他尝试推进时释放该原件，保留检查点并返回 `retryAt`。SQLite 与 IndexedDB 原子核对原件、检查点、修订号；SQLite 对既有日志只增补修订字段，保留待定原件与检查点。结果未知、旧 pending、并发尝试及普通 HTTP 429 都继续保留原件，不允许借后续拒绝抹掉先前可能生效的请求。
+
 ## InstalledEpochKeys 与 InstalledEpochHistory
 
 _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`、`InstalledKeyStore`。_
@@ -115,6 +117,8 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpoch
 本地候选信封列表使用独立的规范 CBOR 限制：最多 4096 个信封，编码后不超过 2 MiB。
 账本记录和背书快照仍保留数组最多 32 项的限制。
 
+`publishAbandoning(baseEpoch)` 仅允许已声明 capability 2 的 Owner 个人设备：读取本地持有的未废弃 baseEpoch 密钥，沿同一候选／暂存流程签署 tag11，历史钥链跳过废弃区间；调用方负责明确确认。所有重试保留原始字节。见[控制面可用性](../../../specs/e2ee/control-plane-availability.zh.md)。
+
 ```text
 生成密钥 → 封装历史包 → 签名记录 → 为每台设备生成信封
 → 保存候选（由 CandidateProtector 保护）并回读
@@ -176,7 +180,7 @@ retained 起点包含本调用方导出的本地 v5 状态与数据源 `offset`�
 保留状态编解码器和 feed 适配器共用 64 MiB 上限，每个 feed 仍遵守其配置的字节预算。
 因此压缩不会删除未决提交、
 候选代次或安装日志依赖的锚点。这些证据仍受 feed 字节预算限制；容量不足时
-保留原缓存和日志。远端快照与比较摘要保持 v4，字节完全不变。快照导入不会
+保留原缓存和日志。远端快照、比较摘要与本地保留状态均使用 v5。快照导入不会
 虚构旧哈希或发布原件：当前密钥可通过已认证的普通邮箱安装，后续发布记录
 则恢复正常的 staging 发现路径。
 

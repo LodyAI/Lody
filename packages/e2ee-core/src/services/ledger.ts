@@ -27,8 +27,10 @@ import type {
  * - `appendCas` must append atomically if and only if the current tail equals
  *   `expected`; it must never append unconditionally. Appending the exact same
  *   bytes twice must be idempotent or rejected, never duplicated.
- * - Failures are reported as {@link LedgerLogError}. After a failed append the
- *   library reads back to learn whether its original record was committed.
+ * - Failures are {@link LedgerLogError}. An explicit self-service-rate-limited
+ *   reason with retryAt promises this attempt was refused before CAS dispatch.
+ *   Generic 429, timeout and transport failures make no such promise. Otherwise
+ *   the library reads back to learn whether the original was committed.
  *
  * The Loro Streams adapter (`@lody/e2ee-core/adapters/loro-streams`) implements
  * this over a Durable Streams control stream.
@@ -46,7 +48,7 @@ export class LedgerLog extends Context.Service<
       },
       LedgerLogError
     >;
-    /** Atomically append at `expected`; an error may follow a committed write, so callers must read back. */
+    /** Atomically append at `expected`; only an explicitly typed pre-CAS quota refusal establishes non-dispatch for this attempt. */
     appendCas(
       anchor: GenesisHash,
       expected: LedgerCheckpoint,
@@ -187,8 +189,12 @@ export interface SubmissionEntry {
  * until the application acknowledges it.
  *
  * Contract for implementers (each method is one atomic step):
- * - `prepare` stores `record` if the slot is empty; the same bytes again is a
- *   no-op; a different record fails with `conflict`.
+ * - `prepare` stores `record` if empty and returns its unique creation revision;
+ *   the same occupied original returns null; another record conflicts.
+ * - Every `observe` increments the durable revision, including an unchanged pin,
+ *   and returns the new revision before an append attempt. `rejectUnsent` clears
+ *   only an unfinished exact record/checkpoint/revision and retains its pin.
+ *   It is reserved for P09's freshly created, first-attempt quota refusal.
  * - `observe`/`finish` apply only while the slot still holds `record` with
  *   checkpoint `before` (else `conflict`), and must refuse an `after` that is
  *   shorter than `before`, or equally long with another head (`conflict`).
@@ -203,15 +209,22 @@ export class SubmissionJournal extends Context.Service<
   {
     /** Read the bound workspace's slot and retained checkpoint; an unused slot contains null fields. */
     load(anchor: GenesisHash): Effect.Effect<SubmissionEntry, LocalStoreError>;
-    /** Persist a copy before network I/O; identical retries are no-ops and a different occupied record conflicts. */
-    prepare(anchor: GenesisHash, record: Uint8Array): Effect.Effect<void, LocalStoreError>;
-    /** Record a newer observed checkpoint while the outcome is still unknown. */
+    /** Persist before I/O. Return the unique creation revision, or null for an identical occupied original; another record conflicts. */
+    prepare(anchor: GenesisHash, record: Uint8Array): Effect.Effect<number | null, LocalStoreError>;
+    /** Clear a freshly prepared, explicitly refused self-service original only if no competing attempt changed its revision. Preserve the checkpoint. */
+    rejectUnsent(
+      anchor: GenesisHash,
+      record: Uint8Array,
+      checkpoint: LedgerCheckpoint,
+      revision: number
+    ): Effect.Effect<boolean, LocalStoreError>;
+    /** Record the observed checkpoint and advance/return the attempt revision, even when the checkpoint is unchanged. */
     observe(
       anchor: GenesisHash,
       record: Uint8Array,
       before: LedgerCheckpoint | null,
       after: LedgerCheckpoint
-    ): Effect.Effect<void, LocalStoreError>;
+    ): Effect.Effect<number, LocalStoreError>;
     /** Atomically retain the terminal outcome and advance the pin only when record and `before` still match. */
     finish(
       anchor: GenesisHash,

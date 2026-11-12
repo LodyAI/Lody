@@ -13,6 +13,7 @@ import {
   VerifiedLedger,
 } from '@lody/e2ee-core';
 import {
+  epochHistoryPacket,
   Bytes,
   LedgerError,
   hashRecordBytes,
@@ -410,6 +411,8 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
     let writeEpoch: number | null = Result.isSuccess(key) ? epoch : null;
     if (Result.isFailure(key) && key.failure.reason === 'missing-key') {
       for (let candidate = retainedWriteEpoch ?? epoch - 1; candidate >= 0; candidate -= 1) {
+        const packet = epochHistoryPacket(view, candidate);
+        if (Result.isFailure(packet) || packet.success.abandoned) continue;
         const older = yield* Effect.result(installed.check(candidate));
         if (Result.isSuccess(older)) {
           writeEpoch = candidate;

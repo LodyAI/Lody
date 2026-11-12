@@ -89,7 +89,7 @@ export interface LedgerFeedOptions {
    * record). On first use it must equal the origin.
    */
   readonly expected: LedgerCheckpoint;
-  /** Upper bounds on records and bytes kept locally. */
+  /** maxRecords bounds appended records after the verified origin; rebase resets that suffix budget. maxBytes includes the origin and retained suffix. */
   readonly budget: { readonly maxRecords: number; readonly maxBytes: number };
 }
 
@@ -449,8 +449,7 @@ export class LedgerFeed extends Context.Service<
           !expected.head.equals(origin.view.head)
         )
           return yield* fail('local-evidence-conflict');
-        if (origin.view.length > budget.maxRecords || origin.bytes.length > budget.maxBytes)
-          return yield* fail('read-too-large');
+        if (origin.bytes.length > budget.maxBytes) return yield* fail('read-too-large');
         if (!contents) {
           if (
             !retained &&
@@ -461,6 +460,7 @@ export class LedgerFeed extends Context.Service<
           yield* local(store.initialize(origin.bytes, origin.view.length, tail));
           contents = { origin: origin.bytes, originCount: origin.view.length, tail, records: [] };
         }
+        let budgetOriginCount = origin.view.length;
         const { tail, records } = contents;
         const recordBytes = records.reduce((size, record) => size + record.length, 0);
         if (
@@ -468,7 +468,7 @@ export class LedgerFeed extends Context.Service<
           contents.originCount !== origin.view.length ||
           !Number.isSafeInteger(tail.count) ||
           tail.count !== origin.view.length + records.length ||
-          tail.count > budget.maxRecords ||
+          records.length > budget.maxRecords ||
           !validLedgerOffset(tail.offset) ||
           tail.bytes !== origin.bytes.length + recordBytes ||
           tail.bytes > budget.maxBytes ||
@@ -526,7 +526,7 @@ export class LedgerFeed extends Context.Service<
               checkpoint
             );
             bytes += incoming.reduce((sum, record) => sum + record.length, 0);
-            if (next.view.length > budget.maxRecords || bytes > budget.maxBytes)
+            if (next.view.length - budgetOriginCount > budget.maxRecords || bytes > budget.maxBytes)
               return yield* fail('read-too-large');
             additions.push(...incoming);
             pending = next;
@@ -579,6 +579,7 @@ export class LedgerFeed extends Context.Service<
                 )
               );
               totalBytes = saved.bytes.length;
+              budgetOriginCount = saved.length;
             })
           );
           return { kind: 'retained' as const, state: saved, offset: state.offset };
@@ -619,7 +620,7 @@ export class LedgerFeed extends Context.Service<
           // A bootstrap page repeats the stored genesis record.
           const additions = copied.slice(observed.bootstrap ? 1 : 0);
           const bytes = additions.reduce((size, record) => size + record.length, totalBytes);
-          if (next.view.length > budget.maxRecords || bytes > budget.maxBytes)
+          if (next.view.length - budgetOriginCount > budget.maxRecords || bytes > budget.maxBytes)
             return yield* fail('read-too-large');
           if (state !== observed) return yield* fail('conflict');
           yield* local(store.append(tailOf(observed, totalBytes), additions, tailOf(next, bytes)));

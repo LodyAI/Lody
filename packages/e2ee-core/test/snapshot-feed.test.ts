@@ -95,7 +95,7 @@ describe('independently qualified snapshot origin with durable exact suffix', ()
         ) as CborValue[];
         const body = kind === 'snapshot' ? (root[0] as CborValue[]) : root;
         const state = body[kind === 'snapshot' ? 5 : 4] as CborValue[];
-        state[7] = [1, 2];
+        state[7] = [1, 3];
         const bodyBytes = ok(encodeSnapshotCbor(body));
         const bytes =
           kind === 'snapshot'
@@ -156,7 +156,7 @@ describe('independently qualified snapshot origin with durable exact suffix', ()
               ? f.signed.snapshot
               : saved.bytes;
         const count = kind === 'genesis' ? 1 : f.view.length;
-        f.f.append([9, [1, 2]]);
+        f.f.append([9, [1, 3]]);
         const records = f.f.records().slice(count);
         const expected = {
           head: hashRecordBytes(records[records.length - 1]!),
@@ -432,15 +432,24 @@ describe('independently qualified snapshot origin with durable exact suffix', ()
         })
       );
       const small = f.input(join(f.dir, 'budget.sqlite'));
+      f.f.append([9, [1]]);
+      const overflowView = f.f.view();
       await run(
         Effect.gen(function* () {
           const feed = yield* makeSqliteSnapshotLedgerFeed({
             ...small,
-            budget: { ...small.budget, maxRecords: 2 },
+            budget: { ...small.budget, maxRecords: 1 },
           });
-          expect(Result.isFailure(yield* Effect.result(feed.accept(f.page(), f.expected)))).toBe(
-            true
-          );
+          expect(
+            Result.isFailure(
+              yield* Effect.result(
+                feed.accept(
+                  { ...f.page(), records: f.f.records().slice(f.view.length) },
+                  { head: overflowView.head, length: overflowView.length }
+                )
+              )
+            )
+          ).toBe(true);
           expect((yield* feed.current()).view.length).toBe(2);
         })
       );

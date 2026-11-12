@@ -435,3 +435,5 @@ These ports contain no private credentials, authorization decision, network
 operation or crypto/network await inside IndexedDB transactions. The opt-in
 [`@lody/e2ee-client`](../../e2ee-client/README.md) host owns proof verification,
 actual custody readback, approval, current membership and confirmation/ACK.
+
+`SubmissionJournal.prepare` returns a new slot’s unique revision, or null for an identical occupied original. `observe` advances the revision even at an unchanged checkpoint. `rejectUnsent` clears only an unfinished matching original/checkpoint/revision, retaining the pin; only P09’s fresh first-attempt pre-CAS quota refusal uses it.

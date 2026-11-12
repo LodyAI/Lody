@@ -57,6 +57,8 @@ A record signed by a device that was revoked meanwhile ends as `Conflict`
 without re-signing. The journal keeps the newest observed log checkpoint and
 refuses a log that rolled back.
 
+For an explicit pre-CAS `LedgerLogError.reason = self-service-rate-limited`, P09 releases only a newly created self-service slot at its unchanged first-attempt revision, preserves its checkpoint and returns `retryAt`. SQLite and IndexedDB atomically compare original/checkpoint/revision. Existing SQLite journals gain only revision metadata, preserving pending originals and checkpoints. Unknown outcomes, older pending entries, competing attempts and generic HTTP 429 retain their originals; a later refusal cannot erase an earlier possibly committed request.
+
 ## InstalledEpochKeys and InstalledEpochHistory
 
 _Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`, `KeyProtector`,
@@ -178,6 +180,8 @@ signed record (`publishRemoving`, owner only).
 Local candidate envelope lists use their own canonical CBOR budget: at most 4096
 envelopes and 2 MiB encoded bytes. Ledger records and endorsed snapshots keep
 their 32-item array limit.
+
+`publishAbandoning(baseEpoch)` requires capability 2 and an Owner personal device. It reads the held, non-abandoned base key and signs tag11 through the same candidate/staging flow, skipping abandoned epochs in history recovery. The caller owns explicit confirmation. Every retry retains original bytes. See [control-plane availability](../../../specs/e2ee/control-plane-availability.md).
 
 ```text
 generate key → seal history packet → sign record → envelope per device
@@ -309,8 +313,8 @@ epoch publications as a length-delimited binary table, without the CBOR array co
 The retained codec and feed adapters share a 64 MiB ceiling; each feed still enforces
 its configured byte budget. Rebase therefore cannot discard anchors used by pending submissions,
 candidates or installations. These retained facts remain bounded by the feed byte budget;
-capacity failure preserves the existing cache and journals. Remote snapshots and comparison
-digests remain v4, byte-for-byte unchanged. Snapshot imports invent no older hashes or
+capacity failure preserves the existing cache and journals. Remote snapshots, comparison
+digests and local retained envelopes use v5. Snapshot imports invent no older hashes or
 publications: current keys can arrive through the ordinary authenticated mailbox, and
 later ledger publications enable staging discovery normally.
 

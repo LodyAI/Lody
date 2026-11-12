@@ -52,13 +52,14 @@ import {
   sealHistoryPacket,
 } from '../../src/internal/keys/history';
 import { prepareEpochEnvelope } from '../../src/internal/keys/envelope';
-import { makeSqliteEpochReceiver } from './harness';
+import { makeSqliteEpochReceiver, makeInstalledEpochHistory } from './harness';
 import { makeSqliteProtectedEpochKeys } from './harness';
 import { makeSqliteKeyDistribution } from './harness';
 import { makeSqliteKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite';
 import { makeSqliteRecipientMailbox } from './harness';
 import { envelopeFixture, recipientPair } from './fixture';
 import { synthetic } from './protection-fixture';
+import { makeWorkspaceControlHandle } from '../../src/internal/testing/workspace';
 const ok = Result.getOrThrow;
 function memberDevice(seed: number) {
   const privateKey = createPrivateKey({
@@ -78,7 +79,24 @@ function memberDevice(seed: number) {
   );
   return {
     publicKey,
-    encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(seed + 100))),
+    encryptionPublicKey: ok(
+      Bytes.encryptionPublicKey(
+        new Uint8Array(
+          createPublicKey(
+            createPrivateKey({
+              key: Buffer.concat([
+                Buffer.from('302e020100300506032b656e04220420', 'hex'),
+                Buffer.alloc(32, seed),
+              ]),
+              format: 'der',
+              type: 'pkcs8',
+            })
+          )
+            .export({ format: 'der', type: 'spki' })
+            .subarray(-32)
+        )
+      )
+    ),
     signBytes: (message: Uint8Array) => new Uint8Array(sign(null, message, privateKey)),
     signer: {
       publicKey,
@@ -522,6 +540,183 @@ describe('durable local epoch rotation', () => {
             view.inspectState().epoch.keyCommitment
           );
           disposeEpochKey(next);
+        })
+      )
+    );
+  });
+
+  it.each(['abandonEpoch', 'rotate', 'setRole'] as const)(
+    'releases a fresh quota refusal so the same Owner immediately performs %s',
+    async (governance) => {
+      const f = fixture();
+      const bob = memberDevice(60),
+        membership = ok(Bytes.membershipId(new Uint8Array(16).fill(66)));
+      const add = (operation: import('../../src/internal/foundation/cbor').CborValue) => {
+        const body = [f.view().head.toBytes(), f.owner.publicKey.toBytes(), operation] as const;
+        f.append(
+          ok(encodeCbor([body, f.owner.signBytes(recordSigningBytes(ok(encodeCbor(body))))]))
+        );
+      };
+      let spent = 0;
+      const remote = LedgerLog.of({
+        ...f.remote,
+        appendCas: (anchor, point, record) =>
+          Effect.suspend(() => {
+            const parsed = ok(decodeRecord(record));
+            if (
+              parsed.body.type === 'ordinary' &&
+              ['admitDevice', 'revokeDevice'].includes(parsed.body.operation.type)
+            ) {
+              if (spent >= 10)
+                return Effect.fail(
+                  new LedgerLogError({ reason: 'self-service-rate-limited', retryAt: 3600000 })
+                );
+              spent++;
+            }
+            if (
+              parsed.body.type === 'ordinary' &&
+              !['publishEpoch', 'abandonEpoch', 'removeMemberAndPublishEpoch'].includes(
+                parsed.body.operation.type
+              )
+            )
+              return Effect.sync(() => f.append(record));
+            return f.remote.appendCas(anchor, point, record);
+          }),
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const request = yield* prepareJoinRequest({
+              genesis: f.context.genesis,
+              requestId: ok(Bytes.requestId(new Uint8Array(16).fill(67))),
+              userId: ok(Bytes.userId(new Uint8Array(32).fill(66))),
+              encryptionPublicKey: bob.encryptionPublicKey,
+              expiresAt: null,
+              signer: bob.signer,
+            });
+            add([
+              1,
+              membership.toBytes(),
+              [
+                request.requestId.toBytes(),
+                request.userId.toBytes(),
+                request.signingPublicKey.toBytes(),
+                request.encryptionPublicKey.toBytes(),
+                null,
+                request.signature.toBytes(),
+              ],
+            ]);
+            add([9, [2]]);
+            if (governance === 'abandonEpoch')
+              add([7, 1, new Uint8Array(32).fill(55), new Uint8Array(72).fill(9)]);
+            const { rotation, journal } = yield* f.open('create', { remote });
+            const point = () =>
+              Effect.sync(() => ({ head: f.view().head, length: f.view().length }));
+            const current = () =>
+              Effect.sync(() => ({ view: f.view(), offset: 'synthetic', bootstrap: false }));
+            const control = yield* makeWorkspaceControlHandle({
+              genesis: f.context.genesis,
+              signer: f.owner.signer,
+              checkpoint: point,
+              client: { current, read: current },
+              journal,
+              remote,
+            });
+            for (let i = 0; i < 5; i++) {
+              const device = memberDevice(70 + i);
+              const consent = yield* prepareDeviceAdmission({
+                genesis: f.context.genesis,
+                membershipId: f.view().inspectState().owner,
+                kind: 'personal',
+                encryptionPublicKey: device.encryptionPublicKey,
+                signer: device.signer,
+              });
+              yield* control.acknowledge(yield* control.execute(consent));
+              yield* control.acknowledge(
+                yield* control.execute({ _tag: 'RevokeDevice', target: device.publicKey })
+              );
+            }
+            const before = f.view().head;
+            const refusal = yield* Effect.result(
+              control.execute({ _tag: 'RevokeDevice', target: f.phone.publicKey })
+            );
+            expect(Result.isFailure(refusal) && refusal.failure).toMatchObject({
+              reason: 'self-service-rate-limited',
+              retryAt: 3600000,
+            });
+            expect((yield* journal.load(f.context.genesis)).record).toBeNull();
+            expect(f.view().head.equals(before)).toBe(true);
+            if (governance === 'setRole') {
+              const result = yield* control.execute({
+                _tag: 'SetRole',
+                membershipId: membership,
+                role: 'admin',
+              });
+              expect(result.outcome).toBe('Committed');
+              yield* control.acknowledge(result);
+            } else {
+              const result =
+                governance === 'rotate'
+                  ? yield* rotation.publish()
+                  : yield* rotation.publishAbandoning(0);
+              expect(result.outcome).toBe('Committed');
+              yield* rotation.acknowledge(result);
+            }
+            expect(f.view().head.equals(before)).toBe(false);
+          })
+        )
+      );
+    }
+  );
+
+  it('recovers a withheld epoch from a held base key through staged exact originals and retained retries', async () => {
+    const f = fixture();
+    const add = (operation: import('../../src/internal/foundation/cbor').CborValue) => {
+      const body = [f.view().head.toBytes(), f.owner.publicKey.toBytes(), operation] as const;
+      f.append(ok(encodeCbor([body, f.owner.signBytes(recordSigningBytes(ok(encodeCbor(body))))])));
+    };
+    add([9, [2]]);
+    add([7, 1, new Uint8Array(32).fill(55), new Uint8Array(72).fill(9)]);
+    let original: Uint8Array;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation, installed } = yield* f.open();
+          expect(Exit.isFailure(yield* Effect.exit(installed.read(1)))).toBe(true);
+          f.stageRewrite(true);
+          failureCode(yield* Effect.exit(rotation.publishAbandoning(0)), 'stage-readback');
+          expect(f.view().inspectState().epoch.number).toBe(1);
+          original = new Uint8Array(f.row()!.record);
+        })
+      )
+    );
+    f.stageRewrite(false);
+    f.mode('lost-ack');
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation, installed } = yield* f.open('open');
+          const result = yield* rotation.publishAbandoning(0);
+          expect(result.outcome).toBe('Committed');
+          expect(result.record).toEqual(original!);
+          expect(f.view().inspectState().epoch.number).toBe(2);
+          const parsed = ok(decodeRecord(result.record));
+          expect(parsed.body.type === 'ordinary' && parsed.body.operation.type).toBe(
+            'abandonEpoch'
+          );
+          const history = yield* makeInstalledEpochHistory({
+            genesis: f.context.genesis,
+            ledger: f.lookup,
+            installed,
+          });
+          expect(yield* history.recover()).toEqual([2, 0]);
+          failureCode(yield* Effect.exit(history.read(1)), 'missing-key');
+          const latest = yield* installed.read(2);
+          const keys = ok(recoverLedgerHistory(f.view(), latest));
+          expect([...keys.keys()]).toEqual([2, 0]);
+          for (const key of keys.values()) disposeEpochKey(key);
+          disposeEpochKey(latest);
+          yield* rotation.acknowledge(result);
         })
       )
     );

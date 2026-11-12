@@ -147,7 +147,8 @@ export const prepareEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
     const record = yield* Effect.fromResult(decodeRecord(candidate.record));
     if (
       record.body.type !== 'ordinary' ||
-      (record.body.operation.type !== 'publishEpoch' &&
+      (record.body.operation.type !== 'abandonEpoch' &&
+        record.body.operation.type !== 'publishEpoch' &&
         record.body.operation.type !== 'removeMemberAndPublishEpoch') ||
       record.body.operation.epoch !== context.epoch ||
       !record.body.signer.equals(context.sender)

@@ -607,6 +607,13 @@ export async function boot(
                   }),
                 appendCas: (_anchor, expected, record) =>
                   Effect.gen(function* () {
+                    if (localStorage.getItem('quota-once') === '1') {
+                      localStorage.removeItem('quota-once');
+                      return yield* new LedgerLogError({
+                        reason: 'self-service-rate-limited',
+                        retryAt: 3600000,
+                      });
+                    }
                     if (expected.length !== records.length || !expected.head.equals(view().head))
                       return yield* new LedgerLogError({});
                     records.push(new Uint8Array(record));
@@ -668,7 +675,11 @@ export async function boot(
                   events.push('fetch');
                   const current = view(),
                     target = current.inspectState().devices.get(toHex(binding.device.toBytes()));
-                  if (!target || epoch > 0) return { items: [], next: null };
+                  if (
+                    !target ||
+                    (epoch > 0 && !(epoch === 1 && localStorage.getItem('current-mailbox') === '1'))
+                  )
+                    return { items: [], next: null };
                   const prepared = yield* prepareEpochEnvelope({
                     context: {
                       genesis: binding.genesis,
@@ -676,7 +687,10 @@ export async function boot(
                       sender: owner.publicKey,
                       recipient: binding.device,
                     },
-                    key,
+                    key:
+                      epoch === 1
+                        ? Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72)))
+                        : key,
                     signer: owner,
                     ledger: () => Effect.succeed(current),
                   });
@@ -1463,6 +1477,62 @@ export async function invoke(action: string) {
             records.push(
               yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner)
             );
+            retain();
+            return true;
+          }
+          case 'quotaThenGovern': {
+            localStorage.setItem('quota-once', '1');
+            const refused = yield* Effect.result(
+              session!.execute({ _tag: 'RevokeDevice', target: session!.binding.device })
+            );
+            const result = yield* session!.execute({
+              _tag: 'DeclareCapabilities',
+              capabilities: [1],
+            });
+            yield* session!.acknowledge(result);
+            return {
+              refusal: Result.isFailure(refused)
+                ? (refused.failure as { reason?: string }).reason
+                : null,
+              outcome: result.outcome,
+            };
+          }
+          case 'currentMailbox':
+            localStorage.setItem('current-mailbox', '1');
+            return true;
+          case 'abandonRemote': {
+            const genesis = Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash)));
+            const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x73)));
+            const operations = [
+              [9, [2]],
+              [
+                11,
+                2,
+                Result.getOrThrow(commitEpochKey(genesis, 2, next)).toBytes(),
+                0,
+                Result.getOrThrow(
+                  sealHistoryPacket({
+                    genesis,
+                    epoch: 2,
+                    baseEpoch: 0,
+                    currentKey: next,
+                    previousKey: key,
+                  })
+                ),
+              ],
+            ];
+            for (const operation of operations) {
+              const body = Result.getOrThrow(
+                encodeCbor([
+                  view().head.toBytes(),
+                  owner.publicKey.toBytes(),
+                  operation as import('@lody/e2ee-core/protocol').CborValue,
+                ])
+              );
+              records.push(
+                yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner)
+              );
+            }
             retain();
             return true;
           }

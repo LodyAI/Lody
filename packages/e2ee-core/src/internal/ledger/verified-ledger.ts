@@ -1,6 +1,7 @@
 import { own } from '../lifecycle';
 import { Clock, Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
 import { LedgerPinStore, LedgerViewSource } from '../../services/ledger';
+import { epochHistoryPacket } from './replay';
 import { makeEpochWriteGrace } from './epoch-write-grace';
 import { WorkspaceScope } from '../../services/workspace';
 import { hasVerifiedCheckpoint, requireLedgerContinuation, type LedgerView } from './index';
@@ -114,7 +115,8 @@ export class VerifiedLedger extends Context.Service<
                 !Number.isSafeInteger(epoch) ||
                 epoch < 0 ||
                 !observed ||
-                epoch >= observed.inspectState().epoch.number
+                epoch >= observed.inspectState().epoch.number ||
+                Result.getOrThrow(epochHistoryPacket(observed, epoch)).abandoned
                   ? Effect.succeed(false)
                   : grace.allowed(epoch)
               )

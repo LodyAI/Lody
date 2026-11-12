@@ -875,3 +875,59 @@ it.each([
     }
   }
 );
+
+it('snapshot-joined personal status skips an installed abandoned K1 while K2 is missing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'lody-abandoned-status-'));
+  let context: BrowserContext | undefined;
+  try {
+    const output = await build({
+      entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+      platform: 'browser',
+      bundle: true,
+      format: 'iife',
+      globalName: 'HostFixture',
+      target: 'safari16.4',
+      write: false,
+      logLevel: 'silent',
+    });
+    const file = join(dir, 'index.html');
+    await writeFile(
+      file,
+      '<!doctype html><script>' +
+        output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+        '</script>'
+    );
+    context = await chromium.launchPersistentContext(join(dir, 'profile'), { headless: true });
+    const page = await context.newPage();
+    await page.goto(pathToFileURL(file).href);
+    await page.evaluate(() => (globalThis as HostGlobal).HostFixture.boot());
+    for (const action of [
+      'rotateRemote',
+      'prepare',
+      'begin',
+      'approve',
+      'claim',
+      'open',
+      'currentMailbox',
+      'keyRound',
+    ]) {
+      const result = await call(page, action);
+      expect(result.ok, action + JSON.stringify(result)).toBe(true);
+    }
+    expect(record(await call(page, 'status')).usableEpoch).toBe(1);
+    for (const action of ['abandonRemote', 'refresh'])
+      expect((await call(page, action)).ok, action).toBe(true);
+    expect((await call(page, 'status')).value).toEqual({
+      currentEpoch: 2,
+      usableEpoch: null,
+      rotationRequired: false,
+    });
+    expect(record(await call(page, 'quotaThenGovern'))).toEqual({
+      refusal: 'self-service-rate-limited',
+      outcome: 'Committed',
+    });
+  } finally {
+    await context?.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

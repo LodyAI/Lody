@@ -24,8 +24,8 @@ Translation: current
 新增能力 2 与操作 tag 11 `[11, nextEpoch, commitment, baseEpoch, baseKeyPacket]`：
 
 - 只有 Owner 的有效个人设备可以签署。Admin、机器和恢复设备一律拒绝。
-- `baseEpoch` 小于当前代次，是签名者实际持有密钥的最近一代；`nextEpoch` 为当前代次加一。`baseEpoch` 之后、`nextEpoch` 之前的代次标记为**已废弃**。
-- `baseKeyPacket` 用新代钥加密 `baseEpoch` 的密钥，认证绑定 genesis、`nextEpoch` 和 `baseEpoch`。历史钥链因此从新代直接接回 `baseEpoch`，跳过已废弃代次。
+- `baseEpoch` 小于当前代次，是签名者实际持有且未被废弃的最近一代；`nextEpoch` 为当前代次加一。`baseEpoch` 之后、`nextEpoch` 之前的代次标记为**已废弃**。
+- `baseKeyPacket` 用新代钥加密 `baseEpoch` 的密钥，认证绑定 genesis、`nextEpoch` 和 `baseEpoch`。AAD 为 `lody-e2ee/epoch-abandon-history/v1\0 || genesis32 || u32be(nextEpoch) || u32be(baseEpoch)`。历史钥链因此从新代直接接回 `baseEpoch`，跳过已废弃代次。
 - 发布沿用[先暂存、一次提交](atomic-removal.zh.md#先暂存一次提交)：先持久保存候选钥、原始记录和发给全部有效设备的信封，暂存并读回后才提交。
 - 记录清除换代提醒。承诺不得重复，代次不得溢出。
 
@@ -33,7 +33,13 @@ Translation: current
 
 ### 2. 自助记录的配额
 
-宿主对每个成员实例的自助记录（登记、撤销自己的设备，登记恢复设备）限速，建议每小时 10 条、每天 30 条；超限返回可识别的错误，客户端显示何时可重试。Owner/Admin 的管理记录（移除、角色调整、换代、废弃代次、能力声明）不计入配额。限速依赖时间，不能由账本规则表达，因此属于宿主职责；宿主本来就被信任提供可用性。
+宿主对每个成员实例的自助记录（登记、撤销自己的设备，登记恢复设备）按滚动窗口限速：每小时 10 条、每天 30 条；超限返回可识别的错误，客户端显示何时可重试。Owner/Admin 的管理记录（移除、角色调整、换代、废弃代次、能力声明）不计入配额。限速依赖时间，不能由账本规则表达，因此属于宿主职责；宿主本来就被信任提供可用性。
+
+账本在 capability 2 生效后采用方案 A（[S-04] / [A-05]）：每个成员实例最多 32 台活跃设备、128 台累计历史设备，包含创始／入会设备和全部设备种类。机器原子替换不增加活跃数量，但消耗一个历史名额。拒绝超额登记时返回 `device-quota-exceeded`；撤销、移除、角色调整与密钥操作仍可执行。Guest 只能登记个人设备；恢复设备恢复其个人设备的既有路径保留。能力声明之前的记录按原规则回放；声明不会删除已有设备，已超额实例只能减少活跃数，不能继续登记。退出后重新接纳属于新成员实例，需要新的身份与设备密钥。
+
+不裁剪已撤销历史设备。单成员配额限制一个成员实例能增加的设备状态；它不构成全工作区的永久容量保证。多次重新入会、多个成员、换代与历史记录仍可能耗尽总容量，宿主仍须管理全局容量。当前快照以固定宽度字节表编码设备，单表不受 4096 个 CBOR 容器元素限制；快照总字节上限仍为 2 MiB。不得把其他协议的 4096 元素限制当作快照设备总数。
+
+限速预留在候选记录完成权限、签名与父节点校验后、首次 CAS 派发前持久化；未知提交结果继续占用预留，完全相同的原始记录重试不重复扣额。设备之间共享成员实例配额；宿主重启不重置窗口。参考宿主返回 HTTP 429、`self-service-rate-limited` 和绝对毫秒时间 `retryAt`。
 
 客户端的账本长度预算改为按“已验证起点之后的后缀”计算，不再按自创世以来的总长度计算。长期运行的工作区不会因为累计记录数而整体停摆。
 
@@ -57,21 +63,35 @@ Translation: current
 
 ## 已考虑的取舍
 
-Owner 于 2026-11-11 在评审对话中同意以下方向；本 Spec 仍为 draft，以本修订的 PR 批准为准。
+本修订选定以下方案。当前任务来自另一代理的转述，尚无本修订的可链接人工批准记录，因此审批状态保留 draft；实现与审批分别记录。
 
 1. **卡死期间不延长旧代写入窗口。** 延长可以避免 Owner 离线时停摆，但被扣钥的那次换代若是为了移除成员，被移除者能多读这段时间的新内容。保持 15 分钟。
 2. **Admin 仍可换代。** 把换代收回给 Owner 可以从源头消除“Admin 卡死代次”，但 Owner 不在线时无法在移除成员后换钥。保留 Admin 换代，由废弃操作兜底。
 3. **配额初始值为每小时 10 条、每天 30 条。** 网页端清除站点数据后要重新配对，每次产生一台新设备；数值是宿主配置，可按实际使用调整，不属于账本规则。
 4. **首版不提供已废弃代次的桥接。** 让持有被废弃代钥的设备事后把它接回历史链，需要再加一种记录和验证路径。
 
+## 实现与边界
+
+```text
+Owner 持有 baseEpoch 密钥
+  → 生成 nextEpoch 密钥与跨代历史包
+  → 持久保存候选／原始记录／全部有效设备信封
+  → 暂存并精确读回
+  → 提交 tag 11
+  → 新代历史链回到 baseEpoch，跳过废弃区间
+```
+
+`EpochPublisher.publishAbandoning(baseEpoch)`、workspace 和 personal-device session 的 `abandonEpoch` 共用既有候选日志、暂存和原始记录重试。调用方负责前述证据展示与明确确认；此修订不增加产品操作按钮。快照、保留状态及摘要同步提升为当前格式 v5，新增固定宽度废弃链接表；旧状态缓存须从原始 v1 账本重建，账本 v1 字节不变。
+
+公开参考宿主包含持久化限速。当前仓库不包含私有 Cloud ledger API，因此本修订不能证明 Cloud 已接入限速或已部署；客户端的限速提示接入也依赖该后端错误契约。
+
 ## 证据
 
-- 换代规则只检查代次加一与承诺不重复：`packages/e2ee-core/src/internal/ledger/policy.ts` 的 `publishEpoch` 分支。
-- 诚实换代须先读当前代钥：`packages/e2ee-core/src/internal/keys/publisher.ts`。
-- 历史包的加密与绑定：`packages/e2ee-core/src/internal/keys/history.ts`。
-- 自助登记、撤销设备不限次数：`policy.ts` 的 `admitDevice`、`revokeDevice` 分支。
-- 账本长度预算：`packages/e2ee-client/src/ledger.ts`（`maxRecords: 16384`）、`packages/e2ee-core/src/internal/ledger/ledger-feed.ts`。
-- X25519 公钥只拒全零：`packages/e2ee-core/src/internal/foundation/bytes.ts`。
-- 能力声明与扩展规则：[权限账本 §4.5](permission-ledger.zh.md)。
+- 操作、权限与设备配额：`packages/e2ee-core/src/internal/ledger/{records,policy,replay}.ts`。
+- 发布暂存与历史包：`packages/e2ee-core/src/internal/keys/{publisher,history,staging}.ts`。
+- X25519 规范编码与低阶点校验：`packages/e2ee-core/src/internal/foundation/bytes.ts`。
+- 后缀预算：`packages/e2ee-core/src/internal/ledger/ledger-feed.ts`；personal-device 客户端继续使用 16384 条后缀预算。
+- 持久限速与 HTTP 错误：`packages/e2ee-lab/src/platform/{control-gateway,host}.ts`。
+- 可执行证据：core 的 `test/ledger/{replay,retained-feed}.test.ts`、`test/keys/epoch-rotation.test.ts` 与 Lab 的 `test/gateway.test.ts`。
 
-以上均为读码结论，未运行测试；宿主是否已有限速未核实。
+自助限流的明确 CAS 前拒绝不得占据治理提交槽。仅本次新建且无先前／并发派发可能的原件可以释放；结果未知的原件继续保留并核实，不能以新的拒绝推翻旧的不确定结果。报告可写代次时也必须排除已废弃代次，包括缓存的代次提示；历史钥仍可保留用于读取。宿主墙上时钟回拨以最新持久时间夹紧，不将微调当作存储或权限错误。

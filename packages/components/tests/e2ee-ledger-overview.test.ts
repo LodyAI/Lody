@@ -43,6 +43,7 @@ describe('readable ledger overview', () => {
       'transferOwner',
       'declareCapabilities',
       'removeMember',
+      'declareCapabilities',
     ]);
     expect(overview.events[6]).toEqual({ type: 'publishEpoch', actor: member(2, '0b'), epoch: 1 });
     // The revoked device was admitted by member 1, so it is shown as theirs.

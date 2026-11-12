@@ -166,7 +166,8 @@ export function checkLocalPublication(
     const commitment =
       b.type === 'genesis'
         ? b.epochCommitment.toBytes()
-        : (b.operation.type === 'publishEpoch' ||
+        : (b.operation.type === 'abandonEpoch' ||
+              b.operation.type === 'publishEpoch' ||
               b.operation.type === 'removeMemberAndPublishEpoch') &&
             b.operation.epoch === c.epoch
           ? b.operation.commitment.toBytes()

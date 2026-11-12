@@ -106,6 +106,7 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         LedgerFeed.layer({
           origin,
           expected,
+          // Counts the suffix after the verified origin, not the absolute ledger sequence.
           budget: { maxRecords: 16384, maxBytes: 32 * 1024 * 1024 },
         }).pipe(
           Layer.provide(

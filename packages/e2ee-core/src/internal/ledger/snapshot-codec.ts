@@ -32,13 +32,13 @@ const lift = <A>(r: Result.Result<A, { readonly code: LedgerError['code'] }>) =>
   Result.mapError(r, (e) => new LedgerError({ code: e.code }));
 /**
  * Format versions of the compact authorization-state encoding `S`. Current-only:
- * decoders reject every other version as `unknown-version`. Version 4 also preserves declared capabilities; older layouts
+ * decoders reject every other version as `unknown-version`. Version 5 also preserves declared capabilities; older layouts
  * cannot restore those facts and are rejected without migration.
  */
-const SNAPSHOT_BODY_VERSION = 4;
-/** Local-only envelope. Snapshot bodies, comparison digests and signature domains remain v4. */
+const SNAPSHOT_BODY_VERSION = 5;
+/** Local-only 9-element retained envelope version; snapshot bodies and digests also use v5. */
 const RETAINED_VERSION = 5;
-const DIGEST_DOMAIN = 'snapshot-digest/v4';
+const DIGEST_DOMAIN = 'snapshot-digest/v5';
 const digestOfBody = (body: Uint8Array) =>
   lift(Bytes.recordHash(sha256(concat([domain(DIGEST_DOMAIN), body]))));
 const array = (v: CborValue | undefined): Result.Result<readonly CborValue[], LedgerError> =>
@@ -232,6 +232,17 @@ function authState(s: InternalState): CborValue {
     s.epoch.rotationRequired,
     concat(machineRows),
     [...s.capabilities].sort((a, b) => a - b),
+    concat(
+      [...s.historyPackets]
+        .filter(([, row]) => row.baseEpoch !== undefined)
+        .sort(([a], [b]) => a - b)
+        .map(([epoch, row]) => {
+          const bytes = new Uint8Array(8);
+          writeIndex(bytes, 0, epoch);
+          writeIndex(bytes, 4, row.baseEpoch!);
+          return bytes;
+        })
+    ),
   ];
 }
 function eligible(s: InternalState, signer: Bytes.SigningPublicKey) {
@@ -462,7 +473,7 @@ function decodeAuthState(
     v instanceof Uint8Array && v.length % row === 0 ? Result.succeed(v) : fail('canonical');
   return Result.gen(function* () {
     const fields = yield* array(value);
-    if (fields.length !== 8) return yield* fail('canonical');
+    if (fields.length !== 9) return yield* fail('canonical');
     const capabilities = yield* array(fields[7]);
     if (capabilities.length > 16) return yield* fail('canonical');
     let previousCapability = 0;
@@ -623,6 +634,24 @@ function decodeAuthState(
           ? new Uint8Array()
           : packetBytes.slice((epoch - 1) * PACKET_ROW, epoch * PACKET_ROW);
       historyPackets.set(epoch, Object.freeze({ epoch, commitment, packet }));
+    }
+    const abandonmentLinks = yield* table(fields[8], 8);
+    if (abandonmentLinks.length > 0 && !declared.includes(2)) return yield* fail('canonical');
+    let lastAbandonment = 0;
+    for (let index = 0; index < abandonmentLinks.length; index += 8) {
+      const epoch = readIndex(abandonmentLinks, index),
+        baseEpoch = readIndex(abandonmentLinks, index + 4);
+      if (
+        epoch <= lastAbandonment ||
+        epoch > number ||
+        baseEpoch >= epoch - 1 ||
+        [...historyPackets.values()].some(
+          (row) => row.baseEpoch !== undefined && baseEpoch > row.baseEpoch && baseEpoch < row.epoch
+        )
+      )
+        return yield* fail('canonical');
+      historyPackets.set(epoch, Object.freeze({ ...historyPackets.get(epoch)!, baseEpoch }));
+      lastAbandonment = epoch;
     }
     const keyCommitment = historyPackets.get(number)!.commitment;
 

@@ -4214,6 +4214,45 @@ describe('machine E2EE local runtime', () => {
             expect(
               yield* binding.open({ ...input, ...sealed, additionalData: new Uint8Array([3]) })
             ).toEqual(input.plaintext);
+            // The late join installed K1 only; its cached write hint must be requalified.
+            const recoveryKey = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(73)));
+            const baseKey = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20)));
+            for (const op of [
+              [9, [2]],
+              [
+                11,
+                2,
+                Result.getOrThrow(commitEpochKey(fixture.genesis, 2, recoveryKey)).toBytes(),
+                0,
+                Result.getOrThrow(
+                  sealHistoryPacket({
+                    genesis: fixture.genesis,
+                    epoch: 2,
+                    baseEpoch: 0,
+                    currentKey: recoveryKey,
+                    previousKey: baseKey,
+                  })
+                ),
+              ],
+            ] as const) {
+              const body = Result.getOrThrow(
+                encodeCbor([view.head.toBytes(), owner.publicKey.toBytes(), op])
+              );
+              const record = yield* signLedgerRecord(
+                Result.getOrThrow(prepareLedgerRecord(view, body)),
+                owner
+              );
+              records.push(record);
+              view = Result.getOrThrow(
+                extendLedger(view, [record], {
+                  head: hashRecordBytes(record),
+                  length: records.length,
+                })
+              );
+            }
+            yield* runtime.ingest(page(records));
+            expect((yield* runtime.status()).writeEpoch).toBeNull();
+            expect((yield* runtime.status()).writeEpoch).toBeNull();
           })
         );
       } finally {

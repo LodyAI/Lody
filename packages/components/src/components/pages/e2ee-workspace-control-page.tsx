@@ -662,6 +662,12 @@ function eventSentence(t: TFunction, name: ResolveMember, event: LedgerEventSumm
           });
     case 'transferOwner':
       return t('e2ee.summary.transferOwner', { actor, member: name(event.member) });
+    case 'abandonEpoch':
+      return t('e2ee.summary.abandonEpoch', {
+        actor,
+        epoch: event.epoch,
+        baseEpoch: event.baseEpoch,
+      });
     case 'publishEpoch':
       return t('e2ee.summary.publishEpoch', { actor, epoch: event.epoch });
     case 'removeMember':

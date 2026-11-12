@@ -679,8 +679,8 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
             );
           }),
       });
-      const submission = (work: (tx: Transaction, done: (v: void) => void) => void) =>
-        run<void>('SubmissionJournal', ['submission'], 'readwrite', work);
+      const submission = <A>(work: (tx: Transaction, done: (v: A) => void) => void) =>
+        run<A>('SubmissionJournal', ['submission'], 'readwrite', work);
       const writeSubmission = (
         tx: Transaction,
         r: typeof Submission.Type,
@@ -721,7 +721,7 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
           const record = ownedRecord(input),
             before = beforeInput ? rawCheckpoint('SubmissionJournal', beforeInput) : null,
             after = rawCheckpoint('SubmissionJournal', afterInput);
-          return submission((tx, done) =>
+          return submission<number>((tx, done) =>
             tx.request(tx.store('submission').get(0), (v) => {
               const r = submissionRow(v);
               if (
@@ -741,7 +741,7 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
                   checkpoint: after,
                   outcome,
                 },
-                done
+                () => done(r.revision + 1)
               );
             })
           );
@@ -765,12 +765,12 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
           attempt('SubmissionJournal', () => {
             checkAnchor(anchor);
             const record = ownedRecord(input);
-            return submission((tx, done) =>
+            return submission<number | null>((tx, done) =>
               tx.request(tx.store('submission').get(0), (v) => {
                 const r = submissionRow(v);
                 if (r.record !== null) {
                   if (!bytesEqual(r.record, record)) throw failure('SubmissionJournal', 'conflict');
-                  done(undefined);
+                  done(null);
                   return;
                 }
                 writeSubmission(
@@ -781,7 +781,7 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
                     record,
                     outcome: null,
                   },
-                  done
+                  () => done(r.revision + 1)
                 );
               })
             );
@@ -791,7 +791,37 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
           attempt('SubmissionJournal', () => {
             if (outcome !== 'Committed' && outcome !== 'Conflict')
               throw failure('SubmissionJournal', 'corrupt');
-            return transition(anchor, record, before, after, outcome);
+            return transition(anchor, record, before, after, outcome).pipe(Effect.asVoid);
+          }),
+        rejectUnsent: (anchor, input, checkpoint, revision) =>
+          attempt('SubmissionJournal', () => {
+            checkAnchor(anchor);
+            const record = ownedRecord(input),
+              expected = rawCheckpoint('SubmissionJournal', checkpoint);
+            return submission<boolean>((tx, done) =>
+              tx.request(tx.store('submission').get(0), (value) => {
+                const r = submissionRow(value);
+                if (
+                  r.revision !== revision ||
+                  r.outcome !== null ||
+                  !sameBytes(r.record, record) ||
+                  !sameCheckpoint(r.checkpoint, expected)
+                ) {
+                  done(false);
+                  return;
+                }
+                writeSubmission(
+                  tx,
+                  {
+                    ...r,
+                    revision: nextRevision('SubmissionJournal', r.revision),
+                    record: null,
+                    outcome: null,
+                  },
+                  () => done(true)
+                );
+              })
+            );
           }),
         acknowledge: (anchor, result) =>
           attempt('SubmissionJournal', () => {
