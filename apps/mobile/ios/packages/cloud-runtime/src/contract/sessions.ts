@@ -32,6 +32,8 @@ export const CreateTabParams = z
     parentSessionId: z.string().min(1),
     preferRoost: z.boolean().optional(),
     title: z.string().min(1).max(200),
+    /** A Tab is a session: the free-plan session quota applies as on Web (null fails open). */
+    billingEntitlement: BillingEntitlement.nullable(),
   })
   .meta({ id: 'CreateTabParams' });
 

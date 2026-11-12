@@ -448,6 +448,12 @@ import {
   getChatLandingVisibleComposerStatus,
   isChatLandingMachineReachable,
 } from './chat-landing-derived';
+import {
+  type ComposerInputElement,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 interface ChatLandingProps {
   /** Committed mobile session surface; route completion alone is not presentation. */
@@ -1276,7 +1282,7 @@ function WorkspaceChatLanding({
   const [loadingLocalGitState, setLoadingLocalGitState] = useState(false);
 
   // ── Common refs ──
-  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptTextareaRef = useRef<ComposerInputElement>(null);
   // Scope root for the keyboard-nav controller (arrow roving over the desktop landing's
   // config + composer column). Mobile/touch keeps native focus behavior.
   const keyboardNavRef = useRef<HTMLDivElement>(null);
@@ -1508,9 +1514,11 @@ function WorkspaceChatLanding({
         return false;
       }
 
-      const currentValue = promptTextareaRef.current?.value ?? prompt;
-      const selectionStart = promptTextareaRef.current?.selectionStart ?? null;
-      const selectionEnd = promptTextareaRef.current?.selectionEnd ?? null;
+      const promptInput = promptTextareaRef.current;
+      const currentValue = promptInput ? getComposerText(promptInput) : prompt;
+      const promptSelection = promptInput ? getComposerSelection(promptInput) : null;
+      const selectionStart = promptSelection?.start ?? null;
+      const selectionEnd = promptSelection?.end ?? null;
       const result = insertPastedTextDraft({
         currentValue,
         pastedText: normalizedText,
@@ -1546,7 +1554,7 @@ function WorkspaceChatLanding({
 
       requestAnimationFrame(() => {
         promptTextareaRef.current?.focus();
-        promptTextareaRef.current?.setSelectionRange(result.draft.end, result.draft.end);
+        setComposerSelection(promptTextareaRef.current, result.draft.end, result.draft.end);
       });
 
       return true;
@@ -2951,7 +2959,7 @@ function WorkspaceChatLanding({
     contextType === 'local' ? handleSelectedLocalBranchChange : setSelectedBranch;
 
   // ── Prompt keydown ──
-  const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handlePromptKeyDown = (event: KeyboardEvent<ComposerInputElement>) => {
     if (event.key !== 'Enter' || isImeComposingKeyboardEvent(event)) return;
     if (
       !shouldSubmitOnEnterForMobileKeyboardAction({
@@ -2979,7 +2987,7 @@ function WorkspaceChatLanding({
     [addFileAttachments, addFiles]
   );
   const handlePromptPaste = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const text = event.clipboardData.getData('text/plain');
 
       const pastedTextFile = text && isPastedTextTooLarge(text) ? createPastedTextFile(text) : null;

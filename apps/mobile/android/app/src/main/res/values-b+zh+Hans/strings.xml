@@ -15,6 +15,14 @@
     <string name="home_search_empty">没有匹配“%1$s”的对话</string>
     <string name="home_view">视图</string>
     <string name="home_view_details">显示</string>
+    <string name="home_view_archived">已归档</string>
+    <string name="home_archived_empty">没有已归档的对话</string>
+    <string name="home_archive">归档</string>
+    <string name="home_archived_done">已归档</string>
+    <string name="home_archive_failed">暂时无法归档，请重试。</string>
+    <string name="home_unarchive">取消归档</string>
+    <string name="home_unarchived">已取消归档</string>
+    <string name="home_unarchive_failed">暂时无法取消归档，请重试。</string>
     <string name="home_view_project">项目名称</string>
     <string name="home_view_pull_request">PR 状态</string>
     <string name="home_view_branch">分支</string>
@@ -98,6 +106,8 @@
     <string name="chat_image_previous">上一张</string>
     <string name="chat_image_failed">图片加载失败，轻点重试</string>
     <string name="chat_image_close">关闭图片</string>
+    <string name="chat_mermaid_open">全屏查看</string>
+    <string name="chat_mermaid_close">关闭图表</string>
     <string name="chat_image_share">分享</string>
     <string name="chat_image_copy">复制</string>
     <string name="chat_image_save">保存到相册</string>
@@ -168,6 +178,17 @@
     <string name="chat_attach_remove">移除</string>
     <string name="chat_attach_limit">每条消息最多 8 张图片和 8 个文件。</string>
     <string name="chat_attach_failed">附件上传失败，消息未发送。</string>
+    <string name="chat_attach_too_large">文件不能超过 %1$d MB：%2$s</string>
+    <plurals name="chat_free_turns_remaining">
+        <item quantity="other">免费会话 · 还可发送 %d 条消息</item>
+    </plurals>
+    <string name="chat_free_turn_limit">免费会话 · 已达到 %d 条消息上限</string>
+    <string name="chat_free_turn_limit_reached">此免费会话已达到 30 轮用户对话上限。消息未发送，草稿已保存。</string>
+    <string name="create_free_session_limit_reached">此免费工作区已达到 200 个会话上限，新会话未创建。</string>
+    <string name="chat_workspace_payment_required">请先完成工作区设置，再创建会话或发送消息。</string>
+    <string name="chat_free_turn_limit_title">免费会话已到上限</string>
+    <string name="chat_free_turn_limit_body">这个免费会话已达到 %d 条消息上限，输入栏已关闭。</string>
+    <string name="chat_composer_quota_closed">已达到消息上限</string>
     <string name="create_search_branches">搜索分支</string>
     <string name="create_more_branches">更多分支…</string>
     <string name="create_mode_auto">Auto</string>
@@ -187,12 +208,12 @@
     <string name="bar_conflicts">有冲突</string>
     <string name="bar_prompt_createPrOrigin">（此消息由 Lody 的「**创建 PR**」按钮发送）</string>
     <string name="bar_prompt_createDraftPrOrigin">（此消息由 Lody 的「**创建草稿 PR**」按钮发送）</string>
-    <string name="bar_prompt_createPr">为当前工作区创建一个正式 PR（非草稿）。使用当前 PATH 中的 `gh`。`gh` 依赖本机已保存的 GitHub 登录信息，而沙盒内的命令通常读取不到它，所以需要访问 GitHub 的 `gh` 命令请在沙盒外运行（如果你的工具要求审批，就发起审批）。只有在沙盒外仍然认证失败时，才请用户登录。确认推送的提交与 PR head 一致，然后报告 PR URL。</string>
-    <string name="bar_prompt_createDraftPr">为当前工作区创建一个草稿 PR。使用当前 PATH 中的 `gh`。`gh` 依赖本机已保存的 GitHub 登录信息，而沙盒内的命令通常读取不到它，所以需要访问 GitHub 的 `gh` 命令请在沙盒外运行（如果你的工具要求审批，就发起审批）。只有在沙盒外仍然认证失败时，才请用户登录。确认推送的提交与 PR head 一致，然后报告 PR URL。</string>
-    <string name="bar_prompt_prBranchUpkeep">PR 创建后请保持它是最新的：在本对话的每一轮结束前，提交所有未提交的改动并推送到 PR 分支，让 PR head 始终对应你最新的工作。把这当作默认行为，不必每次都先询问。只有在用户打断你，或要求做别的事情从而覆盖了这一点时才跳过——这种情况下请说明原因，而不是默默推送。</string>
-    <string name="bar_prompt_commitAndPush">发布当前分支：提交所有未提交的改动，然后推送到远程分支。\n\n要求：\n- 根据变更生成简洁且准确的 commit message\n- 暂存全部变更（git add -A）\n- 使用生成的 commit message 提交\n- 如果工作区已经是干净的，就跳过提交——这个分支可能只是有从未推送过的提交\n- 推送到当前分支；如果推送失败，请明确说明</string>
-    <string name="bar_prompt_resolveConflicts">解决 %1$s PR %2$s 与其目标分支之间的合并冲突。\nPR: %3$s\n\n先检查该 PR 和仓库说明。根据仓库约定选择 merge 或 rebase，保留双方变更的意图，运行相关检查，然后推送已解决冲突的分支。</string>
-    <string name="bar_prompt_fixCi">修复 %1$s PR #%2$d 中失败的 CI 检查。\n\n修改代码前，先自行检查完整的 GitHub Actions/检查日志。阅读仓库说明，定位根因，实施范围最小且正确的修复，在本地运行相关检查，然后提交并推送到 PR 分支。\n\n当前 PR 快照：\n- URL: %3$s\n- Head: %4$s\n\n失败的检查：请自行从 GitHub 获取 PR head 上失败的检查列表。</string>
+    <string name="bar_prompt_createPr">为当前 worktree 创建 PR（非草稿）。`gh` 使用本机保存的 GitHub 登录，沙箱内的命令通常读不到。</string>
+    <string name="bar_prompt_createDraftPr">为当前 worktree 创建草稿 PR。`gh` 使用本机保存的 GitHub 登录，沙箱内的命令通常读不到。</string>
+    <string name="bar_prompt_prBranchUpkeep">PR 创建后，在本对话的每轮结束时把改动提交并推送到 PR 分支。</string>
+    <string name="bar_prompt_commitAndPush">提交未提交的改动，并推送当前分支。</string>
+    <string name="bar_prompt_resolveConflicts">解决 %1$s PR %2$s 的合并冲突：%3$s</string>
+    <string name="bar_prompt_fixCi">修复 %1$s PR %2$s 失败的 CI 检查：%3$s</string>
     <string name="bar_copy_branch">拷贝分支名</string>
     <string name="bar_branch_copied">已拷贝分支名</string>
     <string name="bar_machine">电脑</string>
@@ -645,8 +666,6 @@
     <string name="github_settings_partial">部分 GitHub 设置无法验证，刷新成功前不可修改。</string>
     <string name="github_settings_unconfirmed">无法确认是否修改成功，请刷新查看当前设置。</string>
     <string name="settings_usage">AI 用量</string>
-    <string name="settings_sessions">对话</string>
-    <string name="settings_archived">已归档对话</string>
     <string name="settings_additional">其他</string>
     <string name="settings_about">关于</string>
     <string name="settings_about_hint">版本、许可与致谢</string>
@@ -733,6 +752,7 @@
     <string name="settings_agent_scan_extensions">扫描 Pi 扩展</string>
     <string name="settings_agent_api_key_short">API 密钥</string>
     <string name="settings_agent_sorbet_unavailable">Sorbet 连接管理需要此原生客户端尚未支持的加密功能传输。</string>
+    <string name="preferences_general">通用</string>
     <string name="preferences_language">语言</string>
     <string name="preferences_notifications">通知</string>
     <string name="preferences_chat">会话行为</string>
@@ -797,6 +817,16 @@
     <plurals name="project_group_members">
         <item quantity="other">%d 个仓库或文件夹</item>
     </plurals>
+    <string name="project_visibility_hint">选择工作区中谁可以看到每个项目。</string>
+    <string name="project_visibility_footer">不会删除文件或历史记录。</string>
+    <string name="project_visibility_empty">当前工作区暂无已注册的本地项目。</string>
+    <string name="project_visibility_shared">工作区可见</string>
+    <string name="project_visibility_shared_short">共享</string>
+    <string name="project_visibility_private">仅自己可见</string>
+    <string name="project_visibility_unknown">未知</string>
+    <string name="project_visibility_others">属于其他成员</string>
+    <string name="project_visibility_load_failed">无法载入项目可见性，载入前不能修改。</string>
+    <string name="project_visibility_unconfirmed">无法确认修改结果，请重新载入查看当前可见性。</string>
     <string name="project_groups_header">项目组</string>
     <string name="project_groups_empty">这个工作区还没有项目组。</string>
     <string name="project_groups_untitled">未命名项目组</string>

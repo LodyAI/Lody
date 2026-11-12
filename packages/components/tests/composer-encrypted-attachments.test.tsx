@@ -195,7 +195,7 @@ function Composer({ runtime, slug = 'encrypted' }: { runtime: WorkspaceRuntime; 
     images.addFiles(parts.images);
     files.addFiles(parts.attachments);
   };
-  const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+  const paste = (event: ClipboardEvent<HTMLElement>) => {
     const values = Array.from(event.clipboardData.items)
       .map((item) => item.getAsFile())
       .filter((file): file is globalThis.File => !!file);
@@ -291,7 +291,7 @@ async function attach(method: 'paste' | 'drop' | 'select', files: globalThis.Fil
         },
       });
       (method === 'paste'
-        ? container.querySelector('textarea')!
+        ? container.querySelector('[data-composer-editor], textarea')!
         : container.querySelector('.group.relative')!
       ).dispatchEvent(event);
     }

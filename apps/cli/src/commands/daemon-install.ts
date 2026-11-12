@@ -14,9 +14,9 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { inspectLocalCliHost } from '@lody/shared/node/local-cli-host-lease';
 import {
   getSeaContext,
-  managedDaemonRoot,
+  installFixedServiceEntry,
+  publishManagedInstallation,
   readManagedOperation,
-  writeManagedRecord,
 } from '@/lib/managed-daemon-release';
 
 /** Explicit local migration boundary. Never rewrite arbitrary user-owned services. */
@@ -44,29 +44,9 @@ export async function installManagedDaemon(options: {
     throw new Error(
       'Stop the existing local host and its service before installing the managed daemon.'
     );
-  const root = managedDaemonRoot();
-  await fs.mkdir(root, { recursive: true, mode: 0o700 });
-  const lockPath = path.join(root, 'install.lock');
-  const lock = await fs.open(lockPath, 'wx', 0o600);
-  const tmp = path.join(root, `.service-${randomUUID()}.installing`);
-  try {
-    const service = path.join(root, process.platform === 'win32' ? 'service.exe' : 'service');
-    // The fixed service itself is upgraded only through this explicit command.
-    await fs.copyFile(context.capsulePath, tmp, constants.COPYFILE_EXCL);
-    await fs.chmod(tmp, 0o700);
-    const fd = await fs.open(tmp, 'r+');
-    try {
-      await fd.sync();
-    } finally {
-      await fd.close();
-    }
-    await fs.rename(tmp, service);
-    await writeManagedRecord(path.join(root, 'installation.json'), {
-      format: 1,
-      product: context.metadata.product,
-      serviceProtocol: 1,
-      service,
-    });
+  {
+    const service = await installFixedServiceEntry(context.capsulePath);
+    await publishManagedInstallation(context.metadata.product, service);
     console.log(`Installed fixed entry: ${service}`);
     if (options.auth || (options.start && getCliPlatformKind() === 'cloud')) {
       const logger = getLogger('daemon-install');
@@ -97,16 +77,6 @@ export async function installManagedDaemon(options: {
       console.log(
         'Use the installed absolute executable with daemon-runner in your user service; preserve LODY_DATA_DIR.'
       );
-  } finally {
-    try {
-      await fs.rm(tmp, { force: true });
-    } finally {
-      try {
-        await lock.close();
-      } finally {
-        await fs.rm(lockPath);
-      }
-    }
   }
 }
 

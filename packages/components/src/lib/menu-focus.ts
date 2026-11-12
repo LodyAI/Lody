@@ -1,3 +1,4 @@
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 /**
  * Shared post-menu focus policy for composer-adjacent pickers.
  *
@@ -33,8 +34,15 @@ export function restoreComposerFocusAfterMenu(): boolean {
   ) {
     return false;
   }
-  const composer = document.querySelector<HTMLTextAreaElement>(COMPOSER_FOCUS_SELECTOR);
-  if (!composer || composer.disabled) return false;
+  const composer = document.querySelector<ComposerInputElement>(COMPOSER_FOCUS_SELECTOR);
+  if (!composer) return false;
+  if (
+    composer instanceof HTMLTextAreaElement
+      ? composer.disabled
+      : composer.hasAttribute('data-disabled')
+  ) {
+    return false;
+  }
   composer.focus({ preventScroll: true });
   return true;
 }

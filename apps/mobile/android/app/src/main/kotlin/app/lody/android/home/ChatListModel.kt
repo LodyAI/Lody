@@ -169,14 +169,19 @@ object ChatListModel {
         owner: String? = null,
         today: LocalDate = LocalDate.now(),
         zone: ZoneId = ZoneId.systemDefault(),
+        /** The view menu's Archived switch: only archived chats, in activity buckets (iOS `InboxSections.archived`). */
+        archived: Boolean = false,
     ): List<HomeSection> {
         // Keep the whole family and parent context when filtering to the owner's chats.
         val scoped = owner?.let { id ->
             val mine = snapshot.sessions.filter { it.userId == id }.mapTo(mutableSetOf()) { it.id }
-            val included = families(snapshot).filter { family -> family.any { it.id in mine } }.flatten().mapTo(mutableSetOf()) { it.id }
+            val included = families(snapshot, archived).filter { family -> family.any { it.id in mine } }.flatten().mapTo(mutableSetOf()) { it.id }
             val all = snapshot.sessions.associateBy { it.id }
             snapshot.copy(sessions = snapshot.sessions.filter { conversation(it.id, all) in included })
         } ?: snapshot
+        // Archived chats: no Pinned group and no project or status grouping.
+        if (archived) return timeline(scoped, today, zone, archived = true)
+            .map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) }
         val pinnedIds = scoped.sessions.filter { it.pinned }.mapTo(mutableSetOf()) { it.id }
         val pinned = families(scoped).filter { family -> family.any { it.id in pinnedIds } }.flatten()
         val lifted = pinned.mapTo(mutableSetOf()) { it.id }
@@ -217,13 +222,13 @@ object ChatListModel {
     /** Quiet chats beyond this many fold behind "Show all" in the status view (iOS shows the same 20). */
     const val IDLE_LIMIT = 20
 
-    /** Non-archived rows, newest activity first, carrying their project for the detail line. */
-    private fun homeItems(snapshot: CatalogSnapshot): List<ChatItem> {
+    /** Non-archived (or, with [archived], only archived) rows, newest activity first, carrying their project for the detail line. */
+    private fun homeItems(snapshot: CatalogSnapshot, archived: Boolean = false): List<ChatItem> {
         val projects = snapshot.projects.associateBy { it.id }
         val all = snapshot.sessions.associateBy { it.id }
         val attention = conversationAttention(snapshot.sessions)
         return snapshot.sessions
-            .filter { !it.archived && !isTab(it) }
+            .filter { it.archived == archived && !isTab(it) }
             .map { session ->
                 val project = projects[session.projectId]?.takeUnless { isChat(it.id) }
                 item(session, project?.name.orEmpty(), project?.repoFullName != null, attention[session.id]).copy(openerId = opener(session, all), repository = project?.repoFullName)
@@ -232,8 +237,8 @@ object ChatListModel {
     }
 
     /** Build families before any display bucket; only the root participates in grouping. */
-    private fun families(snapshot: CatalogSnapshot): List<List<ChatItem>> =
-        nest(homeItems(snapshot)).groupBy { it.nestedUnder ?: it.id }.values.toList()
+    private fun families(snapshot: CatalogSnapshot, archived: Boolean = false): List<List<ChatItem>> =
+        nest(homeItems(snapshot, archived)).groupBy { it.nestedUnder ?: it.id }.values.toList()
 
     /**
      * A Tab or side chat (`parentSessionId`) belongs to its parent conversation, not the list
@@ -342,9 +347,9 @@ object ChatListModel {
         return groups
     }
 
-    /** Home "by time": non-archived chats in activity buckets, newest first. */
-    fun timeline(snapshot: CatalogSnapshot, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): List<TimeSection> {
-        return families(snapshot)
+    /** Home "by time": non-archived (or, with [archived], only archived) chats in activity buckets, newest first. */
+    fun timeline(snapshot: CatalogSnapshot, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault(), archived: Boolean = false): List<TimeSection> {
+        return families(snapshot, archived)
             .groupBy { bucket(it.first().activityAt, today, zone) }
             .toSortedMap()
             .map { (bucket, chats) -> TimeSection(bucket, chats.flatten()) }

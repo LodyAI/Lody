@@ -39,6 +39,7 @@ import {
 } from '../src/components/mentions/combined-mention-textarea';
 import type { Mention as MentionRange } from '../src/ui/mention/index';
 import { initI18n } from '../src/i18n';
+import { composerIn } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -133,8 +134,8 @@ describe('inserting a path mention from outside the composer', () => {
     });
     await render(value);
     expect(value).toBe('look at @/existing @/first @/second folder ');
-    const input = container.querySelector('textarea')!;
-    expect(document.activeElement).toBe(input);
+    const input = composerIn(container);
+    expect(document.activeElement).toBe(input.element);
     expect(input.selectionStart).toBe(value.length);
     expect(input.selectionEnd).toBe(value.length);
     expect(

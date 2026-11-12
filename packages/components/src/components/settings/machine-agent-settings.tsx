@@ -95,6 +95,12 @@ import {
 } from './machine-selection';
 import { MachinePills } from './machine-pills';
 import {
+  MachineBatchUpdateDialog,
+  type BatchUpdateMachine,
+  type BatchUpdateProbe,
+} from './machine-batch-update-dialog';
+import { batchUpgradeOptions } from '@/lib/machine-batch-update';
+import {
   MachineConnectedResources,
   type MachineConnectedProject,
 } from './my-machine-connected-resources';
@@ -1175,6 +1181,91 @@ export function MachineAgentSettings({
     [requestMachineLifecycle]
   );
 
+  const [batchUpdateOpen, setBatchUpdateOpen] = useState(false);
+  // Each machine updates within its own channel, so the dialog needs every
+  // channel's latest release, not only the initiating client's.
+  const [latestByChannel, setLatestByChannel] = useState<Partial<
+    Record<'stable' | 'next' | 'nightly', string>
+  > | null>(null);
+  useEffect(() => {
+    if (!batchUpdateOpen) return undefined;
+    setLatestByChannel(null);
+    let cancelled = false;
+    void Promise.all(
+      (['stable', 'next', 'nightly'] as const).map(async (channel) => {
+        const result = await fetchLatestDaemonVersion(channel);
+        return [channel, result.ok ? result.latestVersion : undefined] as const;
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      setLatestByChannel(Object.fromEntries(entries.filter((entry) => entry[1] !== undefined)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [batchUpdateOpen]);
+  const batchUpdateMachines = useMemo((): BatchUpdateMachine[] => {
+    const running = new Map<string, number>();
+    for (const meta of Object.values(sessionMetaCache)) {
+      if (!meta?.machineId) continue;
+      const type = meta.status?.type;
+      if (type === 'running' || type === 'requestPermission')
+        running.set(meta.machineId, (running.get(meta.machineId) ?? 0) + 1);
+    }
+    return allItems
+      .filter((item) => item.isOwn)
+      .map((item) => ({
+        id: item.machine.id,
+        name: item.machine.name || item.machine.id,
+        isOwn: true,
+        isOnline: presumedOnlineMachineIds.has(item.machine.id),
+        cliVersion: item.machine.cliVersion,
+        supportsManagedUpdates: machineSupportsProtocolCapability(
+          item.machine,
+          MACHINE_PROTOCOL_CAPABILITIES.managedDaemonUpdates,
+          1
+        ),
+        runningSessionCount: running.get(item.machine.id) ?? 0,
+      }));
+  }, [allItems, presumedOnlineMachineIds, sessionMetaCache]);
+  const probeBatchMachine = useCallback(
+    async (machineId: string): Promise<BatchUpdateProbe> => {
+      if (!runtime || !workspaceId) return { lifecycle: null };
+      const responsePromise = runtime.waitForMachineStatusResponse(machineId as MachineId, {
+        timeoutMs: 30000,
+      });
+      runtime.sendControl({
+        type: 'machine/status',
+        machineId: machineId as MachineId,
+        workspaceId,
+        ...(batchUpdateMachines.find((machine) => machine.id === machineId)?.supportsManagedUpdates
+          ? { includeDaemonUpdate: true }
+          : {}),
+      });
+      const response = await responsePromise;
+      return response?.success
+        ? { lifecycle: response.lifecycle ?? null, update: response.daemonUpdate }
+        : { lifecycle: null };
+    },
+    [batchUpdateMachines, runtime, workspaceId]
+  );
+  const requestBatchUpgrade = useCallback(
+    async (
+      machineId: string,
+      target: string,
+      policy: 'when-idle' | 'immediate',
+      channel: 'stable' | 'next' | 'nightly'
+    ) => {
+      await requestMachineLifecycle({
+        machineId: machineId as MachineId,
+        action: 'upgrade',
+        targetVersion: target,
+        upgrade: batchUpgradeOptions(channel, policy),
+      });
+    },
+    [requestMachineLifecycle]
+  );
+
   const handleRefreshConfig = useCallback<ProviderRefreshHandler>(
     async (config, options) => {
       await refreshCapabilities({
@@ -1591,14 +1682,45 @@ export function MachineAgentSettings({
     mode === 'machines' && remoteMachinesAvailable ? (
       <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
     ) : null;
-  // In the pane the header names the page; only the filter is this page's to add.
+  const batchUpdateButton =
+    mode === 'machines' &&
+    remoteMachinesAvailable &&
+    latestCliVersion &&
+    batchUpdateMachines.length > 0 ? (
+      <Button
+        size="small"
+        variant="secondary"
+        data-testid="machine-batch-update-open"
+        onClick={() => setBatchUpdateOpen(true)}
+      >
+        {t('settings.machines.batchUpdate.open', 'Update all my machines')}
+      </Button>
+    ) : null;
+  const batchUpdateDialog =
+    batchUpdateButton && latestCliVersion ? (
+      <MachineBatchUpdateDialog
+        open={batchUpdateOpen}
+        onOpenChange={setBatchUpdateOpen}
+        machines={batchUpdateMachines}
+        latestByChannel={latestByChannel}
+        probe={probeBatchMachine}
+        requestUpgrade={requestBatchUpgrade}
+      />
+    ) : null;
+  // In the pane the header names the page; only the filter and batch update are this page's to add.
   const header = inSettingsPane ? (
-    <SettingsPageActions>{filterButton}</SettingsPageActions>
+    <SettingsPageActions>
+      {batchUpdateButton}
+      {filterButton}
+      {batchUpdateDialog}
+    </SettingsPageActions>
   ) : (
     <div {...stylex.props(styles.heading)}>
       <div {...stylex.props(styles.headingLine)}>
         <h2 {...stylex.props(surface.pageTitle)}>{title}</h2>
+        {batchUpdateButton}
         {filterButton}
+        {batchUpdateDialog}
       </div>
       <p {...stylex.props(styles.headingSubtitle)}>{subtitle}</p>
     </div>

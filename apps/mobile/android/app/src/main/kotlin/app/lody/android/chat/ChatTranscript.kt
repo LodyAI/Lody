@@ -520,6 +520,17 @@ private fun DeliveryMark(delivery: Delivery) {
  */
 @Composable
 fun MarkdownBlock(text: String, modifier: Modifier = Modifier, secondary: Boolean = false) {
+    // A block that is one closed ```mermaid fence draws as its diagram, else stays code.
+    val mermaid = remember(text) { mermaidSource(text) }
+    if (mermaid != null) {
+        MermaidBlock(mermaid, modifier) { MarkdownText(text, modifier, secondary) }
+    } else {
+        MarkdownText(text, modifier, secondary)
+    }
+}
+
+@Composable
+private fun MarkdownText(text: String, modifier: Modifier, secondary: Boolean) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
     val state = rememberMarkdownState(content = text, retainState = true)

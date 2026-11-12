@@ -38,12 +38,13 @@ stored text; schedule documents do not persist composer ranges or transcript spa
 
 ## Menu placement
 
-The main desktop chat composer follows the textarea's laid-out caret and
+The main desktop chat composer follows the editor's laid-out caret and
 prefers the space above it. Its height is capped to that upper space while a
 heading and option fit; otherwise it may open below. The dialog composer and
 inline editor follow the caret but prefer below and flip at viewport edges.
 Soft wraps, internal scrolling, and scaled editor containers move these
-popups with the insertion point. The virtual element retains the textarea as
+popups with the insertion point. The caret is measured from a DOM range on the
+editor and snapped to its line grid; the virtual element retains the editor as
 its observation target so layout shifts also update the menu. All stay within
 the input's usable width and scroll when their contents exceed visible room.
 An explicit `positionAnchor="composer"` caller instead anchors to the whole
@@ -58,7 +59,7 @@ records the frame-level evidence.
 
 The mobile composer uses a separate docked strip. Its boundary is the whole
 `data-mention-frame` (input, controls, and attachments), so the strip cannot
-cover content above the textarea. Its height is limited by the actual room
+cover content above the editor. Its height is limited by the actual room
 above that frame, including the top inset. Inline edit-and-resend opts out of
 the dock and keeps the floating caret menu. The
 [placement Spec](../../specs/composer-mention-menu-placement.md) owns these
@@ -70,8 +71,8 @@ registered rows survive; only the pane and layout styles change. The
 [scroll continuity decision](../notes/implemented/bug-fix/2026-10-08-mention-detail-scroll-continuity.md)
 records the reproduction and verification.
 
-Row selection saves the textarea selection, restores focus and that selection,
-then starts insertion/preparation. WebKit touch taps can blur the textarea and
+Row selection saves the editor selection, restores focus and that selection,
+then starts insertion/preparation. WebKit touch taps can blur the editor and
 expose a temporary zero caret during refocus; starting an asynchronous Shortcut
 before that focus cycle lets the empty-query handler cancel it. Preparation keeps
 the menu open for loading and retry feedback. See the
@@ -85,12 +86,19 @@ Emacs bindings such as Control+A/E and Control+P/N move by line, so this
 character-movement rule leaves them with the browser. See the
 [caret navigation decision](../notes/implemented/bug-fix/2026-10-27-mention-emacs-caret-navigation.md).
 
-The decorated input has one visible text painter: a character-aligned mirror
-renders prose, references, and selection together. The native textarea stays
-above it with transparent text and native spelling decorations disabled; it
-owns editing, clipboard semantics, accessibility, and the caret. Moving to a
-reference boundary never changes that stacking order. Placeholder text remains
-native. A primitive without a chip resolver retains native text and highlights.
+The composer input is one Lexical contenteditable
+(`ui/mention/mention-input.tsx`). It edits and paints prose, chips, selection,
+the caret and IME preedit itself, so the caret cannot fall onto a different line
+than the glyphs being edited. That had happened with the previous textarea under
+a character-aligned mirror whenever the two laid out differently, as with a
+scrollbar narrowing only the textarea
+([decision](../notes/implemented/architecture/2026-11-10-composer-lexical-editor.md)).
+A committed mention is an inline decorator node that renders the chip through
+`getMentionChip`. The owner still holds a plain string and UTF-16 ranges;
+`ui/mention/composer-document.ts` converts between that model and the editor's
+single paragraph. Callers read and write text and caret only through
+`ui/mention/composer-input.ts`. A composer without mention sources keeps a plain
+`@lody/ui` textarea, which that API serves too.
 
 ## Ranking
 

@@ -46,6 +46,7 @@ import {
   type PersistedMentionRange,
 } from '../src/components/mentions/mention-persistence';
 import { initI18n } from '../src/i18n';
+import { composerIn } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -121,19 +122,13 @@ describe('mention ranges survive leaving and returning to a draft', () => {
       );
     }
     await act(async () => root.render(<Composer />));
-    const textarea = container.querySelector('textarea')!;
-    await act(async () => {
-      textarea.focus();
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        textarea,
-        '@'
-      );
-      textarea.setSelectionRange(1, 1);
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    const textarea = composerIn(container).element;
+    composerIn(container).focus();
+    composerIn(container).edit('@', 1);
+    await act(async () => {});
     expect(textarea.getAttribute('aria-expanded')).toBe('true');
     await act(async () => setText(''));
-    expect(container.querySelector('textarea')).toBe(textarea);
+    expect(composerIn(container).element).toBe(textarea);
     expect(textarea.getAttribute('aria-expanded')).toBe('false');
     await act(async () => setText('next draft'));
     expect(textarea.getAttribute('aria-expanded')).toBe('false');
@@ -143,15 +138,15 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     knownFileTokens = new Set(['src/app.ts']);
     const props = { resetOnEmpty: true };
     await render({ ...props, value: 'look at @src/app.ts' });
-    const textarea = container.querySelector('textarea')!;
-    textarea.focus();
+    const textarea = composerIn(container).element;
+    act(() => textarea.focus());
     expect(kinds()).toContain('file');
     await render({ ...props, value: '' });
-    expect(container.querySelector('textarea')).toBe(textarea);
+    expect(composerIn(container).element).toBe(textarea);
     expect(document.activeElement).toBe(textarea);
     expect(kinds()).toEqual([]);
     await render({ ...props, value: 'look at @src/app.ts' });
-    expect(container.querySelector('textarea')).toBe(textarea);
+    expect(composerIn(container).element).toBe(textarea);
     expect(kinds()).toContain('file');
   });
 

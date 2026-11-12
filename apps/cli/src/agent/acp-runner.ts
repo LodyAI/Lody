@@ -1,5 +1,6 @@
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
+import { createAntigravityQuotaReader, isAntigravityRegistryAgent } from './antigravity-quota';
 import {
   createSorbetAcpCustomProvider,
   deleteSorbetAcpCustomProvider,
@@ -380,11 +381,15 @@ export class AcpQuotaCleanupError extends Error {
   }
 }
 
-export async function initializeAndReadAcpRateLimits(stream: Stream) {
+export async function initializeAndReadAcpRateLimits(
+  stream: Stream,
+  agent?: { cliType: AgentConfigCliType; agentType: string; workdir: string }
+) {
+  const antigravity = createAntigravityQuotaReader();
   const connection = new ClientSideConnection(
     () => ({
       requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
-      sessionUpdate: async () => {},
+      sessionUpdate: antigravity.update,
     }),
     stream
   );
@@ -393,7 +398,16 @@ export async function initializeAndReadAcpRateLimits(stream: Stream) {
     clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
   });
   const capabilities = parseLodyExtensionCapabilities(initialized.agentCapabilities?._meta);
-  if (capabilities.rateLimits?.query !== true) throw new Error('Rate-limit query unsupported');
+  if (capabilities.rateLimits?.query !== true) {
+    if (
+      agent &&
+      isAntigravityRegistryAgent(agent) &&
+      initialized.agentInfo?.name === 'antigravity-acp'
+    ) {
+      return antigravity.read(connection, agent.workdir);
+    }
+    throw new Error('Rate-limit query unsupported');
+  }
   return parseRateLimitsSnapshot(
     await connection.request(LODY_EXTENSION_METHODS.rateLimitsGet, {})
   );
@@ -560,37 +574,57 @@ export async function runLocalSorbetCredentials(
   }
 }
 
-/** Read-only ACP initialization: no session, MCP servers, file access or prompts. */
+/** Core queries need no session; official Antigravity /usage needs an isolated scratch session. */
 export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
-  const started = await startLocalAcpProtocol(
-    options,
-    async ({ stream, startupAbort }) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const snapshot = await Promise.race([
-          initializeAndReadAcpRateLimits(stream),
-          ...(startupAbort ? [startupAbort] : []),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error('Rate-limit query timed out')), 20_000);
-          }),
-        ]);
-        return { snapshot };
-      } finally {
-        clearTimeout(timer);
-      }
-    },
-    true
-  );
+  const workdir = isAntigravityRegistryAgent(options)
+    ? fs.mkdtempSync(path.join(os.tmpdir(), 'lody-antigravity-quota-'))
+    : undefined;
+  let retainWorkdir = false;
   try {
-    await terminateAcpProcessTree(started.agentProcess, {
-      logger: options.logger,
-      sessionLabel: 'provider-rate-limits',
-      exitTimeoutMs: 3000,
-    });
+    const started = await startLocalAcpProtocol(
+      workdir ? { ...options, workdir } : options,
+      async ({ stream, startupAbort }) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const snapshot = await Promise.race([
+            initializeAndReadAcpRateLimits(stream, {
+              ...options,
+              workdir: workdir ?? options.workdir,
+            }),
+            ...(startupAbort ? [startupAbort] : []),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error('Rate-limit query timed out')), 20_000);
+            }),
+          ]);
+          return { snapshot };
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      true
+    );
+    try {
+      await terminateAcpProcessTree(started.agentProcess, {
+        logger: options.logger,
+        sessionLabel: 'provider-rate-limits',
+        exitTimeoutMs: 3000,
+      });
+    } catch (cause) {
+      throw new AcpQuotaCleanupError(started.agentProcess, cause);
+    }
+    return started.snapshot;
   } catch (cause) {
-    throw new AcpQuotaCleanupError(started.agentProcess, cause);
+    retainWorkdir = cause instanceof AcpQuotaCleanupError;
+    throw cause;
+  } finally {
+    if (workdir && !retainWorkdir) {
+      try {
+        fs.rmSync(workdir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
+    }
   }
-  return started.snapshot;
 }
 
 /** Complete builtin DSH runtime selection after each caller's environment merge. */

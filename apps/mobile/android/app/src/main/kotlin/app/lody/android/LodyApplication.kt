@@ -11,6 +11,9 @@ import app.lody.android.cloud.NetworkAvailability
 
 open class LodyApplication : Application() {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** Last accepted settings-page reads (display only), per account/workspace; cleared on logout. */
+    lateinit var settingsCache: app.lody.android.home.SettingsSnapshotStore
+        private set
     lateinit var runtimeOwner: RuntimeOwner
         private set
     lateinit var account: AccountController
@@ -41,6 +44,7 @@ open class LodyApplication : Application() {
     private var prepared: Pair<RuntimeScope, ShortLivedGrant>? = null
     private val shortcutCloud by lazy { app.lody.android.cloud.PromptShortcutCloud() }
     private val previewTokens by lazy { app.lody.android.cloud.PreviewTokens() }
+    private val workspaceBilling by lazy { app.lody.android.cloud.WorkspaceBilling() }
     protected open fun createRuntime(scope: RuntimeScope): CloudRuntime {
         val ready = prepared?.takeIf { it.first == scope }
         if (ready != null) {
@@ -52,6 +56,8 @@ open class LodyApplication : Application() {
                 account.withVerifiedAccount(key) { credential -> shortcutCloud.call(credential, key.workspaceId, operation, args) }
             }, app.lody.android.runtime.PreviewTokenProvider { key, intent ->
                 account.withVerifiedAccount(key) { credential -> previewTokens.mint(credential, key, intent) }
+            }, app.lody.android.runtime.BillingProvider { key ->
+                account.withVerifiedAccount(key) { credential -> workspaceBilling.entitlement(credential, key.workspaceId) }
             })
         }
         return createOfflineRuntime(scope)
@@ -62,6 +68,7 @@ open class LodyApplication : Application() {
         app.lody.android.home.AvatarImages.initialize(this)
         runtimeOwner = RuntimeOwner(::createRuntime, Dispatchers.Main.immediate)
         val cache = AtomicCatalogStore(this)
+        settingsCache = cache
         val scheduleCache = app.lody.android.schedules.ScheduleDisplayCache(cache)
         val branches = app.lody.android.create.GitHubBranches()
         creation = app.lody.android.create.CreateSessionRepository(runtimeOwner, cache) { scope, repo, page ->

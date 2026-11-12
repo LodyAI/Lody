@@ -21,6 +21,7 @@ import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-
 import { registerBuiltInCommands } from '@/lib/commands';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { SettingsStoryProviders } from './settings-story-shell';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 
 // So session.focusInput has a binding — the desktop ⌘L focus hint reads it.
 registerBuiltInCommands();
@@ -195,7 +196,7 @@ function DemoComposer({
 }) {
   const inlinePastedTextLabel = `[Pasted ${getPastedTextCharacterCount(samplePastedText)} chars]`;
   const inlinePastedTextPrompt = `Investigate this context ${inlinePastedTextLabel} and help me extract the root cause.`;
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const [prompt, setPrompt] = useState(
     initialPrompt ??
       (showPastedText
@@ -362,7 +363,7 @@ function PromptSuggestionPreview({
   suggestion?: string;
 }) {
   const [prompt, setPrompt] = useState('');
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const composer = (
     <ChatComposer
       tone="light"
@@ -598,7 +599,7 @@ export const LandingWithPastedText: Story = {
 
 function ScheduledSendPreview({ pickerInitiallyOpen = false }: { pickerInitiallyOpen?: boolean }) {
   const { t, i18n } = useTranslation();
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const [text, setText] = useState(
     'Review these files tomorrow morning and summarize the remaining issues.'
   );

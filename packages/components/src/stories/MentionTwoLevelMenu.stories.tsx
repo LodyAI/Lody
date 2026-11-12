@@ -536,6 +536,84 @@ function FloatingHarness({
   );
 }
 
+const LONG_PROSE =
+  '对于DE的关于D1的问题，对其对我们的数学上的严谨性表示感谢，后，在两个证明里对应地修改了证明。（不用具体到如何进行证明的修改）在AE\n\n对于AE关于two-tier的意见，表示感谢，并且认可之前的写法可能会造成误解。例如，我们在abstract和introduction在命题之后的说明部分都进行了修改。\n'.repeat(
+    3
+  );
+
+/**
+ * A composer wired like the product one (chips, undo, click handling) that
+ * publishes its owner state, so browser tests can assert what the composer
+ * holds after real keyboard, pointer, clipboard and IME input.
+ */
+function EditorBehaviourHarness({
+  initialValue = '',
+  undoHistory = true,
+}: {
+  initialValue?: string;
+  undoHistory?: boolean;
+}) {
+  const [value, setValue] = React.useState(initialValue);
+  const [mentions, setMentions] = React.useState<MentionRange[]>([]);
+  const [selected, setSelected] = React.useState<string[]>([]);
+  const [clicked, setClicked] = React.useState<string | null>(null);
+  return (
+    <div {...stylex.props(harness.floatingPage)}>
+      <div
+        data-mention-frame=""
+        data-testid="editor-frame"
+        {...stylex.props(harness.composerFrame)}
+      >
+        <Mention
+          triggers={['@', '$', '/', '#']}
+          autoCloseOnEmpty={false}
+          inputValue={value}
+          onInputValueChange={setValue}
+          mentions={mentions}
+          onMentionsChange={setMentions}
+          value={selected}
+          onValueChange={setSelected}
+          onFilter={(options) => options}
+          getMentionChip={getComposerMentionChip}
+          onMentionClick={(mention) => setClicked(mention.value)}
+          undoHistory={undoHistory}
+        >
+          <MentionInput
+            value={value}
+            onChange={() => {}}
+            aria-label="composer"
+            placeholder="Message"
+            rows={3}
+            className="w-full resize-none rounded-md border border-input-border bg-input p-2 text-sm leading-6"
+          />
+          <MentionTwoLevelMenu
+            categories={FLOATING_CATEGORIES}
+            surface="unknown"
+            anchor="caret"
+            menuSide="bottom"
+          />
+        </Mention>
+      </div>
+      {/* The owner clearing its draft, as a composer does after a send. */}
+      <button type="button" onClick={() => setValue('')}>
+        Clear draft
+      </button>
+      <output data-testid="editor-state" hidden>
+        {JSON.stringify({
+          value,
+          mentions: mentions.map(({ start, end, value: id, kind }) => ({
+            start,
+            end,
+            value: id,
+            kind,
+          })),
+          clicked,
+        })}
+      </output>
+    </div>
+  );
+}
+
 const meta = {
   title: 'Mentions/MentionTwoLevelMenu',
   component: Harness,
@@ -836,4 +914,22 @@ export const FloatingComposerAtTop: Story = {
 export const PreparedShortcut: Story = {
   args: { search: '' },
   render: () => <FloatingHarness mainComposer preparedShortcut />,
+};
+
+/** Behaviour harness: an empty product-wired composer. */
+export const EditorBehaviour: Story = {
+  args: { search: '' },
+  render: () => <EditorBehaviourHarness />,
+};
+
+/** Behaviour harness holding long mixed-script prose that overflows its three rows. */
+export const EditorOverflow: Story = {
+  args: { search: '' },
+  render: () => <EditorBehaviourHarness initialValue={LONG_PROSE} />,
+};
+
+/** Behaviour harness with the editor's own undo, as a composer without quotes uses. */
+export const EditorBehaviourEditorUndo: Story = {
+  args: { search: '' },
+  render: () => <EditorBehaviourHarness undoHistory={false} />,
 };

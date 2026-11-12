@@ -106,6 +106,19 @@ describe('fetchAcpCapabilities', () => {
     mocks.startLocalAcpAgent.mockImplementation(async () => createSuccessfulStartupResult());
   });
 
+  it('projects the official registry Antigravity quota reader without enabling custom namesakes', async () => {
+    const official = await fetchAcpCapabilities(
+      'registry',
+      'antigravity-acp',
+      createSilentLogger()
+    );
+    const custom = await fetchAcpCapabilities('custom', 'antigravity-acp', createSilentLogger());
+    const other = await fetchAcpCapabilities('registry', 'another-agent', createSilentLogger());
+    expect(official.rateLimits).toEqual({ version: 1, query: true });
+    expect(custom.rateLimits).toBeUndefined();
+    expect(other.rateLimits).toBeUndefined();
+  });
+
   it('discovers authentication methods only for the Sorbet probe', async () => {
     mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) =>
       createSuccessfulStartupResult(

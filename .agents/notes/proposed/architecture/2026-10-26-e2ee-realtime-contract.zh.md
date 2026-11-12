@@ -56,7 +56,7 @@ MVP；用途 7 和已合入 #1990 的 presence 正文 codec 预留、不使用�
 
 iroh 层保留工作区设备签名公钥作为 EndpointId，仅在可信宿主交付私钥。2026-11-10
 owner 把 iroh 定为排在 Streams RPC 之前的首选通道；该通道、线上格式和可达性由
-[iroh 传输决定](2026-11-10-e2ee-iroh-transport.zh.md)负责。2026-10-28 的 owner 决定记录域隔离审查未发现签名协议混淆；这不等于原生
+[iroh 传输决定](../../implemented/architecture/2026-11-10-e2ee-iroh-transport.zh.md)负责。2026-10-28 的 owner 决定记录域隔离审查未发现签名协议混淆；这不等于原生
 密钥生命周期或安装平台验收通过。发送到实际启动目标为 ≤1 秒，不是 ACK 或业务完成；
 不声称已测得，离线持久补同步不保证一秒交付。
 

@@ -1248,6 +1248,8 @@ export class LodyFleet {
           localWorkspaceCatalog: this.localWorkspaceCatalog,
           memoryPressure: this.memoryPressure,
           machineLifecycleCapability: this.machineLifecycleCapability,
+          hostsEncryptedWorkspace: () =>
+            [...this.runtimes.values()].some((runtime) => runtime.workspace.contentMode === 'e2ee'),
           prepareManagedUpgrade: this.prepareManagedUpgrade,
           closeSessionTerminals: (sessionId) => this.terminalPtyService.closeSession(sessionId),
           cleanupLocalProjectWorktreeSetupIfUnreferenced: (localProjectId) =>

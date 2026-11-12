@@ -15,6 +15,14 @@
     <string name="home_search_empty">No chats match “%1$s”</string>
     <string name="home_view">View</string>
     <string name="home_view_details">Display</string>
+    <string name="home_view_archived">Archived</string>
+    <string name="home_archived_empty">No archived chats</string>
+    <string name="home_archive">Archive</string>
+    <string name="home_archived_done">Archived</string>
+    <string name="home_archive_failed">Could not archive. Try again.</string>
+    <string name="home_unarchive">Unarchive</string>
+    <string name="home_unarchived">Unarchived</string>
+    <string name="home_unarchive_failed">Could not unarchive. Try again.</string>
     <string name="home_view_project">Project</string>
     <string name="home_view_pull_request">PR status</string>
     <string name="home_view_branch">Branch</string>
@@ -99,6 +107,8 @@
     <string name="chat_image_previous">Previous image</string>
     <string name="chat_image_failed">Couldn\'t load the image. Tap to retry.</string>
     <string name="chat_image_close">Close image</string>
+    <string name="chat_mermaid_open">View full screen</string>
+    <string name="chat_mermaid_close">Close diagram</string>
     <string name="chat_image_share">Share</string>
     <string name="chat_image_copy">Copy</string>
     <string name="chat_image_save">Save to gallery</string>
@@ -169,6 +179,18 @@
     <string name="chat_attach_remove">Remove</string>
     <string name="chat_attach_limit">Up to 8 images and 8 files per message.</string>
     <string name="chat_attach_failed">Couldn’t upload the attachments. The message wasn’t sent.</string>
+    <string name="chat_attach_too_large">Files must be %1$d MB or smaller: %2$s</string>
+    <plurals name="chat_free_turns_remaining">
+        <item quantity="one">Free session · %d message left.</item>
+        <item quantity="other">Free session · %d messages left.</item>
+    </plurals>
+    <string name="chat_free_turn_limit">Free session · %d-message limit reached.</string>
+    <string name="chat_free_turn_limit_reached">This Free session has reached 30 user turns. The message was not sent; your draft is saved.</string>
+    <string name="create_free_session_limit_reached">This Free workspace has reached 200 sessions. The new session was not created.</string>
+    <string name="chat_workspace_payment_required">Finish setting up this workspace before creating or sending sessions.</string>
+    <string name="chat_free_turn_limit_title">Free session limit</string>
+    <string name="chat_free_turn_limit_body">This Free session has reached %d messages, so the message field is closed.</string>
+    <string name="chat_composer_quota_closed">Message limit reached</string>
     <string name="create_search_branches">Search branches</string>
     <string name="create_more_branches">More branches…</string>
     <string name="create_mode_auto">Auto</string>
@@ -188,12 +210,12 @@
     <string name="bar_conflicts">Has conflicts</string>
     <string name="bar_prompt_createPrOrigin">(Sent by the **Create PR** button in Lody.)</string>
     <string name="bar_prompt_createDraftPrOrigin">(Sent by the **Create Draft PR** button in Lody.)</string>
-    <string name="bar_prompt_createPr">Create a PR for the current worktree (a regular PR, not a draft). Use `gh` from the current PATH. `gh` signs in with the GitHub login saved on this machine, which sandboxed commands usually cannot read, so run the `gh` commands that talk to GitHub outside the sandbox (request approval if your tool requires it). Ask the user to log in only if authentication still fails there. Verify that the pushed commit matches the PR head, then report the PR URL.</string>
-    <string name="bar_prompt_createDraftPr">Create a draft PR for the current worktree. Use `gh` from the current PATH. `gh` signs in with the GitHub login saved on this machine, which sandboxed commands usually cannot read, so run the `gh` commands that talk to GitHub outside the sandbox (request approval if your tool requires it). Ask the user to log in only if authentication still fails there. Verify that the pushed commit matches the PR head, then report the PR URL.</string>
-    <string name="bar_prompt_prBranchUpkeep">After the PR exists, keep it current: at the end of every turn in this conversation, commit any outstanding changes and push them to the PR branch before you finish, so the PR head always matches your latest work. Treat this as the default rather than something to ask about each time. Skip it only when the user interrupts you or asks for something that overrides it — in that case say so instead of pushing silently.</string>
-    <string name="bar_prompt_commitAndPush">Publish the current branch: commit anything uncommitted, then push to the remote branch.\n\nInstructions:\n- Generate a concise, descriptive commit message based on the changes\n- Stage all changes (git add -A)\n- Commit with the generated message\n- If the working tree is already clean, skip the commit — the branch may simply\n  hold commits that were never pushed\n- Push to the current branch, and report it if the push fails</string>
-    <string name="bar_prompt_resolveConflicts">Resolve the merge conflicts for %1$s pull request %2$s against its base branch.\nPR: %3$s\n\nInspect the pull request and repository instructions first. Choose the merge or rebase workflow that matches this repository’s conventions, preserve the intent of both sides, run the relevant checks, and push the resolved branch.</string>
-    <string name="bar_prompt_fixCi">Fix the failing CI checks for %1$s pull request #%2$d.\n\nInspect the complete GitHub Actions/check logs yourself before changing code. Read the repository instructions, identify the root cause, implement the smallest correct fix, run the relevant checks locally, then commit and push the fix to the PR branch.\n\nCurrent PR snapshot:\n- URL: %3$s\n- Head: %4$s\n\nFailed checks: list the failing checks of the PR head from GitHub yourself.</string>
+    <string name="bar_prompt_createPr">Create a PR (not a draft) for the current worktree. `gh` uses the GitHub login saved on this machine, which sandboxed commands usually cannot read.</string>
+    <string name="bar_prompt_createDraftPr">Create a draft PR for the current worktree. `gh` uses the GitHub login saved on this machine, which sandboxed commands usually cannot read.</string>
+    <string name="bar_prompt_prBranchUpkeep">After the PR exists, commit and push your changes to the PR branch at the end of every turn in this conversation.</string>
+    <string name="bar_prompt_commitAndPush">Commit the uncommitted changes and push the current branch.</string>
+    <string name="bar_prompt_resolveConflicts">Resolve the merge conflicts of %1$s pull request %2$s: %3$s</string>
+    <string name="bar_prompt_fixCi">Fix the failing CI checks of %1$s pull request %2$s: %3$s</string>
     <string name="bar_copy_branch">Copy branch name</string>
     <string name="bar_branch_copied">Branch name copied</string>
     <string name="bar_machine">Computer</string>
@@ -654,8 +676,6 @@
     <string name="github_settings_partial">Some GitHub settings couldn’t be verified. Changes are off until a refresh succeeds.</string>
     <string name="github_settings_unconfirmed">Couldn’t confirm the change. Refresh to check the current setting.</string>
     <string name="settings_usage">AI usage</string>
-    <string name="settings_sessions">Conversations</string>
-    <string name="settings_archived">Archived conversations</string>
     <string name="settings_additional">Additional</string>
     <string name="settings_about">About</string>
     <string name="settings_about_hint">Version, licenses and acknowledgements</string>
@@ -742,6 +762,7 @@
     <string name="settings_agent_scan_extensions">Scan Pi extensions</string>
     <string name="settings_agent_api_key_short">API key</string>
     <string name="settings_agent_sorbet_unavailable">Sorbet connection management requires encrypted feature transport that this native client does not yet support.</string>
+    <string name="preferences_general">General</string>
     <string name="preferences_language">Language</string>
     <string name="preferences_notifications">Notifications</string>
     <string name="preferences_chat">Chat Behavior</string>
@@ -809,6 +830,16 @@
         <item quantity="one">%d repository or folder</item>
         <item quantity="other">%d repositories or folders</item>
     </plurals>
+    <string name="project_visibility_hint">Choose who in this workspace can see each project.</string>
+    <string name="project_visibility_footer">Doesn’t delete files or history.</string>
+    <string name="project_visibility_empty">No registered local projects in this workspace.</string>
+    <string name="project_visibility_shared">Shared with workspace</string>
+    <string name="project_visibility_shared_short">Shared</string>
+    <string name="project_visibility_private">Private</string>
+    <string name="project_visibility_unknown">Unknown</string>
+    <string name="project_visibility_others">Owned by another member</string>
+    <string name="project_visibility_load_failed">Couldn’t load project visibility. Changes are off until it loads.</string>
+    <string name="project_visibility_unconfirmed">The change could not be confirmed. Reload to see the current visibility.</string>
     <string name="project_groups_header">Project groups</string>
     <string name="project_groups_empty">No project groups in this workspace yet.</string>
     <string name="project_groups_untitled">Untitled group</string>

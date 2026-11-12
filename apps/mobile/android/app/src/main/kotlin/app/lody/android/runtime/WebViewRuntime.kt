@@ -42,14 +42,27 @@ open class WebViewRuntime internal constructor(
             if (command.action == RoleSettingsAction.List) CommandDeadline.QUERY else CommandDeadline.WRITE) as JSONObject))
         is RuntimeCommand.ShortcutSettings -> RuntimeResult.ShortcutSettings(ShortcutSettingsJson.result(call("shortcutSettings", JSONArray().put(ShortcutSettingsJson.request(command.action)),
             if (command.action is ShortcutSettingsAction.Save) CommandDeadline.WRITE else CommandDeadline.QUERY) as JSONObject))
-        is RuntimeCommand.MessageAction -> RuntimeResult.MessageAction(call("messageAction", JSONArray().put(command.kind).put(command.payload), CommandDeadline.WRITE) as JSONObject)
+        is RuntimeCommand.MessageAction -> {
+            val payload = JSONObject(command.payload.toString()).apply { command.billing?.let { put("billingEntitlement", it) } }
+            RuntimeResult.MessageAction(call("messageAction", JSONArray().put(command.kind).put(payload), CommandDeadline.WRITE) as JSONObject)
+        }
+        // Only the cloud runtime reads the plan; without it the free-turn notice stays hidden.
+        RuntimeCommand.WorkspacePlan -> RuntimeResult.Plan(null)
+        is RuntimeCommand.TurnQuota -> {
+            val value = call("turnQuota", JSONArray().put(command.sessionId).put(command.billing ?: JSONObject.NULL), CommandDeadline.QUERY) as JSONObject
+            RuntimeResult.Sent(value.optString("state", "allowed"), value.optString("reason").ifBlank { null })
+        }
         is RuntimeCommand.SetTabClosed -> {
             call("setTabClosed", JSONArray().put(command.id).put(command.closed), CommandDeadline.WRITE)
             RuntimeResult.Accepted
         }
+        is RuntimeCommand.ArchiveSession -> {
+            call("archiveSession", JSONArray().put(command.id).put(command.archived), CommandDeadline.WRITE)
+            RuntimeResult.Accepted
+        }
         is RuntimeCommand.CreateTab -> {
-            val value = call("createTab", JSONArray().put(command.parentId).put(command.id).put(command.title).put(backend.preferRoost), CommandDeadline.WRITE) as JSONObject
-            RuntimeResult.Created(CreationReceipt(command.id, value.getString("state")))
+            val value = call("createTab", JSONArray().put(command.parentId).put(command.id).put(command.title).put(backend.preferRoost).put(command.billing ?: JSONObject.NULL), CommandDeadline.WRITE) as JSONObject
+            RuntimeResult.Created(CreationReceipt(command.id, value.getString("state"), value.optString("reason").ifBlank { null }))
         }
         is RuntimeCommand.GetCreationOptions -> RuntimeResult.Options(CreationJson.options(call("creationOptions", JSONArray().put(command.projectId ?: JSONObject.NULL).put(command.agentConfigId ?: JSONObject.NULL), CommandDeadline.QUERY) as JSONObject))
         RuntimeCommand.ListAgentRoles -> RuntimeResult.Roles(CreationJson.roles(call("agentRoles", deadline = CommandDeadline.QUERY) as JSONObject))
@@ -114,8 +127,10 @@ open class WebViewRuntime internal constructor(
             ))
         }
         is RuntimeCommand.CreateAndSend -> {
-            val value = call("createAndSend", JSONArray().put(CreationJson.request(command.request).put("preferRoost", backend.preferRoost)), CommandDeadline.WRITE) as JSONObject
-            RuntimeResult.Created(CreationReceipt(value.getString("sessionId"), value.getString("state")))
+            val request = CreationJson.request(command.request).put("preferRoost", backend.preferRoost)
+            command.billing?.let { request.put("billingEntitlement", it) }
+            val value = call("createAndSend", JSONArray().put(request), CommandDeadline.WRITE) as JSONObject
+            RuntimeResult.Created(CreationReceipt(value.getString("sessionId"), value.getString("state"), value.optString("reason").ifBlank { null }))
         }
         is RuntimeCommand.SendText -> {
             val request = command.request
@@ -137,6 +152,7 @@ open class WebViewRuntime internal constructor(
             }
             if (request.configOptionValues.isNotEmpty()) payload.put("configOptionValues", JSONObject(request.configOptionValues))
             if (request.attachments.isNotEmpty()) payload.put("attachments", JSONArray(request.attachments))
+            command.billing?.let { payload.put("billingEntitlement", it) }
             val value = call("sendText", JSONArray().put(payload), CommandDeadline.WRITE) as JSONObject
             RuntimeResult.Sent(value.optString("state", "unknown"), value.optString("reason").ifBlank { null })
         }

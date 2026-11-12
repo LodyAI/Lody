@@ -2616,12 +2616,14 @@ extension RuntimeContract {
     public var parentSessionId: String
     public var preferRoost: Bool?
     public var title: String
-    public init(workspaceId: String, sessionId: String, parentSessionId: String, preferRoost: Bool? = nil, title: String) {
+    public var billingEntitlement: BillingEntitlement?
+    public init(workspaceId: String, sessionId: String, parentSessionId: String, preferRoost: Bool? = nil, title: String, billingEntitlement: BillingEntitlement?) {
       self.workspaceId = workspaceId
       self.sessionId = sessionId
       self.parentSessionId = parentSessionId
       self.preferRoost = preferRoost
       self.title = title
+      self.billingEntitlement = billingEntitlement
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
@@ -2630,6 +2632,7 @@ extension RuntimeContract {
       self.parentSessionId = try c.decode(String.self, forKey: Key("parentSessionId"))
       self.preferRoost = try c.decodeIfPresent(Bool.self, forKey: Key("preferRoost"))
       self.title = try c.decode(String.self, forKey: Key("title"))
+      self.billingEntitlement = try c.decode(BillingEntitlement?.self, forKey: Key("billingEntitlement"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
@@ -2638,6 +2641,7 @@ extension RuntimeContract {
       try c.encode(self.parentSessionId, forKey: Key("parentSessionId"))
       try c.encodeIfPresent(self.preferRoost, forKey: Key("preferRoost"))
       try c.encode(self.title, forKey: Key("title"))
+      try c.encode(self.billingEntitlement, forKey: Key("billingEntitlement"))
     }
   }
 

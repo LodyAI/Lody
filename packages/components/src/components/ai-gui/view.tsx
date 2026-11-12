@@ -3899,9 +3899,15 @@ const UserMessageRowView = ({
   const rpcDelivered = rpcDeliveredTurns.has(getRpcDeliveredTurnKey(sessionId, message.id));
   const isPendingApply = message.status === 'pending_apply' && !rpcDelivered;
   const isDeliveryUnknown = message.status === 'delivery_unknown';
-  const recoveryLabel = isDeliveryUnknown
-    ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
-    : t('sessions.messageStatus.notDelivered', 'Not delivered');
+  // A forced machine update cancelled this turn; Continue resends it as a new
+  // message instead of replaying it automatically.
+  const isUpdateInterrupted =
+    message.status === 'canceled' && message.cancellationReason === 'machine_update';
+  const recoveryLabel = isUpdateInterrupted
+    ? t('sessions.messageStatus.interruptedByUpdate', 'Interrupted by update')
+    : isDeliveryUnknown
+      ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
+      : t('sessions.messageStatus.notDelivered', 'Not delivered');
   const isDelivered = !isPendingApply && (isSessionHistoryDelivered(message) || rpcDelivered);
   // Missing-history recovery negatively acknowledged this exact turn
   // (`SessionMeta.lastMissingHistoryUserMsgId`): the entry is visible but kept
@@ -4038,7 +4044,7 @@ const UserMessageRowView = ({
             </span>
           ) : null}
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isUndelivered || isDeliveryUnknown ? (
+          {isUndelivered || isDeliveryUnknown || isUpdateInterrupted ? (
             onResendUndelivered ? (
               <button
                 type="button"
@@ -4267,6 +4273,7 @@ const UserMessageRowView = ({
       {onResendUndelivered ? (
         <ResendUndeliveredDialog
           deliveryUnknown={isDeliveryUnknown}
+          updateInterrupted={isUpdateInterrupted}
           open={resendDialogOpen}
           onOpenChange={setResendDialogOpen}
           isResending={isResending}
@@ -4360,14 +4367,43 @@ const ResendUndeliveredDialog = ({
   isResending,
   onConfirm,
   deliveryUnknown = false,
+  updateInterrupted = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isResending: boolean;
   onConfirm: () => void;
   deliveryUnknown?: boolean;
+  updateInterrupted?: boolean;
 }) => {
   const { t } = useTranslation();
+  if (updateInterrupted)
+    return (
+      <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t('sessions.messageStatus.interruptedByUpdate', 'Interrupted by update')}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {t(
+                'sessions.resendUndelivered.updateDescription',
+                'A machine update interrupted this message. Work it already did is kept. Continue sends the same content as a new message.'
+              )}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={isResending}>
+              {t('common.cancel', 'Cancel')}
+            </AlertDialog.Cancel>
+            <AlertDialog.Action disabled={isResending} onClick={onConfirm}>
+              {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+              {t('sessions.resendUndelivered.continue', 'Continue')}
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    );
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Content>

@@ -10,16 +10,17 @@ import { Mention, MentionInput, MentionLabel } from '@/ui/mention';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 
 /**
- * Prototype for icon chips in the plain-textarea composer.
+ * Every chip kind the composer paints.
  *
  * The mention menu is deliberately out of the picture: these stories drive the
  * `Mention` primitive directly so the only variable is how a committed range is
  * painted. Type into any box — the ranges track edits, and the caret, the
- * selection, and the wrap points all come from the native textarea underneath,
- * so a chip that measured wrong would visibly drift from the text it decorates.
+ * selection and the wrap points all come from the editor that paints the chips,
+ * so a chip that measured wrong would visibly push the text after it.
  */
 
 const PASTED_LABEL = wrapPastedTextChipLabel('[Pasted 4,182 chars]');
+const QUOTE_LABEL = wrapPastedTextChipLabel('[Quote: Keep the reading position]');
 
 type Fixture = {
   text: string;
@@ -37,13 +38,15 @@ const fixture = (text: string, tokens: Array<[string, string]>): Fixture => ({
 });
 
 const MIXED = fixture(
-  `Compare @src/ui/mention/mention-highlighter.tsx against #482, run $review-diff, then summarise ${PASTED_LABEL} for @crdt-metadata-cleanup.`,
+  `Compare @src/ui/mention/mention-input.tsx against #482, run $review-diff, then summarise ${PASTED_LABEL} for @crdt-metadata-cleanup. ${QUOTE_LABEL} Why keep it? Ask @Release-Notes.`,
   [
-    ['@src/ui/mention/mention-highlighter.tsx', 'file'],
+    ['@src/ui/mention/mention-input.tsx', 'file'],
     ['#482', 'issue'],
     ['$review-diff', 'skill'],
     [PASTED_LABEL, 'pasted_text'],
     ['@crdt-metadata-cleanup', 'session'],
+    [QUOTE_LABEL, 'message_quote'],
+    ['@Release-Notes', 'agent_role'],
   ]
 );
 

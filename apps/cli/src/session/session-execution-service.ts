@@ -1,4 +1,4 @@
-import { reserveMachineTurn } from './machine-turn-admission';
+import { machineTurnInterruptionReason, reserveMachineTurn } from './machine-turn-admission';
 import { isMissingHistoryUserTurn } from '@lody/shared';
 import { verifyAutomationWorktreeHeads } from './automation-worktree';
 import { classifyCapacityFailure } from './acp-error-classification';
@@ -5920,7 +5920,7 @@ export class SessionExecutionService {
     backend: SessionBackend,
     userTurnId: string,
     status: 'pending' | 'seen' | 'processing' | 'handled' | 'failed' | 'canceled',
-    cancellationReason?: 'user_stop'
+    cancellationReason?: 'user_stop' | 'machine_update'
   ): Promise<boolean> {
     let matched = false;
     await backend
@@ -5979,7 +5979,8 @@ export class SessionExecutionService {
       userTurnId,
       status,
       status === 'canceled'
-        ? this.getInboxInputCancellationReason(sessionId, userTurnId)
+        ? (this.getInboxInputCancellationReason(sessionId, userTurnId) ??
+            machineTurnInterruptionReason())
         : undefined
     );
     if (!matched) {

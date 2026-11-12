@@ -13305,7 +13305,7 @@ describe('Operation Inbox execution boundary', () => {
       const handler: MessageHandler = Object.assign(Object.create(MessageHandler.prototype), {
         executionService: service,
         sessionActivePresence: { activeSessionCount: () => 0 },
-        machineLifecycleCapability: { canRemoteRestart: true },
+        baseMachineLifecycleCapability: { canRemoteRestart: true },
         onProcessLifecycleAction: () => {},
         machineId: 'machine-1',
         userId: 'owner-user',

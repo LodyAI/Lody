@@ -47,6 +47,11 @@ class ChatRepository(
     suspend fun messageAction(scope: RuntimeScope, kind: String, payload: org.json.JSONObject): org.json.JSONObject =
         owner.use(scope) { (it.execute(RuntimeCommand.MessageAction(kind, payload)) as RuntimeResult.MessageAction).value }
 
+    /** Archives or unarchives a conversation; a write, never retried. */
+    suspend fun setArchived(scope: RuntimeScope, id: String, archived: Boolean) {
+        owner.use(scope) { it.execute(RuntimeCommand.ArchiveSession(id, archived)) }
+    }
+
     suspend fun setTabClosed(scope: RuntimeScope, id: String, closed: Boolean) {
         owner.use(scope) { it.execute(RuntimeCommand.SetTabClosed(id, closed)) }
     }
@@ -104,6 +109,14 @@ class ChatRepository(
     /** A read, safe to repeat: used to settle the merge state after Ready for review. */
     suspend fun mergeState(scope: RuntimeScope, repository: String, number: Int): String? =
         mergeStates.read(scope, repository, number)
+
+    /** The free-plan refusal a turn would meet (`free_session_turn_limit_reached`, …), or null when admitted. A read. */
+    suspend fun turnQuota(scope: RuntimeScope, sessionId: String): String? =
+        owner.use(scope) { (it.execute(RuntimeCommand.TurnQuota(sessionId)) as RuntimeResult.Sent).takeIf { sent -> sent.state == "not_sent" }?.reason }
+
+    /** The workspace's plan tier for the free-turn notice; null when unknown. A read, safe to repeat. */
+    suspend fun planTier(scope: RuntimeScope): String? =
+        owner.use(scope) { (it.execute(RuntimeCommand.WorkspacePlan) as? RuntimeResult.Plan)?.tier }
 
     /** The project's provider choices (models, efforts, modes) for the composer's run config; a read. */
     suspend fun options(scope: RuntimeScope, projectId: String?): CreationOptions =

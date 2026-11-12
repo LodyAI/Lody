@@ -379,7 +379,8 @@ export type AcpCommandSummary = {
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
 // 11: provider command previews come only from probes, never project sessions.
-export const ACP_CAPABILITY_CACHE_VERSION = 11;
+// 12: official registry Antigravity supports Lody's /usage quota compatibility reader.
+export const ACP_CAPABILITY_CACHE_VERSION = 12;
 
 /**
  * One sign-in method an ACP agent advertised in its `initialize` response.

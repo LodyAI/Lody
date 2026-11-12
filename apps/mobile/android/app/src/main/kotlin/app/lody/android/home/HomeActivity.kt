@@ -194,9 +194,15 @@ class HomeActivity : ComponentActivity() {
                                 agentProviders = remember { RuntimeAgentProviderService(app.runtimeOwner) },
                                 roleSettings = remember { RuntimeRoleSettingsService(app.runtimeOwner) },
                                 shortcutSettings = remember { RuntimeShortcutSettingsService(app.runtimeOwner) },
+                                settingsCache = app.settingsCache,
                                 githubSettings = remember { LiveGitHubSettingsService(app.account) },
+                                projectVisibility = remember { LiveProjectVisibilityService(app.account) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },
+                                onSetArchived = workspace?.let { selected ->
+                                    val write: suspend (String, Boolean) -> Unit = { id, archived -> repository.setArchived(RuntimeScope(user.id, selected.id), id, archived) }
+                                    write
+                                },
                             )
                         }
                     }

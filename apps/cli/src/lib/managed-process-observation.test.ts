@@ -10,6 +10,8 @@ import {
 import {
   reserveMachineTurn,
   pauseMachineTurnsIfIdle,
+  pauseMachineTurnsForUpdate,
+  machineTurnInterruptionReason,
   resumeMachineTurns,
 } from '@/session/machine-turn-admission';
 afterEach(async () => {
@@ -28,6 +30,14 @@ it('an idle update cannot race initialization in another workspace or admit new 
   const next = reserveMachineTurn();
   expect(next).not.toBeNull();
   next?.();
+});
+it('a forced update attributes the turns it interrupts to the update until it is abandoned', () => {
+  expect(machineTurnInterruptionReason()).toBeUndefined();
+  pauseMachineTurnsForUpdate();
+  expect(reserveMachineTurn()).toBeNull();
+  expect(machineTurnInterruptionReason()).toBe('machine_update');
+  resumeMachineTurns();
+  expect(machineTurnInterruptionReason()).toBeUndefined();
 });
 it('a managed drain joins observed groups instead of trusting the root process exit', async () => {
   configureManagedProcessObservation(true);

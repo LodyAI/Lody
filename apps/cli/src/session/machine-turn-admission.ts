@@ -2,6 +2,8 @@
 // any turn initialization await so an idle update cannot race a starting turn.
 let reservations = 0;
 let paused = false;
+// Set while a forced update drains this process, so cancelled turns record why.
+let interruption: 'machine_update' | undefined;
 export function reserveMachineTurn(): (() => void) | null {
   if (paused) return null;
   reservations++;
@@ -20,8 +22,14 @@ export function pauseMachineTurnsIfIdle(): boolean {
 }
 export function resumeMachineTurns(): void {
   paused = false;
+  interruption = undefined;
 }
 
-export function pauseMachineTurns(): void {
+export function pauseMachineTurnsForUpdate(): void {
   paused = true;
+  interruption = 'machine_update';
+}
+
+export function machineTurnInterruptionReason(): 'machine_update' | undefined {
+  return interruption;
 }

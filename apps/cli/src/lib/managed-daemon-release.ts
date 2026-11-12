@@ -4,12 +4,15 @@ import {
   type DaemonRelease,
 } from '@lody/shared';
 import fs from 'node:fs/promises';
+import { constants, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { resolveRuntimeArtifactsBaseUrl } from '@lody/platform';
+import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
+import { toShared } from '@/platform/process-options';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -47,6 +50,101 @@ export function getCliNodeExecutable(): string {
 }
 export function managedDaemonRoot(): string {
   return path.join(getLodyDataDir(), 'daemon-managed');
+}
+const InstallationRecordSchema = z
+  .object({
+    format: z.literal(1),
+    product: z.enum(['lody-oss', 'lody-cloud']),
+    serviceProtocol: z.literal(1),
+    service: z.string().min(1),
+  })
+  .strict();
+function fixedServicePath(): string {
+  return path.join(managedDaemonRoot(), process.platform === 'win32' ? 'service.exe' : 'service');
+}
+/**
+ * Copy a verified capsule to the fixed service entry atomically. This does NOT
+ * publish the installation: until `publishManagedInstallation`, launchers keep
+ * starting whatever installation they already own.
+ */
+/**
+ * The lock names its holder's pid. A lock whose holder no longer exists was left
+ * by a crashed install and is taken over once; a live holder keeps exclusion.
+ */
+async function acquireInstallLock(lockPath: string): Promise<fs.FileHandle> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const lock = await fs.open(lockPath, 'wx', 0o600);
+      await lock.writeFile(String(process.pid));
+      return lock;
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST') || attempt > 0)
+        throw error;
+      const holder = Number.parseInt(await fs.readFile(lockPath, 'utf8').catch(() => ''), 10);
+      if (!Number.isInteger(holder) || holder <= 0 || isPidAliveSyncLegacy(holder, toShared()))
+        throw new Error(`Managed install in progress (${lockPath}): ${error.message}`);
+      await fs.rm(lockPath, { force: true });
+    }
+  }
+}
+export async function installFixedServiceEntry(capsulePath: string): Promise<string> {
+  const root = managedDaemonRoot();
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  const lockPath = path.join(root, 'install.lock');
+  const lock = await acquireInstallLock(lockPath);
+  const tmp = path.join(root, `.service-${randomUUID()}.installing`);
+  try {
+    const service = fixedServicePath();
+    // The fixed service itself is upgraded only through an explicit install.
+    await fs.copyFile(capsulePath, tmp, constants.COPYFILE_EXCL);
+    await fs.chmod(tmp, 0o700);
+    const fd = await fs.open(tmp, 'r+');
+    try {
+      await fd.sync();
+    } finally {
+      await fd.close();
+    }
+    await fs.rename(tmp, service);
+    return service;
+  } finally {
+    try {
+      await fs.rm(tmp, { force: true });
+    } finally {
+      try {
+        await lock.close();
+      } finally {
+        await fs.rm(lockPath);
+      }
+    }
+  }
+}
+export async function publishManagedInstallation(
+  product: SeaContext['metadata']['product'],
+  service: string
+): Promise<void> {
+  await writeManagedRecord(path.join(managedDaemonRoot(), 'installation.json'), {
+    format: 1,
+    product,
+    serviceProtocol: 1,
+    service,
+  });
+}
+/**
+ * This product's published fixed service entry, or null. Only the fixed path of
+ * this profile is ever followed, so a record cannot redirect launchers elsewhere.
+ */
+export function resolvePublishedManagedService(
+  product: SeaContext['metadata']['product']
+): string | null {
+  try {
+    const record = InstallationRecordSchema.parse(
+      JSON.parse(readFileSync(path.join(managedDaemonRoot(), 'installation.json'), 'utf8'))
+    );
+    if (record.product !== product || record.service !== fixedServicePath()) return null;
+    return existsSync(record.service) ? record.service : null;
+  } catch {
+    return null;
+  }
 }
 export function verifyDaemonRelease(
   raw: string,
@@ -332,9 +430,29 @@ async function downloadArtifact(
     await fs.rm(temporary, { force: true });
   }
 }
+/** The release identity a downloader trusts; a SEA context satisfies it. */
+export type ReleaseTrust = {
+  metadata: Pick<SeaContext['metadata'], 'product' | 'distribution' | 'platform'>;
+};
+/**
+ * An npm-installed daemon has no SEA metadata. It trusts only its own build's
+ * product and the channel bound into the authorized upgrade request.
+ */
+export function npmMigrationTrust(
+  product: SeaContext['metadata']['product'],
+  channel: SeaContext['metadata']['channel']
+): ReleaseTrust {
+  return {
+    metadata: {
+      product,
+      distribution: `${product}${channel === 'next' ? '-next' : ''}-daemon`,
+      platform: `${process.platform}-${process.arch}`,
+    },
+  };
+}
 /** Target is resolved once; never accept a remote command or artifact URL. */
 export async function prepareManagedRelease(
-  context: SeaContext,
+  context: ReleaseTrust,
   target: string,
   options: {
     signal?: AbortSignal;

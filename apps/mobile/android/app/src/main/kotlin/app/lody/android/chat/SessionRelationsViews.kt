@@ -1,6 +1,8 @@
 package app.lody.android.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -24,8 +26,15 @@ internal fun SessionRelationsChip(current: String, sessions: List<CatalogSession
     var open by remember(current) { mutableStateOf(false) }
     if (rows.isEmpty()) return
     val label = stringResource(R.string.chat_relations)
-    IconButton(onClick = { open = true }, modifier = Modifier.clip(CircleShape).background(LodyTheme.colors.bgRaised)) {
-        Icon(LodyIcons.Branch, label, tint = LodyTheme.colors.textSecondary)
+    // A raised capsule like the rest of the action bar; the glyph says "conversations", not git.
+    val colors = LodyTheme.colors
+    Box(
+        Modifier.size(36.dp).clip(CircleShape).background(colors.bgRaised)
+            .border(0.5.dp, colors.borderSubtle, CircleShape)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = label) { open = true },
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        Icon(LodyIcons.Sessions, label, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
     }
     if (open) ModalBottomSheet(onDismissRequest = { open = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Text(label, Modifier.padding(LodySpacing.md), style = LodyTheme.typography.body)

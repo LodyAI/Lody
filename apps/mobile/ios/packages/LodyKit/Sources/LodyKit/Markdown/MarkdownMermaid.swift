@@ -181,13 +181,21 @@ private final class DiagramView: UIView, UIContextMenuInteractionDelegate {
     contentMode = .redraw
     accessibilityIdentifier = "markdown-mermaid"
     accessibilityLabel = "Mermaid\n" + source
-    accessibilityTraits = .image
+    accessibilityTraits = [.image, .button]
     isAccessibilityElement = true
-    accessibilityCustomActions = [UIAccessibilityCustomAction(name: String(localized: "native.chat.copy", bundle: .lody)) { [weak self] _ in
-      guard let self else { return false }
-      UIPasteboard.general.string = self.source
-      return true
-    }]
+    accessibilityCustomActions = [
+      UIAccessibilityCustomAction(name: String(localized: "native.chat.mermaid.open", bundle: .lody)) { [weak self] _ in
+        self?.openPreview() ?? false
+      },
+      UIAccessibilityCustomAction(name: String(localized: "native.chat.copy", bundle: .lody)) { [weak self] _ in
+        guard let self else { return false }
+        UIPasteboard.general.string = self.source
+        return true
+      },
+    ]
+    // The inline diagram is fitted to the message width, so a tap opens it in the image
+    // preview, where it can be pinched, panned, copied, saved and shared like any image.
+    addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
     addInteraction(UIContextMenuInteraction(delegate: self))
     registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (view: DiagramView, _) in
       view.renderer = DiagramRenderer(theme: MarkdownMermaid.theme(view.traitCollection))
@@ -217,11 +225,50 @@ private final class DiagramView: UIView, UIContextMenuInteractionDelegate {
     context.restoreGState()
   }
 
+  override func accessibilityActivate() -> Bool { openPreview() }
+
+  @objc private func tapped() { openPreview() }
+
+  @discardableResult
+  private func openPreview() -> Bool {
+    var responder: UIResponder? = self
+    while let next = responder, !(next is UIViewController) { responder = next.next }
+    guard let controller = responder as? UIViewController, let image = snapshot() else { return false }
+    return ChatImagePreview.present(from: controller, image: image, name: "Mermaid", url: nil, sourceView: self) != nil
+  }
+
+  /// A bitmap sharp enough for the preview's deepest zoom across the screen, on the page
+  /// background (copied or saved images must not be transparent), bounded for memory.
+  private func snapshot() -> UIImage? {
+    let size = CGSize(width: CGFloat(graph.width), height: CGFloat(graph.height))
+    guard size.width > 0, size.height > 0, let window else { return nil }
+    let wanted = max(window.bounds.width, window.bounds.height) * ChatImagePreviewGeometry.maxScale * traitCollection.displayScale
+    let scale = min(wanted / max(size.width, size.height), sqrt(Self.snapshotPixelLimit / (size.width * size.height)))
+    let format = UIGraphicsImageRendererFormat(for: traitCollection)
+    format.scale = scale
+    format.opaque = true
+    let background = UIColor.lodyBackground.resolvedColor(with: traitCollection)
+    let diagram = renderer
+    let graph = graph
+    return UIGraphicsImageRenderer(size: size, format: format).image { context in
+      background.setFill()
+      context.fill(CGRect(origin: .zero, size: size))
+      diagram.render(graph, in: context.cgContext, bounds: CGRect(origin: .zero, size: size))
+    }
+  }
+
+  private static let snapshotPixelLimit: CGFloat = 12_000_000
+
   func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
     UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-      UIMenu(children: [UIAction(title: String(localized: "native.chat.copy", bundle: .lody), image: UIImage(systemName: "doc.on.doc")) { _ in
-        UIPasteboard.general.string = self?.source
-      }])
+      UIMenu(children: [
+        UIAction(title: String(localized: "native.chat.mermaid.open", bundle: .lody), image: UIImage(systemName: "arrow.up.left.and.arrow.down.right")) { _ in
+          _ = self?.openPreview()
+        },
+        UIAction(title: String(localized: "native.chat.copy", bundle: .lody), image: UIImage(systemName: "doc.on.doc")) { _ in
+          UIPasteboard.general.string = self?.source
+        },
+      ])
     }
   }
 }

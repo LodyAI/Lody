@@ -258,16 +258,28 @@ write retry identity handling are unchanged. Open last chat uses Home navigation
 
 Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
 Agent settings, Agent Roles, prompt shortcuts, GitHub, Projects and sign-out. There is no Machines, Published shares or
-Agent conversation sync destination. Other unfinished settings destinations show an explicit placeholder.
+Agent conversation sync destination, and archived chats live behind the Chats view menu's Archived switch. Other unfinished settings destinations show an explicit placeholder.
 
 ### Project groups
 
 Project groups are desktop's multi-repository projects. Android shows them as iOS does
 but does not create or edit them yet.
 
-- Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups from a fresh
-  `projectGroups` read and opens a read-only page with the group's computer, creator and
-  members. Local project visibility is not on Android yet.
+- Settings › Projects (`ProjectGroupsScreen`) lists the workspace's groups (the last accepted
+  list first, from the `project-groups` settings snapshot) from a fresh `projectGroups` read and opens a read-only page with the group's computer, creator and
+  members.
+- Above the groups, the same page shows local project visibility per computer (its header
+  adds Online / Offline from the creation options' online computers while the catalog is live), as iOS
+  (`ProjectVisibility.kt`, mirroring `WorkspaceSettingsCloud` / `ProjectVisibilitySections`).
+  Catalog projects list at once; the `localProjects:listVisibleLocalProjects` registrations
+  (the last accepted read for the scope first: process memory, then the `project-visibility`
+  settings snapshot in `AtomicCatalogStore`, display only) only add each project's
+  Shared / Private state. Like desktop, `machines:listVisibleMachines` identifies the user's
+  own computers: their unregistered projects read as Private and can be shared, those on
+  other members' computers stay hidden, and if the machine read fails they read as Unknown.
+  Only the owner changes a project, only from a live read, through
+  `localProjects:setLocalProjectSharedWithTeam` with a one-shot client; the change counts once
+  a fresh read shows it, and a failed or unknown write locks the page until it is reloaded.
 - Catalog sessions carry the group run's members (`CatalogProjectRun`, cached with the
   catalog). In a group conversation the context capsule summarises repositories, PRs and
   the group-wide diff, and opens a sheet listing every member with its branch, ±diff and
@@ -275,10 +287,11 @@ but does not create or edit them yet.
 - The bar's own actions stay Create PR / Draft and Commit & Push, sent with web's
   Project group scope (`SessionInfoBarTest`).
 
-Preferences follows iOS: language and notifications open the system pages for this
-app, then the queued-message behaviour (`AppPreferences`). Steer applies only when
+Preferences follows iOS: a General group whose language and notifications open the
+system pages for this app, then Chat Behavior with the queued-message behaviour
+(`AppPreferences`). Steer applies only when
 the conversation's agent advertises `steer`; otherwise a message sent while it works
-queues. Android has no alternate app icon.
+queues. Android has no alternate app icon, so there is no Appearance group.
 
 Agent Roles (`RolesScreen`, runtime `agentRoleSettings`) list your Roles and those
 shared by teammates with their emoji, and create, edit and delete your own (emoji
@@ -288,7 +301,9 @@ Saves and deletes show at once and roll back on failure; unknown outcomes are ne
 replayed. Canonical role settings validate ownership and conflicts.
 
 Prompt shortcuts (`ShortcutsScreen`, runtime `shortcutSettings`) list private and
-workspace shortcuts with their `/slug`, read a fresh body before editing, and create or
+workspace shortcuts with their `/slug`, open the editor at once from the list entry and
+read a fresh body into it (nothing is editable or saved until it arrives; a failed read
+closes the editor with a notice only while it is still open), and create or
 edit simple ones (name, slug, prompt; visibility only when creating), as iOS: owner
 only, and shortcuts with a project / computer / provider scope or structured references
 stay view only. A save shows at once and rolls back on failure; an unknown outcome holds
@@ -297,6 +312,12 @@ the same payload so the only next step is retrying that save. The runtime's
 `activateDocument`) reach `PromptShortcutCloud`, which calls `promptShortcuts:*` on Convex
 with the verified account and the native workspace; mutations use a one-shot client.
 This also lets the composer's `/` shortcuts load their bodies.
+The list and the bodies already read are cached per account/workspace (process memory,
+then the `prompt-shortcuts` settings snapshot in `AtomicCatalogStore`, cleared on logout):
+the list shows at once on cold start, an opened shortcut shows its last body read only until
+the fresh read (the save base) arrives, and while the page is open up to 20 uncached bodies
+are read one at a time in the background. Changed or removed entries drop their bodies; at
+most 64 bodies are kept.
 
 GitHub (`GitHubSettingsScreen`) mirrors iOS Settings › GitHub: personal identity with an
 "Act as you" switch (turning it on needs a live authorization), Manage GitHub App for owners
