@@ -36,6 +36,7 @@ final class AgentRoleEditorController: LodyFormController {
     id: "role-prompt", label: text("prompt"), text: role?.promptPrefix, limit: 32000, minHeight: 180
   )
   private lazy var shared = LodyFormToggle(id: "role-shared", title: text("workspace"), isOn: role?.visibility == .workspace)
+  private lazy var machineButton = LodyFormButton.make(id: "role-machine", title: "") { [weak self] in self?.pickMachine() }
   private lazy var targetButton = LodyFormButton.make(id: "role-target", title: "") { [weak self] in self?.pickTarget() }
   private lazy var deleteButton = LodyFormButton.make(id: "role-delete", title: text("delete"), destructive: true) {
     [weak self] in self?.confirmDelete()
@@ -134,7 +135,17 @@ final class AgentRoleEditorController: LodyFormController {
   }
 
   private func targetContent() -> UIView {
-    guard let role else { return LodyFormRow(label: text("agent"), content: targetButton, picker: true) }
+    guard let role else {
+      // New chat's order: the computer first, then one of its Agent configs.
+      let rows = UIStackView(arrangedSubviews: [
+        LodyFormRow(label: String(localized: "create.label.machine", bundle: .lody), content: machineButton, picker: true),
+        LodyFormGroup.hairline(),
+        LodyFormRow(label: text("agent"), content: targetButton, picker: true),
+      ])
+      rows.axis = .vertical
+      rows.spacing = 0
+      return rows
+    }
     let rows = UIStackView()
     rows.axis = .vertical
     rows.spacing = 0
@@ -183,6 +194,7 @@ final class AgentRoleEditorController: LodyFormController {
     summary.isEnabled = editable
     prompt.isEditable = editable
     shared.toggle.isEnabled = editable
+    machineButton.isEnabled = editable
     targetButton.isEnabled = editable
     deleteButton.isEnabled = editable
     emojiButton.isEnabled = editable
@@ -191,7 +203,9 @@ final class AgentRoleEditorController: LodyFormController {
     configuration?.attributedTitle = AttributedString(emoji, attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 44)]))
     emojiButton.configuration = configuration
     emojiButton.accessibilityLabel = String.localizedStringWithFormat(text("emojiLabel"), emoji)
-    targetButton.setTitle(target.map { "\($0.name) · \($0.machineName)" } ?? text("agent"), for: .normal)
+    machineButton.setTitle(target?.machineName ?? String(localized: "create.row.selectMachine", bundle: .lody), for: .normal)
+    machineButton.accessibilityLabel = machineButton.title(for: .normal)
+    targetButton.setTitle(target?.name ?? String(localized: "create.row.selectAgent", bundle: .lody), for: .normal)
     targetButton.accessibilityLabel = targetButton.title(for: .normal)
     errorLabel.text = failure
     errorView.isHidden = failure.isEmpty
@@ -209,12 +223,39 @@ final class AgentRoleEditorController: LodyFormController {
     LodyShell.shared.presentNative(picker, title: text("emoji"), detents: [0.5, 1])
   }
 
-  private func pickTarget() {
-    let picker = AgentRoleTargetController(agents: agents, selected: target) { [weak self] agent in
-      self?.target = agent
-      self?.render()
+  /// Computers that offer at least one Agent config, in the listing's order.
+  private var machines: [(id: String, name: String)] {
+    var seen = Set<String>()
+    return agents.compactMap { seen.insert($0.machineId).inserted ? ($0.machineId, $0.machineName) : nil }
+  }
+
+  private func pickMachine() {
+    let picker = CreateChoiceController(
+      title: String(localized: "create.row.selectMachine", bundle: .lody), header: String(localized: "create.label.machine", bundle: .lody),
+      placeholder: String(localized: "create.picker.machine.placeholder", bundle: .lody),
+      options: machines.map { ($0.id, $0.name, "") }, selected: target?.machineId
+    ) { [weak self] id in
+      guard let self, id != self.target?.machineId else { return }
+      self.target = self.agents.first { $0.machineId == id }
+      self.render()
     }
-    LodyShell.shared.pushNative(picker, title: text("agent"), from: self)
+    LodyShell.shared.pushNative(picker, title: picker.title ?? "", from: self)
+  }
+
+  private func pickTarget() {
+    guard let machineId = target?.machineId else { return pickMachine() }
+    let choices = agents.filter { $0.machineId == machineId }
+    let picker = CreateChoiceController(
+      title: String(localized: "create.row.selectAgent", bundle: .lody), header: String(localized: "create.label.agent", bundle: .lody),
+      placeholder: String(localized: "create.picker.agent.placeholder", bundle: .lody),
+      options: choices.map { ($0.id, $0.name, "") }, selected: target?.id,
+      marks: Dictionary(choices.map { ($0.id, LodyAgentIcon.mark(cliType: $0.cliType, agentType: $0.agentType)) }, uniquingKeysWith: { first, _ in first })
+    ) { [weak self] id in
+      guard let self, let agent = choices.first(where: { $0.id == id }) else { return }
+      self.target = agent
+      self.render()
+    }
+    LodyShell.shared.pushNative(picker, title: picker.title ?? "", from: self)
   }
 
   private func confirmDelete() {
@@ -281,58 +322,6 @@ final class AgentRoleEditorController: LodyFormController {
 
   private func text(_ key: String) -> String {
     AgentRoleSections.text(key)
-  }
-}
-
-@MainActor
-final class AgentRoleTargetController: UIViewController {
-  private let list = LodyGroupedList(frame: .zero)
-  private let agents: [AgentRoleAgent]
-  private let selected: AgentRoleAgent?
-  private let picked: (AgentRoleAgent) -> Void
-
-  init(agents: [AgentRoleAgent], selected: AgentRoleAgent?, picked: @escaping (AgentRoleAgent) -> Void) {
-    self.agents = agents
-    self.selected = selected
-    self.picked = picked
-    super.init(nibName: nil, bundle: nil)
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) { fatalError() }
-
-  override func viewDidLoad() {
-    super.viewDidLoad()
-    list.frame = view.bounds
-    list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    list.forwarded = { [weak self] name, body in
-      guard name == "rowPress", let self, let index = (body["id"] as? String).flatMap(Int.init),
-            self.agents.indices.contains(index) else { return }
-      self.picked(self.agents[index])
-      self.navigationController?.popViewController(animated: true)
-    }
-    view.addSubview(list)
-    // One group per computer, as the new-chat picker reads.
-    var order: [String] = []
-    var groups: [String: LodyListSection] = [:]
-    for (index, agent) in agents.enumerated() {
-      if groups[agent.machineId] == nil {
-        var section = LodyListSection()
-        section.id = "machine:\(agent.machineId)"
-        section.header = agent.machineName
-        groups[agent.machineId] = section
-        order.append(agent.machineId)
-      }
-      var row = LodyListRow()
-      row.id = String(index)
-      row.title = agent.name
-      row.imageAsset = LodyAgentIcon.asset(cliType: agent.cliType, agentType: agent.agentType) ?? ""
-      row.image = "sparkles"
-      row.selected = agent.id == selected?.id && agent.machineId == selected?.machineId
-      row.action = true
-      groups[agent.machineId]?.rows.append(row)
-    }
-    list.setSections(order.compactMap { groups[$0] })
   }
 }
 

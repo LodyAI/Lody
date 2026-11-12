@@ -113,5 +113,11 @@
       "src/runtime/handlers/sessions.ts"
     ],
     "note": "Tabs pass the billing entitlement to createSession, so the free-plan 200-session quota applies to new Tabs as on Web. Mirrored verbatim from the iOS runtime source in the same change."
+  },
+  "stableMetaReplica": {
+    "files": [
+      "src/runtime/index.ts"
+    ],
+    "note": "The meta watcher keeps the replica object while its Flock is unchanged, so in-flight writes (Agent Role saves) no longer read a routine poll as a workspace change. Mirrored verbatim from the iOS runtime source in the same change."
   }
 }

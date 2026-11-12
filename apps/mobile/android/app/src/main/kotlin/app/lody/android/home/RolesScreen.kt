@@ -22,6 +22,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.lody.android.R
+import app.lody.android.create.PickerCard
+import app.lody.android.create.PickerOption
 import app.lody.android.designsystem.*
 import app.lody.android.runtime.*
 import kotlinx.coroutines.CancellationException
@@ -203,8 +205,32 @@ private fun RoleEditor(
             }
             SettingsGroup(stringResource(R.string.roles_target)) {
                 if (base == null) {
-                    SettingsLine(target?.name ?: stringResource(R.string.roles_agent), LodyIcons.Agent, target?.machineName, onClick = { picker = "target" }.takeIf { editable },
-                        leading = { AgentMark(target?.cliType ?: "builtin", target?.agentType ?: "", LodyTheme.colors.textPrimary, Modifier.size(LodyIconSize.lg)) })
+                    // New chat's pickers and order: the computer first, then one of its Agent configs.
+                    Column(Modifier.padding(horizontal = LodySpacing.md)) {
+                        PickerCard(
+                            icon = LodyIcons.Machine,
+                            title = target?.machineName ?: stringResource(R.string.create_pick_machine),
+                            placeholder = target == null,
+                            options = if (editable) agents.distinctBy { it.machineId }.map {
+                                PickerOption(it.machineId, it.machineName, it.machineId == target?.machineId, icon = LodyIcons.Machine)
+                            } else emptyList(),
+                            open = picker == "machine",
+                            onToggle = { picker = if (picker == "machine") null else "machine" },
+                            onPick = { id -> picker = null; if (id != target?.machineId) target = agents.firstOrNull { it.machineId == id } },
+                            searchPlaceholder = stringResource(R.string.create_search_machines),
+                        )
+                        PickerCard(
+                            icon = LodyIcons.Agent,
+                            title = target?.name ?: stringResource(R.string.roles_agent),
+                            placeholder = target == null,
+                            options = if (editable) agents.filter { it.machineId == target?.machineId }.map {
+                                PickerOption(it.id, it.name, it.id == target?.id, agent = (it.cliType ?: "builtin") to (it.agentType ?: ""))
+                            } else emptyList(),
+                            open = picker == "target",
+                            onToggle = { picker = if (picker == "target") null else "target" },
+                            onPick = { id -> picker = null; agents.firstOrNull { it.machineId == target?.machineId && it.id == id }?.let { target = it } },
+                        )
+                    }
                 } else base.targets.forEach { item ->
                     SettingsLine(item.agentName, LodyIcons.Machine, if (item.state == "configured") item.machineName else "${item.machineName} · ${roleState(item.state)}")
                 }
@@ -233,19 +259,6 @@ private fun RoleEditor(
                     Box(Modifier.aspectRatio(1f).padding(LodySpacing.xs)
                         .background(if (glyph == emoji) LodyTheme.colors.bgSunken else LodyTheme.colors.bgBase, RoundedCornerShape(LodyRadius.md))
                         .clickable { emoji = glyph; picker = null }, contentAlignment = Alignment.Center) { Text(glyph, fontSize = 28.sp) }
-                }
-            }
-            Spacer(Modifier.height(LodySpacing.xxl))
-        }
-        "target" -> ModalBottomSheet(onDismissRequest = { picker = null }, containerColor = LodyTheme.colors.bgBase) {
-            LazyColumn {
-                agents.groupBy { it.machineId }.forEach { (_, group) ->
-                    item { SettingsHeading(group.first().machineName) }
-                    items(group, key = { "${it.machineId}:${it.id}" }) { agent ->
-                        SettingsLine(agent.name, LodyIcons.Agent, onClick = { target = agent; picker = null },
-                            leading = { AgentMark(agent.cliType ?: "builtin", agent.agentType ?: "", LodyTheme.colors.textPrimary, Modifier.size(LodyIconSize.lg)) },
-                            trailing = { if (agent == target) Icon(LodyIcons.Check, null, tint = LodyTheme.colors.accentFg) })
-                    }
                 }
             }
             Spacer(Modifier.height(LodySpacing.xxl))

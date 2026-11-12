@@ -52,7 +52,7 @@ ui.wait(lambda items:any(item.get('AXUniqueId')=='role:review' and 'Mobile' in s
 assert catalog.text('settings.roles.sharedValue') in spoken(ui.element('role:review'));tap('role:review');assert ui.element('role-name')['AXValue']=='Mobile';reveal_name();ui.capture('roles-edit-readback');toolbar('common.cancel')
 toolbar('settings.roles.add');ui.element('role-name');assert ui.element('role-shared')['AXValue']=='0'
 assert not next(item for item in ui.state() if item.get('AXLabel')==catalog.text('common.save'))['enabled']
-reveal_name();ui.capture('roles-empty-create');tap('role-target');ui.element('1');tap('1');ui.wait(lambda items:any(item.get('AXUniqueId')=='role-target' and 'Laptop' in spoken(item) for item in items),'Selected target did not return to editor');name('Helper');toolbar('common.save')
+reveal_name();ui.capture('roles-empty-create');tap('role-machine');ui.element('m2');tap('m2');ui.wait(lambda items:any(item.get('AXUniqueId')=='role-machine' and 'Laptop' in spoken(item) for item in items),'Selected computer did not return to editor');assert 'Reviewer' in spoken(ui.element('role-target'));name('Helper');toolbar('common.save')
 created=ui.wait(lambda items:next((item for item in items if (item.get('AXUniqueId') or '').startswith('role:') and 'Helper' in spoken(item)),None),'New role missing')
 created_id=created['AXUniqueId'];assert catalog.text('settings.roles.private') in spoken(created);assert 'Laptop' in spoken(created)
 ui.capture('roles-created');tap(created_id);assert ui.element('role-name')['AXValue']=='Helper'
