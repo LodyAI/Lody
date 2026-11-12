@@ -1162,6 +1162,55 @@ describe('instant QR join and form-factor pairing', () => {
     }
   });
 
+  it('keeps resuming the same approval until it is delivered, through transient failures', async () => {
+    const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
+    const outcomes: ('awaiting-delivery' | 'admitted' | Error)[] = [
+      'awaiting-delivery',
+      new Error('synthetic network blip'),
+      'admitted',
+    ];
+    const approvals: unknown[] = [];
+    let offers = 0;
+    const runtime = {
+      accountPairingCode: async () => {
+        offers += 1;
+        return { pairingString: CODE, expiresAt: NOW + 600_000 };
+      },
+      inspectAccountPairing: async () => preview,
+      approveAccountPairing: async (input: unknown) => {
+        approvals.push(input);
+        const next = outcomes.shift()!;
+        if (next instanceof Error) throw next;
+        return {
+          workspaces: [
+            { workspaceId: 'w1', outcome: next },
+            { workspaceId: 'w2', outcome: next },
+          ],
+        };
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    const joined: string[] = [];
+    await act(async () =>
+      root.render(<E2eeInstantQrApprove runtime={runtime} onJoined={(d) => joined.push(d)} />)
+    );
+    await flush();
+    for (const _ of [1, 2]) {
+      await tick(900);
+      await flush();
+      // Signed but undelivered, then a blip: still joining, never reported joined.
+      expect(text()).toContain('e2ee.instantQr.joining');
+      expect(joined).toEqual([]);
+    }
+    await tick(900);
+    await flush();
+    expect(text()).toContain('e2ee.instantQr.joined');
+    expect(joined).toEqual(['Synthetic phone']);
+    // The same code and request every time; no new code replaced the scanned one.
+    expect(offers).toBe(1);
+    expect(new Set(approvals.map((input) => JSON.stringify(input))).size).toBe(1);
+    expect(approvals).toHaveLength(3);
+  });
+
   it('offers a fresh code once the shown one expires, without signing', async () => {
     const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
     let offers = 0;
@@ -1672,11 +1721,21 @@ describe('pairing hardening', () => {
       expect(calls.filter((call) => call === 'state').length).toBeGreaterThan(before);
       calls.length = 0;
       await scan();
+      // Approved but still installing (a slow history download): never cut short.
       workspaces = [
-        { workspaceId: 'w1', name: 'Alpha', state: 'pending' },
-        { workspaceId: 'w2', name: 'Beta', state: 'joined' },
+        { workspaceId: 'w1', name: 'Alpha', state: 'pending', approval: 'approved' },
+        { workspaceId: 'w2', name: 'Beta', state: 'joined', approval: 'approved' },
       ];
-      for (let poll = 0; poll < 5; poll++) await tick(800);
+      for (let poll = 0; poll < 10; poll++) await tick(800);
+      await flush();
+      expect(text()).toContain('e2ee.instantQr.scannedJoining');
+      expect(calls).not.toContain('cancelAccount');
+      // Left out of the verified approval, with nothing else still installing.
+      workspaces = [
+        { workspaceId: 'w1', name: 'Alpha', state: 'pending', approval: 'omitted' },
+        { workspaceId: 'w2', name: 'Beta', state: 'joined', approval: 'approved' },
+      ];
+      await tick(800);
       await flush();
       expect(text()).toContain('e2ee.instantQr.partial');
       expect(calls).toContain('cancelAccount');

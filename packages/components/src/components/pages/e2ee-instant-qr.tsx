@@ -76,53 +76,61 @@ export function useInstantQrOffer(
     if (!enabled) return undefined;
     let alive = true;
     let running = false;
-    // At most one approval per offer: a slow host reply never signs twice.
-    let approving = false;
+    let settled = false;
     let offer: { pairingString: string; expiresAt: number } | null = null;
+    /** The verified request this offer approves, latched once: every later tick
+     * resumes the same approval with the same code, which never signs twice. */
+    let target: {
+      requestId: string;
+      deviceName: string;
+      workspaceIds: string[];
+      unavailable: string[];
+    } | null = null;
     let timer: ReturnType<typeof setInterval> | undefined;
-    const stop = () => {
+    const finish = (next: InstantQrPhase) => {
+      settled = true;
       if (timer !== undefined) clearInterval(timer);
       timer = undefined;
+      setPhase(next);
     };
     const poll = async () => {
-      if (!alive || running || approving || !offer) return;
+      if (!alive || running || settled || !offer) return;
       // A hidden window does not sign; it resumes as soon as it is shown again.
       if (document.visibilityState !== 'visible') return;
-      if (Date.now() >= offer.expiresAt) {
-        stop();
-        setPhase({ kind: 'expired' });
-        return;
-      }
+      if (Date.now() >= offer.expiresAt) return finish({ kind: 'expired' });
       running = true;
       try {
-        const preview = await runtime.inspectAccountPairing!(offer.pairingString);
-        if (!alive || !preview || approving) return;
-        if (preview.workspaces.length === 0) {
-          stop();
-          setPhase({ kind: 'failed', error: 'e2ee.instantQr.nothingToShare' });
-          return;
+        if (!target) {
+          const preview = await runtime.inspectAccountPairing!(offer.pairingString);
+          if (!alive || !preview) return;
+          if (preview.workspaces.length === 0)
+            return finish({ kind: 'failed', error: 'e2ee.instantQr.nothingToShare' });
+          target = {
+            requestId: preview.requestId,
+            deviceName: preview.deviceName,
+            workspaceIds: preview.workspaces.map((workspace) => workspace.workspaceId),
+            unavailable: preview.unavailable.map((workspace) => workspace.name),
+          };
+          setPhase({ kind: 'joining', deviceName: target.deviceName, unavailable: target.unavailable });
         }
-        approving = true;
-        stop();
-        const unavailable = preview.unavailable.map((workspace) => workspace.name);
-        setPhase({ kind: 'joining', deviceName: preview.deviceName, unavailable });
         const result = await runtime.approveAccountPairing!({
           pairingString: offer.pairingString,
-          requestId: preview.requestId,
-          workspaceIds: preview.workspaces.map((workspace) => workspace.workspaceId),
+          requestId: target.requestId,
+          workspaceIds: target.workspaceIds,
         });
         if (!alive) return;
-        setPhase(
-          result.workspaces.some((workspace) => workspace.outcome !== 'not-admitted')
-            ? { kind: 'joined', deviceName: preview.deviceName, result, unavailable }
+        const outcomes = result.workspaces.map((workspace) => workspace.outcome);
+        // Signed but not yet delivered: the next tick publishes the journaled original.
+        if (outcomes.includes('awaiting-delivery')) return;
+        finish(
+          outcomes.includes('admitted')
+            ? { kind: 'joined', deviceName: target.deviceName, result, unavailable: target.unavailable }
             : { kind: 'failed', error: 'e2ee.accountPair.error.failed' }
         );
       } catch (failure) {
         if (!alive) return;
-        // Before signing, a transient read failure keeps polling the same offer.
-        if (!approving && !accountPairingErrorCode(failure)) return;
-        stop();
-        setPhase({ kind: 'failed', error: failureKey(failure) });
+        // A typed refusal is final; anything else retries the same code next tick.
+        if (accountPairingErrorCode(failure)) finish({ kind: 'failed', error: failureKey(failure) });
       } finally {
         running = false;
       }
@@ -138,12 +146,12 @@ export function useInstantQrOffer(
         setPhase({ kind: 'showing', ...next });
         timer = setInterval(() => void poll(), pollMs);
       } catch (failure) {
-        if (alive) setPhase({ kind: 'failed', error: failureKey(failure) });
+        if (alive) finish({ kind: 'failed', error: failureKey(failure) });
       }
     })();
     return () => {
       alive = false;
-      stop();
+      if (timer !== undefined) clearInterval(timer);
       document.removeEventListener('visibilitychange', wake);
     };
   }, [runtime, enabled, generation, pollMs]);

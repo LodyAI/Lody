@@ -48,8 +48,12 @@ const clock = (seconds: number) =>
 const POLL_MS = 2000;
 /** The new device's poll for its QR join; the approving device signs within a second. */
 const QR_JOIN_POLL_MS = 800;
-/** Polls a scanned join waits after other workspaces joined but this one did not. */
-const PARTIAL_JOIN_POLLS = 5;
+/** A scanned join that verified approvals settled without this workspace: it was left
+ * out, and every workspace that was approved finished installing, so ending the
+ * request (and its secret) can no longer cost another workspace its join. */
+const leftOut = (next: E2eeAccountPairingRequestState, workspaceId: string) =>
+  next.workspaces.some((item) => item.workspaceId === workspaceId && item.approval === 'omitted') &&
+  next.workspaces.every((item) => item.approval !== 'approved' || item.state === 'joined');
 const cameraSupported = () =>
   typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
 
@@ -308,8 +312,7 @@ export function E2eeAutomaticPairingPage({
   useEffect(() => {
     if (qr !== 'joining' || !runtime.accountPairingRequest) return undefined;
     let alive = true,
-      running = false,
-      partial = 0;
+      running = false;
     const timer = setInterval(() => {
       if (running) return;
       running = true;
@@ -324,14 +327,7 @@ export function E2eeAutomaticPairingPage({
             abandonQr(
               `e2ee.accountPair.error.${next?.status === 'expired' ? 'pairing-expired' : 'failed'}`
             );
-          else if (
-            next.workspaces.some((item) => item.workspaceId !== workspaceId && item.state === 'joined')
-          ) {
-            // The other device admitted this device elsewhere but holds no key for this
-            // workspace; after a short settle the wait would only run out the clock.
-            partial += 1;
-            if (partial >= PARTIAL_JOIN_POLLS) abandonQr('e2ee.instantQr.partial');
-          }
+          else if (leftOut(next, workspaceId)) abandonQr('e2ee.instantQr.partial');
         })
         .catch(() => {
           // A failed read keeps the same scanned request; the next poll asks again.
@@ -1014,7 +1010,15 @@ export function E2eeAutomaticPairingInbox({
         .accountPairingRequest!()
         .then((next) => {
           if (!alive) return;
-          if (next?.status === 'joined') setLinkJoin({ phase: 'joined' });
+          if (
+            next?.status === 'joined' ||
+            (next?.workspaces.some((item) => item.state === 'joined') &&
+              next.workspaces.every(
+                (item) => item.approval !== 'approved' || item.state === 'joined'
+              ) &&
+              next.workspaces.every((item) => item.approval !== 'waiting'))
+          )
+            setLinkJoin({ phase: 'joined' });
           else if (!next || next.status === 'declined' || next.status === 'expired') {
             setLinkJoin({ error: 'e2ee.accountPair.error.pairing-expired' });
             void runtime.cancelAccountPairing?.().catch(() => undefined);

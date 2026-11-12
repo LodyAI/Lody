@@ -240,7 +240,12 @@ export interface AccountPairingState {
   pairingString: string | null;
   expiresAt: number;
   status: 'waiting' | 'joined' | 'declined' | 'expired';
-  workspaces: { workspaceId: string; name: string; state: 'pending' | 'joined' | 'blocked' }[];
+  workspaces: {
+    workspaceId: string;
+    name: string;
+    state: 'pending' | 'joined' | 'blocked';
+    approval: 'waiting' | 'approved' | 'omitted';
+  }[];
 }
 export interface AccountPairingPreview {
   requestId: string;
@@ -308,6 +313,9 @@ export function makeAccountPairing(input: {
   /** Workspaces whose last install attempt found an unrelated unfinished
    * per-workspace pairing on this device; recomputed on every poll. */
   const blocked = new Map<string, Set<string>>();
+  /** Per request: whether a verified approval arrived, and the genesis set it covers.
+   * Kept across polls so a later failed claim never forgets an approval already seen. */
+  const coverage = new Map<string, { seen: boolean; approved: Set<string> }>();
   /** Each workspace this device listed for pairing, by genesis. A workspace that
    * joined needs no pairing afterwards and leaves the requester list, while the
    * request still names it. */
@@ -358,6 +366,7 @@ export function makeAccountPairing(input: {
     const joined = yield* sql(joinedSet(row.lookup_id));
     const settled = (yield* terminal(row.lookup_id))?.state;
     const secret = secrets.get(row.lookup_id);
+    const covered = coverage.get(row.lookup_id);
     const status: AccountPairingState['status'] =
       settled === 'approved'
         ? 'joined'
@@ -388,6 +397,12 @@ export function makeAccountPairing(input: {
             : blocked.get(row.lookup_id)?.has(workspaceId)
               ? ('blocked' as const)
               : ('pending' as const),
+          approval:
+            joined.has(workspaceId) || covered?.approved.has(hex(item.genesis))
+              ? ('approved' as const)
+              : covered?.seen
+                ? ('omitted' as const)
+                : ('waiting' as const),
         };
       }),
     } satisfies AccountPairingState;
@@ -548,6 +563,12 @@ export function makeAccountPairing(input: {
             continue;
           // The approval is accepted only while this device's own expiry holds.
           if (Result.isFailure(checkPairingRequestLifetime(request, now()))) return;
+          const covers = coverage.get(row.lookup_id) ?? { seen: false, approved: new Set() };
+          covers.seen = true;
+          for (const approved of approval.success.rows)
+            if (request.rows.some((item) => hex(item.genesis) === hex(approved.genesis)))
+              covers.approved.add(hex(approved.genesis));
+          coverage.set(row.lookup_id, covers);
           for (const approved of approval.success.rows) {
             const workspace = workspaces.find(
               (item) => hex(item.genesis) === hex(approved.genesis)
@@ -936,7 +957,14 @@ export function makeAccountPairing(input: {
               else if (!invitation) outcomes.set(workspace.workspaceId, 'awaiting-delivery');
               else deliverable.push({ workspace, journaled, invitation });
             }
-            if (deliverable.length > 0) {
+            // One approval covers every workspace this device admitted: while any still
+            // awaits its invitation, nothing is published, so the new device never reads
+            // a partial approval as leaving a workspace out. The retry publishes it whole.
+            const withheld = [...outcomes.values()].includes('awaiting-delivery');
+            if (withheld)
+              for (const item of deliverable)
+                outcomes.set(item.workspace.workspaceId, 'awaiting-delivery');
+            if (deliverable.length > 0 && !withheld) {
               deliverable.sort((a, b) => (a.journaled.genesis < b.journaled.genesis ? -1 : 1));
               const approval = {
                 requestDigest: yield* fromResult(pairingRequestDigest(request), 'corrupt'),

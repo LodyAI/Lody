@@ -5737,7 +5737,7 @@ void test('a brand-new desktop gets a pairing code for a workspace another devic
   assert.equal(state.status, 'waiting')
   assert.match(state.pairingString, /\S/)
   assert.deepEqual(state.workspaces, [
-    { workspaceId: 'workspace', name: 'Phone workspace', state: 'pending' }
+    { workspaceId: 'workspace', name: 'Phone workspace', state: 'pending', approval: 'waiting' }
   ])
   assert.deepEqual(
     submitted.map((request) => request.workspaces),

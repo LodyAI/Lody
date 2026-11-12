@@ -61,7 +61,14 @@ export type E2eeAccountPairingRequestState = {
   status: 'waiting' | 'joined' | 'declined' | 'expired';
   /** `blocked`: an unrelated, unfinished per-workspace pairing on this device must be
    * finished or cancelled before this workspace can be installed. */
-  workspaces: (E2eeAccountPairingWorkspace & { state: 'pending' | 'joined' | 'blocked' })[];
+  workspaces: (E2eeAccountPairingWorkspace & {
+    state: 'pending' | 'joined' | 'blocked';
+    /** What verified approvals say, independent of local installation progress:
+     * `approved` is admitted and installs (or retries) until `joined`; `omitted` means
+     * a verified approval arrived without it; `waiting` means none arrived yet. Hosts
+     * that do not report it leave it absent. */
+    approval?: 'waiting' | 'approved' | 'omitted';
+  })[];
 };
 
 /** Shown only after the host verified the request tag and its lifetime. */

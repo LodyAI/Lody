@@ -100,6 +100,8 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   the approver before any signing. A request verified under an approver's own shown
   account pairing QR code is signed for every listed workspace without another
   confirmation; showing it on a computer as a request arrives is an owner decision.
+  An approver publishes only once every workspace it admitted has its invitation, so
+  the requester's `omitted` coverage is exact.
 
 - Management exposes last-personal-device risk from the verified ledger and requires
   explicit recovery-only confirmation before signing its revocation. Restores report
