@@ -49,6 +49,7 @@ export const UnsupportedHost: Story = {
 };
 export const PendingRequests: Story = {
   args: {
+    onBackToWorkspace: fn(),
     fieldsDisabled: true,
     retryPendingCreation: true,
     creationOptions: (
