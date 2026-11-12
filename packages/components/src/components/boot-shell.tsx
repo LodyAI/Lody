@@ -190,10 +190,9 @@ function BootLoadingMark({
   const [createdAt] = useState(() =>
     typeof performance === 'undefined' ? 0 : Math.round(performance.now())
   );
-  const style =
-    elapsedMs === undefined
-      ? ({ '--lody-boot-elapsed': `${createdAt}ms` } as CSSProperties)
-      : undefined;
+  // Set on the mark itself: an inherited value (the document's boot time) would
+  // otherwise decide when a later wait fades in.
+  const style = { '--lody-boot-elapsed': `${elapsedMs ?? createdAt}ms` } as CSSProperties;
   return (
     <>
       <img

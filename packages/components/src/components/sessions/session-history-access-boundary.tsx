@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
-import { useTranslation } from 'react-i18next';
 import { usePlatform } from '@lody/platform/react';
-import { Button } from '@lody/ui/button';
 import { selectAtom } from 'jotai/utils';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
@@ -21,6 +19,11 @@ import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { parseSessionTabSearch } from '@/lib/session-tab-url';
 import { SessionHistoryReader } from './session-history-reader';
+import {
+  SessionAccessReadFailed,
+  SessionAccessUnavailable,
+  SessionAccessWait,
+} from './session-access-states';
 
 function useSessionTarget(sessionId: SessionId) {
   return useAtomValue(
@@ -63,7 +66,6 @@ export function SessionHistoryAccessBoundary({
   const accountId = useWorkspaceLocalAccountId();
   const localOnly = !usePlatform().capabilities.has('teamSharing');
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const { t } = useTranslation();
   const routed = useSessionTarget(sessionId);
   const parent = useSessionTarget((routed?.parentSessionId ?? sessionId) as SessionId);
   const root = isContainedSession(routed, parent) ? parent : routed;
@@ -123,15 +125,18 @@ export function SessionHistoryAccessBoundary({
     };
   }, [root?.machineId, access.store, editable, checkKey]);
   if (editable || localOnly) return children;
+  // Without a machine policy to read, the effect only records the check; waiting for
+  // it would paint one loading frame.
+  const policyRead = !!root?.machineId && !!access.store;
   if (
     machinesLoading ||
     projectsLoading ||
     access.loading ||
     (!!root && !root.machineId) ||
-    checked !== checkKey ||
+    (policyRead && checked !== checkKey) ||
     (selectedId !== rootId && !selected)
   )
-    return <p role="status">{t('common.loading')}</p>;
+    return <SessionAccessWait />;
   // The detail subtree handles absent metadata, workspace transitions and local-only sessions.
   if (!root) return children;
   const readable =
@@ -140,14 +145,9 @@ export function SessionHistoryAccessBoundary({
     (selectedId === rootId || (validTab && !!selected && selected.machineId === root.machineId));
   if (!readable)
     return failed === checkKey ? (
-      <div role="alert">
-        <p>{t('sessions.access.readFailed')}</p>
-        <Button size="small" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
-          {t('common.retry')}
-        </Button>
-      </div>
+      <SessionAccessReadFailed onRetry={() => setAttempt((n) => n + 1)} />
     ) : (
-      <p role="status">{t('sessions.access.unavailable')}</p>
+      <SessionAccessUnavailable />
     );
   return (
     <SessionHistoryReader
