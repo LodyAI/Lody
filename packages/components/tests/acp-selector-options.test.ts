@@ -8,7 +8,7 @@ import {
 } from '@lody/shared';
 import {
   buildAcpSelectorOptions,
-  buildAllConfigOptionSelectors,
+  resolveConfigOptionValue,
   resolvePlanModeSelectorEnabled,
   togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
@@ -839,150 +839,54 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.configOptionSelectors).toEqual([]);
   });
 
-  it.each(['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark', 'gpt-5.6-other'])(
-    'hides max and ultra for %s and falls back to medium',
-    (selectedModelId) => {
-      const configOptions = codexModelAndReasoningOptions('ultra', [
-        { value: 'low', name: 'low' },
-        { value: 'medium', name: 'medium' },
-        { value: 'high', name: 'high' },
-        { value: 'max', name: 'max' },
-        { value: 'ultra', name: 'ultra' },
-      ]);
+  it.each([
+    {
+      model: 'gpt-6-astra',
+      values: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      current: 'ultra',
+    },
+    { model: 'gpt-6-luna', values: ['low', 'medium', 'high', 'xhigh', 'max'], current: 'medium' },
+    // An undeclared model keeps the snapshot's own ladder; nothing is hard-coded.
+    { model: 'gpt-5.6-other', values: ['low', 'medium', 'high', 'xhigh'], current: 'medium' },
+  ])(
+    'takes Codex Max/Ultra for $model from the adapter declaration only',
+    ({ model, values, current }) => {
       const options = buildAcpSelectorOptions({
         configId: agentConfigId,
         cliType: 'builtin',
         agentType: 'codex',
-        selectedModelId,
-        machine: codexMachineWithConfigOptions(configOptions),
+        selectedModelId: model,
+        // A previous selection the incoming model may not offer.
+        configOptionValues: { reasoning_effort: 'ultra' },
+        machine: machineWithCapabilities({
+          [agentConfigId]: {
+            cliType: 'builtin',
+            agentType: 'codex',
+            cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+            provenance: 'runtime',
+            modes: [],
+            models: [],
+            configOptions: codexModelAndReasoningOptions(
+              'medium',
+              ['low', 'medium', 'high', 'xhigh'].map((value) => ({ value, name: value }))
+            ),
+            declaredModelControls: {
+              'gpt-6-astra': { effortValues: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+              'gpt-6-luna': { effortValues: ['low', 'medium', 'high', 'xhigh', 'max'] },
+            },
+            fetchedAt: 1,
+          },
+        }),
       });
 
       const selector = options.configOptionSelectors.find(
         (candidate) => candidate.configId === 'reasoning_effort'
       );
-      expect(selector).toMatchObject({ currentValue: 'medium' });
-      expect(selector?.options.map((option) => option.value)).toEqual(['low', 'medium', 'high']);
-      const cachedReasoningOption = configOptions.find(
-        (option) => option.id === 'reasoning_effort'
-      );
-      expect(cachedReasoningOption?.options.map((option) => option.value)).toEqual([
-        'low',
-        'medium',
-        'high',
-        'max',
-        'ultra',
-      ]);
+      expect(selector?.options.map((option) => option.value)).toEqual(values);
+      const resolved = selector && resolveConfigOptionValue(selector, 'ultra');
+      expect(resolved).toBe(current);
     }
   );
-
-  it('falls back to the first visible effort when medium is unavailable', () => {
-    const options = buildAcpSelectorOptions({
-      configId: agentConfigId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      selectedModelId: 'gpt-5.6-other',
-      machine: codexMachineWithConfigOptions(
-        codexModelAndReasoningOptions('max', [
-          { value: 'low', name: 'low' },
-          { value: 'high', name: 'high' },
-          { value: 'max', name: 'max' },
-        ])
-      ),
-    });
-
-    const selector = options.configOptionSelectors.find(
-      (candidate) => candidate.configId === 'reasoning_effort'
-    );
-    expect(selector).toMatchObject({ currentValue: 'low' });
-    expect(selector?.options.map((option) => option.value)).toEqual(['low', 'high']);
-  });
-
-  it.each(['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-5.6-terra'])(
-    'adds missing max and ultra options for %s',
-    (selectedModelId) => {
-      const options = buildAcpSelectorOptions({
-        configId: agentConfigId,
-        cliType: 'builtin',
-        agentType: 'codex',
-        selectedModelId,
-        machine: codexMachineWithConfigOptions(
-          codexModelAndReasoningOptions('medium', [
-            { value: 'low', name: 'low' },
-            { value: 'medium', name: 'medium' },
-          ])
-        ),
-      });
-
-      const selector = options.configOptionSelectors.find(
-        (candidate) => candidate.configId === 'reasoning_effort'
-      );
-      expect(selector?.options).toEqual([
-        { value: 'low', label: 'low', description: undefined },
-        { value: 'medium', label: 'medium', description: undefined },
-        {
-          value: 'max',
-          label: 'Max',
-          description: 'Maximum reasoning depth for the hardest problems',
-        },
-        {
-          value: 'ultra',
-          label: 'Ultra',
-          description: 'Maximum reasoning with automatic task delegation',
-        },
-      ]);
-    }
-  );
-
-  it.each(
-    ['gpt-5.6-luna', 'gpt-6-luna'].flatMap((selectedModelId) =>
-      ['medium', 'max', 'ultra'].map((currentValue) => ({ selectedModelId, currentValue }))
-    )
-  )(
-    'offers only max for $selectedModelId when the cached effort is $currentValue',
-    ({ selectedModelId, currentValue }) => {
-      const target = {
-        configId: agentConfigId,
-        cliType: 'builtin' as const,
-        agentType: 'codex',
-        selectedModelId,
-        machine: codexMachineWithConfigOptions(
-          codexModelAndReasoningOptions(currentValue, [
-            { value: 'medium', name: 'medium' },
-            { value: 'ultra', name: 'ultra' },
-          ])
-        ),
-      };
-      for (const selectors of [
-        buildAcpSelectorOptions(target).configOptionSelectors,
-        buildAllConfigOptionSelectors(target),
-      ]) {
-        const selector = selectors.find((candidate) => candidate.configId === 'reasoning_effort');
-        expect(selector?.options.map((option) => option.value)).toEqual(['medium', 'max']);
-        expect(selector?.currentValue).toBe(currentValue === 'max' ? 'max' : 'medium');
-      }
-    }
-  );
-
-  it('does not grant extended efforts to near-match model ids', () => {
-    const options = buildAcpSelectorOptions({
-      configId: agentConfigId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      selectedModelId: 'gpt-5.6-sol-preview',
-      machine: codexMachineWithConfigOptions(
-        codexModelAndReasoningOptions('medium', [
-          { value: 'medium', name: 'medium' },
-          { value: 'max', name: 'max' },
-          { value: 'ultra', name: 'ultra' },
-        ])
-      ),
-    });
-
-    const selector = options.configOptionSelectors.find(
-      (candidate) => candidate.configId === 'reasoning_effort'
-    );
-    expect(selector?.options.map((option) => option.value)).toEqual(['medium']);
-  });
 });
 
 describe('plan mode selector value semantics', () => {

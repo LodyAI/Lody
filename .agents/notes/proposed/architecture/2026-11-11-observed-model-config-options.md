@@ -70,7 +70,9 @@ before.
    `sourceVersion` are still used until the next answer replaces them. UI
    selectors, the Role editor and CLI/MCP validation (`getAcpModelEffortChoices`,
    `getAcpModelFastSupport`, `withAcpConfigOptionsForModel`) use the composed list;
-   without a record behavior is unchanged.
+   without a record behavior is unchanged. The hand-maintained Codex Max/Ultra table
+   is removed: Codex's declaration and recorded options cover every model, and a
+   first render before any probe shows the static ladder without Max/Ultra.
 
 ## Alternatives
 

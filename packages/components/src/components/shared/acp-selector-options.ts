@@ -68,32 +68,6 @@ export const CODEX_COLLABORATION_MODE_PLAN_VALUE = ACP_COLLABORATION_MODE_PLAN_V
 export const CONFIG_OPTION_ON_VALUE = ACP_CONFIG_OPTION_ON_VALUE;
 export const CONFIG_OPTION_OFF_VALUE = ACP_CONFIG_OPTION_OFF_VALUE;
 
-// Keep model-specific support aligned with the Codex ACP model catalog.
-const CODEX_EXTENDED_REASONING_BY_MODEL = new Map<string, readonly string[]>([
-  ['gpt-6-astra', ['max', 'ultra']],
-  ['gpt-6.1-sol', ['max', 'ultra']],
-  ['gpt-6-sol', ['max', 'ultra']],
-  ['gpt-6-luna', ['max']],
-  ['gpt-5.6-sol', ['max', 'ultra']],
-  ['gpt-5.6-terra', ['max', 'ultra']],
-  ['gpt-5.6-luna', ['max']],
-]);
-const CODEX_EXTENDED_REASONING_OPTIONS: AcpSessionSelectOption[] = [
-  {
-    value: 'max',
-    label: 'Max',
-    description: 'Maximum reasoning depth for the hardest problems',
-  },
-  {
-    value: 'ultra',
-    label: 'Ultra',
-    description: 'Maximum reasoning with automatic task delegation',
-  },
-];
-const CODEX_EXTENDED_REASONING_VALUES = new Set(
-  CODEX_EXTENDED_REASONING_OPTIONS.map((option) => option.value)
-);
-
 const isOnOffSelectSelector = (selector: AcpSelectConfigOptionSelector): boolean => {
   const values = new Set(selector.options.map((option) => option.value));
   return values.has(CONFIG_OPTION_ON_VALUE) && values.has(CONFIG_OPTION_OFF_VALUE);
@@ -432,68 +406,9 @@ const resolveSelectedModelId = (
   return typeof modelOption?.currentValue === 'string' ? modelOption.currentValue : undefined;
 };
 
-const normalizeCodexReasoningEffortSelectors = (
-  selectors: AcpConfigOptionSelector[],
-  target?: Pick<AcpSelectorTarget, 'cliType' | 'agentType' | 'selectedModelId'>
-): AcpConfigOptionSelector[] => {
-  if (
-    target?.cliType !== 'builtin' ||
-    target.agentType?.toLowerCase() !== 'codex' ||
-    !target.selectedModelId
-  ) {
-    return selectors;
-  }
-  const supportedValues = CODEX_EXTENDED_REASONING_BY_MODEL.get(target.selectedModelId) ?? [];
-
-  return selectors.map((selector) => {
-    if (selector.type !== 'select' || selector.configId !== 'reasoning_effort') {
-      return selector;
-    }
-
-    const visibleOptions = selector.options.filter(
-      (option) =>
-        !CODEX_EXTENDED_REASONING_VALUES.has(option.value) || supportedValues.includes(option.value)
-    );
-    const existingValues = new Set(visibleOptions.map((option) => option.value));
-    const missingOptions = CODEX_EXTENDED_REASONING_OPTIONS.filter(
-      (option) => supportedValues.includes(option.value) && !existingValues.has(option.value)
-    );
-    const options =
-      visibleOptions.length === selector.options.length && missingOptions.length === 0
-        ? selector.options
-        : [...visibleOptions, ...missingOptions];
-
-    const currentValue = options.some((option) => option.value === selector.currentValue)
-      ? selector.currentValue
-      : defaultEffortValue(options.map((option) => option.value));
-    if (options === selector.options && currentValue === selector.currentValue) {
-      return selector;
-    }
-    return { ...selector, options, currentValue };
-  });
-};
-
 const reasoningEffortOptionLabel = (value: string): string =>
   value === 'xhigh' ? 'X-High' : value.charAt(0).toUpperCase() + value.slice(1);
 
-/**
- * Rebuilds a thought-level selector's options from the selected model's own
- * effort ladder. The probed config option list describes only the model that
- * was current at probe time; agents that publish a per-model map
- * (`modelReasoningEfforts`) get a picker that follows the model instead of
- * serving that stale list for every model (LodyAI/Lody#149). A model the
- * map does not cover keeps the probe-time list — the adapter owns the wire
- * and rejects unsupported efforts with a visible warning, so the UI does
- * not duplicate that guard.
- *
- * The map is a FALLBACK, never an override: an agent that already adapts the
- * ladder to the model itself owns that behavior. Codex hands off to its
- * hand-maintained tiers above (its probed list omits the extended ones), and
- * Claude's adapter rebuilds its effort option from the model's own
- * `supportedEffortLevels` on every switch, so it publishes no map and this
- * path stays inert for it. This is the one entry point; the per-agent split
- * lives here rather than at every call site.
- */
 /** What the per-model normalizers need to know about the target and its model. */
 export type PerModelSelectorContext = {
   cliType?: AcpSelectorTarget['cliType'];
@@ -503,13 +418,22 @@ export type PerModelSelectorContext = {
   selectedModelId?: string | null;
 };
 
+/**
+ * Rebuilds a thought-level selector's options from the selected model's own
+ * effort ladder. The selectors already come from the selected model's
+ * recorded options when a refresh read them; on top of that the adapter's
+ * per-model declaration decides, then the per-model map an agent publishes
+ * (`modelReasoningEfforts`, LodyAI/Lody#149). A model none of these cover keeps
+ * the list it has: the adapter owns the wire and rejects unsupported efforts
+ * with a visible warning, so the UI does not duplicate that guard. No
+ * provider's per-model tiers are hard-coded here.
+ */
 export const normalizeReasoningEffortSelectors = (
   selectors: AcpConfigOptionSelector[],
   options: PerModelSelectorContext
 ): AcpConfigOptionSelector[] => {
   // The adapter's own per-model declaration is authoritative for the models it
-  // covers, for every agent: it replaces both the probed snapshot and the
-  // hand-maintained Codex tiers. An undeclared model keeps the paths below.
+  // covers, for every agent. An undeclared model keeps the paths below.
   const declared = resolveDeclaredEffortSupport(options, options.selectedModelId);
   if (declared.state === 'unsupported') {
     return selectors.filter(
@@ -538,13 +462,6 @@ export const normalizeReasoningEffortSelectors = (
             },
           ];
     return applyEffortLadder(withEffort, declared.values, declared.fallbackValue);
-  }
-  if (options.cliType === 'builtin' && options.agentType?.toLowerCase() === 'codex') {
-    return normalizeCodexReasoningEffortSelectors(selectors, {
-      cliType: options.cliType,
-      agentType: options.agentType,
-      selectedModelId: options.selectedModelId ?? undefined,
-    });
   }
   const map = options.modelReasoningEfforts;
   const selectedModelId = options.selectedModelId;

@@ -50,7 +50,7 @@ E2EE 远程机器的刷新行为不变。
    （`snapshot` / `borrowed`），否则返回快照的模型选择器加上该模型记录的选项（`observed`）。档位和
    Fast 仍以声明优先。其他 `sourceVersion` 的记录仍会使用，直到下一次回答覆盖它。UI 选择器、
    Role 编辑器和 CLI/MCP 校验（`getAcpModelEffortChoices`、`getAcpModelFastSupport`、
-   `withAcpConfigOptionsForModel`）都使用组合后的列表；没有记录时行为不变。
+   `withAcpConfigOptionsForModel`）都使用组合后的列表；没有记录时行为不变。Codex 的 Max/Ultra 手写档位表已删除：Codex 的声明和记录覆盖所有模型；任何探测之前的首屏显示不含 Max/Ultra 的静态档位。
 
 ## 备选方案
 

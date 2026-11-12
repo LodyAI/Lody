@@ -48,7 +48,8 @@ the selected model.
   schema.
 - **Use**:
   - UI selectors take the selected model's declared effort list. This also covers
-    Codex, where the declaration replaces the hand tiers.
+    Codex: the hand-maintained tier table was later removed, so an undeclared Codex
+    model keeps its probed or recorded ladder.
   - UI selectors hide Fast for a model declared without it, and add the built-in Fast
     toggle for a model declared with it that the probe did not show.
   - CLI validation and MCP resolution read effort through
