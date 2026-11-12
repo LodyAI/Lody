@@ -534,8 +534,6 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       );
       return undefined;
     });
-  const hasCode = (code: string) => (error: unknown) =>
-    typeof error === 'object' && error !== null && (error as { code?: unknown }).code === code;
   /** This installation's account-pairing originals: the offer its current identity was
    * requested under, and the replacement candidate requested for it, if any. */
   const accountOriginals = (current: ClientInstallation) =>
