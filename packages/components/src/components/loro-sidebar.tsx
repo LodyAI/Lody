@@ -1178,7 +1178,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
-                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1192,7 +1192,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
-                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1218,13 +1218,20 @@ export const LoroSidebar = memo(function LoroSidebar({
               </Menu.GroupLabel>
               <Menu.RadioGroup
                 value={currentWorkspaceId}
-                onValueChange={(value) => onWorkspaceSelected?.(value)}
+                onValueChange={(value) => {
+                  if (value !== currentWorkspaceId) onWorkspaceSelected?.(value);
+                }}
               >
                 {/* Local provider: hosts may render the sidebar without a root one. */}
                 <Tooltip.Provider delay={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
-                    const supportsNewWindow = isElectronRenderer() && !!workspaceSlug;
+                    const desktop = isElectronRenderer();
+                    const supportsNewWindow = desktop && !!workspaceSlug;
+                    const workspaceHref =
+                      !desktop && workspaceSlug
+                        ? `/${encodeURIComponent(workspaceSlug)}/chat`
+                        : undefined;
                     // The avatar carries identity, so the check moves to the
                     // row's trailing edge. ps-2/pe-8 replace the ps-8 selection
                     // indent: the 20px avatar and the action rows' 20px icon
@@ -1239,23 +1246,25 @@ export const LoroSidebar = memo(function LoroSidebar({
                         // Resolve the radio item in the dropdown's context before
                         // introducing the separate right-click menu in its render.
                         render={
-                          supportsNewWindow
-                            ? (props) => (
-                                <ContextMenu.Root>
-                                  <ContextMenu.Trigger render={<div {...props} />} />
-                                  <ContextMenu.Content>
-                                    <ContextMenu.Item
-                                      icon={AppWindow}
-                                      onClick={() => {
-                                        openDesktopWindow(undefined, workspaceSlug, 'context_menu');
-                                      }}
-                                    >
-                                      {t('workspace.openInNewWindow')}
-                                    </ContextMenu.Item>
-                                  </ContextMenu.Content>
-                                </ContextMenu.Root>
-                              )
-                            : undefined
+                          supportsNewWindow ? (
+                            (props) => (
+                              <ContextMenu.Root>
+                                <ContextMenu.Trigger render={<div {...props} />} />
+                                <ContextMenu.Content>
+                                  <ContextMenu.Item
+                                    icon={AppWindow}
+                                    onClick={() => {
+                                      openDesktopWindow(undefined, workspaceSlug, 'context_menu');
+                                    }}
+                                  >
+                                    {t('workspace.openInNewWindow')}
+                                  </ContextMenu.Item>
+                                </ContextMenu.Content>
+                              </ContextMenu.Root>
+                            )
+                          ) : workspaceHref ? (
+                            <a href={workspaceHref} />
+                          ) : undefined
                         }
                         icon={
                           <WorkspaceAvatar
@@ -1265,6 +1274,21 @@ export const LoroSidebar = memo(function LoroSidebar({
                         }
                         className="gap-1.5 ps-2"
                         onClickCapture={(event) => {
+                          if (workspaceHref) {
+                            if (
+                              event.button !== 0 ||
+                              event.metaKey ||
+                              event.ctrlKey ||
+                              event.shiftKey ||
+                              event.altKey
+                            ) {
+                              // Preserve native link actions without selecting in this page.
+                              event.stopPropagation();
+                            } else {
+                              event.preventDefault();
+                            }
+                            return;
+                          }
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
                           if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
                             event.preventDefault();

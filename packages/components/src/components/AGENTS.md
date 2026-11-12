@@ -14,6 +14,11 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
   `draggable={false}`; rows own `draggable`.
+- Workspace switcher rows keep ordinary selection in the current tab/window and
+  leave the current workspace's location intact when selected again. Browser rows
+  expose real workspace `/chat` links and preserve native modified-click, middle-click
+  and context-menu actions without switching the source page. Electron Cmd-click
+  (Ctrl-click on Windows/Linux) and its context menu open a native workspace window.
 - Full-width sidebar stays mounted/inert with scroll; Cmd+B animates content width
   (zero for reduced motion); pause hidden eager-sync/keyboard-nav. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,

@@ -35,6 +35,7 @@ describe('LoroSidebar pinned section', () => {
 
   beforeEach(async () => {
     await initI18n('en');
+    vi.useFakeTimers();
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation((query: string) => ({
@@ -58,6 +59,7 @@ describe('LoroSidebar pinned section', () => {
     container?.remove();
     container = undefined;
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   function renderSidebar(props: Partial<LoroSidebarProps>) {
@@ -69,10 +71,8 @@ describe('LoroSidebar pinned section', () => {
     });
   }
 
-  // Base UI defers the menu's portal mount to a frame; jsdom's rAF is a real
-  // timer, so give it a beat after opening.
   const flushFrame = async () => {
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await vi.advanceTimersByTimeAsync(40);
   };
 
   it('offers workspace context actions without switching the selected workspace', async () => {
@@ -129,6 +129,64 @@ describe('LoroSidebar pinned section', () => {
     }
   });
 
+  it.each([
+    { os: 'darwin', modifier: { metaKey: true } },
+    { os: 'win32', modifier: { ctrlKey: true } },
+    { os: 'linux', modifier: { ctrlKey: true } },
+  ])('opens a separate workspace window on $os', async ({ os, modifier }) => {
+    const previousElectron = window.__LODY_ELECTRON__;
+    const previousPlatform = window.__LODY_PLATFORM__;
+    const previousIpc = window.ipc;
+    const windows: unknown[] = [];
+    window.__LODY_ELECTRON__ = true;
+    window.__LODY_PLATFORM__ = { os, homeDir: '/home/example' };
+    window.ipc = {
+      invoke: async (channel, target) => {
+        if (channel === 'app.openWindow') windows.push(target);
+      },
+      on: () => () => {},
+      send: () => {},
+    };
+    try {
+      let selected = 'workspace';
+      renderSidebar({
+        workspaces: [
+          { id: 'workspace', name: 'Lody', slug: 'lody' },
+          { id: 'second', name: 'Second workspace', slug: 'second' },
+        ],
+        onWorkspaceSelected: (value) => {
+          selected = value;
+        },
+      });
+      flushSync(() => {
+        container
+          ?.querySelector('[data-workspace-switcher-trigger]')
+          ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      });
+      await flushFrame();
+      const rows = document.querySelectorAll<HTMLElement>('[role="menuitemradio"]');
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        const click = new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          ...modifier,
+        });
+        flushSync(() => row.dispatchEvent(click));
+        expect(click.defaultPrevented).toBe(true);
+        expect(selected).toBe('workspace');
+      }
+      expect(windows).toEqual([
+        { workspace: 'lody', sessionId: undefined },
+        { workspace: 'second', sessionId: undefined },
+      ]);
+    } finally {
+      window.__LODY_ELECTRON__ = previousElectron;
+      window.__LODY_PLATFORM__ = previousPlatform;
+      window.ipc = previousIpc;
+    }
+  });
+
   it('keeps workspace rows selectable in browsers', async () => {
     let selected = 'workspace';
     renderSidebar({
@@ -152,10 +210,82 @@ describe('LoroSidebar pinned section', () => {
     // `data-disabled` is what the shared menu item styling turns into
     // `pointer-events-none`, so a row carrying it cannot be clicked at all.
     expect(target?.hasAttribute('data-disabled')).toBe(false);
+    expect(target?.tagName).toBe('A');
+    expect(target?.getAttribute('href')).toBe('/second/chat');
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
     flushSync(() => {
-      target?.click();
+      target?.dispatchEvent(click);
     });
+    expect(click.defaultPrevented).toBe(true);
     expect(selected).toBe('second');
+  });
+
+  it.each([
+    { metaKey: true },
+    { ctrlKey: true },
+    { shiftKey: true },
+    { metaKey: true, shiftKey: true },
+    { button: 1 },
+  ])('preserves native workspace link actions for %j', async (modifiers) => {
+    let selected = 'workspace';
+    renderSidebar({
+      workspaces: [
+        { id: 'workspace', name: 'Lody', slug: 'lody' },
+        { id: 'second', name: 'Second workspace', slug: 'second' },
+      ],
+      onWorkspaceSelected: (value) => {
+        selected = value;
+      },
+    });
+    flushSync(() => {
+      container
+        ?.querySelector('[data-workspace-switcher-trigger]')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+    await flushFrame();
+    const rows = document.querySelectorAll<HTMLAnchorElement>('a[role="menuitemradio"]');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      const click = new MouseEvent(modifiers.button === 1 ? 'auxclick' : 'click', {
+        bubbles: true,
+        cancelable: true,
+        ...modifiers,
+      });
+      // Observe the uncancelled native action without making jsdom navigate.
+      let nativeAction = false;
+      const observe = (event: Event) => {
+        nativeAction = !event.defaultPrevented;
+        event.preventDefault();
+      };
+      window.addEventListener(click.type, observe, { once: true });
+      flushSync(() => row.dispatchEvent(click));
+      window.removeEventListener(click.type, observe);
+      // Capture stops propagation for modified primary clicks; auxiliary clicks
+      // reach the native action observer directly.
+      expect(nativeAction || !click.defaultPrevented).toBe(true);
+      expect(selected).toBe('workspace');
+      expect(document.querySelector('a[role="menuitemradio"]')).not.toBeNull();
+    }
+  });
+
+  it('keeps the current workspace location on ordinary selection', async () => {
+    let destination = '/lody/session/current';
+    renderSidebar({
+      workspaces: [{ id: 'workspace', name: 'Lody', slug: 'lody' }],
+      onWorkspaceSelected: () => {
+        destination = '/lody/chat';
+      },
+    });
+    flushSync(() => {
+      container
+        ?.querySelector('[data-workspace-switcher-trigger]')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+    await flushFrame();
+    const row = document.querySelector<HTMLAnchorElement>('a[role="menuitemradio"]');
+    expect(row).not.toBeNull();
+    flushSync(() => row?.click());
+    expect(destination).toBe('/lody/session/current');
   });
 
   it('keeps Help and Settings around the Archive exit while Archive is open', () => {
