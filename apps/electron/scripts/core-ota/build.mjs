@@ -1,8 +1,56 @@
-import { readFile, readdir, lstat, mkdir, writeFile, realpath } from 'node:fs/promises'
+import { validateRequirements } from './compatibility.mjs'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
+import { Transform } from 'node:stream'
+import { createHash } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { assembleCoreSnapshot } from '../assemble-core-snapshot.mjs'
+import { verifyCoreResources } from '../verify-core-resources.mjs'
+import {
+  readFile,
+  readdir,
+  lstat,
+  mkdir,
+  writeFile,
+  realpath,
+  mkdtemp,
+  rm,
+  open
+} from 'node:fs/promises'
 import { resolve, join, relative, dirname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { zstdCompressSync, zstdDecompressSync } from 'node:zlib'
+import { createZstdCompress, createZstdDecompress } from 'node:zlib'
 import { sha256, signManifest, canonicalJson } from './protocol.mjs'
+async function digestFile(file) {
+  const digest = createHash('sha256')
+  for await (const chunk of createReadStream(file)) digest.update(chunk)
+  return digest.digest('hex')
+}
+async function compress(file, output, expected, dictionary) {
+  const digest = createHash('sha256')
+  const compressed = createHash('sha256')
+  let length = 0
+  await pipeline(
+    createReadStream(file),
+    new Transform({
+      transform(chunk, encoding, done) {
+        digest.update(chunk)
+        done(null, chunk)
+      }
+    }),
+    createZstdCompress(dictionary ? { dictionary } : {}),
+    new Transform({
+      transform(chunk, encoding, done) {
+        length += chunk.length
+        compressed.update(chunk)
+        done(null, chunk)
+      }
+    }),
+    createWriteStream(output, { flags: 'wx' })
+  )
+  if (digest.digest('hex') !== expected) throw new Error('Input changed during build')
+  return { file: output, length, hash: compressed.digest('hex') }
+}
 async function immutableWrite(path, bytes) {
   try {
     await writeFile(path, bytes, { flag: 'wx' })
@@ -12,6 +60,7 @@ async function immutableWrite(path, bytes) {
   }
 }
 export async function buildRelease(o) {
+  validateRequirements(o.hostRequirements)
   const input = await realpath(o.input)
   const requested = resolve(o.output)
   await mkdir(dirname(requested), { recursive: true })
@@ -38,95 +87,178 @@ export async function buildRelease(o) {
         if (totalSize > 32 * 2 ** 30) throw new Error('Core tree exceeds limit')
         if (stat.size > 256 * 2 ** 20 || tree.length >= 100000)
           throw new Error('Core input exceeds limits')
-        const bytes = await readFile(full)
-        const h = sha256(bytes)
-        tree.push({ path, sha256: h, size: bytes.length })
+        const h = await digestFile(full)
+        tree.push({ path, sha256: h, size: stat.size })
         contents.set(h, full)
       } else throw new Error('Unsupported Core file type')
     }
   }
   await walk(input)
-  const frames = [],
-    objects = {},
+  const objects = {},
     patches = []
+  const packs = []
+  await mkdir(output, { recursive: true })
+  const spool = await mkdtemp(join(output, '.pack-'))
+  let packFile = join(spool, 'pending')
+  let packHandle = await open(packFile, 'wx')
+  let packDigest = createHash('sha256')
+  let pending = []
   let offset = 0
-  for (const h of [...contents.keys()].sort()) {
-    const target = await readFile(contents.get(h))
-    if (sha256(target) !== h) throw new Error('Input changed during build')
-    const frame = zstdCompressSync(target)
-    frames.push(frame)
-    objects[h] = { packSha256: '', offset, length: frame.length, compressedSha256: sha256(frame) }
-    offset += frame.length
-    if (previous) {
-      const candidate = tree.find((f) => f.sha256 === h).path
-      const oldPath = join(previous, candidate)
-      let base
-      try {
-        const resolved = await realpath(oldPath)
-        const relation = relative(previous, resolved)
-        if (relation.startsWith('..') || relation.startsWith('/'))
-          throw new Error('Previous input escapes root')
-        const stat = await lstat(oldPath)
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256 * 2 ** 20)
-          throw new Error('Invalid previous input')
-        base = await readFile(oldPath)
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error
-      }
-      if (base && sha256(base) !== h) {
-        const patch = zstdCompressSync(target, { dictionary: base })
-        if (patch.length + 256 < frame.length) {
-          const replay = zstdDecompressSync(patch, {
-            dictionary: base,
-            maxOutputLength: Math.max(1, target.length)
-          })
-          if (!replay.equals(target)) throw new Error('Dictionary patch replay failed')
-          patches.push({
-            fromSha256: sha256(base),
-            toSha256: h,
-            packSha256: '',
-            offset,
-            length: patch.length,
-            compressedSha256: sha256(patch)
-          })
-          frames.push(patch)
-          offset += patch.length
+  await mkdir(join(output, 'packs'), { recursive: true })
+  async function flush() {
+    if (!pending.length) return
+    if (packs.length >= 64) throw new Error('Too many packs')
+    await packHandle.sync()
+    await packHandle.close()
+    const hash = packDigest.digest('hex')
+    const bytes = o.returnPackBytes === false ? undefined : await readFile(packFile)
+    const path = `packs/${hash}.pack`
+    try {
+      await (await import('node:fs/promises')).link(packFile, join(output, path))
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      const digest = createHash('sha256')
+      for await (const chunk of (await import('node:fs')).createReadStream(join(output, path)))
+        digest.update(chunk)
+      if (digest.digest('hex') !== hash) throw new Error('Existing output differs')
+    }
+    await rm(packFile)
+    packHandle = await open(packFile, 'wx')
+    packDigest = createHash('sha256')
+    for (const frame of pending) frame.packSha256 = hash
+    packs.push({
+      sha256: hash,
+      path,
+      size: offset,
+      ...(o.returnPackBytes === false ? {} : { bytes })
+    })
+    pending = []
+    offset = 0
+  }
+  async function append(bytes, descriptor) {
+    if (bytes.length > maxPackBytes) throw new Error('Frame exceeds pack budget')
+    if (offset + bytes.length > maxPackBytes) await flush()
+    descriptor.offset = offset
+    pending.push(descriptor)
+    for await (const chunk of createReadStream(bytes.file)) {
+      await packHandle.writeFile(chunk)
+      packDigest.update(chunk)
+    }
+    await rm(bytes.file)
+    offset += bytes.length
+  }
+  try {
+    for (const h of [...contents.keys()].sort()) {
+      const target = contents.get(h)
+      const frame = await compress(target, join(spool, 'frame'), h)
+      objects[h] = { packSha256: '', offset, length: frame.length, compressedSha256: frame.hash }
+      await append(frame, objects[h])
+      if (previous) {
+        const candidate = tree.find((f) => f.sha256 === h).path
+        const oldPath = join(previous, candidate)
+        let base
+        try {
+          const resolved = await realpath(oldPath)
+          const relation = relative(previous, resolved)
+          if (relation.startsWith('..') || relation.startsWith('/'))
+            throw new Error('Previous input escapes root')
+          const stat = await lstat(oldPath)
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256 * 2 ** 20)
+            throw new Error('Invalid previous input')
+          base = await readFile(oldPath)
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error
+        }
+        if (base && sha256(base) !== h) {
+          const patch = await compress(target, join(spool, 'patch'), h, base)
+          if (patch.length + 256 < frame.length) {
+            const replay = createHash('sha256')
+            let replaySize = 0
+            await pipeline(
+              createReadStream(patch.file),
+              createZstdDecompress({ dictionary: base }),
+              new Transform({
+                transform(chunk, encoding, done) {
+                  replaySize += chunk.length
+                  if (replaySize > tree.find((f) => f.sha256 === h).size)
+                    return done(new Error('Oversized patch replay'))
+                  replay.update(chunk)
+                  done()
+                }
+              })
+            )
+            if (replay.digest('hex') !== h) throw new Error('Dictionary patch replay failed')
+            const descriptor = {
+              fromSha256: sha256(base),
+              toSha256: h,
+              packSha256: '',
+              offset,
+              length: patch.length,
+              compressedSha256: patch.hash
+            }
+            patches.push(descriptor)
+            await append(patch, descriptor)
+          } else await rm(patch.file)
         }
       }
     }
-    if (offset > maxPackBytes) throw new Error('Pack exceeds memory budget')
+    await flush()
+    await packHandle.close()
+  } finally {
+    await packHandle.close().catch(() => {})
+    await rm(spool, { recursive: true, force: true })
   }
-  const bytes = Buffer.concat(frames),
-    h = sha256(bytes),
-    path = `packs/${h}.pack`
-  for (const f of [...Object.values(objects), ...patches]) f.packSha256 = h
   const manifest = signManifest(
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       releaseId: o.release,
       seq: o.seq,
       channel: o.channel,
       platform: o.platform,
       arch: o.arch,
       hostAbi: o.hostAbi,
+      hostRequirements: o.hostRequirements,
       tree,
-      packs: [{ sha256: h, path, size: bytes.length }],
+      packs: packs.map(({ sha256, path, size }) => ({ sha256, path, size })),
       objects,
       patches
     },
     o.privateKey ?? (await readFile(o.keyFile))
   )
   await mkdir(join(output, 'packs'), { recursive: true })
-  await immutableWrite(join(output, path), bytes)
   await immutableWrite(join(output, 'manifest.json'), Buffer.from(canonicalJson(manifest) + '\n'))
-  return { manifest, packs: [{ path, bytes }] }
+  return { manifest, packs: packs.map(({ path, bytes }) => ({ path, bytes })) }
 }
+export async function buildDesktopRelease({ buildOutput, ...options }) {
+  const snapshot = await mkdtemp(join(tmpdir(), 'core-publish-'))
+  try {
+    await assembleCoreSnapshot(buildOutput, join(snapshot, 'out'))
+    await verifyCoreResources(join(snapshot, 'out'))
+    const artifacts = JSON.parse(
+      await readFile(join(buildOutput, 'main/core-artifacts.json'), 'utf8')
+    )
+    if (!artifacts.hostRequirements || !artifacts.hostAbi)
+      throw new Error('Missing Core Host requirements')
+    if (options.hostAbi && options.hostAbi !== artifacts.hostAbi)
+      throw new Error('Core Host protocol mismatch')
+    return await buildRelease({
+      ...options,
+      hostAbi: artifacts.hostAbi,
+      hostRequirements: artifacts.hostRequirements,
+      input: snapshot
+    })
+  } finally {
+    await rm(snapshot, { recursive: true, force: true })
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const o = {}
     const names = {
       'previous-input': 'previousInput',
       input: 'input',
+      'build-output': 'buildOutput',
       output: 'output',
       release: 'release',
       seq: 'seq',
@@ -134,6 +266,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       platform: 'platform',
       arch: 'arch',
       'host-abi': 'hostAbi',
+      'host-requirements': 'hostRequirementsFile',
       'key-file': 'keyFile'
     }
     const args = process.argv.slice(2)
@@ -143,11 +276,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         throw new Error('Invalid arguments')
       o[k] = args[i + 1]
     }
-    if (Object.keys(o).filter((k) => k !== 'previousInput').length !== 9)
+    if (Boolean(o.input) === Boolean(o.buildOutput)) throw new Error('Choose input or build-output')
+    if (
+      ['output', 'release', 'seq', 'channel', 'platform', 'arch', 'keyFile'].some((key) => !o[key])
+    )
       throw new Error('Missing arguments')
+    if (o.input) {
+      if (!o.hostAbi || !o.hostRequirementsFile)
+        throw new Error('Explicit Host requirements required for raw input')
+      o.hostRequirements = JSON.parse(await readFile(o.hostRequirementsFile, 'utf8'))
+    } else if (o.hostRequirementsFile)
+      throw new Error('Desktop requirements come from emitted artifacts')
     if (!/^\d+$/.test(o.seq)) throw new Error('Invalid sequence')
     o.seq = Number(o.seq)
-    await buildRelease(o)
+    await (o.buildOutput ? buildDesktopRelease : buildRelease)({ ...o, returnPackBytes: false })
   } catch {
     console.error('Core OTA build failed; check arguments, input, output and signing key')
     process.exitCode = 1

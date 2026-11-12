@@ -1,3 +1,4 @@
+import { hasHealthyContent } from './core-health'
 import { installClientLog } from '@lody/components/lib/client-log'
 import { installWindowPreparationIntent } from '@lody/components/lib/window-preparation-intent'
 import { windowPreparationAtom } from '@lody/components/lib/window-preparation'
@@ -109,7 +110,11 @@ function markRendererCommitted(): void {
   if (rendererMounted) return
   rendererMounted = true
   try {
-    void getIpcServices()?.app.notifyRendererMounted()
+    const services = getIpcServices()
+    if (!services) throw new Error('Preload IPC bridge unavailable')
+    void services.app
+      .notifyRendererMounted()
+      .catch((error: unknown) => console.warn('[Lody] startup IPC probe failed', error))
   } catch (e) {
     console.warn('[Lody] notifyRendererMounted bridge failed', e)
   }
@@ -241,6 +246,49 @@ try {
   const router = createRouter({
     authClient,
     history: usesHashHistory ? createHashHistory() : undefined
+  })
+  let healthSent = false
+  let healthPending = false
+  const checkHealth = async () => {
+    if (healthSent || healthPending || bootFailureShown || isWarmWindow()) return
+    const state = router.state
+    const params = Object.assign({}, ...state.matches.map((match) => match.params)) as {
+      workspaceName?: string
+      sessionId?: string
+    }
+    const route = {
+      pending: state.isLoading || state.status === 'pending',
+      pathname: state.location.pathname,
+      workspace: params.workspaceName,
+      sessionId: params.sessionId
+    }
+    if (!hasHealthyContent(rootElement!, route)) return
+    healthPending = true
+    try {
+      healthSent = (await getIpcServices()?.app.notifyRendererHealthy()) === true
+    } catch (error) {
+      console.warn('[Lody] initial health probe failed', error)
+    } finally {
+      healthPending = false
+    }
+    if (healthSent) {
+      healthObserver.disconnect()
+      window.clearInterval(healthRetry)
+    }
+  }
+  const healthObserver = new MutationObserver(() => {
+    void checkHealth()
+  })
+  healthObserver.observe(rootElement!, { subtree: true, childList: true, attributes: true })
+  const healthRetry = window.setInterval(() => {
+    void checkHealth()
+  }, 1000)
+  window.setTimeout(() => {
+    healthObserver.disconnect()
+    window.clearInterval(healthRetry)
+  }, 60_000)
+  router.subscribe('onResolved', () => {
+    void checkHealth()
   })
   installWarmWindowBinding(router)
   installWindowPreparationIntent()

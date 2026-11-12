@@ -804,6 +804,18 @@ export class CliService {
     this.cachedMachineId = null
   }
 
+  async probeInitialHealth(): Promise<boolean> {
+    if (!this.cliAutoStartEnabled) return true
+    try {
+      const state = await Effect.runPromise(
+        this.localProbeClient.state({ timeoutMs: LOCAL_PROBE_TIMEOUT_MS })
+      )
+      return state.phase !== 'starting' && state.phase !== 'fatal'
+    } catch {
+      return false
+    }
+  }
+
   async getLocalMachineId(options?: MachineIdLookupOptions): Promise<string | null> {
     if (!this.cliAutoStartEnabled) {
       return null

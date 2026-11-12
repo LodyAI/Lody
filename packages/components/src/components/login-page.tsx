@@ -1877,7 +1877,7 @@ export function LoginPage({
   const entranceInitial = prefersReducedMotion ? false : 'hidden';
 
   return (
-    <div {...stylex.props(styles.page)}>
+    <div {...stylex.props(styles.page)} data-core-entry-ready="/login">
       <WindowDragStrip />
       <section {...stylex.props(styles.visual, isVisualFolded && styles.visualFolded)}>
         <LoginDitherVisual keepClearRef={taglineRef} />

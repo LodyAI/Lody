@@ -1,3 +1,4 @@
+import { assertHostCompatible } from './compatibility.mjs'
 import {
   mkdir,
   open,
@@ -12,8 +13,8 @@ import {
   realpath
 } from 'node:fs/promises'
 import path from 'node:path'
-import { verifyManifest, sha256 } from './protocol.mjs'
-import { randomUUID, createHash } from 'node:crypto'
+import { verifyManifest, sha256, canonicalJson } from './protocol.mjs'
+import { randomUUID, createHash, createPublicKey } from 'node:crypto'
 
 async function persist(file, value) {
   const temporary = `${file}.${randomUUID()}.tmp`
@@ -38,6 +39,11 @@ async function persist(file, value) {
 export async function openActivation({ root, installed, lease, publicKey }) {
   if (!lease || typeof lease.assertHeld !== 'function')
     throw new Error('Exclusive host lease required')
+  if (
+    typeof installed.hostBuildId !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(installed.hostBuildId)
+  )
+    throw new Error('Invalid Host build identity')
   const namespace = createHash('sha256')
     .update(
       JSON.stringify([
@@ -45,7 +51,10 @@ export async function openActivation({ root, installed, lease, publicKey }) {
         installed.channel,
         installed.platform,
         installed.arch,
-        installed.hostAbi
+        installed.hostAbi,
+        (publicKey.type === 'public' ? publicKey : createPublicKey(publicKey))
+          .export({ type: 'spki', format: 'der' })
+          .toString('base64')
       ])
     )
     .digest('hex')
@@ -56,7 +65,7 @@ export async function openActivation({ root, installed, lease, publicKey }) {
   await mkdir(directory, { recursive: true, mode: 0o700 })
   if ((await realpath(directory)) !== path.resolve(directory))
     throw new Error('Linked activation root refused')
-  const file = path.join(directory, 'pointer.json')
+  const file = path.join(directory, `pointer-${installed.hostBuildId}.json`)
   let state
   try {
     state = JSON.parse(await readFile(file, 'utf8'))
@@ -96,9 +105,7 @@ export async function openActivation({ root, installed, lease, publicKey }) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(id)) throw new Error('Invalid release id')
     const result = await verifyRelease(path.join(directory, 'releases', id), publicKey)
     if (result.releaseId !== id) throw new Error('Release identity mismatch')
-    for (const key of ['channel', 'platform', 'arch', 'hostAbi']) {
-      if (result[key] !== installed[key]) throw new Error(`Incompatible ${key}`)
-    }
+    assertHostCompatible(result, installed)
     return result
   }
   return {
@@ -106,13 +113,23 @@ export async function openActivation({ root, installed, lease, publicKey }) {
     async adoptStaged({ directory: sourceDirectory, manifest: suppliedManifest }) {
       await lease.assertHeld()
       const manifest = await verifyRelease(sourceDirectory, publicKey, suppliedManifest)
-      for (const key of ['channel', 'platform', 'arch', 'hostAbi']) {
-        if (manifest[key] !== installed[key]) throw new Error(`Incompatible ${key}`)
-      }
+      assertHostCompatible(manifest, installed)
       if (state.rejected.includes(manifest.releaseId) || manifest.seq <= state.seq)
         throw new Error('Rejected or stale release')
       const releases = path.join(directory, 'releases')
       await mkdir(releases, { recursive: true, mode: 0o700 })
+      const destination = path.join(releases, manifest.releaseId)
+      try {
+        const existing = await verifyRelease(destination, publicKey)
+        if (canonicalJson(existing) !== canonicalJson(manifest))
+          throw new Error('Release identity collision')
+        state.staged = manifest.releaseId
+        state.seq = manifest.seq
+        await save()
+        return manifest.releaseId
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+      }
       const temporary = path.join(releases, `.incoming-${randomUUID()}`)
       try {
         await cp(sourceDirectory, temporary, {
@@ -198,6 +215,24 @@ export async function openActivation({ root, installed, lease, publicKey }) {
       state.attempt = state.current ? { releaseId: state.current, attemptId } : null
       await save()
       return { releaseId: state.current, attemptId, builtin: !state.current }
+    },
+    async fail({ releaseId, attemptId }) {
+      await lease.assertHeld()
+      if (state.attempt?.releaseId !== releaseId || state.attempt?.attemptId !== attemptId)
+        throw new Error('Stale failure acknowledgement')
+      state.rejected = [...new Set([...state.rejected, releaseId])]
+      state.current = state.previous
+      state.previous = null
+      state.attempt = null
+      await save()
+    },
+    // A deliberate shutdown keeps the release eligible for a fresh health attempt.
+    async abandon({ releaseId, attemptId }) {
+      await lease.assertHeld()
+      if (state.attempt?.releaseId !== releaseId || state.attempt?.attemptId !== attemptId)
+        throw new Error('Stale shutdown acknowledgement')
+      state.attempt = null
+      await save()
     },
     async acknowledge({ releaseId, attemptId }) {
       if (state.attempt?.releaseId !== releaseId || state.attempt?.attemptId !== attemptId)

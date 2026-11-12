@@ -36,6 +36,9 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 ## Build toolchain and window identity
 
 - Electron 44 desktop builds require macOS 13 or newer.
+- Bundled main dependency chunks must stay outside `node_modules` paths, which
+  electron-builder filters. Preserve fixed entry paths and verify the emitted Core
+  closure in the packaged ASAR; see [Core OTA](scripts/core-ota/README.md).
 
 - `desktop-bootstrap` must be the first main import: Nightly chooses its data
   directory before auth stores open. `desktop-channel` changes desktop identity,
@@ -55,6 +58,8 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
   and the AppImage runtime desktop entry must all resolve to the same desktop-file
   basename. KDE uses that identity to associate Wayland/X11 windows with the
   installed icon.
+
+Core packaging and ABI changes must follow [Host compatibility](scripts/core-ota/README.md#host-compatibility-and-build-identity).
 
 ## Embedded CLI and native dependencies
 

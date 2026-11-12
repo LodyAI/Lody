@@ -1,3 +1,4 @@
+import { validateRequirements } from './compatibility.mjs'
 import { createHash, sign, verify, createPrivateKey, createPublicKey } from 'node:crypto'
 export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const fail = () => {
@@ -50,10 +51,11 @@ function path(v) {
 export function validateManifest(m) {
   keys(
     m,
-    'schemaVersion releaseId seq channel platform arch hostAbi tree packs objects patches signature'
+    'schemaVersion releaseId seq channel platform arch hostAbi hostRequirements tree packs objects patches signature'
   )
-  if (m.schemaVersion !== 1) fail()
+  if (m.schemaVersion !== 2) fail()
   for (const k of ['releaseId', 'channel', 'platform', 'arch', 'hostAbi']) token(m[k])
+  validateRequirements(m.hostRequirements)
   num(m.seq, Number.MAX_SAFE_INTEGER)
   if (
     !Array.isArray(m.tree) ||

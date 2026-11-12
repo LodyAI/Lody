@@ -25,12 +25,19 @@ const noopLog: DesktopLog = {
   flushSync: () => {}
 }
 
-let installed: DesktopLog | null = null
-let activeRun: { path: string; record: DesktopRunRecord } | null = null
+type DesktopLogState = {
+  installed: DesktopLog | null
+  activeRun: { path: string; record: DesktopRunRecord } | null
+}
+
+// Installed Host and downloaded Core load separate copies of this module.
+const stateKey = Symbol.for('lody.desktop-log')
+const owner = process as typeof process & { [stateKey]?: DesktopLogState }
+const state = (owner[stateKey] ??= { installed: null, activeRun: null })
 
 /** The desktop log, or a no-op before `installDesktopLog` ran. */
 export function getDesktopLog(): DesktopLog {
-  return installed ?? noopLog
+  return state.installed ?? noopLog
 }
 
 function describeError(error: unknown): string {
@@ -59,12 +66,12 @@ function writeRunRecord(path: string, record: DesktopRunRecord): void {
  * main-process work, so startup failures are captured too.
  */
 export function installDesktopLog(): DesktopLog {
-  if (installed) return installed
+  if (state.installed) return state.installed
   try {
     return installDesktopLogUnsafe()
   } catch (error) {
     // Diagnostics must never keep the desktop from starting.
-    installed = noopLog
+    state.installed = noopLog
     console.error('[desktop-log] disabled after an installation error', error)
     return noopLog
   }
@@ -75,7 +82,7 @@ function installDesktopLogUnsafe(): DesktopLog {
     logDir: join(getLodyDataDir(mainPlatformKind), 'logs'),
     scopePrefix: `desktop:${process.pid}`
   })
-  installed = log
+  state.installed = log
 
   log.info(
     'lifecycle',
@@ -107,7 +114,8 @@ function installDesktopLogUnsafe(): DesktopLog {
   app.on('before-quit', () => log.info('lifecycle', 'before-quit'))
   app.on('will-quit', () => {
     log.info('lifecycle', 'will-quit')
-    if (activeRun) writeRunRecord(activeRun.path, { ...activeRun.record, cleanExit: true })
+    if (state.activeRun)
+      writeRunRecord(state.activeRun.path, { ...state.activeRun.record, cleanExit: true })
     log.flushSync()
   })
   app.on('quit', (_event, exitCode) => {
@@ -174,7 +182,7 @@ function installDesktopLogUnsafe(): DesktopLog {
  * URL to the primary must not overwrite the primary's record.
  */
 export function beginDesktopRunRecord(): void {
-  if (activeRun) return
+  if (state.activeRun) return
   const log = getDesktopLog()
   const path = join(app.getPath('userData'), RUN_RECORD_FILE)
   const previousRun = describePreviousDesktopRun(readRunRecord(path))
@@ -184,6 +192,6 @@ export function beginDesktopRunRecord(): void {
     startedAt: new Date().toISOString(),
     cleanExit: false
   }
-  activeRun = { path, record }
+  state.activeRun = { path, record }
   writeRunRecord(path, record)
 }

@@ -73,7 +73,10 @@ export function CreateWorkspacePage({
   const { t } = useTranslation();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div
+      data-core-entry-ready="/workspace/create"
+      className="min-h-screen flex items-center justify-center bg-background p-4"
+    >
       <div className="w-full max-w-md">
         {onBackToWorkspace ? (
           <Button

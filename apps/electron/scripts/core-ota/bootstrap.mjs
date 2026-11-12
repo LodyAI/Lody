@@ -1,3 +1,4 @@
+import { validateCapabilities } from './compatibility.mjs'
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { openActivation } from './activation.mjs'
@@ -12,18 +13,19 @@ export async function openInstalledCore({ resourcesPath, root, isOwner }) {
     await readFile(path.join(resourcesPath, INSTALLED_METADATA_PATH), 'utf8')
   )
   if (
-    installed.schemaVersion !== 1 ||
+    installed.schemaVersion !== 2 ||
     Object.keys(installed).sort().join() !==
-      'arch,channel,feedUrl,hostAbi,platform,product,publicKey,schemaVersion'
+      'arch,channel,feedUrl,hostAbi,hostBuildId,hostCapabilities,platform,product,publicKey,schemaVersion'
   )
     throw new Error('Invalid installed Core metadata')
-  for (const key of ['product', 'channel', 'platform', 'arch', 'hostAbi']) {
+  for (const key of ['product', 'channel', 'platform', 'arch', 'hostAbi', 'hostBuildId']) {
     if (
       typeof installed[key] !== 'string' ||
       !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(installed[key])
     )
       throw new Error(`Invalid installed ${key}`)
   }
+  validateCapabilities(installed.hostCapabilities)
   if (typeof installed.publicKey !== 'string' || !installed.publicKey)
     throw new Error('Installed public key required')
   const feed = new URL(installed.feedUrl)
