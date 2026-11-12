@@ -744,6 +744,8 @@ export type SessionExecutionServiceDeps = {
     signal?: AbortSignal
   ) => Promise<string | null>;
   turnFinalization: TurnFinalizationEffects;
+  /** Borrow the existing bounded user-history gate before recovery list writes. */
+  awaitTurnHistoryGate?: (sessionId: SessionId) => Promise<void>;
   recordChatFailure: (
     sessionDoc: SessionDocument,
     reason: ChatFailedReason,
@@ -3844,6 +3846,132 @@ export class SessionExecutionService {
     );
   }
 
+  /** Called only by the serialized dispatch watcher with no live turn owner. */
+  async recoverUncertainEncryptedTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    const gate = this.deps.encryptedExecution;
+    if (!gate || this.getExecutionSnapshot(sessionId).hasActiveTurn) return false;
+    const release = this.tryAcquireSessionRewriteConflictLease(sessionId);
+    if (!release) return false;
+    try {
+      const meta = await this.getSessionMeta(sessionId);
+      const backend = await createSessionBackend(sessionDoc, meta);
+      const read = await backend.readTurn(userTurnId);
+      if (
+        read.state === 'ready' &&
+        ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '') &&
+        meta?.processingUserMsgId !== userTurnId
+      )
+        return false;
+      const state = await Effect.runPromise(gate.readState({ sessionId, userTurnId }));
+      if (state !== 'uncertain') return false;
+      return await this.settleUncertainEncryptedTurn(sessionId, sessionDoc, userTurnId);
+    } finally {
+      release();
+    }
+  }
+
+  private async settleUncertainEncryptedTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    await this.deps.awaitTurnHistoryGate?.(sessionId);
+    const backend = await this.getSessionBackend(sessionDoc, sessionId);
+    const user = await backend.readTurn(userTurnId);
+    if (
+      user.state === 'ready' &&
+      ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(user.turn.status ?? '')
+    ) {
+      const meta = await this.getSessionMeta(sessionId);
+      if (meta?.processingUserMsgId !== userTurnId) return false;
+      // A stale running pointer does not undo a user's terminal decision.
+      await this.upsertSessionMeta(sessionId, { processingUserMsgId: undefined });
+      await sessionDoc.setStatus(SessionStatusFactory.idle());
+      await backend.flushLocalWrites();
+      return true;
+    }
+    const noticeId = `e2ee-interrupted:${userTurnId}`;
+    const output = await backend.readHistorySelection((rows) => {
+      const start = rows.findIndex((row) => row.id === userTurnId);
+      let end = rows.length;
+      for (let i = start + 1; i < rows.length; i++) {
+        if (rows[i]?.role === 'user') {
+          end = i;
+          break;
+        }
+      }
+      return rows.flatMap((row, index) =>
+        row.id === noticeId ||
+        (row.role === 'assistant' && row.userTurnId === userTurnId) ||
+        (start >= 0 && index > start && index < end && row.role === 'system')
+          ? [index]
+          : []
+      );
+    });
+    const hasNotice = output.some(
+      (entry) =>
+        entry.id === noticeId ||
+        entry.items?.some((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+    );
+    // A completed reply is positive completion evidence, unless it was closed by
+    // this recovery (the durable notice is written before any terminal stamp).
+    if (
+      !hasNotice &&
+      output.some((entry) => entry.role === 'assistant' && typeof entry.endedAt === 'number')
+    )
+      return false;
+    if (!hasNotice) {
+      await backend.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: noticeId,
+          role: 'system',
+          userTurnId,
+          timestamp: new Date().toISOString(),
+          fileDiff: [],
+          items: [
+            {
+              type: 'system_notice',
+              name: 'chat_failed',
+              meta: {
+                reason: 'turn_pre_prompt_failed',
+                message:
+                  'The previous run was interrupted by a device shutdown or crash. Its outcome is unknown, so it was not retried automatically to avoid duplicate execution. Check its effects before sending a new message.',
+              },
+            },
+          ],
+        },
+      });
+      await backend.flushLocalWrites();
+    }
+    for (const entry of output) {
+      if (entry.role === 'assistant' && typeof entry.endedAt !== 'number')
+        await backend.applyHistoryAction({
+          kind: 'finish-assistant',
+          turnId: entry.id,
+          endedAt: Date.now(),
+        });
+    }
+    await this.setTerminalUserTurnStatus(sessionId, sessionDoc, userTurnId, 'failed');
+    const meta = await this.getSessionMeta(sessionId);
+    // Recovery settles an old identity, not the latest execution. Never replace
+    // another turn's handled/processing pointers with this interrupted turn.
+    await this.upsertSessionMeta(sessionId, {
+      ...(!meta?.lastHandledUserMsgId || meta.lastHandledUserMsgId === userTurnId
+        ? { lastHandledUserMsgId: userTurnId }
+        : {}),
+      ...(meta?.processingUserMsgId === userTurnId ? { processingUserMsgId: undefined } : {}),
+    });
+    if (!meta?.processingUserMsgId || meta.processingUserMsgId === userTurnId)
+      await sessionDoc.setStatus(SessionStatusFactory.idle());
+    await backend.flushLocalWrites();
+    return true;
+  }
+
   private async recordKnownChatFailure(options: {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
@@ -5421,6 +5549,14 @@ export class SessionExecutionService {
                 });
                 return authorized;
               }
+              if (result.state === 'uncertain' && userTurnId) {
+                yield* self.tryPromise(() =>
+                  self.settleUncertainEncryptedTurn(sessionId, sessionDoc, userTurnId)
+                );
+                return yield* Effect.fail(
+                  new SessionTurnClaimContended({ sessionId, turnId: runtime.turnId })
+                );
+              }
               if (result.state === 'completed' && userTurnId) {
                 const backend = yield* self.tryPromise(() =>
                   self.getSessionBackend(sessionDoc, sessionId)
@@ -5448,13 +5584,11 @@ export class SessionExecutionService {
                 userTurnId,
                 reason: 'turn_pre_prompt_failed',
                 message:
-                  result.state === 'uncertain'
-                    ? 'Result unknown. This encrypted turn may already have started and will not be started again. Send a new turn to continue.'
-                    : result.state === 'completed'
-                      ? 'This encrypted turn already finished and will not be started again.'
-                      : result.state === 'denied' && result.reason
-                        ? encryptedRefusalMessage(result.reason)
-                        : 'This encrypted turn is not authorized for execution.',
+                  result.state === 'completed'
+                    ? 'This encrypted turn already finished and will not be started again.'
+                    : result.state === 'denied' && result.reason
+                      ? encryptedRefusalMessage(result.reason)
+                      : 'This encrypted turn is not authorized for execution.',
               });
             });
 

@@ -469,12 +469,30 @@ export function makeEncryptedAgentExecution(options: {
       if (claimed.state === 'claimed')
         journal.finish(claimed.permit, Buffer.from('{"state":"retired"}'));
     });
+  /** Inspect restart evidence without authorizing or claiming another execution. */
+  const readState = (input: { sessionId: string; userTurnId: string }) =>
+    attempt(() => {
+      const record = options.journal().read({
+        genesis: options.genesis,
+        workspaceId: options.workspaceId,
+        targetMachineId: options.targetMachineId,
+        requestId: `agent-start:${input.userTurnId}`,
+      });
+      if (!record) return undefined;
+      const saved = retainedIntentSchema.parse(
+        JSON.parse(Buffer.from(record.frame).toString('utf8'))
+      );
+      if (saved[1] !== input.sessionId || saved[2] !== input.userTurnId)
+        throw new RealtimeJournalError('identity_conflict');
+      return record.state;
+    });
   const complete = (permit: RealtimeStartPermit) =>
     attempt(() => {
       options.journal().finish(permit, Buffer.from('{"state":"settled"}'));
     });
   return {
     claim,
+    readState,
     complete,
     retire,
     classifyOrigin,

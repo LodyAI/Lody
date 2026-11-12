@@ -2727,6 +2727,7 @@ describe('SessionExecutionService', () => {
       }),
       setLastMessageAt: vi.fn(async () => {}),
       waitUntilSynced: async () => {},
+      flushLocalWrites: async () => {},
       getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
@@ -3706,7 +3707,14 @@ describe('SessionExecutionService', () => {
         onPrompt,
       });
       expect(submissions).toEqual(['hi']);
-      expect(duplicate.failureMessages).toEqual([expect.stringContaining('Result unknown')]);
+      expect(duplicate.getHistory()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'e2ee-interrupted:turn-user-1',
+            role: 'system',
+          }),
+        ])
+      );
       finished.resolve();
       const completed = await first;
       expect(completed.getHistory()[0]?.status).toBe('handled');
@@ -3750,7 +3758,22 @@ describe('SessionExecutionService', () => {
         },
       });
       expect(submissions).toEqual([]);
-      expect(recovered.failureMessages).toEqual([expect.stringContaining('Result unknown')]);
+      const notices = recovered.getHistory().filter((entry) => entry.role === 'system');
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({
+        id: 'e2ee-interrupted:turn-user-1',
+        userTurnId: 'turn-user-1',
+        items: [
+          {
+            type: 'system_notice',
+            name: 'chat_failed',
+            meta: {
+              message: expect.stringContaining('not retried automatically'),
+            },
+          },
+        ],
+      });
+      expect(recovered.getStatus().type).toBe('idle');
       expect(recovered.getHistory()[0]?.status).toBe('failed');
     } finally {
       f.close();

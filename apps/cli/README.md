@@ -119,6 +119,19 @@ once; a fallback timer doubles from one second to at most five minutes. Stop can
 watcher's delayed retry. A cancelled input that never started is retired in the journal.
 Member removal retains its identity-verified receipt/erasure path; single-device
 revocation closes the workspace while retaining local state.
+After a crash, an encrypted start with no completion receipt is never replayed.
+Recovery closes any partial assistant reply, fails the user turn and writes one
+interruption notice per turn before returning the session to idle. Repeated
+restarts keep that notice. Already terminal turns retain their outcome, and recovery
+never replaces a newer handled pointer. An old turn's journal failure cannot block
+an independently selected new turn. Check any external effects before sending a new message.
+Iroh and Streams share live write completion signals, registered together with the
+journal claim before invoking a handler. A duplicate waits for that owner within
+its request deadline and returns the committed response frames. A retried encrypted
+feature write with no live owner and an unknown outcome returns
+`e2ee_outcome_uncertain`; it does not execute the write again. Sealed frames retained
+after a persistence failure remain retryable across both receivers.
+
 Ordinary workspaces do not open this log.
 Transport frames keep their own original request/response receipts; execution evidence
 contains intent identities and a settlement marker, never prompt or response plaintext.

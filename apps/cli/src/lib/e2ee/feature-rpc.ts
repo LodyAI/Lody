@@ -1,4 +1,4 @@
-import { Clock, Effect } from 'effect';
+import { Clock, Deferred, Effect } from 'effect';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { makeE2eeRpcNative } from '@lody/loro-streams-rpc/e2ee-native';
 import { e2eeRpcEnvelope } from '@lody/loro-streams-rpc/e2ee-streams';
@@ -77,6 +77,17 @@ export type EncryptedFeatureHandler = (
   context: EncryptedFeatureContext
 ) => Promise<LocalMachineRpcResponse>;
 
+type PendingFeatureWrite = { permit: RealtimeStartPermit; frames: Uint8Array[] };
+// Both transports borrow the same workspace journal. A live claim is not crash
+// evidence; keep its completion signal and sealed retry frames across receivers.
+const featureWrites = new WeakMap<
+  RealtimeJournal,
+  {
+    pending: Map<string, PendingFeatureWrite>;
+    active: Map<string, Deferred.Deferred<void>>;
+  }
+>();
+
 /** One codec and channel; pure reads use read authority/originals, effects use
  * write authority and their execution journal. Raw work keeps its own task until settlement. */
 export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options: {
@@ -102,7 +113,6 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
   client?: LoroStreamsJsonStreamClient;
 }) {
   const scope = yield* Effect.scope;
-  const pending = new Map<string, { permit: RealtimeStartPermit; frames: Uint8Array[] }>();
   const reads = new Set<string>(),
     writes = new Set<string>();
   const receive = Effect.fnUntraced(function* (
@@ -215,42 +225,110 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           expiresAt: opened.expiresAt,
           frame: Uint8Array.from(opened.frame),
         };
-        const retained = yield* attempt(() => journal.receive(request));
-        let owned = pending.get(opened.requestId);
-        if (retained.state !== 'completed' && !owned) {
-          if (pending.size >= 32) return yield* Effect.void;
-          const claim = yield* attempt(() => journal.claim(request));
-          if (claim.state !== 'claimed' || !options.isOpen()) return yield* Effect.void;
-          owned = {
-            permit: claim.permit,
-            frames: yield* options.native.sealFeatureResult(
-              options.machineId,
-              opened,
-              yield* invoke(admittedAuthority)
-            ),
-          };
-          pending.set(opened.requestId, owned);
+        let shared = featureWrites.get(journal);
+        if (!shared) {
+          shared = { pending: new Map(), active: new Map() };
+          featureWrites.set(journal, shared);
         }
-        if (owned) {
-          const selected = owned;
-          for (const [index, frame] of selected.frames.entries())
-            yield* attempt(() => journal.retainResponse(selected.permit, { index, frame }));
-          yield* attempt(() =>
-            journal.finish(selected.permit, Uint8Array.of(selected.frames.length))
-          );
-          pending.delete(opened.requestId);
-        }
-        const complete = yield* attempt(() => journal.receive(request));
-        if (complete.state !== 'completed') return yield* Effect.void;
-        const count = complete.outcome[0];
-        if (!count || count > 128)
-          return yield* Effect.fail(new Error('e2ee_feature_response_missing'));
-        frames = [];
-        for (let index = 0; index < count; index++) {
-          const frame = yield* attempt(() => journal.readResponse(request, index));
-          if (!frame) return yield* Effect.fail(new Error('e2ee_feature_response_missing'));
-          frames.push(frame);
-        }
+        const { pending, active } = shared;
+        const writeKey = JSON.stringify([
+          options.genesis,
+          options.workspaceId,
+          options.machineId,
+          opened.requestId,
+        ]);
+        const uncertain = () =>
+          options.native.sealFeatureResult(options.machineId, opened, {
+            ok: false,
+            code: 'e2ee_outcome_uncertain',
+            error:
+              'Previous execution of this request was interrupted before completion and will not be replayed automatically.',
+          });
+        const response = yield* Effect.acquireUseRelease(
+          attempt(() => {
+            // Validate exact retry bytes and publish ownership without a yield
+            // between the durable claim and the process-local completion signal.
+            const retained = journal.receive(request);
+            const running = active.get(writeKey);
+            if (running) return { kind: 'join' as const, done: running };
+            if (retained.state === 'completed') return { kind: 'completed' as const };
+            const owned = pending.get(writeKey);
+            if (!owned && retained.state === 'uncertain') return { kind: 'uncertain' as const };
+            if (active.size >= 32 || (!owned && pending.size >= 32))
+              return { kind: 'busy' as const };
+            const claim = owned ? undefined : journal.claim(request);
+            if (!owned && claim?.state !== 'claimed')
+              return {
+                kind:
+                  claim?.state === 'existing' && claim.record.state === 'uncertain'
+                    ? ('uncertain' as const)
+                    : ('busy' as const),
+              };
+            const done = Deferred.makeUnsafe<void>();
+            active.set(writeKey, done);
+            return {
+              kind: 'owner' as const,
+              done,
+              owned,
+              permit: owned?.permit ?? (claim?.state === 'claimed' ? claim.permit : undefined),
+            };
+          }),
+          (admission) =>
+            Effect.gen(function* () {
+              if (admission.kind === 'busy') return undefined;
+              if (admission.kind === 'uncertain') return yield* uncertain();
+              if (admission.kind === 'join') {
+                const completed = yield* Deferred.await(admission.done).pipe(
+                  Effect.as(true),
+                  Effect.timeout(Math.max(1, opened.expiresAt - (yield* Clock.currentTimeMillis))),
+                  Effect.catch(() => Effect.succeed(false))
+                );
+                if (!completed) return undefined;
+              }
+              if (admission.kind === 'owner') {
+                if (!options.isOpen() || !admission.permit) return undefined;
+                const owned = admission.owned ?? {
+                  permit: admission.permit,
+                  frames: yield* options.native.sealFeatureResult(
+                    options.machineId,
+                    opened,
+                    yield* invoke(admittedAuthority)
+                  ),
+                };
+                pending.set(writeKey, owned);
+                for (const [index, frame] of owned.frames.entries())
+                  yield* attempt(() => journal.retainResponse(owned.permit, { index, frame }));
+                yield* attempt(() =>
+                  journal.finish(owned.permit, Uint8Array.of(owned.frames.length))
+                );
+                pending.delete(writeKey);
+              }
+              const complete = yield* attempt(() => journal.receive(request));
+              if (complete.state !== 'completed') {
+                // A failed persistence attempt retains sealed originals for retry.
+                // Only a settled owner without those frames has an unknown outcome.
+                return pending.has(writeKey) ? undefined : yield* uncertain();
+              }
+              const count = complete.outcome[0];
+              if (!count || count > 128)
+                return yield* Effect.fail(new Error('e2ee_feature_response_missing'));
+              const frames: Uint8Array[] = [];
+              for (let index = 0; index < count; index++) {
+                const frame = yield* attempt(() => journal.readResponse(request, index));
+                if (!frame) return yield* Effect.fail(new Error('e2ee_feature_response_missing'));
+                frames.push(frame);
+              }
+              return frames;
+            }),
+          (admission) =>
+            Effect.sync(() => {
+              if (admission.kind !== 'owner') return;
+              active.delete(writeKey);
+              Deferred.doneUnsafe(admission.done, Effect.void);
+            })
+        );
+        if (!response) return yield* Effect.void;
+        frames = response;
       }
       const current = yield* authorize(options.workspaceId, opened.requesterDevice);
       if (

@@ -3532,6 +3532,7 @@ export class MessageHandler {
           }
         },
       },
+      awaitTurnHistoryGate: (sessionId) => this.awaitTurnHistoryGate(sessionId),
       recordChatFailure: async (sessionDoc, reason, message, code) =>
         await this.recordChatFailure(sessionDoc, reason, message, code),
       recordSessionStopFailure: async (sessionId, turnId, failure) =>

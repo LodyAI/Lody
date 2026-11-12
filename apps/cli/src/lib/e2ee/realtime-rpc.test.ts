@@ -489,6 +489,161 @@ effectIt.effect(
     })
 );
 
+effectIt.effect(
+  'joins a live encrypted write across Iroh and Streams receivers without sealing uncertainty',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver } = yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const input = {
+        requestId: 'd7'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'sorbet/credentials-logout' as const,
+          params: { configId: 'config', providerId: 'provider' },
+        },
+      };
+      const original = yield* f.sender.prepareFeature(input);
+      const streams = memoryStreams();
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const fallbackAdmitted = yield* Deferred.make<void>();
+      const irohdone = yield* Deferred.make<void>();
+      const irohreplies: Uint8Array[] = [];
+      let executions = 0;
+      const options = {
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () => Effect.succeed({ _tag: 'Authorized' as const }),
+        authorizeRead: () => Effect.die('write used read authority'),
+        isOpen: () => true,
+        handle: async () => {
+          executions++;
+          Deferred.doneUnsafe(started, Effect.void);
+          await Effect.runPromise(Deferred.await(release));
+          return { ok: true as const, result: { type: 'sorbet/credentials-logout' as const } };
+        },
+      };
+      let receives = 0;
+      const receiveRecord = f.receipts.receive.bind(f.receipts);
+      vi.spyOn(f.receipts, 'receive').mockImplementation((request) => {
+        const record = receiveRecord(request);
+        if (++receives === 2) Deferred.doneUnsafe(fallbackAdmitted, Effect.void);
+        return record;
+      });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const iroh = yield* makeEncryptedFeatureReceiver(options);
+          const fallback = yield* makeEncryptedFeatureReceiver({
+            ...options,
+            client: streams.client,
+          });
+          const envelope = { id: original.requestId, frame: original.frameHex };
+          yield* iroh(envelope, {
+            deliver: async (_id, frame) => {
+              irohreplies.push(frame);
+            },
+            end: async () => {
+              Deferred.doneUnsafe(irohdone, Effect.void);
+            },
+          });
+          yield* Deferred.await(started);
+          yield* fallback(envelope);
+          yield* Deferred.await(fallbackAdmitted);
+          // The slow real write may now finish, after fallback admission observed its claim.
+          yield* Deferred.succeed(release, undefined);
+          yield* Deferred.await(irohdone);
+          yield* streams.waitResponse(original.requestId, 1);
+        })
+      );
+      expect(executions).toBe(1);
+      expect(irohreplies).toHaveLength(1);
+      const streamReply = streams.writes.find((write) => write.stream.includes(':res:'))?.value as {
+        frame: string;
+      };
+      expect(
+        yield* f.sender.acceptFeatureResponse(
+          input,
+          Buffer.from(irohreplies[0] ?? []).toString('hex')
+        )
+      ).toEqual({ ok: true, result: { type: 'sorbet/credentials-logout' } });
+      expect(yield* f.sender.acceptFeatureResponse(input, streamReply.frame)).toEqual({
+        ok: true,
+        result: { type: 'sorbet/credentials-logout' },
+      });
+      expect(streamReply.frame).toBe(Buffer.from(irohreplies[0] ?? []).toString('hex'));
+    })
+);
+
+effectIt.effect(
+  'returns an encrypted uncertain error for a write claimed before restart without replay',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver } = yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const input = {
+        requestId: 'c7'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'sorbet/credentials-logout' as const,
+          params: { configId: 'config', providerId: 'provider' },
+        },
+      };
+      const original = yield* f.sender.prepareFeature(input);
+      const opened = yield* f.nativeReceiver.openFeature(f.machineId, original.frameHex);
+      if (!opened) throw new Error('synthetic feature did not open');
+      const request = {
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        workspaceId: f.workspaceId,
+        targetMachineId: f.machineId,
+        requestId: opened.requestId,
+        requester: opened.requesterDevice,
+        expiresAt: opened.expiresAt,
+        frame: Uint8Array.from(opened.frame),
+      };
+      f.receipts.receive(request);
+      expect(f.receipts.claim(request).state).toBe('claimed');
+      const journal = new RealtimeJournal(join(f.directory, 'receipts.sqlite'), () => 1000);
+      const streams = memoryStreams();
+      for (let retry = 1; retry <= 2; retry++) {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver({
+              workspaceId: f.workspaceId,
+              genesis: request.genesis,
+              machineId: f.machineId,
+              native: f.nativeReceiver,
+              journal: () => journal,
+              authorize: () => Effect.succeed({ _tag: 'Authorized' as const }),
+              authorizeRead: () => Effect.die('write must not borrow read authority'),
+              isOpen: () => true,
+              client: streams.client,
+              handle: async () => {
+                throw new Error('uncertain write was replayed');
+              },
+            });
+            yield* receive({ id: original.requestId, frame: original.frameHex });
+            yield* streams.waitResponse(original.requestId, retry);
+          })
+        );
+        const replies = streams.writes.filter((write) => write.stream.includes(':res:'));
+        const reply = replies[retry - 1]?.value as { frame: string };
+        expect(yield* f.sender.acceptFeatureResponse(input, reply.frame)).toEqual({
+          ok: false,
+          code: 'e2ee_outcome_uncertain',
+          error:
+            'Previous execution of this request was interrupted before completion and will not be replayed automatically.',
+        });
+        expect(journal.read(request)?.state).toBe('uncertain');
+      }
+    })
+);
+
 for (const method of ['sorbet/credentials-list', 'sorbet/credentials-logout'] as const) {
   effectIt.effect(
     `journals encrypted ${method} and replays the outcome without another execution`,
