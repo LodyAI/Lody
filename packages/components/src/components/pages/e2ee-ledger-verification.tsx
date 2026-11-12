@@ -214,8 +214,35 @@ function ResultAlert(props: { result: DialogResult }) {
 
 export type CameraState = 'idle' | 'starting' | 'scanning' | 'unavailable';
 
+/** Decode passes at most this often (~14 fps): enough to scan, light on a phone. */
+const SCAN_INTERVAL_MS = 70;
+/** jsQR reads a frame downscaled so its longer side is at most this. */
+const SCAN_MAX_SIDE = 640;
+type BarcodeDetectorLike = { detect: (source: CanvasImageSource) => Promise<{ rawValue: string }[]> };
+type BarcodeDetectorClass = new (options: { formats: string[] }) => BarcodeDetectorLike;
+
+/** Opens the rear camera at a modest size. Only a constraint or device mismatch is
+ * retried with plain video; a denied or busy camera is never asked twice. */
+async function openScanCamera() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 720 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
+  } catch (error) {
+    const name = (error as { name?: unknown } | null)?.name;
+    if (name !== 'OverconstrainedError' && name !== 'NotFoundError') throw error;
+    return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  }
+}
+
 /** Reads QR frames until one decodes, then releases the camera. A denied, absent or
- * busy camera reports `unavailable`; callers keep a manual fallback. */
+ * busy camera reports `unavailable`; callers keep a manual fallback. The stream is
+ * reopened when the page returns from the background or the track ends. */
 export function useQrCamera(active: boolean, onCode: (text: string) => void) {
   const video = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<CameraState>('idle');
@@ -229,50 +256,119 @@ export function useQrCamera(active: boolean, onCode: (text: string) => void) {
     let stream: MediaStream | null = null;
     let frame = 0;
     let stopped = false;
+    let decoding = false;
+    let lastPass = 0;
+    let opening = false;
     const canvas = document.createElement('canvas');
-    const stop = () => {
-      stopped = true;
+    let context: CanvasRenderingContext2D | null = null;
+    const Detector = (globalThis as { BarcodeDetector?: BarcodeDetectorClass }).BarcodeDetector;
+    let detector: BarcodeDetectorLike | null = null;
+    try {
+      detector = Detector ? new Detector({ formats: ['qr_code'] }) : null;
+    } catch {
+      detector = null;
+    }
+    const release = () => {
       cancelAnimationFrame(frame);
       stream?.getTracks().forEach((track) => track.stop());
+      stream = null;
     };
-    const tick = () => {
+    const stop = () => {
+      stopped = true;
+      release();
+      document.removeEventListener('visibilitychange', wake);
+    };
+    const found = (text: string) => {
+      stop();
+      setState('idle');
+      latest.current(text);
+    };
+    const readWithJsQr = (element: HTMLVideoElement) => {
+      const scale = Math.min(
+        1,
+        SCAN_MAX_SIDE / Math.max(element.videoWidth, element.videoHeight)
+      );
+      const width = Math.max(1, Math.round(element.videoWidth * scale));
+      const height = Math.max(1, Math.round(element.videoHeight * scale));
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
+      context ??= canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(element, 0, 0, width, height);
+      const image = context.getImageData(0, 0, width, height);
+      return jsQR(image.data, width, height, { inversionAttempts: 'dontInvert' })?.data ?? null;
+    };
+    const tick = (now: number) => {
       if (stopped) return;
+      frame = requestAnimationFrame(tick);
       const element = video.current;
-      if (element && element.readyState >= element.HAVE_ENOUGH_DATA) {
-        canvas.width = element.videoWidth;
-        canvas.height = element.videoHeight;
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        if (context) {
-          context.drawImage(element, 0, 0);
-          const image = context.getImageData(0, 0, canvas.width, canvas.height);
-          const code = jsQR(image.data, image.width, image.height, {
-            inversionAttempts: 'dontInvert',
+      if (
+        decoding ||
+        now - lastPass < SCAN_INTERVAL_MS ||
+        !element ||
+        element.readyState < element.HAVE_ENOUGH_DATA
+      )
+        return;
+      lastPass = now;
+      if (detector) {
+        decoding = true;
+        detector
+          .detect(element)
+          .then((codes) => {
+            if (!stopped && codes[0]?.rawValue) found(codes[0].rawValue);
+          })
+          .catch(() => {
+            // A detector that cannot read this source hands over to jsQR for good.
+            detector = null;
+          })
+          .finally(() => {
+            decoding = false;
           });
-          if (code) {
-            stop();
-            setState('idle');
-            latest.current(code.data);
+        return;
+      }
+      const text = readWithJsQr(element);
+      if (text) found(text);
+    };
+    const start = () => {
+      if (stopped || opening) return;
+      opening = true;
+      setState('starting');
+      openScanCamera()
+        .then(async (media) => {
+          opening = false;
+          if (stopped || !video.current) {
+            media.getTracks().forEach((track) => track.stop());
             return;
           }
-        }
-      }
-      frame = requestAnimationFrame(tick);
+          stream = media;
+          // A phone ends the track when the app goes to the background.
+          for (const track of media.getVideoTracks())
+            track.addEventListener('ended', () => {
+              if (!stopped && document.visibilityState === 'visible') restart();
+            });
+          video.current.srcObject = media;
+          await video.current.play();
+          if (stopped) return;
+          setState('scanning');
+          frame = requestAnimationFrame(tick);
+        })
+        .catch(() => {
+          opening = false;
+          // Denied, absent or busy: reading the code by eye still works.
+          if (!stopped) setState('unavailable');
+        });
     };
-    setState('starting');
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-      .then(async (media) => {
-        stream = media;
-        if (stopped || !video.current) return stop();
-        video.current.srcObject = media;
-        await video.current.play();
-        setState('scanning');
-        frame = requestAnimationFrame(tick);
-      })
-      .catch(() => {
-        // Denied, absent or busy: reading the code by eye still works.
-        if (!stopped) setState('unavailable');
-      });
+    const restart = () => {
+      release();
+      start();
+    };
+    function wake() {
+      if (stopped || document.visibilityState !== 'visible') return;
+      const live = stream?.getVideoTracks().some((track) => track.readyState === 'live');
+      if (!live) restart();
+    }
+    document.addEventListener('visibilitychange', wake);
+    start();
     return stop;
   }, [active]);
   return { video, state };

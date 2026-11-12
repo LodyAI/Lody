@@ -30,11 +30,14 @@ function SecuritySettings({
   scope,
   consoleTab,
   setConsoleTab,
+  addDevice,
 }: {
   scope: ReturnType<typeof useSecurityState>;
   /** The console owns its own control reader; it exists only while open. */
   consoleTab: E2eeConsoleTab | null;
-  setConsoleTab: (tab: E2eeConsoleTab | null) => void;
+  setConsoleTab: (tab: E2eeConsoleTab | null, addDevice?: boolean) => void;
+  /** Opened through "Add device": the pairing code is shown at once. */
+  addDevice: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -91,7 +94,11 @@ function SecuritySettings({
       <E2eeSecurityPanel
         {...panelState}
         joinRequests={joinRequests}
-        onOpenConsole={scope.workspaceId ? (tab) => setConsoleTab(tab ?? 'overview') : undefined}
+        onOpenConsole={
+          scope.workspaceId
+            ? (tab) => setConsoleTab(tab ?? 'overview', tab === 'devices')
+            : undefined
+        }
         onRetry={retry}
         onUpdate={update}
       />
@@ -113,6 +120,7 @@ function SecuritySettings({
                 workspaceId={scope.workspaceId}
                 presentation="modal"
                 initialTab={consoleTab}
+                showPairingCode={addDevice}
                 onClose={() => setConsoleTab(null)}
                 {...(recoveryReady === undefined ? {} : { recoveryReady })}
                 {...(updater ? { onCheckForUpdates: () => void updater.checkForUpdates() } : {})}
@@ -167,9 +175,14 @@ export function WorkspaceSettings() {
   const scope = useSecurityState();
   const key = `${scope.accountId}:${scope.workspaceId}`;
   // Keyed by account and workspace: an open console never carries over to another one.
-  const [open, setOpen] = useState<{ key: string; tab: E2eeConsoleTab } | null>(null);
+  const [open, setOpen] = useState<{
+    key: string;
+    tab: E2eeConsoleTab;
+    addDevice: boolean;
+  } | null>(null);
   const consoleTab = open?.key === key ? open.tab : null;
-  const setConsoleTab = (tab: E2eeConsoleTab | null) => setOpen(tab ? { key, tab } : null);
+  const setConsoleTab = (tab: E2eeConsoleTab | null, addDevice = false) =>
+    setOpen(tab ? { key, tab, addDevice } : null);
   // An encrypted workspace keeps the ordinary General page (name, icon, members,
   // danger zone). Encryption management lives in the console the entry card opens.
   return scope.encrypted ? (
@@ -179,6 +192,7 @@ export function WorkspaceSettings() {
         scope={scope}
         consoleTab={consoleTab}
         setConsoleTab={setConsoleTab}
+        addDevice={open?.key === key && open.addDevice}
       />
       <AccountSettingsComponent
         surface="workspace"

@@ -415,7 +415,9 @@ describe('recovery vault settings actions', () => {
       expect(view.text).toContain('e2ee.recovery.loading');
       expect(view.text).not.toContain('e2ee.recovery.offlineHint');
       expect(view.labels).toEqual([]);
-      await act(async () => answer({ hasVault: false, replacing: false, covered: [], uncovered: [] }));
+      await act(async () =>
+        answer({ hasVault: false, replacing: false, covered: [], uncovered: [] })
+      );
       for (let tick = 0; tick < 5; tick++) await act(async () => {});
       expect(view.text).not.toContain('e2ee.recovery.loading');
       expect(view.primary).toEqual(['e2ee.recovery.create']);
@@ -426,7 +428,7 @@ describe('recovery vault settings actions', () => {
 
   it('says recovery is off when desktop main refuses it, without retry or file actions', async () => {
     const view = await mount(async () => {
-      throw new Error("Error invoking remote method: Error: e2ee_recovery_disabled");
+      throw new Error('Error invoking remote method: Error: e2ee_recovery_disabled');
     });
     try {
       expect(view.text).toContain('e2ee.recovery.disabled');
@@ -815,9 +817,6 @@ describe('encrypted workspace settings', () => {
     });
     try {
       await render();
-      await click('e2ee.security.openConsole');
-      for (let tick = 0; tick < 5; tick++) await act(async () => {});
-      expect(page()).not.toContain('e2ee.console.quick.recovery');
       await openConsole('recovery');
       for (let tick = 0; tick < 5; tick++) await act(async () => {});
       expect(page()).toContain('e2ee.console.recoveryUnavailable');
@@ -1097,6 +1096,36 @@ describe('encrypted workspace settings', () => {
       (button) => button.textContent === 'e2ee.security.revoke'
     );
     expect(revoke?.disabled).toBe(true);
+  });
+  it('adds a device from the General card and keeps one way to add it on the Devices tab', async () => {
+    const personalPairing = () =>
+      document.body.querySelector('[data-testid="e2ee-personal-pairing-state"]');
+    Object.assign(platform.e2eeWorkspaces!.runtime!, {
+      preparePersonalJoin: async () => ({}),
+      claimPersonalJoin: async () => ({}),
+      cancelPersonalJoin: async () => {},
+    });
+    await render();
+    await click('e2ee.security.addDevice');
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(
+      document.body.querySelector('[data-console-tab="devices"]')?.getAttribute('aria-current')
+    ).toBe('page');
+    // A host without account pairing keeps the per-workspace exchange.
+    expect(personalPairing()).not.toBeNull();
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    platform.e2eeWorkspaces!.runtime!.inspectAccountPairing = async () => null;
+    await render();
+    await click('e2ee.security.addDevice');
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    // The device list is still there, alone with the one way to add a device.
+    expect(
+      document.body.querySelector(
+        `[data-testid="e2ee-device-details"][data-device-key="${'ab'.repeat(32)}"]`
+      )
+    ).not.toBeNull();
+    expect(personalPairing()).toBeNull();
   });
   it('keeps the ordinary General page and leaves encrypted team management to the console', async () => {
     state = { ...state, rotationRequired: false };

@@ -446,7 +446,9 @@ export function CloudPlatformProvider({
       },
       workspaces: () => accountPairingHints(workspacesStore.get()),
       deviceName: electron ? 'Lody desktop' : 'Lody mobile',
-      canPresent: () => document.visibilityState === 'visible' && document.hasFocus(),
+      // A visible but unfocused window (another app in front, a second screen) still
+      // answers; only a hidden window falls back to the system notification.
+      canPresent: () => document.visibilityState === 'visible',
       notifyPending: (id) => {
         if (!electron) return;
         void getIpcServices()

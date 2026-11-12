@@ -80,6 +80,8 @@ export const E2eeWorkspaceControlPage = ({
     failure ? 'failed' : (history?.view.length ?? 'loading')
   );
 export const E2eeRemoteMachinePairing = () => null;
+export const E2eeRemoteMachineDisclosure = ({ children }: { children?: ReactNode }) => children;
+export const E2eeAddDeviceCard = () => null;
 export const E2eeIdentityRecovery = () => null;
 export const E2eeTeamSettingsHost = () => null;
 export const E2eePersonalPairing = () => null;

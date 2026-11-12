@@ -56,6 +56,8 @@ it('keeps rejected URL diagnostics within the fixed metadata schema', () => {
       `lody://${code}/`,
       `lody://chat/new?${code}=1#${code}=2`,
       `https://${code}.invalid/${code}`,
+      // A new computer's approval link carries its comparison code.
+      `lody://auto-pair?id=${code}&code=${code}`,
     ]) {
       expect(JSON.stringify(describeDeepLinkForAuthDebug(url)).includes(code)).toBe(false);
     }
