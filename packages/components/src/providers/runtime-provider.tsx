@@ -403,6 +403,23 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const knownEncryptedRef = useRef(knownEncrypted);
   knownEncryptedRef.current = knownEncrypted;
   const savedModeErrorType = savedMode.error ? describeErrorType(savedMode.error) : null;
+  // An encrypted workspace always syncs through the cloud, so the Run local agent
+  // setting (`cloud` <-> `dual`) never changes its runtime: keying the effect on the
+  // platform mode would tear down and reopen its native reader for nothing while the
+  // local agent starts. A verified plaintext descriptor wins over encrypted listing
+  // hints, and ordinary workspaces keep following the setting.
+  const verifiedDescriptor = effectiveWorkspaceId
+    ? savedMode.evidence.get(effectiveWorkspaceId)?.descriptor
+    : undefined;
+  const runtimeSyncMode =
+    modeCloud &&
+    knownEncrypted &&
+    !(verifiedDescriptor && !isEncryptedDescriptor(verifiedDescriptor))
+      ? 'cloud'
+      : platform.sync.mode;
+  // Only a dual runtime waits for the first setting snapshot; its arrival must not
+  // restart a cloud-only (or encrypted) runtime that never waited for it.
+  const runtimeSettingReady = runtimeSyncMode !== 'dual' || localAgentRuntimeReady;
   useWorkspaceModeProofPrefetch(platform, modeCloud ? accountId : null, workspaceSlug);
   const effectiveWorkspaceIdSource = isLocalPlatform
     ? effectiveWorkspaceId
@@ -579,7 +596,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     // dual local-first runtime or a cloud-only control runtime. Wait for that
     // first snapshot so a persisted opt-out never opens the local socket even
     // briefly and never flashes a false reconnecting state.
-    if (platform.sync.mode === 'dual' && !localAgentRuntimeReady) {
+    if (!runtimeSettingReady) {
       setControlConnectionState('idle');
       return undefined;
     }
@@ -1164,7 +1181,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           eagerSyncSurface,
           // Platform assembly is the only authority for room topology. Do not
           // re-probe Electron or cloud configuration inside the runtime.
-          syncMode: encryptedAccess ? 'cloud' : platform.sync.mode,
+          syncMode: encryptedAccess ? 'cloud' : runtimeSyncMode,
           getAuthorizedMachineIds: () => {
             const snapshot = authorizedMachineIdsRef.current;
             return snapshot?.workspaceId === effectiveWorkspaceId ? snapshot.machineIds : null;
@@ -1280,7 +1297,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     clearPresenceStates,
     isLocalPlatform,
     modeCloud,
-    platform.sync.mode,
+    runtimeSyncMode,
     platform.e2eeWorkspaces,
     platform.identity.session,
     setContentMode,
@@ -1296,7 +1313,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     telemetryEnabled,
     workspaceSlug,
     effectiveWorkspaceId,
-    localAgentRuntimeReady,
+    runtimeSettingReady,
     admissionRetry,
     retryAdmission,
   ]);

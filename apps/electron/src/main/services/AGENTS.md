@@ -113,7 +113,7 @@ Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-
 and [bootstrap](../../../../../.agents/docs/e2ee-workspace-bootstrap.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
 Workspace custody; reset binds account/generation; recheck after lock/drain before archive.
-No network under locks; drain before release. Bad keys allow ledger open; core repairs.
+No network or proxy lookup under locks; drain before release. Bad keys allow ledger open; core repairs.
 Recovery keeps completed anchors; unfinished rebinding needs verified same-device admission and archived originals.
 Isolate verification/storage errors; bad input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.

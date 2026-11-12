@@ -994,7 +994,10 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
       : []),
     { tab: 'devices', label: t('e2ee.console.quick.addDevice'), icon: MonitorSmartphone },
     { tab: 'security', label: t('e2ee.console.quick.compare'), icon: ShieldCheck },
-    { tab: 'recovery', label: t('e2ee.console.quick.recovery'), icon: LifeBuoy },
+    // Only a host that composes recovery can set it up; elsewhere the tab explains why not.
+    ...(sections.has('recovery')
+      ? [{ tab: 'recovery' as const, label: t('e2ee.console.quick.recovery'), icon: LifeBuoy }]
+      : []),
   ];
 
   // Getting started follows creation, so it is shown only on the creating device, the one
@@ -1159,7 +1162,7 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
       </>
     ),
     recovery: sections.get('recovery') ?? (
-      <p {...stylex.props(styles.quiet)}>{t('e2ee.console.recoveryElsewhere')}</p>
+      <p {...stylex.props(styles.quiet)}>{t('e2ee.console.recoveryUnavailable')}</p>
     ),
   };
 

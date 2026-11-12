@@ -51,8 +51,9 @@ import {
   readObservedLedgerCheckpoint,
   retainObservedLedgerCheckpoint
 } from '../../../../../packages/components/src/lib/e2ee-workspace-storage.ts'
+import * as proxyEnv from '../../../../../packages/shared/src/proxy-env.ts'
 const require = createRequire(import.meta.url)
-async function load(relative, dependencies, console = globalThis.console, env = {}) {
+async function load(relative, dependencies, console = globalThis.console, env = {}, globals = {}) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
   const exports = {}
   runInNewContext(
@@ -72,6 +73,7 @@ async function load(relative, dependencies, console = globalThis.console, env = 
       setTimeout,
       clearTimeout,
       console,
+      ...globals,
       require: (id) =>
         Object.hasOwn(dependencies, id)
           ? dependencies[id]
@@ -390,6 +392,104 @@ void test('uncertain admission preserves append and reconciliation failures, the
   assert.equal(ipc.pairingFailure, undefined)
   assert.deepEqual(submitted, [request, request])
   assert.deepEqual(warnings, [])
+})
+
+void test('a stalled system proxy lookup counts as direct after its bound', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { resolveSystemProxyEnv, SYSTEM_PROXY_LOOKUP_TIMEOUT_MS } = await load(
+    './system-proxy-env.ts',
+    { electron: { session: {} }, '@lody/shared/proxy-env': proxyEnv },
+    globalThis.console,
+    {},
+    { process: { env: {} } }
+  )
+  const probes = []
+  const resolving = resolveSystemProxyEnv(['https://relay-a.example', 'https://relay-b.example'], {
+    resolveProxy: (url) => {
+      probes.push(url)
+      // A PAC script that never answers for the first URL; the second is direct.
+      return url.includes('relay-a') ? new Promise(() => {}) : Promise.resolve('PROXY proxy:8080')
+    }
+  })
+  let settled = false
+  void resolving.then(() => (settled = true))
+  await Promise.resolve()
+  assert.equal(settled, false)
+  t.mock.timers.tick(SYSTEM_PROXY_LOOKUP_TIMEOUT_MS)
+  // The sandbox realm has its own Object prototype.
+  assert.deepEqual(
+    { ...(await resolving) },
+    {
+      HTTP_PROXY: 'http://proxy:8080',
+      HTTPS_PROXY: 'http://proxy:8080',
+      ALL_PROXY: 'http://proxy:8080',
+      NO_PROXY: proxyEnv.DEFAULT_NO_PROXY
+    }
+  )
+  assert.deepEqual(probes, ['https://relay-a.example', 'https://relay-b.example'])
+})
+
+void test('a cold iroh open waiting on the system proxy never holds other workspaces', async () => {
+  const identity = { userId: 'acc1', generation: 1 }
+  const lookups = []
+  const hosts = []
+  const api = await load(
+    './e2ee-account-runtime.ts',
+    {
+      electron: {
+        app: { getPath: () => '/synthetic-user-data', isPackaged: false, getAppPath: () => '/app' }
+      },
+      '@lody/shared/node/e2ee-identity': { leaseE2eeIdentity: () => Effect.void },
+      '../e2ee-custody-electron': { makeElectronE2eeCustody: () => Effect.succeed({}) },
+      './e2ee-bootstrap.mjs': { makeDesktopE2eeBootstrap: () => Effect.succeed({}) },
+      './e2ee-runtime.mjs': {
+        makeDesktopE2eeRuntimeHost: (input) =>
+          Effect.sync(() => {
+            hosts.push(input.iroh?.proxyUrl ?? null)
+            return {}
+          })
+      },
+      './e2ee-iroh-config': {
+        desktopIrohConfig: () => ({ file: '/iroh.node', relays: { urls: ['https://relay'] } }),
+        proxyUrlFromEnv: (env) => env.HTTPS_PROXY
+      },
+      './e2ee-iroh.mjs': { loadIrohNative: () => ({}) },
+      './system-proxy-env': {
+        resolveSystemProxyEnv: () => {
+          const lookup = Promise.withResolvers()
+          lookups.push(lookup)
+          return lookup.promise
+        }
+      },
+      '../ipc/ipc-service-deps': {
+        getIpcServiceDeps: () => ({
+          authService: {
+            subscribeCachedSessionIdentity: () => () => {},
+            getCachedSessionIdentity: () => ({ ...identity })
+          }
+        })
+      }
+    },
+    globalThis.console,
+    { VITE_LODY_PLATFORM: 'cloud', VITE_IROH_RELAYS: 'https://relay' },
+    { process: { env: {}, resourcesPath: '/resources' } }
+  )
+  const first = api.withDesktopE2eeAccount((owner) => Effect.succeed(owner.directory), 'team')
+  await new Promise((resolve) => setImmediate(resolve))
+  lookups[0].resolve({ HTTPS_PROXY: 'http://proxy:1' })
+  await first
+  // Another workspace's cold open stalls in its proxy lookup, before the permit.
+  const stalled = api.withDesktopE2eeAccount((owner) => Effect.succeed(owner.directory), 'other')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(lookups.length, 2)
+  // The open workspace keeps working meanwhile.
+  assert.equal(
+    await api.withDesktopE2eeAccount((owner) => Effect.succeed(owner.accountId), 'team'),
+    'acc1'
+  )
+  lookups[1].resolve({})
+  assert.match(await stalled, /other$/)
+  assert.deepEqual(hosts, ['http://proxy:1', null])
 })
 
 void test('quit retains a supervisor whose stop failed so recovery retries the same owner', async () => {

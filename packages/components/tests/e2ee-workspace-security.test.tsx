@@ -404,6 +404,40 @@ describe('recovery vault settings actions', () => {
     }
   });
 
+  it('says it is loading until the first recovery state arrives', async () => {
+    let answer: (plan: RecoveryPlan) => void = () => {};
+    const port = fakeRecoveryPort(
+      { hasVault: false, replacing: false, covered: [], uncovered: [] },
+      { plan: () => new Promise<RecoveryPlan>((resolve) => (answer = resolve)) }
+    );
+    const view = await mount(undefined, {}, port);
+    try {
+      expect(view.text).toContain('e2ee.recovery.loading');
+      expect(view.text).not.toContain('e2ee.recovery.offlineHint');
+      expect(view.labels).toEqual([]);
+      await act(async () => answer({ hasVault: false, replacing: false, covered: [], uncovered: [] }));
+      for (let tick = 0; tick < 5; tick++) await act(async () => {});
+      expect(view.text).not.toContain('e2ee.recovery.loading');
+      expect(view.primary).toEqual(['e2ee.recovery.create']);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('says recovery is off when desktop main refuses it, without retry or file actions', async () => {
+    const view = await mount(async () => {
+      throw new Error("Error invoking remote method: Error: e2ee_recovery_disabled");
+    });
+    try {
+      expect(view.text).toContain('e2ee.recovery.disabled');
+      expect(view.text).not.toContain('e2ee.recovery.planFailed');
+      expect(view.text).not.toContain('e2ee.recovery.offlineHint');
+      expect(view.labels).toEqual([]);
+    } finally {
+      view.done();
+    }
+  });
+
   it('never offers a file check, replacement or creation the host cannot perform', async () => {
     const requests: unknown[][] = [];
     const port = fakeRecoveryPort(
@@ -763,7 +797,34 @@ describe('encrypted workspace settings', () => {
     store.set(e2eeRecoveryVaultEnabledAtom, true);
     await render();
     await openConsole('recovery');
-    expect(page()).toContain('e2ee.console.recoveryElsewhere');
+    expect(page()).toContain('e2ee.console.recoveryUnavailable');
+  });
+
+  it('explains instead of showing an empty tab when desktop recovery is switched off', async () => {
+    // Desktop IPC exists, but the renderer switch is off: no vault call may happen and the
+    // tab still explains itself, with no shortcut that promises a setup.
+    store.set(developerModeEnabledAtom, true);
+    store.set(e2eeRecoveryVaultEnabledAtom, false);
+    const channels: string[] = [];
+    vi.stubGlobal('ipc', {
+      invoke: async (channel: string) => {
+        channels.push(channel);
+        return undefined;
+      },
+      on: () => () => {},
+    });
+    try {
+      await render();
+      await click('e2ee.security.openConsole');
+      for (let tick = 0; tick < 5; tick++) await act(async () => {});
+      expect(page()).not.toContain('e2ee.console.quick.recovery');
+      await openConsole('recovery');
+      for (let tick = 0; tick < 5; tick++) await act(async () => {});
+      expect(page()).toContain('e2ee.console.recoveryUnavailable');
+      expect(channels.filter((channel) => channel.startsWith('e2ee.recovery'))).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("shows a browser-shaped host's own recovery section for the current account", async () => {
@@ -785,7 +846,7 @@ describe('encrypted workspace settings', () => {
     );
     await openConsole('recovery');
     expect(page()).toContain('host recovery for account');
-    expect(page()).not.toContain('e2ee.console.recoveryElsewhere');
+    expect(page()).not.toContain('e2ee.console.recoveryUnavailable');
   });
 
   it("renders the shared recovery section over a browser-shaped host's port", async () => {
@@ -812,7 +873,7 @@ describe('encrypted workspace settings', () => {
     for (let tick = 0; tick < 5; tick++) await act(async () => {});
     expect(page()).toContain('Host workspace');
     expect(page()).toContain('e2ee.recovery.setupAll');
-    expect(page()).not.toContain('e2ee.console.recoveryElsewhere');
+    expect(page()).not.toContain('e2ee.console.recoveryUnavailable');
   });
 
   const renderSharing = () =>
