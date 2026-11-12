@@ -22,6 +22,10 @@ embedded clients pass them at startup, while local builds do not require them.
 
 ## Local persistence
 
+- `private-credential-file.ts` — publishes complete owner-only credential files
+  on POSIX using an exclusive temporary file and rename. Login and Git broker
+  state share it so replacement also removes permissive legacy file modes.
+
 - `local-workspace-catalog.ts` — cached workspace/identity discovery; mutations
   compose native FileLocks and keep the file write inside its lease. Read-cache
   refresh orchestration remains Promise-based. Existing application entrypoints

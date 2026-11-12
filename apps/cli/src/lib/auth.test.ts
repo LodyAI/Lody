@@ -182,6 +182,80 @@ describe('AuthClient API key login', () => {
   });
 });
 
+describe('credential file security', () => {
+  it.skipIf(process.platform === 'win32')(
+    'creates credentials as 0600 before writing and atomically replaces the old file',
+    async () => {
+      const root = path.join(tempHome as string, 'custom-data');
+      process.env.LODY_DATA_DIR = root;
+      const user = { id: 'user-1', email: 'user@example.com' };
+      const machine = { machineId: 'machine-1', machineName: 'test-machine' };
+      await saveAuthInfo('old-token', user, machine);
+      expect(fs.statSync(root).mode & 0o777).toBe(0o700);
+      // An existing permissive file must be replaced, rather than truncated in place.
+      fs.chmodSync(getConfigPath(), 0o644);
+      const open = fs.openSync;
+      let observedPrivateCreation = false;
+      const creationObserver = vi.spyOn(fs, 'openSync').mockImplementation((file, flags, mode) => {
+        const descriptor = open(file, flags, mode);
+        if (flags === 'wx') {
+          expect(fs.fstatSync(descriptor).mode & 0o777).toBe(0o600);
+          expect(fs.fstatSync(descriptor).size).toBe(0);
+          observedPrivateCreation = true;
+        }
+        return descriptor;
+      });
+      const rename = fs.renameSync;
+      let observedPublication = false;
+      const observer = vi.spyOn(fs, 'renameSync').mockImplementation((source, destination) => {
+        expect(fs.statSync(source).mode & 0o777).toBe(0o600);
+        expect(JSON.parse(fs.readFileSync(source, 'utf8')).token).toBe('new-token');
+        expect(JSON.parse(fs.readFileSync(destination, 'utf8')).token).toBe('old-token');
+        observedPublication = true;
+        rename(source, destination);
+      });
+      try {
+        await saveAuthInfo('new-token', user, machine);
+      } finally {
+        observer.mockRestore();
+        creationObserver.mockRestore();
+      }
+      expect(observedPrivateCreation).toBe(true);
+      expect(observedPublication).toBe(true);
+      expect(fs.statSync(getConfigPath()).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')).token).toBe('new-token');
+      expect(fs.readdirSync(root)).toEqual(['credentials.json']);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'preserves existing custom directory permissions and old credentials on publication failure',
+    async () => {
+      const root = path.join(tempHome as string, 'shared-parent', 'custom-data');
+      fs.mkdirSync(root, { recursive: true, mode: 0o755 });
+      fs.chmodSync(root, 0o755);
+      process.env.LODY_DATA_DIR = root;
+      const user = { id: 'user-1', email: 'user@example.com' };
+      const machine = { machineId: 'machine-1', machineName: 'test-machine' };
+      await saveAuthInfo('old-token', user, machine);
+      const observer = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+        throw new Error('publication failed');
+      });
+      try {
+        await expect(saveAuthInfo('new-token', user, machine)).rejects.toThrow(
+          'publication failed'
+        );
+      } finally {
+        observer.mockRestore();
+      }
+      expect(fs.statSync(root).mode & 0o777).toBe(0o755);
+      expect(fs.statSync(path.dirname(root)).mode & 0o777).toBe(0o755);
+      expect(JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')).token).toBe('old-token');
+      expect(fs.readdirSync(root)).toEqual(['credentials.json']);
+    }
+  );
+});
+
 describe('AuthClient rejected credential cleanup', () => {
   it('does not delete credentials that were rotated after this process started', async () => {
     const authClient = new AuthClient(createTestLogger());
