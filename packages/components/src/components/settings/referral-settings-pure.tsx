@@ -228,7 +228,7 @@ export function ReferralSettingsView({
   }
   const hasActivity =
     overview.code !== null || overview.issued > 0 || overview.spent > 0 || overview.adjustment > 0;
-  // Plans that cannot refer (Enterprise, Founder, gifts) and never have show nothing.
+  // Plans that cannot refer (Enterprise, Founder) and never have show nothing.
   if (!overview.eligible && !hasActivity) return null;
 
   const url = overview.url;
