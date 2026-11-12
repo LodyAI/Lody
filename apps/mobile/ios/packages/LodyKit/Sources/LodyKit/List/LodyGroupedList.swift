@@ -28,6 +28,13 @@ private final class RowSwitch: UISwitch {
 
 private final class SettingsListCell: UICollectionViewListCell {
   let optionButton = UIButton(type: .system)
+  /// Reused across reconfigures: a fresh accessory view would animate in from the
+  /// trailing edge every time a choice re-renders the list.
+  let optionIndicator: UIImageView = {
+    let view = UIImageView(image: UIImage(systemName: "chevron.up.chevron.down"))
+    view.preferredSymbolConfiguration = .init(pointSize: 11, weight: .semibold)
+    return view
+  }()
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -179,9 +186,8 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     cell.accessibilityElements = row.options.isEmpty ? nil : [button]
     if !row.options.isEmpty {
       cell.accessibilityIdentifier = nil
-      let indicator = UIImageView(image: UIImage(systemName: "chevron.up.chevron.down"))
+      let indicator = cell.optionIndicator
       indicator.tintColor = flatSystem ? .lodyTertiary : .tertiaryLabel
-      indicator.preferredSymbolConfiguration = .init(pointSize: 11, weight: .semibold)
       cell.accessories.append(.customView(configuration: .init(customView: indicator, placement: .trailing(at: { $0.count }))))
       cell.bringSubviewToFront(button)
     }

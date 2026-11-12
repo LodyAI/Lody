@@ -21,8 +21,9 @@ additional sections; unfinished detail pages remain explicitly unavailable.
 Neither native client exposes a standalone Machines entry, MCP server management,
 Memory, or a separate Appearance page in settings. Agents keeps machine selection
 inside its own page, above the selected machine's provider list.
-Both clients can opt into Roost for new conversations through Developer Mode in
-Preferences when the selected machine supports it. Existing conversations retain
+Developer Mode is the last switch on the Settings home. With it on, a Roost
+switch appears directly below it; both clients then use Roost for new
+conversations when the selected machine supports it. Existing conversations retain
 their history backend.
 
 Workspace lists retain encrypted workspaces with a lock. Native clients currently
