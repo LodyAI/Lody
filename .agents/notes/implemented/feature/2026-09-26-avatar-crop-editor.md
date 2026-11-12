@@ -48,3 +48,11 @@ the ACP extension submodule directories have no package manifests; the isolated
 install also had to use the available package metadata to inspect the new
 dependency. Browser-level pointer behavior and native image decoder differences
 remain outside this validation.
+
+## Update: selection box replaces drag-and-zoom
+
+Users found a zoom slider over a moving image unintuitive; a fixed image with a
+square selection moved and resized by its corners (the GitHub-style pattern) is
+clearer. `react-easy-crop` was removed and `avatar-square-cropper.tsx` implements
+the box directly, because `react-image-crop` is not needed for a single square
+selection. Selection state is kept in source-image pixels.
