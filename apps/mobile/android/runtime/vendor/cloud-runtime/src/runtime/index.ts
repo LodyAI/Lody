@@ -14,6 +14,7 @@ import {
   refreshSessionUsage,
 } from './session';
 import { machineRpc } from './machine-rpc';
+import { retrySessionRead } from './session-read';
 import { providerRows } from './provider-settings';
 import { decodeFrames, encodeFrame } from '../frames';
 import { watchMachinePresence } from './machine-presence';
@@ -384,12 +385,51 @@ function watch(mode: string) {
             failures = 0;
             pages = 0;
           }
-          const response = await client.readOnce({
-            offset,
-            cursor,
+          // A failed read has not imported bytes or advanced the cursor. Keep
+          // that verified replica through transport loss and host suspension.
+          // Protocol/cursor failures still leave this loop for a fresh bootstrap.
+          const response = await retrySessionRead(
             signal,
-            ...(upToDate ? { live: 'long-poll' as const } : {}),
-          });
+            async () => {
+              const result = await client.readOnce({
+                offset,
+                cursor,
+                signal,
+                ...(upToDate ? { live: 'long-poll' as const } : {}),
+              });
+              if (!result.ok) {
+                const error = result.result;
+                const aborted =
+                  error.code === 'unknown' &&
+                  (error.cause instanceof Error || error.cause instanceof DOMException) &&
+                  error.cause.name === 'AbortError';
+                const suspended = aborted && error.cause.message === 'runtime_suspended';
+                if (
+                  [
+                    'network_error',
+                    'timeout',
+                    'unauthorized',
+                    'forbidden',
+                    'rate_limited',
+                  ].includes(error.code) ||
+                  aborted ||
+                  (error.code === 'unknown' && (error.status ?? 0) >= 500)
+                )
+                  throw new Error(suspended ? 'runtime_suspended' : error.code);
+              }
+              return result;
+            },
+            (error) => {
+              unhealthy.add(mode);
+              channel.emit('creationOptionsChanged', {});
+              channel.emit('syncError', {
+                reason: 'network_or_auth',
+                stream: mode,
+              });
+              if (!(error instanceof Error && error.message === 'runtime_suspended'))
+                grant = undefined;
+            }
+          );
           if (!response.ok) throw new Error(response.result.code);
           const next = response.result;
           if (signal.aborted) return;

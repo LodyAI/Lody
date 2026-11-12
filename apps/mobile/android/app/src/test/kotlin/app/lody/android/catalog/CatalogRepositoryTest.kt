@@ -84,8 +84,68 @@ class CatalogRepositoryTest {
   repo.networkAvailable();runCurrent();assertEquals(1,runtimes.size)
   old.source.emit(RuntimeEvent.SyncFailed("network_unavailable"));runCurrent()
   repo.networkAvailable();runCurrent()
+  assertEquals(1,runtimes.size);assertEquals("network_unavailable",repo.state.value.failure)
+  old.status.value=RuntimeStatus(RuntimePhase.FAILED,1);runCurrent()
+  repo.networkAvailable();runCurrent()
   assertEquals(2,runtimes.size);assertEquals(RuntimePhase.STOPPED,old.state.value.phase)
   assertEquals(1,repo.state.value.projects);assertTrue(repo.state.value.cached)
+  repo.disconnect()
+ }
+
+ @Test fun networkHintsPreserveRecoveringLeaseAndReplaceUnavailableLeaseWithoutOwner()=runTest {
+  val store=Store(AccountContext(user));val account=account(backgroundScope,store){ShortLivedGrant("short","https://streams.example.org",60)}
+  account.restore().join()
+  val runtimes=mutableListOf<Runtime>();val owner=RuntimeOwner({Runtime(it).also(runtimes::add)},StandardTestDispatcher(testScheduler))
+  val repo=CatalogRepository(account,owner,backgroundScope,store){_,_->};runCurrent()
+  repo.select(user.workspaces[0]).join();runCurrent();val runtime=runtimes.last()
+  for (phase in listOf(RuntimePhase.STARTING,RuntimePhase.SUSPENDED,RuntimePhase.READY)) {
+   runtime.status.value=RuntimeStatus(phase,1);runCurrent()
+   runtime.source.emit(RuntimeEvent.SyncFailed("grant_unavailable"));runCurrent()
+   repo.networkAvailable();runCurrent()
+   assertEquals(1,runtimes.size);assertEquals(key,owner.state.value.scope)
+   assertEquals(phase,owner.state.value.status.phase)
+  }
+  owner.clear();runCurrent()
+  assertEquals(ConnectionPhase.UNAVAILABLE,repo.state.value.phase)
+  repo.networkAvailable();runCurrent()
+  assertEquals(2,runtimes.size);assertEquals(key,owner.state.value.scope)
+  repo.disconnect()
+ }
+
+ @Test fun networkHintRestartsTerminalCatalogWatcherAndRequiresNewLeaseSyncPair()=runTest {
+  val store=Store(AccountContext(user));val account=account(backgroundScope,store){ShortLivedGrant("short","https://streams.example.org",60)}
+  account.restore().join()
+  val runtimes=mutableListOf<Runtime>();val owner=RuntimeOwner({Runtime(it).also(runtimes::add)},StandardTestDispatcher(testScheduler))
+  val repo=CatalogRepository(account,owner,backgroundScope,store){_,_->};runCurrent()
+  repo.select(user.workspaces[0]).join();runCurrent();val old=runtimes.last()
+  old.source.emit(RuntimeEvent.CatalogUpdated(snapshot));old.source.emit(RuntimeEvent.Synced(50,1));runCurrent()
+  val saved=store.values[key]
+  old.source.emit(RuntimeEvent.SyncFailed("catalog_limit"));runCurrent()
+  old.status.value=RuntimeStatus(RuntimePhase.SUSPENDED,1);runCurrent()
+  old.source.emit(RuntimeEvent.SyncFailed("network_or_auth"));runCurrent()
+  assertEquals(ConnectionPhase.PAUSED,repo.state.value.phase)
+  assertEquals("catalog_limit",repo.state.value.failure)
+  old.status.value=RuntimeStatus(RuntimePhase.READY,1);runCurrent()
+  assertEquals("catalog_limit",repo.state.value.failure)
+  assertEquals(RuntimePhase.READY,owner.state.value.status.phase)
+  assertEquals(ConnectionPhase.UNAVAILABLE,repo.state.value.phase)
+  repo.networkAvailable();runCurrent()
+  assertEquals(2,runtimes.size);assertEquals(RuntimePhase.STOPPED,old.state.value.phase)
+  val replacement=runtimes.last()
+  assertEquals(ConnectionPhase.SYNCING,repo.state.value.phase)
+  assertEquals(snapshot,repo.state.value.snapshot);assertTrue(repo.state.value.cached)
+  // Both runtime instances use generation 1; only the replacement's own pair counts.
+  old.source.emit(RuntimeEvent.CatalogUpdated(snapshot.copy(projects=emptyList())))
+  old.source.emit(RuntimeEvent.Synced(50,1))
+  replacement.source.emit(RuntimeEvent.Synced(50,1));runCurrent()
+  assertEquals(ConnectionPhase.SYNCING,repo.state.value.phase)
+  assertTrue(repo.state.value.cached);assertSame(saved,store.values[key])
+  val fresh=snapshot.copy(projects=emptyList())
+  replacement.source.emit(RuntimeEvent.CatalogUpdated(fresh));runCurrent()
+  assertEquals(snapshot,repo.state.value.snapshot)
+  replacement.source.emit(RuntimeEvent.Synced(50,1));runCurrent()
+  assertEquals(ConnectionPhase.LIVE,repo.state.value.phase);assertFalse(repo.state.value.cached)
+  assertEquals(fresh,repo.state.value.snapshot);assertEquals(fresh,store.values[key]!!.snapshot)
   repo.disconnect()
  }
 
@@ -181,6 +241,76 @@ class CatalogRepositoryTest {
   assertEquals("target",repo.state.value.workspace?.id)
   assertEquals(RuntimeScope("u","target"),owner.state.value.scope)
   assertEquals("target",store.context?.workspaceId)
+  repo.disconnect()
+ }
+
+ @Test fun confirmedCatalogSurvivesResumeAndHeartbeatWithoutRewritingCache()=runTest {
+  val store=Store(AccountContext(user));val account=account(backgroundScope,store){ShortLivedGrant("short","https://streams.example.org",60)}
+  account.restore().join()
+  val runtimes=mutableListOf<Runtime>();val owner=RuntimeOwner({Runtime(it).also(runtimes::add)},StandardTestDispatcher(testScheduler))
+  val repo=CatalogRepository(account,owner,backgroundScope,store){_,_->};runCurrent()
+  repo.select(user.workspaces[0]).join();runCurrent();val runtime=runtimes.last()
+  runtime.source.emit(RuntimeEvent.CatalogUpdated(snapshot));runtime.source.emit(RuntimeEvent.Synced(50,1));runCurrent()
+  val saved=store.values[key]
+  runtime.status.value=RuntimeStatus(RuntimePhase.SUSPENDED,1);runCurrent()
+  assertEquals(ConnectionPhase.PAUSED,repo.state.value.phase)
+  runtime.source.emit(RuntimeEvent.Synced(50,2));runCurrent()
+  assertEquals(ConnectionPhase.PAUSED,repo.state.value.phase)
+  assertEquals(2,repo.state.value.streams)
+  // A redundant heartbeat must not turn an already saved catalog into a disk failure.
+  store.failWrite=true
+  runtime.status.value=RuntimeStatus(RuntimePhase.READY,1);runCurrent()
+  runtime.source.emit(RuntimeEvent.Synced(50,2));runCurrent()
+  assertEquals(ConnectionPhase.LIVE,repo.state.value.phase)
+  assertNull(repo.state.value.failure);assertFalse(repo.state.value.cacheFailure)
+  assertEquals(saved,store.values[key]);assertEquals(saved?.syncedAt,repo.state.value.syncedAt)
+  repo.disconnect()
+ }
+
+ @Test fun syncFailureSurvivesSameGenerationResumeUntilMatchingSyncRecoversIt()=runTest {
+  val store=Store(AccountContext(user));val account=account(backgroundScope,store){ShortLivedGrant("short","https://streams.example.org",60)}
+  account.restore().join()
+  val runtimes=mutableListOf<Runtime>();val owner=RuntimeOwner({Runtime(it).also(runtimes::add)},StandardTestDispatcher(testScheduler))
+  val repo=CatalogRepository(account,owner,backgroundScope,store){_,_->};runCurrent()
+  repo.select(user.workspaces[0]).join();runCurrent();val runtime=runtimes.last()
+  runtime.source.emit(RuntimeEvent.CatalogUpdated(snapshot));runtime.source.emit(RuntimeEvent.Synced(50,1));runCurrent()
+  runtime.source.emit(RuntimeEvent.SyncFailed("network_unavailable"));runCurrent()
+  runtime.status.value=RuntimeStatus(RuntimePhase.SUSPENDED,1);runCurrent()
+  runtime.source.emit(RuntimeEvent.SyncFailed("network_unavailable"));runCurrent()
+  assertEquals(ConnectionPhase.PAUSED,repo.state.value.phase)
+  runtime.status.value=RuntimeStatus(RuntimePhase.READY,1);runCurrent()
+  assertEquals(ConnectionPhase.UNAVAILABLE,repo.state.value.phase)
+  assertEquals("network_unavailable",repo.state.value.failure)
+  runtime.source.emit(RuntimeEvent.Synced(51,1));runCurrent()
+  assertEquals(ConnectionPhase.UNAVAILABLE,repo.state.value.phase)
+  runtime.source.emit(RuntimeEvent.Synced(50,1));runCurrent()
+  assertEquals(ConnectionPhase.LIVE,repo.state.value.phase);assertNull(repo.state.value.failure)
+  repo.disconnect()
+ }
+
+ @Test fun replacementGenerationRequiresItsOwnMatchingCatalogEvenWithRepeatedRevision()=runTest {
+  val store=Store(AccountContext(user));val account=account(backgroundScope,store){ShortLivedGrant("short","https://streams.example.org",60)}
+  account.restore().join()
+  val runtimes=mutableListOf<Runtime>();val owner=RuntimeOwner({Runtime(it).also(runtimes::add)},StandardTestDispatcher(testScheduler))
+  val repo=CatalogRepository(account,owner,backgroundScope,store){_,_->};runCurrent()
+  repo.select(user.workspaces[0]).join();runCurrent();val runtime=runtimes.last()
+  runtime.source.emit(RuntimeEvent.CatalogUpdated(snapshot));runtime.source.emit(RuntimeEvent.Synced(50,1));runCurrent()
+  val saved=store.values[key]
+  runtime.status.value=RuntimeStatus(RuntimePhase.READY,2);runCurrent()
+  assertEquals(ConnectionPhase.SYNCING,repo.state.value.phase)
+  runtime.source.emit(RuntimeEmission(2,RuntimeEvent.Synced(50,1)));runCurrent()
+  runtime.source.emit(RuntimeEmission(1,RuntimeEvent.CatalogUpdated(snapshot)));runCurrent()
+  runtime.source.emit(RuntimeEmission(2,RuntimeEvent.Synced(50,1)));runCurrent()
+  assertEquals(ConnectionPhase.SYNCING,repo.state.value.phase);assertSame(saved,store.values[key])
+  runtime.source.emit(RuntimeEmission(2,RuntimeEvent.CatalogUpdated(snapshot.copy(projects=emptyList()))));runCurrent()
+  runtime.source.emit(RuntimeEmission(2,RuntimeEvent.Synced(51,1)));runCurrent()
+  assertEquals(ConnectionPhase.SYNCING,repo.state.value.phase)
+  runtime.status.value=RuntimeStatus(RuntimePhase.SUSPENDED,2);runCurrent()
+  runtime.source.emit(RuntimeEmission(2,RuntimeEvent.Synced(50,1)));runCurrent()
+  assertEquals(ConnectionPhase.PAUSED,repo.state.value.phase);assertEquals(0,repo.state.value.projects)
+  assertEquals(0,store.values[key]!!.snapshot.projects.size)
+  runtime.status.value=RuntimeStatus(RuntimePhase.READY,2);runCurrent()
+  assertEquals(ConnectionPhase.LIVE,repo.state.value.phase)
   repo.disconnect()
  }
 
