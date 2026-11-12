@@ -10,7 +10,7 @@ function DesktopGithubInstallCallback() {
   const [deepLink, setDeepLink] = useState<string | null>(null);
 
   useEffect(() => {
-    const url = `lody://github-install${window.location.search}`;
+    const url = `lody://github-install${window.location.search}${window.location.hash}`;
     setDeepLink(url);
     window.location.href = url;
   }, []);

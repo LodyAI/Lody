@@ -1,5 +1,5 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowUpRight, Lock, Search } from 'lucide-react';
@@ -66,6 +66,7 @@ export interface GitHubSettingsViewProps {
   /** The workspace session is ready for authenticated writes. */
   workspaceReady: boolean;
   connecting: boolean;
+  installationNotice?: ReactNode;
   onConnect: () => void;
   identity: GitHubPersonalIdentitySettingsCardProps;
   repos: SettingsWorkspaceRepoWithStatus[];
@@ -83,6 +84,7 @@ export function GitHubSettingsView({
   canManage,
   workspaceReady,
   connecting,
+  installationNotice,
   onConnect,
   identity,
   repos,
@@ -111,6 +113,7 @@ export function GitHubSettingsView({
 
   return (
     <div {...stylex.props(surface.container)}>
+      {installationNotice}
       <CompactSection>
         <CompactRow
           label="GitHub App"
@@ -301,7 +304,7 @@ function IdentityRow({
       label={t('settings.integrations.github.personalIdentityRowLabel', 'Act as you')}
       helper={helper}
     >
-      {enabled && !authorized && canAuthorize ? (
+      {!authorized && canAuthorize ? (
         <Button
           variant="secondary"
           size="small"

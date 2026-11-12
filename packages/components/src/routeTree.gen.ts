@@ -23,6 +23,7 @@ import { Route as WorkspaceNameRouteImport } from './routes/$workspaceName';
 import { Route as IndexRouteImport } from './routes/index';
 import { Route as WorkspaceNameIndexRouteImport } from './routes/$workspaceName/index';
 import { Route as WorkspaceCreateRouteImport } from './routes/workspace/create';
+import { Route as SettingsGithubRouteImport } from './routes/settings.github';
 import { Route as JoinTokenRouteImport } from './routes/join/$token';
 import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitationId';
 import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install';
@@ -132,6 +133,11 @@ const WorkspaceNameIndexRoute = WorkspaceNameIndexRouteImport.update({
 const WorkspaceCreateRoute = WorkspaceCreateRouteImport.update({
   id: '/workspace/create',
   path: '/workspace/create',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const SettingsGithubRoute = SettingsGithubRouteImport.update({
+  id: '/settings/github',
+  path: '/settings/github',
   getParentRoute: () => rootRouteImport,
 } as any);
 const JoinTokenRoute = JoinTokenRouteImport.update({
@@ -363,6 +369,7 @@ export interface FileRoutesByFullPath {
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
   '/invite/$invitationId': typeof InviteInvitationIdRoute;
   '/join/$token': typeof JoinTokenRoute;
+  '/settings/github': typeof SettingsGithubRoute;
   '/workspace/create': typeof WorkspaceCreateRoute;
   '/$workspaceName/': typeof WorkspaceNameIndexRoute;
   '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
@@ -418,6 +425,7 @@ export interface FileRoutesByTo {
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
   '/invite/$invitationId': typeof InviteInvitationIdRoute;
   '/join/$token': typeof JoinTokenRoute;
+  '/settings/github': typeof SettingsGithubRoute;
   '/workspace/create': typeof WorkspaceCreateRoute;
   '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
@@ -472,6 +480,7 @@ export interface FileRoutesById {
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
   '/invite/$invitationId': typeof InviteInvitationIdRoute;
   '/join/$token': typeof JoinTokenRoute;
+  '/settings/github': typeof SettingsGithubRoute;
   '/workspace/create': typeof WorkspaceCreateRoute;
   '/$workspaceName/': typeof WorkspaceNameIndexRoute;
   '/$workspaceName/_auth/archive': typeof WorkspaceNameAuthArchiveRoute;
@@ -529,6 +538,7 @@ export interface FileRouteTypes {
     | '/desktop/github-install'
     | '/invite/$invitationId'
     | '/join/$token'
+    | '/settings/github'
     | '/workspace/create'
     | '/$workspaceName/'
     | '/$workspaceName/archive'
@@ -584,6 +594,7 @@ export interface FileRouteTypes {
     | '/desktop/github-install'
     | '/invite/$invitationId'
     | '/join/$token'
+    | '/settings/github'
     | '/workspace/create'
     | '/$workspaceName/archive'
     | '/$workspaceName/chat'
@@ -637,6 +648,7 @@ export interface FileRouteTypes {
     | '/desktop/github-install'
     | '/invite/$invitationId'
     | '/join/$token'
+    | '/settings/github'
     | '/workspace/create'
     | '/$workspaceName/'
     | '/$workspaceName/_auth/archive'
@@ -693,6 +705,7 @@ export interface RootRouteChildren {
   DesktopGithubInstallRoute: typeof DesktopGithubInstallRoute;
   InviteInvitationIdRoute: typeof InviteInvitationIdRoute;
   JoinTokenRoute: typeof JoinTokenRoute;
+  SettingsGithubRoute: typeof SettingsGithubRoute;
   WorkspaceCreateRoute: typeof WorkspaceCreateRoute;
   WorkspaceE2eeWorkspaceIdRoute: typeof WorkspaceE2eeWorkspaceIdRoute;
 }
@@ -795,6 +808,13 @@ declare module '@tanstack/react-router' {
       path: '/workspace/create';
       fullPath: '/workspace/create';
       preLoaderRoute: typeof WorkspaceCreateRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/settings/github': {
+      id: '/settings/github';
+      path: '/settings/github';
+      fullPath: '/settings/github';
+      preLoaderRoute: typeof SettingsGithubRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/join/$token': {
@@ -1219,6 +1239,7 @@ const rootRouteChildren: RootRouteChildren = {
   DesktopGithubInstallRoute: DesktopGithubInstallRoute,
   InviteInvitationIdRoute: InviteInvitationIdRoute,
   JoinTokenRoute: JoinTokenRoute,
+  SettingsGithubRoute: SettingsGithubRoute,
   WorkspaceCreateRoute: WorkspaceCreateRoute,
   WorkspaceE2eeWorkspaceIdRoute: WorkspaceE2eeWorkspaceIdRoute,
 };
