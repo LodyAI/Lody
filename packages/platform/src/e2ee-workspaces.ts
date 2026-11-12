@@ -4,6 +4,7 @@ import type {
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest,
   E2eePersonalPairingOffer,
+  E2eeDeviceProfileUpdate,
   E2eeWorkspaceMemberProfilesRequest,
   E2eeWorkspaceMemberProfiles,
   WorkspaceAdmissionDescriptor,
@@ -71,6 +72,9 @@ export interface PlatformE2eeWorkspaces {
   readonly memberProfiles?: (
     input: E2eeWorkspaceMemberProfilesRequest
   ) => Promise<E2eeWorkspaceMemberProfiles>;
+  /** Best-effort display update for an admitted device owned by the live account.
+   * Does not grant access. The caller never submits another device's local metadata. */
+  readonly reportDeviceProfile?: (input: E2eeDeviceProfileUpdate) => Promise<null>;
   /** Absent when this platform has no installed, persistent key-custody adapter.
    * A failed/unknown creation preserves its original local intent for reconciliation.
    */
@@ -139,6 +143,8 @@ export interface E2eeManagementState {
   readonly devices: readonly {
     key: string;
     kind: 'personal' | 'machine' | 'recovery';
+    /** Account display lookup key derived from this device's verified ledger member. */
+    cryptoUserId?: string;
     machineId: string | null;
     self: boolean;
     mayRevoke: boolean;

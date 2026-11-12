@@ -1,6 +1,8 @@
+import type { E2eeWorkspaceMemberProfiles } from '@lody/cloud-api';
 import type { E2eeManagementState } from '@lody/platform';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { Collapsible } from '@lody/ui/collapsible';
 import { Button } from '@lody/ui/button';
 import { Alert } from '@lody/ui/alert';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -32,6 +34,7 @@ const styles = stylex.create({
     gap: space[3],
     paddingBlock: space[2],
   },
+  detail: { display: 'block', overflowWrap: 'anywhere' },
   key: {
     color: colors.secondaryLabel,
     fontFamily: 'monospace',
@@ -251,6 +254,7 @@ export function E2eeSecurityPanel({
  * key update a revoke leaves behind. Native facts only; main rechecks each action. */
 export function E2eeDevicesPanel({
   state,
+  directory,
   busy,
   error: actionError,
   onUpdate,
@@ -258,6 +262,7 @@ export function E2eeDevicesPanel({
   onRetry,
 }: PanelState & {
   onUpdate: () => void;
+  directory?: E2eeWorkspaceMemberProfiles;
   onRevoke: (key: string, confirmation?: { confirmedRecoveryOnly: true }) => void;
   onRetry: () => void;
 }) {
@@ -275,34 +280,90 @@ export function E2eeDevicesPanel({
       )}
       {state && state.devices.length > 0 && (
         <CompactSection title={t('e2ee.security.devices')} boxed>
-          {state.devices.map((device) => (
-            <CompactRow
-              key={device.key}
-              label={device.machineId ?? t(`e2ee.values.${device.kind}`)}
-              helper={
-                <span {...stylex.props(styles.key)}>
-                  {device.key.slice(0, 12)}
-                  {device.self ? ` · ${t('e2ee.security.thisDevice')}` : ''}
-                </span>
-              }
-            >
-              {device.mayRevoke && (
-                <Button
-                  data-testid="e2ee-device-revoke"
-                  data-device-key={device.key}
-                  variant="secondary"
-                  disabled={updating}
-                  onClick={() =>
-                    device.requiresRecoveryConfirmation
-                      ? setConfirmKey(device.key)
-                      : onRevoke(device.key)
-                  }
-                >
-                  {t('e2ee.security.revoke')}
-                </Button>
-              )}
-            </CompactRow>
-          ))}
+          {state.devices.map((device) => {
+            const profile = directory?.devices?.find(
+              (entry) => entry.signingPublicKey === device.key
+            )?.profile;
+            const owner = directory?.profiles
+              .find((entry) => entry.cryptoUserId === device.cryptoUserId)
+              ?.name?.trim();
+            const hardwareCode =
+              profile?.client === 'mobile' && profile.model?.match(/^(iPhone|iPad)\d+,\d+$/);
+            const model = hardwareCode
+              ? `${hardwareCode[1]} · ${t('e2ee.deviceIdentity.modelUnknown')}`
+              : profile?.model?.trim();
+            const name =
+              profile?.name?.trim() ||
+              model ||
+              t(`e2ee.deviceIdentity.${profile?.client ?? device.kind}`);
+            const title = [owner || t('e2ee.deviceIdentity.ownerUnknown'), name].join(' · ');
+            const info = profile
+              ? [
+                  t(`e2ee.deviceIdentity.${profile.client}`),
+                  [profile.os, profile.osVersion].filter(Boolean).join(' '),
+                  profile.appVersion ? `Lody ${profile.appVersion}` : '',
+                  !profile.osVersion ? t('e2ee.deviceIdentity.osVersionUnavailable') : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              : t('e2ee.deviceIdentity.detailsUnavailable');
+            return (
+              <CompactRow
+                key={device.key}
+                helperBlock
+                label={title}
+                helper={
+                  <>
+                    <span {...stylex.props(styles.detail)}>{info}</span>
+                    {device.self && (
+                      <span {...stylex.props(styles.detail)}>{t('e2ee.security.thisDevice')}</span>
+                    )}
+                    <Collapsible.Root>
+                      <Collapsible.Trigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            data-testid="e2ee-device-details"
+                            data-device-key={device.key}
+                          />
+                        }
+                      >
+                        {t('e2ee.deviceIdentity.identifier')} · {device.key.slice(0, 12)}
+                      </Collapsible.Trigger>
+                      <Collapsible.Panel>
+                        {hardwareCode && (
+                          <span {...stylex.props(styles.detail, styles.key)}>{profile?.model}</span>
+                        )}
+                        <span {...stylex.props(styles.detail, styles.key)}>{device.key}</span>
+                        {device.machineId && (
+                          <span {...stylex.props(styles.detail, styles.key)}>
+                            {device.machineId}
+                          </span>
+                        )}
+                      </Collapsible.Panel>
+                    </Collapsible.Root>
+                  </>
+                }
+              >
+                {device.mayRevoke && (
+                  <Button
+                    data-testid="e2ee-device-revoke"
+                    data-device-key={device.key}
+                    variant="secondary"
+                    disabled={updating}
+                    onClick={() =>
+                      device.requiresRecoveryConfirmation
+                        ? setConfirmKey(device.key)
+                        : onRevoke(device.key)
+                    }
+                  >
+                    {t('e2ee.security.revoke')}
+                  </Button>
+                )}
+              </CompactRow>
+            );
+          })}
         </CompactSection>
       )}
       <Dialog.Root

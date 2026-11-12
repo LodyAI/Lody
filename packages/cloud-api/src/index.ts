@@ -58,6 +58,8 @@ import type {
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryRequest,
   E2eeWorkspaceHistoryPage,
+  E2eeDeviceProfile,
+  E2eeDeviceProfileUpdate,
   E2eeWorkspaceMemberProfilesRequest,
   E2eeWorkspaceMemberProfiles,
 } from './e2ee-workspaces';
@@ -68,6 +70,8 @@ export type {
   E2eeWorkspaceCreateResult,
   E2eeLedgerCheckpoint,
   E2eeWorkspaceLedgerHead,
+  E2eeDeviceProfile,
+  E2eeDeviceProfileUpdate,
   E2eeWorkspaceMemberProfilesRequest,
   E2eeWorkspaceMemberProfiles,
   E2eeWorkspaceHistoryRequest,
@@ -540,6 +544,11 @@ export type CloudApi = {
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
+    reportDeviceProfile: Mutation<
+      | E2eeDeviceProfileUpdate
+      | { workspaceId: string; credential: string; cliToken?: string; profile: E2eeDeviceProfile },
+      null
+    >;
     memberProfiles: Query<E2eeWorkspaceMemberProfilesRequest, E2eeWorkspaceMemberProfiles>;
     history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
   };

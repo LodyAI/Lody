@@ -101,3 +101,98 @@ export const LastPersonalDevice: Story = {
     },
   },
 };
+
+/** Synthetic display data, wired to the production Devices panel. */
+export const ReadableDeviceIdentities: Story = {
+  render: () => (
+    <E2eeDevicesPanel
+      state={{
+        epoch: 3,
+        mayRotate: true,
+        rotationRequired: false,
+        updatePending: false,
+        devices: [
+          {
+            key: 'a1'.repeat(32),
+            cryptoUserId: 'alice',
+            kind: 'personal',
+            machineId: null,
+            self: true,
+            mayRevoke: true,
+          },
+          {
+            key: 'b2'.repeat(32),
+            cryptoUserId: 'alice',
+            kind: 'personal',
+            machineId: null,
+            self: false,
+            mayRevoke: true,
+          },
+          {
+            key: 'c3'.repeat(32),
+            cryptoUserId: 'bob',
+            kind: 'machine',
+            machineId: 'a504d5a8-2fcc-44a3-b1a3-0b9705831dae',
+            self: false,
+            mayRevoke: true,
+          },
+          {
+            key: 'd4'.repeat(32),
+            cryptoUserId: 'bob',
+            kind: 'personal',
+            machineId: null,
+            self: false,
+            mayRevoke: true,
+          },
+          { key: 'e5'.repeat(32), kind: 'personal', machineId: null, self: false, mayRevoke: true },
+        ],
+      }}
+      directory={{
+        workspaceId: 'synthetic',
+        profiles: [
+          { cryptoUserId: 'alice', name: 'Alice Chen', image: null },
+          { cryptoUserId: 'bob', name: 'Bob Wang', image: null },
+        ],
+        devices: [
+          {
+            signingPublicKey: 'a1'.repeat(32),
+            profile: {
+              client: 'mobile',
+              model: 'iPhone 17 Pro',
+              os: 'iOS',
+              osVersion: '26.0',
+              appVersion: '1.2.3',
+            },
+          },
+          {
+            signingPublicKey: 'b2'.repeat(32),
+            profile: {
+              client: 'desktop',
+              name: 'Alice’s MacBook Pro',
+              os: 'macOS',
+              osVersion: '26.1',
+              appVersion: '1.2.3',
+            },
+          },
+          {
+            signingPublicKey: 'c3'.repeat(32),
+            profile: {
+              client: 'daemon',
+              name: 'Build server',
+              os: 'Linux',
+              osVersion: '6.8.0',
+              appVersion: '1.2.3',
+            },
+          },
+          {
+            signingPublicKey: 'd4'.repeat(32),
+            profile: { client: 'web', os: 'Windows', appVersion: '1.2.3' },
+          },
+        ],
+      }}
+      onRetry={() => {}}
+      onUpdate={() => {}}
+      onRevoke={() => {}}
+    />
+  ),
+};

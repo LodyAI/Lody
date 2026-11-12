@@ -15,6 +15,8 @@ import { E2eeRecoveryHostContext } from '../src/components/settings/e2ee/recover
 import type { RecoveryPlan, RecoveryPort } from '../src/components/settings/e2ee/recovery-port';
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '../src/atoms/settings';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
+import { collectE2eeDeviceProfile } from '../src/lib/e2ee-device-profile';
+import { useDeviceDirectory } from '../src/components/settings/e2ee/security-state';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
 import {
   E2eeSecurityPanel,
@@ -990,6 +992,9 @@ describe('encrypted workspace settings', () => {
     await click('e2ee.security.complete');
     expect(container.textContent).toContain('e2ee.security.error.retry.title');
     await openConsole('devices');
+    await act(async () =>
+      (document.querySelector('[data-testid="e2ee-device-details"]') as HTMLButtonElement).click()
+    );
     expect(page()).toContain('synthetic-machine');
     expect(signed).toBe(false);
     fail = false;
@@ -1220,3 +1225,228 @@ it.each([true, false])(
     }
   }
 );
+
+describe('authorized device identities', () => {
+  it('binds owner and model to their verified device and still revokes the original key', async () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const revoked: string[] = [];
+    const device = {
+      key: 'aa'.repeat(32),
+      cryptoUserId: 'owner-a',
+      kind: 'personal' as const,
+      machineId: null,
+      self: true,
+      mayRevoke: true,
+    };
+    const state = {
+      epoch: 1,
+      rotationRequired: false,
+      updatePending: false,
+      mayRotate: true,
+      devices: [device, { ...device, key: 'bb'.repeat(32), self: false, cryptoUserId: 'owner-b' }],
+    };
+    try {
+      await act(async () =>
+        root.render(
+          <E2eeDevicesPanel
+            state={state}
+            directory={{
+              workspaceId: 'w',
+              profiles: [{ cryptoUserId: 'owner-a', name: 'Alice', image: null }],
+              devices: [
+                {
+                  signingPublicKey: device.key,
+                  profile: {
+                    client: 'mobile',
+                    model: 'Synthetic phone',
+                    os: 'iOS',
+                    osVersion: '26.0',
+                    appVersion: '1.2.3',
+                  },
+                },
+                { signingPublicKey: 'unadmitted', profile: { client: 'desktop', name: 'Spoof' } },
+              ],
+            }}
+            onRevoke={(key) => revoked.push(key)}
+            onRetry={() => {}}
+            onUpdate={() => {}}
+          />
+        )
+      );
+      expect(container.textContent).toContain('Alice · Synthetic phone');
+      expect(container.textContent).toContain('iOS 26.0 · Lody 1.2.3');
+      expect(container.textContent).toContain('e2ee.security.thisDevice');
+      expect(container.textContent).toContain(
+        'e2ee.deviceIdentity.ownerUnknown · e2ee.deviceIdentity.personal'
+      );
+      expect(container.textContent).toContain('e2ee.deviceIdentity.detailsUnavailable');
+      expect(container.textContent).not.toContain('Spoof');
+      await act(async () =>
+        (container.querySelector('[data-testid="e2ee-device-revoke"]') as HTMLButtonElement).click()
+      );
+      expect(revoked).toEqual([device.key]);
+      const detail = container.querySelector(
+        '[data-testid="e2ee-device-details"]'
+      ) as HTMLButtonElement;
+      await act(async () => detail.click());
+      expect(container.textContent).toContain(device.key);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it('reports only this device, refreshes legacy metadata and discards another account’s late directory', async () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const reports: unknown[] = [];
+    let resolveOld!: (value: any) => void;
+    let old = true;
+    const port = {
+      ...TEST_CLOUD_PLATFORM.e2eeWorkspaces!,
+      reportDeviceProfile: async (input: unknown) => {
+        reports.push(input);
+        return null;
+      },
+      memberProfiles: async () =>
+        old
+          ? new Promise<any>((resolve) => {
+              resolveOld = resolve;
+            })
+          : { workspaceId: 'workspace', profiles: [], devices: [] },
+    };
+    const state = {
+      epoch: 1,
+      rotationRequired: false,
+      updatePending: false,
+      mayRotate: true,
+      devices: [
+        {
+          key: 'aa'.repeat(32),
+          kind: 'personal' as const,
+          machineId: null,
+          self: true,
+          mayRevoke: true,
+        },
+        {
+          key: 'bb'.repeat(32),
+          kind: 'personal' as const,
+          machineId: null,
+          self: false,
+          mayRevoke: true,
+        },
+      ],
+    };
+    function Fixture({ account }: { account: string }) {
+      const directory = useDeviceDirectory(
+        port,
+        { status: 'authenticated', user: { id: account, name: account, email: '' } },
+        'workspace',
+        account,
+        state
+      );
+      return <p>{directory?.profiles.map((p) => p.name).join(',') ?? 'no labels'}</p>;
+    }
+    try {
+      await act(async () => root.render(<Fixture account="a" />));
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toMatchObject({
+        signingPublicKey: state.devices[0]!.key,
+        profile: { client: 'web' },
+      });
+      old = false;
+      await act(async () => root.render(<Fixture account="b" />));
+      await act(async () =>
+        resolveOld({
+          workspaceId: 'workspace',
+          profiles: [{ cryptoUserId: 'x', name: 'Old account', image: null }],
+        })
+      );
+      expect(container.textContent).not.toContain('Old account');
+      // The native shell can finish collecting OS/model information after mount.
+      window.__LODY_APP_INFO__ = { model: 'iPhone18,1', os_name: 'ios', os_version: '26.0' };
+      (window as Window & { __LODY_NATIVE__?: boolean }).__LODY_NATIVE__ = true;
+      await act(async () => window.dispatchEvent(new Event('lody:app-info-updated')));
+      expect(reports.at(-1)).toMatchObject({
+        signingPublicKey: state.devices[0]!.key,
+        profile: { client: 'mobile', model: 'iPhone 17 Pro', osVersion: '26.0' },
+      });
+    } finally {
+      await act(async () => root.unmount());
+      delete window.__LODY_APP_INFO__;
+      delete (window as Window & { __LODY_NATIVE__?: boolean }).__LODY_NATIVE__;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not claim an iPhone model or real OS version from a browser compatibility UA', () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X)',
+    });
+    try {
+      expect(collectE2eeDeviceProfile()).toMatchObject({ client: 'web' });
+      expect(collectE2eeDeviceProfile().model).toBeUndefined();
+      expect(collectE2eeDeviceProfile().osVersion).toBeUndefined();
+    } finally {
+      if (original) Object.defineProperty(navigator, 'userAgent', original);
+      else delete (navigator as unknown as Record<string, unknown>).userAgent;
+    }
+  });
+});
+
+it('keeps the newer device profile when the initial directory read finishes after the post-update read', async () => {
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  type Directory = import('@lody/cloud-api').E2eeWorkspaceMemberProfiles;
+  const replies: ((value: Directory) => void)[] = [];
+  const port = {
+    ...TEST_CLOUD_PLATFORM.e2eeWorkspaces!,
+    reportDeviceProfile: async () => null,
+    memberProfiles: () => new Promise<Directory>((resolve) => replies.push(resolve)),
+  };
+  const state = {
+    epoch: 1,
+    rotationRequired: false,
+    updatePending: false,
+    mayRotate: true,
+    devices: [
+      {
+        key: 'aa'.repeat(32),
+        kind: 'personal' as const,
+        machineId: null,
+        self: true,
+        mayRevoke: true,
+      },
+    ],
+  };
+  function Fixture() {
+    const directory = useDeviceDirectory(
+      port,
+      { status: 'authenticated', user: { id: 'a', name: 'a', email: '' } },
+      'workspace',
+      'a',
+      state
+    );
+    return <p>{directory?.devices?.[0]?.profile.osVersion ?? 'loading'}</p>;
+  }
+  try {
+    await act(async () => root.render(<Fixture />));
+    const value = (version: string): Directory => ({
+      workspaceId: 'workspace',
+      profiles: [],
+      devices: [
+        {
+          signingPublicKey: state.devices[0]!.key,
+          profile: { client: 'mobile', osVersion: version },
+        },
+      ],
+    });
+    await act(async () => replies[1]!(value('26.1')));
+    await act(async () => replies[0]!(value('26.0')));
+    expect(container.textContent).toBe('26.1');
+  } finally {
+    await act(async () => root.unmount());
+  }
+});

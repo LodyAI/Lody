@@ -174,3 +174,23 @@ The native member controls sign ordinary `SetRole` and capability-1 `RemoveMembe
 Native hosts with automatic pairing start a current-workspace request when an unapproved device opens that workspace. An existing same-account personal device asks for the six-digit code shown on the new device and labels the requester's device name as unverified; authorization signs only after a local match, and three wrong entries end the request. Later retains a Device requests count in desktop and mobile chrome and resumes the same request. The dialog initially focuses its container, never the authorization button; another open dialog defers presentation. Manual invitation and recovery remain under help. Approval does not bypass the existing reader, ledger or current-key installation.
 
 The six-digit SAS compares a committed ephemeral channel; it does not carry the old pairing secret. See [the coordinator and limits](../../packages/e2ee-client/README.md#automatic-device-verification). Deploy the private discovery relay before clients and update an approving app too. A running background desktop shows a deduplicated generic OS notification and focuses only after its click. This path adds no APNs/FCM wakeup for suspended mobile apps.
+
+## Authorized device labels
+
+The [member display directory decision](../notes/implemented/feature/2026-10-26-e2ee-member-profile-directory.md) keeps account/device labels separate from verified ledger authority.
+
+The Devices tab joins each host-verified device's crypto user ID to the optional account
+profile directory and its original signing public key to a display profile. It shows owner,
+device name/model, client kind, OS/version and available Lody version; the full public key
+and machine ID remain expandable details. Unknown owners and legacy profiles keep explicit
+fallbacks. Browser compatibility UA versions never establish a real OS version or hardware
+model. Native iPhone identifiers use an explicit known-model lookup; unknown identifiers
+remain unchanged. These self-reported labels grant no authority.
+
+Updated personal clients report only their current admitted device when the encrypted
+workspace security state opens, including after native app info arrives. Daemons report their
+own hostname, kernel platform/version and CLI version through the existing cloud adapter.
+The hosted device projection stores the bounded optional display fields, separately from
+ledger originals and Flock metadata. Reopening backfills old records without re-pairing.
+Failed or older endpoints preserve ledger reads and original revoke behavior. This component
+coverage does not establish native hardware/plugin, installed app or deployed backend acceptance.
