@@ -5346,7 +5346,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_CREATE_MANY_TOOL_NAME,
     {
-      summary: 'Delegate multiple concise tasks to new conversations, choosing each execution environment.',
+      summary:
+        'Delegate multiple concise tasks to new conversations, choosing each execution environment.',
       title: 'Create multiple Lody sessions',
       description:
         'Create 1-20 sessions in one durable asynchronous Operation. Best for short prompts or shared defaults.prompt; when items carry long custom prompts, call lody_session_create individually or in small batches (2-3) to avoid oversized tool-call streaming timeouts. Reuse operationId on retry. Items override defaults shallowly; nested workContext/configOptionValues replace wholesale. Set defaults.useCurrentSessionAsParent=false or choose per item. Each merged item follows the rules below; ordered failures are isolated. Attachments require single create. Results arrive after turn release or with next user input; do not poll operation_get.\n\n' +
