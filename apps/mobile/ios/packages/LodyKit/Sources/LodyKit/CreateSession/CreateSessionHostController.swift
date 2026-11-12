@@ -39,8 +39,10 @@ struct CreateSessionHostParams: Decodable {
   }
 }
 
+/// Owns its header: the shell page hides its bar for the form's own, so the edge swipe back
+/// to Home is restored through the owned-header pop delegate.
 @MainActor
-class CreateSessionHostController: UIViewController {
+class CreateSessionHostController: UIViewController, LodyPageOwnedHeader {
   private let params: CreateSessionHostParams
   private let service: CreateSessionService
   private let input = LodyComposerView(frame: .zero)
@@ -117,6 +119,9 @@ class CreateSessionHostController: UIViewController {
     view.addSubview(navigation.view)
     navigation.didMove(toParent: self)
   }
+
+  // A pushed picker takes the edge swipe back to the form first.
+  var allowsPageSwipeBack: Bool { navigation.viewControllers.count <= 1 }
 
   // A pushed form covers Home's destination: waiting for its viewDidAppear to adopt the
   // composer would deadlock navigation. Close the form with the native transition instead.
