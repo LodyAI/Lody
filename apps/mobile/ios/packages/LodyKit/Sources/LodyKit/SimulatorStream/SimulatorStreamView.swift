@@ -1,4 +1,5 @@
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 @MainActor final class SimulatorStreamView: UIView {
   struct Source: Decodable, Equatable {
@@ -74,6 +75,11 @@ import UIKit
     status.font = .preferredFont(forTextStyle: .subheadline)
     status.adjustsFontForContentSizeCategory = true
     addSubview(status)
+    let fingers = FingerRecognizer()
+    fingers.stream = self
+    fingers.cancelsTouchesInView = false
+    fingers.delaysTouchesEnded = false
+    addGestureRecognizer(fingers)
     let center = NotificationCenter.default
     observers = [
       center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
@@ -406,29 +412,70 @@ import UIKit
     }
   }
 
-  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-    guard finger == nil, !controlBusy, let transport, transport.mode == .webRTC || transport.mode == .webSocket, let device, let touch = touches.first,
-          device.display.bounds.contains(touch.location(in: device.display)) else { return }
+  /// Touches reach the device through a recognizer, not raw `touches…` overrides: the page's
+  /// zoom dismissal and iOS 26 content swipe-back recognizers delay or claim view touches, so
+  /// only the toolbar controls responded. Beginning on touch-down lets this recognizer exclude
+  /// those system gestures inside the display; touches elsewhere fail it at once.
+  private final class FingerRecognizer: UIGestureRecognizer {
+    weak var stream: SimulatorStreamView?
+    private var tracked: UITouch?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+      guard tracked == nil else { return touches.forEach { ignore($0, for: event) } }
+      guard let touch = touches.first, let stream, stream.press(touch) else {
+        state = .failed
+        return
+      }
+      tracked = touch
+      touches.filter { $0 !== touch }.forEach { ignore($0, for: event) }
+      state = .began
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+      guard let tracked, touches.contains(tracked) else { return }
+      stream?.drag(tracked)
+      state = .changed
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+      guard let tracked, touches.contains(tracked) else { return }
+      stream?.release(tracked)
+      state = .ended
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+      guard let tracked, touches.contains(tracked) else { return }
+      stream?.lift()
+      state = .cancelled
+    }
+
+    override func reset() {
+      super.reset()
+      tracked = nil
+    }
+
+    override func canBePrevented(by preventing: UIGestureRecognizer) -> Bool { false }
+  }
+
+  private func press(_ touch: UITouch) -> Bool {
+    guard !compact, finger == nil, !controlBusy, let transport, transport.mode == .webRTC || transport.mode == .webSocket, let device,
+          device.display.bounds.contains(touch.location(in: device.display)) else { return false }
     let point = location(touch)
     finger = touch
     edge = point.y >= frameSize.height * 0.93 ? "bottom" : nil
     self.touch("touch1-down", point)
+    return true
   }
 
-  override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-    guard let finger, touches.contains(finger) else { return }
-    touch("touch1-move", location(finger))
+  private func drag(_ touch: UITouch) {
+    guard finger === touch else { return }
+    self.touch("touch1-move", location(touch))
   }
 
-  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-    guard let finger, touches.contains(finger) else { return }
-    touch("touch1-up", location(finger))
-    self.finger = nil
-  }
-
-  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-    guard let finger, touches.contains(finger) else { return }
-    lift()
+  private func release(_ touch: UITouch) {
+    guard finger === touch else { return }
+    self.touch("touch1-up", location(touch))
+    finger = nil
   }
 
   private func lift() {
