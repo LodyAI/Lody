@@ -16,7 +16,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import app.lody.android.R
 import app.lody.android.designsystem.*
-import app.lody.android.runtime.RoostPreferences
 
 /**
  * iOS `PreferencesController`: language and notifications open the system's own pages for this
@@ -28,9 +27,6 @@ internal fun PreferencesScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
     var behavior by remember { mutableStateOf(AppPreferences.queuedMessageBehavior(context)) }
-    // Developer mode is switched on Settings Home; this page only reads it to gate the beta group.
-    val developer = remember { RoostPreferences.developer(context) }
-    var roost by remember { mutableStateOf(RoostPreferences.experiment(context)) }
     var menu by remember { mutableStateOf(false) }
     BackHandler(onBack = onBack)
     val open = { intent: Intent ->
@@ -80,19 +76,6 @@ internal fun PreferencesScreen(onBack: () -> Unit) {
                                 })
                             }
                         }
-                    }
-                }
-            }
-            if (developer) {
-                item {
-                    SettingsGroup {
-                        SettingsLine(stringResource(R.string.settings_roost_history), LodyIcons.Server,
-                            subtitle = stringResource(R.string.settings_roost_history_hint), trailing = {
-                                Switch(checked = roost, onCheckedChange = {
-                                    roost = it
-                                    RoostPreferences.setExperiment(context, it)
-                                })
-                            })
                     }
                 }
             }

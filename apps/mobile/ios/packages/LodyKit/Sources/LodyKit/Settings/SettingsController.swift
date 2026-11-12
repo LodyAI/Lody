@@ -27,8 +27,12 @@ class SettingsController: UIViewController {
     list.setChatStyle(true)
     list.forwarded = { [weak self] name, body in
       guard let self, let id = body["id"] as? String else { return }
-      if name == "rowToggle", id == "developer-mode", let value = body["value"] as? Bool {
-        LodyPreferences.saveDeveloperMode(value)
+      if name == "rowToggle", let value = body["value"] as? Bool {
+        switch id {
+        case "developer-mode": LodyPreferences.saveDeveloperMode(value)
+        case "roost-history": LodyPreferences.saveRoostHistoryExperiment(value)
+        default: return
+        }
         // Render now so the switch keeps the requested value instead of flicking back until the change notification.
         self.render()
       } else if name == "rowPress" {

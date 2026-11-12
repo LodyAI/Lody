@@ -4911,23 +4911,6 @@
         }
       }
     },
-    "settings.betaFeatures": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Beta Features"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "测试功能"
-          }
-        }
-      }
-    },
     "settings.developerMode": {
       "extractionState": "manual",
       "localizations": {

@@ -22,6 +22,7 @@ internal fun SettingsHome(state: ChatListUiState, padding: PaddingValues, onSele
     var sheet by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     var developer by remember { mutableStateOf(RoostPreferences.developer(context)) }
+    var roost by remember { mutableStateOf(RoostPreferences.experiment(context)) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
         item {
             SettingsGroup {
@@ -33,12 +34,6 @@ internal fun SettingsHome(state: ChatListUiState, padding: PaddingValues, onSele
         item {
             SettingsGroup(stringResource(R.string.settings_personal)) {
                 SettingsLine(stringResource(R.string.settings_preferences), LodyIcons.Settings, stringResource(R.string.settings_preferences_hint), onPreferences)
-                SettingsLine(stringResource(R.string.settings_developer_mode), LodyIcons.Settings, trailing = {
-                    Switch(checked = developer, onCheckedChange = {
-                        developer = it
-                        RoostPreferences.setDeveloper(context, it)
-                    })
-                })
             }
         }
         item {
@@ -56,6 +51,26 @@ internal fun SettingsHome(state: ChatListUiState, padding: PaddingValues, onSele
             SettingsGroup(stringResource(R.string.settings_additional)) {
                 SettingsLine(stringResource(R.string.settings_about), LodyIcons.Info, stringResource(R.string.settings_about_hint), onDeferred)
                 SettingsLine(stringResource(R.string.settings_diagnostics), LodyIcons.StateRunning, onClick = onDeferred)
+            }
+        }
+        // Always the last group; the Roost beta switch follows Developer mode only while it is on.
+        item {
+            SettingsGroup {
+                SettingsLine(stringResource(R.string.settings_developer_mode), LodyIcons.Settings, trailing = {
+                    Switch(checked = developer, onCheckedChange = {
+                        developer = it
+                        RoostPreferences.setDeveloper(context, it)
+                    })
+                })
+                if (developer) {
+                    SettingsLine(stringResource(R.string.settings_roost_history), LodyIcons.Server,
+                        subtitle = stringResource(R.string.settings_roost_history_hint), trailing = {
+                            Switch(checked = roost, onCheckedChange = {
+                                roost = it
+                                RoostPreferences.setExperiment(context, it)
+                            })
+                        })
+                }
             }
         }
     }

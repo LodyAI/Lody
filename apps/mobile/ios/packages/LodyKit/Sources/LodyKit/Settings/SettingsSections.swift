@@ -8,7 +8,6 @@ enum SettingsSections {
       section("account", rows: [accountRow(account)]),
       section("personal", header: text("section.personal"), rows: [
         row("preferences", text("preferences.title"), subtitle: text("preferences.subtitle"), image: "slider.horizontal.3"),
-        developerModeRow(),
       ]),
     ]
     if account != nil {
@@ -24,6 +23,7 @@ enum SettingsSections {
         rows: [row("debug-open", "Debug", image: "ladybug")]
       ))
     }
+    sections.append(developerMode())
     return sections
   }
 
@@ -67,10 +67,20 @@ enum SettingsSections {
     )
   }
 
-  private static func developerModeRow() -> LodyListRow {
-    var result = row("developer-mode", text("developerMode"), image: "hammer", navigates: false)
+  /// Always the last group; the Roost beta switch follows Developer Mode only while it is on.
+  private static func developerMode() -> LodyListSection {
+    let enabled = LodyPreferences.developerModeEnabled
+    var rows = [toggleRow("developer-mode", text("developerMode"), image: "hammer", on: enabled)]
+    if enabled {
+      rows.append(toggleRow("roost-history", text("roostHistory"), image: "externaldrive", on: LodyPreferences.roostHistoryExperimentEnabled))
+    }
+    return section("developer-mode", footer: enabled ? text("roostHistoryHint") : "", rows: rows)
+  }
+
+  private static func toggleRow(_ id: String, _ title: String, image: String, on: Bool) -> LodyListRow {
+    var result = row(id, title, image: image, navigates: false)
     result.disclosure = false
-    result.toggle = LodyPreferences.developerModeEnabled
+    result.toggle = on
     return result
   }
 
