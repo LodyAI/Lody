@@ -33,7 +33,7 @@ checks = {
     'pull-request': ['PullRequests/PullRequestStore.swift'],
     'item-details': ['ItemDetails/ItemDetailStore.swift'],
     'message-details': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Chat/ChatTurnMetadata.swift', 'Chat/ChatSessionUsage.swift', 'Chat/ChatUsagePanel.swift', 'Messages/MessageDetailsSections.swift'],
-    'html-preview': ['LodyLocalization.swift', 'HTMLPreview/HTMLPreviewResource.swift', 'HTMLPreview/HTMLPreviewText.swift'],
+    'html-preview': ['LodyLocalization.swift', 'HTMLPreview/HTMLPreviewResource.swift', 'HTMLPreview/HTMLPreviewText.swift', 'HTMLPreview/LodyHTMLPreviewView.swift', 'HTMLPreview/HTMLPreviewScripts.swift', 'Cloud/ContentStore.swift', 'LodyAppearanceView.swift', 'Chrome/LodyScrollEdges.swift', 'LodyTint.swift'],
     'simulator-transport': ['LodyLocalization.swift', 'SimulatorStream/SimulatorDeviceView.swift', 'SimulatorStream/SimulatorRemote.swift', 'SimulatorStream/SimulatorRTCFrame.swift', 'SimulatorStream/SimulatorRTC.swift', 'SimulatorStream/SimulatorTransport.swift'],
     'chat-kit': [],
     'chat-snapshot-reentrancy': [],
@@ -203,7 +203,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             subprocess.run(['swift', 'run', '--package-path', str(package), '--scratch-path', str(root / '.artifacts/native-local-store')], check=True, timeout=600)
             continue
         binary = str(Path(output) / name)
-        simulator = name in ['share', 'auth-session', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'file-link']
+        simulator = name in ['html-preview', 'share', 'auth-session', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'file-link']
         command = ['xcrun', '--sdk', 'iphonesimulator', 'swiftc'] if simulator else ['xcrun', 'swiftc']
         command += ['-swift-version', '6']
         if name in ['share', 'message-details', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'remote-settings', 'session-rows']:
@@ -269,6 +269,17 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                     '-emit-module-path', str(directory / 'LodyCore.swiftmodule'), *map(str, sources),
                     '-o', str(directory / 'libLodyCore.a')], check=True, timeout=120)
             command += ['-I', str(directory), '-L', str(directory), '-lLodyCore']
+        if name == 'html-preview':
+            # This focused check compiles the production document policy without
+            # pulling the credential-bearing cloud runtime into the preview.
+            runtime = Path(output) / 'preview-runtime'
+            runtime.mkdir()
+            subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-sdk', sdk,
+                '-target', f'{arch}-apple-ios26.0-simulator', '-emit-module', '-emit-library', '-static',
+                '-module-name', 'LodyRuntime', '-emit-module-path', str(runtime / 'LodyRuntime.swiftmodule'),
+                str(root / 'packages/lody-core/Sources/LodyRuntime/RuntimeDocument.swift'),
+                '-o', str(runtime / 'libLodyRuntime.a')], check=True, timeout=120)
+            command += ['-I', str(runtime), '-L', str(runtime), '-lLodyRuntime']
         if any('import ChatKit' in source.read_text() for source in package_sources):
             modules = chat_modules(simulator)
             command += ['-I', str(modules), '-L', str(modules), '-lChatKitCore']
