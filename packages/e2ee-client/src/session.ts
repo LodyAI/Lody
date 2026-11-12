@@ -587,6 +587,9 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           devices: [...state.devices].map(([key, entry]) => ({
             key,
             kind: entry.kind,
+            cryptoUserId: toHex(
+              state.members.get(toHex(entry.membershipId.toBytes()))!.userId.toBytes()
+            ),
             recoveryDeviceAvailable: [...state.devices.values()].some(
               (other) => other.kind === 'recovery' && other.membershipId.equals(entry.membershipId)
             ),

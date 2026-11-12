@@ -388,6 +388,8 @@ export function CloudPlatformProvider({
           ? { runtime: portableRuntime }
           : {}),
       remote: {
+        reportDeviceProfile: (request) =>
+          cloudClient.mutation(cloudOperations.e2eeWorkspaces.reportDeviceProfile, request),
         subscribeLedgerHead: (request, changed, failed) =>
           cloudClient.subscribeValue(
             cloudOperations.e2eeWorkspaces.ledgerHead,

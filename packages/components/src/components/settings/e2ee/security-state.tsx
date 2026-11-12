@@ -1,5 +1,5 @@
 import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notifications';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
 import { usePlatformSession, usePlatform } from '@lody/platform/react';
 import type { E2eeManagementState, E2eeWorkspaceRuntime } from '@lody/platform';
@@ -7,6 +7,9 @@ import { useTranslation } from 'react-i18next';
 import { Settings } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import type { E2eeWorkspaceMemberProfiles } from '@lody/cloud-api';
+import { collectE2eeDeviceProfile } from '@/lib/e2ee-device-profile';
+import { LODY_APP_INFO_UPDATED_EVENT } from '@/lib/native-app-info';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 const refreshAtom = atom(0);
 const styles = stylex.create({
@@ -26,7 +29,8 @@ const styles = stylex.create({
 export function useSecurityState() {
   const mode = useAtomValue(workspaceContentModeAtom);
   const session = usePlatformSession();
-  const native = usePlatform().e2eeWorkspaces?.runtime;
+  const port = usePlatform().e2eeWorkspaces;
+  const native = port?.runtime;
   const revision = useAtomValue(refreshAtom),
     bump = useSetAtom(refreshAtom);
   const encrypted =
@@ -89,7 +93,8 @@ export function useSecurityState() {
       bump((value) => value + 1);
     },
   };
-  return { state, workspaceId, accountId: mode?.accountId, native, encrypted };
+  const directory = useDeviceDirectory(port, session, workspaceId, mode?.accountId, state.data);
+  return { state, directory, workspaceId, accountId: mode?.accountId, native, encrypted };
 }
 
 export function E2eeSettingsIcon() {
@@ -160,4 +165,75 @@ export function E2eeSettingsGlyph({ attention }: { attention: boolean }) {
       )}
     </span>
   );
+}
+
+/** Optional display reads never delay or erase management/ledger facts. */
+export function useDeviceDirectory(
+  port: ReturnType<typeof usePlatform>['e2eeWorkspaces'],
+  session: ReturnType<typeof usePlatformSession>,
+  workspaceId: string | null,
+  accountId: string | null | undefined,
+  state: E2eeManagementState | undefined
+) {
+  const scope = JSON.stringify([accountId, workspaceId]);
+  const [directory, setDirectory] = useState<{
+    scope: string;
+    value: E2eeWorkspaceMemberProfiles;
+  }>();
+  const [nativeRevision, setNativeRevision] = useState(0);
+  const reported = useRef<string | undefined>(undefined);
+  const authenticated = session.status === 'authenticated' && session.user.id === accountId;
+  useEffect(() => {
+    reported.current = undefined;
+    setDirectory(undefined);
+  }, [scope, authenticated, port]);
+  useEffect(() => {
+    const update = () => setNativeRevision((n) => n + 1);
+    window.addEventListener(LODY_APP_INFO_UPDATED_EVENT, update);
+    return () => window.removeEventListener(LODY_APP_INFO_UPDATED_EVENT, update);
+  }, []);
+  useEffect(() => {
+    let active = true;
+    if (!authenticated || !workspaceId || !state) return;
+    const self = state.devices.find((device) => device.self && device.kind === 'personal');
+    const load = async () => {
+      if (self && port?.reportDeviceProfile) {
+        const profile = collectE2eeDeviceProfile();
+        const fingerprint = JSON.stringify([scope, self.key, profile]);
+        if (reported.current !== fingerprint) {
+          try {
+            await port.reportDeviceProfile({ workspaceId, signingPublicKey: self.key, profile });
+            if (!active) return;
+            reported.current = fingerprint;
+            return true;
+          } catch {
+            /* Old servers and offline clients keep all management controls. */
+          }
+        }
+      }
+    };
+    let readRevision = 0;
+    const read = () => {
+      const revision = ++readRevision;
+      if (!port?.memberProfiles) return;
+      void port.memberProfiles({ workspaceId }).then(
+        (value) => {
+          if (active && revision === readRevision && value.workspaceId === workspaceId)
+            setDirectory({ scope, value });
+        },
+        () => {
+          /* Optional labels never gate ledger availability. */
+        }
+      );
+    };
+    // Read independently: even an unresponsive profile update cannot hide labels.
+    read();
+    void load().then((changed) => {
+      if (active && changed) read();
+    });
+    return () => {
+      active = false;
+    };
+  }, [scope, authenticated, workspaceId, port, state, nativeRevision]);
+  return authenticated && directory?.scope === scope ? directory.value : undefined;
 }

@@ -30,7 +30,12 @@ export function createCloudE2eeWorkspaces(input: {
   session: () => PlatformSessionState;
   remote: Pick<
     PlatformE2eeWorkspaces,
-    'create' | 'describe' | 'history' | 'memberProfiles' | 'subscribeLedgerHead'
+    | 'create'
+    | 'describe'
+    | 'history'
+    | 'memberProfiles'
+    | 'subscribeLedgerHead'
+    | 'reportDeviceProfile'
   >;
   prepareCreation?: PlatformE2eeWorkspaces['prepareCreation'];
   runtime?: PlatformE2eeWorkspaces['runtime'];
@@ -86,12 +91,28 @@ export function createCloudE2eeWorkspaces(input: {
             // Keep only display fields; callers must resolve IDs through verified ledger state.
             return {
               workspaceId,
+              devices: result.devices?.map(({ signingPublicKey, profile }) => ({
+                signingPublicKey,
+                profile,
+              })),
               profiles: result.profiles.map(({ cryptoUserId, name, image }) => ({
                 cryptoUserId,
                 name,
                 image,
               })),
             };
+          },
+        }
+      : {}),
+    ...(input.remote.reportDeviceProfile
+      ? {
+          reportDeviceProfile: async (
+            request: Parameters<NonNullable<PlatformE2eeWorkspaces['reportDeviceProfile']>>[0]
+          ) => {
+            const owner = account();
+            const result = await input.remote.reportDeviceProfile!(request);
+            assertAccount(owner);
+            return result;
           },
         }
       : {}),

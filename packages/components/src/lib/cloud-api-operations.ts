@@ -191,6 +191,9 @@ export const cloudOperations = {
     ),
   },
   e2eeWorkspaces: {
+    reportDeviceProfile: mutation<ConvexApi['e2eeWorkspaces']['reportDeviceProfile']>(
+      'e2eeWorkspaces:reportDeviceProfile'
+    ),
     ledgerHead: query<ConvexApi['e2eeWorkspaces']['ledgerHead']>('e2eeWorkspaces:ledgerHead'),
     memberProfiles: query<ConvexApi['e2eeWorkspaces']['memberProfiles']>(
       'e2eeWorkspaces:memberProfiles'
