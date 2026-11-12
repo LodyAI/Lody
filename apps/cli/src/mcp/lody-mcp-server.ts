@@ -911,7 +911,7 @@ const SessionCreateManyToolInputSchema = z
       .array(SessionCreateBatchPublishedItemSchema)
       .max(1_000)
       .describe(
-        '1-20 creates merged over defaults. Directory/history sharing follows each item configuration.'
+        '1-20 creates merged over defaults. Keep per-item prompts concise; for long custom prompts, call lody_session_create individually or in small batches.'
       ),
   })
   .strict()
@@ -927,7 +927,12 @@ const SessionChatManyToolInputSchema = z
   .object({
     ...BatchCommandEnvelopeSchema,
     defaults: SessionChatBatchItemSchema.optional(),
-    items: z.array(SessionChatBatchItemSchema).max(1_000),
+    items: z
+      .array(SessionChatBatchItemSchema)
+      .max(1_000)
+      .describe(
+        '1-20 chats merged over defaults. Keep per-item prompts concise; for long custom prompts, call lody_session_chat individually or in small batches.'
+      ),
   })
   .strict();
 
@@ -5341,10 +5346,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_CREATE_MANY_TOOL_NAME,
     {
-      summary: 'Delegate multiple tasks to new conversations, choosing each execution environment.',
+      summary: 'Delegate multiple concise tasks to new conversations, choosing each execution environment.',
       title: 'Create multiple Lody sessions',
       description:
-        'Create 1-20 sessions in one durable asynchronous Operation. Reuse operationId on retry. Items override defaults shallowly; nested workContext/configOptionValues replace wholesale. Set defaults.useCurrentSessionAsParent=false or choose per item. Each merged item follows the rules below; ordered failures are isolated. Attachments require single create. Results arrive after turn release or with next user input; do not poll operation_get.\n\n' +
+        'Create 1-20 sessions in one durable asynchronous Operation. Best for short prompts or shared defaults.prompt; when items carry long custom prompts, call lody_session_create individually or in small batches (2-3) to avoid oversized tool-call streaming timeouts. Reuse operationId on retry. Items override defaults shallowly; nested workContext/configOptionValues replace wholesale. Set defaults.useCurrentSessionAsParent=false or choose per item. Each merged item follows the rules below; ordered failures are isolated. Attachments require single create. Results arrive after turn release or with next user input; do not poll operation_get.\n\n' +
         SESSION_CREATE_EFFECTS_GUIDANCE +
         '\n\n' +
         SESSION_COLLABORATION_GUIDANCE +
@@ -5366,10 +5371,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     SESSION_CHAT_MANY_TOOL_NAME,
     {
       summary:
-        'Send work to multiple existing conversations; busy targets may be steered and item failures are isolated.',
+        'Send concise work to multiple existing conversations; busy targets may be steered and item failures are isolated.',
       title: 'Chat multiple Lody sessions',
       description:
-        'Send 1-20 chats in one durable asynchronous Operation. Items override defaults shallowly; nested objects replace wholesale. Ordered failures are isolated: successful siblings remain sent, so do not retry them under new ids. deliveries contains {index, delivery} only for items sent by this call; absent entries are uncertain or retries.\n\n' +
+        'Send 1-20 chats in one durable asynchronous Operation. Best for short prompts or shared defaults.prompt; when items carry long custom prompts, call lody_session_chat individually or in small batches (2-3) to avoid oversized tool-call streaming timeouts. Items override defaults shallowly; nested objects replace wholesale. Ordered failures are isolated: successful siblings remain sent, so do not retry them under new ids. deliveries contains {index, delivery} only for items sent by this call; absent entries are uncertain or retries.\n\n' +
         SESSION_CHAT_EFFECTS_GUIDANCE +
         '\n\n' +
         SESSION_COLLABORATION_GUIDANCE +
