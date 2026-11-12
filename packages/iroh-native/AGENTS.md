@@ -39,3 +39,9 @@ rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2
   that drives it, the lockfile or the CI workflow; extend that path list in
   `.github/workflows/ci.yml` when another caller starts loading the module. Release builds
   are not stripped: Cargo's macOS strip step produced an unloadable dylib.
+- Every endpoint keeps UDP segmentation offload (GSO) off. iroh 1.4.1 caches the
+  socket's segment limit when it creates the sender, so after a NIC refuses a
+  segmented send, open connections keep sending batches that fail
+  ([iroh #4555](https://github.com/n0-computer/iroh/issues/4555)); the Android
+  emulator returns EIO and stalled every call past the dispatch deadline. Re-enable
+  it only on an iroh release that reads the limit per send.
