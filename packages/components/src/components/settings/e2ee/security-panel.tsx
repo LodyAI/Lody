@@ -5,9 +5,11 @@ import * as stylex from '@stylexjs/stylex';
 import { Collapsible } from '@lody/ui/collapsible';
 import { Button } from '@lody/ui/button';
 import { Avatar } from '@lody/ui/avatar';
+import { avatar } from '@lody/ui/avatar/avatar.tokens.stylex';
+import { settingsType } from '../type.stylex';
 import { Alert } from '@lody/ui/alert';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { control, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Info, KeyRound, ShieldCheck, ShieldQuestion, UserPlus, UserRound } from 'lucide-react';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useState, type ReactNode } from 'react';
@@ -15,8 +17,26 @@ import { Dialog } from '@lody/ui/dialog';
 import { CompactSection, CompactRow } from '../compact-layout';
 
 const styles = stylex.create({
-  owner: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
-  ownerText: { minWidth: 0, overflowWrap: 'anywhere' },
+  deviceAvatar: {
+    display: 'flex',
+    flexShrink: 0,
+    alignSelf: 'flex-start',
+    paddingBlockStart: `calc((1em * ${settingsType.leading} - ${avatar.sizeMini}) / 2)`,
+  },
+  deviceInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[1],
+    minWidth: 0,
+  },
+  identifiers: { maxWidth: '100%', minWidth: 0 },
+  deviceActions: {
+    marginInlineStart: {
+      default: `calc(${avatar.sizeMini} + ${space[3]})`,
+      '@media (min-width: 640px)': 0,
+    },
+  },
   panel: { display: 'flex', flexDirection: 'column', gap: space[4] },
   glyph: {
     display: 'inline-grid',
@@ -315,8 +335,10 @@ export function E2eeDevicesPanel({
               <CompactRow
                 key={device.key}
                 helperBlock
-                label={
-                  <span {...stylex.props(styles.owner)}>
+                alignTop
+                label={title}
+                leading={
+                  <span {...stylex.props(styles.deviceAvatar)}>
                     <Avatar.Root
                       size="mini"
                       aria-hidden="true"
@@ -327,27 +349,29 @@ export function E2eeDevicesPanel({
                         {owner ? owner.slice(0, 1).toUpperCase() : <UserRound size={12} />}
                       </Avatar.Fallback>
                     </Avatar.Root>
-                    <span {...stylex.props(styles.ownerText)}>{title}</span>
                   </span>
                 }
                 helper={
-                  <>
+                  <div {...stylex.props(styles.deviceInfo)}>
                     <span {...stylex.props(styles.detail)}>{info}</span>
                     {device.self && (
                       <span {...stylex.props(styles.detail)}>{t('e2ee.security.thisDevice')}</span>
                     )}
-                    <Collapsible.Root>
+                    <Collapsible.Root {...stylex.props(styles.identifiers)}>
                       <Collapsible.Trigger
                         render={
                           <Button
-                            variant="ghost"
+                            variant="link"
                             size="small"
+                            style={{ minHeight: control.small }}
                             data-testid="e2ee-device-details"
                             data-device-key={device.key}
                           />
                         }
                       >
-                        {t('e2ee.deviceIdentity.identifier')} · {device.key.slice(0, 12)}
+                        <span {...stylex.props(styles.key)}>
+                          {t('e2ee.deviceIdentity.identifier')} · {device.key.slice(0, 12)}
+                        </span>
                       </Collapsible.Trigger>
                       <Collapsible.Panel>
                         {hardwareCode && (
@@ -361,23 +385,25 @@ export function E2eeDevicesPanel({
                         )}
                       </Collapsible.Panel>
                     </Collapsible.Root>
-                  </>
+                  </div>
                 }
               >
                 {device.mayRevoke && (
-                  <Button
-                    data-testid="e2ee-device-revoke"
-                    data-device-key={device.key}
-                    variant="secondary"
-                    disabled={updating}
-                    onClick={() =>
-                      device.requiresRecoveryConfirmation
-                        ? setConfirmKey(device.key)
-                        : onRevoke(device.key)
-                    }
-                  >
-                    {t('e2ee.security.revoke')}
-                  </Button>
+                  <span {...stylex.props(styles.deviceActions)}>
+                    <Button
+                      data-testid="e2ee-device-revoke"
+                      data-device-key={device.key}
+                      variant="secondary"
+                      disabled={updating}
+                      onClick={() =>
+                        device.requiresRecoveryConfirmation
+                          ? setConfirmKey(device.key)
+                          : onRevoke(device.key)
+                      }
+                    >
+                      {t('e2ee.security.revoke')}
+                    </Button>
+                  </span>
                 )}
               </CompactRow>
             );
