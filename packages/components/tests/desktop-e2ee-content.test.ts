@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { LoroDoc } from 'loro-crdt';
+import { PersonalHostError } from '@lody/e2ee-client';
 import {
   createDesktopE2eeContent,
   KEY_PENDING_WAIT_MS,
@@ -460,14 +461,19 @@ describe('desktop E2EE content epoch safety', () => {
   });
 });
 
+const desktopLoss = (code: string) => () =>
+  new Error(`Error invoking remote method 'e2ee.contentStreamsToken': Error: ${code}`);
 it.each([
-  ['token', 'e2ee_member_removed'],
-  ['snapshot', 'e2ee_member_removed'],
-  ['token', 'e2ee_device_revoked'],
-  ['snapshot', 'e2ee_device_revoked'],
+  ['token', 'e2ee_member_removed', desktopLoss('e2ee_member_removed')],
+  ['snapshot', 'e2ee_member_removed', desktopLoss('e2ee_member_removed')],
+  ['token', 'e2ee_device_revoked', desktopLoss('e2ee_device_revoked')],
+  ['snapshot', 'e2ee_device_revoked', desktopLoss('e2ee_device_revoked')],
+  // A phone or browser's personal host rejects its own revoked device from the verified
+  // ledger; that must reach the re-pairing route instead of endless reconnecting.
+  ['token', 'e2ee_device_revoked', () => new PersonalHostError({ code: 'revoked' })],
 ] as const)(
   'native access loss from %s (%s) retires content without waiting on the failed request',
-  async (source, code) => {
+  async (source, code, failure) => {
     let retire = (_reason: string) => {};
     const retired = new Promise<string>((resolve) => {
       retire = resolve;
@@ -480,9 +486,7 @@ it.each([
       onMemberRemoved: (reason) => retire(reason),
       runtime: {
         contentStreamsToken: async () => {
-          throw new Error(
-            `Error invoking remote method 'e2ee.contentStreamsToken': Error: ${code}`
-          );
+          throw failure();
         },
       } as unknown as E2eeWorkspaceRuntime,
     });
