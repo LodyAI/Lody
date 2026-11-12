@@ -52,6 +52,7 @@ import { accountUserId, inspectContentFrame } from '@lody/e2ee-core/protocol'
 import { desktopE2eePorts, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
+import { makeDesktopLocalPairing } from './e2ee-local-pairing.mts'
 import { decodeMemberKeyPackage } from './e2ee-member-join.mts'
 import { createDesktopQuitBarrier, drainMainProcessQuitResources } from './desktop-shutdown.ts'
 // Authenticated synthetic OS storage; this suite does not exercise a user's keychain.
@@ -1420,6 +1421,85 @@ void test('workspace close fences and drains a held key round without blocking a
     })
   )
 })
+
+for (const first of ['local', 'remote']) {
+  void test(`pairing reset isolates journals and reset receipts with ${first} reset first`, async (t) => {
+    const db = new DatabaseSync(':memory:')
+    t.after(() => db.close())
+    const journals = {
+      local: makeDesktopLocalPairing({ db, current: () => Effect.void }),
+      remote: makeDesktopLocalPairing({ db, journal: 'remote', current: () => Effect.void })
+    }
+    const tables = { local: 'local_pairing', remote: 'remote_local_pairing' }
+    const archives = {
+      local: 'archived_local_pairings',
+      remote: 'remote_archived_local_pairings'
+    }
+    const read = (table) => db.prepare(`SELECT * FROM ${table} WHERE id=1`).get()
+    const originals = {}
+    for (const mode of ['local', 'remote']) {
+      db.prepare(`INSERT INTO ${tables[mode]} VALUES(1,?,?,?,?)`).run(
+        `${mode}-session`,
+        `${mode}-material`,
+        `${mode}-request`,
+        Buffer.from(`${mode}-record`)
+      )
+      originals[mode] = read(tables[mode])
+    }
+    // Preserve the existing local archive schema and historical receipts.
+    db.exec(
+      'CREATE TABLE archived_local_pairings(reset_id TEXT PRIMARY KEY, session TEXT, material TEXT, request_id TEXT, record BLOB)'
+    )
+    db.prepare('INSERT INTO archived_local_pairings VALUES(?,?,?,?,?)').run(
+      'previous-reset',
+      'previous-session',
+      'previous-material',
+      'previous-request',
+      Buffer.from('previous-record')
+    )
+    const previous = db.prepare('SELECT * FROM archived_local_pairings').get()
+    const second = first === 'local' ? 'remote' : 'local'
+    for (const mode of [first, second]) {
+      const other = mode === 'local' ? 'remote' : 'local'
+      const otherBefore = read(tables[other])
+      await execute(journals[mode].reset('shared-reset-id'))
+      const reset = read(tables[mode])
+      assert.notEqual(reset.session, originals[mode].session)
+      assert.deepEqual(
+        { ...reset },
+        {
+          ...originals[mode],
+          session: reset.session,
+          material: null,
+          request_id: null,
+          record: null
+        }
+      )
+      assert.deepEqual(read(tables[other]), otherBefore)
+      assert.deepEqual(
+        {
+          ...db.prepare(`SELECT * FROM ${archives[mode]} WHERE reset_id=?`).get('shared-reset-id')
+        },
+        {
+          reset_id: 'shared-reset-id',
+          ...Object.fromEntries(Object.entries(originals[mode]).filter(([key]) => key !== 'id'))
+        }
+      )
+      const reopened = makeDesktopLocalPairing({
+        db,
+        ...(mode === 'remote' ? { journal: 'remote' } : {}),
+        current: () => Effect.void
+      })
+      await execute(reopened.reset('shared-reset-id'))
+      assert.deepEqual(read(tables[mode]), reset)
+      assert.deepEqual(read(tables[other]), otherBefore)
+    }
+    assert.deepEqual(
+      db.prepare('SELECT * FROM archived_local_pairings WHERE reset_id=?').get('previous-reset'),
+      previous
+    )
+  })
+}
 
 void test('local machine approval retains its exact signed original across restart and verifies the intended session', async (t) => {
   const directory = await fixture(t)
