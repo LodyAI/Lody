@@ -1,4 +1,4 @@
-import type { E2eeWorkspaceMemberProfiles } from '@lody/cloud-api';
+import type { E2eeDeviceProfile, E2eeWorkspaceMemberProfiles } from '@lody/cloud-api';
 import type { E2eeManagementState } from '@lody/platform';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -289,11 +289,46 @@ export function E2eeSecurityPanel({
   );
 }
 
+/** Display name and facts a machine already publishes in the workspace machine directory. */
+export type E2eeDeviceMachineLabel = { name?: string; os?: string; cliVersion?: string };
+const MACHINE_OS: Readonly<Record<string, string>> = {
+  darwin: 'macOS',
+  linux: 'Linux',
+  win32: 'Windows',
+};
+
+/**
+ * Display-only profile for one ledger device. This host's own row uses what it
+ * collects locally; a machine row falls back to its workspace machine name. No
+ * other row ever borrows local or machine data.
+ */
+export function resolveE2eeDeviceProfile(
+  device: E2eeManagementState['devices'][number],
+  reported: E2eeDeviceProfile | undefined,
+  localProfile: E2eeDeviceProfile | undefined,
+  machine: E2eeDeviceMachineLabel | undefined
+): E2eeDeviceProfile | undefined {
+  if (device.self && device.kind === 'personal' && localProfile) return localProfile;
+  if (device.kind !== 'machine' || !machine) return reported;
+  const name = machine.name?.trim() || reported?.name;
+  const os = reported?.os ?? (machine.os ? (MACHINE_OS[machine.os] ?? machine.os) : undefined);
+  const appVersion = reported?.appVersion ?? machine.cliVersion;
+  return {
+    ...reported,
+    client: 'daemon',
+    ...(name ? { name } : {}),
+    ...(os ? { os } : {}),
+    ...(appVersion ? { appVersion } : {}),
+  };
+}
+
 /** Console Devices tab: every authorized device and machine, with revoke and the
  * key update a revoke leaves behind. Native facts only; main rechecks each action. */
 export function E2eeDevicesPanel({
   state,
   directory,
+  localProfile,
+  machines,
   busy,
   error: actionError,
   onUpdate,
@@ -302,6 +337,10 @@ export function E2eeDevicesPanel({
 }: PanelState & {
   onUpdate: () => void;
   directory?: E2eeWorkspaceMemberProfiles;
+  /** This host's own collected profile, used only for the row marked as this device. */
+  localProfile?: E2eeDeviceProfile;
+  /** Workspace machine directory keyed by machine ID, used only for machine rows. */
+  machines?: ReadonlyMap<string, E2eeDeviceMachineLabel>;
   onRevoke: (key: string, confirmation?: { confirmedRecoveryOnly: true }) => void;
   onRetry: () => void;
 }) {
@@ -320,9 +359,12 @@ export function E2eeDevicesPanel({
       {state && state.devices.length > 0 && (
         <CompactSection title={t('e2ee.security.devices')} boxed>
           {state.devices.map((device) => {
-            const profile = directory?.devices?.find(
-              (entry) => entry.signingPublicKey === device.key
-            )?.profile;
+            const profile = resolveE2eeDeviceProfile(
+              device,
+              directory?.devices?.find((entry) => entry.signingPublicKey === device.key)?.profile,
+              localProfile,
+              device.machineId ? machines?.get(device.machineId) : undefined
+            );
             const ownerProfile = directory?.profiles.find(
               (entry) => entry.cryptoUserId === device.cryptoUserId
             );
@@ -332,21 +374,26 @@ export function E2eeDevicesPanel({
             const model = hardwareCode
               ? `${hardwareCode[1]} · ${t('e2ee.deviceIdentity.modelUnknown')}`
               : profile?.model?.trim();
-            const name =
-              profile?.name?.trim() ||
-              model ||
-              t(`e2ee.deviceIdentity.${profile?.client ?? device.kind}`);
+            const named = profile?.name?.trim() || model;
+            const name = named || t(`e2ee.deviceIdentity.${profile?.client ?? device.kind}`);
             const title = [owner || t('e2ee.deviceIdentity.ownerUnknown'), name].join(' · ');
-            const info = profile
-              ? [
-                  t(`e2ee.deviceIdentity.${profile.client}`),
-                  [profile.os, profile.osVersion].filter(Boolean).join(' '),
-                  profile.appVersion ? `Lody ${profile.appVersion}` : '',
-                  !profile.osVersion ? t('e2ee.deviceIdentity.osVersionUnavailable') : '',
-                ]
-                  .filter(Boolean)
-                  .join(' · ')
-              : t('e2ee.deviceIdentity.detailsUnavailable');
+            // The title already names the device kind when nothing was reported; missing
+            // fields are explained once, inside the expandable details.
+            const info =
+              profile &&
+              [
+                // Without a name or model the title already shows the client kind.
+                named ? t(`e2ee.deviceIdentity.${profile.client}`) : '',
+                [profile.os, profile.osVersion].filter(Boolean).join(' '),
+                profile.appVersion ? `Lody ${profile.appVersion}` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ');
+            const missing = !profile
+              ? t('e2ee.deviceIdentity.detailsUnavailable')
+              : !profile.osVersion
+                ? t('e2ee.deviceIdentity.osVersionUnavailable')
+                : undefined;
             return (
               <CompactRow
                 key={device.key}
@@ -369,7 +416,7 @@ export function E2eeDevicesPanel({
                 }
                 helper={
                   <div {...stylex.props(styles.deviceInfo)}>
-                    <span {...stylex.props(styles.detail)}>{info}</span>
+                    {info && <span {...stylex.props(styles.detail)}>{info}</span>}
                     {device.self && (
                       <span {...stylex.props(styles.detail)}>{t('e2ee.security.thisDevice')}</span>
                     )}
@@ -390,6 +437,7 @@ export function E2eeDevicesPanel({
                         </span>
                       </Collapsible.Trigger>
                       <Collapsible.Panel>
+                        {missing && <span {...stylex.props(styles.detail)}>{missing}</span>}
                         {hardwareCode && (
                           <span {...stylex.props(styles.detail, styles.key)}>{profile?.model}</span>
                         )}

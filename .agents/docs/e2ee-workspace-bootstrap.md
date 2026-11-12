@@ -192,5 +192,13 @@ workspace security state opens, including after native app info arrives. Daemons
 own hostname, kernel platform/version and CLI version through the existing cloud adapter.
 The hosted device projection stores the bounded optional display fields, separately from
 ledger originals and Flock metadata. Reopening backfills old records without re-pairing.
-Failed or older endpoints preserve ledger reads and original revoke behavior. This component
+Failed or older endpoints preserve ledger reads and original revoke behavior; an endpoint
+without the report mutation is logged once and not retried until the profile or scope changes.
+
+The row marked as this device always shows the profile this host collects locally, so it does
+not wait for a report round trip. A machine row without a stored profile uses that machine's
+name, OS and CLI version from the workspace machine directory, matched by its ledger machine ID.
+No other row borrows local or machine data. A row with nothing to show keeps the owner and device
+kind as its title; "details unavailable" and a missing OS version appear only in its expanded
+details. This component
 coverage does not establish native hardware/plugin, installed app or deployed backend acceptance.

@@ -1374,7 +1374,8 @@ describe('authorized device identities', () => {
       expect(container.textContent).toContain(
         'e2ee.deviceIdentity.ownerUnknown · e2ee.deviceIdentity.personal'
       );
-      expect(container.textContent).toContain('e2ee.deviceIdentity.detailsUnavailable');
+      // A missing profile is explained once, inside the row's details.
+      expect(container.textContent).not.toContain('e2ee.deviceIdentity.detailsUnavailable');
       expect(container.textContent).not.toContain('Spoof');
       await act(async () =>
         (container.querySelector('[data-testid="e2ee-device-revoke"]') as HTMLButtonElement).click()
@@ -1387,6 +1388,166 @@ describe('authorized device identities', () => {
       expect(container.textContent).toContain(device.key);
     } finally {
       await act(async () => root.unmount());
+    }
+  });
+
+  it('fills this device from local facts and machine rows from the machine directory only', async () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const base = { cryptoUserId: 'owner-a', mayRevoke: true };
+    const self = {
+      ...base,
+      key: 'aa'.repeat(32),
+      kind: 'personal' as const,
+      machineId: null,
+      self: true,
+    };
+    const other = {
+      ...base,
+      key: 'bb'.repeat(32),
+      kind: 'personal' as const,
+      machineId: null,
+      self: false,
+    };
+    const machine = {
+      ...base,
+      key: 'cc'.repeat(32),
+      kind: 'machine' as const,
+      machineId: 'm-1',
+      self: false,
+    };
+    const unknownMachine = { ...machine, key: 'dd'.repeat(32), machineId: 'm-2' };
+    try {
+      await act(async () =>
+        root.render(
+          <E2eeDevicesPanel
+            state={{
+              epoch: 1,
+              rotationRequired: false,
+              updatePending: false,
+              mayRotate: true,
+              devices: [self, other, machine, unknownMachine],
+            }}
+            // The server has not stored any device profile yet.
+            directory={{
+              workspaceId: 'w',
+              profiles: [{ cryptoUserId: 'owner-a', name: 'Alice', image: null }],
+            }}
+            localProfile={{
+              client: 'desktop',
+              name: 'Synthetic laptop',
+              os: 'macOS',
+              osVersion: '26.1',
+              appVersion: '1.2.3',
+            }}
+            machines={new Map([['m-1', { name: 'Build box', os: 'linux', cliVersion: '0.104.0' }]])}
+            onRevoke={() => {}}
+            onRetry={() => {}}
+            onUpdate={() => {}}
+          />
+        )
+      );
+      expect(container.textContent).toContain('Alice · Synthetic laptop');
+      expect(container.textContent).toContain(
+        'e2ee.deviceIdentity.desktop · macOS 26.1 · Lody 1.2.3'
+      );
+      expect(container.textContent).toContain('Alice · Build box');
+      expect(container.textContent).toContain('e2ee.deviceIdentity.daemon · Linux · Lody 0.104.0');
+      // Neither local nor machine facts are borrowed by rows they do not describe.
+      expect(container.textContent).toContain('Alice · e2ee.deviceIdentity.personal');
+      expect(container.textContent).toContain('Alice · e2ee.deviceIdentity.machine');
+      expect(container.textContent?.match(/Synthetic laptop/g)).toHaveLength(1);
+      expect(container.textContent?.match(/Build box/g)).toHaveLength(1);
+      expect(container.textContent).not.toContain('e2ee.deviceIdentity.detailsUnavailable');
+      const otherDetails = container.querySelector(
+        `[data-testid="e2ee-device-details"][data-device-key="${other.key}"]`
+      ) as HTMLButtonElement;
+      await act(async () => otherDetails.click());
+      expect(container.textContent).toContain('e2ee.deviceIdentity.detailsUnavailable');
+      // A browser has no device name: the title carries the client kind once.
+      await act(async () =>
+        root.render(
+          <E2eeDevicesPanel
+            state={{
+              epoch: 1,
+              rotationRequired: false,
+              updatePending: false,
+              mayRotate: true,
+              devices: [self],
+            }}
+            localProfile={{ client: 'web', os: 'macOS', appVersion: '1.2.3' }}
+            onRevoke={() => {}}
+            onRetry={() => {}}
+            onUpdate={() => {}}
+          />
+        )
+      );
+      expect(container.textContent).toContain(
+        'e2ee.deviceIdentity.ownerUnknown · e2ee.deviceIdentity.web'
+      );
+      expect(container.textContent).toContain('macOS · Lody 1.2.3');
+      expect(container.textContent?.match(/e2ee\.deviceIdentity\.web/g)).toHaveLength(1);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it('stops reporting to a server without the profile mutation until the profile changes', async () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const reports: unknown[] = [];
+    const port = {
+      ...TEST_CLOUD_PLATFORM.e2eeWorkspaces!,
+      reportDeviceProfile: async (input: unknown) => {
+        reports.push(input);
+        throw new Error(
+          "[CONVEX M(e2eeWorkspaces:reportDeviceProfile)] Could not find public function for 'e2eeWorkspaces:reportDeviceProfile'"
+        );
+      },
+      memberProfiles: async () => ({ workspaceId: 'workspace', profiles: [] }),
+    };
+    const state = () => ({
+      epoch: 1,
+      rotationRequired: false,
+      updatePending: false,
+      mayRotate: true,
+      devices: [
+        {
+          key: 'aa'.repeat(32),
+          kind: 'personal' as const,
+          machineId: null,
+          self: true,
+          mayRevoke: true,
+        },
+      ],
+    });
+    function Fixture({ value }: { value: ReturnType<typeof state> }) {
+      useDeviceDirectory(
+        port,
+        { status: 'authenticated', user: { id: 'a', name: 'a', email: '' } },
+        'workspace',
+        'a',
+        value
+      );
+      return null;
+    }
+    try {
+      await act(async () => root.render(<Fixture value={state()} />));
+      // Each verified management refresh yields a new state object.
+      await act(async () => root.render(<Fixture value={state()} />));
+      await act(async () => root.render(<Fixture value={state()} />));
+      expect(reports).toHaveLength(1);
+      window.__LODY_APP_INFO__ = { model: 'iPhone18,1', os_name: 'ios', os_version: '26.0' };
+      (window as Window & { __LODY_NATIVE__?: boolean }).__LODY_NATIVE__ = true;
+      await act(async () => window.dispatchEvent(new Event('lody:app-info-updated')));
+      expect(reports).toHaveLength(2);
+      expect(reports.at(-1)).toMatchObject({
+        profile: { client: 'mobile', model: 'iPhone 17 Pro' },
+      });
+    } finally {
+      await act(async () => root.unmount());
+      delete window.__LODY_APP_INFO__;
+      delete (window as Window & { __LODY_NATIVE__?: boolean }).__LODY_NATIVE__;
     }
   });
 
