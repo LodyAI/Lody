@@ -43,10 +43,14 @@ export interface AccountPairingIdentityHost {
   readonly workspaceId: string;
   readonly genesisHash: string;
   /** Creates this workspace's identity once, or reuses the retained one, bound to
-   * the verified genesis record and membership. Never replaces an identity. */
+   * the verified genesis record and membership. `history` is the complete public signed
+   * history the workflow verified; a host that verifies it again from its own pinned
+   * genesis may prepare a replacement identity when it classifies the retained one as
+   * revoked or its member removed. Without that classification nothing is replaced. */
   prepareAccountIdentity(pin: {
     readonly genesisRecordHex: string;
     readonly membershipId: string;
+    readonly history?: readonly E2eeWorkspaceHistoryPage[];
   }): Effect.Effect<AccountPairingIdentity, unknown>;
   /** An unfinished per-workspace pairing exchange already journaled on this device. */
   pendingPersonalJoin(): Effect.Effect<{ readonly pairingSessionId: string } | null, unknown>;
@@ -83,15 +87,22 @@ export function personalHostAccountPairing(
     workspaceId: host.scope.workspaceId,
     genesisHash: toHex(host.scope.genesis.toBytes()),
     prepareAccountIdentity: (pin) =>
-      Effect.map(host.prepareAccount(pin), (prepared) => {
-        const request = decodePersonalRequest(prepared.requestHex);
-        return {
-          signingPublicKey: fromHex(request.signingPublicKey),
-          encryptionPublicKey: fromHex(request.encryptionPublicKey),
-          possessionProof: fromHex(request.possessionSignature),
-          credentialHash: fromHex(request.credentialHash),
-        };
-      }),
+      Effect.map(
+        host.prepareAccount({
+          genesisRecordHex: pin.genesisRecordHex,
+          membershipId: pin.membershipId,
+          ...(pin.history ? { history: pin.history } : {}),
+        }),
+        (prepared) => {
+          const request = decodePersonalRequest(prepared.requestHex);
+          return {
+            signingPublicKey: fromHex(request.signingPublicKey),
+            encryptionPublicKey: fromHex(request.encryptionPublicKey),
+            possessionProof: fromHex(request.possessionSignature),
+            credentialHash: fromHex(request.credentialHash),
+          };
+        }
+      ),
     // Not tracked on portable hosts yet: an unfinished per-workspace join there is
     // not reported as blocked (recorded limit).
     pendingPersonalJoin: () => Effect.succeed(null),
@@ -197,6 +208,7 @@ export function makePortableAccountPairingRequester(input: {
             const identity = yield* host.prepareAccountIdentity({
               genesisRecordHex: checked.genesisRecordHex,
               membershipId,
+              history: checked.history,
             });
             return {
               signingPublicKey: identity.signingPublicKey,

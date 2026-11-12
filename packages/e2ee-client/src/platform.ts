@@ -174,6 +174,8 @@ export class PersonalHostPlatform extends Context.Service<
     >;
     /** Replacement requires actual quiescence of every owner of the old incarnation before its atomic switch. */
     drainOld?(binding: ClientCustodyBinding): Effect.Effect<void, unknown>;
+    /** Upper bound of each remote round held under a serial permit; see `boundedBy`. */
+    readonly deadlines?: import('./deadline').PersonalHostDeadlines;
   }
 >()('@lody/e2ee-client/Platform') {}
 

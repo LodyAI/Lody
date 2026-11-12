@@ -195,6 +195,36 @@ let failControl = false;
 let stagedGroup: EpochStagedGroup | null = null;
 let failStaging = false;
 let oldSession: typeof session;
+/** The runtime's retained offer after this device starts re-pairing with a new offer. */
+let runtimeRetained: PersonalPairingOffer | undefined;
+/** The installation binding before a replacement, to read its preserved originals. */
+let preservedBinding: import('@lody/e2ee-core/services').ClientCustodyBinding | undefined;
+let genuineCandidateHistory: string | null = null;
+/** Remote deadlines elapse only when a test expires them, never by wall-clock time. */
+const deadlineWaiters = new Set<() => void>();
+let deadlinesExpired = false;
+const deadlineSleep = () =>
+  Effect.callback<void>((resume) => {
+    const finish = () => resume(Effect.void);
+    if (deadlinesExpired) return finish();
+    deadlineWaiters.add(finish);
+    return Effect.sync(() => {
+      deadlineWaiters.delete(finish);
+    });
+  });
+/** A remote call that never answers until the network returns. `landed` appends first. */
+let hang: 'feed' | 'append' | 'append-landed' | 'exchange' | null = null;
+const signal = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => (resolve = done));
+  return { promise, resolve };
+};
+let hangEntered = signal();
+const hung = <A>(): Effect.Effect<A> =>
+  Effect.suspend(() => {
+    hangEntered.resolve();
+    return Effect.never;
+  });
 let otherSession: typeof session;
 let trackNextReader = false;
 /** The synthetic member relay: one waiting applicant at a time, plus a call log. */
@@ -588,6 +618,7 @@ export async function boot(
               const source = Layer.succeed(LedgerFeedSource, {
                 readAfter: (offset: string) =>
                   Effect.gen(function* () {
+                    if (hang === 'feed') return yield* hung<never>();
                     if (localStorage.getItem('synthetic-offline'))
                       return yield* new LedgerFeedError({ code: 'native-unavailable' });
                     const start = offset === '-1' ? 0 : Number(offset.split('/')[1]);
@@ -614,10 +645,12 @@ export async function boot(
                         retryAt: 3600000,
                       });
                     }
+                    if (hang === 'append') return yield* hung<never>();
                     if (expected.length !== records.length || !expected.head.equals(view().head))
                       return yield* new LedgerLogError({});
                     records.push(new Uint8Array(record));
                     retain();
+                    if (hang === 'append-landed') return yield* hung<never>();
                     if (loseNextAppendReply) {
                       // The record landed; only its reply is lost on the way back.
                       loseNextAppendReply = false;
@@ -827,6 +860,7 @@ export async function boot(
           },
         },
         drainOld: () => (session ? session.close() : Effect.void),
+        deadlines: { sleep: deadlineSleep },
       });
       const remote = PersonalHostRemote.of({
         accountId: recoveryAccount ?? 'account',
@@ -858,6 +892,7 @@ export async function boot(
           : {}),
         exchange: (request: PersonalExchange) =>
           Effect.gen(function* () {
+            if (hang === 'exchange') return yield* hung<never>();
             const prior = localStorage.getItem('request:' + request.pairingSessionId);
             if (prior && prior !== request.requestHex) throw new Error('changed request');
             localStorage.setItem('request:' + request.pairingSessionId, request.requestHex);
@@ -1311,6 +1346,159 @@ export async function invoke(action: string) {
               access: access.workspaceId === offer.workspaceId && access.credential.length === 64,
             };
           }
+          // The owner revokes the device this host currently opened.
+          case 'revokeOpened': {
+            const command = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: session!.binding.device,
+              })
+            );
+            records.push(yield* signLedgerRecord(command, owner));
+            retain();
+            return true;
+          }
+          case 'hangFeed':
+          case 'hangAppend':
+          case 'hangAppendLanded':
+          case 'hangExchange':
+            hangEntered = signal();
+            hang = (
+              {
+                hangFeed: 'feed',
+                hangAppend: 'append',
+                hangAppendLanded: 'append-landed',
+                hangExchange: 'exchange',
+              } as const
+            )[action as 'hangFeed' | 'hangAppend' | 'hangAppendLanded' | 'hangExchange'];
+            return true;
+          // Once the hung call is entered, its deadline elapses (now or when it registers).
+          case 'expireDeadlines':
+            yield* Effect.promise(() => hangEntered.promise);
+            deadlinesExpired = true;
+            for (const finish of deadlineWaiters) finish();
+            deadlineWaiters.clear();
+            return true;
+          case 'networkBack':
+            hang = null;
+            deadlinesExpired = false;
+            return true;
+          // How many signed records revoke the owner's device: one, never a second signature.
+          case 'ownerRevocations':
+            return records.filter((bytes) => {
+              const decoded = decodeRecord(bytes);
+              return (
+                Result.isSuccess(decoded) &&
+                decoded.success.body.type === 'ordinary' &&
+                decoded.success.body.operation.type === 'revokeDevice' &&
+                decoded.success.body.operation.target.equals(owner.publicKey)
+              );
+            }).length;
+          case 'rememberBinding': {
+            const current = yield* Context.get(baseContext, ClientInstallationStore).read();
+            preservedBinding = current!.binding;
+            return toHex(current!.binding.device.toBytes());
+          }
+          // The replaced identity's original request stays retained under its own binding.
+          case 'preservedOriginal': {
+            const row = yield* Context.get(baseContext, ClientPairingOriginalStore).load({
+              ...preservedBinding!,
+              pairingSessionId: offer.pairingSessionId,
+              purpose: 'request',
+            });
+            return row
+              ? (JSON.parse(new TextDecoder().decode(row.original)).requestHex as string)
+              : null;
+          }
+          case 'currentDevice': {
+            const current = yield* Context.get(baseContext, ClientInstallationStore).read();
+            return toHex(current!.binding.device.toBytes());
+          }
+          // A relay altering one byte of the admitting record in the candidate's history.
+          case 'forgeCandidateHistory': {
+            genuineCandidateHistory = localStorage.getItem('candidate-history');
+            const pages = JSON.parse(genuineCandidateHistory!);
+            const last: string = pages[0].recordsHex.at(-1);
+            pages[0].recordsHex[pages[0].recordsHex.length - 1] =
+              last.slice(0, -2) + (last.endsWith('00') ? '01' : '00');
+            localStorage.setItem('candidate-history', JSON.stringify(pages));
+            return true;
+          }
+          case 'restoreCandidateHistory':
+            localStorage.setItem('candidate-history', genuineCandidateHistory!);
+            return true;
+          // Account pairing again after revocation: the history decides a replacement.
+          case 'accountPrepareWithHistory':
+          case 'accountPrepareWithStaleHistory':
+          case 'accountPrepareWithForgedHistory': {
+            const shown =
+              action === 'accountPrepareWithStaleHistory' ? records.slice(0, -1) : [...records];
+            const recordsHex = shown.map(toHex);
+            if (action === 'accountPrepareWithForgedHistory')
+              recordsHex[recordsHex.length - 1] = recordsHex.at(-1)!.slice(0, -2) + 'ff';
+            return yield* host.prepareAccount({
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+              history: [
+                {
+                  workspaceId: offer.workspaceId,
+                  genesisHash: offer.genesisHash,
+                  checkpoint: {
+                    length: shown.length,
+                    headHash: toHex(hashRecordBytes(shown.at(-1)!).toBytes()),
+                  },
+                  startIndex: 0,
+                  recordsHex,
+                  position: 'opaque/' + shown.length,
+                  nextCursor: null,
+                },
+              ],
+            });
+          }
+          // The owner admits the prepared account replacement; this device installs it
+          // from the complete signed history.
+          case 'accountAdmitReplacement': {
+            const pin = {
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            };
+            const prepared = yield* host.prepareAccount(pin),
+              request = decodePersonalRequest(prepared.requestHex);
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'personal',
+                signingPublicKey: Result.getOrThrow(
+                  Bytes.signingPublicKey(fromHex(request.signingPublicKey))
+                ),
+                encryptionPublicKey: Result.getOrThrow(
+                  Bytes.encryptionPublicKey(fromHex(request.encryptionPublicKey))
+                ),
+                possessionSignature: Result.getOrThrow(
+                  Bytes.signature(fromHex(request.possessionSignature))
+                ),
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            yield* host.acceptAccountHistory({
+              ...pin,
+              pages: [
+                {
+                  workspaceId: offer.workspaceId,
+                  genesisHash: offer.genesisHash,
+                  checkpoint: { length: records.length, headHash: toHex(view().head.toBytes()) },
+                  startIndex: 0,
+                  recordsHex: records.map(toHex),
+                  position: 'opaque/' + records.length,
+                  nextCursor: null,
+                },
+              ],
+            });
+            return request.signingPublicKey;
+          }
+          case 'openedDevice':
+            return toHex(session!.binding.device.toBytes());
           case 'currentRequestForToken': {
             const p = yield* host.prepare(offer);
             localStorage.setItem('last-request', p.requestHex);
@@ -1782,7 +1970,7 @@ export async function bootRuntime(withSharing = false) {
             })
           )
         : runtimePorts,
-      retainedOffer: () => Effect.succeed(offer),
+      retainedOffer: () => Effect.sync(() => runtimeRetained ?? offer),
       account: () =>
         accountFailure
           ? Effect.failCause(accountFailure)
@@ -2027,6 +2215,22 @@ export async function runtimeInvoke(action: string) {
       case 'prepare':
         value = await runtime.preparePersonalJoin!(offer);
         break;
+      // Re-pairing this device from a new personal pairing offer.
+      case 'repairPrepare':
+        runtimeRetained = { ...offer, pairingSessionId: '22'.repeat(16) };
+        value = await runtime.preparePersonalJoin!(runtimeRetained);
+        break;
+      case 'repairForgedGenesis':
+        value = await runtime.preparePersonalJoin!({
+          ...offer,
+          genesisHash: 'ab'.repeat(32),
+          pairingSessionId: '44'.repeat(16),
+        });
+        break;
+      case 'repairClaim':
+        value = await runtime.claimPersonalJoin!(offer.workspaceId, '22'.repeat(16));
+        break;
+
       case 'claim':
         value = await runtime.claimPersonalJoin!(offer.workspaceId, offer.pairingSessionId);
         break;
@@ -2466,6 +2670,24 @@ export async function runtimeInvoke(action: string) {
           primary: await runtimeOpening,
           other: runtimeOtherOpen ? await runtimeOtherOpen : undefined,
         };
+        break;
+      case 'startRefresh':
+      case 'startRepairPrepare':
+      case 'startRevokeOwner':
+        runtimeWork = (
+          action === 'startRefresh'
+            ? runtime.refresh(offer.workspaceId)
+            : action === 'startRepairPrepare'
+              ? runtime.preparePersonalJoin!({ ...offer, pairingSessionId: '22'.repeat(16) })
+              : runtime.revokeDevice!(offer.workspaceId, toHex(owner.publicKey.toBytes()))
+        ).then(
+          (v) => ({ ok: true, value: v }),
+          (error) => ({ ok: false, reason: error.code ?? error.reason })
+        );
+        value = true;
+        break;
+      case 'revokeOwner':
+        value = await runtime.revokeDevice!(offer.workspaceId, toHex(owner.publicKey.toBytes()));
         break;
       case 'startReceive':
         runtimeWork = runtime.refresh(offer.workspaceId, { installKeys: true }).then(

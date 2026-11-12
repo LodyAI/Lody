@@ -380,7 +380,12 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
                 return yield* fail('conflict');
               if (sameBinding(binding, current.binding)) {
                 if (!settled && !approved) return yield* fail('conflict');
+                // The current identity's credential stays pinned to its own offer. A
+                // replacement gets a new device and credential bound to its own offer
+                // (a new approver, or a new membership after removal); scope and genesis
+                // were checked above, and only its own verified admission activates it.
                 if (
+                  !replacement &&
                   !endedMemberJoin &&
                   Object.keys(saved.offer).some(
                     (k) =>
