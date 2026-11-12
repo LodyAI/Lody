@@ -152,7 +152,7 @@ Control-page continuity checks use the genuine ledger view, including its verifi
 prefix hashes. Runtime exports merge retained approval originals with the local suffix;
 each absolute position is checked against the host's genuine view. When complete
 originals are available, the renderer replays them against the same exported head and
-state digest because retained-state serialization omits older hashes. Sparse exports
+state digest when an endorsed snapshot lacks older hashes. Sparse exports
 do not invent a prefix. Reset history position only clears renderer
 observations; it neither supplies missing proof nor removes the host's durable pin.
 
@@ -162,8 +162,10 @@ injected `LedgerFeedStore`, `LedgerPinStore`, `SubmissionJournal`, `LedgerLog`,
 use a separate submission slot per incarnation. Refresh is bounded and verifies
 every suffix before persisting its position. An installed full-history approval can
 reopen offline when the locally re-verified feed already contains its checkpoint.
-A valid older prefix must refresh; a conflicting prefix is rejected. No corrupt row
-is reset or rebased.
+A valid older prefix must refresh; a conflicting prefix is rejected. The feed receives
+both independent pins and the source so an old or corrupt cache can be rebuilt only
+after full replay proves its highest checkpoint. Identity, pins and pending journals
+are preserved; a cache reset never grants admission.
 
 Explicit `prepare(offer, true)` prepares a wrapped replacement candidate while the
 old pointer remains current. A second unresolved candidate is refused. Replacement

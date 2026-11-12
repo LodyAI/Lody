@@ -60,7 +60,7 @@ a personal/recovery path. Retired signing/encryption keys, member IDs, closed jo
 requests and epoch commitments remain replay facts. Legacy tag 2 removal is rejected:
 independent removal uses capability-gated tag 10, while [P12](../../../README.md) retains the tag8 transition.
 Tag 9 declares capabilities: Owner/Admin personal devices list strictly ascending
-nonzero u32 codes, monotonically. Capability 1 enables tag10 `[10, membershipId]`: Owner may remove any non-Owner; Admin may remove only Member/Guest. Removal drops all current devices, retains retired identities and authors, preserves the epoch and sets advisory rotationRequired. Unknown genuine declarations end verification with `upgrade-required`. Declared capabilities are monotonic and preserved by snapshot/retained state v4. The v1 arrays and domains above become permanent at the
+nonzero u32 codes, monotonically. Capability 1 enables tag10 `[10, membershipId]`: Owner may remove any non-Owner; Admin may remove only Member/Guest. Removal drops all current devices, retains retired identities and authors, preserves the epoch and sets advisory rotationRequired. Unknown genuine declarations end verification with `upgrade-required`. Declared capabilities are monotonic and preserved by snapshot v4 and local retained state v5. The v1 arrays and domains above become permanent at the
 first production creation; see the
 [frozen vector](../../../test/ledger-v1-vector.json) and
 [format compatibility](../../../../../specs/e2ee-foundations.md#format-compatibility).

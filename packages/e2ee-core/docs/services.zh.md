@@ -185,6 +185,8 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 
 `LedgerFeedStore.rebase` 比对完整的预期末尾，在同一事务内替换起点和长度、删除
 已覆盖记录，并写入和读回核对新末尾。末尾不符返回 conflict，不修改数据。
+可选的 `rebuild` 在工作流独立重放并证明最高检查点后，以同样的原子方式替换
+缓存；它不修改 pin 或其他日志。
 
 ## 浏览器曲线适配
 

@@ -281,7 +281,9 @@ Lab.
 
 `LedgerFeedStore.rebase` CAS-checks the entire expected tail, replaces the origin
 and its count, removes covered records, and writes/read-checks the new tail in
-one transaction. A stale tail returns conflict without mutation.
+one transaction. A stale tail returns conflict without mutation. Optional `rebuild`
+uses the same atomic replacement after the workflow has independently replayed the
+highest retained checkpoint; it never modifies pins or other journals.
 
 ## Browser ledger and original stores
 

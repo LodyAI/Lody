@@ -4,14 +4,28 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { Effect, Result, type Scope } from 'effect';
+import { Effect, Layer, Result, type Scope } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bytes } from '@lody/e2ee-core/protocol';
 import {
   signLedgerSnapshot,
+  encodeSignedSnapshot,
+  exportVerifiedState,
+  hashRecordBytes,
+  snapshotSigningBytes,
   snapshotTrustFromView,
   type SnapshotTrust,
 } from '@lody/e2ee-core/protocol';
+import { LedgerFeed, type LedgerFeedOrigin } from '@lody/e2ee-core';
+import { LedgerFeedStore, WorkspaceScope } from '@lody/e2ee-core/services';
+import { sqliteLedgerFeedStore } from '@lody/e2ee-core/adapters/node-sqlite';
+import {
+  decodeSnapshotCbor,
+  encodeSnapshotCbor,
+  decodeRetainedCbor,
+  encodeRetainedCbor,
+  type CborValue,
+} from '../src/internal/foundation/cbor';
 import {
   makeSqliteSnapshotLedgerFeed,
   type SqliteSnapshotLedgerFeedInput,
@@ -67,6 +81,125 @@ function rows(db: Database.Database) {
 }
 
 describe('independently qualified snapshot origin with durable exact suffix', () => {
+  it.each(['snapshot', 'retained'] as const)(
+    'reports upgrade-required when a %s origin declares an unknown capability',
+    async (kind) => {
+      const f = await fixture();
+      try {
+        const config = f.input();
+        const saved = ok(exportVerifiedState(f.view));
+        const root = ok(
+          kind === 'snapshot'
+            ? decodeSnapshotCbor(f.signed.snapshot)
+            : decodeRetainedCbor(saved.bytes)
+        ) as CborValue[];
+        const body = kind === 'snapshot' ? (root[0] as CborValue[]) : root;
+        const state = body[kind === 'snapshot' ? 5 : 4] as CborValue[];
+        state[7] = [1, 2];
+        const bodyBytes = ok(encodeSnapshotCbor(body));
+        const bytes =
+          kind === 'snapshot'
+            ? ok(
+                encodeSignedSnapshot(
+                  bodyBytes,
+                  ok(Bytes.signature(f.f.owner.signBytes(snapshotSigningBytes(bodyBytes))))
+                )
+              )
+            : ok(encodeRetainedCbor(root));
+        const origin =
+          kind === 'snapshot'
+            ? { kind, snapshot: { ...config.snapshot, bytes } }
+            : {
+                kind,
+                state: { ...saved, bytes },
+                offset: config.snapshot.offset,
+              };
+        const result = await run(
+          Effect.result(
+            Layer.build(
+              LedgerFeed.layer({ origin, expected: config.expected, budget: config.budget }).pipe(
+                Layer.provide(sqliteLedgerFeedStore({ path: config.path, mode: 'create' })),
+                Layer.provide(Layer.succeed(WorkspaceScope, { genesis: config.genesis }))
+              )
+            )
+          )
+        );
+        expect(Result.isFailure(result)).toBe(true);
+        if (Result.isFailure(result))
+          expect(result.failure).toMatchObject({
+            _tag: 'LedgerFeedError',
+            code: 'upgrade-required',
+          });
+      } finally {
+        rmSync(f.dir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['genesis', 'snapshot', 'retained'] as const)(
+    'preserves upgrade-required when reopening a %s feed with a newer stored suffix',
+    async (kind) => {
+      const f = await fixture();
+      try {
+        const config = f.input();
+        const saved = ok(exportVerifiedState(f.view));
+        const origin: LedgerFeedOrigin =
+          kind === 'genesis'
+            ? { kind, record: f.f.genesisRecord }
+            : kind === 'snapshot'
+              ? { kind, snapshot: config.snapshot }
+              : { kind, state: saved, offset: config.snapshot.offset };
+        const bytes =
+          kind === 'genesis'
+            ? f.f.genesisRecord
+            : kind === 'snapshot'
+              ? f.signed.snapshot
+              : saved.bytes;
+        const count = kind === 'genesis' ? 1 : f.view.length;
+        f.f.append([9, [1, 2]]);
+        const records = f.f.records().slice(count);
+        const expected = {
+          head: hashRecordBytes(records[records.length - 1]!),
+          length: count + records.length,
+        };
+        const result = await run(
+          Effect.gen(function* () {
+            const store = yield* LedgerFeedStore;
+            const tail = {
+              head: kind === 'genesis' ? config.genesis.toBytes() : f.view.head.toBytes(),
+              count,
+              offset: kind === 'genesis' ? '-1' : config.snapshot.offset,
+              bootstrap: kind === 'genesis',
+              bytes: bytes.length,
+            };
+            yield* store.initialize(bytes, count, tail);
+            yield* store.append(tail, records, {
+              head: expected.head.toBytes(),
+              count: expected.length,
+              offset: 'opaque/newer',
+              bootstrap: false,
+              bytes: bytes.length + records.reduce((sum, record) => sum + record.length, 0),
+            });
+            return yield* Effect.result(
+              Layer.build(LedgerFeed.layer({ origin, expected, budget: config.budget }))
+            );
+          }).pipe(
+            Effect.provide(sqliteLedgerFeedStore({ path: config.path, mode: 'create' })),
+            Effect.provideService(WorkspaceScope, { genesis: config.genesis })
+          )
+        );
+        expect(Result.isFailure(result)).toBe(true);
+        if (Result.isFailure(result))
+          expect(result.failure).toMatchObject({
+            _tag: 'LedgerFeedError',
+            code: 'upgrade-required',
+          });
+      } finally {
+        rmSync(f.dir, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('extends without the genesis prefix, persists originals and reverifies in another OS process', async () => {
     const f = await fixture(),
       config = f.input();

@@ -109,9 +109,11 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
           budget: { maxRecords: 16384, maxBytes: 32 * 1024 * 1024 },
         }).pipe(
           Layer.provide(
-            Layer.merge(
+            Layer.mergeAll(
               Layer.succeed(WorkspaceScope, { genesis }),
-              Layer.succeed(LedgerFeedStore, store)
+              Layer.succeed(LedgerFeedStore, store),
+              Layer.succeed(LedgerFeedSource, source),
+              Layer.succeed(LedgerPinStore, pins)
             )
           )
         )

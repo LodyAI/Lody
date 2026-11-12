@@ -868,6 +868,63 @@ for (const installation of ['member', 'personal-history', 'personal-snapshot']) 
     )
   })
 }
+for (const fault of ['feed', 'origin']) {
+  void test(`accepted ledger progress survives auxiliary ${fault} compaction failure`, async (t) => {
+    const directory = await fixture(t),
+      warnings = []
+    t.mock.method(console, 'warn', (...args) => {
+      warnings.push(args)
+    })
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory),
+          prepared = yield* bind(owner)
+        const records = yield* makeRecords(owner.custody, prepared, 71)
+        yield* owner.host.open(workspaceId)
+        const workspace = join(directory, 'workspaces', workspaceId)
+        const history = new DatabaseSync(join(workspace, 'history.sqlite'))
+        const feed = new DatabaseSync(
+          join(workspace, history.prepare('SELECT name FROM cache WHERE id=1').get().name)
+        )
+        const db = fault === 'feed' ? feed : history
+        db.exec(
+          `CREATE TRIGGER fail_compaction BEFORE UPDATE OF origin ON ${fault === 'feed' ? 'feed_meta' : 'cache'} BEGIN SELECT RAISE(ABORT,'synthetic auxiliary failure'); END`
+        )
+        try {
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 0, 64)
+          )
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 64, 70)
+          )
+          assert.equal((yield* owner.host.status(workspaceId)).length, 70)
+          assert.equal(history.prepare('SELECT COUNT(*) AS n FROM records').get().n, 70)
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 70)
+          )
+          assert.equal((yield* owner.host.status(workspaceId)).length, 71)
+          assert.deepEqual(warnings, [
+            ['[E2EE] Ledger compaction pending', { code: 'e2ee_ledger_compaction_pending' }]
+          ])
+        } finally {
+          db.exec('DROP TRIGGER fail_compaction')
+          feed.close()
+          history.close()
+        }
+      })
+    )
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        assert.equal((yield* owner.host.open(workspaceId)).length, 71)
+      })
+    )
+  })
+}
+
 void test('binding is immutable, retained reopen asks only for a suffix, and corrupted cache recovers locally', async (t) => {
   const directory = await fixture(t)
   let saved

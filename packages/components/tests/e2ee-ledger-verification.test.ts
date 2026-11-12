@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { Effect, Result } from 'effect';
 import {
   signLedgerSnapshot,
-  snapshotTrustFromView,
   verifyLedgerSnapshot,
   exportVerifiedState,
   hasVerifiedCheckpoint,
@@ -120,19 +119,33 @@ describe('ledger verification code', () => {
 });
 
 it('displays genuine snapshot state with sparse absolute records without inventing a prefix or losing its safety code', async () => {
-  const fixture = envelopeFixture(),
-    origin = fixture.view();
+  const fixture = envelopeFixture();
+  fixture.append([9, [1]]);
+  const origin = fixture.view();
   const signed = await Effect.runPromise(
     signLedgerSnapshot({ signer: fixture.owner.signer, ledger: () => Effect.succeed(origin) })
   );
-  const trust = Result.getOrThrow(
-    snapshotTrustFromView(origin, fixture.owner.publicKey, signed.headSignature)
+  const snapshot = Result.getOrThrow(
+    verifyLedgerSnapshot({
+      snapshot: signed.snapshot,
+      trust: {
+        source: 'external-confirmation',
+        genesis: origin.genesis,
+        head: origin.head,
+        length: origin.length,
+        endorser: fixture.owner.publicKey,
+        membershipId: origin.inspectState().owner,
+        role: 'owner',
+        kind: 'personal',
+        headSignature: signed.headSignature,
+      },
+    })
   );
-  const snapshot = Result.getOrThrow(verifyLedgerSnapshot({ snapshot: signed.snapshot, trust }));
+  expect(snapshot.verification).toBe('endorsed-snapshot');
   fixture.append([5, fixture.phone.raw]);
-  const suffix = fixture.records()[2]!;
+  const suffix = fixture.records()[3]!;
   const view = Result.getOrThrow(
-    extendLedger(snapshot, [suffix], { head: hashRecordBytes(suffix), length: 3 })
+    extendLedger(snapshot, [suffix], { head: hashRecordBytes(suffix), length: 4 })
   );
   const retained = Result.getOrThrow(exportVerifiedState(view));
   const state = view.inspectState();
@@ -152,20 +165,27 @@ it('displays genuine snapshot state with sparse absolute records without inventi
     },
     stateHex: bytesToHex(retained.bytes),
     recordsHex: [bytesToHex(fixture.genesisRecord), bytesToHex(suffix)],
-    recordPositions: [0, 2],
+    recordPositions: [0, 3],
   };
   const loaded = hostLedgerHistory(received);
-  expect(loaded.records.map((record) => record.index)).toEqual([0, 2]);
+  expect(loaded.records.map((record) => record.index)).toEqual([0, 3]);
   const comparison = ledgerVerificationCode(loaded);
   expect(comparison.headHash).toBe(bytesToHex(view.head.toBytes()));
-  expect(compareVerificationCode(loaded, comparison)).toEqual({ kind: 'match', version: 3 });
+  expect(compareVerificationCode(loaded, comparison)).toEqual({ kind: 'match', version: 4 });
   expect(
     compareVerificationCode(loaded, {
       version: 2,
-      headHash: bytesToHex(origin.head.toBytes()),
+      headHash: bytesToHex(hashRecordBytes(fixture.records()[1]!).toBytes()),
       stateDigest: '00'.repeat(32),
     })
   ).toEqual({ kind: 'theirs-older', version: 2, prefixConfirmed: false });
+  expect(
+    compareVerificationCode(loaded, {
+      version: 3,
+      headHash: bytesToHex(origin.head.toBytes()),
+      stateDigest: '00'.repeat(32),
+    })
+  ).toEqual({ kind: 'theirs-older', version: 3, prefixConfirmed: true });
   expect(
     compareVerificationCode(loaded, {
       version: 1,

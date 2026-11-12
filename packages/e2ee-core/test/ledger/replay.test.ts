@@ -1267,7 +1267,7 @@ describe('authenticated snapshot migration reproduction', () => {
     ).toBe('bad-signature');
     // Validly signed bodies of another version (1 was the pre-compact layout) are rejected.
     expect((ok(decodeSnapshotCbor(data.proposal.bodyBytes)) as CborValue[])[0]).toBe(4);
-    for (const version of [1, 2, 3, 5])
+    for (const version of [1, 2, 3, 6])
       expect(
         code(
           Snapshots.verifyLedgerSnapshot(
@@ -2222,7 +2222,7 @@ describe('retained verified state', () => {
     for (let length = 1; length < o.records.length; length++) {
       const saved = ok(Ledger.exportVerifiedState(prefix(o, length)));
       const restored = ok(Ledger.restoreVerifiedState(saved));
-      expect(restored).toMatchObject({ length, historyStart: length - 1 });
+      expect(restored).toMatchObject({ length, historyStart: 0 });
       expect(restored.verification).toBe('full-history');
       const extended = ok(
         Ledger.extendLedger(restored, o.records.slice(length), checkpoint(o.records))
@@ -2278,9 +2278,9 @@ describe('retained verified state', () => {
       code(Ledger.restoreVerifiedState({ ...saved, bytes: saved.bytes.subarray(0, 40) }))
     ).not.toBe('accepted');
     // Current-only: a row written before version 2 (or by a newer client) is rebuilt by full replay.
-    for (const version of [1, 2, 3, 5]) {
+    for (const version of [1, 2, 3, 6]) {
       const stale = new Uint8Array(saved.bytes);
-      expect(stale[1]).toBe(4);
+      expect(stale[1]).toBe(5);
       stale[1] = version;
       expect(code(Ledger.restoreVerifiedState({ ...saved, bytes: stale }))).toBe('unknown-version');
     }
@@ -2302,8 +2302,9 @@ describe('retained verified state', () => {
     );
     // Flipping the provenance byte keeps the bytes decodable but leaves the
     // digest unchanged (provenance is not part of it); a byte inside S does not.
-    const provenance = new Uint8Array(saved.bytes);
-    provenance[provenance.length - 1] = 1;
+    const root = ok(decodeRetainedCbor(saved.bytes)) as CborValue[];
+    root[5] = 1;
+    const provenance = ok(encodeRetainedCbor(root));
     expect(ok(Ledger.restoreVerifiedState({ ...saved, bytes: provenance })).verification).toBe(
       'endorsed-snapshot'
     );
@@ -2313,7 +2314,7 @@ describe('retained verified state', () => {
     );
   });
 
-  it('keeps every author and reports the publications it does not retain as unavailable', () => {
+  it('keeps every author and original epoch publication for pending workflows', () => {
     const o = history(),
       full = ok(o.verify()),
       restored = ok(Ledger.restoreVerifiedState(ok(Ledger.exportVerifiedState(full))));
@@ -2322,7 +2323,9 @@ describe('retained verified state', () => {
         ok(Snapshots.historicalContentIdentity(full, publicKey(key)))
       );
     expect(code(Ledger.epochPublicationRecord(full, 2))).toBe('accepted');
-    expect(code(Ledger.epochPublicationRecord(restored, 2))).toBe('unauthorized');
+    expect(ok(Ledger.epochPublicationRecord(restored, 2))).toEqual(
+      ok(Ledger.epochPublicationRecord(full, 2))
+    );
     expect(ok(Ledger.epochHistoryPacket(restored, 2)).packet).toEqual(filled(32, 72));
   });
 });
@@ -2601,11 +2604,11 @@ describe('compact authorization state', () => {
       );
       expect(authors(extended)).toEqual(authors(after));
     }
-    // Only provenance differs between sources: the last byte of the retained envelope.
-    const fromFull = exported(views.full).bytes,
-      fromSnapshot = exported(views.snapshot).bytes;
-    expect(fromSnapshot.subarray(0, -1)).toEqual(fromFull.subarray(0, -1));
-    expect([fromFull.at(-1), fromSnapshot.at(-1)]).toEqual([0, 1]);
+    // Authorization and remote digests agree; local evidence stays source-specific.
+    const fromFull = ok(decodeRetainedCbor(exported(views.full).bytes)) as CborValue[],
+      fromSnapshot = ok(decodeRetainedCbor(exported(views.snapshot).bytes)) as CborValue[];
+    expect(fromSnapshot.slice(0, 5)).toEqual(fromFull.slice(0, 5));
+    expect([fromFull[5], fromSnapshot[5]]).toEqual([0, 1]);
   });
 
   it('keeps provenance, verified hashes and publications source-specific', () => {
@@ -2621,12 +2624,13 @@ describe('compact authorization state', () => {
     expect([full.historyStart, snapshot.historyStart, retained.historyStart]).toEqual([
       0,
       full.length - 1,
-      full.length - 1,
+      0,
     ]);
     expect(ok(Ledger.hasVerifiedRecordHash(full, older))).toBe(true);
-    expect(ok(Ledger.hasVerifiedRecordHash(retained, older))).toBe(false);
+    expect(ok(Ledger.hasVerifiedRecordHash(retained, older))).toBe(true);
     expect(code(Ledger.epochPublicationRecord(full, 4))).toBe('accepted');
-    for (const view of [snapshot, retained])
+    expect(code(Ledger.epochPublicationRecord(retained, 4))).toBe('accepted');
+    for (const view of [snapshot])
       expect(code(Ledger.epochPublicationRecord(view, 4))).toBe('unauthorized');
   });
 

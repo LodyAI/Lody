@@ -303,20 +303,33 @@ failures propagate.
 
 ### Retained feed origin
 
-A retained origin contains this caller's full exported v2 state and the source
-`offset` immediately after it. Restore preserves full-history versus endorsed-snapshot
-provenance. Corruption, unknown versions or another genesis return `retained-cache-invalid`:
-rebuild that optional cache from independently verified originals. A cache longer than
-its pin is also invalid. Equal lengths require equal heads. If the pin is ahead, provide
-`LedgerFeedSource`; opening verifies the suffix and proves the hash at the pin before
-persisting any catch-up. A missing or conflicting proof is `local-evidence-conflict`,
-never permission to reset the pin.
+A retained origin contains this caller's local v5 export and source `offset`.
+It preserves provenance, every verified hash already held by that view, and original
+epoch publications as a length-delimited binary table, without the CBOR array count limit.
+The retained codec and feed adapters share a 64 MiB ceiling; each feed still enforces
+its configured byte budget. Rebase therefore cannot discard anchors used by pending submissions,
+candidates or installations. These retained facts remain bounded by the feed byte budget;
+capacity failure preserves the existing cache and journals. Remote snapshots and comparison
+digests remain v4, byte-for-byte unchanged. Snapshot imports invent no older hashes or
+publications: current keys can arrive through the ordinary authenticated mailbox, and
+later ledger publications enable staging discovery normally.
 
-After at least 64 additional records, call `rebase()` with the same `VerifiedLedger`
-used by the runtime. It first advances the pin, then CAS-replaces the origin and removes
-covered feed rows in one store transaction. Save the returned origin for next open.
-Keep original history separately if the UI needs it. An interrupted compaction must
-rebuild from originals or read a suffix to prove the existing pin; never lower it.
+Call `rebase()` with the runtime's `VerifiedLedger` after at least 64 additional records.
+It advances the monotonic rollback pin first, then atomically replaces origin, covered
+rows and position in `LedgerFeedStore`. Reopen discovers that committed local origin,
+including when the process died before the returned origin was saved separately.
+A newer cache must contain the independently retained pin; equal positions require equal heads.
+
+Provide `LedgerPinStore` and `LedgerFeedSource` on opening to enable bounded recovery.
+For a corrupt or old-format cache, SQLite and IndexedDB implement `rebuild`: first replay
+original records from genesis and prove both the highest stored tail and independent pin,
+then CAS-replace only the feed cache in one transaction. Interrupted writes leave the
+previous cache intact. Pins and workflow journals are never cleared. Missing history,
+network/storage failure or conflicting evidence leaves recovery unsuccessful and retryable;
+it does not authorize a lower checkpoint. Invalid genesis/snapshot origins and protocol-upgrade or native-verification failures
+are returned directly, without network repair. A valid genesis-origin cache behind its
+independent pin also catches up through the source. Custom stores without `rebuild` return
+`retained-cache-invalid` for an unusable cache.
 
 `InstalledEpochKeys.check(epoch)` verifies a stored key's current eligibility and
 commitment, disposing its temporary material instead of returning a secret to a status reader.

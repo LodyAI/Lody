@@ -112,6 +112,13 @@ export const sqliteLedgerPinStore = (options: SqliteFileOptions) =>
           sql(() =>
             db
               .transaction(() => {
+                const before = decode();
+                if (
+                  before &&
+                  (checkpoint.length < before.length ||
+                    (checkpoint.length === before.length && !checkpoint.head.equals(before.head)))
+                )
+                  throw fail('conflict');
                 if (
                   db
                     .prepare('UPDATE ledger_pin SET head=?,count=? WHERE id=1')

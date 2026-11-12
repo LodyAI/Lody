@@ -30,8 +30,8 @@
   Members share 20 durable reservations across restart/reset; Owners remain unbounded
   ([derivation](../../../../../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)).
   Origins bind signatures to content ([intent](../../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
-- Journal originals before feed/pin; rebase core pin first after 64 records.
-  Retired cache cleanup must fail closed.
+- Retain originals before feed/pin. Pin before compaction, attempted every
+  64 records; its failures only warn. Retired cache cleanup must fail closed.
 - Iroh and Streams receivers share journal claims and live write completions, registered before
   invocation. Only ownerless uncertain writes return errors; see [iroh rules](../../../../../packages/iroh-native/AGENTS.md).
 - Follow [Schedule rules](../schedules/AGENTS.md).

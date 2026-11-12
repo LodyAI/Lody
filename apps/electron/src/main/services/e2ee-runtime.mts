@@ -1480,14 +1480,25 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             minimumPin = { head: view.head, length: view.length }
           }
           if (!pending((yield* feed.current()).view) && length - compactedAt >= 64) {
-            const origin = yield* feed
-              .rebase()
-              .pipe(Effect.provideService(VerifiedLedger, verified))
-            yield* sql(() =>
-              db
-                .prepare('UPDATE cache SET origin=? WHERE id=1')
-                .run(JSON.stringify(savedOrigin(origin.state, origin.offset)))
+            const compacted = yield* Effect.result(
+              Effect.gen(function* () {
+                const origin = yield* feed
+                  .rebase()
+                  .pipe(Effect.provideService(VerifiedLedger, verified))
+                yield* sql(() =>
+                  db
+                    .prepare('UPDATE cache SET origin=? WHERE id=1')
+                    .run(JSON.stringify(savedOrigin(origin.state, origin.offset)))
+                )
+              })
             )
+            if (Result.isFailure(compacted)) {
+              yield* Effect.sync(() =>
+                console.warn('[E2EE] Ledger compaction pending', {
+                  code: 'e2ee_ledger_compaction_pending'
+                })
+              ).pipe(Effect.ignoreCause)
+            }
             compactedAt = length
           }
           return yield* status()
