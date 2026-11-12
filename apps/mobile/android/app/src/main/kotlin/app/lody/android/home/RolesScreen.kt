@@ -203,7 +203,10 @@ private fun RoleEditor(
             }
             SettingsGroup(stringResource(R.string.roles_target)) {
                 if (base == null) {
-                    SettingsLine(target?.name ?: stringResource(R.string.roles_agent), LodyIcons.Agent, target?.machineName, onClick = { picker = "target" }.takeIf { editable },
+                    // New chat's order: the computer first, then one of its Agent configs.
+                    SettingsLine(target?.machineName ?: stringResource(R.string.create_pick_machine), LodyIcons.Machine,
+                        onClick = { picker = "machine" }.takeIf { editable })
+                    SettingsLine(target?.name ?: stringResource(R.string.roles_agent), LodyIcons.Agent, onClick = { picker = "target" }.takeIf { editable && target != null },
                         leading = { AgentMark(target?.cliType ?: "builtin", target?.agentType ?: "", LodyTheme.colors.textPrimary, Modifier.size(LodyIconSize.lg)) })
                 } else base.targets.forEach { item ->
                     SettingsLine(item.agentName, LodyIcons.Machine, if (item.state == "configured") item.machineName else "${item.machineName} · ${roleState(item.state)}")
@@ -237,15 +240,26 @@ private fun RoleEditor(
             }
             Spacer(Modifier.height(LodySpacing.xxl))
         }
+        "machine" -> ModalBottomSheet(onDismissRequest = { picker = null }, containerColor = LodyTheme.colors.bgBase) {
+            LazyColumn {
+                item { SettingsHeading(stringResource(R.string.create_pick_machine)) }
+                // Computers that offer at least one Agent config, in the listing's order.
+                items(agents.distinctBy { it.machineId }, key = { it.machineId }) { first ->
+                    SettingsLine(first.machineName, LodyIcons.Machine, onClick = {
+                        if (first.machineId != target?.machineId) target = first
+                        picker = null
+                    }, trailing = { if (first.machineId == target?.machineId) Icon(LodyIcons.Check, null, tint = LodyTheme.colors.accentFg) })
+                }
+            }
+            Spacer(Modifier.height(LodySpacing.xxl))
+        }
         "target" -> ModalBottomSheet(onDismissRequest = { picker = null }, containerColor = LodyTheme.colors.bgBase) {
             LazyColumn {
-                agents.groupBy { it.machineId }.forEach { (_, group) ->
-                    item { SettingsHeading(group.first().machineName) }
-                    items(group, key = { "${it.machineId}:${it.id}" }) { agent ->
-                        SettingsLine(agent.name, LodyIcons.Agent, onClick = { target = agent; picker = null },
-                            leading = { AgentMark(agent.cliType ?: "builtin", agent.agentType ?: "", LodyTheme.colors.textPrimary, Modifier.size(LodyIconSize.lg)) },
-                            trailing = { if (agent == target) Icon(LodyIcons.Check, null, tint = LodyTheme.colors.accentFg) })
-                    }
+                item { SettingsHeading(target?.machineName.orEmpty()) }
+                items(agents.filter { it.machineId == target?.machineId }, key = { "${it.machineId}:${it.id}" }) { agent ->
+                    SettingsLine(agent.name, LodyIcons.Agent, onClick = { target = agent; picker = null },
+                        leading = { AgentMark(agent.cliType ?: "builtin", agent.agentType ?: "", LodyTheme.colors.textPrimary, Modifier.size(LodyIconSize.lg)) },
+                        trailing = { if (agent == target) Icon(LodyIcons.Check, null, tint = LodyTheme.colors.accentFg) })
                 }
             }
             Spacer(Modifier.height(LodySpacing.xxl))
