@@ -53,3 +53,66 @@ void test('persists caught and uncaught post-mount render errors without replaci
   ])
   assert.deepEqual(harness.bootFailures, [])
 })
+
+void test('recovery reload awaits IPC rejection and falls back to document reload', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { runInNewContext } = await import('node:vm')
+  const { createRequire } = await import('node:module')
+  const require = createRequire(import.meta.url)
+  const ts = require('typescript')
+  const source = await readFile(new URL('./recovery-entry.ts', import.meta.url), 'utf8')
+  for (const mode of ['rejected', 'unavailable', 'accepted']) {
+    let options
+    let page = 'recovery'
+    const deps = {
+      '@lody/components/lib/boot-failure': {
+        renderBootFailure: (_root, _error, value) => {
+          options = value
+        }
+      },
+      '@lody/components/lib/electron-ipc-client': {
+        getIpcServices: () =>
+          mode === 'unavailable'
+            ? null
+            : {
+                app: {
+                  requestRendererReload: async () => {
+                    if (mode === 'rejected') throw new Error('IPC refused')
+                    page = 'product'
+                  },
+                  reportRendererFatalError: async () => {
+                    throw new Error('report refused')
+                  }
+                }
+              }
+      }
+    }
+    runInNewContext(
+      ts.transpileModule(source, {
+        compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
+      }).outputText,
+      {
+        exports: {},
+        URLSearchParams,
+        document: { getElementById: () => ({}) },
+        window: {
+          location: {
+            hash: '#source=did-fail-load',
+            reload: () => {
+              page = 'document-reloaded'
+            }
+          }
+        },
+        console: { warn() {} },
+        require: (id) => {
+          if (!(id in deps)) throw new Error(id)
+          return deps[id]
+        }
+      }
+    )
+    await options.onReload()
+    assert.equal(page, mode === 'accepted' ? 'product' : 'document-reloaded')
+    // Report rejection is observed rather than becoming an unhandled rejection.
+    await options.onCopy()
+  }
+})

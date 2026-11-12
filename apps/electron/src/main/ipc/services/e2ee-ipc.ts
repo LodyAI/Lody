@@ -1,3 +1,4 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import {
   id as sharingId,
   generation as sharingGeneration,
@@ -17,7 +18,7 @@ import {
 } from '../../services/e2ee-cloud-errors.mjs'
 import { Effect, Exit } from 'effect'
 import { z } from 'zod'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import type { E2eeWorkspaceRuntime } from '@lody/platform'
 import type { RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { isLocalPlatform } from '../../platform'
@@ -342,7 +343,7 @@ const keyDeliveryView = (requestId: string, delivery: MemberKeyDelivery) => ({
   ...(delivery.state === 'failed' && delivery.code ? { code: delivery.code } : {})
 })
 /** Explicit operations only: no arbitrary signing, secret export or unbound identity generation. */
-export class E2eeIpc extends IpcService {
+export class E2eeIpc extends ProductWindowIpcService {
   static override readonly groupName = 'e2ee'
   // The decorator logs rejected errors. Retain only the latest local diagnostic
   // here, never on the cause-bearing Error passed to that logging/IPC boundary.

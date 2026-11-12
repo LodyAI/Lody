@@ -1,22 +1,19 @@
-import { BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron'
+import { isTrustedProductRendererUrl } from './product-renderer-url'
 import { productWindows } from '../window-state'
 
-export function assertProductWindowSender(event: IpcMainInvokeEvent): void {
+export function assertProductWindowSender(
+  event: IpcMainInvokeEvent | IpcMainEvent,
+  channel?: string
+): void {
   const mainWindow = BrowserWindow.fromWebContents(event.sender)
   const registered = mainWindow && productWindows.has(mainWindow)
-  const senderUrl = event.senderFrame?.url
-  const devRendererUrl = process.env['ELECTRON_RENDERER_URL']
-  let hasAllowedUrl = false
-  try {
-    const parsedSender = new URL(senderUrl ?? '')
-    hasAllowedUrl = devRendererUrl
-      ? parsedSender.origin === new URL(devRendererUrl).origin
-      : parsedSender.protocol === 'file:' &&
-        (parsedSender.pathname.endsWith('/out/renderer/index.html') ||
-          parsedSender.pathname.endsWith('/out/renderer/devbar.html'))
-  } catch {
-    hasAllowedUrl = false
-  }
+  const hasAllowedUrl = isTrustedProductRendererUrl(event.senderFrame?.url, {
+    mainDirectory: __dirname,
+    platform: process.platform,
+    devRendererUrl: process.env['ELECTRON_RENDERER_URL'],
+    channel
+  })
 
   if (
     !registered ||

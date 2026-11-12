@@ -49,3 +49,21 @@ export async function launchCommandPathWithFallback(
 
   return lastResult
 }
+
+/** Keep native executable and protocol candidates when cmd.exe cannot safely carry the path. */
+export function selectSafePathLauncherInput(
+  input: LaunchLocalPathInput,
+  platform: string,
+  usesShell: (command: string) => boolean
+): LaunchLocalPathInput | null {
+  if (platform !== 'win32' || input.kind === 'url' || !/[&|<>^%!"\r\n]/u.test(input.targetPath))
+    return input
+  const candidates = [input.command, ...(input.fallbackCommands ?? [])].filter(
+    (candidate) => !usesShell(candidate.command)
+  )
+  if (candidates.length)
+    return { ...input, command: candidates[0]!, fallbackCommands: candidates.slice(1) }
+  if (input.fallbackUrl)
+    return { kind: 'url', url: input.fallbackUrl, targetPath: input.targetPath, label: input.label }
+  return null
+}

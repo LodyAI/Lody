@@ -1,8 +1,9 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { app, BrowserWindow, dialog, type OpenDialogOptions } from 'electron'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import type {
   SendSessionFileLocalInput,
   SendSessionFileLocalResult
@@ -102,7 +103,7 @@ function isLocalProjectHistoryProvider(value: unknown): value is LocalProjectHis
   return LocalProjectHistoryProviderSchema.safeParse(value).success
 }
 
-export class LocalProjectsIpc extends IpcService {
+export class LocalProjectsIpc extends ProductWindowIpcService {
   static override readonly groupName = 'localProjects'
 
   @IpcMethod()

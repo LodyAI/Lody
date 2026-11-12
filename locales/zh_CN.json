@@ -6612,6 +6612,8 @@
   "settings.machines.batchUpdate.confirmImmediate": "{{count}} 个正在运行的对话会被中断，更新后可以在每个对话里点“继续”。",
   "settings.machines.batchUpdate.confirmInterrupt": "中断并更新",
   "settings.machines.batchUpdate.start": "更新 {{count}} 台机器",
+  "desktop.pathLauncher.approve": "允许此自定义启动器运行命令吗？",
+  "desktop.pathLauncher.allow": "允许启动器",
   "settings.integrations.github.installErrors.authorizationRequired": "请先授权你的个人 GitHub 账号，再连接 GitHub App。这不会更改“以你的身份操作”偏好。",
   "settings.integrations.github.installErrors.temporarilyUnavailable": "暂时无法连接 GitHub。请重试同一次安装。",
   "settings.integrations.github.installErrors.installationNotVisible": "你的 GitHub 账号无法访问此安装。请检查账号和仓库访问权限后重试。",
