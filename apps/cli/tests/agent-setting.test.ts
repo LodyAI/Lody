@@ -618,6 +618,49 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
+  it.each([
+    [undefined, 'sdk-ts'],
+    ['', 'sdk-ts'],
+    ['lody', 'lody'],
+    ['my/custom-client', 'my/custom-client'],
+  ])(
+    'passes the Claude entrypoint through launch merging to the real SDK: %j',
+    async (entrypoint, expected) => {
+      // Use the adapter's installed SDK, which can differ from the CLI dev SDK.
+      const { query } =
+        await import('../../../packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs');
+      const launch = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'claude',
+        runtimeOverrides: { claudeCodeExecutable: '/synthetic/claude' },
+      });
+      const env = mergeACPProcessEnv(launch, {
+        KEEP_ME: 'unchanged',
+        ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }),
+      });
+      // Lody does not inject a default. The SDK supplies sdk-ts only when unset/empty.
+      expect(env.CLAUDE_CODE_ENTRYPOINT).toBe(entrypoint);
+      let spawnedEnv: NodeJS.ProcessEnv | undefined;
+      await expect(async () => {
+        const session = query({
+          prompt: '',
+          options: {
+            env,
+            pathToClaudeCodeExecutable: env.CLAUDE_CODE_EXECUTABLE,
+            spawnClaudeCodeProcess(options) {
+              spawnedEnv = options.env;
+              // Stop at the actual SDK spawn boundary: no process, credentials or API call.
+              throw new Error('synthetic SDK spawn boundary');
+            },
+          },
+        });
+        await session.next();
+      }).rejects.toThrow('synthetic SDK spawn boundary');
+      expect(spawnedEnv).toMatchObject({ CLAUDE_CODE_ENTRYPOINT: expected, KEEP_ME: 'unchanged' });
+      expect(env.CLAUDE_CODE_ENTRYPOINT).toBe(entrypoint);
+    }
+  );
+
   it('launches Grok ACP and device login through an overridden runtime', async () => {
     await expect(
       resolveACPProcessLaunchAsync({

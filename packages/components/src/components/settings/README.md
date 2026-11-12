@@ -103,3 +103,19 @@ user's live member-workspace list. It selects an active workspace only from that
 list, otherwise using the existing member-list preference. Unsigned callback
 parameters never select the workspace or a desktop target. Anonymous returns use
 the existing login flow; retry capabilities are never placed in its redirect query.
+
+## Claude Code entrypoint
+
+The built-in Claude provider exposes an experimental, optional entrypoint in its
+configuration dialog. It uses the existing provider environment map's
+`CLAUDE_CODE_ENTRYPOINT`, also editable under Environment variables. There is no
+Lody default or whitelist; saving an empty/whitespace-only value removes the
+override. Other environment variables are preserved, including preset routing.
+The value follows the existing provider environment into newly started ACP
+processes and the adapter's SDK query environment. Existing processes are not
+hot-swapped. An unset provider override preserves inherited environment and SDK
+behavior; it does not force-clear an administrator's environment or managed policy.
+
+This is a compatibility/experimentation control, not a verified cost reduction.
+Custom values can affect subscriber-granted API credit eligibility; upstream
+entrypoint semantics and server-side quota accounting are not a stable contract.

@@ -320,6 +320,88 @@ describe('AgentConfigDialog', () => {
     }
   );
 
+  it.each([undefined, '', '   ', 'lody', 'my-custom-client'])(
+    'saves the optional Claude entrypoint without a forced default: %j',
+    async (entrypoint) => {
+      const saved: AgentConfigSubmitPayload[] = [];
+      await renderDialog(
+        {
+          kind: 'edit',
+          config: createBuiltinConfig({
+            agentType: 'claude',
+            env: {
+              KEEP_ME: 'unchanged',
+              ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }),
+            },
+          }),
+        },
+        createTitleConfigMachine(),
+        async (payload) => {
+          saved.push(payload);
+        }
+      );
+      const section = Array.from(document.querySelectorAll('button')).find(
+        (button) => button.textContent?.trim() === 'Claude Code entrypoint'
+      );
+      await act(async () => {
+        section?.click();
+      });
+      const input = document.querySelector<HTMLInputElement>('#claude-code-entrypoint');
+      expect(input?.value).toBe(entrypoint ?? '');
+      await act(async () => {
+        getPrimaryAction('Save').click();
+      });
+      expect(saved.at(-1)?.env).toEqual({
+        KEEP_ME: 'unchanged',
+        ...(entrypoint?.trim() ? { CLAUDE_CODE_ENTRYPOINT: entrypoint.trim() } : {}),
+      });
+    }
+  );
+
+  it('edits and clears the Claude entrypoint through the provider environment', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: createBuiltinConfig({ agentType: 'claude', env: { KEEP_ME: 'unchanged' } }),
+      },
+      createTitleConfigMachine(),
+      async (payload) => {
+        saved.push(payload);
+      }
+    );
+    const section = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Claude Code entrypoint'
+    );
+    await act(async () => {
+      section?.click();
+    });
+    const input = document.querySelector<HTMLInputElement>('#claude-code-entrypoint');
+    if (!input) throw new Error('Missing Claude entrypoint field');
+    await act(async () => {
+      setNativeInputValue(input, 'my/custom-client');
+    });
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.at(-1)?.env).toEqual({
+      KEEP_ME: 'unchanged',
+      CLAUDE_CODE_ENTRYPOINT: 'my/custom-client',
+    });
+    await act(async () => {
+      setNativeInputValue(input, '');
+    });
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.at(-1)?.env).toEqual({ KEEP_ME: 'unchanged' });
+  });
+
+  it('does not offer the Claude entrypoint for another provider', async () => {
+    await renderDialog({ kind: 'edit', config: createBuiltinConfig() }, createTitleConfigMachine());
+    expect(document.body.textContent).not.toContain('Claude Code entrypoint');
+  });
+
   it('keeps the encrypted same-machine provider form usable through its existing local callbacks', async () => {
     store.set(workspaceContentModeAtom, {
       accountId: 'fixture-owner',

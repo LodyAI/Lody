@@ -1733,6 +1733,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     activePreset?.brandId ?? (mode.kind === 'edit' ? mode.config.brandId : undefined);
 
   const isCustom = formData.cliType === 'custom';
+  const isClaudeBuiltin = formData.cliType === 'builtin' && formData.agentType === 'claude';
   const isDeepSeekBuiltin = isDeepSeekBuiltinForm(formData);
   // Bub is builtin but user-installed, so there is no managed runtime to
   // prepare. It still must pass a live probe on create: that is how a missing
@@ -1914,6 +1915,12 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       env = buildPresetEnv(activePreset, activeCredentialMode, formData);
     } else if (isDeepSeekBuiltinForm(formData)) {
       env = buildDeepSeekSubmitEnv(formData);
+    }
+    if (formData.cliType === 'builtin' && formData.agentType === 'claude') {
+      // Empty means no provider override, not an empty SDK entrypoint.
+      const entrypoint = env.CLAUDE_CODE_ENTRYPOINT?.trim();
+      if (entrypoint) env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
+      else delete env.CLAUDE_CODE_ENTRYPOINT;
     }
     const agentType = formData.agentType as AgentType;
     const titleGeneration = acpProvidesSessionTitle
@@ -3389,6 +3396,40 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   />
                 </Section>
               )}
+
+            {isClaudeBuiltin ? (
+              <Section
+                title={t(
+                  'settings.agent.dialog.claudeEntrypoint.section',
+                  'Claude Code entrypoint'
+                )}
+              >
+                <Field
+                  htmlFor="claude-code-entrypoint"
+                  label={t(
+                    'settings.agent.dialog.claudeEntrypoint.label',
+                    'Custom entrypoint (experimental)'
+                  )}
+                  hint={t(
+                    'settings.agent.dialog.claudeEntrypoint.hint',
+                    'Optional CLAUDE_CODE_ENTRYPOINT override. Leave empty to keep existing runtime defaults. Any custom value is allowed; quota savings are unverified and subscriber API credits may stop working. Applies to newly started agent processes.'
+                  )}
+                >
+                  <Input
+                    id="claude-code-entrypoint"
+                    value={formData.env.CLAUDE_CODE_ENTRYPOINT ?? ''}
+                    onChange={(event) => {
+                      const env = { ...formData.env };
+                      if (event.target.value) env.CLAUDE_CODE_ENTRYPOINT = event.target.value;
+                      else delete env.CLAUDE_CODE_ENTRYPOINT;
+                      updateEnvironment(env);
+                    }}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </Field>
+              </Section>
+            ) : null}
 
             <Section
               title={t('settings.agent.dialog.section.prompt', 'Custom prompt')}

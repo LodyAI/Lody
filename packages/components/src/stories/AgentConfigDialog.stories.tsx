@@ -650,3 +650,11 @@ export const MobileGlmPreset: Story = {
     viewport: { defaultViewport: 'mobile1' },
   },
 };
+
+export const EditClaudeEntrypoint: Story = {
+  render: () => (
+    <EditWrapper
+      config={{ ...existingConfig, env: { CLAUDE_CODE_ENTRYPOINT: 'my-custom-client' } }}
+    />
+  ),
+};
