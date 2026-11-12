@@ -5,6 +5,8 @@ import {
   createDaemonLossRegistry,
   readDaemonLossAuthority,
 } from '../src/lib/e2ee/client-loss-observer';
+import { executeScheduleCommand } from '../src/lib/schedules/schedule-command-service';
+import { getLogger } from '../src/utils/logger';
 import { authorizeEncryptedSchedule } from '../src/lib/e2ee/schedule-execution-authorization';
 import {
   scheduleDefinitionFingerprint,
@@ -512,6 +514,250 @@ describe('machine E2EE local runtime', () => {
       }
     }
   );
+
+  it('signs local Schedule changes with machine custody and refuses other targets', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-local-schedules-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    vi.stubEnv('LODY_SESSION_ID', 'stale-daemon-session');
+    vi.stubEnv('LODY_AGENT_SESSION_ID', 'stale-daemon-agent');
+    vi.stubEnv('LODY_PARENT_SESSION_ID', '');
+    let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+    const repo = await LoroRepo.create({});
+    let manager: LoroDocumentManager | undefined;
+    try {
+      const accountId = 'synthetic-schedule-account';
+      const root = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update(accountId).digest('hex'),
+        'workspace'
+      );
+      const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+      await retainCliE2eeWorkspaceBinding(accountId, {
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesisRecord),
+      });
+      const signingPublicKey = await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(root, 'custody'),
+            keyring: noKeyring,
+          });
+          return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+        })
+      );
+      await fs.writeFile(
+        join(root, 'activation.json'),
+        JSON.stringify({ genesisHash: hex(fixture.genesis.toBytes()), signingPublicKey })
+      );
+      host = await openCliE2eeWorkspaceLegacy({
+        machineId: 'machine',
+        accountId,
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        keyring: noKeyring,
+        onUnavailable: () => {},
+        cloud: {
+          getHistory: async () => page(fixture.records),
+          mailboxCall: async (method) => {
+            if (method === 'fetch')
+              return {
+                items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
+                next: null,
+              };
+            if (method === 'report') return null;
+            throw new Error('unexpected mailbox operation');
+          },
+        } as CloudE2eePort,
+      });
+      await host.refresh();
+      const runtime = host;
+      const ws = 'workspace' as WorkspaceId;
+      manager = new LoroDocumentManager({
+        repo,
+        workspaceId: ws,
+        userId: 'owner',
+        metaSub: null,
+        logger: getLogger('schedule-test'),
+        encryptedWorkspace: runtime,
+      });
+      await repo.upsertDocMeta('machine-machine', {
+        id: 'machine',
+        ownerUserId: 'owner',
+        protocolCapabilities: { schedules: 2 },
+      });
+      await repo.upsertDocMeta('agent-agent', {
+        id: 'agent',
+        machineId: 'machine',
+        name: 'Synthetic Agent',
+        cliType: 'custom',
+        agentType: 'synthetic',
+      });
+      const context = {
+        manager,
+        workspace: {
+          id: 'workspace',
+          name: 'Synthetic',
+          slug: 'synthetic',
+          contentMode: 'e2ee' as const,
+        },
+        auth: {
+          token: 'synthetic-token',
+          userId: 'owner',
+          userName: 'Owner',
+          userEmail: '',
+          machineId: 'machine',
+          machineName: 'Synthetic',
+        },
+        localOnly: true,
+      };
+
+      const repository = new ScheduleRepository(repo, ws, {
+        protectedContent: true,
+        signDeclaration: runtime.signScheduleDeclaration,
+      });
+      const unsigned = new ScheduleRepository(repo, ws, { protectedContent: true });
+      const draft = {
+        misfirePolicy: { kind: 'skip' as const },
+        overlapPolicy: 'skip' as const,
+        retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
+        title: 'Local task',
+        machineId: 'machine',
+        prompt: 'Synthetic prompt',
+        trigger: { kind: 'manual' as const },
+        agent: { agentConfigId: 'agent' },
+      };
+      const save = (create: boolean, requestId: string, prompt: string) =>
+        executeScheduleCommand(context, {
+          action: create ? 'create' : 'edit',
+          scheduleId: 'local',
+          draft: { ...draft, prompt },
+          requestId,
+        });
+      const authorize = async (manualRunKey?: string) => {
+        const document = await repository.read('local');
+        if (!document) throw new Error('missing schedule');
+        const { doc } = await repo.openPersistedDoc(getScheduleRoomId('local'));
+        return runtime.authorizeScheduleExecutionLegacy(
+          {
+            scheduleId: 'local',
+            definitionFingerprint: scheduleDefinitionFingerprint(document),
+            manualRunKey,
+          },
+          doc
+        );
+      };
+      await save(true, 'create', draft.prompt);
+      expect(await authorize()).toMatchObject({ _tag: 'Authorized' });
+      await save(false, 'edit', 'Updated synthetic prompt');
+      expect(await authorize()).toMatchObject({ _tag: 'Authorized' });
+      await executeScheduleCommand(context, {
+        action: 'run',
+        scheduleId: 'local',
+        requestId: 'before-pause',
+      });
+      const beforePause = await repository.read('local');
+      if (!beforePause) throw new Error('missing pre-pause Schedule');
+      const oldRequest = {
+        scheduleId: 'local',
+        definitionFingerprint: scheduleDefinitionFingerprint(beforePause),
+        manualRunKey: manualScheduleRunKey('local', 'before-pause'),
+      };
+      const before = (await repo.openPersistedDoc(getScheduleRoomId('local'))).doc.toJSON();
+      const pause = {
+        scheduleId: 'local',
+        enabled: false,
+        actorId: 'owner',
+        now: 2,
+        activationId: 'pause',
+        requestId: 'pause',
+      };
+      await unsigned.setEnabled(pause);
+      await unsigned.setEnabled(pause);
+      expect(await authorize()).toMatchObject({
+        _tag: 'Denied',
+        reason: 'e2ee_schedule_not_authorized',
+      });
+      const pausedDoc = (await repo.openPersistedDoc(getScheduleRoomId('local'))).doc;
+      expect(pausedDoc.toJSON().scheduleAuthorizations).toEqual(before.scheduleAuthorizations);
+      expect((await repository.read('local'))?.definition.activationId).toBe('pause');
+      expect(await runtime.authorizeScheduleExecutionLegacy(oldRequest, pausedDoc)).toMatchObject({
+        _tag: 'Denied',
+      });
+      await expect(
+        unsigned.requestRun({
+          scheduleId: 'local',
+          actorId: 'owner',
+          manualRunId: 'unsigned-paused',
+          now: 3,
+        })
+      ).rejects.toThrow('e2ee_signature_unavailable');
+      await executeScheduleCommand(context, {
+        action: 'run',
+        scheduleId: 'local',
+        requestId: 'paused-run',
+      });
+      await executeScheduleCommand(context, {
+        action: 'run',
+        scheduleId: 'local',
+        requestId: 'paused-run',
+      });
+      expect(await authorize(manualScheduleRunKey('local', 'paused-run'))).toMatchObject({
+        _tag: 'Authorized',
+      });
+      expect(await authorize()).toMatchObject({
+        _tag: 'Denied',
+        reason: 'e2ee_schedule_not_authorized',
+      });
+      expect((await repository.read('local'))?.definition.enabled).toBe(false);
+      await expect(
+        unsigned.setEnabled({
+          ...pause,
+          enabled: true,
+          activationId: 'unsigned-resume',
+          requestId: 'unsigned-resume',
+        })
+      ).rejects.toThrow('e2ee_signature_unavailable');
+      pausedDoc.getText('prompt').insert(0, 'tampered');
+      await expect(
+        unsigned.setEnabled({ ...pause, enabled: true, requestId: 'unsigned-resume' })
+      ).rejects.toThrow('e2ee_signature_unavailable');
+      await executeScheduleCommand(context, {
+        action: 'resume',
+        scheduleId: 'local',
+        requestId: 'resume',
+      });
+      expect(await authorize()).toMatchObject({ _tag: 'Authorized' });
+      // A retry of the old pause cannot replace the newer signed declaration.
+      await unsigned.setEnabled(pause);
+      expect(await authorize()).toMatchObject({ _tag: 'Authorized' });
+      await executeScheduleCommand(context, {
+        action: 'run',
+        scheduleId: 'local',
+        requestId: 'run',
+      });
+      expect(await authorize(manualScheduleRunKey('local', 'run'))).toMatchObject({
+        _tag: 'Authorized',
+      });
+      const document = await repository.read('local');
+      if (!document) throw new Error('missing schedule');
+      for (const key of [undefined, manualScheduleRunKey('local', 'foreign')])
+        await expect(
+          runtime.signScheduleDeclaration(
+            { ...document, definition: { ...document.definition, machineId: 'other-machine' } },
+            key
+          )
+        ).rejects.toThrow('personal device');
+    } finally {
+      if (manager) await manager.cleanUp();
+      else {
+        await host?.close();
+        await repo.destroy();
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it('selects the new epoch when every key install outlasts its deadline', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-slow-key-install-'));
@@ -7835,6 +8081,13 @@ describe('machine execution authorization freshness', () => {
           undefined,
           yield* Effect.promise(() => declarationSigner(writer)(changed))
         );
+        if (mutation === 'enabled') {
+          expect(yield* authorize()).toMatchObject({
+            _tag: 'Denied',
+            reason: 'e2ee_schedule_not_authorized',
+          });
+          return;
+        }
         expect((yield* authorize())._tag).toBe('Authorized');
         // A declaration without a signature never authorizes, whoever wrote it.
         recordScheduleAuthorization(doc, changed);

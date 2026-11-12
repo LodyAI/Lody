@@ -52,7 +52,8 @@ export const authorizeEncryptedSchedule = Effect.fnUntraced(function* (options: 
     try: () => currentDocument(options.doc, request.scheduleId),
     catch: () => undefined,
   }).pipe(Effect.catch(() => Effect.succeed(undefined)));
-  if (!document) return denied('e2ee_schedule_not_authorized');
+  if (!document || (!document.definition.enabled && !request.manualRunKey))
+    return denied('e2ee_schedule_not_authorized');
   const signers: string[] = [];
   for (const manualRunKey of request.manualRunKey
     ? [undefined, request.manualRunKey]

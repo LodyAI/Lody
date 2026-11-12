@@ -8,7 +8,12 @@ import {
 import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
 import { openSqliteMachineSharingStore } from '@lody/e2ee-machine-sharing/sqlite';
 import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
-import { getScheduleIdFromRoomId, type ScheduleAuthorizationRequest } from '@lody/shared';
+import {
+  getScheduleIdFromRoomId,
+  scheduleDeclarationSubject,
+  type ScheduleDocument,
+  type ScheduleAuthorizationRequest,
+} from '@lody/shared';
 import {
   makeEncryptedFeatureReceiver,
   makeEncryptedFeatureAuthorization,
@@ -444,6 +449,8 @@ async function prepareMachine(
  * work on open. Delete this facade when those application owners compose Effects.
  */
 type CliE2eeWorkspaceOptions = {
+  /** Required to enable local Schedule signing; must match the admitted device. */
+  machineId?: string;
   accountId: string;
   workspaceId: string;
   genesisHash: string;
@@ -1607,6 +1614,42 @@ async function openWorkspaceOwned(
         );
         return result.allowed;
       }),
+    /** Machine custody can endorse only schedules addressed to this admitted machine. */
+    signScheduleDeclaration: (
+      document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+      manualRunKey?: string
+    ) =>
+      run(
+        Effect.gen(function* () {
+          if (closed) return yield* Effect.fail(new Error('e2ee_closed'));
+          const state = (yield* opened.runtime.executionLedger()).inspectState();
+          const self = state.devices.get(opened.signingPublicKey);
+          if (
+            !options.machineId ||
+            self?.kind !== 'machine' ||
+            self.machineId !== options.machineId ||
+            document.definition.machineId !== options.machineId
+          )
+            return yield* Effect.fail(
+              new Error(
+                'Machine keys can sign schedules only for this machine; use a personal device in the desktop app to manage schedules on another machine'
+              )
+            );
+          const subject = yield* Effect.try(() =>
+            scheduleDeclarationSubject(document, manualRunKey)
+          );
+          const signature = yield* opened.runtime.signExecutionIntent({
+            ...subject,
+            workspaceId: options.workspaceId,
+            contentDigest: bytes(subject.contentDigest),
+          });
+          return encodeE2eeIntentRecord({
+            kind: E2EE_INTENT_KIND.scheduleDeclaration,
+            signer: bytes(opened.signingPublicKey),
+            signature,
+          });
+        })
+      ),
     signMachineInput,
     startRpc: (
       machineId: string,
