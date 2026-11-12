@@ -46,9 +46,9 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
       resolvePrimaryDownloadAction({
         platform,
         labels: copy.labels,
-        webAppHref: copy.webAppHref,
+        allPlatforms: { label: copy.otherDownloads, href: copy.otherDownloadsHref },
       }),
-    [copy.labels, copy.webAppHref, platform]
+    [copy.labels, copy.otherDownloads, copy.otherDownloadsHref, platform]
   );
 
   return (
@@ -65,8 +65,11 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
         >
           {primary.label}
         </SiteAnchor>
+        <SiteAnchor className="underwater-btn underwater-btn--ghost" href={copy.webAppHref}>
+          {copy.labels.browser}
+        </SiteAnchor>
         <SiteAnchor
-          className="underwater-btn underwater-btn--ghost"
+          className="underwater-btn underwater-btn--ghost underwater-hero__github-desktop"
           href={copy.secondaryHref}
           {...(copy.secondaryExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
         >
@@ -75,9 +78,19 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
         </SiteAnchor>
       </div>
       <div className="underwater-hero__cta-links">
-        <SiteAnchor className="underwater-hero__more" href={copy.otherDownloadsHref}>
-          {copy.otherDownloads}
+        <SiteAnchor
+          className="underwater-hero__more underwater-hero__github-mobile"
+          href={copy.secondaryHref}
+          {...(copy.secondaryExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
+        >
+          <GithubMark className="underwater-btn__icon" />
+          {copy.secondary}
         </SiteAnchor>
+        {primary.key !== 'browser' ? (
+          <SiteAnchor className="underwater-hero__more" href={copy.otherDownloadsHref}>
+            {copy.otherDownloads}
+          </SiteAnchor>
+        ) : null}
         {copy.showIntelMac !== false && platform === 'mac-arm' ? (
           <>
             <span className="underwater-hero__link-dot" aria-hidden="true">
