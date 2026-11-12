@@ -105,5 +105,13 @@
         ]
       }
     }
+  },
+  "tabSessionQuota": {
+    "files": [
+      "contract/runtime-contract.json",
+      "src/contract/sessions.ts",
+      "src/runtime/handlers/sessions.ts"
+    ],
+    "note": "Tabs pass the billing entitlement to createSession, so the free-plan 200-session quota applies to new Tabs as on Web. Mirrored verbatim from the iOS runtime source in the same change."
   }
 }

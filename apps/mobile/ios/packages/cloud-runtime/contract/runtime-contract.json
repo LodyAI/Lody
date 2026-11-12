@@ -1562,9 +1562,18 @@
         },
         "parentSessionId": { "type": "string", "minLength": 1 },
         "preferRoost": { "type": "boolean" },
-        "title": { "type": "string", "minLength": 1, "maxLength": 200 }
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "billingEntitlement": {
+          "anyOf": [{ "$ref": "BillingEntitlement" }, { "type": "null" }]
+        }
       },
-      "required": ["workspaceId", "sessionId", "parentSessionId", "title"]
+      "required": [
+        "workspaceId",
+        "sessionId",
+        "parentSessionId",
+        "title",
+        "billingEntitlement"
+      ]
     },
     "CreationOptions": {
       "type": "object",

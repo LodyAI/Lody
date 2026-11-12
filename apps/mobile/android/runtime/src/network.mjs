@@ -36,7 +36,7 @@ const detail={
   const args={...input,workspaceId:identity.workspaceId,userId:identity.userId,billingEntitlement:billingEntitlement(input.billingEntitlement)};
   return kind==='edit' ? runtime.editSession(args) : runtime.forkSession(args);
  },
- createTab:(parentSessionId,sessionId,title,preferRoost)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.createTab({workspaceId:scope.workspaceId,parentSessionId,sessionId,title,preferRoost:preferRoost===true});},
+ createTab:async(parentSessionId,sessionId,title,preferRoost,entitlement)=>{const scope=identity;if(!scope)throw Error('not_connected');const result=await runtime.createTab({workspaceId:scope.workspaceId,parentSessionId,sessionId,title,preferRoost:preferRoost===true,billingEntitlement:billingEntitlement(entitlement)});return {state:result.state,...(result.state==='rejected'&&typeof result.reason==='string'?{reason:result.reason}:{})};},
  loadOlderSession:sessionId=>runtime.loadOlderSession({sessionId}),
  retryPendingInput:(sessionId,inputId)=>runtime.retryPendingInput({sessionId,inputId}),
  forgetPendingInput:(sessionId,inputId)=>runtime.forgetPendingInput({sessionId,inputId}),

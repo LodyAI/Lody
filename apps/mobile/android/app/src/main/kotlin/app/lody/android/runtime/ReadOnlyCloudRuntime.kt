@@ -130,6 +130,7 @@ internal class ReadOnlyCloudRuntime(
         is RuntimeCommand.SendText -> runtime.execute(command.copy(billing = entitlement()))
         is RuntimeCommand.MessageAction ->
             runtime.execute(if (command.kind == "edit" && command.payload.optString("action") == "send") command.copy(billing = entitlement()) else command)
+        is RuntimeCommand.CreateTab -> runtime.execute(command.copy(billing = entitlement()))
         is RuntimeCommand.TurnQuota -> runtime.execute(command.copy(billing = entitlement()))
         RuntimeCommand.WorkspacePlan -> RuntimeResult.Plan(entitlement()?.optString("effectivePlanTier")?.ifBlank { null })
         else -> runtime.execute(command)

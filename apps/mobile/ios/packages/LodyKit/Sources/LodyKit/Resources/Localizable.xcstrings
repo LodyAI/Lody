@@ -22933,6 +22933,40 @@
         }
       }
     },
+    "session.tabs.freeSessionLimit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Free workspace has reached 200 sessions, so no new Tab was created."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此免费工作区已达到 200 个会话上限，未创建新 Tab。"
+          }
+        }
+      }
+    },
+    "session.tabs.workspacePaymentRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish setting up this workspace before creating a Tab."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先完成工作区设置，再创建 Tab。"
+          }
+        }
+      }
+    },
     "session.tabs.unknown": {
       "extractionState": "manual",
       "localizations": {

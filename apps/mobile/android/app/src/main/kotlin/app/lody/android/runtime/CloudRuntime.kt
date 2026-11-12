@@ -30,7 +30,8 @@ sealed interface RuntimeCommand {
     data class SetTabClosed(val id: String, val closed: Boolean) : RuntimeCommand
     /** Archives or unarchives a conversation (upstream `archiveSession`); a write, never replayed. */
     data class ArchiveSession(val id: String, val archived: Boolean) : RuntimeCommand
-    data class CreateTab(val parentId: String, val id: String, val title: String) : RuntimeCommand
+    /** [billing]: a Tab is a session, so the free-plan session quota applies (null fails open). */
+    data class CreateTab(val parentId: String, val id: String, val title: String, val billing: org.json.JSONObject? = null) : RuntimeCommand
     data class GetCreationOptions(val projectId: String?, val agentConfigId: String? = null) : RuntimeCommand
     /** The workspace's Agent Roles readable by this user. Read only. */
     data object ListAgentRoles : RuntimeCommand
