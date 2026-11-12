@@ -6,6 +6,8 @@ Read before changing Home: its tabs and bottom bar, the workspace capsule, the S
 
 - In the iPad sidebar, Home section heads are `lodyBand` bands inset with 12 pt side margins and rounded corners, because full-bleed bands clash with the inset sidebar rows.
 
+- In the iPad sidebar, text group labels (Pinned, activity buckets, archived buckets) collapse and expand their group outside search, as on iPhone: the whole label is the target, and a trailing chevron, the iPadOS sidebar convention, rotates while the rows animate (`SidebarHeaderCell`, UserDefaults `sidebarCollapsedGroups`, archived buckets kept separately). Project bands keep their own outline disclosure.
+
 - The Chats bottom bar uses UIKit `tabBarMinimizeBehavior = .onScrollDown`; other tabs use `.never`. Bind the actual active list as the content scroll view. UIKit owns the compact active icon and expansion behavior; never mutate tab items, frames, or transforms to animate minimization.
 
 - On the Schedules tab the system tab bar's create action turns into "+" ("New schedule", `HomeTabsController.updateCreate`) and pushes a new schedule's editor (`SchedulesController.newSchedule`). The Projects add menu (`Projects/ProjectAddMenu`, `GitHubRepositoryPicker`) is unwired while the Projects tab is hidden.
