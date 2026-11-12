@@ -381,6 +381,13 @@ export interface MachineAcpCapabilitiesRefreshRequest {
    * default path answers from the cache when it can.
    */
   force?: boolean;
+  /**
+   * Switch the probe session to every advertised model and record each model's
+   * own option list, reporting `reading-model-options` progress. Sent only to
+   * daemons that advertise `acpModelOptionsRead`; the strict schema of older
+   * daemons rejects the key.
+   */
+  readModelOptions?: true;
 }
 
 export interface MachineAcpCapabilitiesRefreshResponse {
@@ -627,7 +634,9 @@ export type MachineAcpBinaryProgressStatus =
   | 'installed'
   | 'unsupported-platform'
   | 'incompatible-host'
-  | 'error';
+  | 'error'
+  /** Not a binary phase: a forced refresh is reading one model's options. */
+  | 'reading-model-options';
 
 export interface MachineAcpBinaryProgressMessage {
   type: 'machine/acp-binary-progress';
@@ -643,6 +652,15 @@ export interface MachineAcpBinaryProgressMessage {
   required?: string;
   command?: string;
   error?: string;
+  /**
+   * `reading-model-options` only: the config being refreshed and the model
+   * whose options are being read, `modelIndex` of `modelCount` (1-based).
+   */
+  configId?: string;
+  modelId?: string;
+  modelName?: string;
+  modelIndex?: number;
+  modelCount?: number;
 }
 
 /**

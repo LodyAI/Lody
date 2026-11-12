@@ -3804,6 +3804,7 @@
   "settings.agent.provider.binaryExtracting": "解压中",
   "settings.agent.provider.binaryFailed": "下载失败",
   "settings.agent.provider.binaryPublishing": "安装中",
+  "settings.agent.provider.readingModelOptions": "正在读取 {{model}} 的选项（{{index}}/{{total}}）",
   "settings.agent.provider.binaryReady": "就绪",
   "settings.agent.provider.binaryRequired": "需要下载",
   "settings.agent.provider.binaryVerifying": "校验中",

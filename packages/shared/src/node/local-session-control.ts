@@ -60,6 +60,10 @@ function isConfigOptionValueRecord(value: unknown): value is Record<string, stri
   );
 }
 
+function isOptionalPositiveInteger(value: unknown): boolean {
+  return typeof value === 'undefined' || (Number.isInteger(value) && Number(value) > 0);
+}
+
 function isOptionalString(value: unknown): boolean {
   return typeof value === 'undefined' || typeof value === 'string';
 }
@@ -598,6 +602,7 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.configId === 'string' &&
       value.configId.trim().length > 0 &&
       (typeof value.force === 'undefined' || typeof value.force === 'boolean') &&
+      (typeof value.readModelOptions === 'undefined' || value.readModelOptions === true) &&
       typeof value.cliType === 'undefined' &&
       typeof value.agentType === 'undefined' &&
       typeof value.customAcp === 'undefined' &&
@@ -1113,7 +1118,8 @@ export function isLocalSessionControlResponse(
         value.status === 'installed' ||
         value.status === 'unsupported-platform' ||
         value.status === 'incompatible-host' ||
-        value.status === 'error') &&
+        value.status === 'error' ||
+        value.status === 'reading-model-options') &&
       (typeof value.downloadedBytes === 'undefined' ||
         (typeof value.downloadedBytes === 'number' &&
           Number.isInteger(value.downloadedBytes) &&
@@ -1129,7 +1135,12 @@ export function isLocalSessionControlResponse(
       isOptionalString(value.current) &&
       isOptionalString(value.required) &&
       isOptionalString(value.command) &&
-      isOptionalString(value.error)
+      isOptionalString(value.error) &&
+      isOptionalString(value.configId) &&
+      isOptionalString(value.modelId) &&
+      isOptionalString(value.modelName) &&
+      isOptionalPositiveInteger(value.modelIndex) &&
+      isOptionalPositiveInteger(value.modelCount)
     );
   }
 

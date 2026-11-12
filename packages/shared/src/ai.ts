@@ -434,6 +434,12 @@ export type AcpCapabilityCacheEntry = {
    * stored in the capability row itself; see `acp-model-capabilities.ts`.
    */
   declaredModelControls?: Record<string, AcpModelControls>;
+  /**
+   * Each model's own option list from the config's `acpModelConfigOptions`
+   * rows, attached by `getMachineFlockAcpCapabilities`. Never stored in the
+   * capability row itself; see `acp-model-config-options.ts`.
+   */
+  observedModelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   /** Probe commands shown before a session reports its own list; [] confirms an empty probe. */
   availableCommands?: AcpCommandSummary[];
   /**

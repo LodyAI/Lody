@@ -3804,6 +3804,7 @@
   "settings.agent.provider.binaryExtracting": "Extracting",
   "settings.agent.provider.binaryFailed": "Download failed",
   "settings.agent.provider.binaryPublishing": "Installing",
+  "settings.agent.provider.readingModelOptions": "Reading options for {{model}} ({{index}}/{{total}})",
   "settings.agent.provider.binaryReady": "Ready",
   "settings.agent.provider.binaryRequired": "Download required",
   "settings.agent.provider.binaryVerifying": "Verifying",

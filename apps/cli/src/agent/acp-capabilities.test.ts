@@ -28,7 +28,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return { ...actual, mkdtemp: vi.fn(actual.mkdtemp), rm: vi.fn(actual.rm) };
 });
 
-import { fetchAcpCapabilities } from './acp-capabilities';
+import { ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS, fetchAcpCapabilities } from './acp-capabilities';
 import { AcpAuthenticationRequiredError } from './agent-client';
 
 const createSilentLogger = (): Logger => ({
@@ -509,5 +509,118 @@ describe('fetchAcpCapabilities', () => {
     const result = await fetchAcpCapabilities('registry', 'filter-agent', createSilentLogger());
 
     expect(result.configOptions?.map((opt) => opt.id)).toEqual(['mode']);
+  });
+});
+
+describe('fetchAcpCapabilities model option read', () => {
+  const effort = (values: string[]) => ({
+    id: 'thought_level',
+    name: 'Thinking',
+    category: 'thought_level',
+    type: 'select' as const,
+    currentValue: values[0] ?? '',
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const model = (currentValue: string) => ({
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select' as const,
+    currentValue,
+    options: [
+      { value: 'mimo', name: 'MiMo' },
+      { value: 'deepseek-flash', name: 'DeepSeek Flash' },
+      { value: 'broken', name: 'Broken' },
+      { value: 'qwen', name: 'Qwen' },
+    ],
+  });
+  const answers: Record<string, unknown> = {
+    'deepseek-flash': [model('deepseek-flash'), effort(['auto', 'low', 'max'])],
+    qwen: [model('qwen'), effort(['high'])],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.probeBuiltinAuthentication.mockResolvedValue({ status: 'unknown' });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const startWith = (setSessionConfigOption: (modelId: string) => Promise<unknown>) => {
+    const startup = createSuccessfulStartupResult({
+      sessionId: 'acp-session-1',
+      configOptions: [model('mimo'), effort(['auto', 'none'])],
+    });
+    Object.assign(startup.client as object, {
+      setSessionConfigOption: (_session: unknown, _configId: string, value: string) =>
+        setSessionConfigOption(value),
+    });
+    mocks.startLocalAcpAgent.mockResolvedValue(startup);
+  };
+
+  it('switches to every model, reports each one, and skips a model that fails', async () => {
+    startWith(async (modelId) => {
+      if (modelId === 'broken') throw new Error('rejected');
+      return answers[modelId];
+    });
+    const progress: string[] = [];
+
+    const result = await fetchAcpCapabilities(
+      'builtin',
+      'dimcode',
+      createSilentLogger(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        readModelOptions: {
+          onProgress: ({ modelName, index, total }) =>
+            progress.push(`${index}/${total} ${modelName}`),
+        },
+      }
+    );
+
+    expect(progress).toEqual(['1/4 MiMo', '2/4 DeepSeek Flash', '3/4 Broken', '4/4 Qwen']);
+    expect(Object.keys(result.modelConfigOptions ?? {})).toEqual([
+      'mimo',
+      'deepseek-flash',
+      'qwen',
+    ]);
+    expect(result.modelConfigOptions?.qwen).toEqual([model('qwen'), effort(['high'])]);
+  });
+
+  it('stops at a switch the agent never answers and keeps what it read', async () => {
+    vi.useFakeTimers();
+    startWith((modelId) =>
+      modelId === 'broken' ? new Promise(() => {}) : Promise.resolve(answers[modelId])
+    );
+    const progress: string[] = [];
+    const pending = fetchAcpCapabilities(
+      'builtin',
+      'dimcode',
+      createSilentLogger(),
+      undefined,
+      undefined,
+      undefined,
+      { readModelOptions: { onProgress: ({ modelId }) => progress.push(modelId) } }
+    );
+    await vi.waitFor(() => expect(progress).toContain('broken'));
+    await vi.advanceTimersByTimeAsync(ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS);
+
+    const result = await pending;
+    expect(progress).toEqual(['mimo', 'deepseek-flash', 'broken']);
+    expect(Object.keys(result.modelConfigOptions ?? {})).toEqual(['mimo', 'deepseek-flash']);
+  });
+
+  it('switches nothing unless the refresh asked to read models', async () => {
+    const switched: string[] = [];
+    startWith(async (modelId) => {
+      switched.push(modelId);
+      return answers[modelId];
+    });
+
+    const result = await fetchAcpCapabilities('builtin', 'dimcode', createSilentLogger());
+
+    expect(switched).toEqual([]);
+    expect(result.modelConfigOptions).toBeUndefined();
   });
 });

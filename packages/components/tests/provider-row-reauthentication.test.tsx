@@ -181,3 +181,72 @@ describe('ProviderRow reauthentication', () => {
     expect(document.body.textContent).toContain('No reset forecast right now.');
   });
 });
+
+describe('ProviderRow model option refresh', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('names each model while the refresh reads its options, then clears', async () => {
+    let reportProgress!: (progress: {
+      modelId: string;
+      modelName: string;
+      index: number;
+      total: number;
+    }) => void;
+    let finish!: () => void;
+    const onRefresh = vi.fn(
+      (_config: AgentConfigMeta, options?: { onModelOptionsProgress?: typeof reportProgress }) =>
+        new Promise<void>((resolve) => {
+          reportProgress = (progress) => options?.onModelOptionsProgress?.(progress);
+          finish = resolve;
+        })
+    );
+    await act(async () => {
+      root.render(
+        <ProviderRow
+          config={makeConfig({ cliType: 'builtin', agentType: 'dimcode' })}
+          machine={machine}
+          onEdit={vi.fn()}
+          onRefresh={onRefresh}
+        />
+      );
+    });
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Manage"]');
+    await act(async () => {
+      trigger?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      trigger?.click();
+    });
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((node) =>
+      node.textContent?.includes('Refresh models and modes')
+    );
+    await act(async () => item?.click());
+
+    await act(async () =>
+      reportProgress({
+        modelId: 'deepseek-flash',
+        modelName: 'DeepSeek Flash',
+        index: 2,
+        total: 40,
+      })
+    );
+    const statusText = () =>
+      [...container.querySelectorAll('[role="status"]')].map((node) => node.textContent).join('');
+    expect(statusText()).toContain('Reading options for DeepSeek Flash (2/40)');
+
+    await act(async () => finish());
+    expect(statusText()).not.toContain('Reading options');
+  });
+});

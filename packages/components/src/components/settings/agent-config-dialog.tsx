@@ -92,6 +92,8 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
+import type { AcpModelOptionsRefreshProgress } from '@/hooks/use-refresh-machine-acp-capabilities';
+import { formatModelOptionsProgressText } from './model-options-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
@@ -1209,6 +1211,7 @@ export type AgentConfigDialogMode =
 type RefreshArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
+  onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void;
 };
 
 /** Whether a registry agent's platform binary is present on the target machine. */
@@ -1634,6 +1637,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [probing, setProbing] = useState(false);
+  const [modelProgress, setModelProgress] = useState<AcpModelOptionsRefreshProgress | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [manuallyTested, setManuallyTested] = useState(false);
   const [authRequired, setAuthRequired] = useState(false);
@@ -2140,6 +2144,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         const response = await onRefreshCapabilities({
           machineId: machine.id,
           configId: agentConfigId,
+          onModelOptionsProgress: (progress) => {
+            if (!cancelled) setModelProgress(progress);
+          },
         });
         if (cancelled) return;
         if (response.authRequired) {
@@ -2183,12 +2190,16 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         setVerifiedBuiltinContext(null);
         setProbeError(error instanceof Error ? error.message : String(error));
       } finally {
-        if (!cancelled) setProbing(false);
+        if (!cancelled) {
+          setProbing(false);
+          setModelProgress(null);
+        }
       }
     })();
     return () => {
       cancelled = true;
       setProbing(false);
+      setModelProgress(null);
     };
   }, [
     open,
@@ -2221,6 +2232,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       const response = await onRefreshCapabilities({
         machineId: machine.id,
         configId: agentConfigId,
+        onModelOptionsProgress: setModelProgress,
       });
       if (response.authRequired) {
         setAuthRequired(true);
@@ -2249,6 +2261,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       setProbeError(error instanceof Error ? error.message : String(error));
     } finally {
       setProbing(false);
+      setModelProgress(null);
     }
   };
 
@@ -2817,6 +2830,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <ProbeStatus
                 isPreset={isPreset}
                 probing={probing}
+                probingText={
+                  modelProgress ? formatModelOptionsProgressText(t, modelProgress) : undefined
+                }
                 probeError={probeError}
                 ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
                 showIdleAction={!isCustom}
@@ -3731,6 +3747,7 @@ function formatBinaryStatusText(
 function ProbeStatus({
   isPreset,
   probing,
+  probingText,
   probeError,
   ready,
   showIdleAction,
@@ -3739,6 +3756,8 @@ function ProbeStatus({
 }: {
   isPreset: boolean;
   probing: boolean;
+  /** Replaces the generic label while a refresh names the model it is reading. */
+  probingText?: string;
   probeError: string | null;
   ready: boolean;
   showIdleAction: boolean;
@@ -3757,7 +3776,7 @@ function ProbeStatus({
     return (
       <span {...stylex.props(styles.probing)}>
         <Spinner size="small" aria-hidden="true" />
-        {t('settings.agent.dialog.probing', 'Probing…')}
+        {probingText ?? t('settings.agent.dialog.probing', 'Probing…')}
       </span>
     );
   }

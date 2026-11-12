@@ -1047,3 +1047,74 @@ describe('plan mode selector value semantics', () => {
     expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, disabled)).toBe(false);
   });
 });
+
+describe('observed per-model option lists', () => {
+  const thoughtLevel = (values: string[]): AcpConfigOptionSummary => ({
+    id: 'thought_level',
+    name: 'Thinking',
+    category: 'thought_level',
+    type: 'select',
+    currentValue: values[0] ?? '',
+    options: values.map((value) => ({ value, name: value })),
+  });
+  // Dimcode probed on mimo (LodyAI/Lody#2568): one ladder for every model.
+  const machine = machineWithCapabilities({
+    [agentConfigId]: {
+      cliType: 'registry',
+      agentType: 'dimcode',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'mimo',
+          options: ['mimo', 'deepseek-flash', 'qwen'].map((value) => ({ value, name: value })),
+        },
+        thoughtLevel(['auto', 'none', 'low', 'medium', 'high']),
+      ],
+      observedModelConfigOptions: {
+        'deepseek-flash': [thoughtLevel(['auto', 'low', 'high', 'max'])],
+      },
+      fetchedAt: 1,
+    },
+  });
+  const ladder = (model: string) => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'registry',
+      agentType: 'dimcode',
+      configOptionValues: { model },
+      machine,
+    });
+    const effort = options.configOptionSelectors.find(
+      (selector) => selector.configId === 'thought_level'
+    );
+    return {
+      values: effort?.type === 'select' ? effort.options.map((option) => option.value) : [],
+      source: options.modelConfigOptionsSource,
+    };
+  };
+
+  it('shows the selected model’s own recorded ladder', () => {
+    expect(ladder('deepseek-flash')).toEqual({
+      values: ['auto', 'low', 'high', 'max'],
+      source: 'observed',
+    });
+    expect(ladder('mimo')).toEqual({
+      values: ['auto', 'none', 'low', 'medium', 'high'],
+      source: 'snapshot',
+    });
+  });
+
+  it('keeps the snapshot for an unrecorded model and says it is borrowed', () => {
+    expect(ladder('qwen')).toEqual({
+      values: ['auto', 'none', 'low', 'medium', 'high'],
+      source: 'borrowed',
+    });
+  });
+});

@@ -442,6 +442,7 @@ type RpcServerDeps = {
   refreshMachineAcpCapabilities: (args: {
     configId: AgentConfigId;
     force?: boolean;
+    readModelOptions?: true;
     onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
     signal: AbortSignal;
   }) => Promise<MachineAcpCapabilitiesRefreshResponse>;
@@ -1381,6 +1382,7 @@ export class LoroStreamsMachineRpcServer {
             const response = await this.deps.refreshMachineAcpCapabilities({
               configId: request.params.configId as AgentConfigId,
               force: request.params.force === true,
+              ...(request.params.readModelOptions ? { readModelOptions: true as const } : {}),
               onAcpBinaryProgress: appendProgress,
               signal: controller.signal,
             });

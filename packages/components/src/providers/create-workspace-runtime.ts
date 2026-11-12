@@ -49,6 +49,7 @@ import {
   type MachineMeta,
   type MachineProtocolCapabilities,
   negotiatedAcpCapabilitiesRefreshForce,
+  negotiatedAcpModelOptionsRead,
 } from '@lody/shared';
 import {
   LoroRepo,
@@ -1444,6 +1445,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   function handleMachineAcpBinaryProgress(message: MachineAcpBinaryProgressMessage): void {
+    // Model-option reading is progress of one refresh, not runtime install
+    // state: only that refresh's caller shows it, through its own `onProgress`.
+    if (message.status === 'reading-model-options') return;
     const key = getMachineAcpBinaryPendingKey(message.machineId as MachineId, message.agentType);
     machineAcpBinaryProgressSnapshots.set(key, message);
     const listeners = machineAcpBinaryProgressListeners.get(key);
@@ -2502,6 +2506,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const response = await client.requestMachineAcpCapabilitiesRefresh({
         configId: message.configId,
         force: message.force,
+        ...(message.readModelOptions ? { readModelOptions: true as const } : {}),
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
             handleMachineAcpBinaryProgress({ ...progress, machineId: message.machineId });
@@ -2559,13 +2564,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // negotiated once here rather than per transport. A daemon that did not
     // advertise the capability has no cache to opt out of, so dropping the field
     // still gives every forced caller the probe it asked for.
-    const { force: requestedForce, ...baseMessage } = message;
+    const {
+      force: requestedForce,
+      readModelOptions: requestedModelOptions,
+      ...baseMessage
+    } = message;
+    const protocolCapabilities = await getMachineProtocolCapabilities(message.machineId);
     const negotiatedMessage = {
       ...baseMessage,
-      ...negotiatedAcpCapabilitiesRefreshForce(
-        { protocolCapabilities: await getMachineProtocolCapabilities(message.machineId) },
-        requestedForce
-      ),
+      ...negotiatedAcpCapabilitiesRefreshForce({ protocolCapabilities }, requestedForce),
+      ...negotiatedAcpModelOptionsRead({ protocolCapabilities }, requestedModelOptions),
     };
     if (signal?.aborted) return null;
 

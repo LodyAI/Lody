@@ -23,7 +23,9 @@ import {
   defaultEffortValue,
   getBuiltinModelControlBinding,
   getDeclaredModelControls,
+  resolveAcpConfigOptionsForModel,
   resolveDeclaredEffortSupport,
+  type AcpModelConfigOptionsSource,
 } from '@lody/shared';
 import type { AcpSessionSelectOption } from './acp-session-select';
 
@@ -200,6 +202,12 @@ export type AcpSelectorOptions = {
   modelReasoningEfforts: Record<string, string[]> | undefined;
   /** Per-model effort and Fast support the adapter declared, when stored. */
   declaredModelControls?: Record<string, AcpModelControls>;
+  /**
+   * Where the selected model's options came from. `borrowed` means neither the
+   * snapshot nor a recorded answer describes that model, so the controls shown
+   * belong to another model until the agent answers for this one.
+   */
+  modelConfigOptionsSource?: AcpModelConfigOptionsSource;
 };
 
 export type AcpSelectorTarget = {
@@ -224,6 +232,36 @@ type ResolvedConfigOptions = {
   modelReasoningEfforts: Record<string, string[]> | undefined;
   /** Per-model effort and Fast support the adapter declared, when stored. */
   declaredModelControls?: Record<string, AcpModelControls>;
+  /** Each model's own option list, recorded from the agent's answers. */
+  observedModelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
+};
+
+/**
+ * The snapshot describes one model. Replace its options with the selected
+ * model's own recorded list when there is one; the model selector stays.
+ */
+const resolveConfigOptionsForSelectedModel = (
+  target?: AcpSelectorTarget
+): ResolvedConfigOptions & { source: AcpModelConfigOptionsSource } => {
+  const resolved = resolveConfigOptions(target);
+  const selectedModelId = target
+    ? resolveSelectedModelId(resolved.configOptions, target)
+    : undefined;
+  const forModel = resolveAcpConfigOptionsForModel(
+    resolved.configOptions,
+    resolved.observedModelConfigOptions,
+    selectedModelId
+  );
+  const declared = selectedModelId
+    ? getDeclaredModelControls(resolved, selectedModelId) !== undefined ||
+      resolved.modelReasoningEfforts?.[selectedModelId] !== undefined
+    : false;
+  return {
+    ...resolved,
+    configOptions: forModel.configOptions,
+    // A declaration describes the controls Lody normalizes, so it is not borrowed.
+    source: forModel.source === 'borrowed' && declared ? 'snapshot' : forModel.source,
+  };
 };
 
 const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions => {
@@ -245,12 +283,14 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
       const modelReasoningEfforts = capability.modelReasoningEfforts;
       const declaredModelControls = capability.declaredModelControls;
+      const observedModelConfigOptions = capability.observedModelConfigOptions;
       if (capability.configOptions?.length) {
         return {
           authority,
           configOptions: capability.configOptions,
           modelReasoningEfforts,
           declaredModelControls,
+          observedModelConfigOptions,
         };
       }
       // Fallback: synthesize configOptions from legacy modes/models.
@@ -680,12 +720,13 @@ const resolveDefaultModeId = (
  * For React components, prefer useAcpSelectorOptions hook instead.
  */
 export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelectorOptions => {
+  const resolved = resolveConfigOptionsForSelectedModel(target);
   const {
     authority: capabilityAuthority,
     configOptions,
     modelReasoningEfforts,
     declaredModelControls,
-  } = resolveConfigOptions(target);
+  } = resolved;
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.
@@ -705,12 +746,7 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     (option) => option.category === 'model' && option.type === 'select'
   );
 
-  const allSelectors = buildNormalizedSelectors(target, {
-    authority: capabilityAuthority,
-    configOptions,
-    modelReasoningEfforts,
-    declaredModelControls,
-  });
+  const allSelectors = buildNormalizedSelectors(target, resolved);
   const configOptionSelectors = allSelectors.filter((selector) => {
     const category = selector.category ?? '';
     if (selector.configId === 'interaction_mode') {
@@ -741,6 +777,7 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
       : {}),
     modelReasoningEfforts,
     declaredModelControls,
+    modelConfigOptionsSource: resolved.source,
   };
 };
 
@@ -750,7 +787,8 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
  */
 export const buildAllConfigOptionSelectors = (
   target?: AcpSelectorTarget
-): AcpConfigOptionSelector[] => buildNormalizedSelectors(target, resolveConfigOptions(target));
+): AcpConfigOptionSelector[] =>
+  buildNormalizedSelectors(target, resolveConfigOptionsForSelectedModel(target));
 
 const buildNormalizedSelectors = (
   target: AcpSelectorTarget | undefined,

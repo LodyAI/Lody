@@ -3818,7 +3818,13 @@ export class MessageHandler {
         },
         refreshMachineProviderRateLimits: async (configId) =>
           this.executionService.refreshProviderRateLimits(configId),
-        refreshMachineAcpCapabilities: async ({ configId, force, onAcpBinaryProgress, signal }) =>
+        refreshMachineAcpCapabilities: async ({
+          configId,
+          force,
+          readModelOptions,
+          onAcpBinaryProgress,
+          signal,
+        }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
               type: 'machine/acp-capabilities-refresh',
@@ -3826,6 +3832,7 @@ export class MessageHandler {
               workspaceId: this.workspaceId,
               configId,
               force,
+              ...(readModelOptions ? { readModelOptions } : {}),
             },
             { onAcpBinaryProgress, signal }
           ),

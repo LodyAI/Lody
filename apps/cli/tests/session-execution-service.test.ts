@@ -11451,6 +11451,105 @@ describe('SessionExecutionService', () => {
     );
   });
 
+  it.each([
+    { cliType: 'builtin' as const, readsModels: true },
+    { cliType: 'registry' as const, readsModels: false },
+  ])(
+    'reads every model and reports each one only for a $cliType agent that asked',
+    async ({ cliType, readsModels }) => {
+      const model = (currentValue: string) => ({
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select' as const,
+        currentValue,
+        options: [
+          { value: 'mimo', name: 'MiMo' },
+          { value: 'deepseek-flash', name: 'DeepSeek Flash' },
+        ],
+      });
+      const answer = [model('deepseek-flash')];
+      const updateAcpCapabilities = vi.fn(async () => ({
+        cliType,
+        agentType: 'dimcode',
+        modes: [],
+        models: [],
+        fetchedAt: 1,
+      }));
+      const fetchAcpCapabilities = vi.fn(
+        async (...args: Parameters<SessionExecutionServiceDeps['fetchAcpCapabilities']>) => {
+          const readModelOptions = args[5]?.readModelOptions;
+          readModelOptions?.onProgress?.({
+            modelId: 'deepseek-flash',
+            modelName: 'DeepSeek Flash',
+            index: 2,
+            total: 2,
+          });
+          return {
+            modes: [],
+            models: [],
+            configOptions: [model('mimo')],
+            sessionFork: false,
+            acknowledgedSteer: false,
+            ...(readModelOptions ? { modelConfigOptions: { 'deepseek-flash': answer } } : {}),
+          };
+        }
+      );
+      const deps = createBaseDeps({
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta: vi.fn(async () => undefined),
+          },
+          getOrCreateSessionDoc: vi.fn(),
+          updateAcpCapabilities,
+          getAgentConfigForMachineLaunch: vi.fn(async () =>
+            createLaunchConfig({ cliType, agentType: 'dimcode' })
+          ),
+        } as unknown as LoroDocumentManager,
+        fetchAcpCapabilities,
+      });
+      const progress: unknown[] = [];
+
+      await new SessionExecutionService(deps).refreshMachineAcpCapabilities(
+        {
+          type: 'machine/acp-capabilities-refresh',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          configId: capabilityConfigId,
+          force: true,
+          readModelOptions: true,
+        },
+        { onAcpBinaryProgress: (message) => progress.push(message) }
+      );
+
+      expect(progress).toEqual(
+        readsModels
+          ? [
+              {
+                type: 'machine/acp-binary-progress',
+                machineId: 'machine-1',
+                agentType: 'dimcode',
+                status: 'reading-model-options',
+                configId: capabilityConfigId,
+                modelId: 'deepseek-flash',
+                modelName: 'DeepSeek Flash',
+                modelIndex: 2,
+                modelCount: 2,
+              },
+            ]
+          : []
+      );
+      const writeOptions = (updateAcpCapabilities.mock.calls[0] as unknown[] | undefined)?.at(-1);
+      expect(writeOptions).toMatchObject(
+        readsModels ? { modelConfigOptions: { 'deepseek-flash': answer } } : {}
+      );
+      if (!readsModels) {
+        expect(writeOptions).not.toHaveProperty('modelConfigOptions', expect.anything());
+      }
+    }
+  );
+
   describe('ACP capability refresh cache', () => {
     const sourceVersion = 'opencode@1.0.0';
     const secretToken = 'sk-test-9f3a-low-entropy-token';
