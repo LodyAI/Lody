@@ -25,6 +25,8 @@ export interface MachineKeyringEntry {
 export type MachineKeyring = (account: string) => Promise<MachineKeyringEntry>;
 // Native keyring prompts cannot be cancelled in-process. The official process
 // owner terminates and joins this helper before a timeout can select file custody.
+// One helper process performs the whole read or read-or-create, so a slow keyring
+// costs one bounded wait per open instead of one per native call.
 const keyringHelper = `
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
@@ -33,23 +35,21 @@ try {
   const loaded = await import(moduleUrl);
   const { AsyncEntry } = loaded.default ?? loaded;
   const entry = new AsyncEntry('Lody E2EE Machine Custody', account, { linux: { store: 'secret-service' } });
-  let result = null;
-  if (operation === 'get') result = (await entry.getPassword()) ?? null;
-  else if (operation === 'set') await entry.setPassword(value);
-  else if (operation === 'delete') await entry.deleteCredential();
-  else throw new Error('invalid');
+  let result = (await entry.getPassword()) ?? null;
+  if (operation === 'get-or-create' && result === null) {
+    await entry.setPassword(value);
+    result = (await entry.getPassword()) ?? null;
+    if (result !== value) throw new Error('mismatch');
+  } else if (operation !== 'get' && operation !== 'get-or-create') throw new Error('invalid');
   process.stdout.write(JSON.stringify(result));
 } catch {
   process.stderr.write('e2ee_keyring_unavailable');
   process.exitCode = 1;
 }
 `;
-/** One bounded native operation; caller supplies the official process Layer. */
-const machineKeyringOperation = (
-  account: string,
-  operation: 'get' | 'set' | 'delete',
-  value?: string
-) =>
+/** One bounded native helper; caller supplies the official process Layer. With `create`,
+ * a missing entry is written and read back; an existing entry is never replaced. */
+const machineKeyringOperation = (account: string, create?: string) =>
   Effect.gen(function* () {
     const moduleUrl = yield* Effect.try({
       try: () => pathToFileURL(createRequire(import.meta.url).resolve('@napi-rs/keyring')).href,
@@ -59,7 +59,12 @@ const machineKeyringOperation = (
       command: getCliNodeExecutable(),
       args: ['--input-type=module', '-e', keyringHelper],
       env: { ...process.env },
-      input: JSON.stringify({ moduleUrl, account, operation, value }),
+      input: JSON.stringify({
+        moduleUrl,
+        account,
+        operation: create === undefined ? 'get' : 'get-or-create',
+        value: create,
+      }),
       timeout: 10_000,
       maxOutputBytes: 8192,
     }).pipe(Effect.catchCause(processFailure));
@@ -272,18 +277,24 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
     (db) => Effect.sync(() => db.close())
   );
   const marker = join(directory, 'protection');
-  const callKeyring = (account: string, operation: 'get' | 'set' | 'delete', value?: string) =>
+  const account = createHash('sha256').update(directory).digest('hex');
+  // Read this custody's KEK entry; with `create`, write it when missing and read it back.
+  // An existing entry is never replaced: an archived custody may still depend on it.
+  const readKeyring = (create?: string) =>
     options.keyring
       ? native(async () => {
           const entry = await options.keyring!(account);
-          if (operation === 'get') return entry.getPassword();
-          if (operation === 'set') await entry.setPassword(value!);
-          else await entry.deleteCredential();
-          return undefined;
+          const existing = await entry.getPassword();
+          if (existing !== undefined || create === undefined) return existing;
+          await entry.setPassword(create);
+          if ((await entry.getPassword()) !== create) throw failure('unavailable');
+          return create;
         })
-      : machineKeyringOperation(account, operation, value).pipe(
+      : machineKeyringOperation(account, create).pipe(
           Effect.provide(platformLayer({ nodeProcess: options.nodeProcess }))
         );
+  // Preserve the v1 hex password format so older CLI versions can still reopen it.
+  let encoded: string | undefined;
 
   let protection: KekWrapper['protection'];
   let selected: Buffer | undefined;
@@ -307,22 +318,15 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
       )
     );
     if (originals) return yield* failure('identity-lost');
-    const probeId = `probe:${randomBytes(16).toString('hex')}`;
-    const probe = randomSecretHex();
-    const available = yield* Effect.gen(function* () {
-      const probed = yield* Effect.result(
-        Effect.gen(function* () {
-          yield* callKeyring(probeId, 'set', probe);
-          return (yield* callKeyring(probeId, 'get')) === probe;
-        })
-      );
-      // A process-release defect bypasses this fallback; do not start another
-      // helper or publish file protection while the previous tree is unresolved.
-      yield* callKeyring(probeId, 'delete').pipe(Effect.catch(() => Effect.void));
-      return Result.isSuccess(probed) && probed.success;
-    });
+    // Creating the KEK entry is the write/read probe: one bounded helper both decides
+    // protection and supplies the key, keeping first-time setup within one timeout.
+    // A process-release defect bypasses this fallback; do not start another helper
+    // or publish file protection while the previous tree is unresolved.
+    const probed = yield* Effect.result(readKeyring(randomSecretHex()));
+    const available = Result.isSuccess(probed) && probed.success !== undefined;
     if (!available && options.requireOsProtection) return yield* failure('unavailable');
     protection = available ? 'os-keystore' : 'file';
+    if (Result.isSuccess(probed)) encoded = probed.success;
     yield* native(() => publish(marker, protection));
   }
   if (protection !== 'file' && protection !== 'os-keystore') return yield* failure('corrupt');
@@ -338,18 +342,13 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
   let key: Uint8Array | undefined;
   yield* Effect.addFinalizer(() => Effect.sync(() => key?.fill(0)));
   if (protection === 'os-keystore') {
-    const account = createHash('sha256').update(directory).digest('hex');
-    // Preserve the v1 hex password format so older CLI versions can still reopen it.
-    let encoded = yield* callKeyring(account, 'get');
     if (encoded === undefined) {
-      if (yield* native(() => exists(join(directory, 'kek.safe-storage'))))
-        return yield* failure('identity-lost');
-      const original = randomSecretHex();
-      yield* callKeyring(account, 'set', original);
-      encoded = yield* callKeyring(account, 'get');
-      if (encoded !== original) return yield* failure('unavailable');
+      // A wrapped KEK without its keyring entry is lost identity, never a new key.
+      const wrapped = yield* native(() => exists(join(directory, 'kek.safe-storage')));
+      encoded = yield* readKeyring(wrapped ? undefined : randomSecretHex());
+      if (encoded === undefined) return yield* failure('identity-lost');
     }
-    if (encoded === undefined || !/^[0-9a-f]{64}$/.test(encoded)) return yield* failure('corrupt');
+    if (!/^[0-9a-f]{64}$/.test(encoded)) return yield* failure('corrupt');
     key = decodeHex(encoded);
   }
 

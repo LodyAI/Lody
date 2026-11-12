@@ -3,7 +3,8 @@
 `CLAUDE.md` aliases this; CLI rules apply.
 
 - Lazy machine-only; ordinary startup never probes keyring.
-- Creation probes OS keystore write/read; fixes OS/file protection permanently.
+- Creation reads, or writes and reads back, the KEK keyring entry in one helper process;
+  never replace an existing entry. It fixes OS/file protection permanently.
   Reopen: original selector/KEK; no re-probe/switch.
 - File protection: owner-only dirs/files, no symlinks. Windows: owner/DACL via official
   process Layer, never Unix mode bits.

@@ -46,5 +46,8 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   started it, while restoring stays available and leads when it is the host's only next
   step. A passkey removal that settled keeps its outcome even when the host cannot read
   the list again; the section then drops the stale list instead of reporting a failure. A host-owned `Section` is accepted only
-  while hosts move to the port, and a host with neither shows where recovery can be
-  set up instead of an empty tab.
+  while hosts move to the port. A host with neither, or with the renderer recovery switch
+  off, composes no section: the console says recovery is unavailable on this device,
+  never an empty tab, and offers no recovery shortcut. The section shows loading until
+  its first plan answers; a host's `e2ee_recovery_disabled` refusal shows recovery as
+  off with no actions. The switch never enables main's vault.

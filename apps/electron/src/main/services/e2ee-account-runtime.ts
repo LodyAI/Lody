@@ -202,6 +202,58 @@ const closeCurrent = Effect.gen(function* () {
   return undefined
 })
 
+type IrohPreparation =
+  | {
+      readonly config: NonNullable<
+        ReturnType<(typeof import('./e2ee-iroh-config'))['desktopIrohConfig']>
+      >
+      readonly native: NonNullable<ReturnType<(typeof import('./e2ee-iroh.mjs'))['loadIrohNative']>>
+      readonly proxyUrl: string | undefined
+    }
+  | undefined
+/** Only cloud builds that carry relays load the iroh route at all. */
+function irohRouted() {
+  return import.meta.env.VITE_LODY_PLATFORM === 'cloud' && !!import.meta.env.VITE_IROH_RELAYS
+}
+/**
+ * The iroh route for a cold account open. It loads modules and asks the system proxy
+ * (PAC/WPAD may stall), so callers run it before taking the account permit: a slow
+ * lookup must never hold every other workspace's E2EE operations.
+ */
+async function prepareIroh(): Promise<IrohPreparation> {
+  if (!irohRouted()) return undefined
+  const configModule = await import('./e2ee-iroh-config')
+  const config = configModule.desktopIrohConfig({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+    env: import.meta.env
+  })
+  if (!config) return undefined
+  const native = (await import('./e2ee-iroh.mjs')).loadIrohNative(config.file)
+  if (!native) return undefined
+  // Relays need the same proxy the embedded CLI receives: the inherited
+  // environment first, else the system proxy for the first relay URL.
+  const inherited = configModule.proxyUrlFromEnv(process.env)
+  if (inherited) return { config, native, proxyUrl: inherited }
+  const { resolveSystemProxyEnv } = await import('./system-proxy-env')
+  const proxyUrl = configModule.proxyUrlFromEnv(
+    await resolveSystemProxyEnv(config.relays.urls.slice(0, 1)).catch(() => ({}))
+  )
+  return { config, native, proxyUrl }
+}
+/** Whether this call may construct an owner: a hint read without the permit. */
+function mayOpenCold(location: IdentityLocation | undefined) {
+  if (quitting || !irohRouted()) return false
+  const userId = getIpcServiceDeps().authService.getCachedSessionIdentity().userId
+  if (!userId) return false
+  try {
+    return !owners.has(identityDirectory(userId, location))
+  } catch {
+    return false
+  }
+}
+
 /** Entry boundary; account and resources remain locked until the native operation settles. */
 export function withDesktopE2eeAccount<A>(
   work: (owner: Account) => Effect.Effect<A, unknown>,
@@ -210,6 +262,22 @@ export function withDesktopE2eeAccount<A>(
   retiring?: RemovalFence
 ): Promise<A> {
   observeIdentity()
+  // Settled before the permit; the permit-held open below only reuses its answer.
+  const iroh: Promise<Exit.Exit<IrohPreparation, unknown>> | undefined = mayOpenCold(location)
+    ? prepareIroh().then(Exit.succeed, (error: unknown) => Exit.die(error))
+    : undefined
+  // Without a cold iroh open the call is admitted synchronously, as before.
+  if (!iroh) return runAccountOperation(work, location, create, retiring, undefined)
+  return iroh.then((prepared) => runAccountOperation(work, location, create, retiring, prepared))
+}
+
+function runAccountOperation<A>(
+  work: (owner: Account) => Effect.Effect<A, unknown>,
+  location: IdentityLocation | undefined,
+  create: boolean,
+  retiring: RemovalFence | undefined,
+  prepared: Exit.Exit<IrohPreparation, unknown> | undefined
+): Promise<A> {
   return Effect.runPromise(
     Effect.uninterruptible(
       serial.withPermit(
@@ -265,47 +333,19 @@ export function withDesktopE2eeAccount<A>(
                 )
                 const bootstrap = yield* makeDesktopE2eeBootstrap({ directory, accountId, custody })
                 const runtime = yield* Effect.promise(() => import('./e2ee-runtime.mjs'))
-                // Only cloud builds that carry relays load the iroh route at all.
-                const irohConfigModule =
-                  import.meta.env.VITE_LODY_PLATFORM === 'cloud' && import.meta.env.VITE_IROH_RELAYS
-                    ? yield* Effect.promise(() => import('./e2ee-iroh-config'))
-                    : undefined
-                const irohConfig = irohConfigModule?.desktopIrohConfig({
-                  packaged: app.isPackaged,
-                  resourcesPath: process.resourcesPath,
-                  appPath: app.getAppPath(),
-                  env: import.meta.env
-                })
-                const irohNative = irohConfig
-                  ? (yield* Effect.promise(() => import('./e2ee-iroh.mjs'))).loadIrohNative(
-                      irohConfig.file
-                    )
-                  : undefined
-                // Relays need the same proxy the embedded CLI receives: the inherited
-                // environment first, else the system proxy for the first relay URL.
-                const irohProxy = irohNative
-                  ? yield* Effect.promise(async () => {
-                      const { proxyUrlFromEnv } = await import('./e2ee-iroh-config')
-                      const inherited = proxyUrlFromEnv(process.env)
-                      if (inherited) return inherited
-                      const { resolveSystemProxyEnv } = await import('./system-proxy-env')
-                      return proxyUrlFromEnv(
-                        await resolveSystemProxyEnv(irohConfig!.relays.urls.slice(0, 1)).catch(
-                          () => ({})
-                        )
-                      )
-                    })
-                  : undefined
+                // Normally prepared before the permit. A cold open the hint did not
+                // foresee (an owner closed meanwhile) prepares here, still bounded.
+                const iroh = prepared ? yield* prepared : yield* Effect.promise(() => prepareIroh())
                 const host = yield* runtime.makeDesktopE2eeRuntimeHost({
                   directory,
                   custody,
                   bootstrap,
-                  ...(irohConfig && irohNative
+                  ...(iroh
                     ? {
                         iroh: {
-                          native: irohNative,
-                          relays: irohConfig.relays,
-                          ...(irohProxy ? { proxyUrl: irohProxy } : {})
+                          native: iroh.native,
+                          relays: iroh.config.relays,
+                          ...(iroh.proxyUrl ? { proxyUrl: iroh.proxyUrl } : {})
                         }
                       }
                     : {})
