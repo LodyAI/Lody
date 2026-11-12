@@ -45,12 +45,14 @@ describe.skipIf(!native)('@lody/iroh-native', () => {
     })();
     const target = { endpointId: listener.endpointId, directAddrs: listener.directAddrs() };
     expect(await dialer.hasConnection(listener.endpointId)).toBe(false);
+    expect(await dialer.connectionPath!(listener.endpointId)).toBe('none');
     const call = await dialer.call(target, Buffer.from('frame'), 10_000);
     const replies: string[] = [];
     for (let reply = await call.nextReply(); reply; reply = await call.nextReply())
       replies.push(reply.toString());
     expect(replies).toEqual(['ack:frame', 'done']);
     expect(await served).toBe(dialer.endpointId);
+    expect(await dialer.connectionPath!(listener.endpointId)).toBe('direct');
     expect(await dialer.hasConnection(listener.endpointId)).toBe(true);
   });
 

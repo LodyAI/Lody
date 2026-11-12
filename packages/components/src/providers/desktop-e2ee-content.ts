@@ -454,6 +454,12 @@ export function createE2eeContent(input: {
       },
       ...(input.runtime.irohReady && input.runtime.irohCall
         ? {
+            irohPath: (machineId: string) =>
+              withinContent(
+                () =>
+                  input.runtime.irohPath?.(input.workspaceId, machineId) ??
+                  Promise.resolve('none' as const)
+              ),
             irohReady: (machineId: string) =>
               withinContent(() => input.runtime.irohReady!(input.workspaceId, machineId)),
             irohCall: (

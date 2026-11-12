@@ -48,6 +48,8 @@ interface CompactRowProps {
   labelId?: string;
   helperId?: string;
   helper?: ReactNode;
+  /** Interactive disclosure content needs a block container rather than a paragraph. */
+  helperBlock?: boolean;
   children?: ReactNode;
   className?: string;
   alignTop?: boolean;
@@ -158,21 +160,23 @@ export function CompactRow({
   labelId,
   helperId,
   helper,
+  helperBlock = false,
   children,
   className,
   alignTop = false,
   inset = true,
   disabled = false,
 }: CompactRowProps) {
+  const Helper = helperBlock ? 'div' : 'p';
   const text = (
     <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
       <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
         {label}
       </p>
       {helper ? (
-        <p id={helperId} {...stylex.props(surface.rowHelper)}>
+        <Helper id={helperId} {...stylex.props(surface.rowHelper)}>
           {helper}
-        </p>
+        </Helper>
       ) : null}
     </div>
   );

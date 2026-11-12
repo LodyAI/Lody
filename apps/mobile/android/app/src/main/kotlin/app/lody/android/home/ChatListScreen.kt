@@ -122,6 +122,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -851,7 +852,17 @@ internal fun HomeList(
         folded = if (id in folded) folded - id else folded + id
         FoldedOpeners.save(context, folded)
     }
-    val shown = remember(sections, folded) { sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded)) } }
+    // Home labels collapse their group; search labels never do. Archived buckets reuse activity ids.
+    var collapsedGroups by remember { mutableStateOf(CollapsedGroups.load(context)) }
+    val groupKey = { id: String -> if (archivedList) "archived:$id" else id }
+    val toggleGroup = { id: String ->
+        val key = groupKey(id)
+        collapsedGroups = if (key in collapsedGroups) collapsedGroups - key else collapsedGroups + key
+        CollapsedGroups.save(context, collapsedGroups)
+    }
+    val shown = remember(sections, folded, collapsedGroups, pinsLabels, archivedList) {
+        sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded), collapsed = pinsLabels && groupKey(it.id) in collapsedGroups) }
+    }
     val direction = LocalLayoutDirection.current
     // Keep the sticky slot below the app bar; content padding alone scrolls away.
     ProjectIndexList(shown, titles, listState, projectIndex, padding.calculateBottomPadding(),
@@ -869,11 +880,14 @@ internal fun HomeList(
                 // Project groups lead their label with the project's logo.
                 val logo = section.repository.takeIf { section.header is HomeSection.Header.Project }
                 if (pinsLabels) {
-                    stickyHeader(key = section.id) { SectionTitle(titles.getValue(section.id), logo) }
+                    stickyHeader(key = section.id) {
+                        SectionTitle(titles.getValue(section.id), logo, collapsed = section.collapsed, onToggle = { toggleGroup(section.id) })
+                    }
                 } else {
                     item(key = section.id) { SectionTitle(titles.getValue(section.id), logo) }
                 }
                 items(section.visibleChats(idleExpanded), key = { "${section.id}/${it.id}" }) { chat ->
+                    // Rows fade and slide as their group collapses or expands.
                     ChatRow(
                         chat, if (section.header is HomeSection.Header.Project && chat.nestedUnder == null) details - ChatRowDetail.Project else details, now,
                         owner = owners?.let { it[chat.ownerId] ?: WorkspaceMember(chat.ownerId.orEmpty(), "") },
@@ -881,6 +895,7 @@ internal fun HomeList(
                         onToggle = { toggleOpener(chat.id) },
                         archived = archivedList,
                         onSetArchived = onSetArchived?.let { action -> { action(chat, !archivedList) } },
+                        modifier = Modifier.animateItem(),
                     ) { onOpenChat(chat) }
                 }
                 if (section.folds) {
@@ -888,6 +903,7 @@ internal fun HomeList(
                         MoreRow(
                             if (idleExpanded) showLess else pluralStringResource(R.plurals.home_group_show_all, section.rootCount, section.rootCount),
                             onToggleIdle,
+                            Modifier.animateItem(),
                         )
                     }
                 }
@@ -914,12 +930,12 @@ private fun HomeSection.Header.title(): String = when (this) {
 }
 
 @Composable
-private fun MoreRow(title: String, onClick: () -> Unit) {
+private fun MoreRow(title: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Text(
         title,
         style = LodyTheme.typography.body,
         color = LodyTheme.colors.textTertiary,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .heightIn(min = LodySize.listRow)
             .clickable(role = Role.Button, onClick = onClick)
@@ -1086,12 +1102,20 @@ private val ProjectSource.label: Int
 // MARK: - Rows
 
 @Composable
-private fun SectionTitle(text: String, repository: String? = null) {
+private fun SectionTitle(text: String, repository: String? = null, collapsed: Boolean? = null, onToggle: () -> Unit = {}) {
+    // `collapsed` is null where the group cannot fold (search). The chevron points down while open.
+    val angle by animateFloatAsState(if (collapsed == true) 0f else 90f, LodySpring.snappy(), label = "group")
+    val action = stringResource(if (collapsed == true) R.string.home_group_expand else R.string.home_group_collapse)
+    val state = stringResource(if (collapsed == true) R.string.home_tree_collapsed else R.string.home_tree_expanded)
     Row(
         Modifier
             .fillMaxWidth()
             .background(homePageColor())
-            .semantics(mergeDescendants = true) { heading() }
+            .then(if (collapsed != null) Modifier.clickable(role = Role.Button, onClickLabel = action, onClick = onToggle) else Modifier)
+            .semantics(mergeDescendants = true) {
+                heading()
+                if (collapsed != null) stateDescription = state
+            }
             .padding(start = LodyLayout.screenPaddingX, end = LodyLayout.screenPaddingX, top = LodySpacing.lg, bottom = LodySpacing.xs),
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),
         verticalAlignment = Alignment.CenterVertically,
@@ -1099,6 +1123,7 @@ private fun SectionTitle(text: String, repository: String? = null) {
         // The project's logo in its original colours, unlike the muted row marks.
         if (!repository.isNullOrBlank()) RepositoryIcon(repository, muted = false)
         Text(text, style = LodyTheme.typography.subhead, color = LodyTheme.colors.textSecondary)
+        if (collapsed != null) Glyph(LodyIcons.Forward, LodyTheme.colors.textSecondary, FamilyChevron, Modifier.rotate(angle))
     }
 }
 
@@ -1121,6 +1146,7 @@ private fun ChatRow(
     /** Whether the row is in the archived list: its long-press action is then Unarchive. */
     archived: Boolean = false,
     onSetArchived: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val colors = LodyTheme.colors
@@ -1135,7 +1161,7 @@ private fun ChatRow(
     val rail = colors.borderDefault
     var titleHeight by remember { mutableFloatStateOf(0f) }
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
             .drawBehind { if (nested) drawRail(rail, chat.lastChild, if (twoLine) LodySpacing.sm.toPx() + titleHeight / 2 else size.height / 2) },
     ) {

@@ -54,7 +54,8 @@ final class SessionListView: UIView {
   func setPreviewWorkspaceId(_ value: String) { sidebar.previewWorkspaceId = value }
   /// Home pins the current group's label; search results keep labels in the flow.
   func setProjectIndexEnabled(_ value: Bool) { grouped.projectIndexEnabled = value }
-  func setPinsGroupLabels(_ value: Bool) { grouped.pinsGroupLabels = value }
+  /// Home group labels also collapse their group; search labels do not.
+  func setPinsGroupLabels(_ value: Bool) { grouped.pinsGroupLabels = value; sidebar.collapsibleHeaders = value }
   func setPlaceholder(_ value: String) { grouped.setPlaceholder(value); sidebar.setPlaceholder(value) }
   func setSections(_ value: [LodyListSection]) { sections = value; setRetry(retryAction); render() }
   private func render() {

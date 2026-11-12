@@ -278,6 +278,7 @@ export type WorkspaceE2eeTransport = {
     frame: string
   ) => Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
   /** Optional iroh route; see `E2eeWorkspaceRuntime.irohReady`/`irohCall`. */
+  irohPath?: (machineId: string) => Promise<'direct' | 'relay' | 'none'>;
   irohReady?: (machineId: string) => Promise<boolean>;
   irohCall?: (
     machineId: string,
@@ -1994,7 +1995,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         prepareFeature: native.prepareFeatureRpc,
         acceptFeature: native.acceptFeatureRpcResponse,
         ...(native.irohReady && native.irohCall
-          ? { iroh: { ready: native.irohReady, call: native.irohCall } }
+          ? { iroh: { ready: native.irohReady, call: native.irohCall, path: native.irohPath } }
           : {}),
         closeClient: async () => {
           await encryptedRpcToken?.close();

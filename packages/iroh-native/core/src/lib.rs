@@ -102,6 +102,8 @@ impl std::error::Error for EndpointError {}
 
 /// Endpoint options supplied by a trusted native host.
 pub struct EndpointConfig {
+    #[cfg(test)]
+    relay_only: bool,
     /// Ed25519 seed of the ledger device. Wiped when this config is dropped.
     pub secret_key: Zeroizing<[u8; 32]>,
     /// Lody relay URLs. Every dial targets all of them, so the peer is reachable
@@ -267,6 +269,10 @@ impl LodyEndpoint {
                 .map_err(|e| EndpointError::InvalidRelay(format!("proxy: {e}")))?;
             builder = builder.proxy_url(proxy);
         }
+        #[cfg(test)]
+        if config.relay_only {
+            builder = builder.clear_ip_transports();
+        }
         builder = with_test_tls(builder, config.insecure_relay_tls);
         let endpoint = builder
             .bind()
@@ -321,6 +327,29 @@ impl LodyEndpoint {
         match slot.as_ref().map(|slot| slot.try_lock()) {
             Some(Ok(guard)) => guard.as_ref().is_some_and(|c| c.close_reason().is_none()),
             _ => false,
+        }
+    }
+
+    /// Selected path on an existing connection. Never dials or waits for a dial.
+    pub async fn connection_path(&self, endpoint_id: &[u8; 32]) -> &'static str {
+        let Ok(id) = EndpointId::from_bytes(endpoint_id) else {
+            return "none";
+        };
+        let slot = self.connections.lock().await.get(&id).cloned();
+        let Some(slot) = slot else {
+            return "none";
+        };
+        let Ok(guard) = slot.try_lock() else {
+            return "none";
+        };
+        let Some(connection) = guard.as_ref().filter(|c| c.close_reason().is_none()) else {
+            return "none";
+        };
+        let paths = connection.paths();
+        match paths.iter().find(|path| path.is_selected()) {
+            Some(path) if path.is_ip() => "direct",
+            Some(path) if path.is_relay() => "relay",
+            _ => "none",
         }
     }
 

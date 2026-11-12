@@ -263,6 +263,7 @@ const styles = stylex.create({
   },
   emptyGrid: {
     display: 'grid',
+    gridAutoRows: 'minmax(40px, 1fr)',
     gridTemplateColumns: {
       default: 'repeat(1, minmax(0, 1fr))',
       '@container empty-panel (min-width: 320px)': 'repeat(2, minmax(0, 1fr))',

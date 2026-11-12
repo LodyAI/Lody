@@ -23,6 +23,7 @@ enum SettingsSections {
         rows: [row("debug-open", "Debug", image: "ladybug")]
       ))
     }
+    sections.append(developerMode())
     return sections
   }
 
@@ -64,6 +65,23 @@ enum SettingsSections {
     return section(
       "remote", header: String.localizedStringWithFormat(String(localized: "settings.section.workspaceNamed", bundle: .lody), String(describing: workspace.name)), footer: footer, rows: rows
     )
+  }
+
+  /// Always the last group; the Roost beta switch follows Developer Mode only while it is on.
+  private static func developerMode() -> LodyListSection {
+    let enabled = LodyPreferences.developerModeEnabled
+    var rows = [toggleRow("developer-mode", text("developerMode"), image: "hammer", on: enabled)]
+    if enabled {
+      rows.append(toggleRow("roost-history", text("roostHistory"), image: "externaldrive", on: LodyPreferences.roostHistoryExperimentEnabled))
+    }
+    return section("developer-mode", footer: enabled ? text("roostHistoryHint") : "", rows: rows)
+  }
+
+  private static func toggleRow(_ id: String, _ title: String, image: String, on: Bool) -> LodyListRow {
+    var result = row(id, title, image: image, navigates: false)
+    result.disclosure = false
+    result.toggle = on
+    return result
   }
 
   private static func section(_ id: String, header: String = "", footer: String = "", rows: [LodyListRow]) -> LodyListSection {

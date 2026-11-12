@@ -34,6 +34,21 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Replacement verifies new desktop approval, drains the old incarnation and uses
   the approved atomic archive/current switch. Preserve old pins, wrappers and
   journals. Logout, close and ordinary cache cleanup never delete identity.
+- Exact access loss comes only from the session's verified ledger classifying its own
+  key as revoked or member-removed, or from a trusted adapter's typed
+  `PersonalAccessLoss`; the runtime boundary projects either to `e2ee_device_revoked`
+  or `e2ee_member_removed`. Messages, codes and transport, JWT or parse failures never
+  do. Opens and admitted operations refuse such a device; ledger reads stay usable, and
+  a confirmed self-revocation still reports success.
+- A revoked device keeps its identity until replaced. A new personal offer prepares a
+  replacement identity. Account pairing prepares one only when the complete history,
+  verified from the pinned genesis, classifies the current identity as lost; its offer
+  session derives from the replaced key, so the revoked key is never reused.
+- Each remote round under a serial permit is bounded (`boundedBy`, injectable sleep):
+  at the deadline it is interrupted, releases the permit and fails as `network`. Its
+  outcome is unknown: retained originals and journals stay, and the retry resends or
+  resumes them. Governance commands settle a journaled original first and never sign
+  the same command again.
 - RPC exposes the existing closed product methods and exact original retries,
   never private keys, credentials or generic signing to product callers. Real
   injected implementations are required; no empty handler substitutes for support.

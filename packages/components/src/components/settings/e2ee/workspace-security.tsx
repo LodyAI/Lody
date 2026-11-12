@@ -142,6 +142,7 @@ function SecuritySettings({
                     <E2eeConsoleSection tab="devices">
                       <E2eeDevicesPanel
                         {...panelState}
+                        directory={scope.directory}
                         onRetry={retry}
                         onUpdate={update}
                         onRevoke={(key, confirmation) => {

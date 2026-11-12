@@ -162,8 +162,9 @@ the system back circle. The transparent header registers its controls with UIKit
 top-edge blur. A noninteractive 55% semantic canvas tint protects the title and
 machine subtitle, fading to transparent over 32 pt below the header rather than
 adding an opaque chrome material. The transcript scrolls underneath;
-content/find insets keep initial content and search below the controls. The shell hides native navigation only for conversations;
-detail pages retain their native bars. Back uses the existing navigation/split
+content/find insets keep initial content and search below the controls. The shell hides native navigation for conversations; iPhone
+pages opened from a Home tab carry their native bar inside the page (`LodyPageStackHost`);
+other detail pages retain the shell's native bars. Back uses the existing navigation/split
 owner, and controls retain native glass styling and accessibility labels. The book-layout
 conversation list popover anchors to the visible page sidebar button and its bounds;
 native navigation-bar controls retain their bar-item anchors.

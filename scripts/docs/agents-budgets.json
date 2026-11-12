@@ -8,6 +8,7 @@
     "packages/ui/AGENTS.md": 1380,
     "apps/mobile/ios/packages/LodyKit/Sources/LodyKit/Sessions/AGENTS.md": 1400,
     "apps/cli/src/session/AGENTS.md": 1320,
-    "packages/components/src/hooks/AGENTS.md": 1280
+    "packages/components/src/hooks/AGENTS.md": 1280,
+    "packages/e2ee-client/AGENTS.md": 1400
   }
 }

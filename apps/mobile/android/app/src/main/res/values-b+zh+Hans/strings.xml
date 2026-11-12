@@ -57,6 +57,8 @@
     <string name="home_group_running">运行中</string>
     <string name="home_group_pull_request">PR 进行中</string>
     <string name="home_group_idle">空闲</string>
+    <string name="home_group_expand">展开分组</string>
+    <string name="home_group_collapse">收起分组</string>
     <string name="home_group_show_less">收起</string>
     <string name="home_ci_pass">CI 通过</string>
     <string name="home_ci_fail">CI 失败</string>
@@ -624,7 +626,6 @@
     <string name="settings_personal">个人</string>
     <string name="settings_preferences">偏好设置</string>
     <string name="settings_preferences_hint">语言、通知与会话行为</string>
-    <string name="settings_developer">开发者</string>
     <string name="settings_developer_mode">开发者模式</string>
     <string name="settings_roost_history">Roost 历史记录（测试）</string>
     <string name="settings_roost_history_hint">新会话在所选电脑支持时使用 Roost；已有会话保留原有历史记录。</string>
@@ -853,10 +854,8 @@
     <string name="preview_unauthorized">你没有在这台电脑上预览的权限。</string>
     <string name="preview_generic">电脑无法启动预览。</string>
     <string name="preview_timeout">设备启动超时。</string>
-    <string name="preview_device">设备预览</string>
     <string name="preview_ios">iOS 模拟器</string>
     <string name="preview_android">Android 模拟器</string>
-    <string name="preview_choose_title">选择设备预览</string>
     <string name="preview_ios_upgrade">请在 %1$s 上更新 Lody 后再预览 iOS 模拟器。</string>
     <string name="preview_ok">好</string>
     <string name="preview_cancel">取消</string>
@@ -903,10 +902,6 @@
     <string name="preview_quality_saver">省流量</string>
     <string name="preview_quality_balanced">均衡</string>
     <string name="preview_quality_clear">清晰</string>
-    <string name="preview_requested_ios">Agent 想展示 iOS 模拟器</string>
-    <string name="preview_requested_android">Agent 想展示 Android 模拟器</string>
-    <string name="preview_show">查看</string>
-    <string name="preview_dismiss">忽略</string>
     <string name="chat_proposal_role_create">创建 Agent Role？</string>
     <string name="chat_proposal_role_update">更新 Agent Role？</string>
     <string name="chat_proposal_role_saved">Agent Role 已保存</string>

@@ -90,6 +90,10 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Optional `memberProfiles` is a display directory scoped to the live account and
   workspace. Resolve its crypto user IDs through verified ledger members; it cannot
   grant permissions, pin keys, identify the creator, or block ledger availability.
+- Device display profiles are optional, untrusted labels keyed by the original
+  device signing public key. Attach owner names only through that device's verified
+  ledger member. Report only the current host's metadata; missing fields never borrow
+  another device's values. Labels cannot alter admission, keys or revocation targets.
 - Optional `subscribeLedgerHead` belongs to an open control reader. Its values are
   refresh hints, never verified checkpoints or permission grants; callers fetch
   and verify original suffixes and unsubscribe when their scope closes. Absence or

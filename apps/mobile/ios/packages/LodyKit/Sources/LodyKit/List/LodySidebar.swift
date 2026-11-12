@@ -42,7 +42,7 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
   private lazy var registration = UICollectionView.CellRegistration<UICollectionViewListCell, LodyListRow> { [weak self] cell, _, row in
     self?.configure(cell, row: row)
   }
-  private lazy var headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+  private lazy var headerRegistration = UICollectionView.SupplementaryRegistration<SidebarHeaderCell>(
     elementKind: UICollectionView.elementKindSectionHeader
   ) { [weak self] cell, _, index in
     guard let self, let id = self.dataSource.sectionIdentifier(for: index.section),
@@ -51,7 +51,20 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
     content.text = section.header
     cell.contentConfiguration = content
     cell.backgroundConfiguration = .clear()
-    cell.accessibilityTraits = .header
+    cell.sectionId = id
+    cell.onToggle = { [weak self] in self?.toggleHeader(id) }
+    cell.setCollapsible(self.collapsibleHeaders, collapsed: self.isHeaderCollapsed(id), animated: false)
+  }
+  /// Text group labels the person collapsed (Home outside search); band projects use their outline.
+  private var collapsedHeaders = Set(UserDefaults.standard.stringArray(forKey: LodySidebar.collapsedHeadersKey) ?? [])
+  private static let collapsedHeadersKey = "sidebarCollapsedGroups"
+  /// Search results keep their labels fixed.
+  var collapsibleHeaders = true {
+    didSet {
+      guard collapsibleHeaders != oldValue else { return }
+      setSections(sections)
+      refreshHeaders(animated: false)
+    }
   }
 
   @available(*, unavailable)
@@ -183,6 +196,42 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
     outlineChanged(item, expanded: expanded)
   }
 
+  /// Archived buckets reuse the activity ids, so they fold separately.
+  private func headerKey(_ id: String) -> String { (archivedStyle ? "archived:" : "") + id }
+
+  private func isHeaderCollapsed(_ id: String) -> Bool {
+    collapsibleHeaders && collapsedHeaders.contains(headerKey(id))
+  }
+
+  /// Text-labelled sections only; a band section's first row is its own outline parent.
+  private func hasTextHeader(_ section: LodyListSection) -> Bool {
+    !(section.rows.first?.parent == true || section.header.isEmpty)
+  }
+
+  private func toggleHeader(_ id: String) {
+    guard collapsibleHeaders, let section = sections.first(where: { $0.id == id }), hasTextHeader(section) else { return }
+    let key = headerKey(id)
+    if collapsedHeaders.remove(key) == nil { collapsedHeaders.insert(key) }
+    UserDefaults.standard.set(Array(collapsedHeaders).sorted(), forKey: Self.collapsedHeadersKey)
+    let animated = window != nil && !UIAccessibility.isReduceMotionEnabled
+    dataSource.apply(sectionSnapshot(section), to: id, animatingDifferences: animated) { [weak self] in
+      self?.synchronizeSelection()
+    }
+    refreshHeaders(animated: animated)
+  }
+
+  private func sectionSnapshot(_ section: LodyListSection) -> NSDiffableDataSourceSectionSnapshot<SidebarItemID> {
+    // A collapsed group keeps its label, which UIKit still lays out for an empty section.
+    if hasTextHeader(section), isHeaderCollapsed(section.id) { return NSDiffableDataSourceSectionSnapshot() }
+    return section.outlineSnapshot(collapsed: collapsedSessions) { SidebarItemID(section: section.id, row: $0) }
+  }
+
+  private func refreshHeaders(animated: Bool) {
+    for case let header as SidebarHeaderCell in collection.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionHeader) {
+      header.setCollapsible(collapsibleHeaders, collapsed: isHeaderCollapsed(header.sectionId), animated: animated)
+    }
+  }
+
   private func outlineChanged(_ item: SidebarItemID, expanded: Bool) {
     guard let row = rows[item] else { return }
     if row.parent {
@@ -213,9 +262,7 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
       dataSource.apply(snapshot, animatingDifferences: false)
     }
     for section in value {
-      let snapshot = section.outlineSnapshot(collapsed: collapsedSessions) {
-        SidebarItemID(section: section.id, row: $0)
-      }
+      let snapshot = sectionSnapshot(section)
       dataSource.apply(snapshot, to: section.id, animatingDifferences: sameSections && window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
         // A deep link can select before its catalog snapshot arrives. Read the
         // current detail, never a captured row from an earlier navigation.
@@ -300,6 +347,7 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
       collection.backgroundColor = backgroundColor
       // Outline section snapshots own expansion; restyle visible cells in place instead of reapplying.
       updateVisibleRows()
+      refreshHeaders(animated: false)
     }
   }
 
@@ -443,5 +491,56 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
       let target = id.hasPrefix("toggle:") ? "project:" + String(id.dropFirst(7)) : id
       self?.onRowPress(["id": target])
     }
+  }
+}
+
+/// A sidebar text group label. Where groups collapse, the whole label toggles its group and a
+/// trailing chevron points down while open and right when collapsed, as iPadOS sidebar sections do.
+private final class SidebarHeaderCell: UICollectionViewListCell {
+  var sectionId = ""
+  var onToggle: () -> Void = {}
+  private let chevron = UIImageView(image: UIImage(
+    systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(textStyle: .footnote, scale: .small).applying(UIImage.SymbolConfiguration(weight: .semibold))
+  ))
+  private var collapsible = false
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    chevron.tintColor = .secondaryLabel
+    chevron.contentMode = .center
+    addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
+
+  @objc private func tapped() { if collapsible { onToggle() } }
+
+  override func accessibilityActivate() -> Bool {
+    guard collapsible else { return false }
+    onToggle()
+    return true
+  }
+
+  func setCollapsible(_ collapsible: Bool, collapsed: Bool, animated: Bool) {
+    let changed = collapsible != self.collapsible
+    self.collapsible = collapsible
+    if changed {
+      accessories = collapsible
+        ? [.customView(configuration: .init(customView: chevron, placement: .trailing(), reservedLayoutWidth: .actual))]
+        : []
+    }
+    let transform = collapsed ? .identity : CGAffineTransform(rotationAngle: .pi / 2)
+    if animated {
+      UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 1, initialSpringVelocity: 0) { self.chevron.transform = transform }
+    } else {
+      chevron.transform = transform
+    }
+    isAccessibilityElement = true
+    accessibilityLabel = (contentConfiguration as? UIListContentConfiguration)?.text
+    accessibilityTraits = collapsible ? [.header, .button] : .header
+    accessibilityValue = collapsible
+      ? String(localized: String.LocalizationValue(collapsed ? "native.list.collapsed" : "native.list.expanded"), bundle: .lody)
+      : nil
   }
 }

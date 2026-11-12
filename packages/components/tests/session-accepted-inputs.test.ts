@@ -18,6 +18,7 @@ import * as electron from '../src/lib/electron';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import {
+  e2eeAccessLoss,
   removeEncryptedWorkspaceLocalData,
   retainEncryptedWorkspaceCleanup,
 } from '../src/lib/e2ee-member-removal';
@@ -1180,6 +1181,24 @@ describe('locally accepted Roost input', () => {
       });
     }
   );
+});
+
+it('only exact or typed access-loss results start terminal workspace cleanup', () => {
+  for (const [error, expected] of [
+    [new Error('e2ee_device_revoked'), 'e2ee_device_revoked'],
+    [
+      new Error("Error invoking remote method 'e2ee.refresh': Error: e2ee_member_removed"),
+      'e2ee_member_removed',
+    ],
+    [{ _tag: 'PersonalAccessLoss', code: 'e2ee_member_removed' }, 'e2ee_member_removed'],
+    [{ _tag: 'PersonalHostError', code: 'revoked' }, 'e2ee_device_revoked'],
+    // Untrusted failures never authorize cleanup, even when they mention the code.
+    [new Error('jwt verification failed: e2ee_device_revoked'), null],
+    [Object.assign(new Error('network'), { code: 'e2ee_device_revoked' }), null],
+    [{ _tag: 'PersonalAccessLoss', code: 'revoked' }, null],
+    [{ code: 'e2ee_member_removed' }, null],
+  ] as const)
+    expect(e2eeAccessLoss(error)).toBe(expected);
 });
 
 it('member removal deletes only the stopped workspace input and replica namespaces', async () => {

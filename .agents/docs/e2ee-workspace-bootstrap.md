@@ -38,7 +38,7 @@ sequenceDiagram
 
 The developer preference controls new creation, not access to existing workspaces or retry of an unresolved intent. Only a host with the persistent preparation capability offers creation. Desktop main verifies the signed-in account itself; IPC exposes neither arbitrary signing nor private-key export. The Ed25519 and X25519 private keys, and epoch zero, remain in desktop custody. Cloud creation receives public canonical signed bytes. Workspace names and slugs are ordinary cloud metadata in this preview.
 
-The ledger user ID is the signed-in account ID in a frozen 32-byte encoding, computed locally before signing; the service checks it names the authenticated account ([decision](../notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md)). Each request ID freezes account, name, slug and genesis. An unknown cloud result retries the same bytes, and never switches mode or replaces identity. Independent windows retain independent pending requests; completing one must not remove another. Pending intents are parsed per canonical request key; malformed JSON or a mismatched key remains byte-for-byte in storage for reconciliation and cannot block healthy or new requests. Host storage owns interrupted key preparation. Missing protected material after an interrupted preparation fails visibly instead of silently creating replacement keys.
+The ledger user ID is the signed-in account ID in a frozen 32-byte encoding, computed locally before signing; the service checks it names the authenticated account ([decision](../notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md)). Each request ID freezes account, name, slug and genesis. An unknown cloud result retries the same bytes, and never switches mode or replaces identity. Independent windows retain independent pending requests; completing one must not remove another. Pending intents are parsed per canonical request key; malformed JSON or a mismatched key remains byte-for-byte in storage for reconciliation and cannot block healthy or new requests. Archiving a saved request only writes a per-request display marker (`lody-e2ee-pending-creation-archived:<account>:<request>`): the request record, its slug reservation evidence and host-prepared identity stay unchanged, nothing is cancelled on the server, and restore resumes the same request. Archived requests are never resumed automatically; a submit in flight keeps its request even if another window archives it, and a late unknown result leaves it archived. Completing or removing a request also drops its marker. Deleting a saved request is permanent and confirmed first: the same request is reconciled with the server, a workspace it already created is deleted through the ordinary workspace deletion so it no longer uses an allowance slot, and only then is the request removed. A refusal that proves no reservation (including `free_workspace_limit_reached`, checked only after the retained-receipt lookup) removes it without creating anything; an unknown result or a failed workspace deletion keeps the request, archived state included. Host-retained keys are not deleted. Host storage owns interrupted key preparation. Missing protected material after an interrupted preparation fails visibly instead of silently creating replacement keys.
 
 The cloud response binds the product workspace ID to `contentMode=e2ee`, version 1 and `cryptoOrgId=genesisHash`. It identifies an encrypted organization within the existing cloud service; it does not select another deployment. The ordinary workspace-creation API cannot create or convert an encrypted workspace. Server account membership authorizes reading public control records, not decrypting content or enrolling a device.
 
@@ -174,3 +174,23 @@ The native member controls sign ordinary `SetRole` and capability-1 `RemoveMembe
 Native hosts with automatic pairing start a current-workspace request when an unapproved device opens that workspace. An existing same-account personal device asks for the six-digit code shown on the new device and labels the requester's device name as unverified; authorization signs only after a local match, and three wrong entries end the request. Later retains a Device requests count in desktop and mobile chrome and resumes the same request. The dialog initially focuses its container, never the authorization button; another open dialog defers presentation. Manual invitation and recovery remain under help. Approval does not bypass the existing reader, ledger or current-key installation.
 
 The six-digit SAS compares a committed ephemeral channel; it does not carry the old pairing secret. See [the coordinator and limits](../../packages/e2ee-client/README.md#automatic-device-verification). Deploy the private discovery relay before clients and update an approving app too. A running background desktop shows a deduplicated generic OS notification and focuses only after its click. This path adds no APNs/FCM wakeup for suspended mobile apps.
+
+## Authorized device labels
+
+The [member display directory decision](../notes/implemented/feature/2026-10-26-e2ee-member-profile-directory.md) keeps account/device labels separate from verified ledger authority.
+
+The Devices tab joins each host-verified device's crypto user ID to the optional account
+profile directory and its original signing public key to a display profile. It shows owner avatar/name,
+device name/model, client kind, OS/version and available Lody version; the full public key
+and machine ID remain expandable details. Unknown owners and legacy profiles keep explicit
+fallbacks. Browser compatibility UA versions never establish a real OS version or hardware
+model. Native iPhone identifiers use an explicit known-model lookup; unknown identifiers
+remain unchanged. These self-reported labels grant no authority.
+
+Updated personal clients report only their current admitted device when the encrypted
+workspace security state opens, including after native app info arrives. Daemons report their
+own hostname, kernel platform/version and CLI version through the existing cloud adapter.
+The hosted device projection stores the bounded optional display fields, separately from
+ledger originals and Flock metadata. Reopening backfills old records without re-pairing.
+Failed or older endpoints preserve ledger reads and original revoke behavior. This component
+coverage does not establish native hardware/plugin, installed app or deployed backend acceptance.
