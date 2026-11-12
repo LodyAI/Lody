@@ -4,16 +4,19 @@ import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Collapsible } from '@lody/ui/collapsible';
 import { Button } from '@lody/ui/button';
+import { Avatar } from '@lody/ui/avatar';
 import { Alert } from '@lody/ui/alert';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { Info, KeyRound, ShieldCheck, ShieldQuestion, UserPlus } from 'lucide-react';
+import { Info, KeyRound, ShieldCheck, ShieldQuestion, UserPlus, UserRound } from 'lucide-react';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useState, type ReactNode } from 'react';
 import { Dialog } from '@lody/ui/dialog';
 import { CompactSection, CompactRow } from '../compact-layout';
 
 const styles = stylex.create({
+  owner: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  ownerText: { minWidth: 0, overflowWrap: 'anywhere' },
   panel: { display: 'flex', flexDirection: 'column', gap: space[4] },
   glyph: {
     display: 'inline-grid',
@@ -284,9 +287,10 @@ export function E2eeDevicesPanel({
             const profile = directory?.devices?.find(
               (entry) => entry.signingPublicKey === device.key
             )?.profile;
-            const owner = directory?.profiles
-              .find((entry) => entry.cryptoUserId === device.cryptoUserId)
-              ?.name?.trim();
+            const ownerProfile = directory?.profiles.find(
+              (entry) => entry.cryptoUserId === device.cryptoUserId
+            );
+            const owner = ownerProfile?.name?.trim();
             const hardwareCode =
               profile?.client === 'mobile' && profile.model?.match(/^(iPhone|iPad)\d+,\d+$/);
             const model = hardwareCode
@@ -311,7 +315,21 @@ export function E2eeDevicesPanel({
               <CompactRow
                 key={device.key}
                 helperBlock
-                label={title}
+                label={
+                  <span {...stylex.props(styles.owner)}>
+                    <Avatar.Root
+                      size="mini"
+                      aria-hidden="true"
+                      data-testid="e2ee-device-owner-avatar"
+                    >
+                      {ownerProfile?.image && <Avatar.Image src={ownerProfile.image} alt="" />}
+                      <Avatar.Fallback>
+                        {owner ? owner.slice(0, 1).toUpperCase() : <UserRound size={12} />}
+                      </Avatar.Fallback>
+                    </Avatar.Root>
+                    <span {...stylex.props(styles.ownerText)}>{title}</span>
+                  </span>
+                }
                 helper={
                   <>
                     <span {...stylex.props(styles.detail)}>{info}</span>

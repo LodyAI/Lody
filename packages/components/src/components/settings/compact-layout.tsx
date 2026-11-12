@@ -41,7 +41,7 @@ const rowStyles = stylex.create({
 });
 
 interface CompactRowProps {
-  label: string;
+  label: ReactNode;
   /** Optional identity mark beside the label and helper. */
   leading?: ReactNode;
   /** Controls associate these IDs through aria-labelledby / aria-describedby. */

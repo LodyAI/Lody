@@ -1275,6 +1275,10 @@ describe('authorized device identities', () => {
         )
       );
       expect(container.textContent).toContain('Alice · Synthetic phone');
+      const avatars = container.querySelectorAll('[data-testid="e2ee-device-owner-avatar"]');
+      expect(avatars[0]?.textContent).toBe('A');
+      expect(avatars[1]?.querySelector('svg')).not.toBeNull();
+      expect(avatars[1]?.textContent).not.toContain('A');
       expect(container.textContent).toContain('iOS 26.0 · Lody 1.2.3');
       expect(container.textContent).toContain('e2ee.security.thisDevice');
       expect(container.textContent).toContain(

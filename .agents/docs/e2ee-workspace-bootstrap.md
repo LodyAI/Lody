@@ -180,7 +180,7 @@ The six-digit SAS compares a committed ephemeral channel; it does not carry the 
 The [member display directory decision](../notes/implemented/feature/2026-10-26-e2ee-member-profile-directory.md) keeps account/device labels separate from verified ledger authority.
 
 The Devices tab joins each host-verified device's crypto user ID to the optional account
-profile directory and its original signing public key to a display profile. It shows owner,
+profile directory and its original signing public key to a display profile. It shows owner avatar/name,
 device name/model, client kind, OS/version and available Lody version; the full public key
 and machine ID remain expandable details. Unknown owners and legacy profiles keep explicit
 fallbacks. Browser compatibility UA versions never establish a real OS version or hardware
