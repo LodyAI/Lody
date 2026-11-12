@@ -24,6 +24,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private var list: UICollectionView!
   private var data: UICollectionViewDiffableDataSource<Section, String>!
   private let refresh = UIRefreshControl()
+  private let topBackdrop = LodyPinnedLabelBackdrop()
   private var cache = ScheduleCache()
   private var result: RuntimeContract.SchedulesResult? {
     get { cache.result }
@@ -63,12 +64,22 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
       self?.swipeActions(at: indexPath)
     }
-    let layout = UICollectionViewCompositionalLayout.list(using: configuration)
+    // Group labels pin under the bar over the same blurred backdrop as Chats.
+    let layout = UICollectionViewCompositionalLayout { _, environment in
+      let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+      section.boundarySupplementaryItems.forEach {
+        $0.pinToVisibleBounds = true
+        $0.zIndex = 2
+      }
+      return section
+    }
     // Group spacing belongs between sections, as in Chats.
     let layoutConfiguration = UICollectionViewCompositionalLayoutConfiguration()
     layoutConfiguration.interSectionSpacing = LodySpacing.md
     layout.configuration = layoutConfiguration
-    list = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
+    let list = ChatListCollectionView(frame: view.bounds, collectionViewLayout: layout)
+    list.onLayout = { [weak self] in self?.updateBackdrop() }
+    self.list = list
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.backgroundColor = .clear
     list.alwaysBounceVertical = true
@@ -78,6 +89,9 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     refresh.addAction(UIAction { [weak self] _ in self?.reload() }, for: .valueChanged)
     list.refreshControl = refresh
     view.addSubview(list)
+    topBackdrop.layer.zPosition = 1
+    topBackdrop.isHidden = true
+    list.addSubview(topBackdrop)
     let cell = UICollectionView.CellRegistration<UICollectionViewListCell, String> { [weak self] cell, _, id in
       guard let self, let item = self.items[id] else { return }
       self.configure(cell, item)
@@ -88,6 +102,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       header.contentConfiguration = UIHostingConfiguration { ScheduleSectionTitle(text: section.label) }
         .margins(.all, 0)
       header.backgroundConfiguration = .clear()
+      header.layer.zPosition = 2
       header.accessibilityIdentifier = "schedules-section:" + section.rawValue
     }
     data = UICollectionViewDiffableDataSource(collectionView: list) { collection, indexPath, id in
@@ -129,6 +144,10 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     } else {
       chrome.detach()
     }
+  }
+
+  private func updateBackdrop() {
+    topBackdrop.update(in: list, pinsLabels: true)
   }
 
   // MARK: Loading
@@ -261,7 +280,9 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       return reconfigure || before != items[id]
     }
     snapshot.reconfigureItems(changed)
-    data.apply(snapshot, animatingDifferences: view.window != nil && !UIAccessibility.isReduceMotionEnabled)
+    data.apply(snapshot, animatingDifferences: view.window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
+      self?.updateBackdrop()
+    }
     setNeedsUpdateContentUnavailableConfiguration()
   }
 
