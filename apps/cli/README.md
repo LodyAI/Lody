@@ -87,7 +87,10 @@ lody e2ee journal reset --file /absolute/path/to/journal.sqlite --json
 
 The command works offline and returns `archivePath` and `journalPath`. It renames
 and preserves the old execution log, creates a fresh log, and retains old current-format
-request ID fences in the adjacent `.control.sqlite`. Keep that file and the archive;
+request ID fences and root derivation quota receipts in the adjacent `.control.sqlite`.
+Reset does not replenish the shared-member 20-start quota; Owner starts are unbounded. Reservations commit before starts; a
+failed or interrupted start may consume a slot, while an exact retry reuses it.
+Keep that file and the archive;
 unknown results are not automatically retried. Restart owners after reset. Retrying
 this command completes an interrupted reset using the same archive path.
 

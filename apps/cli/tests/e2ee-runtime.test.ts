@@ -5664,8 +5664,11 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
       signer: member,
     }),
   });
+  const sharing = { allowed: true };
   const gate = yield* makeGate(
-    shared ? () => Effect.succeed({ allowed: true, isCurrent: () => true }) : undefined
+    shared
+      ? () => Effect.succeed({ allowed: sharing.allowed, isCurrent: () => sharing.allowed })
+      : undefined
   );
   const { makeRealtimeContentBinding } = yield* Effect.promise(
     () => import('@lody/e2ee-core/adapters/loro-streams')
@@ -5785,14 +5788,15 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     signer: typeof device,
     turnId: string,
     inputConfig: unknown,
-    extra: { derivedFrom?: unknown; scheduleRun?: unknown } = {}
+    extra: { derivedFrom?: unknown; scheduleRun?: unknown } = {},
+    targetMachineId = 'machine'
   ) {
     const kind = signer === device ? E2EE_INTENT_KIND.machineInput : E2EE_INTENT_KIND.memberInput;
     const signature = yield* signExecutionIntent({
       kind,
       genesis: fixture.genesis,
       workspaceId: 'workspace',
-      targetMachineId: 'machine',
+      targetMachineId,
       scope: queuedSessionId,
       messageId: turnId,
       contentDigest: Buffer.from(turnExecutionDigest({ inputConfig, ...extra })!, 'hex'),
@@ -5806,28 +5810,71 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
   });
   // The machine's own clock: tests move it to model a machine that was offline.
   const machineClock = { now: Date.parse(queuedTimestamp) + 1_000 };
-  const journal = RealtimeJournal.create(
+  let journal = RealtimeJournal.create(
     join(directory, 'queued-journal.sqlite'),
     () => machineClock.now
   );
-  const execution = makeEncryptedAgentExecution({
-    genesis: hex(fixture.genesis.toBytes()),
-    workspaceId: 'workspace',
-    targetMachineId: 'machine',
-    journal: () => journal,
-    authorizeExecution: gate.authorizeExecution,
-    resolveVerifiedOriginal: (intent, lookup) => resolve(intent, doc, lookup),
-    selfDevice: machineKey,
-    machineUserId: ownerAccount,
-    ledgerIdentity: {
-      ownsDevice: (device) =>
-        Effect.succeed(
-          device === hex(fixture.owner.publicKey.toBytes()) ||
-            device === hex(secondDevice.publicKey.toBytes())
-        ),
-      memberDevice: () => Effect.succeed(hex(member.publicKey.toBytes())),
-    },
-    authorizeMachineTarget: () => Effect.succeed(true),
+  const makeExecution = () =>
+    makeEncryptedAgentExecution({
+      genesis: hex(fixture.genesis.toBytes()),
+      workspaceId: 'workspace',
+      targetMachineId: 'machine',
+      journal: () => journal,
+      authorizeExecution: gate.authorizeExecution,
+      resolveVerifiedOriginal: (intent, lookup) => resolve(intent, doc, lookup),
+      selfDevice: machineKey,
+      machineUserId: ownerAccount,
+      ledgerIdentity: {
+        ownsDevice: (device) =>
+          Effect.succeed(
+            device === hex(fixture.owner.publicKey.toBytes()) ||
+              device === hex(secondDevice.publicKey.toBytes())
+          ),
+        memberDevice: () => Effect.succeed(hex(member.publicKey.toBytes())),
+      },
+      authorizeMachineTarget: () => Effect.succeed(true),
+    });
+  let execution = makeExecution();
+  const makeRemoteExecution = Effect.fnUntraced(function* () {
+    const custody = yield* makeNodeE2eeCustody({
+      directory: join(directory, 'remote-machine'),
+      wrapper,
+    });
+    const remote = yield* custody.prepareDevice();
+    yield* append(
+      yield* prepareDeviceAdmission({
+        genesis: fixture.genesis,
+        membershipId: fixture.membershipId,
+        signer: remote,
+        encryptionPublicKey: remote.enc,
+        kind: 'machine',
+        machineId: 'machine-B',
+      })
+    );
+    const resolveRemote = makeVerifiedExecutionIntent({
+      workspaceId: 'workspace',
+      genesis: fixture.genesis,
+      selfDevice: hex(remote.publicKey.toBytes()),
+      isClosed: () => false,
+      readIncoming: () => Effect.succeed(undefined),
+      openDispatch: receiver.openDispatch,
+      ledger: runtime.executionLedger,
+      refreshLedger: gate.refreshLedger,
+    });
+    const targetJournal = RealtimeJournal.create(
+      join(directory, 'remote-journal.sqlite'),
+      () => machineClock.now
+    );
+    return makeEncryptedAgentExecution({
+      genesis: hex(fixture.genesis.toBytes()),
+      workspaceId: 'workspace',
+      targetMachineId: 'machine-B',
+      journal: () => targetJournal,
+      selfDevice: hex(remote.publicKey.toBytes()),
+      machineUserId: ownerAccount,
+      resolveVerifiedOriginal: (intent, lookup) => resolveRemote(intent, doc, lookup),
+      authorizeExecution: gate.authorizeExecution,
+    });
   });
   const clientConfig = (turnId: string, config: object = queuedConfig(turnId)) =>
     normalizeSessionTurnInputConfig({ ...config, mcpServerIds: [] });
@@ -5980,6 +6027,31 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     doc.commit();
     return { id: turnId, inputConfig, userId };
   });
+  const writeDerivedRow = Effect.fnUntraced(function* (turnId: string, drivingTurnId: string) {
+    const root = yield* execution.resolveDerivationOrigin({
+      sessionId: queuedSessionId,
+      userTurnId: drivingTurnId,
+    });
+    if (!root?.origin) return yield* Effect.fail(new Error('e2ee_derivation_denied'));
+    const inputConfig = clientConfig(turnId);
+    const e2eeIntent = yield* signIntent(device, turnId, inputConfig, { derivedFrom: root.origin });
+    yield* Effect.promise(() =>
+      session.sessionData.commands.appendTurn({
+        id: turnId,
+        role: 'user',
+        userId: ownerAccount,
+        timestamp: queuedTimestamp,
+        status: 'pending',
+        inputConfig,
+        e2eeIntent,
+        derivedFrom: root.origin,
+        items: [{ type: 'text', text: turnId }],
+        fileDiff: [],
+      } as never)
+    );
+    doc.commit();
+    return { id: turnId, inputConfig };
+  });
   /**
    * The production start: the watcher builds the request from the stored row, the
    * gate claims that request's input, and the agent runs that request's blocks.
@@ -6009,6 +6081,16 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     historyRow(turnId).set('items', [{ type: 'text', text }]);
   };
   return {
+    sharing,
+    writeDerivedRow,
+    makeRemoteExecution,
+    restartExecution: () => {
+      journal = new RealtimeJournal(
+        join(directory, 'queued-journal.sqlite'),
+        () => machineClock.now
+      );
+      execution = makeExecution();
+    },
     replaceItems,
     startFromHistory,
     memberCryptoUser: Buffer.from(new Uint8Array(32).fill(73)).toString('hex'),
@@ -6035,8 +6117,9 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     pushRow,
     rewriteRow,
     writeMemberRow,
-    execution,
-    fixture,
+    get execution() {
+      return execution;
+    },
     gate,
     io,
     machineClock,
@@ -6576,6 +6659,237 @@ describe('encrypted queued input evidence', () => {
         expect(controlled).toBe(0);
       })
     )
+  );
+
+  it('keeps a derived start pending when current root authority is temporarily unavailable', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.writeMemberRow('root', memberAccount);
+        const child = yield* h.writeDerivedRow('child', 'root');
+        h.io.wall += 15 * 60_000;
+        h.io.monotonic += 15 * 60_000;
+        h.io.offline = true;
+        expect(
+          yield* h.execution.resolveRequester({
+            workspaceId: 'workspace',
+            sessionId: queuedSessionId,
+            userTurnId: child.id,
+            inputConfig: child.inputConfig,
+          })
+        ).toEqual({ state: 'pending' });
+        expect(yield* h.rawClaim({ ...child, userId: h.memberRequester })).toEqual({
+          state: 'pending-evidence',
+        });
+        h.io.offline = false;
+        expect((yield* h.claim(child)).state).toBe('claimed');
+      })
+    ));
+
+  it('starts all twenty-two same-machine Owner descendants of one personal-device root', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('owner-root', h.ownerRpc);
+        expect((yield* h.claim(yield* h.promote())).state).toBe('claimed');
+        for (let i = 1; i <= 22; i++) {
+          const child = yield* h.writeDerivedRow(`owner-child-${i}`, 'owner-root');
+          expect(yield* h.claim(child)).toMatchObject({ state: 'claimed', principal: 'owner' });
+        }
+      })
+    ));
+
+  it('verifies and starts Owner cross-machine delegation without local-only provenance', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('owner-root', h.ownerRpc);
+        expect((yield* h.claim(yield* h.promote())).state).toBe('claimed');
+        const target = yield* h.makeRemoteExecution();
+        const { MessageHandler } = yield* Effect.promise(
+          () => import('../src/lib/message-handler')
+        );
+        const handler = Object.assign(Object.create(MessageHandler.prototype), {
+          encryptedExecution: h.execution,
+          machineId: 'machine',
+          executionService: {
+            getActiveInvocationContext: () => ({ sourceTurnId: 'owner-root' }),
+            getEncryptedControlPrincipal: () => ({ kind: 'owner' }),
+          },
+        }) as {
+          classifyEncryptedDerivation: (
+            ref: { sessionId: string; userTurnId: string },
+            target: { machineId: string; userTurnId: string }
+          ) => Promise<unknown>;
+        };
+        expect(
+          yield* Effect.promise(() =>
+            handler.classifyEncryptedDerivation(
+              { sessionId: queuedSessionId, userTurnId: 'owner-root' },
+              { machineId: 'machine', userTurnId: 'same-machine-child' }
+            )
+          )
+        ).toEqual({
+          principal: 'owner',
+          origin: { sessionId: queuedSessionId, userTurnId: 'owner-root' },
+        });
+        const classification = yield* Effect.promise(() =>
+          handler.classifyEncryptedDerivation(
+            { sessionId: queuedSessionId, userTurnId: 'owner-root' },
+            { machineId: 'machine-B', userTurnId: 'remote-child' }
+          )
+        );
+        expect(classification).toBe('owner');
+        const inputConfig = h.clientConfig('remote-child');
+        const e2eeIntent = yield* h.signIntent(
+          h.device,
+          'remote-child',
+          inputConfig,
+          {},
+          'machine-B'
+        );
+        yield* Effect.promise(() =>
+          h.session.sessionData.commands.appendTurn({
+            id: 'remote-child',
+            role: 'user',
+            userId: ownerAccount,
+            status: 'pending',
+            timestamp: queuedTimestamp,
+            inputConfig,
+            e2eeIntent,
+            items: [{ type: 'text', text: 'remote child' }],
+            fileDiff: [],
+          } as never)
+        );
+        h.doc.commit();
+        expect(
+          yield* target.claim({
+            workspaceId: 'workspace',
+            sessionId: queuedSessionId,
+            userTurnId: 'remote-child',
+            requesterUserId: ownerAccount,
+            inputConfig,
+          })
+        ).toMatchObject({ state: 'claimed', principal: 'owner' });
+        let active = true;
+        const nextHandler = Object.assign(Object.create(MessageHandler.prototype), {
+          encryptedExecution: target,
+          machineId: 'machine-B',
+          executionService: {
+            getActiveInvocationContext: () =>
+              active ? { sourceTurnId: 'remote-child' } : undefined,
+            getEncryptedControlPrincipal: () => (active ? { kind: 'owner' } : undefined),
+          },
+        }) as typeof handler;
+        // Both a live second hop and Operation recovery use B's own machine-signed path.
+        for (const running of [true, false]) {
+          active = running;
+          for (const machineId of ['machine-B', 'machine-C']) {
+            expect(
+              yield* Effect.promise(() =>
+                nextHandler.classifyEncryptedDerivation(
+                  { sessionId: queuedSessionId, userTurnId: 'remote-child' },
+                  { machineId, userTurnId: `next-${running}-${machineId}` }
+                )
+              )
+            ).toBe('owner');
+          }
+        }
+        yield* h.append({ _tag: 'RevokeDevice', target: h.device.publicKey });
+        for (const machineId of ['machine-B', 'machine-C']) {
+          yield* Effect.promise(() =>
+            expect(
+              nextHandler.classifyEncryptedDerivation(
+                { sessionId: queuedSessionId, userTurnId: 'remote-child' },
+                { machineId, userTurnId: `revoked-${machineId}` }
+              )
+            ).rejects.toThrow('e2ee_derivation_denied')
+          );
+        }
+        yield* h.append({ _tag: 'RevokeDevice', target: h.fixture.owner.publicKey });
+        yield* Effect.promise(() =>
+          expect(
+            handler.classifyEncryptedDerivation(
+              { sessionId: queuedSessionId, userTurnId: 'owner-root' },
+              { machineId: 'machine-B', userTurnId: 'after-revocation' }
+            )
+          ).rejects.toThrow('e2ee_derivation_denied')
+        );
+      })
+    ));
+
+  it('retains the shared root quota after fifteen starts and a journal/execution restart', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.writeMemberRow('quota-root', memberAccount);
+        for (let i = 1; i <= 21; i++) {
+          if (i === 16) h.restartExecution();
+          const turn = yield* h.writeDerivedRow(
+            `quota-child-${i}`,
+            i === 1 ? 'quota-root' : `quota-child-${i - 1}`
+          );
+          expect((yield* h.claim(turn)).state).toBe(i <= 20 ? 'claimed' : 'denied');
+        }
+      })
+    ));
+
+  it.each(['member', 'owner'] as const)(
+    'flattens %s multi-hop delegation to its signed root',
+    (principal) =>
+      run(true, (h) =>
+        Effect.gen(function* () {
+          yield* h.send('root', principal === 'owner' ? h.ownerRpc : h.memberRpc);
+          const rootTurn = yield* h.promote();
+          expect((yield* h.claim(rootTurn)).state).toBe('claimed');
+          const child = yield* h.writeDerivedRow('child', 'root');
+          expect(yield* h.claim(child)).toMatchObject({
+            state: 'claimed',
+            principal: principal === 'owner' ? 'owner' : 'derived',
+          });
+          const grandchild = yield* h.writeDerivedRow('grandchild', 'child');
+          expect(h.historyRow('grandchild').toJSON().derivedFrom).toEqual({
+            sessionId: queuedSessionId,
+            userTurnId: 'root',
+          });
+          expect((yield* h.claim(grandchild)).state).toBe('claimed');
+        })
+      )
+  );
+
+  it.each(['removed', 'revoked', 'unshared', 'owner-revoked'] as const)(
+    'refuses pending descendants and new derivations when the root is %s',
+    (mode) =>
+      run(true, (h) =>
+        Effect.gen(function* () {
+          if (mode === 'owner-revoked') {
+            yield* h.send('root', h.ownerRpc);
+            yield* h.promote();
+          } else yield* h.writeMemberRow('root', memberAccount);
+          const child = yield* h.writeDerivedRow('child', 'root');
+          expect((yield* h.claim(child)).state).toBe('claimed');
+          const grandchild = yield* h.writeDerivedRow('grandchild', 'child');
+          if (mode === 'removed') {
+            yield* h.append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+            yield* h.append({ _tag: 'RemoveMember', membershipId: h.membershipId });
+          } else if (mode === 'revoked') {
+            yield* h.append({ _tag: 'RevokeDevice', target: h.member.publicKey }, h.member);
+          } else if (mode === 'owner-revoked') {
+            yield* h.append({ _tag: 'RevokeDevice', target: h.fixture.owner.publicKey });
+          } else h.sharing.allowed = false;
+          expect(
+            yield* h.execution.classifyOrigin({ sessionId: queuedSessionId, userTurnId: 'child' })
+          ).toBe('denied');
+          expect(
+            yield* h.execution.resolveRequester({
+              workspaceId: 'workspace',
+              sessionId: queuedSessionId,
+              userTurnId: grandchild.id,
+              inputConfig: grandchild.inputConfig,
+            })
+          ).toEqual({ state: 'denied' });
+          expect((yield* h.claim(grandchild)).state).toBe('denied');
+          expect(yield* Effect.result(h.writeDerivedRow('later', 'child'))).toMatchObject({
+            _tag: 'Failure',
+          });
+        })
+      )
   );
 
   it('classifies a derivation origin by the queued input signer', () =>

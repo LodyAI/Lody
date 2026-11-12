@@ -2901,6 +2901,115 @@ describe('SessionExecutionService', () => {
     };
   };
 
+  it('lets a claimed derived turn delegate through the daemon with its root member identity', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-derived-invocation-'));
+    const root = { sessionId: 'human-session', userTurnId: 'human-turn' };
+    const member = 'aa'.repeat(32);
+    const machine = 'bb'.repeat(32);
+    const requester = 'e2ee-member:member';
+    let allowed = true;
+    const gate = makeEncryptedAgentExecution({
+      genesis: 'genesis',
+      workspaceId: 'workspace-1',
+      targetMachineId: 'machine-1',
+      machineUserId: 'user-1',
+      selfDevice: machine,
+      journal: lazyExecutionJournal(path.join(directory, 'journal.sqlite'), () => 100),
+      resolveVerifiedOriginal: (intent) =>
+        Effect.succeed(
+          intent.sessionId === root.sessionId
+            ? { requesterDevice: member, requesterCryptoUserId: 'member' }
+            : { requesterDevice: machine, requesterCryptoUserId: 'owner', derivedFrom: root }
+        ),
+      authorizeExecution: () =>
+        Effect.succeed(
+          allowed
+            ? { _tag: 'Authorized', principal: 'member' }
+            : { _tag: 'Denied', reason: 'not-authorized' }
+        ),
+    });
+    const delegated: unknown[] = [];
+    let allChecksCompleted = false;
+    try {
+      const result = await runSilentPromptTurn({
+        sessionId: 'derived-session',
+        requesterUserId: requester,
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: gate,
+        onPrompt: async (service) => {
+          expect(
+            service.getActiveInvocationContext('derived-session' as SessionId)?.requesterUserId
+          ).toBe(requester);
+          expect(
+            service.getEncryptedControlPrincipal('derived-session' as SessionId)
+          ).toMatchObject({ kind: 'member', requesterDevice: member });
+          const handler = Object.assign(Object.create(MessageHandler.prototype), {
+            encryptedExecution: gate,
+            executionService: service,
+            machineId: 'machine-1',
+          }) as {
+            classifyEncryptedDerivation: (
+              ref: { sessionId: string; userTurnId: string },
+              target: { machineId: string; userTurnId: string }
+            ) => Promise<unknown>;
+          };
+          const driving = { sessionId: 'derived-session', userTurnId: 'turn-user-1' };
+          // Refused targets never spend a slot, even with different request IDs.
+          for (let i = 0; i < 25; i++)
+            await expect(
+              handler.classifyEncryptedDerivation(driving, {
+                machineId: 'other-machine',
+                userTurnId: `rejected-${i}`,
+              })
+            ).rejects.toThrow('e2ee_derivation_cross_machine_unsupported');
+          // One accepted operation can retry without spending the remaining slots.
+          for (let i = 0; i < 25; i++) {
+            const result = await handler.classifyEncryptedDerivation(driving, {
+              machineId: 'machine-1',
+              userTurnId: 'accepted-0',
+            });
+            expect(result).toEqual({ principal: 'member', origin: root });
+            if (i === 0) delegated.push(result);
+          }
+          for (let i = 1; i < 20; i++)
+            expect(
+              await handler.classifyEncryptedDerivation(driving, {
+                machineId: 'machine-1',
+                userTurnId: `accepted-${i}`,
+              })
+            ).toEqual({ principal: 'member', origin: root });
+          await expect(
+            handler.classifyEncryptedDerivation(driving, {
+              machineId: 'machine-1',
+              userTurnId: 'overflow',
+            })
+          ).rejects.toThrow('e2ee_derivation_denied');
+          expect(
+            await handler.classifyEncryptedDerivation(driving, {
+              machineId: 'machine-1',
+              userTurnId: 'accepted-0',
+            })
+          ).toEqual({ principal: 'member', origin: root });
+          allowed = false;
+          await expect(
+            handler.classifyEncryptedDerivation(driving, {
+              machineId: 'machine-1',
+              userTurnId: 'accepted-0',
+            })
+          ).rejects.toThrow('e2ee_derivation_denied');
+          allChecksCompleted = true;
+        },
+      });
+      expect(allChecksCompleted).toBe(true);
+      expect(result.failureMessages).toEqual([]);
+      expect(result.getHistory()[0]?.status).toBe('handled');
+      expect(delegated).toEqual([{ principal: 'member', origin: root }]);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   const runProductionSignedTurn = async (
     mode:
       | 'account'
@@ -3371,7 +3480,11 @@ describe('SessionExecutionService', () => {
             submitted.push('hi');
             invocations.push(service.getActiveInvocationContext(sessionId as SessionId));
             derivations.push(
-              service.reserveEncryptedDerivation(sessionId as SessionId, 'turn-user-1')?.kind
+              service.reserveEncryptedDerivation(
+                sessionId as SessionId,
+                'turn-user-1',
+                'observation'
+              )?.kind
             );
           },
         });

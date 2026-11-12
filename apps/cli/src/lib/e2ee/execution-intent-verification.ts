@@ -173,6 +173,9 @@ export function makeVerifiedExecutionIntent(options: {
       return {
         requesterDevice: signer,
         requesterCryptoUserId: hex(found.userId.toBytes()),
+        ...(state.devices.get(signer)?.kind === 'machine'
+          ? { machineAuthored: true as const }
+          : {}),
         ...(schedule?.success ? { schedule: schedule.data } : {}),
         ...(derivedFrom?.success ? { derivedFrom: derivedFrom.data } : {}),
       };

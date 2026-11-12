@@ -381,7 +381,7 @@ type TurnRuntimeState = {
   /** Encrypted member turns only: the verified origin device and reached projects. */
   encryptedOrigin?: { requesterDevice: string; localProjectIds: readonly string[] };
   /** Inputs derived from this member turn so far (owner decision: bounded per origin). */
-  encryptedDerivations?: number;
+  encryptedDerivations?: Set<string>;
   inboxNotificationWork?: { userId: string; originTurnIds: string[] };
   goalControl?: GoalPromptControl;
   session?: ISession;
@@ -5539,7 +5539,7 @@ export class SessionExecutionService {
                       localProjectIds: [...authorized],
                     }
                   : undefined;
-                runtime.encryptedDerivations = 0;
+                runtime.encryptedDerivations = new Set();
                 // Authorization may have yielded while Stop was requested.
                 yield* abortIfCancelled();
                 self.deps.logger.debug('[e2ee-rpc-timing]', {
@@ -6156,21 +6156,27 @@ export class SessionExecutionService {
 
   /**
    * Encrypted only: the verified principal of the active turn driving `sourceTurnId`.
-   * A member result reserves one of that origin's bounded derivations; past the
-   * bound, or for any other turn, the result is undefined and callers fail closed.
+   * After write authorization, reserve one slot per request; identical retries reuse it. Past the
+   * bound, new requests fail closed; accepted IDs can retry within the same turn.
    */
   reserveEncryptedDerivation(
     sessionId: SessionId,
-    sourceTurnId: string
+    sourceTurnId: string,
+    requestId: string
   ): { kind: 'owner' } | { kind: 'member' } | undefined {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     if (!runtime || runtime.cancelRequested || runtime.invocation?.sourceTurnId !== sourceTurnId)
       return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
-    if (runtime.encryptedPrincipal !== 'member' || !runtime.encryptedOrigin) return undefined;
-    const used = runtime.encryptedDerivations ?? 0;
-    if (used >= MAX_DERIVED_TURNS_PER_ORIGIN) return undefined;
-    runtime.encryptedDerivations = used + 1;
+    if (
+      (runtime.encryptedPrincipal !== 'member' && runtime.encryptedPrincipal !== 'derived') ||
+      !runtime.encryptedOrigin
+    )
+      return undefined;
+    if (!requestId) return undefined;
+    const used = (runtime.encryptedDerivations ??= new Set<string>());
+    if (!used.has(requestId) && used.size >= MAX_DERIVED_TURNS_PER_ORIGIN) return undefined;
+    used.add(requestId);
     return { kind: 'member' };
   }
 
@@ -6184,7 +6190,10 @@ export class SessionExecutionService {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     if (!runtime || runtime.cancelRequested) return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
-    if (runtime.encryptedPrincipal === 'member' && runtime.encryptedOrigin)
+    if (
+      (runtime.encryptedPrincipal === 'member' || runtime.encryptedPrincipal === 'derived') &&
+      runtime.encryptedOrigin
+    )
       return { kind: 'member', ...runtime.encryptedOrigin };
     return undefined;
   }
@@ -6212,11 +6221,12 @@ export class SessionExecutionService {
     // In encrypted workspaces the history row's userId is unauthenticated display
     // data and never authority. Derived work from an owner turn keeps today's
     // behavior; from a shared member's turn it is re-authorized as that member when
-    // written and when it starts. Derived, steered or unclaimed turns expose none.
+    // written and when it starts. Unclaimed turns expose no invocation identity.
     if (
       (this.deps.encryptedExecution || this.deps.encryptedWorkspace) &&
       runtime.encryptedPrincipal !== 'owner' &&
-      runtime.encryptedPrincipal !== 'member'
+      runtime.encryptedPrincipal !== 'member' &&
+      runtime.encryptedPrincipal !== 'derived'
     ) {
       return undefined;
     }

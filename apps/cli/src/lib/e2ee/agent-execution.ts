@@ -7,7 +7,6 @@ import {
   RealtimeJournalError,
   type RealtimeStartPermit,
 } from './realtime-journal';
-import { MAX_DERIVED_TURNS_PER_ORIGIN } from './derivation-limits';
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
 
@@ -50,8 +49,7 @@ export type ExecutionAuthorization =
       readonly principal?: 'owner' | 'member';
     }
   | { readonly _tag: 'Denied'; readonly reason: string };
-/** Machine-authored inputs derived from one shared member's active Turn: one level,
- * created while the origin is active, bounded by `derivation-limits.ts`. */
+/** The human-signed root shared by every hop of a machine-authored derivation. */
 export type DerivationOrigin = { readonly sessionId: string; readonly userTurnId: string };
 export type AuthorizeEncryptedExecution = (
   workspaceId: string,
@@ -62,8 +60,10 @@ export type VerifiedExecutionOriginal = {
   requesterDevice: string;
   /** Historical ledger actor, never the UI account ID. */
   requesterCryptoUserId: string;
+  /** Verified ledger device kind: a machine cannot stand in for a human root. */
+  machineAuthored?: true;
   schedule?: ScheduleAuthorizationRequest;
-  /** Present only on a machine-authored input derived from a shared member's Turn. */
+  /** Present on machine-authored delegation; always points to the human-signed root. */
   derivedFrom?: DerivationOrigin;
 };
 /** Waiting on something that will arrive, never on time: a ledger read that could not complete. */
@@ -90,7 +90,7 @@ export type EncryptedExecutionClaim =
       permit: RealtimeStartPermit;
       /** `owner` only when the verified signer belongs to this machine owner's
        * membership; anything else, including an unstated principal, is `member`.
-       * `derived` is a shared member's derived input: it can derive nothing further. */
+       * `derived` retains a shared member root's authority across further delegation. */
       principal: 'owner' | 'member' | 'derived';
       /** The member's verified device, for derivation and agent control. */
       origin?: { readonly requesterDevice: string };
@@ -131,14 +131,15 @@ export function makeEncryptedAgentExecution(options: {
   /** Observation only, after the committed actual-start claim. */
   onClaim?: (userTurnId: string) => void;
 }) {
-  const derivedClaims = new Map<string, number>();
   const hex64 = /^[0-9a-f]{64}$/;
-  // A derivation origin is a shared member's own signed, non-derived, non-scheduled Turn.
-  const verifiedOrigin = Effect.fnUntraced(function* (ref: DerivationOrigin) {
-    const origin = yield* options.resolveVerifiedOriginal(
+  // Each lookup verifies the signed row in its workspace, including its provenance.
+  const readOrigin = (ref: DerivationOrigin) =>
+    options.resolveVerifiedOriginal(
       { workspaceId: options.workspaceId, sessionId: ref.sessionId, userTurnId: ref.userTurnId },
       { origin: true }
     );
+  const verifiedOrigin = Effect.fnUntraced(function* (ref: DerivationOrigin) {
+    const origin = yield* readOrigin(ref);
     if (!origin || 'state' in origin || !hex64.test(origin.requesterDevice)) return undefined;
     return origin;
   });
@@ -166,20 +167,37 @@ export function makeEncryptedAgentExecution(options: {
       ...(owner ? { principal: 'owner' as const } : {}),
     };
   });
-  /** Write-time classification of an Agent-delegated input's driving Turn. `owner`
-   * keeps today's behavior; `member` must be recorded as `derivedFrom`; anything
-   * unverifiable, derived, or no longer authorized is `denied`. */
-  const classifyOrigin = Effect.fnUntraced(function* (
-    ref: DerivationOrigin
-  ): Effect.fn.Return<'owner' | 'member' | 'denied', unknown> {
-    const origin = yield* verifiedOrigin(ref);
-    if (!origin || origin.derivedFrom || !options.authorizeExecution) return 'denied';
-    // This machine's own, non-derived input (for example a Schedule run) is owner work.
-    if (origin.requesterDevice === options.selfDevice) return 'owner';
-    const result = yield* options.authorizeExecution(options.workspaceId, origin.requesterDevice);
-    if (result._tag === 'Authorized') return result.principal === 'owner' ? 'owner' : 'member';
-    return result.reason === 'e2ee_machine_not_shared' ? 'member' : 'denied';
+  /** Resolve a driving turn to its signed root, then recheck that root's authority.
+   * Stored derivations stay flat and human-rooted; Owner machine inputs continue without a root. */
+  const resolveDerivationOrigin = Effect.fnUntraced(function* (ref: DerivationOrigin) {
+    const driving = yield* verifiedOrigin(ref);
+    if (!driving || !options.authorizeExecution) return undefined;
+    if (driving.derivedFrom && (driving.requesterDevice !== options.selfDevice || driving.schedule))
+      return undefined;
+    const rootRef = driving.derivedFrom ?? ref;
+    const root = driving.derivedFrom ? yield* verifiedOrigin(rootRef) : driving;
+    if (
+      !root ||
+      root.derivedFrom ||
+      (root.schedule && root.requesterDevice !== options.selfDevice) ||
+      (driving.derivedFrom &&
+        (root.machineAuthored || root.schedule || root.requesterDevice === options.selfDevice))
+    )
+      return undefined;
+    const grant = yield* options.authorizeExecution(options.workspaceId, root.requesterDevice);
+    if (grant._tag !== 'Authorized' || grant.isCurrent?.() === false) return undefined;
+    if (root.machineAuthored && grant.principal !== 'owner') return undefined;
+    return {
+      principal: grant.principal === 'owner' ? ('owner' as const) : ('member' as const),
+      ...(!root.machineAuthored && root.requesterDevice !== options.selfDevice
+        ? { origin: rootRef }
+        : {}),
+    };
   });
+  const classifyOrigin = (ref: DerivationOrigin) =>
+    resolveDerivationOrigin(ref).pipe(
+      Effect.map((resolved) => resolved?.principal ?? ('denied' as const))
+    );
   /** Agent control on behalf of a shared member: that member's own rights for every
    * project the running turn reaches, under the same freshness gate as execution. */
   const authorizeAgentControl = (requesterDevice: string, localProjectIds?: readonly string[]) =>
@@ -196,10 +214,28 @@ export function makeEncryptedAgentExecution(options: {
   /** Who a verified input runs as. This machine's own rows keep the requester it wrote. */
   const verifiedRequester = Effect.fnUntraced(function* (
     verified: VerifiedExecutionOriginal
-  ): Effect.fn.Return<string | undefined, unknown> {
+  ): Effect.fn.Return<string | PendingExecutionOriginal | undefined, unknown> {
     if (verified.derivedFrom) {
-      const origin = yield* verifiedOrigin(verified.derivedFrom);
-      return origin ? encryptedMemberRequester(origin.requesterCryptoUserId) : undefined;
+      const origin = yield* readOrigin(verified.derivedFrom);
+      if (origin && 'state' in origin)
+        return origin.state === 'pending-evidence' ? origin : undefined;
+      if (
+        !origin ||
+        !hex64.test(origin.requesterDevice) ||
+        origin.derivedFrom ||
+        origin.machineAuthored ||
+        origin.schedule ||
+        origin.requesterDevice === options.selfDevice ||
+        !options.authorizeExecution
+      )
+        return undefined;
+      const grant = yield* options.authorizeExecution(options.workspaceId, origin.requesterDevice);
+      if (grant._tag !== 'Authorized')
+        return grant.reason === 'unavailable' ? { state: 'pending-evidence' as const } : undefined;
+      if (grant.isCurrent?.() === false) return undefined;
+      return grant.principal === 'owner'
+        ? options.machineUserId
+        : encryptedMemberRequester(origin.requesterCryptoUserId);
     }
     if (verified.requesterDevice === options.selfDevice || !options.ledgerIdentity)
       return undefined;
@@ -217,6 +253,8 @@ export function makeEncryptedAgentExecution(options: {
       return { state: verified.state === 'refused' ? 'denied' : 'pending' };
     if (!verified) return { state: 'denied' };
     const userId = yield* verifiedRequester(verified);
+    if (typeof userId === 'object') return { state: 'pending' };
+    if (verified.derivedFrom && userId === undefined) return { state: 'denied' };
     return userId === undefined ? {} : { userId };
   });
   /** Local machine access for a verified requester; the service is never asked. */
@@ -305,10 +343,10 @@ export function makeEncryptedAgentExecution(options: {
       return { state: 'denied' };
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
-    // A derived input executes with its origin member's own rights, never as the
-    // machine that authored it; only this machine may author one, one level deep.
+    // A derived input uses its human root's current rights. Only this machine may
+    // author it, and the stored reference must already point directly to the root.
     let authorityDevice = verified.requesterDevice;
-    let originKey: string | undefined;
+    let originRef: DerivationOrigin | undefined;
     let originRequester: string | undefined;
     if (verified.derivedFrom) {
       if (
@@ -317,18 +355,21 @@ export function makeEncryptedAgentExecution(options: {
         verified.schedule
       )
         return { state: 'denied' };
-      const origin = yield* verifiedOrigin(verified.derivedFrom);
+      const origin = yield* readOrigin(verified.derivedFrom);
+      if (origin && 'state' in origin)
+        return { state: origin.state === 'pending-evidence' ? 'pending-evidence' : 'denied' };
       if (
         !origin ||
+        !hex64.test(origin.requesterDevice) ||
         origin.derivedFrom ||
+        origin.machineAuthored ||
         origin.schedule ||
         origin.requesterDevice === options.selfDevice
       )
         return { state: 'denied' };
-      originKey = JSON.stringify([verified.derivedFrom.sessionId, verified.derivedFrom.userTurnId]);
-      if ((derivedClaims.get(originKey) ?? 0) >= MAX_DERIVED_TURNS_PER_ORIGIN)
-        return { state: 'denied' };
+      originRef = verified.derivedFrom;
       authorityDevice = origin.requesterDevice;
+      // The final authorization below determines whether the root is owner or member.
       originRequester = encryptedMemberRequester(origin.requesterCryptoUserId);
     }
     // Each touched project needs its own switch; every grant's fence must still hold.
@@ -397,21 +438,24 @@ export function makeEncryptedAgentExecution(options: {
       frame,
     };
     const executionCurrent = authorization.isCurrent;
-    const principal = originKey
-      ? ('derived' as const)
-      : authorization.principal === 'owner'
-        ? ('owner' as const)
-        : ('member' as const);
+    const principal =
+      originRef && authorization.principal !== 'owner'
+        ? ('derived' as const)
+        : authorization.principal === 'owner'
+          ? ('owner' as const)
+          : ('member' as const);
     if (principal !== 'owner' && intent.requesterUserId === options.machineUserId)
       return { state: 'denied' };
     const expectedRequester = !options.ledgerIdentity
       ? undefined
-      : (originRequester ??
-        (verified.requesterDevice === options.selfDevice
-          ? undefined
-          : principal === 'owner'
-            ? options.machineUserId
-            : encryptedMemberRequester(verified.requesterCryptoUserId)));
+      : originRef && authorization.principal === 'owner'
+        ? options.machineUserId
+        : (originRequester ??
+          (verified.requesterDevice === options.selfDevice
+            ? undefined
+            : principal === 'owner'
+              ? options.machineUserId
+              : encryptedMemberRequester(verified.requesterCryptoUserId)));
     if (expectedRequester !== undefined && intent.requesterUserId !== expectedRequester)
       return { state: 'denied' };
     return yield* attempt(() => {
@@ -423,11 +467,16 @@ export function makeEncryptedAgentExecution(options: {
       )
         return { state: 'denied' as const };
       journal.receive(request);
+      if (
+        originRef &&
+        authorization.principal !== 'owner' &&
+        !journal.reserveDerivation(request, originRef)
+      )
+        return { state: 'denied' as const };
       const result = journal.claim(request);
       // Execution records carry no deadline, so the journal never reports one expired.
       if (result.state === 'expired') return { state: 'denied' as const };
       if (result.state === 'claimed') {
-        if (originKey) derivedClaims.set(originKey, (derivedClaims.get(originKey) ?? 0) + 1);
         try {
           options.onClaim?.(intent.userTurnId);
         } catch {
@@ -442,7 +491,9 @@ export function makeEncryptedAgentExecution(options: {
         : {
             ...result,
             principal,
-            ...(principal === 'member' ? { origin: { requesterDevice: authorityDevice } } : {}),
+            ...(principal === 'member' || principal === 'derived'
+              ? { origin: { requesterDevice: authorityDevice } }
+              : {}),
           };
     });
   });
@@ -496,6 +547,7 @@ export function makeEncryptedAgentExecution(options: {
     complete,
     retire,
     classifyOrigin,
+    resolveDerivationOrigin,
     authorizeAgentControl,
     automationEvidence,
     resolveRequester,

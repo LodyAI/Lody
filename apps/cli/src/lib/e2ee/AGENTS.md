@@ -25,10 +25,11 @@
   never network-retry.
   A shared grant pins the ledger generation after its policy check, then rechecks the
   signer and machine against that ledger; a later ingest fails `isCurrent()`.
-  Claims record the principal; history `userId` is display data. A shared member's
-  derivation is written with signed `derivedFrom`, same-machine only, and starts with
-  that member's rights ([derivation](../../../../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md)). Origins are signed execution intents
-  stored with their content ([intent](../../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
+  Claims record verified principals, never history `userId`. Signed `derivedFrom` names
+  the human root; member delegation stays on this machine and rechecks the root's rights.
+  Members share 20 durable reservations across restart/reset; Owners remain unbounded
+  ([derivation](../../../../../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)).
+  Origins bind signatures to content ([intent](../../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup must fail closed.
 - Iroh and Streams receivers share journal claims and live write completions, registered before

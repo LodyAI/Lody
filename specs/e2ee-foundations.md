@@ -328,14 +328,16 @@ product enablement remains separate. See the [proposed sharing decision](../.age
 work that a shared member's turn derives through the machine (child Sessions, chat,
 Roles, continuations, agent control) by reusing the signed-original chain. The machine
 writes such an input with `derivedFrom: { sessionId, userTurnId }` inside the signed
-row, only while that origin turn is active and only for this machine. At start, the
+row, only while its driving turn is active and only for this machine. At start, the
 machine verifies the origin as the member's own signed, non-derived Turn and authorizes
 the member's rights ∩ the owner's sharing policy ∩ every reached project. Per the owner
 decision of 2026-11-10 (approved), no start deadline applies; only the active-turn and
-per-origin bounds do. Derivation is one level deep,
-with at most 20 inputs per origin. Owner work is unchanged. Cross-machine derivation is
-not implemented and fails closed; a future version would use a user-approved signature
-from the originating member's personal device. See [derived work](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
+per-origin bounds do. Member hops inherit the same human-signed root and share
+at most 20 durable starts across restarts. Owner same-machine delegation retains
+and rechecks its root, has no such quota and may steer. Owner cross-machine delegation
+rechecks the root before sending, then retains the existing machine-signed path
+without local-only provenance. Member cross-machine derivation remains unsupported; a future version would use a user-approved signature
+from the originating member's personal device. See [derived work](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md).
 
 ### Permission freshness and the separate durable expiry clock
 
