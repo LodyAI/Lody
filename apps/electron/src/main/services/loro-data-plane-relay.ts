@@ -46,7 +46,7 @@ type PendingDaemonWrite = {
  * daemon would hold its room subscriptions for the life of the shared socket.
  */
 export class LoroDataPlaneRelay {
-  private readonly socketPath: string
+  private readonly endpoint: () => { socketPath: string; token: string }
   private readonly createSocket: (socketPath: string) => net.Socket
   private socket: net.Socket | null = null
   private connecting: Promise<void> | null = null
@@ -66,10 +66,10 @@ export class LoroDataPlaneRelay {
   private pendingDaemonBytes = 0
 
   constructor(
-    socketPath: string,
+    endpoint: () => { socketPath: string; token: string },
     createSocket: (socketPath: string) => net.Socket = (path) => net.createConnection(path)
   ) {
-    this.socketPath = socketPath
+    this.endpoint = endpoint
     this.createSocket = createSocket
   }
 
@@ -180,17 +180,54 @@ export class LoroDataPlaneRelay {
   private async ensureConnected(): Promise<void> {
     if (this.destroyed) throw new Error('loro_data_plane_relay_destroyed')
     if (!this.enabled) throw new Error('loro_data_plane_relay_disabled')
-    if (this.socket && !this.socket.destroyed) return
+    if (this.connected && this.socket && !this.socket.destroyed) return
     if (this.connecting) return await this.connecting
     // A destroyed socket whose close has not arrived yet is retired here, so
     // renderers still see the disconnect and rejoin on the new connection.
     if (this.socket) this.dropSocket()
 
+    const endpoint = this.endpoint()
+    const socket = this.createSocket(endpoint.socketPath)
     this.connecting = new Promise<void>((resolve, reject) => {
-      const socket = this.createSocket(this.socketPath)
+      let authenticated = false
+      const authTimeout = setTimeout(
+        () => socket.destroy(new Error('local_ipc_auth_timeout')),
+        5_000
+      )
+      authTimeout.unref?.()
       this.socket = socket
       const splitLines = createJsonLineSplitter({
-        onLine: (line) => this.handleLine(socket, line),
+        onLine: (line) => {
+          if (!current()) return
+          if (!authenticated) {
+            let hello: unknown
+            try {
+              hello = JSON.parse(line)
+            } catch {
+              socket.destroy()
+              return
+            }
+            if (
+              !hello ||
+              typeof hello !== 'object' ||
+              !('type' in hello) ||
+              hello.type !== 'authenticated'
+            ) {
+              socket.destroy()
+              return
+            }
+            authenticated = true
+            clearTimeout(authTimeout)
+            this.connecting = null
+            this.redialAttempt = 0
+            this.lastInboundAt = Date.now()
+            this.startPingLoop(socket)
+            this.setConnected(true)
+            resolve()
+            return
+          }
+          this.handleLine(socket, line)
+        },
         // Defense-in-depth: a compliant daemon never sends an oversized frame
         // (sender-side budget); cap main-process buffering against a
         // non-compliant one and skip the frame rather than kill the socket.
@@ -205,18 +242,16 @@ export class LoroDataPlaneRelay {
       const current = (): boolean => this.socket === socket
       socket.once('connect', () => {
         if (!current()) return
-        this.connecting = null
-        this.redialAttempt = 0
-        this.lastInboundAt = Date.now()
-        this.startPingLoop(socket)
-        this.setConnected(true)
-        resolve()
+        socket.write(`${JSON.stringify({ type: 'authenticate', token: endpoint.token })}\n`)
       })
       socket.once('error', (error) => {
+        clearTimeout(authTimeout)
         if (current()) this.connecting = null
         reject(error)
       })
       socket.on('close', () => {
+        clearTimeout(authTimeout)
+        reject(new Error('local_ipc_connection_closed'))
         if (!current()) return
         this.dropSocket()
         this.scheduleRedial()
@@ -309,7 +344,7 @@ export class LoroDataPlaneRelay {
   // stopped reading entirely) still reconnects.
   private write(message: LocalLoroDataPlaneClientMessage): void {
     const socket = this.socket
-    if (!socket || socket.destroyed) {
+    if (!this.enabled || !this.connected || !socket || socket.destroyed) {
       throw new Error('loro_data_plane_socket_unavailable')
     }
     const line = `${JSON.stringify(message)}\n`

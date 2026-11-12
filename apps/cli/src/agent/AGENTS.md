@@ -29,9 +29,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   daemon process.
 - MCP HTTP: loopback bind plus bearer token; on Linux prove the peer socket's uid via
   `/proc/net/tcp{,6}`, REJECT an unprovable peer, and refuse to start when it is
-  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. Stdio uses an explicit env allowlist: keep `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, and
-  `LODY_SERVER_URL` so cloud MCP orchestration uses the daemon's deployment, let local platform
-  assembly clear them before agent startup, and never add CLI credentials or secrets.
+  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. Stdio forwards nonempty `LODY_PLATFORM`, `LODY_DATA_DIR`, `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL` and `LODY_SERVER_URL`. Discover control lazily unless `LODY_MCP_SOCKET_PATH` overrides it. Local assembly clears cloud endpoints before startup; never forward credentials or secrets.
 - Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
 - Workspace MCP resolution starts before `initialize` to overlap the handshake.
   Before the first remote baseline, complete selected rows may start locally with a

@@ -29,3 +29,5 @@ Read before any change under `apps/mobile/ios`. These rules bind every caller of
 - Build-time backends are resolved by the shared `../backend-config.mjs`; see [backend configuration](../backend-configuration.md). Keep Swift and bundled runtime configuration identical; nonproduction storage must never reuse production credentials or caches. All configurations require public HTTPS origins; never relax TLS validation.
 
 - Generate native runtime assets before prebuild/build. Preserve dependency licenses beside generated resources. Native watchdog behavior has a deterministic Swift check in `verification/kit/watchdog`.
+
+- Untrusted HTML previews must enforce `HTMLPreviewDocumentPolicy` before authored markup and block external navigation and popups. Keep this policy separate from the trusted cloud data runtime. HTTPS static resources remain allowed with the [documented isolation limit](../../../../../.agents/notes/implemented/bug-fix/2026-11-12-local-ipc-and-native-preview-security.md).

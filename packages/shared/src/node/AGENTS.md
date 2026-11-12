@@ -136,3 +136,7 @@ wall and monotonic readings together; sleep and process ownership use real time.
 The inspector is passive and cannot initialize or mutate the clock.
 
 Application-owned process observers inventory acquired trees without granting signal authority. Managed daemon drain receipts require every observed tree to be proven gone.
+
+## Local IPC authentication
+
+Control, probe and Loro data-plane requests require the private daemon token before dispatch. Publish credentials and random Windows endpoints atomically in the `0600` run file; never log or expose secrets to renderers. See [compatibility and filesystem limits](../../../../.agents/notes/implemented/bug-fix/2026-11-12-local-ipc-and-native-preview-security.md).
