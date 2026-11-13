@@ -66,6 +66,7 @@ import {
   Copy,
   CornerLeftUp,
   Ellipsis,
+  FileText,
   Folder,
   GitBranch,
   GitBranchPlus,
@@ -73,6 +74,7 @@ import {
   Github,
   History,
   Image,
+  Link,
   LockKeyhole,
   MessageCircle,
   Monitor,
@@ -82,6 +84,7 @@ import {
   Plus,
   Search,
   Share2,
+  SquareArrowOutUpRight,
   Trash2,
   UserRoundCog,
   Users,
@@ -1970,7 +1973,7 @@ export function SessionHeaderMenu({
                   trimmedWorkspacePath ||
                   t('sessions.copyPathUnavailable', 'Workspace path unavailable')
                 }
-                icon={Copy}
+                icon={Folder}
               >
                 {t('sessions.copyPath', 'Copy path')}
               </Menu.Item>
@@ -1988,7 +1991,7 @@ export function SessionHeaderMenu({
                         'Conversation history is unavailable for this tab'
                       ))
                 }
-                icon={Copy}
+                icon={FileText}
               >
                 {t('sessions.copyAsMarkdown', 'Copy as Markdown')}
               </Menu.Item>
@@ -1996,12 +1999,12 @@ export function SessionHeaderMenu({
                 onClick={() => {
                   void onCopyUrl();
                 }}
-                icon={Copy}
+                icon={Link}
               >
                 {t('sessions.copyUrl', 'Copy URL')}
               </Menu.Item>
               {onCopyDeepLink ? (
-                <Menu.Item onClick={() => void onCopyDeepLink()} icon={Copy}>
+                <Menu.Item onClick={() => void onCopyDeepLink()} icon={SquareArrowOutUpRight}>
                   {t('sessions.copyDeepLink', 'Copy deeplink')}
                 </Menu.Item>
               ) : null}
