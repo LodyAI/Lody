@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.com/LodyAI/Lody/pull/2751)
+PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.com/LodyAI/Lody/pull/2751), [#2757](https://github.com/LodyAI/Lody/pull/2757)
 
 [中文](2026-11-14-workspace-diff-stat-ownership.zh.md)
 
@@ -28,6 +28,9 @@ owner mutation queue. Branch/dirty/unpushed observations preserve Member totals;
 Git turn attribution cannot write cumulative totals. Nested Members own their
 deepest path prefix, so their edits are not counted again in an ancestor Member.
 Additional file roots retain independent summaries when their indexes are merged.
+A group total requires a comparison from every Git Member. Non-Git directory
+Members (`additional`/`link`) are shared, unisolated folders: their summaries count
+when their roots resolve, but an unavailable directory never withholds the total.
 
 Statistics are computed before the shared file index is trimmed. Unknown line
 counts preserve the prior line total rather than publishing a partial sum as complete.

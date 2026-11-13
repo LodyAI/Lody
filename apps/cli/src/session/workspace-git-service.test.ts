@@ -534,6 +534,36 @@ describe('WorkspaceGitService', () => {
     });
   });
 
+  it('publishes the group total when an unavailable non-Git directory Member has no comparison', async () => {
+    const { service, meta } = fixture();
+    const run = projectRun();
+    run.members['docs' as keyof typeof run.members] = {
+      o: 2,
+      access: 'link',
+      src: { kind: 'local', machineId: 'machine' as never, localProjectId: 'docs' as never },
+      placement: { kind: 'root', dir: 'docs' },
+      path: 'docs',
+      base: 'main',
+    };
+    meta.set(owner, { projectRun: run, diffStats: { allChange: { add: 0, del: 0 } } });
+    await service.publishDiffStats({
+      ownerSessionId: owner,
+      allChangesDiffStats: { files: 3, allChange: { add: 5, del: 1 } },
+      memberDiffStats: {
+        web: { files: 2, allChange: { add: 2, del: 1 } },
+        api: { files: 1, allChange: { add: 3, del: 0 } },
+      },
+    });
+    expect(meta.get(owner)?.diffStats).toEqual({ allChange: { add: 5, del: 1, files: 3 } });
+    // A Git Member without a comparison still withholds the group total.
+    await service.publishDiffStats({
+      ownerSessionId: owner,
+      allChangesDiffStats: { files: 4, allChange: { add: 9, del: 1 } },
+      memberDiffStats: { web: { files: 2, allChange: { add: 2, del: 1 } } },
+    });
+    expect(meta.get(owner)?.diffStats).toEqual({ allChange: { add: 5, del: 1, files: 3 } });
+  });
+
   it('does not publish a cancelled comparison queued behind another owner mutation', async () => {
     const { service, meta } = fixture();
     const previous = { allChange: { add: 4, del: 2 } };

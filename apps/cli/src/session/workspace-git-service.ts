@@ -97,8 +97,13 @@ export class WorkspaceGitService {
           changed = true;
         }
         patch = projectRunMetaPatch(run);
-        const complete = Object.keys(run.members).every(
-          (id) => input.memberDiffStats?.[id] != null
+        // Non-Git directory Members are shared, unisolated folders: count them when
+        // their root resolves, but never let an unavailable one withhold the total.
+        const complete = Object.entries(run.members).every(
+          ([id, member]) =>
+            member.access === 'additional' ||
+            member.access === 'link' ||
+            input.memberDiffStats?.[id] != null
         );
         if (complete && input.allChangesDiffStats) {
           patch.diffStats = {
