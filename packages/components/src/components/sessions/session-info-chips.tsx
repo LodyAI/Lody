@@ -707,28 +707,31 @@ export function ContextChip({
   // like GitHub's (the PR's green and red), apart from the repo/branch text.
   // Under squeeze the action label truncates first; the totals clip last,
   // inside their own chip rather than past the bar.
-  const diffChip = hasDiff && diffStat ? (
-    <button
-      type="button"
-      onClick={onOpenAllChanges}
-      disabled={!onOpenAllChanges}
-      aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
-      title={t('sessions.detailTabs.allChanges', 'All Changes')}
-      className={cn(
-        'flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none',
-        INFO_BAR_TEXT_CLASS
-      )}
-    >
-      {diffStat.add + diffStat.del > 0 ? (
-        <>
-          <span className="text-github-addition">+{diffStat.add}</span>
-          <span className="text-github-deletion">−{diffStat.del}</span>
-        </>
-      ) : (
-        <span>{t('sessions.fileProvider.fileCount', '{{count}} files', { count: diffStat.files })}</span>
-      )}
-    </button>
-  ) : null;
+  const diffChip =
+    hasDiff && diffStat ? (
+      <button
+        type="button"
+        onClick={onOpenAllChanges}
+        disabled={!onOpenAllChanges}
+        aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
+        title={t('sessions.detailTabs.allChanges', 'All Changes')}
+        className={cn(
+          'flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none',
+          INFO_BAR_TEXT_CLASS
+        )}
+      >
+        {diffStat.add + diffStat.del > 0 ? (
+          <>
+            <span className="text-github-addition">+{diffStat.add}</span>
+            <span className="text-github-deletion">−{diffStat.del}</span>
+          </>
+        ) : (
+          <span>
+            {t('sessions.fileProvider.fileCount', '{{count}} files', { count: diffStat.files })}
+          </span>
+        )}
+      </button>
+    ) : null;
   const trailing =
     diffChip || actions?.length ? (
       <>

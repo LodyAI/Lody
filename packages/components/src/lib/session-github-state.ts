@@ -93,8 +93,8 @@ export const getSessionGitHubState = (
   const hasWorkspaceDiff = hasWorkspaceChanges(allChange);
   // A group total can be unknown while some Members have a complete comparison.
   const memberHasWorkspaceDiff = sourceSession?.projectRun
-    ? Object.values(sourceSession.projectRun.members).some(
-        (member) => hasWorkspaceChanges(member.diff)
+    ? Object.values(sourceSession.projectRun.members).some((member) =>
+        hasWorkspaceChanges(member.diff)
       )
     : false;
 
