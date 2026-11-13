@@ -400,6 +400,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
         ChatRowContent(
           row: entry.row, details: details, owner: owners[entry.row.id], muted: muted,
           expanded: entry.canToggle ? entry.expanded : nil,
+          onOpen: { [weak self] in self?.forwarded?("rowPress", ["id": entry.row.id]) },
           onToggle: { [weak self] in self?.toggleOpener(entry.row.id) }
         )
         .accessibilityAddTraits(current ? .isSelected : [])
@@ -620,6 +621,7 @@ private struct ChatRowContent: View {
   /// Set on a row with nested chats: whether they are shown. A "⌄ 4 opened chats" line below the
   /// row heads the family; both parent and child status marks stay trailing.
   var expanded: Bool?
+  let onOpen: () -> Void
   var onToggle: () -> Void = {}
 
   private var project: String { details.contains(.project) ? row.place : "" }
@@ -638,11 +640,20 @@ private struct ChatRowContent: View {
   }
 
   var body: some View {
-    // The family line is a compact, full-width target that starts inside the opener's blank
-    // bottom space, so its text sits just under the opener instead of between rows.
-    VStack(alignment: .leading, spacing: expanded == nil ? 0 : -contentBottomInset) {
-      content
-      if let expanded { familyToggle(expanded) }
+    // Reserve separate space for navigation and disclosure; the family target must not
+    // consume the opener's bottom padding.
+    VStack(alignment: .leading, spacing: 0) {
+      if let expanded {
+        // Adjacent SwiftUI buttons arbitrate touch tolerance together. Leaving the
+        // opener to UIKit cell selection lets disclosure steal taps above its bounds.
+        Button(action: onOpen) {
+          content.contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        familyToggle(expanded)
+      } else {
+        content
+      }
     }
     .backgroundPreferenceValue(ChatRowTitleBounds.self) { anchor in
       GeometryReader { geometry in
@@ -671,6 +682,7 @@ private struct ChatRowContent: View {
       [row.badge, project, branch, pullRequest?.label ?? "", familyLabel, row.accessibilityValue].filter { !$0.isEmpty }.joined(separator: ", ")
     )
     .accessibilityAddTraits(.isButton)
+    .accessibilityAction { onOpen() }
     .accessibilityActions {
       if let expanded {
         Button(String(localized: String.LocalizationValue(expanded ? "home.tree.collapse" : "home.tree.expand"), bundle: .lody), action: onToggle)
@@ -719,14 +731,6 @@ private struct ChatRowContent: View {
     .frame(maxWidth: .infinity, minHeight: nested ? LodySize.controlMd : LodySize.listRow, alignment: .leading)
   }
 
-  /// Blank space `content` leaves below its last text line: the vertical padding of a two-line
-  /// row, or half the spare minimum height around a single title line.
-  private var contentBottomInset: CGFloat {
-    if snippet != nil || hasDetailLine { return LodySpacing.sm }
-    let line = nested ? LodyTextStyle.callout.lineHeight : LodyTextStyle.body.lineHeight
-    return max(0, ((nested ? LodySize.controlMd : LodySize.listRow) - line) / 2)
-  }
-
   /// Child count and expanded state for VoiceOver; the toggle is an accessibility action.
   private var familyLabel: String {
     guard let expanded else { return "" }
@@ -765,9 +769,8 @@ private struct ChatRowContent: View {
         }
       }
       .padding(.horizontal, LodyLayout.listEdgeX)
-      .padding(.top, contentBottomInset + LodySpacing.xs)
-      .padding(.bottom, LodySpacing.xs)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.vertical, LodySpacing.xs)
+      .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .topLeading)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
