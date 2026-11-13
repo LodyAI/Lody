@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { RequestError } from '@agentclientprotocol/sdk';
 import { LoroRepo } from 'loro-repo';
+import { FileSystemStorageAdaptor } from 'loro-repo/storage/filesystem';
 import { getSessionRoomId, type ACPSessionId, type MachineId } from '@lody/shared';
 
 import type {
@@ -89,14 +93,15 @@ const destroyRepoOnRealTimers = async (repo: LoroRepo) => {
 
 const createHandlerHarness = async (
   sessionIds: SessionId[],
-  createManager?: (logger: Logger, document: LoroDocumentManager) => SessionManager
+  createManager?: (logger: Logger, document: LoroDocumentManager) => SessionManager,
+  repoOptions?: Parameters<typeof LoroRepo.create>[0]
 ) => {
   const logger = createSilentLogger();
   const fakeTimersActive = vi.isFakeTimers();
   if (fakeTimersActive) {
     vi.useRealTimers();
   }
-  const repo = await LoroRepo.create({});
+  const repo = await LoroRepo.create(repoOptions ?? {});
   const docs = new Map<SessionId, SessionDocument>();
   for (const sessionId of sessionIds) {
     const doc = new SessionDocument(repo, sessionId);
@@ -1716,15 +1721,11 @@ describe('MessageHandler ACP batching', () => {
       flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
       finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
     };
-    const findCompaction = (history: SessionHistoryInput[], toolCallId: string) =>
+    const compactions = (history: SessionHistoryInput[]) =>
       history
         .flatMap((entry) => readItems(entry))
-        .find(
-          (item) =>
-            item.type === 'tool_call' &&
-            item.activityKind === 'context_compaction' &&
-            item.toolCallId === toolCallId
-        );
+        .filter((item) => item.type === 'tool_call' && item.activityKind === 'context_compaction');
+    const activity = { version: 1, kind: 'context_compaction', automatic: true };
 
     try {
       const turnId = host.beginConversationTurn(sessionId);
@@ -1735,15 +1736,14 @@ describe('MessageHandler ACP batching', () => {
           toolCallId: 'compact-1',
           title: 'Context compacting',
           status: 'in_progress',
-          _meta: { contextCompaction: true },
+          _meta: { lody: { activity } },
         },
       });
       await host.flushACPUpdatesNow(sessionId);
       expect(isSessionContextCompacting(await doc.sessionData.history.readAll())).toBe(true);
 
-      // Nothing after the turn boundary can carry `compact-1` to a terminal
-      // status, so finalization owns it: the durable record must not reload as
-      // a compaction that is still running. Repeating the call is a no-op.
+      // Finalization settles the open row as a fallback until a provider result
+      // arrives. Repeating finalization must not change the stored row.
       await host.finalizeACPState(sessionId, turnId);
       await host.finalizeACPState(sessionId, turnId);
 
@@ -1752,7 +1752,9 @@ describe('MessageHandler ACP batching', () => {
       const reloadedHistory = await reopened.sessionData.history.readAll();
       const reloadedTurn = reloadedHistory.find((entry) => entry.id === turnId);
       expect(reloadedTurn?.finished).toBe(true);
-      expect(findCompaction(reloadedHistory, 'compact-1')).toMatchObject({ status: 'failed' });
+      expect(compactions(reloadedHistory)).toMatchObject([
+        { toolCallId: 'compact-1', status: 'failed' },
+      ]);
       expect(isSessionContextCompacting(reloadedHistory)).toBe(false);
 
       host.enqueueACPUpdate(sessionId, {
@@ -1761,16 +1763,19 @@ describe('MessageHandler ACP batching', () => {
           sessionUpdate: 'tool_call_update',
           toolCallId: 'compact-1',
           status: 'completed',
-          _meta: { contextCompaction: true },
+          title: 'Context compacted',
+          _meta: {
+            lody: { activity: { ...activity, usedTokensBefore: 900, usedTokensAfter: 300 } },
+          },
         },
       });
       await host.flushACPUpdatesNow(sessionId);
-      const completedHistory = await doc.sessionData.history.readAll();
-      const completedCompaction = findCompaction(completedHistory, 'compact-1');
-      expect(completedCompaction).toMatchObject({ status: 'completed' });
-      if (!completedCompaction || completedCompaction.type !== 'tool_call') {
-        throw new Error('Missing completed context compaction');
-      }
+      const afterCompletion = new SessionDocument(repo, sessionId, async () => {});
+      await afterCompletion.initOffline({ history: [] });
+      const completedHistory = await afterCompletion.sessionData.history.readAll();
+      expect(compactions(completedHistory)).toMatchObject([
+        { toolCallId: 'compact-1', status: 'completed', title: 'Context compacted' },
+      ]);
       expect(isSessionContextCompacting(completedHistory)).toBe(false);
 
       const nextTurnId = host.beginConversationTurn(sessionId);
@@ -1787,12 +1792,110 @@ describe('MessageHandler ACP batching', () => {
       await host.flushACPUpdatesNow(sessionId);
       const nextHistory = await doc.sessionData.history.readAll();
       expect(nextTurnId).not.toBe(turnId);
-      expect(findCompaction(nextHistory, 'compact-2')).toMatchObject({ status: 'in_progress' });
+      expect(compactions(nextHistory)).toMatchObject([
+        { toolCallId: 'compact-1', status: 'completed' },
+        { toolCallId: 'compact-2', status: 'in_progress' },
+      ]);
       expect(isSessionContextCompacting(nextHistory)).toBe(true);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
   });
+
+  it.each([
+    ['completed', 'Context compacted', {}],
+    ['failed', 'Context compaction cancelled', { cancellationReason: 'cancelled' }],
+    ['failed', 'Context compaction stopped by user', { cancellationReason: 'user-abort' }],
+    [
+      'failed',
+      'Context changed during compaction',
+      { failureReason: 'Context changed during compaction' },
+    ],
+  ] as const)(
+    'persists one compaction row with terminal outcome %s (%s)',
+    async (status, title, outcome) => {
+      vi.useRealTimers();
+      const sessionId = 'compaction-outcome' as SessionId;
+      const baseDir = await mkdtemp(join(tmpdir(), 'lody-compaction-test-'));
+      const storage = () => ({ storageAdapter: new FileSystemStorageAdaptor({ baseDir }) });
+      let openRepo: LoroRepo | undefined;
+      const toolCallId = 'context-compaction:fixture';
+      const activity = { version: 1, kind: 'context_compaction', automatic: true };
+
+      try {
+        const { repo, docs, handler } = await createHandlerHarness(
+          [sessionId],
+          undefined,
+          storage()
+        );
+        openRepo = repo;
+        const doc = docs.get(sessionId);
+        if (!doc) throw new Error(`Missing session doc for ${sessionId}`);
+        const host = handler as unknown as {
+          beginConversationTurn(sessionId: SessionId): string;
+          enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
+          flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
+          finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+        };
+        const turnId = host.beginConversationTurn(sessionId);
+        host.enqueueACPUpdate(sessionId, {
+          sessionId,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId,
+            kind: 'think',
+            title: 'Compacting context',
+            status: 'in_progress',
+            _meta: { lody: { activity } },
+          },
+        });
+        await host.flushACPUpdatesNow(sessionId);
+        expect(isSessionContextCompacting(await doc.sessionData.history.readAll())).toBe(true);
+
+        const terminal: AcpSessionNotification = {
+          sessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId,
+            status,
+            title,
+            _meta: { lody: { activity: { ...activity, ...outcome } } },
+          },
+        };
+        host.enqueueACPUpdate(sessionId, terminal);
+        host.enqueueACPUpdate(sessionId, terminal);
+        await host.finalizeACPState(sessionId, turnId);
+
+        await repo.flush();
+        await repo.destroy();
+        openRepo = await LoroRepo.create(storage());
+        const reopened = new SessionDocument(openRepo, sessionId, async () => {});
+        await reopened.initOffline({ history: [] });
+        const history = await reopened.sessionData.history.readAll();
+        const rows = history
+          .flatMap(readItems)
+          .filter(
+            (item) => item.type === 'tool_call' && item.activityKind === 'context_compaction'
+          );
+        expect(rows).toMatchObject([{ toolCallId, status, title }]);
+        const row = rows[0];
+        if (row?.type !== 'tool_call') throw new Error('Missing compaction row');
+        expect(row.activityCancellationReason).toBe(
+          'cancellationReason' in outcome ? outcome.cancellationReason : undefined
+        );
+        expect(row.activityFailureReason).toBe(
+          'failureReason' in outcome ? outcome.failureReason : undefined
+        );
+        expect(isSessionContextCompacting(history)).toBe(false);
+      } finally {
+        try {
+          if (openRepo && !openRepo.destroyed) await destroyRepoOnRealTimers(openRepo);
+        } finally {
+          await rm(baseDir, { recursive: true, force: true });
+        }
+      }
+    }
+  );
 
   it('persists updates buffered during the finalization tail instead of dropping them', async () => {
     const sessionId = 's-1' as SessionId;

@@ -8183,16 +8183,28 @@ const ToolCallCard = memo(function ToolCallCard({
   }
   if (toolCall.activityKind === 'context_compaction') {
     const isCompacting = toolCall.status === 'pending' || toolCall.status === 'in_progress';
+    let label = t('sessions.activity.contextCompacted', 'Context compacted');
+    if (isCompacting) {
+      label = t('sessions.activity.compactingContext', 'Compacting context');
+    } else if (toolCall.status === 'failed') {
+      switch (toolCall.activityCancellationReason) {
+        case 'user-abort':
+          label = t(
+            'sessions.activity.contextCompactionStopped',
+            'Context compaction stopped by user'
+          );
+          break;
+        case 'cancelled':
+          label = t('sessions.activity.contextCompactionCancelled', 'Context compaction cancelled');
+          break;
+        default:
+          label = t('sessions.activity.contextCompactionFailed', 'Context compaction failed');
+      }
+    }
     return (
       <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
         {isCompacting ? <Spinner className="h-[1em] w-[1em] shrink-0" aria-hidden="true" /> : null}
-        <span>
-          {isCompacting
-            ? t('sessions.activity.compactingContext', 'Compacting context')
-            : toolCall.status === 'failed'
-              ? t('sessions.activity.contextCompactionFailed', 'Context compaction failed')
-              : t('sessions.activity.contextCompacted', 'Context compacted')}
-        </span>
+        <span title={toolCall.activityFailureReason}>{label}</span>
       </div>
     );
   }

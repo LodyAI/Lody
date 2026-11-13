@@ -3876,6 +3876,8 @@ export const ToolCallMessageSchema = z.object({
   rawInput: z.record(SharedStringSchema, z.unknown()).optional(),
   rawOutput: z.record(SharedStringSchema, z.unknown()).optional(),
   activityKind: z.enum(['context_compaction', 'codex_retry']).optional(),
+  activityCancellationReason: z.enum(['cancelled', 'user-abort']).optional(),
+  activityFailureReason: SharedOptionalStringSchema,
   // Canonical tool name, when the agent published one (ACP `title` is human-facing).
   toolName: SharedOptionalStringSchema,
   // IANA timezone of the machine that ran a scheduling tool (cron is local-time to it).

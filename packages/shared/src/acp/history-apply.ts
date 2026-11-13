@@ -1040,6 +1040,14 @@ const mergeToolCallMessage = (
     recordedAtMs: prev.recordedAtMs ?? incoming.recordedAtMs,
     toolName: incoming.toolName ?? prev.toolName,
     activityKind: incoming.activityKind !== undefined ? incoming.activityKind : prev.activityKind,
+    activityCancellationReason:
+      nextStatus === 'failed'
+        ? (incoming.activityCancellationReason ?? prev.activityCancellationReason)
+        : undefined,
+    activityFailureReason:
+      nextStatus === 'failed'
+        ? (incoming.activityFailureReason ?? prev.activityFailureReason)
+        : undefined,
   };
 };
 
@@ -1393,9 +1401,11 @@ const buildToolCallMessageForHistory = (
   // scheduled-tasks panel derives entirely from history, so it needs the schedule and
   // the created job id. Persist them (small, stable) plus the canonical tool name the
   // deriver switches on; `title` stays whatever the agent chose to show.
-  const toolName =
-    resolveAcpToolName((update as ToolCallUpdateWithMeta)._meta) ?? previousTool?.toolName;
-  const activityKind = getToolCallActivityKind((update as ToolCallUpdateWithMeta)._meta);
+  const updateMeta = (update as ToolCallUpdateWithMeta)._meta;
+  const toolName = resolveAcpToolName(updateMeta) ?? previousTool?.toolName;
+  const activityKind = getToolCallActivityKind(updateMeta);
+  const activity = asRecordOrUndefined(asRecordOrUndefined(updateMeta?.lody)?.activity);
+  const cancellationReason = activity?.cancellationReason;
   const isSchedulingTool = toolName !== undefined && SCHEDULING_TOOL_NAMES.has(toolName);
   const input = asRecordOrUndefined(update.rawInput);
   return {
@@ -1419,6 +1429,18 @@ const buildToolCallMessageForHistory = (
     // fire time in the right timezone regardless of where it is later viewed.
     schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
     activityKind,
+    activityCancellationReason:
+      activityKind === 'context_compaction' &&
+      update.status === 'failed' &&
+      (cancellationReason === 'cancelled' || cancellationReason === 'user-abort')
+        ? cancellationReason
+        : undefined,
+    activityFailureReason:
+      activityKind === 'context_compaction' &&
+      update.status === 'failed' &&
+      typeof activity?.failureReason === 'string'
+        ? truncateToolTitleForHistory(activity.failureReason.trim()) || undefined
+        : undefined,
   };
 };
 

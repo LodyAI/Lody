@@ -160,6 +160,32 @@ describe('live agent status', () => {
   const shimmering = () =>
     Array.from(container.querySelectorAll('.agent-shimmer')).map((el) => el.textContent);
 
+  it('renders compaction completion, cancellation, user stop, and failure distinctly', async () => {
+    const compaction = (id: string, outcome: Record<string, unknown>) => ({
+      ...toolCall(id),
+      activityKind: 'context_compaction',
+      ...outcome,
+    });
+    await render(
+      liveTurn([
+        compaction('complete', {}),
+        compaction('cancelled', { status: 'failed', activityCancellationReason: 'cancelled' }),
+        compaction('stopped', { status: 'failed', activityCancellationReason: 'user-abort' }),
+        compaction('failed', {
+          status: 'failed',
+          activityFailureReason: 'Context changed during compaction',
+        }),
+      ]),
+      { label: 'Working' }
+    );
+    expect(container.textContent).toContain('Context compacted');
+    expect(container.textContent).toContain('Context compaction cancelled');
+    expect(container.textContent).toContain('Context compaction stopped by user');
+    expect(
+      container.querySelector('[title="Context changed during compaction"]')?.textContent
+    ).toBe('Context compaction failed');
+  });
+
   it('says how long a working turn has gone without output once that passes two minutes', async () => {
     useTickingClock('2026-09-19T00:04:29Z');
     const { deliverUpdate } = await render(

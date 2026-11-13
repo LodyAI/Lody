@@ -1917,6 +1917,8 @@ export type MessageContent =
       rawOutput?: { [k: string]: unknown };
       /** Small provider-neutral marker for tool-like status rows rendered in the transcript. */
       activityKind?: 'context_compaction' | 'codex_retry';
+      activityCancellationReason?: 'cancelled' | 'user-abort';
+      activityFailureReason?: string;
       /**
        * The agent's canonical name for this tool, when it published one. ACP
        * `title` is human-facing — an agent that describes its calls puts the
