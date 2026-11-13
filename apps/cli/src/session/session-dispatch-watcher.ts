@@ -2106,6 +2106,7 @@ export class SessionDispatchWatcher {
 
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(getSessionRoomId(sessionId), {
       lastHandledUserMsgId: userTurnId,
+      lastFailedUserMsgId: userTurnId,
       processingUserMsgId: undefined,
     } satisfies Partial<SessionMeta>);
     await this.deps.executionService.acknowledgeSteerTurn(sessionId, userTurnId);
