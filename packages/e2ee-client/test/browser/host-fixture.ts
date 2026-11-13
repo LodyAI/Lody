@@ -631,6 +631,11 @@ export async function boot(
                   }),
               });
               const log = Layer.succeed(LedgerLog, {
+                readFrom: (_anchor, base) =>
+                  Effect.succeed({
+                    records: records.slice(base.length).map((r) => new Uint8Array(r)),
+                    checkpoint: { head: view().head, length: records.length },
+                  }),
                 read: () =>
                   Effect.succeed({
                     records: records.map((r) => new Uint8Array(r)),

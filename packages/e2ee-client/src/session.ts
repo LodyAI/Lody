@@ -142,8 +142,18 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     });
     const log = Object.freeze({
       read: rawLog.read.bind(rawLog),
+      readFrom: rawLog.readFrom?.bind(rawLog),
       appendCas: rawLog.appendCas.bind(rawLog),
     });
+    const refreshCheckpoint = (value: { checkpoint: import('@lody/e2ee-core').LedgerCheckpoint }) =>
+      Effect.gen(function* () {
+        const local = yield* sync.current();
+        if (
+          local.view.length !== value.checkpoint.length ||
+          !local.view.head.equals(value.checkpoint.head)
+        )
+          yield* sync.refresh();
+      });
     const controlPorts = Layer.succeedContext(
       Context.pick(
         LedgerSync,
@@ -154,9 +164,20 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         Context.add(LedgerSync, sync),
         Context.add(LedgerLog, {
           appendCas: log.appendCas.bind(log),
+          ...(log.readFrom
+            ? {
+                readFrom: (anchor: Bytes.GenesisHash, base: import('@lody/e2ee-core').LedgerView) =>
+                  log.readFrom!(anchor, base).pipe(
+                    Effect.tap(refreshCheckpoint),
+                    Effect.mapError((cause) =>
+                      cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
+                    )
+                  ),
+              }
+            : {}),
           read: (anchor) =>
             log.read(anchor).pipe(
-              Effect.tap(() => sync.refresh()),
+              Effect.tap(refreshCheckpoint),
               Effect.mapError((cause) =>
                 cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
               )
@@ -172,7 +193,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         ),
     });
     const controlLayer = WorkspaceControl.layer.pipe(
-      Layer.provideMerge(Layer.merge(VerifiedLedger.layer, LedgerSubmission.layer)),
+      Layer.provideMerge(LedgerSubmission.layer.pipe(Layer.provideMerge(VerifiedLedger.layer))),
       Layer.provideMerge(Layer.mergeAll(identity, controlPorts, source))
     );
     const controlServices = yield* Layer.build(controlLayer);
@@ -605,6 +626,14 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             );
           })
         );
+        const personalCounts = new Map<string, number>();
+        const recoveryMembers = new Set<string>();
+        for (const device of state.devices.values()) {
+          const membership = toHex(device.membershipId.toBytes());
+          if (device.kind === 'personal')
+            personalCounts.set(membership, (personalCounts.get(membership) ?? 0) + 1);
+          if (device.kind === 'recovery') recoveryMembers.add(membership);
+        }
         return {
           epoch: state.epoch.number,
           rotationRequired: state.epoch.rotationRequired,
@@ -618,17 +647,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             cryptoUserId: toHex(
               state.members.get(toHex(entry.membershipId.toBytes()))!.userId.toBytes()
             ),
-            recoveryDeviceAvailable: [...state.devices.values()].some(
-              (other) => other.kind === 'recovery' && other.membershipId.equals(entry.membershipId)
-            ),
+            recoveryDeviceAvailable: recoveryMembers.has(toHex(entry.membershipId.toBytes())),
             requiresRecoveryConfirmation:
               entry.kind === 'personal' &&
-              ![...state.devices.entries()].some(
-                ([otherKey, other]) =>
-                  otherKey !== key &&
-                  other.kind === 'personal' &&
-                  other.membershipId.equals(entry.membershipId)
-              ),
+              personalCounts.get(toHex(entry.membershipId.toBytes())) === 1,
             machineId: entry.machineId ?? null,
             self: key === toHex(device.publicKey.toBytes()),
             mayRevoke: Result.isSuccess(

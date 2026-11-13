@@ -371,13 +371,30 @@ export function E2eeWorkspaceConsole({
             };
             owner.publish = publish;
             await publish();
-            const synchronize = async () => {
+            const synchronize = async (
+              targetHead?: import('@lody/cloud-api').E2eeWorkspaceLedgerHead
+            ) => {
               if (!isCurrent()) return;
-              const local = await runtime.ledgerView(workspaceId);
+              const local = await runtime.status(workspaceId);
               if (!isCurrent()) return;
+              if (
+                targetHead &&
+                local.genesisHash === targetHead.genesisHash &&
+                (local.length > targetHead.checkpoint.length ||
+                  (local.length === targetHead.checkpoint.length &&
+                    local.headHash === targetHead.checkpoint.headHash))
+              ) {
+                if (
+                  published.genesisHash !== local.genesisHash ||
+                  published.length !== local.length ||
+                  published.headHash !== local.headHash
+                )
+                  await publish();
+                return;
+              }
               let page = await port.history({
                 workspaceId,
-                ...(local.status.position ? { after: local.status.position } : {}),
+                ...(local.position ? { after: local.position } : {}),
               });
               for (;;) {
                 if (!isCurrent()) return;
@@ -428,7 +445,7 @@ export function E2eeWorkspaceConsole({
             // The first subscription value closes the gap after initial catch-up.
             // Only original, verified history advances the local checkpoint.
             let running = false;
-            let pending = false;
+            let pending: import('@lody/cloud-api').E2eeWorkspaceLedgerHead | null = null;
             const subscriptionFailed = () => {
               if (isCurrent()) console.warn('E2EE ledger live updates unavailable');
             };
@@ -445,14 +462,15 @@ export function E2eeWorkspaceConsole({
                         head.checkpoint.headHash === published.headHash)
                     )
                       return;
-                    pending = true;
+                    pending = head;
                     if (running) return;
                     running = true;
                     void (async () => {
                       try {
                         while (pending && isCurrent()) {
-                          pending = false;
-                          await synchronize();
+                          const target = pending;
+                          pending = null;
+                          await synchronize(target);
                           if (isCurrent()) setDirectoryRevision((value) => value + 1);
                         }
                       } catch (error) {

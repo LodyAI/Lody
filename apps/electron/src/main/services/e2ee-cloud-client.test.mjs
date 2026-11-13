@@ -1147,3 +1147,68 @@ void test('a call that hits the 30 s deadline drops the reused Convex token', as
     ).pipe(Effect.provide(TestClock.layer()))
   )
 })
+
+for (const mode of ['conflict', 'empty', 'misbound', 'paged']) {
+  void test(`post-CAS ledger suffix handles ${mode} reply hints and ingests each page`, async () => {
+    const group = stagedGroup()
+    const base = { head: Result.getOrThrow(Bytes.recordHash(Buffer.alloc(32, 2))), length: 1 }
+    const anchor = Result.getOrThrow(Bytes.genesisHash(Buffer.from(group.genesis, 'hex')))
+    const suffix = {
+      workspaceId: access.workspaceId,
+      genesisHash: group.genesis,
+      checkpoint: { headHash: group.recordHash, length: 2 },
+      startIndex: 1,
+      recordsHex: [Buffer.from(group.record).toString('hex')],
+      position: 'suffix-end',
+      nextCursor: null
+    }
+    const calls = [],
+      ingested = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            if (path === 'e2eeWorkspaces:appendRecord')
+              return response({
+                status: mode === 'conflict' ? 'conflict' : 'committed',
+                recordHash: group.recordHash,
+                historyPage: {
+                  ...suffix,
+                  ...(mode === 'empty' ? { recordsHex: [] } : {}),
+                  ...(mode === 'misbound' ? { workspaceId: 'other-workspace' } : {}),
+                  ...(mode === 'paged' ? { nextCursor: 'unusable-inline-cursor' } : {})
+                }
+              })
+            assert.equal(path, 'e2eeWorkspaces:history')
+            assert.equal(args.after, 'retained-prefix')
+            return response(suffix)
+          })
+          const log = client.ledgerLog(access.workspaceId, undefined, {
+            position: () => Effect.succeed('retained-prefix'),
+            ingest: (page) =>
+              Effect.sync(() => {
+                ingested.push(page)
+              })
+          })
+          yield* log.observe(base)
+          const appended = yield* Effect.result(log.appendCas(anchor, base, group.record))
+          assert.equal(Result.isFailure(appended), mode === 'conflict')
+          const read = yield* log.readFrom(anchor, base)
+          assert.deepEqual(read.records, [group.record])
+          assert.equal(read.checkpoint.length, 2)
+          assert.equal(read.checkpoint.head.equals(hashRecordBytes(group.record)), true)
+          assert.deepEqual(ingested, [suffix])
+          assert.equal(
+            calls.filter((call) => call.path === 'e2eeWorkspaces:history').length,
+            mode === 'conflict' ? 0 : 1
+          )
+        })
+      )
+    )
+  })
+}

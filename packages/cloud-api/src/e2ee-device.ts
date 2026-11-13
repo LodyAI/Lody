@@ -1,3 +1,5 @@
+import type { E2eeWorkspaceHistoryPage } from './e2ee-workspaces';
+
 /** Opaque device credential. Remote machines use an explicitly admitted, device-scoped service grant. */
 export type E2eeDeviceAccess = { workspaceId: string; credential: string; cliToken?: string };
 export type E2eeContentTokenRequest = E2eeDeviceAccess & {
@@ -50,4 +52,9 @@ export type E2eeAppendRecordRequest = {
   /** Personal join cancellation fence, consumed with the writer reservation. */
   pairingSessionId?: string;
 };
-export type E2eeAppendRecordReply = { status: string; recordHash: string };
+export type E2eeAppendRecordReply = {
+  status: string;
+  recordHash: string;
+  /** Untrusted suffix hint; clients must verify it against their pinned ledger. */
+  historyPage?: E2eeWorkspaceHistoryPage;
+};

@@ -991,6 +991,65 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }
   });
 
+  it('refreshes native access on ledger hints and releases the subscription with its reader', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let local = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      length: 1,
+      headHash: '33'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+    };
+    let changed!: Parameters<NonNullable<PlatformE2eeWorkspaces['subscribeLedgerHead']>>[1];
+    let subscribed = false;
+    let refreshes = 0;
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.subscribeLedgerHead = (_input, listener) => {
+      changed = listener;
+      subscribed = true;
+      return () => {
+        subscribed = false;
+      };
+    };
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => local,
+      status: async () => local,
+      refresh: async () => {
+        refreshes++;
+        return local;
+      },
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(subscribed).toBe(true);
+    const before = refreshes;
+    const hint = (workspaceId = 'local:workspace') =>
+      changed({
+        workspaceId,
+        genesisHash: local.genesisHash,
+        checkpoint: { length: local.length, headHash: local.headHash },
+      });
+    await act(async () => hint());
+    expect(refreshes).toBe(before);
+    local = { ...local, length: 2, headHash: '44'.repeat(32) };
+    await act(async () => hint('another-workspace'));
+    expect(refreshes).toBe(before);
+    await act(async () => hint());
+    expect(refreshes).toBe(before + 1);
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    await act(async () => hint());
+    expect(refreshes).toBe(before + 1);
+    await act(async () => root.render(null));
+    expect(subscribed).toBe(false);
+    expect(prepared.disposed).toBe(true);
+    local = { ...local, length: 3 };
+    await act(async () => hint());
+    expect(refreshes).toBe(before + 1);
+  });
+
   it('binds the protected reader to its authenticated account and releases only that lease', async () => {
     ordinaryCloud();
     listEncrypted();
@@ -1061,9 +1120,9 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(prepared.disposed).toBe(false);
     expect(opened).toEqual(['local:workspace']);
     expect(closed).toEqual([]);
-    expect(vi.mocked(createWorkspaceRuntime).mock.calls.map(([options]) => options.syncMode)).toEqual(
-      ['cloud']
-    );
+    expect(
+      vi.mocked(createWorkspaceRuntime).mock.calls.map(([options]) => options.syncMode)
+    ).toEqual(['cloud']);
   });
 
   it('reopens an ordinary workspace runtime in the sync mode Run local agent selects', async () => {
@@ -1077,9 +1136,9 @@ describe('RuntimeProvider warm workspace preparation', () => {
     await render();
     expect(first.disposed).toBe(true);
     expect(store.get(runtimeAtom)).toBe(next);
-    expect(vi.mocked(createWorkspaceRuntime).mock.calls.map(([options]) => options.syncMode)).toEqual(
-      ['cloud', 'dual']
-    );
+    expect(
+      vi.mocked(createWorkspaceRuntime).mock.calls.map(([options]) => options.syncMode)
+    ).toEqual(['cloud', 'dual']);
   });
 
   it('opens an independent ordinary workspace while an encrypted workspace retains incomplete native close', async () => {
