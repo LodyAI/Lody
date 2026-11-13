@@ -142,8 +142,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     closePanel()
     secondary.setViewControllers([placeholder()], animated: false)
     updateBookSidebar()
-    inbox.list.selectedSessionId = ""
-    tabNavigations.values.flatMap(\.viewControllers).flatMap(\.children).compactMap { $0 as? ProjectController }.forEach { $0.list.selectedSessionId = "" }
+    markListSelection()
     layoutColumns()
     if split.isCollapsed { split.show(.primary) }
   }
@@ -161,10 +160,16 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       secondary.setViewControllers([page(next, title: "")], animated: false)
       updateBookSidebar()
     } else if !query.isEmpty { session?.find(query: query, keyboard: false) }
-    inbox.list.selectedSessionId = id
-    tabNavigations.values.flatMap(\.viewControllers).flatMap(\.children).compactMap { $0 as? ProjectController }.forEach { $0.list.selectedSessionId = id }
+    markListSelection()
     layoutColumns()
     if !folded, !panelOpen { split.show(.secondary) }
+  }
+  /// Only a list shown beside its conversation (iPad and unfolded iPhone Duo split) marks the open row.
+  /// Compact Home pushes the conversation over the list, so returning must not leave a highlighted row.
+  private func markListSelection() {
+    let id = compactTabsInstalled ? "" : session?.sessionId ?? ""
+    inbox.list.selectedSessionId = id
+    tabNavigations.values.flatMap(\.viewControllers).flatMap(\.children).compactMap { $0 as? ProjectController }.forEach { $0.list.selectedSessionId = id }
   }
   func contains(_ controller: UIViewController) -> Bool {
     var ancestor: UIViewController? = controller
@@ -285,6 +290,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       split.setViewController(primary, for: .primary)
     }
     compactTabsInstalled = compact
+    markListSelection()
     if !compact {
       if selectedTab == .schedules, session == nil { showSchedulesInDetail() } else { selectedTab = .chats }
       inbox.setDestination(selectedTab)
@@ -344,8 +350,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     if let navigation = tabNavigations[.schedules] { navigation.setViewControllers([], animated: false) }
     session = nil
     closePanel()
-    inbox.list.selectedSessionId = ""
-    tabNavigations.values.flatMap(\.viewControllers).flatMap(\.children).compactMap { $0 as? ProjectController }.forEach { $0.list.selectedSessionId = "" }
+    markListSelection()
     selectedTab = .schedules
     schedules?.inDetailColumn = true
     if secondary.viewControllers.first !== root { secondary.setViewControllers([root], animated: false) }
