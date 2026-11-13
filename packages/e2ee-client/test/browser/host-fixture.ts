@@ -2924,6 +2924,7 @@ export async function recoverBrowser(
     repair?: boolean;
     revokePersonal?: boolean;
     setup?: boolean;
+    slowRecoveryIo?: boolean;
     runtime?: boolean;
   } = {}
 ) {
@@ -2933,21 +2934,24 @@ export async function recoverBrowser(
     { readonly entryId: string; readonly revision: number; readonly body: Uint8Array }
   >();
   const journal = new Map<string, Uint8Array>();
-  let index: {
-    readonly entryId: string;
-    readonly revision: number;
-    readonly body: Uint8Array;
-  } | null = null;
+  const indices = new Map<
+    string,
+    {
+      readonly entryId: string;
+      readonly revision: number;
+      readonly body: Uint8Array;
+    }
+  >();
   const store: RecoveryVaultStore['Service'] = {
     putImmutable: (_id, entry) =>
       Effect.sync(() => {
         entries.set(entry.entryId, entry);
       }),
     readEntry: (_id, id) => Effect.succeed(entries.get(id) ?? null),
-    readIndex: () => Effect.sync(() => index),
-    compareAndSwapIndex: (_id, _expected, next) =>
+    readIndex: (id) => Effect.sync(() => indices.get(id) ?? null),
+    compareAndSwapIndex: (id, _expected, next) =>
       Effect.sync(() => {
-        index = next;
+        indices.set(id, next);
         return 'Committed' as const;
       }),
     deleteUnreferenced: () => Effect.void,
@@ -3078,18 +3082,29 @@ export async function recoverBrowser(
           retain();
         }
         if (options.tamperedPackage) entries.get(reference.entryId)!.body[25] ^= 1;
+        const expireDeadlines = () =>
+          Effect.gen(function* () {
+            deadlinesExpired = true;
+            const waiters = [...deadlineWaiters];
+            deadlineWaiters.clear();
+            for (const finish of waiters) finish();
+            yield* Effect.yieldNow;
+          });
         const pages = () =>
-          Effect.succeed([
-            {
-              workspaceId: offer.workspaceId,
-              genesisHash: offer.genesisHash,
-              checkpoint: { length: view().length, headHash: toHex(view().head.toBytes()) },
-              startIndex: 0,
-              recordsHex: records.map(toHex),
-              position: 'recovery/full',
-              nextCursor: null,
-            },
-          ]);
+          Effect.gen(function* () {
+            if (options.slowRecoveryIo) yield* expireDeadlines();
+            return [
+              {
+                workspaceId: offer.workspaceId,
+                genesisHash: offer.genesisHash,
+                checkpoint: { length: view().length, headHash: toHex(view().head.toBytes()) },
+                startIndex: 0,
+                recordsHex: records.map(toHex),
+                position: 'recovery/full',
+                nextCursor: null,
+              },
+            ];
+          });
         failKeys = options.failInstall ?? false;
         let recoveryRuntime: E2eeWorkspaceRuntime | undefined;
         if (options.runtime) {
@@ -3203,13 +3218,24 @@ export async function recoverBrowser(
         }
         session = yield* host.open(offer, false, true);
         let recoveryVerified = false;
+        let refreshedDuringSetup = false;
         if (options.setup) {
+          deadlinesExpired = false;
+          const setupVault = options.slowRecoveryIo
+            ? (yield* (yield* RecoveryVaults).create({ locator: 'abc-rotated' })).vault
+            : vault;
           const setupResult = yield* session.setupRecovery({
-            vault,
+            vault: setupVault,
             local,
             fetchCurrentEnvelope: envelope,
             submitOriginal: (record) =>
-              Effect.sync(() => {
+              Effect.gen(function* () {
+                if (options.slowRecoveryIo) {
+                  yield* expireDeadlines();
+                  deadlinesExpired = false;
+                  yield* session!.refresh();
+                  refreshedDuringSetup = true;
+                }
                 if (!records.some((old) => toHex(old) === toHex(record)))
                   records.push(record.slice());
                 retain();
@@ -3303,6 +3329,7 @@ export async function recoverBrowser(
           sealed: frame.sealed.length > 64,
           noDuplicateAdmission: records.length === admittedCount,
           recoveryVerified,
+          refreshedDuringSetup,
         };
       }).pipe(Effect.provide(layers))
     )

@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Result } from 'effect';
+import {
+  derivePairingKeys,
+  disposePairingKeys,
+  parsePairingString,
+} from '@lody/e2ee-core/protocol';
 import { useTranslation } from 'react-i18next';
 import { Camera, ChevronDown, ChevronLeft, CircleCheck, QrCode, Smartphone } from 'lucide-react';
 import { Button } from '@lody/ui/button';
@@ -56,6 +62,27 @@ const leftOut = (next: E2eeAccountPairingRequestState, workspaceId: string) =>
   next.workspaces.every((item) => item.approval !== 'approved' || item.state === 'joined');
 const cameraSupported = () =>
   typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
+const parsePairCodeLink = (url: string): string | null => {
+  const trimmed = url.trim();
+  return /^lody:\/\/pair\//i.test(trimmed) && !localCodeError(trimmed) ? trimmed : null;
+};
+const hexBytes = (bytes: Uint8Array) =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+const lookupIdFromPairingString = (pairingString: string): string | null => {
+  const secret = parsePairingString(pairingString);
+  if (Result.isFailure(secret)) return null;
+  try {
+    const keys = derivePairingKeys(secret.success);
+    if (Result.isFailure(keys)) return null;
+    try {
+      return hexBytes(keys.success.lookupId);
+    } finally {
+      disposePairingKeys(keys.success);
+    }
+  } finally {
+    secret.success.fill(0);
+  }
+};
 
 /** The first service or host code carried by a failure, through wrappers. */
 function carriedCode(cause: unknown, depth = 0): string | null {
@@ -64,8 +91,10 @@ function carriedCode(cause: unknown, depth = 0): string | null {
   if (typeof record.code === 'string') return record.code;
   const data = record.data as { code?: unknown } | null | undefined;
   if (data && typeof data === 'object' && typeof data.code === 'string') return data.code;
-  if (typeof record.message === 'string' && /^e2ee_[\w-]+$/.test(record.message))
-    return record.message;
+  if (typeof record.message === 'string') {
+    const match = /\be2ee_([\w-]+)\b/.exec(record.message);
+    if (match) return `e2ee_${match[1]}`;
+  }
   return carriedCode(record.cause, depth + 1);
 }
 /** Only an outage retries quietly; a refusal says what went wrong instead of blaming the
@@ -143,10 +172,14 @@ export function E2eeAutomaticPairingPage({
   // automatic request is left alone, so neither flow cancels the other.
   const [qr, setQr] = useState<'idle' | 'scanning' | 'joining' | 'joined'>('idle');
   const [qrError, setQrError] = useState<string | null>(null);
+  const [pendingLink, setPendingLink] = useState<string | null>(null);
+  const pendingLinkRef = useRef<string | null>(null);
+  pendingLinkRef.current = pendingLink;
+  const activeQr = qr !== 'idle' || pendingLink !== null;
   const qrPaused = useRef(false);
-  qrPaused.current = qr !== 'idle';
-  /** A scanned request this page submitted and has not settled. */
-  const qrSubmitted = useRef(false);
+  qrPaused.current = activeQr;
+  /** Lookup ID of a scanned request this page submitted and has not settled. */
+  const qrSubmitted = useRef<string | null>(null);
   // Phones scan and computers show: a laptop webcam is never the primary path.
   const handheld = useIsHandheldScanner();
   const mobile = handheld;
@@ -154,6 +187,48 @@ export function E2eeAutomaticPairingPage({
     handheld &&
     Boolean(runtime.requestAccountPairing && runtime.accountPairingRequest) &&
     cameraSupported();
+  const receiving = state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined';
+  const linkGuardRef = useRef({ busy, canStart, lostAllOpen, receiving });
+  linkGuardRef.current = { busy, canStart, lostAllOpen, receiving };
+  useEffect(() => {
+    const currentRuntime = runtime;
+    qrPaused.current = false;
+    pendingLinkRef.current = null;
+    setPendingLink(null);
+    setQr('idle');
+    setQrError(null);
+    return () => {
+      const expectedLookupId = qrSubmitted.current;
+      if (!expectedLookupId) return;
+      qrSubmitted.current = null;
+      void currentRuntime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
+    };
+  }, [runtime, workspaceId]);
+  useEffect(() => {
+    if (!runtime.requestAccountPairing) return undefined;
+    return registerE2eePairLinkHandler((url) => {
+      const pairingString = parsePairCodeLink(url);
+      if (!pairingString) return false;
+      const guard = linkGuardRef.current;
+      if (!guard.canStart) return false;
+      if (
+        guard.busy ||
+        guard.receiving ||
+        guard.lostAllOpen ||
+        qrPaused.current ||
+        blockedRef.current !== null
+      )
+        return true;
+      qrPaused.current = true;
+      pendingLinkRef.current = pairingString;
+      setPendingLink(pairingString);
+      setQrError(null);
+      return true;
+    });
+  }, [runtime]);
+  useEffect(() => {
+    if (canStart) retryE2eePairLink();
+  }, [canStart, runtime, workspaceId]);
   useEffect(() => {
     if (!canStart) return undefined;
     let alive = true,
@@ -238,8 +313,17 @@ export function E2eeAutomaticPairingPage({
     },
     []
   );
-  const finishQrJoin = () => {
-    qrSubmitted.current = false;
+  const finishQrJoin = (next?: E2eeAccountPairingRequestState | null) => {
+    const expectedLookupId = qrSubmitted.current;
+    qrSubmitted.current = null;
+    if (
+      expectedLookupId &&
+      next &&
+      next.status !== 'joined' &&
+      next.workspaces.every((item) => item.approval !== 'approved' || item.state === 'joined')
+    ) {
+      void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
+    }
     setQr('joined');
     // Only now is the automatic request redundant; ending it earlier would close the
     // other device's dialog while it is still signing for the scanned code.
@@ -260,23 +344,41 @@ export function E2eeAutomaticPairingPage({
   const abandonQr = (errorKey: string | null) => {
     setQr('idle');
     setQrError(errorKey);
-    if (!qrSubmitted.current) return;
-    qrSubmitted.current = false;
-    void runtime.cancelAccountPairing?.().catch(() => undefined);
+    const expectedLookupId = qrSubmitted.current;
+    if (!expectedLookupId) return;
+    qrSubmitted.current = null;
+    void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
   };
   const joinWithCode = async (pairingString: string) => {
+    const expectedLookupId = lookupIdFromPairingString(pairingString);
+    if (!expectedLookupId) {
+      setQr('idle');
+      setQrError('e2ee.instantQr.notPairingCode');
+      return;
+    }
     const owner = ownerRef.current;
     setQrError(null);
     setQr('joining');
     try {
       // Without `preserveExisting` the host replaces its retained request atomically,
       // leaving the automatic discovery row open until this join settles.
-      qrSubmitted.current = true;
+      qrSubmitted.current = expectedLookupId;
       const next = await runtime.requestAccountPairing!({ pairingString });
-      if (!sameOwner(owner)) return;
-      if (qrJoined(next)) finishQrJoin();
+      if (!sameOwner(owner) || qrSubmitted.current !== expectedLookupId) {
+        if (!qrJoined(next)) {
+          void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
+        }
+        return;
+      }
+      if (qrJoined(next)) finishQrJoin(next);
     } catch (cause) {
-      if (!sameOwner(owner)) return;
+      if (!sameOwner(owner) || qrSubmitted.current !== expectedLookupId) {
+        if (accountPairingErrorCode(cause) !== 'pairing-used') {
+          void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
+        }
+        return;
+      }
+      if (accountPairingErrorCode(cause) === 'pairing-used') qrSubmitted.current = null;
       abandonQr(failureKey(cause));
     }
   };
@@ -296,19 +398,7 @@ export function E2eeAutomaticPairingPage({
     void joinWithCode(scanned.trim());
   };
   const { video: qrVideo, state: cameraState } = useQrCamera(qr === 'scanning', acceptScan);
-  // A code scanned with the system camera opens Lody with the same link.
-  const linkRef = useRef({ qr, canStart, joinWithCode });
-  linkRef.current = { qr, canStart, joinWithCode };
-  useEffect(() => {
-    if (!runtime.requestAccountPairing) return undefined;
-    return registerE2eePairLinkHandler((url) => {
-      const current = linkRef.current;
-      if (!current.canStart || current.qr === 'joining' || current.qr === 'joined') return false;
-      if (!/^lody:\/\/pair\//i.test(url.trim()) || localCodeError(url)) return false;
-      void current.joinWithCode(url.trim());
-      return true;
-    });
-  }, [runtime]);
+
   useEffect(() => {
     if (qr !== 'joining' || !runtime.accountPairingRequest) return undefined;
     let alive = true,
@@ -319,10 +409,10 @@ export function E2eeAutomaticPairingPage({
       void runtime
         .accountPairingRequest!()
         .then((next) => {
-          if (!alive) return;
+          if (!alive || qrSubmitted.current === null) return;
+          if (next?.lookupId && next.lookupId !== qrSubmitted.current) return;
           if (qrJoined(next)) {
-            qrSubmitted.current = false;
-            finishQrJoin();
+            finishQrJoin(next);
           } else if (!next || next.status === 'declined' || next.status === 'expired')
             abandonQr(
               `e2ee.accountPair.error.${next?.status === 'expired' ? 'pairing-expired' : 'failed'}`
@@ -388,7 +478,10 @@ export function E2eeAutomaticPairingPage({
     if (busy) return;
     setBusy(true);
     try {
-      if (replace) await runtime.cancelAutomaticPairing!(workspaceId);
+      if (replace) {
+        abandonQr(null);
+        await runtime.cancelAutomaticPairing!(workspaceId);
+      }
       const next = await runtime.startAutomaticPairing!(workspaceId);
       if (sameOwner(owner)) {
         setState(next);
@@ -404,6 +497,7 @@ export function E2eeAutomaticPairingPage({
   };
   const cancel = (manual = false) => {
     if (busy) return;
+    abandonQr(null);
     // The relay may queue the cancellation while offline: leaving never waits for it.
     // A request it misses still expires, and a new request replaces it.
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
@@ -412,8 +506,17 @@ export function E2eeAutomaticPairingPage({
   };
   if (!canStart)
     return (
-      <main className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
-        <Button variant="ghost" onClick={onBack}>
+      <main
+        data-e2ee-pairing-surface=""
+        className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
+      >
+        <Button
+          variant="ghost"
+          onClick={() => {
+            abandonQr(null);
+            onBack();
+          }}
+        >
           <ChevronLeft size={16} />
           {t('e2ee.control.back')}
         </Button>
@@ -439,9 +542,8 @@ export function E2eeAutomaticPairingPage({
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
     lostAll?.onRecovered();
   };
-  const receiving = state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined';
   const terminal =
-    !receiving && state && ['declined', 'expired', 'cancelled'].includes(state.phase);
+    !receiving && !activeQr && state && ['declined', 'expired', 'cancelled'].includes(state.phase);
   const scanButton = (label: string) =>
     qrSupported && (
       <Button
@@ -458,8 +560,17 @@ export function E2eeAutomaticPairingPage({
       </Button>
     );
   return (
-    <main className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
-      <Button variant="ghost" onClick={onBack}>
+    <main
+      data-e2ee-pairing-surface=""
+      className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
+    >
+      <Button
+        variant="ghost"
+        onClick={() => {
+          abandonQr(null);
+          onBack();
+        }}
+      >
         <ChevronLeft size={16} />
         {t('e2ee.control.back')}
       </Button>
@@ -512,6 +623,36 @@ export function E2eeAutomaticPairingPage({
                 <Button className="mt-3" variant="ghost" onClick={() => abandonQr(null)}>
                   {t('common.cancel')}
                 </Button>
+              </div>
+            ) : pendingLink ? (
+              <div
+                data-testid="e2ee-link-join"
+                className="my-6 rounded-2xl border bg-muted/40 px-4 py-5 text-center"
+              >
+                <p className="text-sm font-medium">{t('e2ee.accountPair.request.title')}</p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <Button
+                    data-testid="e2ee-link-join-confirm"
+                    onClick={() => {
+                      const code = pendingLink;
+                      qrPaused.current = true;
+                      pendingLinkRef.current = null;
+                      setPendingLink(null);
+                      void joinWithCode(code);
+                    }}
+                  >
+                    {t('e2ee.accountPair.request.useCode')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      pendingLinkRef.current = null;
+                      setPendingLink(null);
+                    }}
+                  >
+                    {t('common.cancel')}
+                  </Button>
+                </div>
               </div>
             ) : qr === 'scanning' ? (
               <div className="my-6" data-testid="e2ee-qr-viewfinder">
@@ -729,6 +870,11 @@ export function E2eeDeviceRequestsButton({ className }: { className?: string }) 
   );
 }
 /** One account's application-level inbox, shared by desktop and mobile chrome. */
+const hasVisiblePairingSurface = () =>
+  Array.from(document.querySelectorAll('[data-e2ee-pairing-surface], [role="alertdialog"]')).some(
+    (node) => !node.closest('[hidden], [inert], [data-closed], [data-ending-style]')
+  );
+
 export function E2eeAutomaticPairingInbox({
   runtime,
   children,
@@ -769,6 +915,10 @@ export function E2eeAutomaticPairingInbox({
   inboxRef.current = inbox;
   const qrForRef = useRef(qrFor);
   qrForRef.current = qrFor;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const codeRef = useRef(code);
+  codeRef.current = code;
   const dialog = useRef<HTMLDivElement>(null);
   // A phone approves by scanning the new device's screen; a computer types its code.
   const handheld = useIsHandheldScanner();
@@ -777,20 +927,20 @@ export function E2eeAutomaticPairingInbox({
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const requestsRef = useRef(requests);
   requestsRef.current = requests;
-  /** A `lody://pair/…` link opened here joins this device through that code. */
-  const [linkJoin, setLinkJoin] = useState<{ phase: 'joining' | 'joined' } | { error: string } | null>(
-    null
-  );
   useEffect(() => {
     let alive = true,
       running = false;
+    qrForRef.current = null;
     setQrFor(null);
     setRequests([]);
+    busyRef.current = null;
     setBusy(null);
     setError(null);
+    codeRef.current = '';
     setCode('');
     codeOwner.current = null;
     setEnded(null);
+    selectedRef.current = null;
     setSelected(null);
     deferred.current.clear();
     if (!runtime?.pendingAutomaticPairing) return;
@@ -804,26 +954,31 @@ export function E2eeAutomaticPairingInbox({
         setRequests(rows);
         const ids = new Set(rows.map((row) => row.id));
         for (const id of deferred.current) if (!ids.has(id)) deferred.current.delete(id);
-        if (selectedRef.current && !ids.has(selectedRef.current)) setSelected(null);
+        if (selectedRef.current && !ids.has(selectedRef.current)) {
+          selectedRef.current = null;
+          setSelected(null);
+        }
+        // A link scanned with the system camera may name a request fetched only now; claim it
+        // before the default first-waiting popup chooses a different row.
+        requestsRef.current = rows;
+        retryE2eePairLink();
         // A visible window presents even without keyboard focus (another app or a
         // second screen); a hidden one leaves the request to the system notification.
         // It opens over Settings or the encryption console, but never over another
-        // pairing surface or a confirmation in progress.
+        // pairing surface.
         if (
           !selectedRef.current &&
           !inboxRef.current &&
           !qrForRef.current &&
           document.visibilityState === 'visible' &&
-          !document.querySelector(
-            '[data-e2ee-pairing-surface]:not([hidden]), [role="alertdialog"]:not([hidden])'
-          )
+          !hasVisiblePairingSurface()
         ) {
           const next = rows.find((row) => row.phase === 'waiting' && !deferred.current.has(row.id));
-          if (next) setSelected(next.id);
+          if (next) {
+            selectedRef.current = next.id;
+            setSelected(next.id);
+          }
         }
-        // A link scanned with the system camera may name a request fetched only now.
-        requestsRef.current = rows;
-        retryE2eePairLink();
       } catch {
         /* An inbox outage never gates an existing workspace or clears known requests. */
       } finally {
@@ -910,7 +1065,8 @@ export function E2eeAutomaticPairingInbox({
     setEnded(null);
     setError(null);
   };
-  const act = async (approve: boolean, entered = code, target = current) => {
+  const act = async (approve: boolean, entered = code) => {
+    const target = current;
     if (!target || busy || !runtime) return;
     if (approve && !/^\d{6}$/.test(entered)) return;
     const owner = actionOwner.current;
@@ -946,96 +1102,69 @@ export function E2eeAutomaticPairingInbox({
   // request on a phone.
   const qrSlot = qrSupported && runtime && (shownQr || current) && (
     <div className="my-5 rounded-xl border p-4" data-testid="e2ee-approval-qr">
-                {shownQr ? (
-                  <E2eeInstantQrApprove
-                    key={shownQr}
-                    runtime={runtime}
-                    onJoined={() => qrJoined(shownQr)}
-                  />
-                ) : (
-                  <div className="flex flex-col items-center gap-2 text-center">
-                    <Button
-                      data-testid="e2ee-approval-show-qr"
-                      variant={mobile ? 'ghost' : 'primary'}
-                      disabled={Boolean(busy)}
-                      onClick={() => current && setQrFor(current.id)}
-                    >
-                      <QrCode size={16} aria-hidden="true" />
-                      {t(mobile ? 'e2ee.auto.showQr.mobile' : 'e2ee.auto.showQr')}
-                    </Button>
-                    <p className="text-xs text-muted-foreground">{t('e2ee.auto.showQr.help')}</p>
-                  </div>
-                )}
-              </div>
+      {shownQr ? (
+        <E2eeInstantQrApprove
+          key={shownQr}
+          runtime={runtime}
+          onJoined={() => qrJoined(shownQr)}
+        />
+      ) : (
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Button
+            data-testid="e2ee-approval-show-qr"
+            variant={mobile ? 'ghost' : 'primary'}
+            disabled={Boolean(busy)}
+            onClick={() => current && setQrFor(current.id)}
+          >
+            <QrCode size={16} aria-hidden="true" />
+            {t(mobile ? 'e2ee.auto.showQr.mobile' : 'e2ee.auto.showQr')}
+          </Button>
+          <p className="text-xs text-muted-foreground">{t('e2ee.auto.showQr.help')}</p>
+        </div>
+      )}
+    </div>
   );
-  // Links from the system camera: an approval code for a request here, or a code that
-  // joins this device. The approval goes through the same comparison and attempts.
-  const linkActions = useRef({ act, runtime });
-  linkActions.current = { act, runtime };
+  // External links (for example from a system camera or Android BROWSABLE intent) are
+  // untrusted: an approval link only opens/prefills the matching request when no other
+  // pairing surface is active, and a join link stays queued for an open join page.
   useEffect(() => {
     if (!runtime) return undefined;
-    return registerE2eePairLinkHandler((url) => {
-      const approval = parseAutoPairQr(url);
-      if (approval) {
+    return registerE2eePairLinkHandler(
+      (url) => {
+        const approval = parseAutoPairQr(url);
+        if (!approval) return false;
+        if (busyRef.current) return true;
+        if (!runtime.approveAutomaticPairing) return false;
         const row = requestsRef.current.find(
           (item) => item.id === approval.id && item.phase === 'waiting'
         );
-        if (!row || !runtime.approveAutomaticPairing) return false;
+        if (!row) {
+          return (
+            selectedRef.current !== null || qrForRef.current !== null || hasVisiblePairingSurface()
+          );
+        }
+        const sameEmpty = selectedRef.current === row.id && codeRef.current === '';
+        const idle =
+          selectedRef.current === null && qrForRef.current === null && !hasVisiblePairingSurface();
+        if (!sameEmpty && !idle) return true;
+        clearTimeout(dismissTimer.current);
+        if (selectedRef.current !== row.id) {
+          qrForRef.current = null;
+          setQrFor(null);
+        }
+        inboxRef.current = false;
+        setInbox(false);
+        selectedRef.current = row.id;
         setSelected(row.id);
         codeOwner.current = row.id;
+        codeRef.current = approval.code;
         setCode(approval.code);
-        void linkActions.current.act(true, approval.code, row);
+        setError(null);
         return true;
-      }
-      if (!runtime.requestAccountPairing || localCodeError(url)) return false;
-      setLinkJoin({ phase: 'joining' });
-      runtime
-        .requestAccountPairing({ pairingString: url.trim() })
-        .then((next) => {
-          if (next.status === 'joined') setLinkJoin({ phase: 'joined' });
-        })
-        .catch((cause: unknown) => setLinkJoin({ error: failureKey(cause) }));
-      return true;
-    });
+      },
+      { fallback: true }
+    );
   }, [runtime]);
-  const linkJoining = linkJoin !== null && 'phase' in linkJoin && linkJoin.phase === 'joining';
-  useEffect(() => {
-    if (!linkJoining || !runtime?.accountPairingRequest) return undefined;
-    let alive = true,
-      running = false;
-    const timer = setInterval(() => {
-      if (running) return;
-      running = true;
-      void runtime
-        .accountPairingRequest!()
-        .then((next) => {
-          if (!alive) return;
-          if (
-            next?.status === 'joined' ||
-            (next?.workspaces.some((item) => item.state === 'joined') &&
-              next.workspaces.every(
-                (item) => item.approval !== 'approved' || item.state === 'joined'
-              ) &&
-              next.workspaces.every((item) => item.approval !== 'waiting'))
-          )
-            setLinkJoin({ phase: 'joined' });
-          else if (!next || next.status === 'declined' || next.status === 'expired') {
-            setLinkJoin({ error: 'e2ee.accountPair.error.pairing-expired' });
-            void runtime.cancelAccountPairing?.().catch(() => undefined);
-          }
-        })
-        .catch(() => {
-          // The same scanned request stays; the next poll asks again.
-        })
-        .finally(() => {
-          running = false;
-        });
-    }, QR_JOIN_POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [linkJoining, runtime]);
   const requestCount = requests.length;
   const requestsUi = useMemo(
     () => ({
@@ -1073,7 +1202,12 @@ export function E2eeAutomaticPairingInbox({
                     variant="secondary"
                     disabled={row.phase !== 'waiting'}
                     onClick={() => {
+                      clearTimeout(dismissTimer.current);
+                      qrForRef.current = null;
+                      setQrFor(null);
+                      inboxRef.current = false;
                       setInbox(false);
+                      selectedRef.current = row.id;
                       setSelected(row.id);
                     }}
                   >
@@ -1277,37 +1411,6 @@ export function E2eeAutomaticPairingInbox({
               </>
             )}
             {mobile && qrSlot}
-          </PrivatePairingSurface>
-        </Dialog.Content>
-      </Dialog.Root>
-      <Dialog.Root
-        open={linkJoin !== null}
-        onOpenChange={(open) => {
-          if (open) return;
-          if (linkJoining) void runtime?.cancelAccountPairing?.().catch(() => undefined);
-          setLinkJoin(null);
-        }}
-      >
-        <Dialog.Content width={400} data-e2ee-pairing-surface="" data-testid="e2ee-link-join">
-          <PrivatePairingSurface>
-            <Dialog.Title>{t('e2ee.instantQr.title')}</Dialog.Title>
-            <p role="status" className="mt-3 text-sm text-muted-foreground">
-              {linkJoin && 'error' in linkJoin
-                ? t(linkJoin.error)
-                : t(
-                    linkJoining ? 'e2ee.instantQr.scannedJoining' : 'e2ee.instantQr.linkJoined'
-                  )}
-            </p>
-            <Button
-              className="mt-4"
-              variant="secondary"
-              onClick={() => {
-                if (linkJoining) void runtime?.cancelAccountPairing?.().catch(() => undefined);
-                setLinkJoin(null);
-              }}
-            >
-              {t(linkJoining ? 'common.cancel' : 'common.close')}
-            </Button>
           </PrivatePairingSurface>
         </Dialog.Content>
       </Dialog.Root>

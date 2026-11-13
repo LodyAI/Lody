@@ -27,6 +27,10 @@ import {
   Bytes,
   hashRecordBytes,
   verifyLedger,
+  derivePairingKeys,
+  disposePairingKeys,
+  encodePairingSecret,
+  formatPairingString,
   prepareLedgerCommand,
   signLedgerRecord
 } from '@lody/e2ee-core/protocol'
@@ -5742,6 +5746,118 @@ void test('a brand-new desktop gets a pairing code for a workspace another devic
   assert.deepEqual(
     submitted.map((request) => request.workspaces),
     [[{ workspaceId: 'workspace', genesisHash }]]
+  )
+})
+
+void test('IPC requestAccountPairing decouples preserveExisting from multi-workspace hints and optional workspaceId', async (t) => {
+  const phone = await nativeAccountFixture(t)
+  const first = await createAccountWorkspace(phone.api, 'workspace-a')
+  const second = await createAccountWorkspace(phone.api, 'workspace-b')
+  const ledgerPage = async (workspaceId) => {
+    const genesisHash =
+      workspaceId === 'workspace-a' ? first.creation.genesisHashHex : second.creation.genesisHashHex
+    const ledger = await phone.api.withDesktopE2eeAccount(
+      (owner) => owner.host.ledgerView(workspaceId),
+      workspaceId
+    )
+    return {
+      workspaceId,
+      genesisHash,
+      startIndex: 0,
+      recordsHex: ledger.recordsHex,
+      checkpoint: { length: ledger.status.length, headHash: ledger.status.headHash },
+      position: `p1:${workspaceId}:${ledger.status.length}:source-${ledger.status.length}:0`,
+      nextCursor: null
+    }
+  }
+  const submitted = []
+  const desktop = await nativeAccountFixture(t)
+  const client = {
+    history: ({ workspaceId }) => Effect.promise(() => ledgerPage(workspaceId)),
+    pairingSubmit: (request) =>
+      Effect.sync(() => {
+        submitted.push(request)
+        return {
+          requestId: `request-${submitted.length}`,
+          status: 'pending',
+          deviceName: request.deviceName,
+          approximateLocation: null,
+          requestedAt: Date.now(),
+          expiresAt: request.expiresAt
+        }
+      }),
+    pairingClaim: () => Effect.succeed({ status: 'pending', approvals: [] })
+  }
+  const sender = Object.assign(new EventEmitter(), {
+    id: 32,
+    isDestroyed: () => false,
+    send: () => {}
+  })
+  const { E2eeIpc } = await load(
+    '../ipc/services/e2ee-ipc.ts',
+    e2eeIpcDependencies(
+      {
+        ...desktop.api,
+        desktopE2eeCloudClient: async () => ({ accountId: 'acc1', client }),
+        desktopAccountPairingDatabase: (accountId) =>
+          join(desktop.directory, `account-pairing-${accountId}.sqlite`)
+      },
+      sender
+    )
+  )
+  const ipc = new E2eeIpc()
+  const hints = [
+    { workspaceId: 'workspace-a', name: 'Alpha', genesisHash: first.creation.genesisHashHex },
+    { workspaceId: 'workspace-b', name: 'Beta', genesisHash: second.creation.genesisHashHex }
+  ]
+  const makeCode = (fillByte) => {
+    const secret = new Uint8Array(16).fill(fillByte)
+    const keys = Result.getOrThrow(derivePairingKeys(secret))
+    const lookupId = Buffer.from(keys.lookupId).toString('hex')
+    disposePairingKeys(keys)
+    const pairingString = formatPairingString(Result.getOrThrow(encodePairingSecret(secret)))
+    secret.fill(0)
+    return { pairingString, lookupId }
+  }
+  const codeOne = makeCode(11)
+  const codeTwo = makeCode(22)
+
+  // Account-wide external link confirmation passes preserveExisting across 2+ workspaces.
+  const allState = await ipc.requestAccountPairing(
+    { pairingString: codeOne.pairingString, preserveExisting: true },
+    hints
+  )
+  assert.equal(allState.status, 'waiting')
+  assert.deepEqual(allState.workspaces.map((w) => w.workspaceId).sort(), [
+    'workspace-a',
+    'workspace-b'
+  ])
+  // Another preserveExisting request refuses with pairing-elsewhere while codeOne is open.
+  await assert.rejects(
+    ipc.requestAccountPairing(
+      { pairingString: codeTwo.pairingString, preserveExisting: true },
+      hints
+    ),
+    { message: 'e2ee_pairing-elsewhere' }
+  )
+  // Cancelling with a non-matching lookupId preserves codeOne; matching lookupId cancels it.
+  await ipc.cancelAccountPairing({ expectedLookupId: codeTwo.lookupId })
+  assert.equal((await ipc.accountPairingRequest(hints))?.status, 'waiting')
+  await ipc.cancelAccountPairing({ expectedLookupId: codeOne.lookupId })
+  assert.equal((await ipc.accountPairingRequest(hints))?.status, 'expired')
+
+  // Automatic pairing passes workspaceId explicitly and scopes to that single workspace.
+  const singleState = await ipc.requestAccountPairing(
+    {
+      pairingString: codeTwo.pairingString,
+      preserveExisting: true,
+      workspaceId: 'workspace-b'
+    },
+    [hints[1]]
+  )
+  assert.deepEqual(
+    singleState.workspaces.map((w) => w.workspaceId),
+    ['workspace-b']
   )
 })
 

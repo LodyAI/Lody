@@ -230,7 +230,12 @@ export function E2eeInstantQrApprove(props: {
   const pairingString = phase.kind === 'showing' ? phase.pairingString : null;
   return (
     <PrivatePairingSurface>
-      <div data-testid="e2ee-instant-qr" data-phase={phase.kind} {...stylex.props(styles.root)}>
+      <div
+        data-testid="e2ee-instant-qr"
+        data-e2ee-pairing-surface=""
+        data-phase={phase.kind}
+        {...stylex.props(styles.root)}
+      >
         <p {...stylex.props(styles.lead)}>{t('e2ee.instantQr.lead')}</p>
         <div {...stylex.props(styles.frame)}>
           {pairingString ? (

@@ -298,6 +298,7 @@ export function CloudPlatformProvider({
                       pairingString: input.pairingString,
                       expiresAt: input.expiresAt,
                       preserveExisting: input.preserveExisting,
+                      workspaceId: input.workspace?.workspaceId,
                     },
                     input.workspace ? [input.workspace] : accountPairingHints(workspacesStore.get())
                   )
