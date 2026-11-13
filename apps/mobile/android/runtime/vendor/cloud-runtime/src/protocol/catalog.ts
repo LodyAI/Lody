@@ -213,6 +213,8 @@ export function projectRows(
       lastReadAt: stamp(value.lastReadAt),
       lastRunningSeen: stamp(value.lastRunningSeen),
       awaitingUserSince: stamp(value.awaitingUserSince),
+      lastHandledUserMsgId: text(value.lastHandledUserMsgId) || undefined,
+      lastFailedUserMsgId: text(value.lastFailedUserMsgId) || undefined,
       branchName: text(value.branchName) || undefined,
       baseBranch:
         text(value.baseBranch).trim() ||

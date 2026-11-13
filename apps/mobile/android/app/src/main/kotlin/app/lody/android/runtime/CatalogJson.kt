@@ -32,6 +32,8 @@ object CatalogJson {
         lastMessageAt = json.optMillis("lastMessageAt"),
         lastReadAt = json.optMillis("lastReadAt"),
         awaitingUserSince = json.optMillis("awaitingUserSince"),
+        lastHandledUserMsgId = json.optText("lastHandledUserMsgId"),
+        lastFailedUserMsgId = json.optText("lastFailedUserMsgId"),
         pullRequests = json.optJSONArray("pullRequests")?.let { array ->
             (0 until array.length()).mapNotNull { index -> array.optJSONObject(index)?.let(::pullRequest) }
         }.orEmpty(),
@@ -118,6 +120,8 @@ object CatalogJson {
         session.lastMessageAt?.let { put("lastMessageAt", it) }
         session.lastReadAt?.let { put("lastReadAt", it) }
         session.awaitingUserSince?.let { put("awaitingUserSince", it) }
+        session.lastHandledUserMsgId?.let { put("lastHandledUserMsgId", it) }
+        session.lastFailedUserMsgId?.let { put("lastFailedUserMsgId", it) }
         if (session.pullRequests.isNotEmpty()) {
             put("pullRequests", JSONArray(session.pullRequests.map(::putPullRequest)))
         }

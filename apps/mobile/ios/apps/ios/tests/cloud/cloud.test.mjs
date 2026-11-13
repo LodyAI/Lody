@@ -31,6 +31,8 @@ test('real Flock snapshot plus framed updates produces current catalog without d
       machineId: 'm1',
       title: 'Before',
       project: { kind: 'local', localProjectId: 'p1' },
+      lastHandledUserMsgId: 'turn-2',
+      lastFailedUserMsgId: 'turn-2',
       privatePrompt: 'must never leave decoder',
     },
     4,
@@ -53,6 +55,9 @@ test('real Flock snapshot plus framed updates produces current catalog without d
   assert.equal(result.sessions.length, 1);
   assert.equal(result.sessions[0].title, 'After');
   assert.equal(result.sessions[0].projectId, 'm1:local:p1');
+  // A failed latest turn reaches native lists: the marker names the turn handled last.
+  assert.equal(result.sessions[0].lastHandledUserMsgId, 'turn-2');
+  assert.equal(result.sessions[0].lastFailedUserMsgId, 'turn-2');
   assert.equal(result.projects[0].name, 'Legacy project');
   assert.ok(!JSON.stringify(result).includes('privatePrompt'));
   assert.throws(

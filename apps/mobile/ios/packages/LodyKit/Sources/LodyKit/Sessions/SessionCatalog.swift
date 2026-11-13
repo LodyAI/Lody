@@ -69,6 +69,10 @@ struct SessionItem: Equatable, Sendable {
   var lastMessageAt: Double?
   var lastReadAt: Double?
   var awaitingUserSince: Double?
+  /// Latest user turn the machine finished (session meta `lastHandledUserMsgId`).
+  var lastHandledUserMsgId: String?
+  /// Latest user turn that ended in failure (session meta `lastFailedUserMsgId`).
+  var lastFailedUserMsgId: String?
   var branchName: String?
   /// Web `session.baseBranch || project.branch`; the Copy menu offers it beside a different current branch.
   var baseBranch: String?
@@ -98,10 +102,20 @@ struct SessionItem: Equatable, Sendable {
   }
 }
 
+extension SessionItem {
+  /// The latest finished turn failed: web `hasFailedLatestTurn`. A later handled or canceled
+  /// turn moves `lastHandledUserMsgId` on, which retires the marker.
+  var latestTurnFailed: Bool {
+    guard let failed = lastFailedUserMsgId else { return false }
+    return failed == lastHandledUserMsgId
+  }
+}
+
 extension SessionItem: Decodable {
   private enum CodingKeys: String, CodingKey {
     case id, title, status, isTabClosed, archived, pinned, projectId, createdAt, openedBySessionId, openedByRootSessionId
     case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, awaitingUserSince, branchName, baseBranch, lastModel, diff, machineId
+    case lastHandledUserMsgId, lastFailedUserMsgId
     case cliType, agentType, resume, pullRequests, iosSimulatorPreviewRequestId, androidEmulatorPreviewRequestId, userId, agentConfigId
     case workspaceDirty, workspaceUnpushed, projectRun
   }
@@ -137,6 +151,8 @@ extension SessionItem: Decodable {
     lastMessageAt = value(.lastMessageAt)
     lastReadAt = value(.lastReadAt)
     awaitingUserSince = value(.awaitingUserSince)
+    lastHandledUserMsgId = present(value(.lastHandledUserMsgId))
+    lastFailedUserMsgId = present(value(.lastFailedUserMsgId))
     branchName = present(value(.branchName))
     baseBranch = present(value(.baseBranch))
     machineId = value(.machineId) ?? ""

@@ -134,11 +134,22 @@ object ChatListModel {
         else -> null
     }
 
-    /** Status first; an idle chat still flags an open question (`awaitingUserSince`) or an unread reply. */
+    /**
+     * The latest finished turn failed (web `hasFailedLatestTurn`): the failure marker still names
+     * the turn handled last. A later handled or canceled turn moves that pointer on.
+     */
+    fun latestTurnFailed(session: CatalogSession): Boolean =
+        session.lastFailedUserMsgId != null && session.lastFailedUserMsgId == session.lastHandledUserMsgId
+
+    /**
+     * Status first; a failed latest turn shows unless the agent is running again, and an idle chat
+     * still flags an open question (`awaitingUserSince`) or an unread reply.
+     */
     fun attention(session: CatalogSession): ChatAttention? {
         val status = attention(session.status)
         return when {
             status == ChatAttention.Failed -> status
+            status != ChatAttention.Running && latestTurnFailed(session) -> ChatAttention.Failed
             session.awaitingUserSince != null && status != ChatAttention.Running -> ChatAttention.Waiting
             status != null -> status
             isUnread(session) -> ChatAttention.Unread
