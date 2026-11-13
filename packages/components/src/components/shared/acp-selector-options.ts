@@ -62,6 +62,10 @@ export type AcpFastModeConfigOptionSelector = AcpConfigOptionSelector;
 
 export const CODEX_FAST_MODE_CONFIG_ID = 'fast-mode';
 export const CLAUDE_FAST_MODE_CONFIG_ID = 'fast';
+/** Devin's per-model Fast control is a select (`acp-extension-devin` README, Model capabilities). */
+export const DEVIN_SPEED_CONFIG_ID = 'speed';
+export const DEVIN_SPEED_FAST_VALUE = 'fast';
+const BUILTIN_SELECT_FAST_CONFIG_IDS: Record<string, string> = { devin: DEVIN_SPEED_CONFIG_ID };
 export const CODEX_COLLABORATION_MODE_CONFIG_ID = ACP_COLLABORATION_MODE_CONFIG_ID;
 export const CODEX_COLLABORATION_MODE_DEFAULT_VALUE = ACP_COLLABORATION_MODE_DEFAULT_VALUE;
 export const CODEX_COLLABORATION_MODE_PLAN_VALUE = ACP_COLLABORATION_MODE_PLAN_VALUE;
@@ -507,9 +511,17 @@ const normalizeFastModeSelectors = (
 ): AcpConfigOptionSelector[] => {
   const fastMode = getDeclaredModelControls(options, options.selectedModelId)?.fastMode;
   if (fastMode === undefined) return selectors;
-  const hasFast = selectors.some(isFastModeSelector);
+  // Devin carries Fast on a `speed` select rather than a toggle; the declared
+  // per-model support decides it exactly like the toggle ids.
+  const selectFastConfigId =
+    options.cliType === 'builtin'
+      ? BUILTIN_SELECT_FAST_CONFIG_IDS[options.agentType?.toLowerCase() ?? '']
+      : undefined;
+  const isFastControl = (selector: AcpConfigOptionSelector): boolean =>
+    isFastModeSelector(selector) || selector.configId === selectFastConfigId;
+  const hasFast = selectors.some(isFastControl);
   if (!fastMode) {
-    return hasFast ? selectors.filter((selector) => !isFastModeSelector(selector)) : selectors;
+    return hasFast ? selectors.filter((selector) => !isFastControl(selector)) : selectors;
   }
   const configId = getBuiltinModelControlBinding(options)?.fastConfigId;
   if (hasFast || !configId) return selectors;

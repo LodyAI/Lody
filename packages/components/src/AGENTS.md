@@ -135,6 +135,8 @@ Cancellation retains selection and cannot remove a user destination.
 - Effort ladders follow the selected model: its recorded options, then the adapter's
   per-model declaration, then `modelReasoningEfforts` (`components/shared/acp-selector-options.ts`).
   Never hard-code a provider's per-model tiers; cached efforts may belong to another model.
+- The Devin Fusion builder applies only advertised model values through composer edits and
+  never composes a model id ([decision](../../../.agents/notes/implemented/feature/2026-11-14-devin-fusion-builder.md)).
 
 ## ACP authentication
 

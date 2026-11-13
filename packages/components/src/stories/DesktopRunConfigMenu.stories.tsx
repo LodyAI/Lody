@@ -34,6 +34,7 @@ const machineId = 'machine-storybook' as MachineId;
 const codexId = 'agent-codex' as AgentConfigId;
 const grokId = 'agent-grok' as AgentConfigId;
 const deepseekId = 'agent-deepseek' as AgentConfigId;
+const devinId = 'agent-devin' as AgentConfigId;
 
 const storyPlatform = createLocalPlatformProvider({
   session: createStaticStore({
@@ -84,6 +85,15 @@ const agents: AgentConfigMeta[] = [
     description: 'Built-in DeepSeek Harness runtime',
     cliType: 'builtin',
     agentType: 'deepseek',
+    env: {},
+  },
+  {
+    id: devinId,
+    machineId,
+    name: 'Devin',
+    description: 'Built-in Devin runtime',
+    cliType: 'builtin',
+    agentType: 'devin',
     env: {},
   },
 ];
@@ -334,6 +344,119 @@ function GrokConfigShell() {
   );
 }
 
+/* Devin Fusion: the menu's Fusion row, opening the same dialog the session
+   composer uses. Synthetic catalog mirrors `fusion-<lead>-sidekick-<sk>`;
+   per-model controls come from a resolver like `useAcpModelSelectorResolver`. */
+const fusionModelOptions: AcpSessionSelectOption[] = [
+  { value: 'adaptive', label: 'Adaptive' },
+  { value: 'swe-2-high', label: 'SWE-2 High' },
+  {
+    value: 'fusion-claude-opus-5-5-medium-sidekick-swe-2-medium',
+    label: 'Fusion (Claude Opus 5.5 Medium + SWE-2 Medium)',
+  },
+  {
+    value: 'fusion-claude-opus-5-5-medium-sidekick-swe-2-high',
+    label: 'Fusion (Claude Opus 5.5 Medium + SWE-2 High)',
+  },
+  {
+    value: 'fusion-claude-opus-5-5-medium-sidekick-glm-5-2',
+    label: 'Fusion (Claude Opus 5.5 Medium + GLM-5.2 High)',
+  },
+  {
+    value: 'fusion-gpt-6-astra-high-sidekick-swe-2-medium',
+    label: 'Fusion (GPT-6 Astra High Thinking + SWE-2 Medium)',
+  },
+  {
+    value: 'fusion-claude-fable-5-2-high-sidekick-swe-2-medium',
+    label: 'Fusion (Claude Fable 5.2 High + SWE-2 Medium)',
+  },
+];
+
+const FUSION_FABLE = 'fusion-claude-fable-5-2-high-sidekick-swe-2-medium';
+const fusionSelectors = (modelValue: string): AcpConfigOptionSelector[] => [
+  {
+    type: 'select',
+    configId: 'thought_level',
+    category: 'thought_level',
+    label: 'Effort',
+    currentValue: modelValue === FUSION_FABLE ? 'high' : 'medium',
+    options:
+      modelValue === FUSION_FABLE
+        ? [{ value: 'high', label: 'High' }]
+        : [
+            { value: 'low', label: 'Low' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+          ],
+  },
+  ...(modelValue === FUSION_FABLE || !modelValue.startsWith('fusion-')
+    ? []
+    : [
+        {
+          type: 'select' as const,
+          configId: 'speed',
+          category: 'model_config',
+          label: 'Speed',
+          currentValue: 'standard',
+          options: [
+            { value: 'standard', label: 'Standard' },
+            { value: 'fast', label: 'Fast' },
+          ],
+        },
+      ]),
+];
+
+function DevinFusionShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(agents.map((agent) => [getAgentConfigRoomId(agent.id), agent]))
+    );
+    return next;
+  }, []);
+  const initialModel = 'fusion-claude-opus-5-5-medium-sidekick-swe-2-medium';
+  const [model, setModel] = useState<string | null>(initialModel);
+  const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>({
+    thought_level: 'medium',
+    speed: 'standard',
+  });
+  const updateConfig = (id: string, value: AcpConfigOptionValue) =>
+    setValues((previous) => ({ ...previous, [id]: value }));
+
+  return (
+    <Provider store={store}>
+      <div className="flex min-h-dvh items-end bg-background p-8">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
+          <DesktopRunConfigMenu
+            agentSelection={{ agentId: devinId, machineId }}
+            allowedMachineIds={[machineId]}
+            availableAgentConfigs={agents}
+            agentLocked
+            modelOptions={fusionModelOptions}
+            selectedModelId={model}
+            onModelChange={setModel}
+            configOptionSelectors={fusionSelectors(model ?? '')}
+            configOptionValues={values}
+            onConfigOptionChange={updateConfig}
+            fusionBuilder={{
+              selectorsForModel: (modelValue) => ({
+                selectors: fusionSelectors(modelValue),
+                source: 'snapshot',
+              }),
+              runtimeConfig: {
+                modelId: initialModel,
+                configOptionValues: { thought_level: 'medium', speed: 'standard' },
+              },
+              appliesOn: 'nextMessage',
+            }}
+          />
+        </div>
+      </div>
+    </Provider>
+  );
+}
+
 function DeepSeekConfigShell() {
   const store = useMemo(() => {
     const next = createStore();
@@ -474,6 +597,10 @@ export const MachineRequired: Story = {
 export const GrokInteractionAndPermission: Story = {
   args: { isEmptyConversation: false },
   render: () => <GrokConfigShell />,
+};
+export const DevinFusion: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <DevinFusionShell />,
 };
 export const DeepSeekModels: Story = {
   args: { isEmptyConversation: false },

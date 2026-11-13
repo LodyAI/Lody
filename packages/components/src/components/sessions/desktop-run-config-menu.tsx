@@ -33,6 +33,15 @@ import {
   type AcpSelectConfigOptionSelector,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import { FusionBuilderDialog } from '@/components/sessions/fusion-builder-dialog';
+import type { AcpModelSelectorResolver } from '@/hooks/use-acp-selector-options';
+import {
+  findFusionPairForModel,
+  parseFusionCatalog,
+  resolveFusionControls,
+  type FusionApplyEdits,
+  type FusionControlsResolver,
+} from '@/lib/devin-fusion';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { composerSurface as surface } from '@/components/shared/composer-surface';
 import { MenuOptionSearchList } from '@/components/shared/menu-option-search-list';
@@ -390,6 +399,19 @@ export type DesktopRunConfigMenuProps = {
   recentRunConfigs?: ReadonlyArray<RecentRunConfigItem>;
   onRecentRunConfigSelect?: (id: string) => void;
   /**
+   * Devin Fusion builder entry: present only on surfaces that can resolve
+   * per-model controls and say when applied edits take effect. A Fusion row
+   * shows for builtin Devin agents whose model list advertises Fusion pairs.
+   */
+  fusionBuilder?: {
+    selectorsForModel: AcpModelSelectorResolver;
+    runtimeConfig?: {
+      modelId?: string | null;
+      configOptionValues?: Record<string, AcpConfigOptionValue>;
+    } | null;
+    appliesOn: 'nextMessage' | 'conversationStart';
+  };
+  /**
    * Agent Roles, shown above Agent. The caller scopes them to what this
    * surface can apply: full configuration on new chats, run configuration
    * only in existing sessions. Omit for non-Role surfaces such as schedules
@@ -429,11 +451,14 @@ export function DesktopRunConfigMenu({
   onConfigOptionChange,
   recentRunConfigs,
   onRecentRunConfigSelect,
+  fusionBuilder,
   agentRoles,
 }: DesktopRunConfigMenuProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [fusionOpen, setFusionOpen] = useState(false);
   if (disabledReason && open) setOpen(false);
+  if (disabledReason && fusionOpen) setFusionOpen(false);
   // Each submenu remains anchored to its own trigger, including during filtering.
   const submenuPlacement = {
     align: 'start',
@@ -510,6 +535,49 @@ export function DesktopRunConfigMenu({
       onModelChange?.(value);
     } else if (modelConfigSelector) {
       onConfigOptionChange?.(modelConfigSelector.configId, value as AcpConfigOptionValue);
+    }
+  };
+
+  /* Devin Fusion: pairs live inside the flat model list, so the row exists
+     only when the advertised options parse into a catalog — and only for the
+     builtin Devin agent, never another provider that happens to reuse a
+     `fusion-` prefix. */
+  const fusionAgent = selectedAgentConfig ?? fallbackAgent;
+  const fusionCatalog = useMemo(
+    () =>
+      fusionBuilder &&
+      fusionAgent?.cliType === 'builtin' &&
+      fusionAgent.agentType?.toLowerCase() === 'devin'
+        ? parseFusionCatalog(modelPickerOptions)
+        : null,
+    [fusionBuilder, fusionAgent?.cliType, fusionAgent?.agentType, modelPickerOptions]
+  );
+  const fusionControlsFor: FusionControlsResolver = useMemo(
+    () => (modelValue) => {
+      const resolved = fusionBuilder?.selectorsForModel(modelValue);
+      return resolveFusionControls(resolved?.selectors ?? [], resolved?.source, resolved?.declared);
+    },
+    [fusionBuilder]
+  );
+  const currentFusionPair = fusionCatalog
+    ? findFusionPairForModel(fusionCatalog, modelValue)
+    : undefined;
+  const fusionRowValue = currentFusionPair
+    ? t('chat.runConfig.fusion.menuValue', {
+        defaultValue: '{{lead}} + {{sidekick}}',
+        lead:
+          fusionCatalog?.leads.find((lead) => lead.key === currentFusionPair.leadKey)?.label ??
+          currentFusionPair.leadKey,
+        sidekick:
+          fusionCatalog?.sidekicks.find(
+            (sidekick) => sidekick.key === currentFusionPair.sidekickKey
+          )?.label ?? currentFusionPair.sidekickKey,
+      })
+    : t('chat.runConfig.fusion.configure', 'Configure…');
+  const handleFusionApply = (edits: FusionApplyEdits) => {
+    handleModelSelect(edits.modelValue);
+    for (const [configId, value] of Object.entries(edits.configOptionValues)) {
+      onConfigOptionChange?.(configId, value);
     }
   };
 
@@ -919,6 +987,21 @@ export function DesktopRunConfigMenu({
             </Menu.Submenu>
           ) : null}
 
+          {fusionCatalog ? (
+            <Menu.Item
+              data-testid="fusion-builder-trigger"
+              onClick={() => {
+                setOpen(false);
+                setFusionOpen(true);
+              }}
+            >
+              {t('chat.runConfig.fusion.label', 'Fusion')}
+              <span {...stylex.props(styles.rowValue)}>
+                <span {...stylex.props(surface.truncate)}>{fusionRowValue}</span>
+              </span>
+            </Menu.Item>
+          ) : null}
+
           {interactionSelector ? (
             <Menu.Submenu>
               <ValueSubTrigger label={interactionSelector.label} value={interactionLabel} />
@@ -1007,6 +1090,25 @@ export function DesktopRunConfigMenu({
     </Menu.Root>
   );
 
+  /* The dialog lives OUTSIDE the menu root: the menu content unmounts when it
+     closes, which is exactly what choosing the Fusion row does. */
+  const fusionDialog =
+    fusionCatalog && fusionBuilder ? (
+      <FusionBuilderDialog
+        open={fusionOpen}
+        onOpenChange={setFusionOpen}
+        catalog={fusionCatalog}
+        controlsFor={fusionControlsFor}
+        current={{ modelId: modelValue, configOptionValues: configOptionValues ?? {} }}
+        runtime={fusionBuilder.runtimeConfig}
+        appliesOn={fusionBuilder.appliesOn}
+        modelLabel={(value) =>
+          modelPickerOptions.find((option) => option.value === value)?.label ?? value
+        }
+        onApply={handleFusionApply}
+      />
+    ) : null;
+
   /* The values a Role pins, stated but INERT: only the Role itself is a control,
      because changing one of these by hand is what stops the configuration being
      that Role — and a knob that silently unnames the thing beside it is a trap.
@@ -1016,13 +1118,12 @@ export function DesktopRunConfigMenu({
       <span {...stylex.props(surface.faceInert)}>{withFaceDots(configFaceParts, false)}</span>
     ) : null;
 
-  return roleConfigFace ? (
+  return (
     <>
       {menu}
       {roleConfigFace}
+      {fusionDialog}
     </>
-  ) : (
-    menu
   );
 }
 
