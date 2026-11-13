@@ -10,6 +10,15 @@ ui.wait(lambda items: any(i.get('AXLabel') == home_avatar for i in items), 'Miss
 ui.axe('tap', '--label', home_avatar, '--post-delay', '.8')
 ui.axe('tap', '--label', 'Design states', '--post-delay', '1.2')
 
+# A prior interrupted run may leave this family folded in the existing list
+# instance. Establish the starting state through the actual disclosure target.
+parent = ui.wait(lambda items: next((i for i in items if i.get('AXUniqueId') == 'st-ship'
+                                     and i.get('AXValue')), None), 'Missing parent conversation')
+if catalog.text('home.tree.collapsed') in parent['AXValue']:
+    frame = parent['frame']
+    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2),
+           '-y', str(frame['y'] + frame['height'] - 22), '--tap-style', 'physical')
+
 rows = ['st-checklist', 'st-review', 'st-ship', 'st-ship-mac', 'st-ship-fix', 'st-unread', 'st-sync']
 for row in rows:
     ui.element(row)
@@ -29,11 +38,11 @@ def gap_between(above, below):
     return found[below]['y'] - (upper['y'] + upper['height'])
 
 
-group_gap = gap_between('st-checklist', 'toggle:states:lody-cloud')
-project_gap = gap_between('st-bump', 'toggle:states:lody-ios')
-# Bands mark every group, so groups only need one small step between them.
-for name, gap in [('Pinned to projects', group_gap), ('project to project', project_gap)]:
-    assert 6 <= gap <= 10, (f'{name} is one small step above the next band', gap)
+# Project sections now follow their newest parent activity: iOS precedes Cloud.
+# AX labels include their text position within the supplementary header. Keep
+# sections visibly separated without mistaking text bounds for section bounds.
+group_gap = gap_between('st-checklist', 'label:group:states:lody-ios')
+assert 11 <= group_gap <= 32, ('Pinned and project sections remain separated', group_gap)
 ui.capture('states-top')
 
 
@@ -51,42 +60,82 @@ def rail_photo_pixels(identifier):
                if all(abs(pixels[(y * width + x) * 3 + c] - v) < 40 for c, v in enumerate((124, 58, 237))))
 
 
-assert rail_photo_pixels('toggle:states:lody-ios') > 20, 'A project with an owner photo shows it on the rail'
-assert rail_photo_pixels('toggle:states:lody-cloud') == 0, 'A project without a photo keeps the folder glyph'
 
 
-def toggle_x(identifier):
-    row = ui.element(identifier)['frame']
-    ui.screenshot('children-probe')
-    path = str(ui.output / 'children-probe.png')
-    width = round(ui.state()[0]['frame']['width'])
-    pixels = subprocess.check_output([
-        'ffmpeg', '-v', 'error', '-i', path, '-vf', f'scale={width}:-1', '-f', 'rawvideo', '-pix_fmt', 'gray', '-',
-    ], timeout=20)
-    line = round(row['y'] + row['height'] - 16)
-    ground = pixels[line * width + 30]
-    ink = [x for x in range(60, width - 16) if abs(pixels[line * width + x] - ground) > 40]
-    assert ink, ('Line two must draw the sub-agent toggle', identifier)
-    return max(ink) - 6, line
+# The family button is hidden from AX (VoiceOver exposes a custom action on
+# the parent). Its physical target is the bottom 44 points of the parent frame.
+# Probe that contract directly, without locating text ink or invoking AX actions.
+FAMILY_HEIGHT = 44
+PARENT = 'st-ship'
+CHILDREN = {'st-ship-mac', 'st-ship-fix'}
+
+
+def family_frame(expanded):
+    previous = None
+
+    def ready(items):
+        nonlocal previous
+        state = catalog.text('home.tree.expanded' if expanded else 'home.tree.collapsed')
+        parent = next((i for i in items if i.get('AXUniqueId') == PARENT
+                       and state in (i.get('AXValue') or '')), None)
+        visible = {i.get('AXUniqueId') for i in items}
+        children_match = CHILDREN <= visible if expanded else CHILDREN.isdisjoint(visible)
+        if not parent or not children_match or 'session-input' in visible:
+            previous = None
+            return None
+        frame = parent['frame']
+        geometry = tuple(frame[key] for key in ('x', 'y', 'width', 'height'))
+        settled = previous is not None and all(abs(a - b) < .5 for a, b in zip(previous, geometry))
+        previous = geometry
+        return frame if settled else None
+
+    frame = ui.wait(ready, f'Parent and both children did not settle with expanded={expanded}')
+    assert frame['height'] > FAMILY_HEIGHT, ('Parent content must precede its family target', frame)
+    return frame
 
 
 def tap_at(point):
-    ui.axe('tap', '-x', str(point[0]), '-y', str(point[1]), '--post-delay', '.8')
+    ui.axe('tap', '-x', str(point[0]), '-y', str(point[1]), '--tap-style', 'physical')
 
 
-# A folded parent takes its children's state and may show Review, so the open toggle is located once and reused.
-fold_point = toggle_x('st-ship')
-tap_at(fold_point)
-ui.wait(lambda items: not any(i.get('AXUniqueId') == 'st-ship-mac' for i in items), 'The line-two toggle folds the sub-agents')
-assert any(i.get('AXUniqueId') == 'st-ship' for i in ui.state()), 'Folding keeps the parent session on screen'
-ui.capture('states-folded')
-tap_at(fold_point)
-ui.element('st-ship-mac')
-ui.axe('swipe', '--start-x', '200', '--start-y', '700', '--end-x', '200', '--end-y', '300', '--duration', '.4', '--post-delay', '.6')
+def open_parent_above_family(expanded):
+    frame = family_frame(expanded)
+    # One point above the boundary is blank parent content, where the old
+    # overlapping button stole the conversation tap.
+    tap_at((frame['x'] + frame['width'] * .75,
+            frame['y'] + frame['height'] - FAMILY_HEIGHT - 1))
+    ui.element('session-input')
+    ui.wait(lambda items: any(i.get('AXUniqueId') == 'chat-navigation-title'
+                             and 'Ship 0.42 release' in (i.get('AXLabel') or '') for i in items),
+            'The boundary tap did not open the parent conversation')
+    ui.capture('states-parent-from-' + ('expanded' if expanded else 'collapsed'))
+    ui.axe('tap', '--id', 'BackButton')
+    family_frame(expanded)
+
+
+open_parent_above_family(True)
+# Blank space across the row must toggle, including near its top and bottom,
+# not just the count/chevron. Every coordinate gets a collapse and an expand;
+# fresh frames avoid assuming diffable updates leave the row in the same place.
+for index, (fraction, offset) in enumerate(((.5, 2), (.75, 22), (.95, 42))):
+    for expanded in (True, False):
+        frame = family_frame(expanded)
+        tap_at((frame['x'] + frame['width'] * fraction,
+                frame['y'] + frame['height'] - FAMILY_HEIGHT + offset))
+        family_frame(not expanded)
+        if index == 0 and expanded:
+            ui.capture('states-folded')
+            open_parent_above_family(False)
+ui.capture('states-expanded')
+assert rail_photo_pixels('label:group:states:lody-ios') > 20, 'A project with an owner photo shows it in the heading'
+ui.axe('drag', '--start-x', '200', '--start-y', '700', '--end-x', '200', '--end-y', '300', '--duration', '.4', '--post-delay', '.6')
 for row in ['st-flaky', 'st-streams', 'st-notes']:
     ui.element(row)
-chat_gap = gap_between('st-flaky', 'toggle:chat')
-assert 6 <= chat_gap <= 10, ('Chat sits one small step below the projects', chat_gap)
+project_gap = gap_between('st-flaky', 'label:group:states:lody-cloud')
+chat_gap = gap_between('st-bump', 'label:group:chat')
+for name, gap in [('iOS to Cloud', project_gap), ('Cloud to Chat', chat_gap)]:
+    assert 11 <= gap <= 32, (f'{name} sections remain separated', gap)
+assert rail_photo_pixels('label:group:states:lody-cloud') == 0, 'A project without an owner photo does not borrow another heading avatar'
 ui.capture('states-bottom')
 
 ui.axe('tap', '--id', 'magnifyingglass', '--post-delay', '.8')
@@ -97,4 +146,4 @@ spoken = ' '.join([hit.get('AXLabel') or ''] + [child.get('AXLabel') or '' for c
 assert 'watermark' in spoken, ('A message match shows its snippet', spoken)
 assert hit['frame']['height'] > 58, ('The snippet takes a second line', hit['frame'])
 ui.capture('states-search')
-print('PASS: the Design states workspace shows every rail state, folds sub-agents inline and highlights message search hits.')
+print('PASS: the Design states workspace shows every rail state, keeps parent navigation separate from the full family touch target, toggles both children and highlights message search hits.')
