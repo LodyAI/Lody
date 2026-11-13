@@ -1393,11 +1393,17 @@ describe('encrypted file and preview routing', () => {
       targetContext: { kind: 'shared' as const },
     };
     const requests: unknown[] = [];
-    const facade = (requestEncryptedFeature?: (request: never) => Promise<never>) =>
+    const facade = (
+      requestEncryptedFeature?: (request: never) => Promise<never>,
+      capabilities: Record<string, number> = {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionFork: 1,
+      }
+    ) =>
       createWorkspaceMachineRpcFacade({
         workspaceId,
         protectedContent: true,
-        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        getMachineProtocolCapabilities: async () => capabilities,
         targetRouter: {
           getPlaneForMachine: () => 'cloud',
           resolvePlaneForMachine: async () => 'cloud',
@@ -1445,6 +1451,15 @@ describe('encrypted file and preview routing', () => {
       success: false,
       error: { message: 'e2ee_feature_unavailable' },
     });
+    // An older machine drops the unknown method without replying: refuse at once, unsigned.
+    const unsigned: unknown[] = [];
+    expect(
+      await facade(async (request) => {
+        unsigned.push(request);
+        return { ok: true } as never;
+      }, CURRENT_MACHINE_PROTOCOL_CAPABILITIES).requestSessionFork(remoteMachineId, spec)
+    ).toMatchObject({ success: false, error: { code: 'FORK_UNAVAILABLE' } });
+    expect(unsigned).toEqual([]);
   });
 
   it('edits and resends an encrypted message through the protected feature channel, never ordinary RPC', async () => {
@@ -1457,11 +1472,17 @@ describe('encrypted file and preview routing', () => {
       inputConfig: { prompt: 'edited' },
     };
     const requests: unknown[] = [];
-    const facade = (requestEncryptedFeature?: (request: never) => Promise<never>) =>
+    const facade = (
+      requestEncryptedFeature?: (request: never) => Promise<never>,
+      capabilities: Record<string, number> = {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionEditAndResend: 1,
+      }
+    ) =>
       createWorkspaceMachineRpcFacade({
         workspaceId,
         protectedContent: true,
-        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        getMachineProtocolCapabilities: async () => capabilities,
         targetRouter: {
           getPlaneForMachine: () => 'cloud',
           resolvePlaneForMachine: async () => 'cloud',
@@ -1498,6 +1519,14 @@ describe('encrypted file and preview routing', () => {
       success: false,
       error: { message: 'e2ee_feature_unavailable' },
     });
+    const unsigned: unknown[] = [];
+    expect(
+      await facade(async (request) => {
+        unsigned.push(request);
+        return { ok: true } as never;
+      }, CURRENT_MACHINE_PROTOCOL_CAPABILITIES).requestSessionEditAndResend(remoteMachineId, spec)
+    ).toMatchObject({ success: false });
+    expect(unsigned).toEqual([]);
   });
 
   it.each(['create', 'status', 'revoke'] as const)(

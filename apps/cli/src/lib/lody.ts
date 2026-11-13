@@ -406,7 +406,8 @@ export class Lody {
       (input) => this.runtime.offerEncryptedRpcTurn(input),
       (event) => this.logger.debug('[e2ee-rpc-timing]', event),
       (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context),
-      (sessionId) => this.runtime.resolveSessionHistoryAccessTarget(sessionId)
+      (sessionId) => this.runtime.resolveSessionHistoryAccessTarget(sessionId),
+      (sessionId) => this.runtime.resolveSessionExecutionScope(sessionId)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }

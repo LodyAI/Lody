@@ -27,9 +27,46 @@ export function makeEncryptedFeatureAuthorization(options: {
   resolveHistoryTarget?: (
     sessionId: string
   ) => Promise<{ rootSessionId: string; sessionOwnerUserId?: string; localProjectId?: string }>;
+  /** Every local project a session's execution can reach, resolved on this machine. */
+  resolveSessionExecutionScope?: (sessionId: string) => Promise<readonly string[]>;
+  /** The verified signer's account and execution identity, from the ledger. */
+  requesterIdentity?: (
+    requesterDevice: string
+  ) => Effect.Effect<EncryptedFeatureRequester | undefined, unknown>;
 }) {
-  const { authorization, resolveHistoryTarget } = options;
+  const { authorization, resolveHistoryTarget, resolveSessionExecutionScope } = options;
   return {
+    /** Work on one session with the same sharing authority as sending to it: the owner,
+     * or a member allowed on this machine and on every project the session reaches. */
+    authorizeSessionExecution: Effect.fnUntraced(function* (
+      workspaceId: string,
+      requester: string,
+      sessionId: string
+    ) {
+      if (!resolveSessionExecutionScope)
+        return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+      const scope = yield* Effect.tryPromise({
+        try: () => resolveSessionExecutionScope(sessionId),
+        catch: (cause) => cause,
+      });
+      const targets: readonly (string | undefined)[] = scope.length
+        ? [...new Set(scope)]
+        : [undefined];
+      const fences: (() => boolean)[] = [];
+      let owner = true;
+      for (const target of targets) {
+        const result = yield* authorization.authorizeExecution(workspaceId, requester, target);
+        if (result._tag !== 'Authorized') return result;
+        if (result.isCurrent) fences.push(result.isCurrent);
+        if (result.principal !== 'owner') owner = false;
+      }
+      return {
+        _tag: 'Authorized' as const,
+        isCurrent: () => fences.every((current) => current()),
+        ...(owner ? { principal: 'owner' as const } : {}),
+      };
+    }),
+    ...(options.requesterIdentity ? { requesterIdentity: options.requesterIdentity } : {}),
     authorize: authorization.authorizeOwnedExecution,
     authorizeRead: authorization.authorizeRead,
     authorizeHistoryRead: Effect.fnUntraced(function* (
@@ -65,12 +102,21 @@ export function makeEncryptedFeatureAuthorization(options: {
 export type EncryptedFeatureReplySink = EncryptedReplySink & { end(): Promise<void> };
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
+/** Who signed a request, from the verified ledger; never from request parameters. */
+export type EncryptedFeatureRequester = {
+  /** The signer's account, which a request's `requestedByUserId` must name. */
+  accountId: string;
+  /** The identity execution runs under: the machine owner's account or `e2ee-member:`. */
+  executionUserId: string;
+};
 export type EncryptedFeatureContext = {
   requestId: string;
   requesterDevice: string;
   expiresAt: number;
   signal: AbortSignal;
   authority?: { isCurrent(): boolean; signal: AbortSignal };
+  /** Set for session execution methods (`session/fork`) after their scope authorization. */
+  requester?: EncryptedFeatureRequester;
 };
 export type EncryptedFeatureHandler = (
   request: LocalMachineRpcRequest,
@@ -106,6 +152,15 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     requesterDevice: string,
     sessionId: string
   ) => ReturnType<AuthorizeEncryptedExecution>;
+  /** Session execution methods (`session/fork`): owner or shared member, per project. */
+  authorizeSessionExecution?: (
+    workspaceId: string,
+    requesterDevice: string,
+    sessionId: string
+  ) => ReturnType<AuthorizeEncryptedExecution>;
+  requesterIdentity?: (
+    requesterDevice: string
+  ) => Effect.Effect<EncryptedFeatureRequester | undefined, unknown>;
   authoritySignal?: () => AbortSignal;
   isOpen: () => boolean;
   handle: EncryptedFeatureHandler;
@@ -132,6 +187,8 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     active.add(envelope.id);
     const historyRequest =
       opened.input.request.method === 'session/history-read' ? opened.input.request : undefined;
+    const forkRequest =
+      opened.input.request.method === 'session/fork' ? opened.input.request : undefined;
     const authorize: AuthorizeEncryptedExecution = historyRequest
       ? (workspaceId, requesterDevice) =>
           options.authorizeHistoryRead?.(
@@ -139,9 +196,17 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
             requesterDevice,
             historyRequest.params.sessionId
           ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
-      : read
-        ? options.authorizeRead
-        : options.authorize;
+      : forkRequest
+        ? (workspaceId, requesterDevice) =>
+            options.authorizeSessionExecution?.(
+              workspaceId,
+              requesterDevice,
+              forkRequest.params.sourceSessionId
+            ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
+        : read
+          ? options.authorizeRead
+          : options.authorize;
+    let requester: EncryptedFeatureRequester | undefined;
     const invoke = (authority: { isCurrent(): boolean; signal: AbortSignal } | undefined) =>
       Effect.acquireUseRelease(
         Effect.sync(() => ({
@@ -157,6 +222,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
                 expiresAt: opened.expiresAt,
                 signal: owner.controller.signal,
                 authority,
+                ...(requester ? { requester } : {}),
               })),
             catch: (cause) => cause,
           });
@@ -204,6 +270,13 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           : undefined;
       const currentAdmission = () =>
         !admittedAuthority || (!admittedAuthority.signal.aborted && admittedAuthority.isCurrent());
+      if (forkRequest) {
+        // Execution identity comes from the verified signer, never from the request.
+        requester = options.requesterIdentity
+          ? yield* options.requesterIdentity(opened.requesterDevice)
+          : undefined;
+        if (!requester) return yield* Effect.void;
+      }
       yield* options.native.retainFeatureRequest(options.machineId, opened);
       let frames: Uint8Array[];
       if (read) {

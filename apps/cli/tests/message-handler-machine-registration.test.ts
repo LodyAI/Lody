@@ -243,7 +243,9 @@ describe('MessageHandler machine registration', () => {
         ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
         acpAuthenticationInteractions: 2,
         acpAuthenticationMethodSelection: 1,
-        ...(encryptedWorkspace ? { e2eeAcpInteraction: 1 } : {}),
+        ...(encryptedWorkspace
+          ? { e2eeAcpInteraction: 1, e2eeSessionFork: 1, e2eeSessionEditAndResend: 1 }
+          : {}),
         previewControl: 1,
         androidEmulator: 1,
         androidEmulatorQuality: 1,

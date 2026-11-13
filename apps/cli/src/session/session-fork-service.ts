@@ -47,8 +47,18 @@ const FORK_RECOVERY_CONCURRENCY = 4;
 
 type ForkRuntimeConfig = Omit<SessionAcpRuntimeConfigSnapshot, 'acpSessionId' | 'revision'>;
 
+/**
+ * `requestedByUserId` names the account that owns the new Session (display and read
+ * visibility). An encrypted fork also carries the verified signer's execution identity
+ * (the machine owner's account or `e2ee-member:`), which every execution, credential
+ * and access decision uses instead.
+ */
+export type SessionForkInput = SessionForkSpec & { executionRequesterUserId?: string };
+const executionRequester = (spec: SessionForkInput) =>
+  spec.executionRequesterUserId ?? spec.requestedByUserId;
+
 type WorktreeForkPreparedInput = {
-  spec: SessionForkSpec;
+  spec: SessionForkInput;
   source: SessionMeta;
   sourceAcpSessionId: NonNullable<SessionMeta['acpSessionId']>;
   targetDoc: Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>;
@@ -178,7 +188,7 @@ export function cloneHistoryThroughTurn(
 export class SessionForkService {
   private readonly inFlight = new Map<
     string,
-    { spec: SessionForkSpec; promise: Promise<SessionForkResponse> }
+    { spec: SessionForkInput; promise: Promise<SessionForkResponse> }
   >();
   /**
    * Operation ids this process is currently driving (accept → background saga).
@@ -202,7 +212,7 @@ export class SessionForkService {
     }
   ) {}
 
-  async fork(spec: SessionForkSpec): Promise<SessionForkResponse> {
+  async fork(spec: SessionForkInput): Promise<SessionForkResponse> {
     const key = spec.targetSessionId;
     const existing = this.inFlight.get(key);
     if (existing) {
@@ -210,6 +220,7 @@ export class SessionForkService {
         existing.spec.sourceSessionId !== spec.sourceSessionId ||
         existing.spec.sourceTurnId !== spec.sourceTurnId ||
         existing.spec.requestedByUserId !== spec.requestedByUserId ||
+        executionRequester(existing.spec) !== executionRequester(spec) ||
         existing.spec.targetContext?.kind !== spec.targetContext?.kind ||
         existing.spec.targetPlacement !== spec.targetPlacement
       ) {
@@ -450,7 +461,7 @@ export class SessionForkService {
     }
   }
 
-  private async forkInner(spec: SessionForkSpec): Promise<SessionForkResponse> {
+  private async forkInner(spec: SessionForkInput): Promise<SessionForkResponse> {
     const { sourceSessionId, targetSessionId } = spec;
     const sourceDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sourceSessionId);
     const source = await sourceDoc.getMetaState();
@@ -481,7 +492,7 @@ export class SessionForkService {
     }
     const reusedUser = this.deps.sessionManager
       .getSession(sourceSessionId)
-      ?.getGitIdentityForUser?.(spec.requestedByUserId);
+      ?.getGitIdentityForUser?.(executionRequester(spec));
 
     const targetRoomId = getSessionRoomId(targetSessionId);
     const worktreeFork = spec.targetContext?.kind === 'new-worktree';
@@ -497,7 +508,7 @@ export class SessionForkService {
         this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
         sourceBackend.captureForkSnapshot(),
         this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
-        reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
+        reusedUser ?? this.deps.userResolver.resolve(executionRequester(spec)),
         sourceDoc.getDocState(),
       ]);
     if (worktreeFork) {
@@ -750,7 +761,7 @@ export class SessionForkService {
           ...(targetRepoFullName ? { repoFullName: targetRepoFullName } : {}),
           ...(branch ? { branch } : {}),
           ...(targetWorkdir ? { workdir: targetWorkdir } : {}),
-          requesterUserId: spec.requestedByUserId,
+          requesterUserId: executionRequester(spec),
           agentConfigId: source.agentConfigId,
           cliType: source.cliType,
           agentType: source.agentType,
@@ -866,7 +877,7 @@ export class SessionForkService {
         await this.deps.sessionManager.createSession(
           {
             workspaceId: this.deps.workspaceId as never,
-            requesterUserId: spec.requestedByUserId,
+            requesterUserId: executionRequester(spec),
             machineId: source.machineId,
             agentConfigId: source.agentConfigId,
             agentCliType: source.cliType,
@@ -1008,7 +1019,7 @@ export class SessionForkService {
     const targetProject = targetMeta.project;
     const config = {
       workspaceId: this.deps.workspaceId as never,
-      requesterUserId: spec.requestedByUserId,
+      requesterUserId: executionRequester(spec),
       machineId: source.machineId,
       agentConfigId: source.agentConfigId,
       agentCliType: source.cliType,

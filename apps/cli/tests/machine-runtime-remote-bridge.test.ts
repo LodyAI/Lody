@@ -219,6 +219,52 @@ it('admits encrypted file and preview features through machine dispatch while re
   expect([...files.keys()]).toEqual(['private.ts']);
 });
 
+it('forks for the verified signer, owner or shared member, never a claimed requester', async () => {
+  const { runtime, handler } = createHarness(true);
+  const forks: unknown[] = [];
+  Object.assign(handler, {
+    handleEncryptedSessionFork: async (spec: unknown, executionRequesterUserId: string) => {
+      forks.push({ spec, executionRequesterUserId });
+      return { ok: true, result: { status: 'ok' } };
+    },
+    handleLocalMachineRpc: async () => {
+      throw new Error('encrypted fork bypassed its verified identity');
+    },
+  });
+  const request = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    method: 'session/fork' as const,
+    params: {
+      sourceSessionId: 'session',
+      sourceTurnId: 'assistant-1',
+      targetSessionId: 'target',
+      requestedByUserId: 'member-account',
+    },
+  };
+  const context = (requester?: { accountId: string; executionUserId: string }) => ({
+    requestId: 'b'.repeat(32),
+    requesterDevice: 'c'.repeat(64),
+    expiresAt: Date.now() + 60_000,
+    signal: new AbortController().signal,
+    ...(requester ? { requester } : {}),
+  });
+  const member = { accountId: 'member-account', executionUserId: 'e2ee-member:aa' };
+  await runtime.handleEncryptedFeatureRpc(request, context(member));
+  expect(forks).toEqual([{ spec: request.params, executionRequesterUserId: 'e2ee-member:aa' }]);
+  // The request may not name anyone but its signer, and an unverified signer never forks.
+  await expect(
+    runtime.handleEncryptedFeatureRpc(
+      { ...request, params: { ...request.params, requestedByUserId: 'owner' } },
+      context(member)
+    )
+  ).rejects.toThrow('e2ee_feature_requester');
+  await expect(runtime.handleEncryptedFeatureRpc(request, context())).rejects.toThrow(
+    'e2ee_feature_requester'
+  );
+  expect(forks).toHaveLength(1);
+});
+
 it('requires live verified authority for encrypted ACP interaction routing', async () => {
   const { runtime, handler } = createHarness(true);
   const request = {

@@ -31,6 +31,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   subagentEvents: 'subagentEvents',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
   e2eeAcpInteraction: 'e2eeAcpInteraction',
+  e2eeSessionFork: 'e2eeSessionFork',
+  e2eeSessionEditAndResend: 'e2eeSessionEditAndResend',
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
@@ -75,6 +77,10 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
+/** Encrypted feature RPC accepts `session/fork` from the owner and shared members. */
+export const E2EE_SESSION_FORK_PROTOCOL_VERSION = 1;
+/** Encrypted feature RPC accepts `session/edit-and-resend` from the machine owner. */
+export const E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION = 1;
 export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
