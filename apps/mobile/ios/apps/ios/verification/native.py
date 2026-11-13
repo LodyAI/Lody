@@ -125,7 +125,6 @@ for files in checks.values():
     if 'Chat/ChatComposerView.swift' in files:
         files.append('Chat/ChatActionBar.swift')
         files.extend(['Projects/RepositoryIcon.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift'])
-        files.append('Chat/ChatComposerFormatBar.swift')
         files.append('Chat/ChatShortcutInsertion.swift')
     if 'Chat/ChatTranscript.swift' in files:
         files.append('Chat/ChatPendingSend.swift')
