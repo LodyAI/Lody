@@ -100,6 +100,8 @@ export type RecoverySetupResult = {
 export type RecoveryRestoreResult = {
   /** Admission succeeded with newer epoch keys still awaiting repair. */
   readonly partialEpochKey?: boolean;
+  /** Present when the host knows which workspace the row is; names may repeat. */
+  readonly workspaceId?: string;
   readonly name: string;
   readonly outcome: RecoveryCommitOutcome;
 };

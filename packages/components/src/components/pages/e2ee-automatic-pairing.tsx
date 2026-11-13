@@ -36,7 +36,7 @@ import {
   useE2eeDeviceRequests,
 } from './e2ee-device-requests';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
-import { E2eeLostAllRecovery, type E2eeLostAllRecoveryProps } from './e2ee-lost-all-recovery';
+import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
 
 /** Seconds left until `expiresAt`, ticking once a second; null without a deadline. */
 function useSecondsLeft(expiresAt: number | undefined) {
@@ -132,7 +132,7 @@ export function E2eeAutomaticPairingPage({
   onManual,
   keyFailure,
   onRetryKeys,
-  lostAll,
+  lostAccess,
 }: {
   runtime: E2eeWorkspaceRuntime;
   workspaceId: string;
@@ -141,8 +141,8 @@ export function E2eeAutomaticPairingPage({
   onManual?: () => void;
   keyFailure?: boolean;
   onRetryKeys?: () => void;
-  /** Present where this host can restore from a backup (desktop with recovery on). */
-  lostAll?: Omit<E2eeLostAllRecoveryProps, 'workspaceId'>;
+  /** The way out when no other device can approve: restore, go back, or remove. */
+  lostAccess?: Omit<E2eeLostAccessProps, 'workspaceId'>;
 }) {
   usePairingPrivacy();
   const { t, i18n } = useTranslation();
@@ -542,12 +542,13 @@ export function E2eeAutomaticPairingPage({
       hour: '2-digit',
       minute: '2-digit',
     }).format(new Date(value));
+  const recovery = lostAccess?.recovery;
   const recovered = () => {
     setLostAllOpen(false);
     // Reached only when this workspace's own restore committed: its pending request is
     // no longer needed. Another workspace's success keeps this request.
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
-    lostAll?.onRecovered();
+    recovery?.onRecovered();
   };
   const terminal =
     !receiving && !activeQr && state && ['declined', 'expired', 'cancelled'].includes(state.phase);
@@ -761,23 +762,31 @@ export function E2eeAutomaticPairingPage({
                 </Button>
               )}
             </details>
-            <details
-              className="mt-2 text-sm text-muted-foreground"
-              data-testid="e2ee-lost-all-entry"
-            >
-              <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-1.5 [&::-webkit-details-marker]:hidden">
-                {t('e2ee.auto.noOtherDevice')}
-                <ChevronDown size={14} />
-              </summary>
-              <p className="mt-3 text-left leading-relaxed">
-                {t(lostAll ? 'e2ee.auto.noOtherDevice.help' : 'e2ee.auto.noOtherDevice.elsewhere')}
-              </p>
-              {lostAll && (
-                <Button variant="link" disabled={busy} onClick={() => setLostAllOpen(true)}>
-                  {t('e2ee.auto.noOtherDevice.restore')}
-                </Button>
-              )}
-            </details>
+            {lostAccess ? (
+              <div className="mt-3" data-testid="e2ee-lost-all-entry">
+                <E2eeLostAccessEntry
+                  {...lostAccess}
+                  workspaceId={workspaceId}
+                  workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
+                  {...(recovery ? { recovery: { ...recovery, onRecovered: recovered } } : {})}
+                  disabled={busy}
+                  onOpenChange={setLostAllOpen}
+                />
+              </div>
+            ) : (
+              <details
+                className="mt-2 text-sm text-muted-foreground"
+                data-testid="e2ee-lost-all-entry"
+              >
+                <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-1.5 [&::-webkit-details-marker]:hidden">
+                  {t('e2ee.auto.noOtherDevice')}
+                  <ChevronDown size={14} />
+                </summary>
+                <p className="mt-3 text-left leading-relaxed">
+                  {t('e2ee.auto.noOtherDevice.elsewhere')}
+                </p>
+              </details>
+            )}
           </>
         )}
         {error && (
@@ -829,23 +838,6 @@ export function E2eeAutomaticPairingPage({
           </div>
         )}
       </section>
-      {lostAll && (
-        <Dialog.Root open={lostAllOpen} onOpenChange={setLostAllOpen}>
-          <Dialog.Content
-            width={480}
-            className="max-h-[90dvh] overflow-y-auto"
-            data-e2ee-pairing-surface=""
-          >
-            <Dialog.Title>{t('e2ee.lostAll.title')}</Dialog.Title>
-            <E2eeLostAllRecovery
-              workspaceId={workspaceId}
-              passkeyAvailable={lostAll.passkeyAvailable}
-              restore={lostAll.restore}
-              onRecovered={recovered}
-            />
-          </Dialog.Content>
-        </Dialog.Root>
-      )}
     </main>
   );
 }
