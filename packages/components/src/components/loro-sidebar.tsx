@@ -196,6 +196,10 @@ export interface LoroSidebarProps {
   activeNav?: LoroSidebarNavKey | null;
 
   topContent?: ReactNode;
+  /** Rendered under the navigation rows, above the list (project mode's view switch). */
+  navAccessory?: ReactNode;
+  /** When set, replaces every list the sidebar would show (project mode's project list). */
+  listOverride?: ReactNode;
   /** The filter trigger element rendered in-flow on the first visible section
       header. Caller-owned so its open state survives remounting between slots. */
   desktopFilterAction?: ReactNode;
@@ -880,6 +884,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   maxWidth = MAX_DESKTOP_SIDEBAR_WIDTH,
   activeNav = null,
   topContent,
+  navAccessory,
+  listOverride,
   desktopFilterAction,
   afterSessionListContent,
   bottomFloatingContent,
@@ -1609,6 +1615,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             onClick={() => setCommandPaletteOpen(true)}
           />
         </div>
+        {navAccessory}
 
         <ScrollArea
           viewportRef={scrollViewportRef}
@@ -1635,66 +1642,28 @@ export const LoroSidebar = memo(function LoroSidebar({
               : 'px-1.5 pb-3'
           )}
         >
-          <div className="relative">
-            {hasPinnedItems ? (
-              <div className={cn('pt-1', pinnedSectionCollapsed ? 'pb-1' : 'pb-3')}>
-                <SidebarUpdatedSessionList
-                  items={pinnedItems ?? []}
-                  now={now}
-                  isMobile={isMobile}
-                  showPinnedIcon={false}
-                  showProjectContext={organizeMode !== 'workspace' && showUpdatedProjectNames}
-                  selectedItemId={updatedSelectedItemId ?? null}
-                  collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
-                  labels={{
-                    heading: mergedLabels.pinned,
-                    emptyTitle: mergedLabels.updated.emptyTitle,
-                    emptyDescription: mergedLabels.updated.emptyDescription,
-                  }}
-                  onSelectItem={onSelectUpdatedItem}
-                  onToggleBucket={onTogglePinnedSection}
-                  toggleBucketLabel={mergedLabels.pinned}
-                  onArchiveItem={onArchiveUpdatedItem}
-                  onMarkItemUnread={onMarkUpdatedItemUnread}
-                  onRenameItem={onRenameUpdatedItem}
-                  onTogglePinItem={onToggleUpdatedItemPinned}
-                  onCopyItemUrl={onCopyUpdatedItemUrl}
-                  onShareItemWithTeam={onShareUpdatedItemWithTeam}
-                  onOpenPullRequest={onOpenUpdatedItemPullRequest}
-                  getItemHref={getUpdatedItemHref}
-                  headerAction={sectionHeaderFilterAction ?? undefined}
-                />
-              </div>
-            ) : null}
-            {organizeMode !== 'workspace' ? (
-              // Design intent: 'updated' mode is a flat firehose of recent
-              // sessions. It deliberately drops Workspace-mode structure
-              // (per-repo groups with collapse/reorder, per-project headers
-              // with rename/remove, per-group "+" new-session affordance,
-              // GitHub Worktrees / Local Projects section headers). Users who
-              // need that structure switch back via the footer popover; the
-              // sidebar-state.sidebarOrganizeModeAtom persists the choice.
-              // Per-row actions (rename, pin, archive, copy URL, copy branch,
-              // open PR) are wired through the props below so the two modes
-              // are at parity for individual sessions even though section-
-              // level affordances diverge. 'status' mode lists the same rows,
-              // split into status groups.
-              !hasPinnedItems || updatedIsLoading || Boolean(updatedItems?.length) ? (
-                <div className={hasPinnedItems ? undefined : 'pt-1'}>
+          {listOverride ? (
+            <div className="relative">{listOverride}</div>
+          ) : (
+            <div className="relative">
+              {hasPinnedItems ? (
+                <div className={cn('pt-1', pinnedSectionCollapsed ? 'pb-1' : 'pb-3')}>
                   <SidebarUpdatedSessionList
-                    items={updatedItems ?? []}
+                    items={pinnedItems ?? []}
                     now={now}
                     isMobile={isMobile}
-                    isLoading={updatedIsLoading}
-                    grouping={organizeMode === 'status' ? 'status' : 'recency'}
-                    showProjectContext={showUpdatedProjectNames}
+                    showPinnedIcon={false}
+                    showProjectContext={organizeMode !== 'workspace' && showUpdatedProjectNames}
                     selectedItemId={updatedSelectedItemId ?? null}
-                    labels={mergedLabels.updated}
-                    collapsedBuckets={updatedBucketsCollapsed}
-                    showFullBuckets={updatedShowFullBuckets}
+                    collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
+                    labels={{
+                      heading: mergedLabels.pinned,
+                      emptyTitle: mergedLabels.updated.emptyTitle,
+                      emptyDescription: mergedLabels.updated.emptyDescription,
+                    }}
                     onSelectItem={onSelectUpdatedItem}
-                    onToggleBucket={onToggleUpdatedBucket}
-                    onToggleFullBucket={onToggleUpdatedShowFullBucket}
+                    onToggleBucket={onTogglePinnedSection}
+                    toggleBucketLabel={mergedLabels.pinned}
                     onArchiveItem={onArchiveUpdatedItem}
                     onMarkItemUnread={onMarkUpdatedItemUnread}
                     onRenameItem={onRenameUpdatedItem}
@@ -1703,99 +1672,143 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onShareItemWithTeam={onShareUpdatedItemWithTeam}
                     onOpenPullRequest={onOpenUpdatedItemPullRequest}
                     getItemHref={getUpdatedItemHref}
-                    headerAction={
-                      hasPinnedItems ? undefined : (sectionHeaderFilterAction ?? undefined)
-                    }
+                    headerAction={sectionHeaderFilterAction ?? undefined}
                   />
                 </div>
-              ) : null
-            ) : (
-              <>
-                {/* pb-1 (not pb-3): the last topContent item is the GitHub
+              ) : null}
+              {organizeMode !== 'workspace' ? (
+                // Design intent: 'updated' mode is a flat firehose of recent
+                // sessions. It deliberately drops Workspace-mode structure
+                // (per-repo groups with collapse/reorder, per-project headers
+                // with rename/remove, per-group "+" new-session affordance,
+                // GitHub Worktrees / Local Projects section headers). Users who
+                // need that structure switch back via the footer popover; the
+                // sidebar-state.sidebarOrganizeModeAtom persists the choice.
+                // Per-row actions (rename, pin, archive, copy URL, copy branch,
+                // open PR) are wired through the props below so the two modes
+                // are at parity for individual sessions even though section-
+                // level affordances diverge. 'status' mode lists the same rows,
+                // split into status groups.
+                !hasPinnedItems || updatedIsLoading || Boolean(updatedItems?.length) ? (
+                  <div className={hasPinnedItems ? undefined : 'pt-1'}>
+                    <SidebarUpdatedSessionList
+                      items={updatedItems ?? []}
+                      now={now}
+                      isMobile={isMobile}
+                      isLoading={updatedIsLoading}
+                      grouping={organizeMode === 'status' ? 'status' : 'recency'}
+                      showProjectContext={showUpdatedProjectNames}
+                      selectedItemId={updatedSelectedItemId ?? null}
+                      labels={mergedLabels.updated}
+                      collapsedBuckets={updatedBucketsCollapsed}
+                      showFullBuckets={updatedShowFullBuckets}
+                      onSelectItem={onSelectUpdatedItem}
+                      onToggleBucket={onToggleUpdatedBucket}
+                      onToggleFullBucket={onToggleUpdatedShowFullBucket}
+                      onArchiveItem={onArchiveUpdatedItem}
+                      onMarkItemUnread={onMarkUpdatedItemUnread}
+                      onRenameItem={onRenameUpdatedItem}
+                      onTogglePinItem={onToggleUpdatedItemPinned}
+                      onCopyItemUrl={onCopyUpdatedItemUrl}
+                      onShareItemWithTeam={onShareUpdatedItemWithTeam}
+                      onOpenPullRequest={onOpenUpdatedItemPullRequest}
+                      getItemHref={getUpdatedItemHref}
+                      headerAction={
+                        hasPinnedItems ? undefined : (sectionHeaderFilterAction ?? undefined)
+                      }
+                    />
+                  </div>
+                ) : null
+              ) : (
+                <>
+                  {/* pb-1 (not pb-3): the last topContent item is the GitHub
                   Worktrees section header, whose repo list renders just below
                   as the sibling SessionList — the header must hug its content. */}
-                {topContent ? (
-                  <div className={cn(hasPinnedItems ? 'pb-1' : 'pt-1 pb-1')}>{topContent}</div>
-                ) : null}
-                {sessionListProps ? (
-                  <SessionList
-                    {...sessionListProps}
-                    className={sessionListClassName}
-                    emptyState={workspaceEmptyState}
-                    headerAction={
-                      topContent || hasPinnedItems || afterSessionListContent
-                        ? sessionListProps.headerAction
-                        : (sessionListProps.headerAction ?? sectionHeaderFilterAction ?? undefined)
-                    }
-                  />
-                ) : null}
-                {afterSessionListContent}
-              </>
-            )}
-            {organizeMode === 'workspace' && !topContent && !sessionListProps ? (
-              <div className="space-y-3 pt-1">
-                {repoSections.map((section, sectionIndex) => (
-                  <div key={section.id} className="space-y-2">
-                    <div
-                      className={cn(
-                        SIDEBAR_CONTROL_TEXT_CLASS,
-                        'flex items-center gap-2 px-1 font-medium text-sidebar-foreground-muted'
-                      )}
-                    >
-                      <Github className="h-3.5 w-3.5" />
-                      <span className="truncate">{section.repoFullName}</span>
-                      {sectionIndex === 0 && sectionHeaderFilterAction ? (
-                        <span className="ml-auto shrink-0">{sectionHeaderFilterAction}</span>
-                      ) : null}
-                    </div>
-
-                    {/* A project with no sessions yet is its header alone, not an empty tray. */}
-                    {section.items.length > 0 ? (
-                      <GlassSurface className="p-1">
-                        <ul className="space-y-1">
-                          {section.items.map((item) => (
-                            <li key={item.id}>
-                              <div
-                                className={cn(
-                                  SIDEBAR_ROW_TEXT_CLASS,
-                                  'flex items-center gap-2 rounded-lg px-2 py-2',
-                                  item.isSelected
-                                    ? 'bg-sidebar-selection text-sidebar-selection-foreground'
-                                    : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
-                                )}
-                              >
-                                <span className="h-2 w-2 rounded-full bg-sidebar-border" />
-                                <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                                {item.ageLabel ? (
-                                  <span
-                                    className={cn(
-                                      SIDEBAR_CAPTION_TEXT_CLASS,
-                                      'shrink-0 text-sidebar-foreground-muted'
-                                    )}
-                                  >
-                                    {item.ageLabel}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </GlassSurface>
-                    ) : null}
-                  </div>
-                ))}
-
-                <div className="pt-2">
-                  {resolvedChatsSessionListProps ? (
+                  {topContent ? (
+                    <div className={cn(hasPinnedItems ? 'pb-1' : 'pt-1 pb-1')}>{topContent}</div>
+                  ) : null}
+                  {sessionListProps ? (
                     <SessionList
-                      {...resolvedChatsSessionListProps}
-                      className={chatsSessionListClassName}
+                      {...sessionListProps}
+                      className={sessionListClassName}
+                      emptyState={workspaceEmptyState}
+                      headerAction={
+                        topContent || hasPinnedItems || afterSessionListContent
+                          ? sessionListProps.headerAction
+                          : (sessionListProps.headerAction ??
+                            sectionHeaderFilterAction ??
+                            undefined)
+                      }
                     />
                   ) : null}
+                  {afterSessionListContent}
+                </>
+              )}
+              {organizeMode === 'workspace' && !topContent && !sessionListProps ? (
+                <div className="space-y-3 pt-1">
+                  {repoSections.map((section, sectionIndex) => (
+                    <div key={section.id} className="space-y-2">
+                      <div
+                        className={cn(
+                          SIDEBAR_CONTROL_TEXT_CLASS,
+                          'flex items-center gap-2 px-1 font-medium text-sidebar-foreground-muted'
+                        )}
+                      >
+                        <Github className="h-3.5 w-3.5" />
+                        <span className="truncate">{section.repoFullName}</span>
+                        {sectionIndex === 0 && sectionHeaderFilterAction ? (
+                          <span className="ml-auto shrink-0">{sectionHeaderFilterAction}</span>
+                        ) : null}
+                      </div>
+
+                      {/* A project with no sessions yet is its header alone, not an empty tray. */}
+                      {section.items.length > 0 ? (
+                        <GlassSurface className="p-1">
+                          <ul className="space-y-1">
+                            {section.items.map((item) => (
+                              <li key={item.id}>
+                                <div
+                                  className={cn(
+                                    SIDEBAR_ROW_TEXT_CLASS,
+                                    'flex items-center gap-2 rounded-lg px-2 py-2',
+                                    item.isSelected
+                                      ? 'bg-sidebar-selection text-sidebar-selection-foreground'
+                                      : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+                                  )}
+                                >
+                                  <span className="h-2 w-2 rounded-full bg-sidebar-border" />
+                                  <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                                  {item.ageLabel ? (
+                                    <span
+                                      className={cn(
+                                        SIDEBAR_CAPTION_TEXT_CLASS,
+                                        'shrink-0 text-sidebar-foreground-muted'
+                                      )}
+                                    >
+                                      {item.ageLabel}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </GlassSurface>
+                      ) : null}
+                    </div>
+                  ))}
+
+                  <div className="pt-2">
+                    {resolvedChatsSessionListProps ? (
+                      <SessionList
+                        {...resolvedChatsSessionListProps}
+                        className={chatsSessionListClassName}
+                      />
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </div>
+              ) : null}
+            </div>
+          )}
         </ScrollArea>
 
         {bottomFloatingContent ? (

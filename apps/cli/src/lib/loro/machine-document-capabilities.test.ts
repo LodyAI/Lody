@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  canStartCoordinatorSession,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  getAcpCapabilityCacheKey,
+  getMachineFlockAcpCapabilities,
   machineFlockKeys,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
@@ -79,6 +83,50 @@ describe('MachineDocument ACP capabilities', () => {
     });
     // A probe that did ask, and found none, clears the list.
     await expect(write([])).resolves.toMatchObject({ authMethods: [] });
+  });
+
+  it('records system prompt support that gates coordinator conversations', async () => {
+    const flock = new FakeMachineFlock();
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => undefined) })),
+      flush: vi.fn(async () => undefined),
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId
+    );
+    const configId = 'config-1' as AgentConfigId;
+    const write = (systemPrompt: boolean) =>
+      document.updateAcpCapabilities(
+        configId,
+        'builtin',
+        'claude',
+        [],
+        [{ modelId: 'model-a', name: 'Model A' }],
+        undefined,
+        undefined,
+        true,
+        'claude@1.0.0',
+        undefined,
+        true,
+        undefined,
+        { systemPrompt }
+      );
+    const stored = () =>
+      getMachineFlockAcpCapabilities(
+        readMachineFlockRowsFromFlock(flock, { families: ['acpCapability'] })
+      )[getAcpCapabilityCacheKey(configId)];
+    const currentDaemon = { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES };
+
+    await write(true);
+    expect(stored()?.systemPrompt).toBe(true);
+    expect(canStartCoordinatorSession(currentDaemon, stored())).toBe(true);
+    // A daemon that does not advertise coordinators would drop the prompt.
+    expect(canStartCoordinatorSession({ protocolCapabilities: {} }, stored())).toBe(false);
+
+    await write(false);
+    expect(canStartCoordinatorSession(currentDaemon, stored())).toBe(false);
   });
 });
 

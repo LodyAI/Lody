@@ -449,6 +449,36 @@ be a security boundary. Naming refs after user text needs a source provably isol
 prompt, and no such source exists at session-ready: the ACP title has not arrived yet, and the
 isolated generator's own fallback is the raw prompt.
 
+### Client system prompts (coordinator conversations)
+
+A coordinator conversation (`SessionMeta.coordinator: { version: 1 }`) is the only
+conversation that sends a client system prompt. `AgentClient` receives it as the
+`systemPrompt` option and puts the unstable ACP field
+`systemPrompt: { mode: 'append', content: [{ type: 'text', text }] }` on every
+`session/new`, `session/load`, `session/resume` and `session/fork`, including
+edit-and-resend replacements, because adapters persist it only on some paths. Append
+keeps the provider's own instructions, tools and permissions. The prompt text is
+[`session/coordinator-system-prompt.md`](../session/coordinator-system-prompt.md),
+sent verbatim.
+
+Support is read from `initialize`: an object at
+`agentCapabilities.sessionCapabilities.systemPrompt` means the agent accepts append mode.
+Without it, startup fails with `[ACP_SYSTEM_PROMPT_UNSUPPORTED]` before any session
+exists; the prompt is never moved into a user message the way a Role's `promptPrefix`
+is. Probes and real session starts record the result as `systemPrompt` on the
+capability entry, and the renderer offers only configurations whose entry says `true`
+on a machine advertising the `coordinatorSessions` protocol capability. Entries written
+before this field have no value and count as unsupported until the configuration starts
+a conversation or is refreshed. A marker version this build does not know fails with
+`[COORDINATOR_UNSUPPORTED]` instead of running without the prompt.
+
+Adapter source at the pinned submodule commits (2026-11-12) advertises the capability
+for Claude (append and override), Codex (append only), DeepSeek Harness, Pi, and Kimi
+when its session runtime is bound. The Grok and Devin proxies forward the upstream
+CLI's capabilities, and the Lody Agent (Sorbet) ships outside this repository, so for
+them only the runtime probe decides. Rationale and scope:
+[project coordinator note](../../../../.agents/notes/proposed/feature/2026-11-11-project-coordinator-mode.md).
+
 ### Local project identity
 
 For local project sessions, `SessionManager` supplies a resolver for the original

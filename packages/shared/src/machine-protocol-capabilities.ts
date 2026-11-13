@@ -72,6 +72,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   machineDiskStatus: 'machineDiskStatus',
   managedDaemonUpdates: 'managedDaemonUpdates',
   sessionInputWithdraw: 'sessionInputWithdraw',
+  coordinatorSessions: 'coordinatorSessions',
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
@@ -125,6 +126,8 @@ export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 /** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
 export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
+/** The daemon delivers the coordinator system prompt for `SessionMeta.coordinator` v1. */
+export const COORDINATOR_SESSIONS_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -249,7 +252,23 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.coordinatorSessions]: COORDINATOR_SESSIONS_PROTOCOL_VERSION,
 };
+
+/**
+ * Whether the target daemon honors `SessionMeta.coordinator`. An older daemon
+ * ignores the marker and would run the conversation without its system prompt,
+ * so creators must not write it there.
+ */
+export function machineSupportsCoordinatorSessions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.coordinatorSessions,
+    COORDINATOR_SESSIONS_PROTOCOL_VERSION
+  );
+}
 
 /**
  * Whether `machine/bug-report` may carry `clientLog`. Its request schema is

@@ -1,13 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { ChatLanding } from '@/components/chat/chat-landing';
 import {
   parseChatLandingSearch,
   type ChatLandingSearch,
 } from '@/components/chat/chat-landing-derived';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { mobileWorkspaceBaseContextAtom } from '@/atoms';
+import { developerModeEnabledAtom, mobileWorkspaceBaseContextAtom } from '@/atoms';
+import { ProjectBoard } from '@/components/project-mode/project-board';
+import type { CoordinatorProjectKey } from '@/components/project-mode/project-board-model';
+import { ProjectWorkspace } from '@/components/project-mode/project-workspace';
+import type { MachineId } from '@lody/shared';
 
 export type ChatSearch = ChatLandingSearch;
 
@@ -22,14 +26,18 @@ function ChatRoute() {
   const navigate = Route.useNavigate();
   const isMobile = useIsMobile();
   const setMobileBaseContext = useSetAtom(mobileWorkspaceBaseContextAtom);
+  const developerMode = useAtomValue(developerModeEnabledAtom);
 
   // Selection steering is an in-place correction of the current address, not
   // a visit to a new page, so the mirror always replaces.
   const handleSelectionUrlSync = useCallback(
     (selectionSearch: ChatLandingSearch) => {
-      void navigate({ search: selectionSearch, replace: true });
+      void navigate({
+        search: search.coordinator ? { ...selectionSearch, coordinator: true } : selectionSearch,
+        replace: true,
+      });
     },
-    [navigate]
+    [navigate, search.coordinator]
   );
 
   /* On mobile the home/project landing is owned by `MobileWorkspaceStack` (so
@@ -52,17 +60,45 @@ function ChatRoute() {
     return null;
   }
 
+  const landing = (
+    <ChatLanding
+      workspaceSlug={workspaceName}
+      preSelectedContext={search.context}
+      preSelectedMachine={search.machine}
+      preSelectedProject={search.project}
+      preSelectedRepo={search.repo}
+      preSelectedGroup={search.group}
+      coordinator={search.coordinator === true}
+      onSelectionUrlSync={handleSelectionUrlSync}
+    />
+  );
+  // Project mode prototype: starting a coordinator already shows the project's conversations.
+  const boardProject =
+    developerMode && search.coordinator ? coordinatorProjectFromSearch(search) : null;
   return (
     <div className="h-full" data-window-workspace-ready={workspaceName}>
-      <ChatLanding
-        workspaceSlug={workspaceName}
-        preSelectedContext={search.context}
-        preSelectedMachine={search.machine}
-        preSelectedProject={search.project}
-        preSelectedRepo={search.repo}
-        preSelectedGroup={search.group}
-        onSelectionUrlSync={handleSelectionUrlSync}
-      />
+      {boardProject ? (
+        <ProjectWorkspace
+          main={landing}
+          board={<ProjectBoard coordinatorSessionId={null} project={boardProject} />}
+        />
+      ) : (
+        landing
+      )}
     </div>
   );
+}
+
+function coordinatorProjectFromSearch(search: ChatLandingSearch): CoordinatorProjectKey | null {
+  if (search.context === 'local' && search.machine && search.project) {
+    return {
+      kind: 'local',
+      machineId: search.machine as MachineId,
+      localProjectId: search.project,
+    };
+  }
+  if (search.context === 'github' && search.repo) {
+    return { kind: 'github', repoFullName: search.repo };
+  }
+  return null;
 }

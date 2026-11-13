@@ -325,6 +325,16 @@ export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
 );
 
 /**
+ * Project mode prototype (Developer mode only): whether the sidebar lists
+ * projects, each opening its coordinator page, or the usual conversations.
+ */
+export type SidebarProjectView = 'projects' | 'conversations';
+export const sidebarProjectViewAtom = atomWithStorage<SidebarProjectView>(
+  'lody-sidebar-project-view',
+  'conversations'
+);
+
+/**
  * Updated mode mixes every project into one recency list. When true, top-level
  * rows show the project mark and name under the title. Nested opened Sessions
  * stay one line. Workspace mode ignores this preference because its group

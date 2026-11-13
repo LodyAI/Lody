@@ -972,6 +972,9 @@ export type PendingScheduledTask = {
 
 export type SessionHistoryBackendKind = 'loro' | 'roost';
 
+/** Versioned so a later coordinator contract can be told apart from this one. */
+export type SessionCoordinatorMarker = { version: 1 };
+
 /** Missing discriminator means a legacy session and must remain pinned to Loro. */
 export const LEGACY_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
 
@@ -1087,6 +1090,13 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   openedByRootSessionId?: SessionId;
   /** Project binding for this session (GitHub repo or local project). */
   project?: ProjectRef;
+  /**
+   * Coordinator conversation marker, written once at creation. The owning daemon
+   * delivers the coordinator system prompt over ACP on every session establishment;
+   * creators require `coordinatorSessions` on the machine and an agent config whose
+   * capability advertises `systemPrompt` (`session-coordinator.ts`).
+   */
+  coordinator?: SessionCoordinatorMarker;
   projectRun?: SessionProjectRun;
   repoFullName?: string;
   /** Base branch selected when the session starts (starting point). */

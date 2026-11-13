@@ -150,3 +150,11 @@ The mobile chat rows still keep status on their leading node; their geometry (48
 indent, a selection checkbox in the same slot, a chevron that has to sit outside the row
 button and lift above the edge-back swipe zone) is different enough that the change is a
 separate one to make.
+
+## Proposed: projects as the sidebar unit
+
+The sidebar's unit is the conversation today. A proposal to list projects instead, with
+a coordinator conversation and a board of its child conversations inside each project, is
+recorded in the
+[project mode note](../notes/proposed/feature/2026-11-11-project-coordinator-mode.md).
+Nothing in it is implemented.

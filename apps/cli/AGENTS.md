@@ -102,6 +102,9 @@ execution/consent rules. These rules also bind CLI callers outside that director
   a `createAgent` failure detaches the instance BEFORE its cleanup `terminate`; otherwise a
   recovery such as the resume-to-replay fallback loses every update of the replacement agent
   ([note](../../.agents/notes/implemented/bug-fix/2026-09-11-failed-session-create-lifecycle-events.md)).
+- Only coordinator conversations send a system prompt, as ACP `systemPrompt` on every
+  session start; an agent without that capability fails startup. Never fold it into user
+  text ([details](src/agent/README.md#client-system-prompts-coordinator-conversations)).
 - `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text and CLI
   version, platform, and architecture — never cwd, paths, hostname, environment, logs, prompts,
   history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.

@@ -1,4 +1,11 @@
-import type { SessionId } from '@lody/shared';
+import { getSessionRoomId, isCoordinatorSession, type SessionId } from '@lody/shared';
+import { useAtomValue } from 'jotai';
+import type { ReactNode } from 'react';
+import { developerModeEnabledAtom } from '@/atoms/settings';
+import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
+import { ProjectBoard } from '@/components/project-mode/project-board';
+import { getSessionCoordinatorProjectKey } from '@/components/project-mode/project-board-model';
+import { ProjectWorkspace } from '@/components/project-mode/project-workspace';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { AppThemeShell } from '@/components/app-theme-shell';
 import SessionDetail from '@/components/sessions/session-detail';
@@ -41,18 +48,42 @@ const SessionDetailRoute = () => {
     return null;
   }
 
+  const detail = (
+    <SessionDetail
+      sessionId={sessionId as SessionId}
+      urlTab={search.tab}
+      urlPrNumber={search.pr}
+      urlBrowser={search.browser}
+      urlSimulator={search.simulator}
+    />
+  );
   return (
     <AppThemeShell>
-      <SessionDetail
-        sessionId={sessionId as SessionId}
-        urlTab={search.tab}
-        urlPrNumber={search.pr}
-        urlBrowser={search.browser}
-        urlSimulator={search.simulator}
-      />
+      <CoordinatorAwareDetail sessionId={sessionId} detail={detail} />
     </AppThemeShell>
   );
 };
+
+/**
+ * Project mode prototype (Developer mode): a coordinator conversation is its
+ * project's page, with the project's conversations beside it.
+ */
+function CoordinatorAwareDetail({ sessionId, detail }: { sessionId: string; detail: ReactNode }) {
+  const developerMode = useAtomValue(developerModeEnabledAtom);
+  const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId as SessionId)));
+  if (!developerMode || !meta || !isCoordinatorSession(meta)) return detail;
+  return (
+    <ProjectWorkspace
+      main={detail}
+      board={
+        <ProjectBoard
+          coordinatorSessionId={meta.id}
+          project={getSessionCoordinatorProjectKey(meta)}
+        />
+      }
+    />
+  );
+}
 
 const parsePrNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isInteger(value) && value > 0) {

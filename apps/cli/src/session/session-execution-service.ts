@@ -1,5 +1,5 @@
 import { machineTurnInterruptionReason, reserveMachineTurn } from './machine-turn-admission';
-import { isMissingHistoryUserTurn } from '@lody/shared';
+import { isMissingHistoryUserTurn, readSessionCoordinatorKind } from '@lody/shared';
 import { verifyAutomationWorktreeHeads } from './automation-worktree';
 import { classifyCapacityFailure } from './acp-error-classification';
 import {
@@ -802,6 +802,7 @@ export type SessionExecutionServiceDeps = {
     sessionFork: boolean;
     acknowledgedSteer: boolean;
     sessionTitle?: boolean;
+    systemPrompt?: boolean;
     rateLimits?: LodyRateLimitsCapability;
     goalActions?: SessionGoalAction[];
     modelReasoningEfforts?: Record<string, string[]>;
@@ -7039,6 +7040,7 @@ export class SessionExecutionService {
       const restoreBranch = project?.branch?.trim() || undefined;
       const restoreConfig: SessionConfig = {
         projectRun: meta?.projectRun,
+        coordinator: readSessionCoordinatorKind(meta),
         sessionId,
         agentConfigId: meta?.agentConfigId,
         codexAuth: storedLaunchConfig.config?.codexAuth,
@@ -7965,6 +7967,7 @@ export class SessionExecutionService {
     const sessionConfig: SessionConfig = {
       sessionId,
       workspaceId,
+      coordinator: readSessionCoordinatorKind(existingMeta),
       agentCliType: acpSessionConfig.cliType,
       agentType: acpSessionConfig.agentType,
       modelId: acpSessionConfig.modelId,
@@ -8922,6 +8925,7 @@ export class SessionExecutionService {
         capabilities.goalActions,
         {
           sessionTitle: capabilities.sessionTitle,
+          systemPrompt: capabilities.systemPrompt,
           rateLimits: capabilities.rateLimits,
           modelCapabilities: capabilities.modelCapabilities,
         }
@@ -9443,6 +9447,7 @@ export class SessionExecutionService {
         sessionFork,
         acknowledgedSteer,
         sessionTitle,
+        systemPrompt,
         rateLimits,
         goalActions,
         modelReasoningEfforts,
@@ -9528,6 +9533,7 @@ export class SessionExecutionService {
         {
           signal: options.signal,
           sessionTitle,
+          systemPrompt,
           rateLimits,
           modelCapabilities,
           authMethods: advertisedAuthMethods,

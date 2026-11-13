@@ -8,6 +8,7 @@ import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
 import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
 import { prependGhShimBinDirToPath } from '@/lib/gh-shim-script';
 import { ACPSessionId, getServerNow, MachineId, SessionId } from '@lody/shared';
+import { resolveSessionSystemPrompt } from './coordinator-system-prompt';
 import type { CreateAgentConfig, ISession, SessionMonitorRuntimeInfo } from './session-manager';
 import {
   SessionConfig,
@@ -780,6 +781,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           },
           modelId: this.config.modelId,
           configOptionValues: this.config.configOptionValues,
+          systemPrompt: resolveSessionSystemPrompt(this.config.coordinator),
           launcher,
           workspaceId: this.config.workspaceId,
           machineId: this.config.machineId as MachineId,
@@ -824,6 +826,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
           sessionTitle: started.client.supportsSessionTitleGeneration(),
+          systemPrompt: started.client.supportsSystemPrompt(),
           rateLimits: started.client.getRateLimitsCapability(),
           acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
           goalActions: started.client.getGoalCapability()?.actions.slice(),

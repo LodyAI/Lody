@@ -3986,6 +3986,8 @@ type MachineMetaPatch = Partial<MachineMeta> & Pick<MachineMeta, 'id'>;
 export type AcpCapabilityWriteOptions = {
   signal?: AbortSignal;
   sessionTitle?: boolean;
+  /** Runtime advertised standard ACP `sessionCapabilities.systemPrompt`. */
+  systemPrompt?: boolean;
   rateLimits?: LodyRateLimitsCapability;
   /**
    * Every model's controls from the adapter's `_meta.lody.modelCapabilities`,
@@ -4023,6 +4025,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
     sessionTitle: entry.sessionTitle,
+    systemPrompt: entry.systemPrompt,
     rateLimits: entry.rateLimits,
     sessionForkWorktree: entry.sessionForkWorktree,
   });
@@ -4154,6 +4157,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
       sessionTitle: options.sessionTitle,
+      systemPrompt: options.systemPrompt,
       rateLimits: options.rateLimits,
       sessionForkWorktree: sessionFork,
       modelReasoningEfforts:

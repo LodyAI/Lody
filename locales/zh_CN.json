@@ -6719,5 +6719,20 @@
   "e2ee.instantQr.linkJoined": "这台设备已加入，工作区会在密钥到达后打开。",
   "e2ee.auto.scan.wrongRole": "这个二维码是给新设备扫的。请扫新设备屏幕上的二维码。",
   "e2ee.auto.scopeWithQr": "扫描二维码会把你的手机加入此设备上的加密工作区；输入 6 位码只批准当前工作区。",
-  "e2ee.addDevice.waiting": "等待批准的设备：{{count}}"
+  "e2ee.addDevice.waiting": "等待批准的设备：{{count}}",
+  "sidebar.localProjects.startCoordinator": "开始协调者对话",
+  "chat.coordinator.heading": "开始一个协调者对话",
+  "chat.coordinator.unsupportedAgent": "这个 Agent 不能运行协调者对话：它必须支持系统提示词，并且所在机器需要运行较新版本的 Lody。",
+  "chat.coordinator.noAgent": "这里没有能运行协调者对话的 Agent。协调者需要支持系统提示词的 Agent；Agent 在启动过一次对话或在设置中刷新后才会报告这一点。",
+  "projectMode.board.title": "全部子对话",
+  "projectMode.board.needsYou": "需要你",
+  "projectMode.board.working": "进行中",
+  "projectMode.board.unread": "未读",
+  "projectMode.board.done": "已完成",
+  "projectMode.board.empty": "暂无",
+  "projectMode.board.createdManually": "手动创建",
+  "projectMode.sidebar.projects": "项目",
+  "projectMode.sidebar.conversations": "对话",
+  "projectMode.sidebar.allProjects": "所有项目",
+  "projectMode.sidebar.noProjects": "还没有项目。先添加一个文件夹或关联一个仓库。"
 }
