@@ -85,6 +85,21 @@ class RuntimeProtocolTest {
   assertEquals("live",snapshot.status)
   assertEquals(listOf(SessionMessage("u","user","hello",false),SessionMessage("a","assistant","First\n\nSecond",true)),snapshot.messages.map { it.copy(items = emptyList()) })
  }
+ @Test fun planApprovalCarriesItsPlanOptionsAndSettledOutcome() {
+  val body="""{"v":1,"status":"live","entries":[{"id":"a","role":"assistant","finished":false,"items":[{"itemId":"p","type":"proposed_plan","status":"delta","markdown":"1. Draft"},{"itemId":"x","type":"tool_call","kind":"switch_mode","title":"Ready to code?","status":"pending","hasDetail":true,"plan":"1. Build","permission":{"requestId":"r","pending":true,"kind":"permission","options":[{"optionId":"yes","name":"Yes","kind":"allow_once"},{"optionId":"","name":"Broken"},{"optionId":"no","name":"No, keep planning","kind":"reject_once"}]}},{"itemId":"e","type":"tool_call","kind":"execute","title":"ls","status":"completed","plan":"ignored","hasDetail":false}]}]}"""
+  val frame=JSONObject().put("type","session").put("sessionId","s").put("session",body)
+  val items=(RuntimeProtocol.event(frame) as RuntimeEvent.SessionUpdated).snapshot.messages.single().items
+  assertEquals(TurnItem.ProposedPlan("p","1. Draft",streaming=true),items[0])
+  val approval=items[1] as TurnItem.Tool
+  assertEquals("1. Build",approval.plan)
+  assertTrue(approval.awaitingPermission)
+  assertEquals(ToolPermission("r",true,listOf(PermissionOption("yes","Yes","allow_once"),PermissionOption("no","No, keep planning","reject_once"))),approval.permission)
+  assertEquals("Only a plan approval carries a plan",null,(items[2] as TurnItem.Tool).plan)
+  val chosen=RuntimeProtocol.detail(JSONObject().put("blocks",org.json.JSONArray()).put("outcome",JSONObject().put("outcome","selected").put("optionId","no")))
+  assertEquals("no",chosen.chosenOption)
+  assertFalse(chosen.withdrawn)
+  assertTrue(RuntimeProtocol.detail(JSONObject().put("outcome",JSONObject().put("outcome","cancelled"))).withdrawn)
+ }
  @Test fun recoveredInputsStayUnconfirmedAndDoNotDuplicateOwnerHistory() {
   val body = """{"v":1,"status":"live","entries":[{"id":"owner","role":"user","finished":true,"items":[{"type":"text","text":"confirmed"}]}],"pendingRoostInputs":[{"id":"owner","items":[{"type":"text","text":"duplicate"}]},{"id":"pending","timestamp":"2026-01-01","userId":"u","inputState":"unknown","items":[{"type":"text","text":"kept"},{"type":"file","file":{"fileName":"proof.txt"}}]}]}"""
   val frame = JSONObject().put("type", "session").put("sessionId", "s").put("session", body)

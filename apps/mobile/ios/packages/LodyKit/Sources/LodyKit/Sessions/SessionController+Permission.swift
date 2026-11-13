@@ -16,18 +16,24 @@ extension SessionController {
       return
     }
     let target = ready ? feed?.state.transcript.permission : nil
+    // Web answers a plan approval below its plan, never over it: the transcript's plan card
+    // offers the request, so it is not presented by itself (and a sheet opened while the
+    // request was still unknown steps aside).
+    let planReview = target?.showsPlan == true
     if let page = permissionPage {
-      page.update(target, ready: ready)
-    } else if view.window != nil, permissionGate.shouldOpen(target?.requestId),
+      if planReview && permissionOpenedAutomatically { page.withdraw() }
+      else { page.update(target, ready: ready) }
+    } else if view.window != nil, permissionGate.shouldOpen(target?.requestId), !planReview,
               target != nil || (!ready && session.awaitingUserSince != nil) {
-      openPermission(target)
+      openPermission(target, automatically: true)
     }
   }
 
-  func openPermission(_ target: SessionPermission?) {
+  func openPermission(_ target: SessionPermission?, automatically: Bool = false) {
     guard permissionPage == nil else { return }
     let page = PermissionController(sessionId: sessionId, service: permissionService)
     permissionPage = page
+    permissionOpenedAutomatically = automatically
     permissionScope = (source.state.userId, source.state.workspaceId)
     permissionGate.opened()
     page.onClose = { [weak self, weak page] answer, cancelled in

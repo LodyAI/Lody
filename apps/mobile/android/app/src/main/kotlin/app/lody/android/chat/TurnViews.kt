@@ -69,11 +69,12 @@ internal fun LazyListScope.turnBlocks(
     open: Map<String, Boolean>,
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
+    respond: PermissionResponder? = null,
 ) {
     val active = entry.layout.activeActivityKey(entry.working)
     for (block in blocks) {
         when (block) {
-            is TurnLayout.Content -> content(entry, block, open, toggle, details)
+            is TurnLayout.Content -> content(entry, block, open, toggle, details, respond)
             is TurnLayout.Activity -> {
                 val expanded = open[block.key] ?: false
                 val running = block.key == active
@@ -101,14 +102,19 @@ private fun LazyListScope.content(
     open: Map<String, Boolean>,
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
+    respond: PermissionResponder?,
 ) {
     when (val value = block.item) {
-        is TurnItem.Text, is TurnItem.ProposedPlan -> prose(block.key, entry.prose[value.id], secondary = false)
+        is TurnItem.Text -> prose(block.key, entry.prose[value.id], secondary = false)
+        is TurnItem.ProposedPlan -> proposedPlan(entry, value, block.key, open, toggle)
         is TurnItem.Checklist -> item(key = block.key, contentType = "checklist") { Checklist(value, Modifier.animateItem()) }
         is TurnItem.Notice -> item(key = block.key, contentType = "notice") { Notice(value, Modifier.animateItem()) }
         is TurnItem.Images -> item(key = block.key, contentType = "images") { TurnImages(value, Modifier.animateItem()) }
         is TurnItem.File -> item(key = block.key, contentType = "file") { AgentFileCard(value, Modifier.animateItem()) }
-        is TurnItem.Tool -> step(entry, value, block.key, entry.working && value.status == "in_progress", open, toggle, details)
+        // A plan approval renders as the plan and its decision; a bare mode switch stays a step.
+        is TurnItem.Tool ->
+            if (value.kind == "switch_mode" && (value.plan != null || value.permission != null)) planExit(entry, value, block.key, open, toggle, details, respond)
+            else step(entry, value, block.key, entry.working && value.status == "in_progress", open, toggle, details)
         is TurnItem.Thought -> prose(block.key, entry.prose[value.id], secondary = true)
         is TurnItem.Task -> Unit
     }

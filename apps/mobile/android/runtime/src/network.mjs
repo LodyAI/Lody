@@ -5,7 +5,7 @@ import '../vendor/cloud-runtime/src/runtime/index.ts';
 import {createDispatcher,HOST_PROTOCOL,CORE_CAPABILITIES} from './dispatch.mjs';
 import {createReadAccess} from './read-access.mjs';
 import {createCommands,billingEntitlement} from './create-commands.mjs';
-import {controlTurn,itemDetail,sendTurn,stopSessions} from '../vendor/cloud-runtime/src/runtime/session.ts';
+import {controlTurn,itemDetail,respondPermission,sendTurn,stopSessions} from '../vendor/cloud-runtime/src/runtime/session.ts';
 import {cloudCommands} from './cloud-commands.mjs';
 import {providerCommands} from './provider-commands.mjs';
 import {roleCommands} from './role-commands.mjs';
@@ -50,7 +50,13 @@ const detail={
  iosSimulatorControl:(sessionId,command)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.iosSimulatorControl({workspaceId:scope.workspaceId,sessionId,userId:scope.userId,command});},
  androidEmulatorControl:(sessionId,command)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.androidEmulatorControl({workspaceId:scope.workspaceId,sessionId,userId:scope.userId,command});},
  // Stops the watched session's running turn; a write, never retried.
- controlTurn:async(sessionId,machineId,turnId)=>{const result=await controlTurn({action:'stop',sessionId,machineId,turnId});return {state:result?.state??'unknown'};}};
+ controlTurn:async(sessionId,machineId,turnId)=>{const result=await controlTurn({action:'stop',sessionId,machineId,turnId});return {state:result?.state??'unknown'};},
+ // Answers a permission request (a plan approval) in the watched session; a write, never retried.
+ // `{state}` is accepted / stale / conflict; failures travel in-band as `{error: code}`.
+ respondPermission:async(sessionId,entryId,itemId,requestId,optionId)=>{
+  try{const result=await respondPermission({sessionId,entryId,itemId,requestId,optionId});return {state:result.state};}
+  catch(error){const code=String(error?.message??'');return {error:['session_not_ready','workspace_changed','invalid_option','upload_failed'].includes(code)?code:'permission_write_failed'};}
+ }};
 const sendWithReferences = args => sendTurn(args, async text => {
  const items = [];
  const expanded = await expandMentions(text, async category => {
@@ -61,4 +67,4 @@ const sendWithReferences = args => sendTurn(args, async text => {
  return {text:expanded,spans:referenceSpans(expanded,items)};
 });
 globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...proposalCommands(runtime,()=>identity),...providerCommands(runtime,()=>identity),...roleCommands(runtime,()=>identity),...shortcutCommands(runtime,()=>identity),...detail});
-emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','turnQuota','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','archiveSession','schedules','scheduleDetail','scheduleCommand','decideProposal','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings','sessionPreview','iosSimulatorControl','androidEmulatorControl','previewTokenReply']});
+emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','turnQuota','itemDetail','createTab','turnDiff','listDir','readFile','controlTurn','respondPermission','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','archiveSession','schedules','scheduleDetail','scheduleCommand','decideProposal','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings','sessionPreview','iosSimulatorControl','androidEmulatorControl','previewTokenReply']});

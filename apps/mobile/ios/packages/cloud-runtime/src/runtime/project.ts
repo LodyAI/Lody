@@ -72,6 +72,8 @@ export type ItemSummary =
       added?: number;
       removed?: number;
       hasDetail: boolean;
+      /** Plan text a `switch_mode` (plan-approval) card carries; see `planExitMarkdown`. */
+      plan?: string;
       permission?: {
         requestId: string;
         pending: boolean;
@@ -182,6 +184,26 @@ export function identityAt(list: LoroList, index: number) {
   return id ? `${id.peer}:${id.counter}` : `idx:${index}`;
 }
 
+
+/**
+ * Plan text carried by a plan-approval (`switch_mode`) card — web
+ * `resolvePlanExitMarkdown` (`packages/components/.../plan-surface.ts`).
+ * Claude puts it in `rawInput.plan` (its `content` can later be replaced by a
+ * status message), Kimi in the first `content` text block; Codex carries none
+ * here and renders a separate `proposed_plan` item instead.
+ */
+function planExitMarkdown(raw: any): string | undefined {
+  const rawPlan = raw.rawInput?.plan;
+  if (typeof rawPlan === 'string' && rawPlan.trim()) return rawPlan.trim();
+  const block = (Array.isArray(raw.content) ? raw.content : []).find(
+    (block: any) =>
+      block?.type === 'content' &&
+      block.content?.type === 'text' &&
+      typeof block.content.text === 'string' &&
+      block.content.text.trim(),
+  );
+  return block ? String(block.content.text).trim() : undefined;
+}
 function countDiff(content: unknown) {
   if (!Array.isArray(content)) return undefined;
   let added = 0,
@@ -342,6 +364,8 @@ function summarizeItem(
 
   if (type === 'tool_call') {
     const diff = countDiff(raw.content);
+    const plan =
+      raw.kind === 'switch_mode' ? planExitMarkdown(raw) : undefined;
     const questionMeta = parseQuestionMeta(raw.permissionRequest?._meta);
     const isQuestion =
       !!questionMeta ||
@@ -373,6 +397,7 @@ function summarizeItem(
         (Array.isArray(raw.content) && raw.content.length > 0) ||
         raw.rawInput != null ||
         raw.rawOutput != null,
+      ...(plan ? { plan } : {}),
       permission,
     };
     summary.rev = bump(

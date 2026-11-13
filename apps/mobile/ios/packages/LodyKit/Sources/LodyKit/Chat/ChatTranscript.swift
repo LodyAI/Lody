@@ -58,6 +58,45 @@ struct ChatEntry: Decodable {
   }
 }
 
+extension ChatEntry {
+  /// Web `PlanExitBlock`: a plan-approval card (ACP `switch_mode`) that carries its plan
+  /// (Claude's `rawInput.plan`, Kimi's content) shows it as the turn's plan, directly above the
+  /// decision, with the same surface as a `proposed_plan`. A turn that already renders its own
+  /// `proposed_plan` (Codex, web `hasSeparatePlanItem`) keeps only that one, or the plan would
+  /// print twice. Idempotent: the inserted plan is itself a `proposed_plan`.
+  static func showingCarriedPlans(_ entries: [ChatEntry]) -> [ChatEntry] {
+    entries.map { entry in
+      guard entry.role == "assistant",
+            entry.items.contains(where: { $0.carriedPlan != nil }),
+            !entry.items.contains(where: { $0.type == "proposed_plan" && !$0.hidesFromTranscript }) else { return entry }
+      var result = entry
+      result.items = entry.items.flatMap { item -> [ChatItem] in
+        guard let markdown = item.carriedPlan else { return [item] }
+        var plan = item
+        plan.itemId = ChatItem.carriedPlanID(item.itemId)
+        plan.type = "proposed_plan"
+        plan.markdown = markdown
+        plan.status = "completed"
+        plan.isLatest = true
+        plan.permission = nil
+        plan.plan = nil
+        return [plan, item]
+      }
+      return result
+    }
+  }
+}
+
+extension ChatItem {
+  static func carriedPlanID(_ itemId: String) -> String { itemId + ":plan" }
+
+  var carriedPlan: String? {
+    guard type == "tool_call", kind == "switch_mode",
+          let plan = plan?.trimmingCharacters(in: .whitespacesAndNewlines), !plan.isEmpty else { return nil }
+    return plan
+  }
+}
+
 struct ChatImage: Codable, Equatable {
   let id: String
   let fileName: String
@@ -178,16 +217,18 @@ struct ChatItem: Decodable {
   /// An Agent's Role or schedule proposal carried by a `system_notice` (web proposal notices).
   var proposal: ChatProposal? = nil
   var isChatFailure: Bool { type == "system_notice" && name == "chat_failed" }
-  let itemId: String
-  let type: String
+  var itemId: String
+  var type: String
   let name: String?
   var text: String?
   let kind: String?
   let title: String?
-  let status: String?
+  var status: String?
   let path: String?
   let hasDetail: Bool?
-  let permission: Permission?
+  var permission: Permission?
+  /// Plan text a plan-approval card (`switch_mode`) carries (runtime `planExitMarkdown`).
+  var plan: String? = nil
   let entries: [Plan]?
   let description: String?
   let actor: String?
@@ -446,10 +487,10 @@ struct ChatTranscript {
     guard let data = cache.data(using: .utf8) else { return [] }
     if let envelope = try? JSONDecoder().decode(CachedEnvelope.self, from: data),
        let entries = envelope.entries {
-      return ChatTranscript(entries: entries).rows().filter { $0.kind != "meta" }
+      return ChatTranscript(entries: ChatEntry.showingCarriedPlans(entries)).rows().filter { $0.kind != "meta" }
     }
     if let entries = try? JSONDecoder().decode([ChatEntry].self, from: data) {
-      return ChatTranscript(entries: entries).rows().filter { $0.kind != "meta" }
+      return ChatTranscript(entries: ChatEntry.showingCarriedPlans(entries)).rows().filter { $0.kind != "meta" }
     }
     return []
   }

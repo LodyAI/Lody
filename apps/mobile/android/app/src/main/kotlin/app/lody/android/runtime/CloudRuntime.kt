@@ -88,6 +88,12 @@ sealed interface RuntimeCommand {
      * `decideProposal`); the outcome is recorded in history. A write, never retried here.
      */
     data class DecideProposal(val sessionId: String, val entryId: String, val itemId: String, val accept: Boolean) : RuntimeCommand
+    /**
+     * Answers a permission request (a plan approval) in the watched session with one of its
+     * options (upstream `respondPermission`); answers [RuntimeResult.PermissionAnswered]. A write,
+     * never retried here.
+     */
+    data class RespondPermission(val sessionId: String, val entryId: String, val itemId: String, val requestId: String, val optionId: String) : RuntimeCommand
     data object Ping : RuntimeCommand
     data object InspectSchema : RuntimeCommand
 }
@@ -113,6 +119,8 @@ sealed interface RuntimeResult {
     data class ScheduleWritten(val scheduleId: String) : RuntimeResult
     /** A proposal's recorded outcome (`saved` / `created` / `dismissed`). */
     data class ProposalDecided(val outcome: String, val scheduleId: String? = null) : RuntimeResult
+    /** A permission answer's state: `accepted`, `stale` (the request is gone) or `conflict` (answered elsewhere). */
+    data class PermissionAnswered(val state: String) : RuntimeResult
     data class Created(val value: CreationReceipt) : RuntimeResult
     data class Plan(val tier: String?) : RuntimeResult
     /** Upstream send state (`sent` / `queued` / `not_sent` / `unknown`); a machine ACK is delivery only. */
@@ -272,9 +280,13 @@ sealed interface TurnItem {
         val awaitingPermission: Boolean = false,
         /** The runtime holds a detail (command, output, diff) to open under the step. */
         val hasDetail: Boolean = false,
+        /** The plan a plan-approval (`switch_mode`) step carries (Claude, Kimi); Codex sends a separate [ProposedPlan]. */
+        val plan: String? = null,
+        /** The step's permission request, when it has one. */
+        val permission: ToolPermission? = null,
     ) : TurnItem
-    /** A proposed plan (Markdown); never folded. */
-    data class ProposedPlan(override val id: String, val markdown: String) : TurnItem
+    /** A proposed plan (Markdown); never folded. [streaming] while the agent still writes it. */
+    data class ProposedPlan(override val id: String, val markdown: String, val streaming: Boolean = false) : TurnItem
     /** The agent's checklist (`plan`); never folded. */
     data class Checklist(override val id: String, val entries: List<Pair<String, String>>) : TurnItem
     /**
@@ -413,7 +425,24 @@ class ShortLivedGrant(val token: String, val gatewayBaseUrl: String, val expires
  * A tool step's detail, after upstream `itemDetail`: its content blocks in order. [truncated] when
  * the runtime cut a long detail; the rest stays on desktop.
  */
-data class StepDetail(val blocks: List<StepBlock>, val truncated: Boolean = false)
+/**
+ * [chosenOption]: the option id a settled permission request was answered with; [withdrawn]: the
+ * request was cancelled rather than answered.
+ */
+data class StepDetail(
+    val blocks: List<StepBlock>,
+    val truncated: Boolean = false,
+    val chosenOption: String? = null,
+    val withdrawn: Boolean = false,
+)
+
+/** A tool step's permission request (web `permissionRequest`): [pending] until answered or withdrawn. */
+data class ToolPermission(val requestId: String, val pending: Boolean, val options: List<PermissionOption>)
+
+/** One option the provider offers; [kind] is ACP's `allow_once` / `allow_always` / `reject_once` / …. */
+data class PermissionOption(val optionId: String, val name: String, val kind: String?) {
+    val allows: Boolean get() = kind?.startsWith("allow") == true
+}
 
 sealed interface StepBlock {
     data class Command(val command: String, val cwd: String? = null) : StepBlock

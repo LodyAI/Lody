@@ -267,6 +267,11 @@ extension LodyChatView {
       if let state = planDecisionState, state.entryId == projected[index].entryID, state.itemId == projected[index].itemID {
         projected[index].planDecision = state
       }
+      // Web `PlanPanel`: a plan waiting on the reader's approval opens in full once; the reader
+      // may still fold it, and it clamps again as history.
+      if !projected[index].planPermissionItemID.isEmpty, awaitingPlansOpened.insert(projected[index].id).inserted {
+        expandedPlans.insert(projected[index].id)
+      }
     }
     for index in projected.indices where projected[index].kind == "proposal" {
       let row = projected[index]
@@ -348,6 +353,7 @@ extension LodyChatView {
     if tabClosed { projected = [] }
     let retainedIDs = Set(projected.map(\.id))
     expandedPlans.formIntersection(retainedIDs)
+    awaitingPlansOpened.formIntersection(retainedIDs)
     projected = prepareHistory(projected)
     let insertingHistory = previousHistoryStart != nil && previousHistoryStart != historyStartID
     // Starting/waiting for a page changes only the header, not the collection.

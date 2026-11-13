@@ -219,7 +219,13 @@ internal object RuntimeProtocol {
                     .takeIf { it.isNotBlank() }?.let { StepBlock.Text(it) }
             }
         }
-        return StepDetail(blocks, json.optBoolean("truncated"))
+        // A settled permission request's outcome: the chosen option, or withdrawn (cancelled).
+        val outcome = json.optJSONObject("outcome")
+        return StepDetail(
+            blocks, json.optBoolean("truncated"),
+            chosenOption = outcome?.takeIf { it.optString("outcome") == "selected" }?.optString("optionId")?.ifEmpty { null },
+            withdrawn = outcome?.optString("outcome") == "cancelled",
+        )
     }
 
     /** One upstream `ItemSummary`, leniently: unknown types and malformed fields are dropped. */
@@ -238,9 +244,11 @@ internal object RuntimeProtocol {
                 removed = (item.opt("removed") as? Number)?.toInt(),
                 awaitingPermission = item.optJSONObject("permission")?.optBoolean("pending") == true,
                 hasDetail = item.optBoolean("hasDetail"),
+                plan = (item.opt("plan") as? String)?.takeIf { it.isNotBlank() && item.optString("kind") == "switch_mode" },
+                permission = item.optJSONObject("permission")?.let(::permission),
             )
             "proposed_plan" -> item.optString("markdown").takeIf { it.isNotBlank() && item.optString("status") != "cleared" }
-                ?.let { TurnItem.ProposedPlan(id, it) }
+                ?.let { TurnItem.ProposedPlan(id, it, streaming = item.optString("status") == "delta") }
             "plan" -> item.optJSONArray("entries")?.objects()?.map { it.optString("content") to it.optString("status") }
                 ?.takeIf { it.isNotEmpty() }?.let { TurnItem.Checklist(id, it) }
             "subagent_task" -> {
@@ -298,6 +306,19 @@ internal object RuntimeProtocol {
             else -> null
         }
     }
+    /** A tool step's `permission` summary; options without an id or name are dropped. */
+    private fun permission(json: JSONObject): ToolPermission? {
+        val requestId = json.optString("requestId").ifEmpty { return null }
+        val options = json.optJSONArray("options")?.let { array ->
+            (0 until array.length()).mapNotNull { array.optJSONObject(it) }.mapNotNull { option ->
+                val optionId = option.optString("optionId").ifEmpty { return@mapNotNull null }
+                val name = option.optString("name").trim().ifEmpty { return@mapNotNull null }
+                PermissionOption(optionId, name, (option.opt("kind") as? String)?.takeIf { it.isNotBlank() })
+            }
+        }.orEmpty()
+        return ToolPermission(requestId, json.optBoolean("pending"), options)
+    }
+
     private fun attachments(items: List<JSONObject>) = items.flatMap { item ->
         when (item.optString("type")) {
             "image" -> listOfNotNull(item.optJSONObject("image"))

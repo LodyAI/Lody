@@ -274,6 +274,15 @@
     <string name="chat_step_fetching">Fetching</string>
     <string name="chat_step_failed">Failed</string>
     <string name="chat_step_awaiting">Awaiting approval</string>
+    <string name="chat_plan_title">Proposed Plan</string>
+    <string name="chat_plan_copy">Copy plan</string>
+    <string name="chat_permission_waiting">Waiting for your answer</string>
+    <string name="chat_permission_approved">Permission Approved</string>
+    <string name="chat_permission_denied">Permission Denied</string>
+    <string name="chat_permission_error_stale">This request is no longer valid</string>
+    <string name="chat_permission_error_answered">It was already answered elsewhere, and that answer stands</string>
+    <string name="chat_permission_error_option">This option is no longer valid</string>
+    <string name="chat_permission_error_send">Could not send. Try again.</string>
     <plurals name="chat_activity_commands">
         <item quantity="one">Ran %d command</item>
         <item quantity="other">Ran %d commands</item>

@@ -103,6 +103,12 @@ open class WebViewRuntime internal constructor(
             val value = ScheduleJson.checked(call("decideProposal", JSONArray().put(request), CommandDeadline.WRITE))
             RuntimeResult.ProposalDecided(value.optString("outcome"), value.optString("scheduleId").ifEmpty { null })
         }
+        is RuntimeCommand.RespondPermission -> {
+            val args = JSONArray().put(command.sessionId).put(command.entryId).put(command.itemId).put(command.requestId).put(command.optionId)
+            // Failures arrive in-band as `{error}` with the runtime's code, like proposal decisions.
+            val value = ScheduleJson.checked(call("respondPermission", args, CommandDeadline.WRITE))
+            RuntimeResult.PermissionAnswered(value.optString("state").ifEmpty { throw RuntimeException(runtimeFault("invalid_permission_reply")) })
+        }
         is RuntimeCommand.ShortcutBody -> RuntimeResult.Shortcut(call("shortcutBody", JSONArray().put(command.id), CommandDeadline.QUERY) as JSONObject)
         is RuntimeCommand.LocalProjects -> {
             val args = JSONArray().put(command.action).put(command.browserId)

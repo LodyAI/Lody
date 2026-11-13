@@ -87,6 +87,24 @@ class TurnLayoutTest {
         assertFalse("Nothing folds: the approval is never folded and the answer follows it", layout.folded)
     }
 
+    @Test fun plansMoveBeforeTheirApprovalAndAttachmentsFollow() {
+        val approval = TurnItem.Tool("4", "switch_mode", "Ready to code?", "pending",
+            permission = app.lody.android.runtime.ToolPermission("r", pending = true, options = emptyList()))
+        val file = TurnItem.File("2", "notes.md")
+        val items = listOf(text("1"), file, tool("3", "read"), approval, text("5"), TurnItem.ProposedPlan("6", "plan"))
+        val layout = TurnLayout.build("t", items, finished = false, showThoughts = false)
+        assertEquals(
+            listOf("t:content:1", "t:activity:3", "t:content:6", "t:content:4", "t:content:5", "t:content:2"),
+            layout.blocks.map { it.key },
+        )
+        assertTrue("The turn shows its plan as its own row", layout.separatePlan)
+        assertTrue("The approval still waits", layout.planAwaiting)
+        // Without a proposed plan the turn keeps its order, and the approval's own plan is the card.
+        val claude = TurnLayout.build("t", listOf(text("1"), file, approval.copy(plan = "plan")), finished = false, showThoughts = false)
+        assertEquals(listOf("t:content:1", "t:content:2", "t:content:4"), claude.blocks.map { it.key })
+        assertFalse(claude.separatePlan)
+    }
+
     @Test fun tasksLeaveTheTurnBlocksForTheirOwnPanel() {
         val task = TurnItem.Task("9", "Explore", "map the repo", "running")
         val layout = TurnLayout.build("t", listOf(tool("1"), text("2"), task), finished = true, showThoughts = false)

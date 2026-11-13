@@ -160,6 +160,8 @@ fun ChatTranscript(
     meId: String? = null,
     /** Decides an Agent's proposal; null where there is no runtime. */
     decideProposal: ProposalDecider? = null,
+    /** Answers a plan approval; null where there is no runtime or the session cannot take an answer. */
+    respondPermission: PermissionResponder? = null,
 ) {
     // Only an actual drag leaves follow mode. Programmatic positioning and IME layout
     // changes must not look like the reader scrolled away from the end.
@@ -271,6 +273,7 @@ fun ChatTranscript(
             transcriptRows(
                 entries, open, toggle, details, openTasks, openFiles, actions,
                 relatedSessions, navigateSession, onForgetPending, onRetryPending, retryablePendingIds, meId, decideProposal,
+                respondPermission,
             )
         }
         // A small stable end anchor avoids enormous scroll offsets and measuring the
@@ -329,6 +332,7 @@ private fun LazyListScope.transcriptRows(
     retryablePendingIds: Set<String>,
     meId: String?,
     decideProposal: ProposalDecider?,
+    respondPermission: PermissionResponder?,
 ) {
         entries.forEach { entry ->
             when (entry) {
@@ -354,9 +358,9 @@ private fun LazyListScope.transcriptRows(
                                 Modifier.animateItem().padding(top = LodySpacing.md),
                             ) { toggle(key, it) }
                         }
-                        if (expanded) turnBlocks(entry, layout.folding, open, toggle, details)
+                        if (expanded) turnBlocks(entry, layout.folding, open, toggle, details, respondPermission)
                     }
-                    turnBlocks(entry, layout.visible, open, toggle, details)
+                    turnBlocks(entry, layout.visible, open, toggle, details, respondPermission)
                     if (entry.working) {
                         val last = layout.blocks.lastOrNull()
                         val thinking = last is TurnLayout.Activity && last.items.lastOrNull() is TurnItem.Thought

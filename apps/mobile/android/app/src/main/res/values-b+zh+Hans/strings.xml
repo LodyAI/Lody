@@ -272,6 +272,15 @@
     <string name="chat_step_fetching">正在获取</string>
     <string name="chat_step_failed">失败</string>
     <string name="chat_step_awaiting">等待批准</string>
+    <string name="chat_plan_title">拟定计划</string>
+    <string name="chat_plan_copy">复制计划</string>
+    <string name="chat_permission_waiting">等待你的答复</string>
+    <string name="chat_permission_approved">已批准</string>
+    <string name="chat_permission_denied">已拒绝</string>
+    <string name="chat_permission_error_stale">这个请求已经失效</string>
+    <string name="chat_permission_error_answered">已经在别处作答，以那次为准</string>
+    <string name="chat_permission_error_option">选项已失效</string>
+    <string name="chat_permission_error_send">发送失败，请重试</string>
     <plurals name="chat_activity_commands">
         <item quantity="one">调用了 %d 个命令</item>
         <item quantity="other">调用了 %d 个命令</item>
