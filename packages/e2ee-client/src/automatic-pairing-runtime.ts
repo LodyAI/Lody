@@ -1,9 +1,4 @@
-import {
-  Clock,
-  Effect,
-  Result,
-  Semaphore,
-} from 'effect';
+import { Clock, Effect, Result, Semaphore } from 'effect';
 import { toHex } from './bytes';
 import {
   derivePairingKeys,
@@ -279,8 +274,7 @@ export function makeAutomaticPairingRuntime(options: {
     const live = new Set<string>();
     if (!closed && listeners.size > 0 && relay.subscribeRead)
       for (const value of requesting.values())
-        if (value.state._tag !== 'Terminal')
-          live.add(value.context.id);
+        if (value.state._tag !== 'Terminal') live.add(value.context.id);
     for (const [id, release] of readWatches)
       if (!live.has(id)) {
         readWatches.delete(id);
@@ -1186,7 +1180,8 @@ export function makeAutomaticPairingRuntime(options: {
             return yield* Effect.fail(refuse('pairing-tampered'));
           yield* value.gate.withPermit(
             Effect.gen(function* () {
-              if (yield* expiresApprover(value)) return yield* Effect.fail(refuse('pairing-expired'));
+              if (yield* expiresApprover(value))
+                return yield* Effect.fail(refuse('pairing-expired'));
               // A retry after a lost reply resumes the already-verified approval.
               if (value.state._tag === 'WaitingForCode') {
                 const waitingState = value.state;

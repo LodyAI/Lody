@@ -5,6 +5,7 @@ import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { getAgentRoleEmoji, type AgentMessageAuthor, type SessionId } from '@lody/shared';
+import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { Popover } from '@/ui/armed-overlays';
 import { AgentIcon, AGENT_BRAND_ICONS } from '@/components/icons/agent-icon';
 import { useSessionLinkNavigator } from './session-link-context';
@@ -34,11 +35,14 @@ const styles = stylex.create({
 /** Snapshot-only leaf: no Session, Provider or Role catalog subscriptions. */
 export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
   author,
+  onNavigateSession,
 }: {
   author: AgentMessageAuthor;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) {
   const { t } = useTranslation();
-  const navigate = useSessionLinkNavigator();
+  const contextNavigate = useSessionLinkNavigator();
+  const navigate = onNavigateSession ?? contextNavigate;
   const name = author.role?.name ?? author.name;
   const BrandIcon = author.brandId ? AGENT_BRAND_ICONS[author.brandId] : undefined;
   const unknownIcon = <span>{Array.from(author.name)[0] ?? '?'}</span>;
