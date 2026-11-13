@@ -20,6 +20,8 @@ final class InboxController: UIViewController {
   private var memberTask: Task<Void, Never>?
   private var observers: [NSObjectProtocol] = []
   private var renderedInput: (userId: String, workspaceId: String, catalog: SessionCatalog)?
+  /// Account/workspace whose catalog has loaded empty once; later resyncs or reconnects keep the guide.
+  private var onboardingSettledKey: String?
 
   init(source: SessionSource = .live) {
     self.source = source
@@ -226,13 +228,19 @@ final class InboxController: UIViewController {
     return state.loading ? .syncing : .live
   }
 
-  /// Web mobile Home's first-run guide: only where the empty placeholder would read
-  /// "no sessions yet" (signed in, plaintext, loaded, connected, not archived) and the
-  /// workspace has neither a computer nor a conversation. Search is excluded by the caller.
+  /// Web mobile Home's first-run guide: a signed-in plaintext workspace, outside Archived,
+  /// with neither a computer nor a conversation. Like web it waits only for the first
+  /// loaded, connected catalog of that account/workspace; a later foreground resync or
+  /// reconnect keeps it until a computer or conversation appears. Search is excluded by the caller.
   private func showsOnboarding(_ state: SessionListState) -> Bool {
-    guard !state.userId.isEmpty, !HomeArchive.shown, !state.loading, state.connected,
-      state.workspace?.resolvedMode == .plaintext else { return false }
-    return state.catalog.machineIds.isEmpty && state.catalog.sessions.isEmpty
+    let empty = state.catalog.machineIds.isEmpty && state.catalog.sessions.isEmpty
+    if !empty || state.key.isEmpty {
+      onboardingSettledKey = nil
+    } else if !state.loading, state.connected {
+      onboardingSettledKey = state.key
+    }
+    guard empty, !state.userId.isEmpty, !HomeArchive.shown, state.workspace?.resolvedMode == .plaintext else { return false }
+    return onboardingSettledKey == state.key
   }
 
   private func listPlaceholder(_ state: SessionListState) -> String {
