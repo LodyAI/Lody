@@ -36,16 +36,20 @@ vi.mock('../src/components/settings/account-setting', () => ({
   AccountSettingsComponent: (props: {
     encryptedTeamManagement?: boolean;
     onOpenEncryptionConsole?: () => void;
+    workspaceSecuritySlot?: import('react').ReactNode;
   }) => (
-    <p>
-      ordinary settings
-      {props.encryptedTeamManagement === false ? ' without team management' : ''}
-      {props.onOpenEncryptionConsole && (
-        <button type="button" onClick={props.onOpenEncryptionConsole}>
-          danger zone transfer
-        </button>
-      )}
-    </p>
+    <>
+      {props.workspaceSecuritySlot}
+      <p>
+        ordinary settings
+        {props.encryptedTeamManagement === false ? ' without team management' : ''}
+        {props.onOpenEncryptionConsole && (
+          <button type="button" onClick={props.onOpenEncryptionConsole}>
+            danger zone transfer
+          </button>
+        )}
+      </p>
+    </>
   ),
 }));
 describe('recovery vault settings', () => {

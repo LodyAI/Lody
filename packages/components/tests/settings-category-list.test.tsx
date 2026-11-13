@@ -332,6 +332,20 @@ describe('SettingsCategoryList', () => {
     });
   });
 
+  it('lists Machines in a workspace without other members', async () => {
+    await renderList();
+
+    await act(async () => {
+      getButton('Machines').click();
+    });
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/$workspaceName/settings/machines',
+      params: { workspaceName: 'acme' },
+      search: expect.any(Function),
+    });
+  });
+
   it.each(['ios', 'android'])('does not expose billing in the native %s app', async (platform) => {
     Object.defineProperty(window, 'Capacitor', {
       configurable: true,
