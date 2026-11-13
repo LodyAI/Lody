@@ -681,6 +681,10 @@
     <string name="settings_agent_load_failed">无法加载提供商，请刷新重试。</string>
     <string name="settings_agent_read_only">仅计算机所有者可管理提供商。</string>
     <string name="settings_agent_refresh">刷新</string>
+    <string name="settings_agent_refresh_models">刷新模型和模式</string>
+    <string name="settings_agent_refreshing">正在刷新…</string>
+    <string name="settings_agent_reading_model_options">正在读取 %1$s 的选项（%2$d/%3$d）</string>
+    <string name="settings_agent_refresh_done">模型和模式已刷新。</string>
     <string name="settings_agent_back">返回</string>
     <string name="settings_agent_loading">正在加载提供商…</string>
     <string name="settings_agent_add">添加提供商</string>

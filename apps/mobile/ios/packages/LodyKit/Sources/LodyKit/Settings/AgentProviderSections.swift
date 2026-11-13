@@ -71,7 +71,11 @@ enum AgentProviderSections {
 
   /// The selected computer's line, its providers (tap to open; long-press for actions) and, when
   /// the computer reports subscription windows, one usage bar per window. Adding lives in the bar's "+".
-  static func make(_ snapshot: AgentProviderSnapshot, selectedID: String?, busy: Bool, usage: [String: AgentUsage] = [:], now: Double = Date().timeIntervalSince1970 * 1000) -> [LodyListSection] {
+  /// `refreshing` names the provider whose capabilities are being refreshed and the progress
+  /// line shown in place of its subtitle.
+  static func make(_ snapshot: AgentProviderSnapshot, selectedID: String?, busy: Bool, usage: [String: AgentUsage] = [:],
+                   now: Double = Date().timeIntervalSince1970 * 1000,
+                   refreshing: (id: String, text: String)? = nil) -> [LodyListSection] {
     guard let machine = selected(snapshot, id: selectedID) else { return [] }
     var computers = LodyListSection()
     computers.id = "provider-machine"
@@ -111,6 +115,10 @@ enum AgentProviderSections {
       row.image = provider.cliType == "custom" ? "terminal" : "sparkles"
       row.imageAsset = LodyAgentIcon.asset(cliType: provider.cliType, agentType: provider.agentType) ?? ""
       row.subtitle = subtitle(provider, windows: windows[provider.id] ?? [])
+      if let refreshing, refreshing.id == provider.id {
+        row.subtitle = refreshing.text
+        row.wrapSubtitle = true
+      }
       row.action = true
       row.disclosure = true
       row.navigates = true

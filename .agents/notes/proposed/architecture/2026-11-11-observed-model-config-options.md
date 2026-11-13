@@ -74,6 +74,12 @@ before.
    is removed: Codex's declaration and recorded options cover every model, and a
    first render before any probe shows the static ladder without Max/Ultra.
 
+6. **Native mobile.** The shared mobile cloud runtime (iOS, mirrored into Android's
+   snapshot) folds the records into its per-model `reasoningEfforts` and `fastModes`
+   below declarations and `modelReasoningEfforts`. Settings › Agents on both
+   platforms refreshes through `agentProviderProbe` with `readModelOptions` and shows
+   each `agentProviderRefreshProgress` model; Save and test stays quick.
+
 ## Alternatives
 
 - **Probe on every model switch in a live session, or keep a query session for the

@@ -52,6 +52,11 @@ E2EE 远程机器的刷新行为不变。
    Role 编辑器和 CLI/MCP 校验（`getAcpModelEffortChoices`、`getAcpModelFastSupport`、
    `withAcpConfigOptionsForModel`）都使用组合后的列表；没有记录时行为不变。Codex 的 Max/Ultra 手写档位表已删除：Codex 的声明和记录覆盖所有模型；任何探测之前的首屏显示不含 Max/Ultra 的静态档位。
 
+6. **原生移动端。** 两端共用的移动端 cloud runtime（iOS 源码，Android 快照镜像）把这些记录并入按模型的
+   `reasoningEfforts` 和 `fastModes`，优先级低于声明和 `modelReasoningEfforts`。两个平台的设置 › Agent 都通过
+   带 `readModelOptions` 的 `agentProviderProbe` 刷新，并显示每条 `agentProviderRefreshProgress` 的模型；
+   「保存并测试」保持快速。
+
 ## 备选方案
 
 - **运行中的会话每次切模型都探测，或给新建会话页常驻一个问询会话**：评审本设计后放弃；它们

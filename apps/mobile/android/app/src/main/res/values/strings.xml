@@ -691,6 +691,10 @@
     <string name="settings_agent_load_failed">Unable to load providers. Try refreshing.</string>
     <string name="settings_agent_read_only">Only the machine owner can manage providers.</string>
     <string name="settings_agent_refresh">Refresh</string>
+    <string name="settings_agent_refresh_models">Refresh models and modes</string>
+    <string name="settings_agent_refreshing">Refreshing…</string>
+    <string name="settings_agent_reading_model_options">Reading options for %1$s (%2$d/%3$d)</string>
+    <string name="settings_agent_refresh_done">Models and modes refreshed.</string>
     <string name="settings_agent_back">Back</string>
     <string name="settings_agent_loading">Loading providers…</string>
     <string name="settings_agent_add">Add provider</string>

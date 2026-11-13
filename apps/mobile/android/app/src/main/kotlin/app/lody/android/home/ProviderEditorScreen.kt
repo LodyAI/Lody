@@ -46,6 +46,12 @@ internal fun ProviderEditorScreen(editor: ProviderEditor, catalog: List<Provider
     var detail by remember(editor.id) { mutableStateOf<ProviderDetail?>(null) }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+    var refreshProgress by remember { mutableStateOf<RuntimeEvent.ProviderRefreshProgress?>(null) }
+    var refreshResult by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(service, scope, editor.id) {
+        service.refreshProgress(scope).collect { if (refreshing && it.id == editor.id && it.machineId == machineId) refreshProgress = it }
+    }
     var capabilities by remember { mutableStateOf(ProviderCapabilities()) }
     var description by remember { mutableStateOf("") }
     var envPatch by remember(editor.id) { mutableStateOf<Map<String, String?>>(emptyMap()) }
@@ -114,6 +120,20 @@ internal fun ProviderEditorScreen(editor: ProviderEditor, catalog: List<Provider
                     catch (_: Exception) { failed = true }
                     finally { loading = false }
                 } }) { Text(stringResource(R.string.settings_agent_test)) }
+                TextButton(enabled = editable && !refreshing, onClick = { tasks.launch {
+                    refreshing = true; refreshProgress = null; refreshResult = null
+                    refreshResult = try {
+                        val result = service.refreshModels(scope, machineId, editor.id)
+                        capabilities = result.capabilities
+                        when { result.authRequired -> R.string.settings_agent_auth_required; result.success -> R.string.settings_agent_refresh_done; else -> R.string.settings_agent_write_unknown }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { R.string.settings_agent_write_unknown }
+                    finally { refreshing = false; refreshProgress = null }
+                } }) { Text(stringResource(R.string.settings_agent_refresh_models)) }
+                if (refreshing) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+                    CircularProgressIndicator(Modifier.size(LodyIconSize.sm), color = LodyTheme.colors.textSecondary)
+                    Text(refreshLine(refreshProgress), style = LodyTheme.typography.footnote, color = LodyTheme.colors.textSecondary)
+                } else refreshResult?.let { Text(stringResource(it), style = LodyTheme.typography.footnote, color = LodyTheme.colors.textSecondary) }
                 ProviderAuthentication(service, scope, machineId, editor.id, detail!!, editable)
 
             }

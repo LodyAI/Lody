@@ -112,7 +112,17 @@ Creation reads healthy machine replicas independently: another machine's failed
 sync does not block its agents or session creation. `creationOptionsChanged`
 wakes both native pickers even before the whole catalog can report synced.
 Matching `acpModelCapability` source versions supply per-model effort/Fast
-controls; mismatched declarations never overwrite current capabilities.
+controls; mismatched declarations never overwrite current capabilities. Below
+them, each model's own option list recorded by a desktop or mobile model refresh
+(`acpModelConfigOptions` pointers to shared `acpModelConfigOptionsShape` lists)
+supplies that model's effort ladder and Fast toggle; `modelReasoningEfforts`
+still wins over a record, and an unrecorded model keeps the snapshot.
+
+Settings › Agents refreshes a provider (row menu or the editor's Refresh models
+and modes) through `agentProviderProbe` with `readModelOptions`. The runtime sends
+the field only to machines advertising `acpModelOptionsRead`, waits up to twenty
+minutes, and emits `agentProviderRefreshProgress` naming each model. Save and test
+remains the quick probe.
 
 Agent discovery merges live `agent-*` repo metadata with machine Flock configs,
 matching the daemon. Machine configs win by machine/config identity; deleted

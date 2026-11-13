@@ -127,6 +127,92 @@ test('creation uses matching per-model declarations instead of the probed model 
   assert.equal(stale.fastModes, undefined);
 });
 
+test('creation follows each model’s recorded options from a refresh that read every model', () => {
+  const { meta, machine, state } = fixture();
+  const effort = (values) => ({
+    id: 'thought_level',
+    category: 'thought_level',
+    name: 'Thinking',
+    type: 'select',
+    currentValue: values[0],
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const fast = {
+    id: 'fast',
+    name: 'Fast',
+    type: 'boolean',
+    currentValue: false,
+    options: [],
+  };
+  // Dimcode probed on mimo: its snapshot ladder alone would serve every model.
+  machine.set(['acpCapability', 'dim'], {
+    cliType: 'builtin',
+    agentType: 'dimcode',
+    sourceVersion: 'v1',
+    fetchedAt: 2,
+    models: [],
+    configOptions: [
+      {
+        id: 'model',
+        category: 'model',
+        name: 'Model',
+        type: 'select',
+        currentValue: 'mimo',
+        options: ['mimo', 'flash', 'qwen', 'plain'].map((value) => ({
+          value,
+          name: value,
+        })),
+      },
+      effort(['auto', 'none']),
+    ],
+  });
+  machine.set(['acpModelConfigOptionsShape', 'dim', 's1'], {
+    version: 1,
+    configOptions: [effort(['auto', 'low', 'max']), fast],
+  });
+  machine.set(['acpModelConfigOptionsShape', 'dim', 's2'], {
+    version: 1,
+    configOptions: [],
+  });
+  machine.set(['acpModelConfigOptions', 'dim', 'flash'], {
+    version: 1,
+    sourceVersion: 'v0',
+    shape: 's1',
+  });
+  machine.set(['acpModelConfigOptions', 'dim', 'plain'], {
+    version: 1,
+    sourceVersion: 'v1',
+    shape: 's2',
+  });
+  // A pointer whose shape has not synced yet stays unknown.
+  machine.set(['acpModelConfigOptions', 'dim', 'qwen'], {
+    version: 1,
+    sourceVersion: 'v1',
+    shape: 'missing',
+  });
+
+  const result = creationOptions(undefined, meta, state.machineReplicas)
+    .capabilities[0];
+  assert.deepEqual(result.reasoningEfforts.flash, ['auto', 'low', 'max']);
+  assert.deepEqual(result.reasoningEfforts.plain, []);
+  assert.equal(result.reasoningEfforts.qwen, undefined);
+  assert.deepEqual(result.fastModes, { flash: true, plain: false });
+  // Fast exists only on a recorded model, so the control is offered and
+  // hidden per model through fastModes.
+  assert.ok(result.configOptions.some((option) => option.id === 'fast'));
+
+  // A declaration still decides over a recorded list.
+  machine.set(['acpModelCapability', 'dim'], {
+    version: 1,
+    sourceVersion: 'v1',
+    models: { flash: { effortValues: ['high'], fastMode: false } },
+  });
+  const declared = creationOptions(undefined, meta, state.machineReplicas)
+    .capabilities[0];
+  assert.deepEqual(declared.reasoningEfforts.flash, ['high']);
+  assert.equal(declared.fastModes.flash, false);
+});
+
 test('creating on a healthy machine is not rejected by an unrelated sync failure', async () => {
   const { state, meta } = fixture(),
     handlers = new Map();

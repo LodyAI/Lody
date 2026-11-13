@@ -28283,6 +28283,70 @@
         }
       }
     },
+    "settings.providers.refreshModels": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh models and modes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新模型和模式"
+          }
+        }
+      }
+    },
+    "settings.providers.refreshing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refreshing…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在刷新…"
+          }
+        }
+      }
+    },
+    "settings.providers.readingModelOptions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading options for %1$@ (%2$lld/%3$lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在读取 %1$@ 的选项（%2$lld/%3$lld）"
+          }
+        }
+      }
+    },
+    "settings.providers.refreshDone": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Models and modes refreshed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模型和模式已刷新"
+          }
+        }
+      }
+    },
     "settings.providers.retry": {
       "localizations": {
         "en": {

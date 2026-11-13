@@ -50,6 +50,8 @@ struct ProviderTarget: Encodable, Sendable {
   var workspaceId: String
   var machineId: String
   var id: String
+  /// Switch through every model to record each one's options (Refresh models and modes).
+  var readModelOptions: Bool?
 }
 
 struct ProviderProbe: Decodable, Sendable {
@@ -129,4 +131,5 @@ extension Notification.Name {
   static let lodyProvidersChanged = Notification.Name("lody.providers-changed")
   static let lodyProviderAuthChanged = Notification.Name("lody.provider-auth-changed")
   static let lodyProviderOperationProgress = Notification.Name("lody.provider-operation-progress")
+  static let lodyProviderRefreshProgress = Notification.Name("lody.provider-refresh-progress")
 }

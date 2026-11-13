@@ -119,5 +119,16 @@
       "src/runtime/index.ts"
     ],
     "note": "The meta watcher keeps the replica object while its Flock is unchanged, so in-flight writes (Agent Role saves) no longer read a routine poll as a workspace change. Mirrored verbatim from the iOS runtime source in the same change."
+  },
+  "perModelConfigOptions": {
+    "files": [
+      "contract/runtime-contract.json",
+      "src/contract/methods.ts",
+      "src/contract/provider-details.ts",
+      "src/runtime/create-session.ts",
+      "src/runtime/handlers/settings.ts",
+      "src/runtime/provider-detail.ts"
+    ],
+    "note": "Creation options read desktop's per-model option records (acpModelConfigOptions pointers and their shared acpModelConfigOptionsShape lists) for effort and Fast after declarations and modelReasoningEfforts. agentProviderProbe accepts readModelOptions, forwards it only to machines advertising acpModelOptionsRead, and emits agentProviderRefreshProgress for each model it reads."
   }
 }

@@ -297,25 +297,69 @@ export async function providerDetail(
     unavailableActions,
   } as z.infer<typeof AgentProviderDetail>;
 }
+/** Upper bound for a refresh that switches through every model. */
+export const MODEL_OPTIONS_READ_TIMEOUT_MS = 1_200_000;
+
+export type ModelOptionsProgress = {
+  modelId: string;
+  modelName: string;
+  index: number;
+  total: number;
+};
+
 export async function probeProvider(
-  args: ProviderScope,
+  args: ProviderScope & { readModelOptions?: boolean },
   grant: ProviderGrant,
   signal: AbortSignal,
   check: () => void,
+  onModelOptionsProgress?: (progress: ModelOptionsProgress) => void,
 ) {
-  const { config, pending } = await readProvider(args, grant, signal, check);
+  const { config, pending, protocol } = await readProvider(
+    args,
+    grant,
+    signal,
+    check,
+  );
   if (pending) throw new Error('provider_setup_busy');
+  // The machine parses this request strictly; only a daemon that advertises
+  // `acpModelOptionsRead` receives the field.
+  const readModels =
+    args.readModelOptions === true && protocol.acpModelOptionsRead === 1;
   let reply;
   try {
     reply = await machineRpc(
       args.workspaceId,
       args.machineId,
       'machine/acp-capabilities-refresh',
-      { configId: args.id, force: true },
+      {
+        configId: args.id,
+        force: true,
+        ...(readModels ? { readModelOptions: true } : {}),
+      },
       grant,
       signal,
-      undefined,
-      120000,
+      readModels
+        ? (progress) => {
+            if (
+              progress.status !== 'reading-model-options' ||
+              progress.configId !== args.id ||
+              typeof progress.modelId !== 'string' ||
+              typeof progress.modelIndex !== 'number' ||
+              typeof progress.modelCount !== 'number'
+            )
+              return;
+            onModelOptionsProgress?.({
+              modelId: progress.modelId,
+              modelName:
+                typeof progress.modelName === 'string'
+                  ? progress.modelName
+                  : progress.modelId,
+              index: progress.modelIndex,
+              total: progress.modelCount,
+            });
+          }
+        : undefined,
+      readModels ? MODEL_OPTIONS_READ_TIMEOUT_MS : 120000,
     );
   } catch {
     throw new Error('provider_refresh_unknown');

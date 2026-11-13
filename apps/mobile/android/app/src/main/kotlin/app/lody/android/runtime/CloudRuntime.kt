@@ -19,7 +19,8 @@ data class RuntimeScope(val accountId: String, val workspaceId: String) {
 }
 sealed interface RuntimeCommand {
     data class ProviderDetail(val machineId: String, val id: String) : RuntimeCommand
-    data class ProviderProbe(val machineId: String, val id: String) : RuntimeCommand
+    /** [readModelOptions] switches the agent through every model (Refresh models and modes). */
+    data class ProviderProbe(val machineId: String, val id: String, val readModelOptions: Boolean = false) : RuntimeCommand
     data class ProviderOperation(val machineId: String, val id: String?, val action: String, val cliType: String? = null, val agentType: String? = null) : RuntimeCommand
     data class ProviderAuth(val request: ProviderAuthRequest) : RuntimeCommand
     data class AgentProviders(val action: ProviderAction) : RuntimeCommand
@@ -366,6 +367,8 @@ data class SessionSnapshot(
 sealed interface RuntimeEvent {
     data class ProvidersChanged(val machineId: String) : RuntimeEvent
     data class ProviderProgress(val machineId: String, val id: String, val status: String, val percent: Float?) : RuntimeEvent
+    /** A refresh is reading [modelName]'s options, [index] of [total] (1-based). */
+    data class ProviderRefreshProgress(val machineId: String, val id: String, val modelName: String, val index: Int, val total: Int) : RuntimeEvent
     data class CreationChanged(val key: String = "") : RuntimeEvent
     data class SessionUpdated(val snapshot: SessionSnapshot) : RuntimeEvent
     data class CatalogUpdated(val snapshot: CatalogSnapshot) : RuntimeEvent

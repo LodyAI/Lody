@@ -2,6 +2,7 @@ import {
   AgentProviderOperationParams,
   AgentProviderOperationResult,
   AgentProviderOperationProgress,
+  AgentProviderRefreshProgress,
   AgentProviderDetailParams,
   AgentProviderDetail,
   AgentProviderProbeParams,
@@ -203,7 +204,9 @@ export const runtimeCalls = {
   agentProviderProbe: {
     params: AgentProviderProbeParams,
     result: AgentProviderProbeResult,
-    timeoutMs: 135000,
+    // Backstop for a refresh that reads every model; a plain probe answers
+    // within the runtime's own 125 s budget.
+    timeoutMs: 1_215_000,
   },
   agentProviderAuth: {
     params: AgentProviderAuthParams,
@@ -418,6 +421,7 @@ export const hostCalls = {
 export const runtimeEvents = {
   agentProviderAuthChanged: AgentProviderAuthState,
   agentProviderOperationProgress: AgentProviderOperationProgress,
+  agentProviderRefreshProgress: AgentProviderRefreshProgress,
   agentProvidersChanged: z
     .object({ machineId: z.string() })
     .meta({ id: 'AgentProvidersChangedEvent' }),

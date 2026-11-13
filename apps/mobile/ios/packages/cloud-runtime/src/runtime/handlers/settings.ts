@@ -10,6 +10,7 @@ import { agentProviders } from '../provider-settings';
 import {
   providerDetail,
   probeProvider,
+  MODEL_OPTIONS_READ_TIMEOUT_MS,
   readProvider,
 } from '../provider-detail';
 import { createProviderRpc } from '../provider-rpc';
@@ -198,7 +199,20 @@ export function registerSettings(ctx: RuntimeContext) {
       !state.presence.onlineMachineIds.includes(args.machineId)
     )
       throw new Error('machine_unavailable');
-    return probeProvider(args, scopedGrant, AbortSignal.timeout(125000), check);
+    return probeProvider(
+      args,
+      scopedGrant,
+      AbortSignal.timeout(
+        args.readModelOptions ? MODEL_OPTIONS_READ_TIMEOUT_MS + 5000 : 125000,
+      ),
+      check,
+      (progress) =>
+        channel.emit('agentProviderRefreshProgress', {
+          machineId: args.machineId,
+          id: args.id,
+          ...progress,
+        }),
+    );
   });
   channel.handle('agentProviders', async (args) => {
     const { check, scopedGrant } = providerScope(args);

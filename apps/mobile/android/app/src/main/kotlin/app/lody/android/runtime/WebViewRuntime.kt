@@ -34,7 +34,9 @@ open class WebViewRuntime internal constructor(
     }
     override suspend fun execute(command: RuntimeCommand): RuntimeResult = when (command) {
         is RuntimeCommand.ProviderDetail -> RuntimeResult.ProviderDetail(ProviderDetailsJson.detail(call("agentProviderDetail", JSONArray().put(ProviderDetailsJson.target(command.machineId, command.id)), CommandDeadline.QUERY) as JSONObject))
-        is RuntimeCommand.ProviderProbe -> RuntimeResult.ProviderProbe(ProviderDetailsJson.probe(call("agentProviderProbe", JSONArray().put(ProviderDetailsJson.target(command.machineId, command.id)), CommandDeadline.PROVIDER_PROBE) as JSONObject))
+        is RuntimeCommand.ProviderProbe -> RuntimeResult.ProviderProbe(ProviderDetailsJson.probe(call("agentProviderProbe",
+            JSONArray().put(ProviderDetailsJson.target(command.machineId, command.id, command.readModelOptions)),
+            if (command.readModelOptions) CommandDeadline.PROVIDER_REFRESH else CommandDeadline.PROVIDER_PROBE) as JSONObject))
         is RuntimeCommand.ProviderOperation -> RuntimeResult.ProviderOperation(ProviderDetailsJson.operation(call("agentProviderOperation", JSONArray().put(ProviderDetailsJson.operationParams(command)), CommandDeadline.PROVIDER_OPERATION) as JSONObject))
         is RuntimeCommand.ProviderAuth -> RuntimeResult.ProviderAuth(ProviderDetailsJson.auth(call("agentProviderAuth", JSONArray().put(ProviderDetailsJson.authRequest(command.request)), CommandDeadline.PROVIDER_AUTH) as JSONObject))
         is RuntimeCommand.AgentProviders -> RuntimeResult.AgentProviders(AgentProviderJson.result(call("agentProviders", JSONArray().put(AgentProviderJson.request(command.action)), CommandDeadline.PROVIDER_PROBE) as JSONObject))
