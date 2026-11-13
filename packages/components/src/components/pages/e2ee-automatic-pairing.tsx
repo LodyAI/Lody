@@ -17,6 +17,8 @@ import type {
   E2eeWorkspaceRuntime,
 } from '@lody/platform';
 import { Dialog } from '@/ui/dialog';
+import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { WINDOW_CAPTION_CLEAR_TOP, WindowDragStrip } from '@/ui/window-drag-region';
 import { Drawer } from '@lody/ui/drawer';
 import { E2eeAccountPairingRequest, failureKey, localCodeError } from './e2ee-account-pairing';
 import {
@@ -123,6 +125,29 @@ const ComparisonCode = ({ code, hint }: { code: string; hint: string }) => {
     </div>
   );
 };
+
+/**
+ * Full-window pairing surface. In a desktop window its top row belongs to the
+ * window chrome (macOS traffic lights or Windows caption buttons), so the back
+ * button starts below that row and the row stays draggable.
+ */
+function PairingPage({ children }: { children: ReactNode }) {
+  const fullscreen = useElectronFullscreen();
+  const clearTrafficLights = isMacOSElectronRenderer() && !fullscreen;
+  return (
+    <main
+      data-e2ee-pairing-surface=""
+      className="relative h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))]"
+      style={{
+        paddingTop: clearTrafficLights ? '2.75rem' : `max(1rem, ${WINDOW_CAPTION_CLEAR_TOP})`,
+      }}
+    >
+      <WindowDragStrip position="fixed" />
+      {children}
+    </main>
+  );
+}
+
 /** New native device: open once, retain its request, then progress without manual checks. */
 export function E2eeAutomaticPairingPage({
   runtime,
@@ -519,10 +544,7 @@ export function E2eeAutomaticPairingPage({
   };
   if (!canStart)
     return (
-      <main
-        data-e2ee-pairing-surface=""
-        className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
-      >
+      <PairingPage>
         <Button
           variant="ghost"
           onClick={() => {
@@ -541,7 +563,7 @@ export function E2eeAutomaticPairingPage({
           onJoined={onJoined}
           onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })}
         />
-      </main>
+      </PairingPage>
     );
   const formatTime = (value: number) =>
     new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
@@ -574,10 +596,7 @@ export function E2eeAutomaticPairingPage({
       </Button>
     );
   return (
-    <main
-      data-e2ee-pairing-surface=""
-      className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
-    >
+    <PairingPage>
       <Button
         variant="ghost"
         onClick={() => {
@@ -844,7 +863,7 @@ export function E2eeAutomaticPairingPage({
           </div>
         )}
       </section>
-    </main>
+    </PairingPage>
   );
 }
 
@@ -1407,7 +1426,9 @@ export function E2eeAutomaticPairingInbox({
                     {t('e2ee.auto.notMine')}
                   </Button>
                   <Button
-                    className="flex-1"
+                    // Grow only beside "not mine": in the stacked phone layout a
+                    // zero flex-basis would override the button height and crush it.
+                    className="sm:flex-1"
                     data-testid="e2ee-approval-authorize"
                     disabled={
                       Boolean(busy) ||
