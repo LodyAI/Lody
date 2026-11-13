@@ -32,30 +32,9 @@ import { LinkedAccountsList } from '../settings/linked-accounts-list';
 import { InviteMemberDialog, type InviteMemberRole } from '../settings/invite-member-dialog';
 import type { AccountSettingsPureProps } from '../settings/account-setting-pure';
 import { useMobileSettingsFold } from './mobile-settings-fold-context';
+import { describeCliApiKey } from '../settings/cli-api-key-display';
 
-function formatCliApiKeyTimestamp(
-  value: number | null
-): { label: string; dateTime: string } | null {
-  if (value === null) {
-    return null;
-  }
-
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) {
-    return null;
-  }
-
-  return {
-    label: new Intl.DateTimeFormat(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date),
-    dateTime: date.toISOString(),
-  };
-}
+const EMPTY_MACHINE_NAMES: ReadonlyMap<string, string> = new Map();
 
 export function MobileAccountSettings({
   surface = 'account',
@@ -97,6 +76,8 @@ export function MobileAccountSettings({
   onSetupPassword,
   canGenerateCliApiKey = false,
   cliApiKeys = [],
+  cliApiKeyMachineNames = EMPTY_MACHINE_NAMES,
+  currentMachineId = null,
   isLoadingCliApiKeys = false,
   isCreatingCliApiKey = false,
   hasGeneratedCliApiKey = false,
@@ -106,7 +87,7 @@ export function MobileAccountSettings({
   onClearGeneratedCliApiKey,
   onRevokeCliApiKey,
 }: AccountSettingsPureProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isWorkspaceSurface = surface === 'workspace';
   const settingsFold = useMobileSettingsFold();
   const fold = settingsFold;
@@ -136,6 +117,14 @@ export function MobileAccountSettings({
   const [cliApiKeyDialogOpen, setCliApiKeyDialogOpen] = useState(false);
   const [cliApiKeyNote, setCliApiKeyNote] = useState('');
   const [cliApiKeyToRevoke, setCliApiKeyToRevoke] = useState<CliApiKeyRecord | null>(null);
+  const describeApiKey = (apiKey: CliApiKeyRecord) =>
+    describeCliApiKey(apiKey, {
+      machineNamesById: cliApiKeyMachineNames,
+      currentMachineId,
+      language: i18n.language,
+      t,
+    });
+  const cliApiKeyToRevokeDisplay = cliApiKeyToRevoke ? describeApiKey(cliApiKeyToRevoke) : null;
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   const [userNameDraft, setUserNameDraft] = useState(currentUser?.name ?? '');
@@ -738,14 +727,10 @@ export function MobileAccountSettings({
                 </div>
               ) : (
                 cliApiKeys.map((apiKey, index) => {
-                  const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt);
-                  const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest);
-                  const sourceLabel =
-                    apiKey.source === 'auto'
-                      ? t('settings.account.cliAuth.sourceAuto')
-                      : apiKey.source === 'manual'
-                        ? t('settings.account.cliAuth.sourceManual')
-                        : null;
+                  const display = describeApiKey(apiKey);
+                  const details = [display.lifetime, display.createdAt, display.lastUsed].filter(
+                    Boolean
+                  );
 
                   return (
                     <div
@@ -757,29 +742,20 @@ export function MobileAccountSettings({
                     >
                       <div className="min-w-0 space-y-1">
                         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                          <p className="truncate text-[0.95rem] font-medium">
-                            {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
-                          </p>
-                          {sourceLabel && <Badge>{sourceLabel}</Badge>}
-                          {createdAt && (
-                            <time
-                              dateTime={createdAt.dateTime}
-                              className="shrink-0 text-[0.72rem] text-muted-foreground"
-                            >
-                              {createdAt.label}
-                            </time>
+                          <p className="truncate text-[0.95rem] font-medium">{display.title}</p>
+                          {display.isCurrentMachine && (
+                            <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
                           )}
+                          {display.sourceLabel && <Badge>{display.sourceLabel}</Badge>}
                         </div>
-                        {(apiKey.keyPreview || lastRequest) && (
+                        {(apiKey.keyPreview || details.length > 0) && (
                           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[0.72rem] text-muted-foreground">
                             {apiKey.keyPreview && (
                               <span className="font-mono">{apiKey.keyPreview}</span>
                             )}
-                            {lastRequest && (
-                              <span>
-                                {t('settings.account.cliAuth.lastUsed', { at: lastRequest.label })}
-                              </span>
-                            )}
+                            {details.map((detail) => (
+                              <span key={detail}>{detail}</span>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -961,8 +937,11 @@ export function MobileAccountSettings({
               </AlertDialog.Title>
               <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
-                  note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
+                  note: cliApiKeyToRevokeDisplay?.title ?? '',
                 })}
+                {cliApiKeyToRevokeDisplay?.isCurrentMachine
+                  ? ` ${t('settings.account.cliAuth.revokeCurrentMachineWarning')}`
+                  : null}
               </AlertDialog.Description>
             </AlertDialog.Header>
             <AlertDialog.Footer>

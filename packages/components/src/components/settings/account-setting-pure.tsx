@@ -27,8 +27,9 @@ import { LinkedAccountsList, type LinkedAccountInfo } from './linked-accounts-li
 import { MobileAccountSettings } from '@/components/mobile/mobile-account-settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { UserAvatar } from '@/components/user-avatar';
-import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { settingsSurface } from './surface';
+import { describeCliApiKey } from './cli-api-key-display';
+import { Badge } from '@lody/ui/badge';
 
 const styles = stylex.create({
   loading: {
@@ -63,6 +64,8 @@ const styles = stylex.create({
   glyph: { width: '100%', height: '100%' },
 
   noteLoading: { display: 'flex', alignItems: 'center', gap: space[2] },
+  /** A token's "This computer" badge beside its Revoke answer. */
+  tokenControls: { display: 'inline-flex', alignItems: 'center', gap: space[2] },
 
   /** A dialog's body between its header and its answers. */
   dialogBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -72,24 +75,7 @@ const styles = stylex.create({
   alignSelfStart: { alignSelf: 'flex-start' },
 });
 
-function formatCliApiKeyTimestamp(value: number | null, language: string): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) {
-    return null;
-  }
-
-  return new Intl.DateTimeFormat(toIntlLocaleOrEn(language), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
+const EMPTY_MACHINE_NAMES: ReadonlyMap<string, string> = new Map();
 
 export interface AccountMember {
   id: string;
@@ -179,6 +165,10 @@ export interface AccountSettingsPureProps {
   onSetupPassword?: () => Promise<void>;
   canGenerateCliApiKey?: boolean;
   cliApiKeys?: CliApiKeyRecord[];
+  /** Machine id → display name, to say which machine each token signs in. */
+  cliApiKeyMachineNames?: ReadonlyMap<string, string>;
+  /** The machine this page runs on, if a local runtime is reachable. */
+  currentMachineId?: string | null;
   isLoadingCliApiKeys?: boolean;
   isCreatingCliApiKey?: boolean;
   hasGeneratedCliApiKey?: boolean;
@@ -232,6 +222,8 @@ export function AccountSettingsPure({
   onSetupPassword,
   canGenerateCliApiKey = false,
   cliApiKeys = [],
+  cliApiKeyMachineNames = EMPTY_MACHINE_NAMES,
+  currentMachineId = null,
   isLoadingCliApiKeys = false,
   isCreatingCliApiKey = false,
   hasGeneratedCliApiKey = false,
@@ -268,6 +260,14 @@ export function AccountSettingsPure({
   const [cliApiKeyDialogOpen, setCliApiKeyDialogOpen] = useState(false);
   const [cliApiKeyNote, setCliApiKeyNote] = useState('');
   const [cliApiKeyToRevoke, setCliApiKeyToRevoke] = useState<CliApiKeyRecord | null>(null);
+  const describeApiKey = (apiKey: CliApiKeyRecord) =>
+    describeCliApiKey(apiKey, {
+      machineNamesById: cliApiKeyMachineNames,
+      currentMachineId,
+      language: i18n.language,
+      t,
+    });
+  const cliApiKeyToRevokeDisplay = cliApiKeyToRevoke ? describeApiKey(cliApiKeyToRevoke) : null;
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   // Profile: user display-name inline edit (mirrors the workspace name pattern).
@@ -535,6 +535,8 @@ export function AccountSettingsPure({
         onSetupPassword={onSetupPassword}
         canGenerateCliApiKey={canGenerateCliApiKey}
         cliApiKeys={cliApiKeys}
+        cliApiKeyMachineNames={cliApiKeyMachineNames}
+        currentMachineId={currentMachineId}
         isLoadingCliApiKeys={isLoadingCliApiKeys}
         isCreatingCliApiKey={isCreatingCliApiKey}
         hasGeneratedCliApiKey={hasGeneratedCliApiKey}
@@ -771,8 +773,11 @@ export function AccountSettingsPure({
               </AlertDialog.Title>
               <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
-                  note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
+                  note: cliApiKeyToRevokeDisplay?.title ?? '',
                 })}
+                {cliApiKeyToRevokeDisplay?.isCurrentMachine
+                  ? ` ${t('settings.account.cliAuth.revokeCurrentMachineWarning')}`
+                  : null}
               </AlertDialog.Description>
             </AlertDialog.Header>
             <AlertDialog.Footer>
@@ -959,39 +964,35 @@ export function AccountSettingsPure({
             </p>
           ) : (
             cliApiKeys.map((apiKey) => {
-              const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt, i18n.language);
-              const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest, i18n.language);
-              const sourceLabel =
-                apiKey.source === 'auto'
-                  ? t('settings.account.cliAuth.sourceAuto')
-                  : apiKey.source === 'manual'
-                    ? t('settings.account.cliAuth.sourceManual')
-                    : null;
-
+              const display = describeApiKey(apiKey);
               return (
                 <CompactRow
                   key={apiKey.id}
-                  label={apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
+                  label={display.title}
                   helper={[
                     apiKey.keyPreview,
-                    sourceLabel,
-                    createdAt,
-                    lastRequest
-                      ? t('settings.account.cliAuth.lastUsed', { at: lastRequest })
-                      : null,
+                    display.sourceLabel,
+                    display.lifetime,
+                    display.createdAt,
+                    display.lastUsed,
                   ]
                     .filter(Boolean)
                     .join(' · ')}
                 >
-                  <Button
-                    variant="secondary"
-                    size="small"
-                    onClick={() => setCliApiKeyToRevoke(apiKey)}
-                    disabled={revokingCliApiKeyId === apiKey.id}
-                  >
-                    {revokingCliApiKeyId === apiKey.id ? <Spinner size="small" /> : null}
-                    {t('settings.account.cliAuth.revokeButton')}
-                  </Button>
+                  <span {...stylex.props(styles.tokenControls)}>
+                    {display.isCurrentMachine ? (
+                      <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+                    ) : null}
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      onClick={() => setCliApiKeyToRevoke(apiKey)}
+                      disabled={revokingCliApiKeyId === apiKey.id}
+                    >
+                      {revokingCliApiKeyId === apiKey.id ? <Spinner size="small" /> : null}
+                      {t('settings.account.cliAuth.revokeButton')}
+                    </Button>
+                  </span>
                 </CompactRow>
               );
             })

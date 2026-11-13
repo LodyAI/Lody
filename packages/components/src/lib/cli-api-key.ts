@@ -18,6 +18,7 @@ const CliApiKeyRecordSchema = z
     lastRequest: z.number().nullable(),
     expiresAt: z.number().nullable(),
     enabled: z.boolean(),
+    machineIds: z.array(z.string()).optional(),
   })
   .passthrough();
 
