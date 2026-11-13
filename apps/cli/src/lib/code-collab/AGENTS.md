@@ -81,6 +81,10 @@ File-by-file responsibilities: [README.md](README.md).
   and 8 MiB of cached raw snapshots per request by default. Over-limit paths stay
   deferred for single-file loading. Never collect unbounded candidates or
   reconstruct deferred paths twice.
+- Git-backed current diffs must check file state against the same resolved repository and
+  pinned base before declaring equal text or binary placeholders unchanged. Content
+  equality does not rule out mode changes. Comparison failures stay retryable per file;
+  historical turn diffs use only stored evidence.
 - File RPCs convert absolute paths to workspace-relative paths only inside the
   target's registered session roots. Reject other paths as `invalid_path`;
   frontend path stripping never grants filesystem access.

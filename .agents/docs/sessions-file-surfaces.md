@@ -57,6 +57,11 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
   unavailable state
   ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
+  Equal text does not establish that a Git file is unchanged: current-diff readers
+  also compare file state against that same repository and pinned base, preserving
+  mode-only changes. Binary placeholders carry no content identity. Git comparison
+  failures remain per-file retryable results instead of hiding the path as unchanged.
+  Historical turn diffs continue to use stored evidence exclusively.
 - The composer and session sidebar's `diffStats` describe the default workspace
   comparison, including uncommitted edits, independently of PR association. Code
   Collab summarizes the complete comparison before trimming the shared index and
