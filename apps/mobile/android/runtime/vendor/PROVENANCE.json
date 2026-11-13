@@ -145,5 +145,16 @@
       "src/runtime/mention-expansion.ts"
     ],
     "note": "An @session:/@role: chip written straight after non-ASCII text (`让@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
+  },
+  "perModelConfigOptions": {
+    "files": [
+      "contract/runtime-contract.json",
+      "src/contract/methods.ts",
+      "src/contract/provider-details.ts",
+      "src/runtime/create-session.ts",
+      "src/runtime/handlers/settings.ts",
+      "src/runtime/provider-detail.ts"
+    ],
+    "note": "Creation options read desktop's per-model option records (acpModelConfigOptions pointers and their shared acpModelConfigOptionsShape lists) for effort and Fast after declarations and modelReasoningEfforts. agentProviderProbe accepts readModelOptions, forwards it only to machines advertising acpModelOptionsRead, and emits agentProviderRefreshProgress for each model it reads."
   }
 }

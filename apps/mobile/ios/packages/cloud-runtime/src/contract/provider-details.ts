@@ -144,8 +144,27 @@ export const AgentProviderDetail = z
   })
   .meta({ id: 'AgentProviderDetail' });
 export const AgentProviderProbeParams = z
-  .object(scope)
+  .object({
+    ...scope,
+    /**
+     * Switch the probe session to every model and record each model's own
+     * options. Ignored by a machine that does not advertise
+     * `acpModelOptionsRead`, which refreshes as before.
+     */
+    readModelOptions: z.boolean().optional(),
+  })
   .meta({ id: 'AgentProviderProbeParams' });
+/** The model a refresh is reading options for, `index` of `total` (1-based). */
+export const AgentProviderRefreshProgress = z
+  .object({
+    machineId: z.string(),
+    id: z.string(),
+    modelId: z.string(),
+    modelName: z.string(),
+    index: z.number().int().positive(),
+    total: z.number().int().positive(),
+  })
+  .meta({ id: 'AgentProviderRefreshProgress' });
 export const AgentProviderProbeResult = z
   .object({
     success: z.boolean(),

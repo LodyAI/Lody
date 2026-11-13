@@ -146,6 +146,10 @@ precondition(emptyProviderSections[1].rows.map(\.id) == ["providers-empty"], "Re
 precondition(AgentProviderSections.picker(providerSnapshot.machines, selectedID: "empty")[0].rows.count == 2)
 let staleProviders = AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: true)
 precondition(staleProviders[1].rows.allSatisfy { $0.menuActions.isEmpty }, "Cached providers cannot authorize mutation actions")
+let refreshingProviders = AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: true,
+                                                    refreshing: (id: "codex-one", text: "Reading options for GPT-6 Astra (2/7)"))
+precondition(refreshingProviders[1].rows.first { $0.id == "provider:codex-one" }?.subtitle == "Reading options for GPT-6 Astra (2/7)",
+             "A provider being refreshed names the model whose options are being read")
 var mixedSnapshot = providerSnapshot
 mixedSnapshot.providers.append(AgentProviderItem(id: "codex-two", machineId: "m1", name: "Second", cliType: "builtin", agentType: "codex"))
 var mixedUsage = AgentUsage(configs: [

@@ -320,6 +320,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       NotificationCenter.default.post(name: .lodyProviderAuthChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
     case .agentProviderOperationProgress(let value):
       NotificationCenter.default.post(name: .lodyProviderOperationProgress, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
+    case .agentProviderRefreshProgress(let value):
+      NotificationCenter.default.post(name: .lodyProviderRefreshProgress, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
     case .shareProgress(let value):
       NotificationCenter.default.post(name: .lodyShareProgress, object: value)
     case .machinePresence(let value):
