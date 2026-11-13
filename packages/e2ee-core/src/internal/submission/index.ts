@@ -127,8 +127,7 @@ export class LedgerSubmission extends Context.Service<
           cachedPrefix.records.length <= parentIndex + 1 &&
           cachedPrefix.records.every((bytes, index) => bytesEqual(bytes, records[index]!));
         const predecessor = canExtendCached
-          ? cachedPrefix.records.length === parentIndex + 1 &&
-            cachedPrefix.view.head.equals(parent)
+          ? cachedPrefix.records.length === parentIndex + 1 && cachedPrefix.view.head.equals(parent)
             ? cachedPrefix.view
             : yield* extendLedgerEffect(
                 cachedPrefix.view,
