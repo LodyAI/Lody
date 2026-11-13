@@ -420,6 +420,29 @@ describe('portable account pairing approver key delivery', () => {
     ]);
   });
 
+  it('lets the approval publish once the first delivery attempt ends, never after its retry backoff', async () => {
+    const rounds = { count: 0, released: 0 };
+    const states: string[] = [];
+    const [workspace] = await Effect.runPromise(
+      makePortableAccountPairingApprover({
+        workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
+        session: () => Effect.succeed(approverSession(rounds)),
+        appendRecord: () => Effect.void,
+        onKeyDelivery: (event) => states.push(event.state),
+        // The backoff never ends: waiting on it would stall the approval forever.
+        keyDeliveryRetry: { delays: [10], sleep: () => Effect.never },
+      })()
+    );
+    const firstPass = await Effect.runPromise(
+      workspace!.deliverKeys!(new Uint8Array(32).fill(2), 'r1')
+    );
+    expect(Effect.isEffect(firstPass)).toBe(true);
+    await Effect.runPromise(firstPass as Effect.Effect<void>);
+    expect(states).toEqual(['running', 'retrying']);
+    // The attempt's session was released before the backoff began.
+    expect([rounds.count, rounds.released]).toEqual([1, 1]);
+  });
+
   it("never continues on another account's session for the same workspace", async () => {
     // Account A's first delivery fails; during the backoff account B signs in and opens
     // the same workspace, so the lookup now returns B's session (B's own device).

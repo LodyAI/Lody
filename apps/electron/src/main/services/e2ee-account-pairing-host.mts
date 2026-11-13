@@ -162,9 +162,31 @@ export interface DesktopAccountPairingHostInput {
   workspaces: () => readonly AccountPairingWorkspaceHint[]
   /** Starts the main-owned member key delivery (distribute-only key round, per-device
    * mailbox evidence, retry and status) for one device the verified ledger admitted.
-   * Must return at once; the approval never waits for delivery. */
-  deliverKeys?: (workspaceId: string, requestId: string, device: string) => void
+   * Must return at once. It may return a handle that settles when the first delivery
+   * attempt ends; the approval waits on it, bounded, before publishing, and its failure
+   * or rejection is ignored. */
+  deliverKeys?: (
+    workspaceId: string,
+    requestId: string,
+    device: string
+  ) => Effect.Effect<void, never> | Promise<void> | void
   now?: () => number
+}
+
+/** The infallible first-attempt handle the shared workflow waits on, if any. A promise
+ * is observed at once, so a rejection no approval waits for is never unhandled. */
+const firstPassOf = (
+  handle: Effect.Effect<void, never> | Promise<void> | void
+): Effect.Effect<void, never> | undefined => {
+  if (Effect.isEffect(handle)) return Effect.ignoreCause(handle)
+  if (handle instanceof Promise) {
+    const settled = handle.then(
+      () => undefined,
+      () => undefined
+    )
+    return Effect.promise(() => settled)
+  }
+  return undefined
 }
 
 /** Workspace inspections that run at once while listing approver or requester ports. */
@@ -335,7 +357,9 @@ export function makeDesktopAccountPairingWorkspaces(
       ...(input.deliverKeys
         ? {
             deliverKeys: (device: Uint8Array, requestId: string) =>
-              Effect.sync(() => input.deliverKeys!(workspaceId, requestId, hex(device)))
+              Effect.sync(() =>
+                firstPassOf(input.deliverKeys!(workspaceId, requestId, hex(device)))
+              )
           }
         : {})
     }

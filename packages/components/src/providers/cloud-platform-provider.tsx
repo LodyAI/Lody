@@ -503,6 +503,15 @@ export function CloudPlatformProvider({
                       changed
                     )
                   : () => {},
+              // A hint only: the host still reads and verifies the request itself.
+              subscribeAccountPairingApproval: (lookupId: string, changed: () => void) =>
+                /^[0-9a-f]{32}$/.test(lookupId)
+                  ? cloudClient.subscribe(
+                      cloudOperations.e2eeAccountPairing.read,
+                      { lookupId },
+                      changed
+                    )
+                  : () => {},
             },
           }
         : baseE2eeWorkspaces,

@@ -6,8 +6,8 @@ import {
 import type { E2eeAutomaticPairingRecord } from '@lody/cloud-api';
 import { makeAutomaticPairingExchange } from '../src/automatic-pairing-crypto';
 import { decodePairingRequest } from '@lody/e2ee-core/protocol';
-import { Effect } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { Deferred, Effect } from 'effect';
+import { describe, expect, it, vi } from 'vitest';
 import {
   makeAccountPairing,
   type AccountPairingAdmissionRecord,
@@ -983,7 +983,19 @@ describe('automatic device verification before account admission', () => {
 
 describe('approval coverage across workspaces', () => {
   const fill = (byte: number, size = 32) => new Uint8Array(size).fill(byte);
-  const setup = (options: { approverHas: string[]; invitationFails?: Set<string> }) => {
+  const setup = (options: {
+    approverHas: string[];
+    invitationFails?: Set<string>;
+    /** Records the order of key deliveries, invitations, accesses and publishes. */
+    log?: string[];
+    deliverKeys?: (
+      workspaceId: string
+    ) => Effect.Effect<Effect.Effect<void, never> | void, unknown>;
+    firstKeyDeliveryWaitMs?: number;
+    /** Wraps each per-workspace invitation and access call. */
+    around?: <A>(step: string, work: Effect.Effect<A, unknown>) => Effect.Effect<A, unknown>;
+  }) => {
+    const around = options.around ?? (<A>(_: string, work: Effect.Effect<A, unknown>) => work);
     const requests = new Map<string, Record<string, unknown>>();
     const approvals = new Map<string, unknown[]>();
     let publishes = 0;
@@ -1011,6 +1023,7 @@ describe('approval coverage across workspaces', () => {
       publish: (args: { lookupId: string }) =>
         Effect.sync(() => {
           publishes += 1;
+          options.log?.push('publish');
           approvals.set(args.lookupId, [...(approvals.get(args.lookupId) ?? []), args]);
         }),
       claim: (lookupId: string) =>
@@ -1064,6 +1077,9 @@ describe('approval coverage across workspaces', () => {
       deviceName: 'Synthetic desktop',
       relay: relay as never,
       requesterWorkspaces: () => Effect.succeed([]),
+      ...(options.firstKeyDeliveryWaitMs === undefined
+        ? {}
+        : { firstKeyDeliveryWaitMs: options.firstKeyDeliveryWaitMs }),
       approverWorkspaces: () =>
         Effect.succeed(
           options.approverHas.map((workspaceId) => ({
@@ -1075,10 +1091,20 @@ describe('approval coverage across workspaces', () => {
               Effect.succeed({ requestId: `admit-${workspaceId}`, record: new Uint8Array([9]) }),
             append: () => Effect.void,
             invitation: () =>
-              invitationFails.has(workspaceId)
-                ? Effect.fail(new Error('synthetic invitation outage'))
-                : Effect.succeed(new Uint8Array([7])),
-            access: () => Effect.succeed({ workspaceId, credential: '99'.repeat(32) }),
+              around(
+                `invitation:${workspaceId}`,
+                invitationFails.has(workspaceId)
+                  ? Effect.fail(new Error('synthetic invitation outage'))
+                  : Effect.succeed(new Uint8Array([7]))
+              ),
+            access: () =>
+              around(
+                `access:${workspaceId}`,
+                Effect.succeed({ workspaceId, credential: '99'.repeat(32) })
+              ),
+            ...(options.deliverKeys
+              ? { deliverKeys: () => options.deliverKeys!(workspaceId) }
+              : {}),
           }))
         ),
     });
@@ -1089,6 +1115,8 @@ describe('approval coverage across workspaces', () => {
       failingInstalls,
       invitationFails,
       publishes: () => publishes,
+      published: () =>
+        [...approvals.values()].flat() as { invitations: { genesisHash: string }[] }[],
     };
   };
   const coverageOf = (
@@ -1155,5 +1183,125 @@ describe('approval coverage across workspaces', () => {
       w1: 'joined/approved',
       w2: 'joined/approved',
     });
+  });
+
+  const approveAll = (harness: ReturnType<typeof setup>, pairingString: string) =>
+    Effect.runPromise(
+      harness.approver.approveAccountPairing({
+        pairingString,
+        requestId: 'request-1',
+        workspaceIds: ['w1', 'w2'],
+      })
+    );
+
+  it('publishes the approval only after the first key delivery attempt lands, so the new device finds its key on first activation', async () => {
+    vi.useFakeTimers();
+    try {
+      const log: string[] = [];
+      const harness = setup({
+        approverHas: ['w1', 'w2'],
+        log,
+        deliverKeys: (workspaceId) =>
+          Effect.gen(function* () {
+            const firstPass = yield* Deferred.make<void>();
+            Effect.runFork(
+              Effect.sleep(100).pipe(
+                Effect.andThen(Effect.sync(() => log.push(`delivered:${workspaceId}`))),
+                Effect.andThen(Deferred.succeed(firstPass, undefined))
+              )
+            );
+            return Deferred.await(firstPass);
+          }),
+      });
+      const state = await Effect.runPromise(harness.requester.requestAccountPairing({}));
+      const approved = approveAll(harness, state.pairingString!);
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await approved).workspaces.map((item) => item.outcome)).toEqual([
+        'admitted',
+        'admitted',
+      ]);
+      expect(log).toEqual(['delivered:w1', 'delivered:w2', 'publish']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('publishes after the bounded wait when a first key delivery attempt hangs, and leaves that delivery running', async () => {
+    vi.useFakeTimers();
+    try {
+      const log: string[] = [];
+      let interrupted = false;
+      const background = Effect.runSync(Deferred.make<void>());
+      const harness = setup({
+        approverHas: ['w1'],
+        log,
+        firstKeyDeliveryWaitMs: 50,
+        deliverKeys: () =>
+          Effect.sync(() => {
+            Effect.runFork(
+              Deferred.await(background).pipe(
+                Effect.andThen(Effect.sync(() => log.push('delivered:w1'))),
+                Effect.onInterrupt(() => Effect.sync(() => (interrupted = true)))
+              )
+            );
+            return Deferred.await(background);
+          }),
+      });
+      const state = await Effect.runPromise(harness.requester.requestAccountPairing({}));
+      const approved = Effect.runPromise(
+        harness.approver.approveAccountPairing({
+          pairingString: state.pairingString!,
+          requestId: 'request-1',
+          workspaceIds: ['w1'],
+        })
+      );
+      await vi.advanceTimersByTimeAsync(49);
+      expect(log).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await approved).workspaces.map((item) => item.outcome)).toEqual(['admitted']);
+      expect(log).toEqual(['publish']);
+      Effect.runSync(Deferred.succeed(background, undefined));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(log).toEqual(['publish', 'delivered:w1']);
+      expect(interrupted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks every admitted workspace for its invitation and access at once, and still publishes them in genesis order', async () => {
+    const inFlight = new Map<string, number>();
+    const peak = new Map<string, number>();
+    const harness = setup({
+      approverHas: ['w2', 'w1'],
+      around: (step, work) => {
+        const kind = step.split(':')[0]!;
+        return Effect.gen(function* () {
+          inFlight.set(kind, (inFlight.get(kind) ?? 0) + 1);
+          peak.set(kind, Math.max(peak.get(kind) ?? 0, inFlight.get(kind)!));
+          yield* Effect.yieldNow;
+          yield* Effect.yieldNow;
+          inFlight.set(kind, inFlight.get(kind)! - 1);
+          return yield* work;
+        });
+      },
+    });
+    const state = await Effect.runPromise(harness.requester.requestAccountPairing({}));
+    await approveAll(harness, state.pairingString!);
+    expect(Object.fromEntries(peak)).toEqual({ invitation: 2, access: 2 });
+    expect(harness.published()[0]!.invitations.map((item) => item.genesisHash)).toEqual([
+      '11'.repeat(32),
+      '12'.repeat(32),
+    ]);
+  });
+
+  it("names the shown code's relay lookup key, so the approver can watch for the request the new device submits under it", async () => {
+    const harness = setup({ approverHas: ['w1'] });
+    const code = await Effect.runPromise(harness.approver.accountPairingCode());
+    expect(code.lookupId).toMatch(/^[0-9a-f]{32}$/);
+    const state = await Effect.runPromise(
+      harness.requester.requestAccountPairing({ pairingString: code.pairingString })
+    );
+    expect(state.lookupId).toBe(code.lookupId);
   });
 });

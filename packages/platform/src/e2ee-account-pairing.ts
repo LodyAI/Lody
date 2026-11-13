@@ -112,8 +112,14 @@ export interface E2eeAccountPairingRuntime {
   subscribeAccountPairingRequest?(lookupId: string, changed: () => void): () => void;
   /** Abandons and destroys the secret; a later request starts fresh. */
   cancelAccountPairing?(input?: { expectedLookupId: string }): Promise<void>;
-  /** Reverse direction: this approved device shows a code for a new device to scan. */
-  accountPairingCode?(): Promise<{ pairingString: string; expiresAt: number }>;
+  /** Reverse direction: this approved device shows a code for a new device to scan.
+   * `lookupId` is the code's public relay lookup key (never secret), for
+   * `subscribeAccountPairingApproval`; an older host may omit it. */
+  accountPairingCode?(): Promise<{ pairingString: string; expiresAt: number; lookupId?: string }>;
+  /** Optional push hint that a request arrived under this device's shown code. It grants
+   * nothing: callers still read `inspectAccountPairing`, keep their poll as a fallback,
+   * and release the subscription when they stop showing the code or the page unmounts. */
+  subscribeAccountPairingApproval?(lookupId: string, changed: () => void): () => void;
   /** Fetches and verifies the request for a code. `null` means no request has been
    * submitted under it yet (reverse direction). Refuses with a typed code. */
   inspectAccountPairing?(pairingString: string): Promise<E2eeAccountPairingPreview | null>;
