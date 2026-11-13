@@ -62,6 +62,11 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   mode-only changes. Binary placeholders carry no content identity. Git comparison
   failures remain per-file retryable results instead of hiding the path as unchanged.
   Historical turn diffs continue to use stored evidence exclusively.
+- Historical diff failures retain the requested turn on Web, Electron, and native
+  iOS/Android. The native runtime passes unavailable reasons/messages to its
+  existing notice UI instead of requesting the current workspace diff. A separate
+  current/All Changes request remains available; later workspace edits cannot
+  replace an unavailable turn. See the [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md).
 - The composer and session sidebar's `diffStats` describe the default workspace
   comparison, including uncommitted edits, independently of PR association. Code
   Collab summarizes the complete comparison before trimming the shared index and
