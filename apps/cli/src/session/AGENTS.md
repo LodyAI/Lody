@@ -59,7 +59,7 @@ only signed input; the default ceiling had no room for those rules.
   pre-owner awaits; sealed requests retain pending history and Inbox inputs without
   marking them handled, failed or canceled. Registered Turns block recovery even
   before presence publication.
-- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 300s), including pre-open
+- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 60s), including pre-open
   writes, never status/meta. Timeout preserves live metadata creation; disposal aborts it and releases waiters.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before
