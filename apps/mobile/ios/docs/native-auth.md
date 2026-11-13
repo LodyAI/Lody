@@ -11,7 +11,7 @@ Passwords are cleared from the form after submission and are never persisted.
 `OnboardingController` reproduces web `/login` (`packages/components/src/components/login-page.tsx`)
 in UIKit: full screen on iPhone (a form sheet on iPad), the dithered jellyfish surface on top
 (`LoginDitherView`, web's WebGL fragment shader ported line for line to a Metal source compiled at
-runtime, 3 pt cells, 1.6 s centre-out reveal, one still frame under Reduce Motion), then a
+runtime, ~1.5 pt cells snapped to whole device pixels, 1.6 s centre-out reveal, one still frame under Reduce Motion), then a
 bottom-anchored column: title and description, one group of equal GitHub / Google / Apple / Discord
 buttons, the "Continue with email" row, and the legal notice. The method this device last completed
 (`NativeLastLoginMethod`, written by `AuthSession` after a credential is installed) carries the
