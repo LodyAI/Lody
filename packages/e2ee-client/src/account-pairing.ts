@@ -278,7 +278,9 @@ export function makeAccountPairing(input: {
   approverWorkspaces: (
     filter?: AccountPairingApproverFilter
   ) => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>;
-  requesterWorkspaces: () => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown>;
+  requesterWorkspaces: (
+    hints?: readonly { workspaceId: string; name: string; genesisHash: string }[]
+  ) => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown>;
   now?: () => number;
   random?: (size: number) => Uint8Array;
   /** Local diagnostics for isolated failures; causes never reach the caller. */
@@ -329,8 +331,10 @@ export function makeAccountPairing(input: {
    * joined needs no pairing afterwards and leaves the requester list, while the
    * request still names it. */
   const listedByGenesis = new Map<string, { workspaceId: string; name: string }>();
-  const requesterWorkspaces = () =>
-    Effect.tap(input.requesterWorkspaces(), (workspaces) =>
+  const requesterWorkspaces = (
+    hints?: readonly { workspaceId: string; name: string; genesisHash: string }[]
+  ) =>
+    Effect.tap(input.requesterWorkspaces(hints), (workspaces) =>
       Effect.sync(() => {
         for (const workspace of workspaces)
           listedByGenesis.set(hex(workspace.genesis), {
@@ -434,9 +438,9 @@ export function makeAccountPairing(input: {
         deviceName: request.deviceName,
         expiresAt: request.expiresAt,
         workspaces: request.rows.flatMap((item) => {
-          const workspace = workspaces.find(
-            (candidate) => hex(candidate.genesis) === hex(item.genesis)
-          );
+          const workspace =
+            workspaces.find((candidate) => hex(candidate.genesis) === hex(item.genesis)) ??
+            listedByGenesis.get(hex(item.genesis));
           return workspace
             ? [{ workspaceId: workspace.workspaceId, genesisHash: hex(item.genesis) }]
             : [];
@@ -458,7 +462,10 @@ export function makeAccountPairing(input: {
     /** Automatic discovery must never replace another window's retained request. */
     preserveExisting?: true;
     workspaceId?: string;
+    workspace?: { workspaceId: string; name: string; genesisHash: string };
   }) {
+    const hints = options.workspace ? [options.workspace] : undefined;
+    const targetWorkspaceId = options.workspaceId ?? options.workspace?.workspaceId;
     if (
       options.expiresAt !== undefined &&
       (!Number.isSafeInteger(options.expiresAt) ||
@@ -479,7 +486,7 @@ export function makeAccountPairing(input: {
         return yield* Effect.fail(fail('pairing-tampered'));
       // Retry the exact original; a retry never extends the request.
       const request = yield* fromResult(decodePairingRequest(current.request), 'corrupt');
-      const workspaces = yield* requesterWorkspaces();
+      const workspaces = yield* requesterWorkspaces(hints);
       yield* submitExact(current, request, workspaces);
       return yield* stateOf(current, workspaces);
     }
@@ -494,9 +501,9 @@ export function makeAccountPairing(input: {
           const lookupId = hex(keys.lookupId);
           const used = yield* sql(store.hasRequest(lookupId));
           if (used || (yield* terminal(lookupId))) return yield* Effect.fail(fail('pairing-used'));
-          const available = yield* requesterWorkspaces();
-          const workspaces = options.workspaceId
-            ? available.filter((workspace) => workspace.workspaceId === options.workspaceId)
+          const available = yield* requesterWorkspaces(hints);
+          const workspaces = targetWorkspaceId
+            ? available.filter((workspace) => workspace.workspaceId === targetWorkspaceId)
             : available;
           if (workspaces.length === 0) return yield* Effect.fail(fail('invalid-input'));
           // Each workspace stands alone: one that cannot prepare an identity now
@@ -658,9 +665,9 @@ export function makeAccountPairing(input: {
     );
     const joined = yield* sql(joinedSet(row.lookup_id));
     const requested = request.rows.flatMap((item) => {
-      const workspace = workspaces.find(
-        (candidate) => hex(candidate.genesis) === hex(item.genesis)
-      );
+      const workspace =
+        workspaces.find((candidate) => hex(candidate.genesis) === hex(item.genesis)) ??
+        listedByGenesis.get(hex(item.genesis));
       return workspace ? [workspace.workspaceId] : [];
     });
     if (requested.length > 0 && requested.every((id) => joined.has(id)))

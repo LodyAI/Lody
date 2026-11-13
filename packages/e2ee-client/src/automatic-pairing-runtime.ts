@@ -272,7 +272,7 @@ export function makeAutomaticPairingRuntime(options: {
     if (!row.requesterKey)
       row = yield* checked(value, yield* relay.exchange({ id: value.context.id, requesterKey }));
     if (!row.reveal) return snapshot(value);
-    channel(value, yield* exchange.finish(row.reveal));
+    if (!value.channel) channel(value, yield* exchange.finish(row.reveal));
     yield* check();
     if (!value.attempted) {
       const retained = yield* promise(
@@ -391,7 +391,7 @@ export function makeAutomaticPairingRuntime(options: {
     }
     if (row.reveal?.publicKey !== reveal.publicKey || row.reveal.nonce !== reveal.nonce)
       return yield* Effect.fail(refuse('pairing-tampered'));
-    channel(value, yield* exchange.finish(row.requesterKey!));
+    if (!value.channel) channel(value, yield* exchange.finish(row.requesterKey!));
     const preview = yield* promise(() => runtime.inspectAccountPairing!(value.code!));
     yield* check();
     if (!preview) return options.includePreparingReviews ? review(value, '') : null;
@@ -437,6 +437,18 @@ export function makeAutomaticPairingRuntime(options: {
             },
             'requester'
           );
+          if (runtime.status) {
+            const currentStatus = yield* Effect.result(promise(() => runtime.status(workspaceId)));
+            if (
+              Result.isSuccess(currentStatus) &&
+              currentStatus.success.genesisHash === hint.genesisHash &&
+              currentStatus.success.deviceKind === 'personal' &&
+              currentStatus.success.hasDeviceCredential
+            ) {
+              retained.admitted = true;
+              retained.phase = 'syncing';
+            }
+          }
           requesting.set(workspaceId, retained);
         }
         return retained;
@@ -518,7 +530,7 @@ export function makeAutomaticPairingRuntime(options: {
       ? {
           subscribeAutomaticPairing: (changed: () => void) =>
             relay.subscribe!(() => {
-              if (!closed && options.account() === account) changed();
+              if (!closed && (!account || options.account() === account)) changed();
             }),
         }
       : {}),

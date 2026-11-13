@@ -159,15 +159,37 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     Layer.succeed(EpochCandidateStore, Context.get(input.stores, EpochCandidateStore)),
     Layer.succeed(SubmissionJournal, Context.get(input.stores, SubmissionJournal))
   ).pipe(Layer.provideMerge(identity))
+  let refreshedInTurn = false
+  const refreshIfNeeded = Effect.suspend(() => {
+    if (refreshedInTurn) return Effect.void
+    return input.ports.refresh().pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          refreshedInTurn = true
+        })
+      )
+    )
+  })
   const syncedLog = Layer.succeed(LedgerLog, {
     ...input.ports.log,
     read: (anchor) =>
       input.ports.log.read(anchor).pipe(
-        Effect.tap(() => input.ports.refresh()),
+        Effect.tap((value) =>
+          Effect.gen(function* () {
+            const local = yield* input.verified.current()
+            if (local.length !== value.checkpoint.length || !local.head.equals(value.checkpoint.head))
+              refreshedInTurn = false
+            yield* refreshIfNeeded
+          })
+        ),
         Effect.mapError((cause) =>
           cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
         )
-      )
+      ),
+    appendCas: (anchor, point, source) =>
+      Effect.sync(() => {
+        refreshedInTurn = false
+      }).pipe(Effect.andThen(input.ports.log.appendCas(anchor, point, source)))
   })
   const submission = LedgerSubmission.layer.pipe(Layer.provideMerge(Layer.merge(ports, syncedLog)))
   const services = yield* Layer.build(
@@ -180,16 +202,27 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
   const journal = Context.get(services, LedgerSubmission)
   const finishRotation = Effect.fnUntraced(function* (start: boolean) {
     // Reception can repair a previously committed candidate before installation/ACK retry.
-    yield* input.ports.refresh()
-    yield* Effect.result(input.ports.receive())
+    yield* refreshIfNeeded
+    if (start) {
+      const currentView = yield* input.verified.current()
+      const currentEpoch = currentView.inspectState().epoch.number
+      if (Result.isFailure(yield* Effect.result(input.installed.check(currentEpoch)))) {
+        refreshedInTurn = false
+        yield* Effect.result(input.ports.receive())
+      }
+    } else {
+      refreshedInTurn = false
+      yield* Effect.result(input.ports.receive())
+    }
     let result = yield* start ? publisher.publish() : publisher.resume()
     if (!result) return null
-    yield* input.ports.refresh()
+    yield* refreshIfNeeded
     yield* publisher.acknowledge(result)
     return result.outcome
   })
   return Effect.fnUntraced(function* (command: DesktopE2eeManagementCommand) {
-    yield* input.ports.refresh()
+    refreshedInTurn = false
+    yield* refreshIfNeeded
     const entry = yield* journal.pending()
     if (entry.record) {
       const parsed = yield* Effect.fromResult(decodeRecord(entry.record))

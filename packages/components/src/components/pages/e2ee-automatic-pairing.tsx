@@ -255,7 +255,7 @@ export function E2eeAutomaticPairingPage({
       }
     };
     const tick = async () => {
-      if (!alive || qrPaused.current) return;
+      if (!alive || qrPaused.current || completed.current) return;
       if (running) {
         queued = true;
         return;
@@ -266,7 +266,12 @@ export function E2eeAutomaticPairingPage({
           queued = false;
           const retained = await runtime.automaticPairingState!(workspaceId);
           if (!alive) return;
-          accept(retained ?? (await runtime.startAutomaticPairing!(workspaceId)));
+          accept(
+            retained ??
+              (completed.current || admitted.current
+                ? null
+                : await runtime.startAutomaticPairing!(workspaceId))
+          );
         } while (queued && alive && !qrPaused.current && !completed.current);
       } catch (cause) {
         if (alive) {
@@ -333,12 +338,13 @@ export function E2eeAutomaticPairingPage({
       void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
     }
     setQr('joined');
+    const wasCompleted = completed.current;
+    completed.current = true;
+    admitted.current = true;
     // Only now is the automatic request redundant; ending it earlier would close the
     // other device's dialog while it is still signing for the scanned code.
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
-    if (!completed.current) {
-      completed.current = true;
-      admitted.current = true;
+    if (!wasCompleted) {
       joinedRef.current();
     }
   };

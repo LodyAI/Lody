@@ -639,6 +639,59 @@ void test('management ledger transport preserves the original record and refuses
   )
 })
 
+void test('management ledger transport reuses the cached position for delta reads', async () => {
+  const group = stagedGroup()
+  const historyCalls = []
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(async (_url, init) => {
+          const {
+            path,
+            args: [args]
+          } = JSON.parse(init.body)
+          assert.equal(path, 'e2eeWorkspaces:history')
+          historyCalls.push(args)
+          if (args.after === 'p1:w:1:first') {
+            return response({
+              workspaceId: access.workspaceId,
+              genesisHash: group.genesis,
+              checkpoint: { length: 2, headHash: '03'.repeat(32) },
+              startIndex: 1,
+              recordsHex: ['02'],
+              position: 'p1:w:2:second',
+              nextCursor: null
+            })
+          }
+          return response({
+            workspaceId: access.workspaceId,
+            genesisHash: group.genesis,
+            checkpoint: { length: 1, headHash: '02'.repeat(32) },
+            startIndex: 0,
+            recordsHex: ['01'],
+            position: 'p1:w:1:first',
+            nextCursor: null
+          })
+        })
+        const anchor = Result.getOrThrow(Bytes.genesisHash(Buffer.from(group.genesis, 'hex')))
+        const log = client.ledgerLog(access.workspaceId)
+        const first = yield* log.read(anchor)
+        assert.equal(first.records.length, 1)
+        const second = yield* log.read(anchor)
+        assert.equal(second.records.length, 2)
+        assert.deepEqual(
+          second.records.map((r) => Buffer.from(r).toString('hex')),
+          ['01', '02']
+        )
+        assert.deepEqual(historyCalls, [
+          { workspaceId: access.workspaceId },
+          { workspaceId: access.workspaceId, after: 'p1:w:1:first' }
+        ])
+      })
+    )
+  )
+})
+
 void test('the relay copy of a member invitation reaches the approving host intact for verification', async () => {
   // Automatic email admission verifies this copy itself; dropping it here would silently
   // turn every genuine email invitation into an explicit approval.

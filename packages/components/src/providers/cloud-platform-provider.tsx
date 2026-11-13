@@ -443,7 +443,8 @@ export function CloudPlatformProvider({
       runtime,
       account: () => {
         const state = sessionStore.get();
-        return state.status === 'authenticated' ? state.user.id : null;
+        if (state.status === 'authenticated') return state.user.id;
+        return session.data?.user?.id ?? atomStore.get(userAtom)?.id ?? null;
       },
       workspaces: () => accountPairingHints(workspacesStore.get()),
       deviceName: electron ? 'Lody desktop' : 'Lody mobile',
@@ -474,6 +475,7 @@ export function CloudPlatformProvider({
       },
     });
   }, [
+    atomStore,
     baseE2eeWorkspaces,
     cloudClient,
     electron,

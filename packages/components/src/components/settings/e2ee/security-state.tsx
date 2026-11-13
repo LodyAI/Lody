@@ -13,6 +13,7 @@ import { LODY_APP_INFO_UPDATED_EVENT } from '@/lib/native-app-info';
 import { recordClientError } from '@/lib/client-log';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 const refreshAtom = atom(0);
+let localOnlyRevision = -1;
 const styles = stylex.create({
   icon: { position: 'relative', display: 'inline-flex', width: '100%', height: '100%' },
   dot: {
@@ -53,15 +54,17 @@ export function useSecurityState() {
     if (!workspaceId || !mode?.accountId || !native?.managementState) return undefined;
     let active = true,
       pending = false;
-    const load = async () => {
+    const load = async (forceRefresh = false) => {
       if (pending) return;
       pending = true;
       try {
         // Offline refresh cannot erase verified local facts or pause the workspace.
-        try {
-          await native.refresh(workspaceId, { installKeys: false });
-        } catch {
-          /* Retry on the next probe. */
+        if (forceRefresh || revision !== localOnlyRevision) {
+          try {
+            await native.refresh(workspaceId, { installKeys: false });
+          } catch {
+            /* Retry on the next probe. */
+          }
         }
         if (!active) return;
         const data = await native.managementState!(workspaceId);
@@ -80,7 +83,7 @@ export function useSecurityState() {
     };
     void load();
     const timer = setInterval(() => {
-      void load();
+      void load(true);
     }, 15_000);
     return () => {
       active = false;
@@ -91,7 +94,10 @@ export function useSecurityState() {
     data: encrypted && snapshot?.key === key ? snapshot.data : undefined,
     isError: encrypted && snapshot?.key === key ? snapshot.isError : false,
     refetch: async () => {
-      bump((value) => value + 1);
+      bump((value) => {
+        localOnlyRevision = value + 1;
+        return value + 1;
+      });
     },
   };
   const localProfile = useLocalDeviceProfile();
