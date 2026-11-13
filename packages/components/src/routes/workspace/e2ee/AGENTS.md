@@ -35,3 +35,18 @@ backend's extra fields never reach the host's strict capture, and record validat
 is never relaxed to admit them. Only an availability failure (untyped transport
 errors, or a portable `network`/`closed`) leaves the verified view offline; a typed
 validation, local or authorization failure shows its failure instead.
+
+A device waiting for approval always has one way out, `E2eeLostAccessEntry`
+(`components/pages/e2ee-lost-access.tsx`), beside the unchanged pairing flow. It
+offers restore through the host's `RecoveryPort` first, never promising recovery
+without a configured backup. It then states that the content cannot be recovered,
+and only then offers the ordinary account removal from
+`e2ee-workspace-removal.ts`: delete for an account owner, leave otherwise. The
+listed account role only chooses which one to show; the server's ownership and
+billing checks decide. Leaving or closing these steps never cancels the request or
+touches keys or recovery material. A removal is reported as done only when the
+server answers success or the account list no longer has the workspace; an
+unanswered or unreadable result stays unknown with a retry, never failed, and a
+late success still lands. Deletion says that encrypted data is erased in the
+background; it never claims that erasure finished. Refreshing the list afterwards
+cannot undo a confirmed removal.

@@ -18,9 +18,10 @@ import {
 } from '@/lib/e2ee-member-removal';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
-import { getIpcServices } from '@/lib/electron-ipc-client';
+import { useSetAtom } from 'jotai';
+import { useRecoveryPort } from '@/components/settings/e2ee/recovery-port';
+import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
+import type { E2eeWorkspaceRemoval } from './e2ee-workspace-removal';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeRuntimeStatus } from '@lody/platform';
@@ -97,6 +98,9 @@ export interface E2eeWorkspaceConsoleProps {
   onCheckForUpdates?: () => void;
   /** Host-known recovery state for the getting-started list; see the control page. */
   recoveryReady?: boolean;
+  /** Ordinary account deletion/leave for a device with no approval; absent when the
+   * host has no account workspaces. The server decides who may use either. */
+  workspaceRemoval?: E2eeWorkspaceRemoval;
 }
 
 /** The encryption console. It owns its account/workspace control reader and the
@@ -110,6 +114,7 @@ export function E2eeWorkspaceConsole({
   sections,
   onCheckForUpdates,
   recoveryReady,
+  workspaceRemoval,
 }: E2eeWorkspaceConsoleProps) {
   const platform = usePlatform();
   const { t } = useTranslation();
@@ -119,14 +124,15 @@ export function E2eeWorkspaceConsole({
   const port = platform.e2eeWorkspaces;
   const navigate = useNavigate();
   const clearWorkspace = useSetAtom(setWorkspaceContextAtom);
-  // Restoring from a backup is a desktop capability while the recovery switch is on.
-  const recoveryEnabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
-  const [desktopE2ee] = useState(() => getIpcServices()?.e2ee);
+  // Restoring from a backup uses this host's recovery port (desktop main, Web or the
+  // mobile webview) while the recovery switch is on.
+  const recoveryPort = useRecoveryPort();
   const [passkeyAvailable, setPasskeyAvailable] = useState(false);
   useEffect(() => {
-    if (!recoveryEnabled || !desktopE2ee) return undefined;
+    setPasskeyAvailable(false);
+    if (!recoveryPort) return undefined;
     let live = true;
-    void desktopE2ee.recoveryPasskeyAvailable().then(
+    void recoveryPort.passkeyAvailable().then(
       (available) => {
         if (live) setPasskeyAvailable(available);
       },
@@ -135,7 +141,7 @@ export function E2eeWorkspaceConsole({
     return () => {
       live = false;
     };
-  }, [recoveryEnabled, desktopE2ee]);
+  }, [recoveryPort]);
   useLayoutEffect(() => {
     // The standalone page has no workspace; the modal stays inside the open one.
     if (presentation === 'page') clearWorkspace({ slug: null, workspaceId: null });
@@ -821,6 +827,28 @@ export function E2eeWorkspaceConsole({
     });
   };
   if (current?.removed) return <p role="status">{t('e2ee.members.removed')}</p>;
+  const listedWorkspace =
+    workspaces.status === 'ready'
+      ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)
+      : undefined;
+  const lostAccess: Omit<E2eeLostAccessProps, 'workspaceId'> = {
+    workspaceName: listedWorkspace?.name,
+    // Only a hint for which path to offer; the server checks it on submit.
+    accountRole: listedWorkspace?.role,
+    ...(recoveryPort
+      ? {
+          recovery: {
+            passkeyAvailable,
+            restore: recoveryPort.restore,
+            onRecovered: refresh,
+            onCheck: refresh,
+          },
+        }
+      : {}),
+    ...(workspaceRemoval ? { removal: workspaceRemoval } : {}),
+    onBackToWorkspaces: backToWorkspaces,
+    onRemoved: backToWorkspaces,
+  };
   // A signed-in device without an approved identity here sees the next step first;
   // the ledger, diagnostics and failures stay one click away in the full page.
   const awaitingApproval = Boolean(
@@ -857,21 +885,13 @@ export function E2eeWorkspaceConsole({
         onRetryKeys={retryAccountPairingKey}
         onBack={backToWorkspaces}
         onManual={() => setManualPairingFor(identity)}
-        {...(recoveryEnabled && desktopE2ee
-          ? {
-              lostAll: {
-                passkeyAvailable,
-                restore: (method: 'file' | 'passkey') =>
-                  desktopE2ee.restoreFromRecoveryFile(method),
-                onRecovered: refresh,
-              },
-            }
-          : {})}
+        lostAccess={lostAccess}
       />
     );
   if (awaitingApproval && !showDetails && port?.runtime && accountId)
     return (
       <E2eeDeviceApprovalGuide
+        lostAccess={<E2eeLostAccessEntry {...lostAccess} workspaceId={workspaceId} />}
         reason={current?.failure?.code === 'device-revoked' ? 'revoked' : 'new'}
         onRefresh={refresh}
         onShowDetails={() => setShowDetails(true)}

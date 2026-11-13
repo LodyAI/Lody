@@ -52,7 +52,6 @@ const styles = stylex.create({
   },
   actions: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
   key: {
-    fontFamily: 'monospace',
     color: colors.secondaryLabel,
     overflowWrap: 'anywhere',
     fontSize: text.footnoteSize,
@@ -240,7 +239,7 @@ export function MachineSharingPanel({
                 <dt>{t('e2ee.machineSharing.signer')}</dt>
                 <dd
                   title={view?.signer ?? undefined}
-                  {...stylex.props(styles.detailValue, styles.key)}
+                  {...stylex.props(styles.detailValue, view?.signer ? styles.key : undefined)}
                 >
                   {view?.signer
                     ? `${view.signer.slice(0, 12)}…${view.signer.slice(-8)}`

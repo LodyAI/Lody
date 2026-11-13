@@ -54,6 +54,15 @@ struct SessionPermission: Equatable, Sendable {
   let path: String?
   let options: [Option]?
   let questionMeta: Questions?
+  /// A plan approval whose plan the transcript shows (a carried plan or the turn's own
+  /// `proposed_plan`). Web answers it below the plan, so it is not presented over it.
+  var showsPlan = false
+
+  /// The request itself; `showsPlan` only decides how it is first offered.
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.entryId == rhs.entryId && lhs.itemId == rhs.itemId && lhs.requestId == rhs.requestId && lhs.kind == rhs.kind
+      && lhs.title == rhs.title && lhs.path == rhs.path && lhs.options == rhs.options && lhs.questionMeta == rhs.questionMeta
+  }
 
   // Decode only pending tool requests. Other transcript items keep their own schemas.
   static func first(in entries: [[String: Any]]) throws -> Self? {
@@ -61,7 +70,16 @@ struct SessionPermission: Equatable, Sendable {
       for item in entry["items"] as? [[String: Any]] ?? [] {
         guard item["type"] as? String == "tool_call",
               let permission = item["permission"] as? [String: Any], permission["pending"] as? Bool == true else { continue }
-        return try target(entryId: entry["id"] as? String, item: item, permission: permission)
+        var result = try target(entryId: entry["id"] as? String, item: item, permission: permission)
+        if result.kind == "switch_mode" {
+          func hasText(_ value: Any?) -> Bool {
+            !((value as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          }
+          result.showsPlan = hasText(item["plan"]) || (entry["items"] as? [[String: Any]] ?? []).contains {
+            $0["type"] as? String == "proposed_plan" && ["delta", "completed"].contains($0["status"] as? String ?? "") && hasText($0["markdown"])
+          }
+        }
+        return result
       }
     }
     return nil

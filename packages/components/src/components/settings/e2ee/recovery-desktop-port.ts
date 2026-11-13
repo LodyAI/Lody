@@ -33,7 +33,11 @@ export function desktopRecoveryPort(e2ee: IpcServices['e2ee']): RecoveryPort {
       return restored.outcome === 'restored'
         ? {
             outcome: 'restored',
-            results: restored.results.map((row) => ({ name: row.name, outcome: row.outcome })),
+            results: restored.results.map((row) => ({
+              ...(row.workspaceId === undefined ? {} : { workspaceId: row.workspaceId }),
+              name: row.name,
+              outcome: row.outcome,
+            })),
           }
         : { outcome: 'cancelled' };
     },

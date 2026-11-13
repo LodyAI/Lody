@@ -19,6 +19,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   private let compactNavigation = HomeCompactNavigation()
   private var tabNavigations: [HomeTab: UINavigationController] = [:]
   private var compactTabsInstalled = false
+  private var updatingTabContainer = false
   private var session: SessionController?
   private var scope = ""
   private var observers: [NSObjectProtocol] = []
@@ -267,7 +268,9 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   /// Keep iPad's existing split/fold navigation; only compact Home uses system tabs.
   private func updateTabContainer() {
     let compact = traitCollection.horizontalSizeClass != .regular
-    guard compact != compactTabsInstalled else { return }
+    guard compact != compactTabsInstalled, !updatingTabContainer else { return }
+    updatingTabContainer = true
+    defer { updatingTabContainer = false }
     if folded { setFolded(false) }
     split.setViewController(nil, for: .primary)
     if compact {

@@ -180,6 +180,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                                         is TurnItem.Text -> item.text
                                         is TurnItem.Thought -> item.text
                                         is TurnItem.ProposedPlan -> item.markdown
+                                        // The plan a plan-approval step carries (Claude, Kimi).
+                                        is TurnItem.Tool -> item.plan ?: return@mapNotNull null
                                         else -> return@mapNotNull null
                                     }
                                     val streaming = message.streaming && item.id == growing
@@ -813,6 +815,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
                         meId = context.me?.id,
                         decideProposal = { card, accept -> repository.decideProposal(scope, id, card.entryId, card.itemId, accept) },
+                        // Only a live, open conversation takes an answer; otherwise the approval just waits.
+                        respondPermission = if (status == "live" && context.session?.isTabClosed != true) ({ entryId, itemId, requestId, optionId, answers ->
+                            repository.respondPermission(scope, id, entryId, itemId, requestId, optionId, answers)
+                        }) else null,
                     ) }
                 }
                 ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine,

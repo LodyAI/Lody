@@ -102,7 +102,7 @@
   "src/runtime/operation-presentation.ts": "c29318aa2c0cbc896449e5935c002e6ec3ee1a85990e027f3574354f0f23003a",
   "src/runtime/preview.ts": "a8208d5b456ed48295f5fe96662b7574d539128834d84ed32d77fc4e3fb1e488",
   "src/runtime/project-groups.ts": "4ebc501cc7d7f03376840973705c32d0efb63de552fa830b2af65544daa14434",
-  "src/runtime/project.ts": "5c95ad380505a79da52176ad4bdddf7d296e35a2d5f42a2523bd1ee3ab678361",
+  "src/runtime/project.ts": "18f9bb2ee1b7f96723037c190c91a1f1729ad7a11508b8a1b5995c33e45a75a3",
   "src/runtime/prompt-shortcuts.ts": "3301ff43f1b3a3f2b792cba5a2110a05e0cb887b42b6d500d33654e68b1b6828",
   "src/runtime/provider-detail.ts": "a73fd603f9e3c17303d6ae874e038e74d1c86df1935cabb9531006959f126b69",
   "src/runtime/provider-rpc.ts": "be13495a6268086ebeb18cef45a06ea9b6435e5755c67bcbaf3b87636481dab6",
