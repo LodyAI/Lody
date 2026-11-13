@@ -4127,6 +4127,7 @@
   "session.mcp.nextStartHint": "Selection changes take effect the next time the agent starts.",
   "session.mcp.title": "MCP servers",
   "settings.machines.manage": "Manage",
+  "settings.machines.noSharedMachines": "No machines are shared with this workspace yet",
   "settings.machines.privateMachinesHint": "These machines are not available to other workspace members. Select one here to manage sharing.",
   "settings.machines.yourPrivateMachines": "Your private machines",
   "settings.machines.connectedAgents": "Connected agents",

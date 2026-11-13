@@ -4127,6 +4127,7 @@
   "session.mcp.nextStartHint": "选择变更会在 Agent 下次启动时生效。",
   "session.mcp.title": "MCP 服务器",
   "settings.machines.manage": "管理",
+  "settings.machines.noSharedMachines": "还没有共享给工作区的机器",
   "settings.machines.privateMachinesHint": "这些机器尚未开放给工作区的其他用户。选择机器后可在这里管理分享状态。",
   "settings.machines.yourPrivateMachines": "你尚未分享的机器",
   "settings.machines.connectedAgents": "已连接的 Agents",
