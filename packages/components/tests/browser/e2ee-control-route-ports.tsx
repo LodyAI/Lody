@@ -30,6 +30,8 @@ export const e2eeRecoveryVaultFeatureEnabledAtom = {};
 export const getIpcServices = () => undefined;
 // Matches the recovery switch above: no passkey recovery port.
 export const useRecoveryPort = () => null;
+export const useE2eeRecoverySection = () => undefined;
+export const useWorkspaceRecoveryReady = () => undefined;
 export const isElectronRenderer = () => false;
 export const isNativeAppShell = () => false;
 export const setWorkspaceContextAtom = {};

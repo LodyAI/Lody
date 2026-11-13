@@ -730,6 +730,68 @@ describe('automatic pairing product flow', () => {
     expect(cancelled).toEqual([]);
   });
 
+  it('falls back to recovery password when passkey is unavailable and validates password restore', async () => {
+    const cancelled: string[] = [];
+    const attempts: Array<{ method: string; password?: string }> = [];
+    let recovered = 0;
+    const runtime = waitingRuntime(cancelled);
+    await renderWaiting(runtime, {
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      recovery: {
+        passkeyAvailable: false,
+        restore: async (method, options) => {
+          attempts.push({ method, password: options?.password });
+          if (options?.password !== 'correct-horse-battery-staple')
+            throw new Error('e2ee_recovery_authentication');
+          return {
+            outcome: 'restored',
+            results: [{ workspaceId: 'w1', name: 'Alpha', outcome: 'Committed' }],
+          };
+        },
+        onRecovered: () => {
+          recovered++;
+        },
+      },
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {},
+    });
+    await click('e2ee.lostAccess.entry');
+    expect(document.body.querySelector('[data-lost-all-method="passkey"]')).toBeNull();
+    expect(
+      document.body.querySelector('[data-lost-all-method="password"]')?.getAttribute('aria-checked')
+    ).toBe('true');
+
+    const typePassword = async (value: string) => {
+      const input = testId('e2ee-lost-all-password') as HTMLInputElement;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+          input,
+          value
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    expect(inDialog('e2ee.lostAll.continue')?.disabled).toBe(true);
+    await typePassword('too-short');
+    expect(inDialog('e2ee.lostAll.continue')?.disabled).toBe(true);
+
+    await typePassword('wrong-password-1234');
+    expect(inDialog('e2ee.lostAll.continue')?.disabled).toBe(false);
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(document.body.textContent).toContain('e2ee.recovery.wrongPassword');
+
+    await typePassword('correct-horse-battery-staple');
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(attempts).toEqual([
+      { method: 'password', password: 'wrong-password-1234' },
+      { method: 'password', password: 'correct-horse-battery-staple' },
+    ]);
+    await pressInDialog('e2ee.lostAll.open');
+    expect(recovered).toBe(1);
+    expect(cancelled).toEqual(['w1']);
+  });
+
   it('lets an account owner with no authorized device delete the workspace, reporting background cleanup even when the list refresh fails', async () => {
     let removed = 0;
     const port = removalPort(async () => true);

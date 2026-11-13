@@ -19,7 +19,9 @@ import {
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { useSetAtom } from 'jotai';
+import { useE2eeRecoverySection } from '@/components/settings/e2ee/recovery-host';
 import { useRecoveryPort } from '@/components/settings/e2ee/recovery-port';
+import { useWorkspaceRecoveryReady } from '@/components/settings/e2ee/recovery-vault-section';
 import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
 import type { E2eeWorkspaceRemoval } from './e2ee-workspace-removal';
 import { useTranslation } from 'react-i18next';
@@ -131,6 +133,12 @@ export function E2eeWorkspaceConsole({
   // Restoring from a backup uses this host's recovery port (desktop main, Web or the
   // mobile webview) while the recovery switch is on.
   const recoveryPort = useRecoveryPort();
+  const DefaultRecoverySection = useE2eeRecoverySection();
+  const pageRecoveryReady = useWorkspaceRecoveryReady(
+    presentation === 'page' && recoveryReady === undefined ? workspaceId : undefined,
+    accountId
+  );
+  const resolvedRecoveryReady = recoveryReady === undefined ? pageRecoveryReady : recoveryReady;
   const [passkeyAvailable, setPasskeyAvailable] = useState(false);
   useEffect(() => {
     setPasskeyAvailable(false);
@@ -1018,7 +1026,7 @@ export function E2eeWorkspaceConsole({
         presentation={presentation}
         initialTab={initialTab}
         {...(onCheckForUpdates ? { onCheckForUpdates } : {})}
-        {...(recoveryReady === undefined ? {} : { recoveryReady })}
+        {...(resolvedRecoveryReady === undefined ? {} : { recoveryReady: resolvedRecoveryReady })}
         memberRole={
           current?.scope === scope && !current.failure
             ? current.nativeStatus?.memberRole
@@ -1120,7 +1128,12 @@ export function E2eeWorkspaceConsole({
             />
           </E2eeConsoleSection>
         )}
-        {sections}
+        {sections ??
+          (DefaultRecoverySection && (
+            <E2eeConsoleSection tab="recovery">
+              <DefaultRecoverySection key={accountId ?? ''} accountId={accountId} />
+            </E2eeConsoleSection>
+          ))}
         {port?.runtime?.beginRemoteMachinePairing && current?.history?.locallyPinned && (
           <E2eeConsoleSection tab="devices">
             <E2eeRemoteMachineDisclosure key={identity + ':remote-machine-disclosure'}>

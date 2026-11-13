@@ -34,7 +34,11 @@ void test('invoke policy allows methods only within renderer-facing service grou
     'ledgerView',
     'managementState',
     'updateKeys',
-    'revokeDevice'
+    'revokeDevice',
+    'createRecoveryVault',
+    'saveRecoveryVaultFile',
+    'setRecoveryPassword',
+    'removeRecoveryPassword'
   ])
     assert.equal(isIpcInvokeChannel(`e2ee.${method}`), true)
   for (const method of [
