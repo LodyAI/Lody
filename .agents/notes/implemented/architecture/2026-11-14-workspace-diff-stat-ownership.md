@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.com/LodyAI/Lody/pull/2751)
+PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.com/LodyAI/Lody/pull/2751), [#2757](https://github.com/LodyAI/Lody/pull/2757)
 
 [中文](2026-11-14-workspace-diff-stat-ownership.zh.md)
 
