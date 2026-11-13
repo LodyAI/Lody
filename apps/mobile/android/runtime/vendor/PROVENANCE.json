@@ -132,5 +132,12 @@
       "src/protocol/catalog.ts"
     ],
     "note": "The catalog projection carries session meta lastHandledUserMsgId and lastFailedUserMsgId, so native lists show a conversation whose latest turn failed. Mirrored verbatim from the iOS runtime source in the same change."
+  },
+  "roleMachineNames": {
+    "files": [
+      "src/runtime/agent-roles.ts",
+      "src/runtime/handlers/mentions.ts"
+    ],
+    "note": "A Role on several machines labels each @ mention target by its alias or the computer's catalog name instead of the raw machine id. Mirrored verbatim from the iOS runtime source in the same change."
   }
 }
