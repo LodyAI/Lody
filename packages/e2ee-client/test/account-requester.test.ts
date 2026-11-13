@@ -183,6 +183,47 @@ describe('portable account pairing requester', () => {
     );
     expect(queries).toEqual([{ workspaceId: 'w1' }, { workspaceId: 'w1', after: 'pos-1' }]);
   });
+
+  it('merges explicit workspace hints when the requester list has not populated yet', async () => {
+    const { f } = fixture();
+    const genesisHash = hex(f.context.genesis.toBytes());
+    const req = makePortableAccountPairingRequester({
+      workspaces: () => [],
+      host: (workspaceId) =>
+        workspaceId === 'w1'
+          ? Effect.succeed({
+              workspaceId: 'w1',
+              genesisHash,
+              prepareAccountIdentity: () =>
+                Effect.succeed({
+                  signingPublicKey: new Uint8Array(32).fill(1),
+                  encryptionPublicKey: new Uint8Array(32).fill(2),
+                  possessionProof: new Uint8Array(64).fill(3),
+                  credentialHash: new Uint8Array(32).fill(4),
+                }),
+              pendingPersonalJoin: () => Effect.succeed(null),
+              acceptAccountInvitation: () => Effect.void,
+            })
+          : Effect.succeed(null),
+      history: () =>
+        Effect.succeed({
+          workspaceId: 'w1',
+          genesisHash,
+          checkpoint: { length: f.records().length, headHash: hex(f.view().head.toBytes()) },
+          startIndex: 0,
+          recordsHex: f.records().map(hex),
+          position: 'pos-1',
+          nextCursor: null,
+        }),
+      accountId: 'acc1',
+    });
+    const withoutHints = await Effect.runPromise(req());
+    expect(withoutHints).toEqual([]);
+    const withHints = await Effect.runPromise(
+      req([{ workspaceId: 'w1', name: 'Alpha', genesisHash }])
+    );
+    expect(withHints.map((item) => item.workspaceId)).toEqual(['w1']);
+  });
 });
 
 describe('account-level runtime', () => {

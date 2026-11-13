@@ -10,6 +10,7 @@ import {
   verifyLedgerEffect,
   type LedgerCheckpoint,
   type LedgerError,
+  type LedgerView,
 } from '../ledger';
 import type { LedgerLogError, LocalStoreError } from '../../services/errors';
 import {
@@ -89,6 +90,8 @@ export class LedgerSubmission extends Context.Service<
       const store = <A>(effect: Effect.Effect<A, LocalStoreError>) =>
         effect.pipe(Effect.mapError(fromStore));
 
+      let cachedPrefix: { records: readonly Uint8Array[]; view: LedgerView } | null = null;
+
       const inspect = Effect.fnUntraced(function* (
         record: Uint8Array,
         pin: LedgerCheckpoint | null
@@ -105,16 +108,30 @@ export class LedgerSubmission extends Context.Service<
         if (parentIndex < 0) return yield* fail('missing-parent');
         // Authenticate the predecessor once, then verify only the remote suffix.
         // The pending operation must still be valid at its original parent.
-        const predecessor = yield* verifyLedgerEffect({
-          anchor,
-          records: records.slice(0, parentIndex + 1),
-          checkpoint: { head: parent, length: parentIndex + 1 },
-        });
+        const canExtendCached =
+          cachedPrefix !== null &&
+          cachedPrefix.records.length <= parentIndex + 1 &&
+          cachedPrefix.records.every((bytes, index) => bytesEqual(bytes, records[index]!));
+        const predecessor = canExtendCached
+          ? cachedPrefix!.records.length === parentIndex + 1 &&
+            cachedPrefix!.view.head.equals(parent)
+            ? cachedPrefix!.view
+            : yield* extendLedgerEffect(
+                cachedPrefix!.view,
+                records.slice(cachedPrefix!.records.length, parentIndex + 1),
+                { head: parent, length: parentIndex + 1 }
+              )
+          : yield* verifyLedgerEffect({
+              anchor,
+              records: records.slice(0, parentIndex + 1),
+              checkpoint: { head: parent, length: parentIndex + 1 },
+            });
         const view = yield* extendLedgerEffect(
           predecessor,
           records.slice(parentIndex + 1),
           incoming.checkpoint
         );
+        cachedPrefix = { records: records.slice(), view };
         if (
           pin &&
           (records.length < pin.length ||
@@ -138,14 +155,15 @@ export class LedgerSubmission extends Context.Service<
 
       const recover = Effect.fnUntraced(function* (
         expectedRecord?: Uint8Array,
-        creationRevision?: number
+        creationRevision?: number,
+        prepared?: { outcome: SubmissionOutcome | null; checkpoint: LedgerCheckpoint }
       ): Effect.fn.Return<SubmissionResult | null, SubmissionFailure> {
         const entry = yield* store(journal.load(anchor));
         if (expectedRecord && (!entry.record || !bytesEqual(entry.record, expectedRecord)))
           return yield* fail('busy');
         if (!entry.record) return null;
         const record = entry.record;
-        let checked = yield* inspect(record, entry.checkpoint);
+        let checked = prepared ?? (yield* inspect(record, entry.checkpoint));
         if (entry.outcome) {
           if (checked.outcome !== entry.outcome) return yield* fail('corrupt');
           yield* store(
@@ -204,11 +222,14 @@ export class LedgerSubmission extends Context.Service<
           const entry = yield* store(journal.load(anchor));
           if (entry.record && !bytesEqual(entry.record, record)) return yield* fail('busy');
           let creationRevision: number | undefined;
+          let prepared:
+            | { outcome: SubmissionOutcome | null; checkpoint: LedgerCheckpoint }
+            | undefined;
           if (!entry.record) {
-            yield* inspect(record, entry.checkpoint);
+            prepared = yield* inspect(record, entry.checkpoint);
             creationRevision = (yield* store(journal.prepare(anchor, record))) ?? undefined;
           }
-          const result = yield* recover(record, creationRevision);
+          const result = yield* recover(record, creationRevision, prepared);
           if (!result) return yield* fail('corrupt');
           return result;
         }),
