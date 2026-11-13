@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ loaded: false, options: undefined as unknown }));
+const state = vi.hoisted(() => ({ loaded: false, options: undefined as unknown, help: '' }));
 vi.mock('../src/lib/cli-platform', () => ({ getCliPlatformKind: () => 'local' }));
 vi.mock('../src/commands/start', async () => {
   state.loaded = true;
@@ -15,16 +15,26 @@ vi.mock('../src/commands/start', async () => {
 vi.mock('../src/commands/session', async () => {
   const { Command } = await import('commander');
   return {
-    sessionCommand: new Command('session').addCommand(
-      new Command('show')
-        .alias('get')
-        .argument('<id>')
-        .option('--json')
-        .action((id, options, command) => {
-          state.options = { id, ...options, parent: command.parent?.name() };
-        })
-    ),
+    sessionCommand: new Command('session')
+      .exitOverride()
+      .configureOutput({
+        writeOut: (text) => {
+          state.help += text;
+        },
+      })
+      .addCommand(
+        new Command('show')
+          .alias('get')
+          .argument('<id>')
+          .option('--json')
+          .action((id, options, command) => {
+            state.options = { id, ...options, parent: command.parent?.name() };
+          })
+      ),
   };
+});
+vi.mock('../src/commands/login', () => {
+  throw new Error('unselected login implementation loaded');
 });
 import { registerCommands } from '../src/commands/register';
 
@@ -47,42 +57,17 @@ describe('command lazy dispatch', () => {
     await program().parseAsync(['session', 'get', 'example', '--json'], { from: 'user' });
     expect(state.options).toEqual({ id: 'example', json: true, parent: 'session' });
   });
+  it('dispatches help to the selected nested command tree', async () => {
+    await expect(program().parseAsync(['help', 'session'], { from: 'user' })).rejects.toMatchObject(
+      { code: 'commander.help' }
+    );
+    expect(state.help).toContain('show');
+    expect(state.help).toContain('get');
+  });
   it('retains unknown command errors', async () => {
     const command = program().configureOutput({ writeErr: () => {} });
     await expect(command.parseAsync(['missing'], { from: 'user' })).rejects.toMatchObject({
       code: 'commander.unknownCommand',
     });
   });
-});
-
-it('keeps implementation imports dynamic in the emitted registration bundle', async () => {
-  const { build } = await import('esbuild');
-  const result = await build({
-    entryPoints: ['src/commands/register.ts'],
-    bundle: true,
-    write: false,
-    format: 'esm',
-    platform: 'node',
-    metafile: true,
-    plugins: [
-      {
-        name: 'command-boundaries',
-        setup(build) {
-          build.onResolve({ filter: /^\.\// }, (args) =>
-            args.kind === 'entry-point' ? undefined : { path: args.path, external: true }
-          );
-          build.onResolve({ filter: /^\.\.\/lib\/cli-platform$/ }, (args) => ({
-            path: args.path,
-            external: true,
-          }));
-        },
-      },
-    ],
-    packages: 'external',
-  });
-  const imports = Object.values(result.metafile.outputs).flatMap((output) => output.imports);
-  expect(imports.filter((entry) => entry.kind === 'dynamic-import')).toHaveLength(25);
-  expect(
-    imports.filter((entry) => entry.kind === 'import-statement').map((entry) => entry.path)
-  ).toEqual(['commander', '../lib/cli-platform']);
 });

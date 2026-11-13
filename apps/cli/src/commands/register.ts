@@ -158,6 +158,27 @@ const commands = [
 ];
 
 export function registerCommands(program: Command): void {
+  program.addCommand(
+    new Command('help')
+      .helpOption(false)
+      .description('display help for command')
+      .argument('[command]', 'command to show help for')
+      .allowExcessArguments()
+      .allowUnknownOption()
+      .action(async (name?: string) => {
+        if (!name) program.help();
+        const entry = commands.find(
+          (entry) =>
+            entry.name === name && !('cloudOnly' in entry && getCliPlatformKind() !== 'cloud')
+        );
+        if (!entry) {
+          program.help({ error: true });
+        }
+        const implementation = await entry.load();
+        implementation.parent = program;
+        implementation.help();
+      })
+  );
   for (const entry of commands) {
     if ('cloudOnly' in entry && getCliPlatformKind() !== 'cloud') continue;
     const placeholder = new Command(entry.name).description(entry.description).usage(entry.usage);
