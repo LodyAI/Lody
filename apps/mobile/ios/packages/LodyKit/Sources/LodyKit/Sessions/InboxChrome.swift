@@ -92,6 +92,13 @@ final class InboxChrome {
     }
   }
 
+  /// Called from the content's `viewIsAppearing`: the first point the page is in a window, so the
+  /// search placement item withheld by an earlier off-screen `update` can be placed.
+  func hostIsAppearing() {
+    guard let lastModel else { return }
+    update(lastModel)
+  }
+
   func update(_ model: Model?) {
     guard let host, let header else { return }
     guard let model else {
@@ -124,13 +131,14 @@ final class InboxChrome {
     if header.search !== search { header.search = search }
     // Destinations, Settings and create sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
     // Right items run from the trailing edge: search, then the view menu (design).
-    // The search placement item goes into a navigation bar only on a compact iPhone page. iPadOS 26
-    // throws NSInvalidArgumentException ("only supported in UIToolbar"), and iPhone threw from here
-    // too when an idiom-only check let a cold launch's sign-in restore render Home while it still
-    // sat in the split's list column. This is an API constraint, not a layout choice: elsewhere
-    // UIKit places the integrated search itself. A size class change re-runs `update` (`attach`).
+    // UIKit throws NSInvalidArgumentException ("searchBarPlacementBarButtonItem is only supported in
+    // UIToolbar") when the item enters the bar of a page that is not yet on screen: a cold launch's
+    // sign-in restore renders Home ~170 ms in, before it appears, and aborted on every launch. iPadOS 26
+    // throws even on screen, so only a compact iPhone page places it, and only once in a window;
+    // `hostIsAppearing` and size class changes re-run this. Elsewhere UIKit places the search itself.
     let placesSearch = host.traitCollection.userInterfaceIdiom == .phone
       && host.traitCollection.horizontalSizeClass == .compact
+      && host.viewIfLoaded?.window != nil
     let right = placesSearch ? [filter, host.navigationItem.searchBarPlacementBarButtonItem] : [filter]
     (workspaceItem, filterItem) = (left[0], filter)
     let shownLeft = searching || detailTitle != nil ? [] : left
