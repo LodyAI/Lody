@@ -1557,8 +1557,10 @@ export class E2eeIpc extends ProductWindowIpcService {
           workspaces: () => holder.hints,
           // The same main-owned delivery as a member approval: distribute-only round,
           // per-device mailbox evidence, backoff retry and `memberKeyDeliveries` status.
+          // The approval waits, bounded, on its first pass before publishing.
           deliverKeys: (workspaceId, requestId, device) => {
             this.trackKeyDelivery(accountId, workspaceId, requestId, device)
+            return this.keyDelivery.firstPass(accountId, workspaceId, requestId)
           }
         })
       })

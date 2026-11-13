@@ -56,6 +56,8 @@ Account-wide pairing (`approveAccountPairing`) uses the same delivery. Its admis
 - `onKeyDelivery` reports `running`, `retrying` (with code), `delivered` or `ended`.
 - The core distribution journal stores the same id and bytes on each retry.
 
+The requester now wakes from a live relay hint about 30 ms after `publish`, which used to beat the approver's first `e2eeMailbox:put`: activation found no key and fell into its polling retries (Phase 3, 2026-11-13). `deliverKeys` may therefore return a first-pass handle that completes when attempt 0 ends, however it ends, and never after a backoff sleep. The portable approver backs it with a `Deferred` per delivery; the desktop with `firstPass(accountId, workspaceId, requestId)` on the slot, which also completes when the slot is dropped. Before `publish`, the shared workflow waits on all handles alongside the relay accesses, bounded by `firstKeyDeliveryWaitMs` (1.5 s by default). The wait only observes: a slow, failed or hung attempt never blocks, fails or withholds the publish, and the delivery is never interrupted by it. A withheld approval does not wait.
+
 Security review of #2302 found that a failed first delivery was retried only by `memberJoinRequests`/`memberKeyDeliveries` polls. Those polls run only in an owner/admin's team settings or email worker, so a Member approver, or a workspace that is not active, left the new device keyless. `E2eeIpc` now also schedules a main-owned due timer for every delivery slot:
 
 - the timer fires at the earliest retryable `retryAt`, for at most eight timer-driven retries after the last new request or explicit retry;
