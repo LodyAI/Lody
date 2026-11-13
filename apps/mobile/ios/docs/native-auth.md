@@ -66,7 +66,8 @@ Deployed HTTPS reset-page behavior and emailed-link delivery remain unverified.
 
 ## External configuration
 
-Supply these **public** Xcode build settings (never client secrets):
+`project.yml` sets these **public** Xcode build settings on the Lody target to
+production's Google clients (never client secrets):
 
 | Setting                          | Value                                                    |
 | -------------------------------- | -------------------------------------------------------- |
@@ -76,9 +77,9 @@ Supply these **public** Xcode build settings (never client secrets):
 
 The plist maps these to `GIDClientID`, `GIDServerClientID` and URL schemes.
 Missing IDs or a missing reversed callback scheme produce a localized
-configuration error instead of launching the SDK. Set the build settings in the
-app's build configuration or an operator-owned xcconfig; run `pnpm prebuild` to
-regenerate the project after changing persistent app configuration.
+configuration error instead of launching the SDK. A build for other Google clients
+overrides all three on the `xcodebuild` command line; changing the defaults requires
+`pnpm prebuild` to regenerate the project.
 
 Enable Sign in with Apple for the app's developer-team identifier and refresh
 provisioning profiles; `App/Lody.entitlements` declares the capability. Configure
