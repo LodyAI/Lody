@@ -58,7 +58,7 @@ final class InboxChrome {
     }
     // Every width: a search button that expands into the field (iOS 26 integratedButton).
     // No toolbar integration: with a toolbar-less page UIKit otherwise drops the button to the
-    // bottom edge, under the system tab bar. `update` places it in the trailing nav items instead.
+    // bottom edge, under the system tab bar; without it UIKit keeps the button in the navigation bar.
     search.configure(LodyNavigationSearch.Config(
       placeholder: searchPlaceholder, placement: "integratedButton", hideWhenScrolling: false,
       allowToolbarIntegration: false
@@ -117,13 +117,11 @@ final class InboxChrome {
     filter.menu = pageMenu?() ?? compactMenu?() ?? viewMenu()
     if header.search !== search { header.search = search }
     // Destinations, Settings and create sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
-    // Right items run from the trailing edge: search, then the view menu (design).
-    // Only iPhone (including iPhone Duo at any width) accepts the search placement item in a
-    // navigation bar; iPadOS 26 throws NSInvalidArgumentException ("only supported in UIToolbar").
-    // This is an API constraint, not a layout choice: on iPad UIKit places the integrated search
-    // in the navigation bar itself.
-    let placesSearch = host.traitCollection.userInterfaceIdiom == .phone
-    let right = placesSearch ? [filter, host.navigationItem.searchBarPlacementBarButtonItem] : [filter]
+    // The view menu is the only custom trailing item. UIKit places the integrated search button itself:
+    // iOS 26 throws NSInvalidArgumentException ("searchBarPlacementBarButtonItem is only supported in
+    // UIToolbar") when that item is put in navigation bar items, on iPad and on a compact iPhone tab
+    // page alike, which aborted every cold launch with a saved sign-in.
+    let right = [filter]
     (workspaceItem, filterItem) = (left[0], filter)
     let shownLeft = searching || detailTitle != nil ? [] : left
     host.navigationItem.title = detailTitle
@@ -151,7 +149,7 @@ final class InboxChrome {
     workspace.setItems([])
     guard let header else { return }
     if let item = workspaceItem, header.leftItems == [item] { header.leftItems = nil }
-    if let right = header.rightItems, right.contains(where: { $0 === filterItem || $0 === host?.navigationItem.searchBarPlacementBarButtonItem }) {
+    if let right = header.rightItems, right.contains(where: { $0 === filterItem }) {
       header.rightItems = nil
     }
     if header.search === search { header.search = nil }
