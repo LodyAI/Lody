@@ -10,6 +10,7 @@ import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/machine-sharing-settings';
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
+import { E2eeWorkspaceConsole } from '../src/components/pages/e2ee-workspace-console';
 import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-vault-section';
 import { E2eeRecoveryHostContext } from '../src/components/settings/e2ee/recovery-host';
 import type { RecoveryPlan, RecoveryPort } from '../src/components/settings/e2ee/recovery-port';
@@ -87,6 +88,39 @@ describe('recovery vault settings', () => {
       for (let tick = 0; tick < 20; tick++) await act(async () => {});
       expect(container.textContent).toContain('e2ee.recovery.replace');
       expect(calls.get('e2ee.recoveryReplacementPlan')).toBe(1);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('is enabled by default without requiring developer mode', async () => {
+    vi.stubGlobal('ipc', {
+      invoke: async (channel: string) =>
+        channel === 'e2ee.recoveryReplacementPlan'
+          ? { hasVault: false, replaceable: false, replacing: false, covered: [], uncovered: [] }
+          : channel === 'e2ee.recoveryPasskeyAvailable'
+            ? false
+            : [],
+      on: () => () => {},
+    });
+    const store = createStore();
+    expect(store.get(developerModeEnabledAtom)).toBe(false);
+    expect(store.get(e2eeRecoveryVaultEnabledAtom)).toBe(true);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <Provider store={store}>
+            <RecoveryVaultSection />
+          </Provider>
+        );
+      });
+      for (let tick = 0; tick < 10; tick++) await act(async () => {});
+      expect(container.textContent).toContain('e2ee.recovery.createWithPassword');
     } finally {
       act(() => root.unmount());
       container.remove();
@@ -192,8 +226,8 @@ describe('recovery vault settings actions', () => {
   };
   const workspace = (id: string, status: unknown) => ({ id, name: `Workspace ${id}`, status });
 
-  it('offers only creation when the account has no vault', async () => {
-    const view = await mount({
+  it('recommends passkey creation when available and falls back to password otherwise', async () => {
+    const withPasskey = await mount({
       hasVault: false,
       replaceable: false,
       replacing: false,
@@ -201,8 +235,134 @@ describe('recovery vault settings actions', () => {
       uncovered: [],
     });
     try {
-      expect(view.labels).toEqual(['e2ee.recovery.create']);
-      expect(view.primary).toEqual(['e2ee.recovery.create']);
+      expect(withPasskey.labels).toEqual([
+        'e2ee.recovery.createWithPasskey',
+        'e2ee.recovery.createWithPassword',
+        'e2ee.recovery.create',
+      ]);
+      expect(withPasskey.primary).toEqual(['e2ee.recovery.createWithPasskey']);
+    } finally {
+      withPasskey.done();
+    }
+
+    const withoutPasskey = await mount(
+      {
+        hasVault: false,
+        replaceable: false,
+        replacing: false,
+        covered: [workspace('a', { kind: 'notSet' })],
+        uncovered: [],
+      },
+      { 'e2ee.recoveryPasskeyAvailable': () => false }
+    );
+    try {
+      expect(withoutPasskey.labels).toEqual([
+        'e2ee.recovery.createWithPassword',
+        'e2ee.recovery.create',
+      ]);
+      expect(withoutPasskey.primary).toEqual(['e2ee.recovery.createWithPassword']);
+    } finally {
+      withoutPasskey.done();
+    }
+  });
+
+  it('creates with password, saves an offline recovery file later, and nudges removing password after passkey setup', async () => {
+    const typeInput = async (testId: string, value: string) => {
+      const input = document.body.querySelector<HTMLInputElement>(`[data-testid="${testId}"]`)!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+          input,
+          value
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    const dialogButton = (label: string) =>
+      [...document.body.querySelectorAll('button')].find(
+        (b) => b.textContent === label && b.closest('[role="alertdialog"]')
+      );
+    let state = {
+      hasVault: false,
+      replaceable: false,
+      replacing: false,
+      methods: { hasFile: false, hasPassword: false, hasPasskey: false as boolean | null },
+      covered: [workspace('a', { kind: 'verified', update: 1 })],
+      uncovered: [],
+    };
+    const calls: unknown[] = [];
+    const view = await mount(() => state, {
+      'e2ee.recoveryPasskeyAvailable': () => false,
+      'e2ee.createRecoveryVault': (options) => {
+        calls.push(['create', options]);
+        state = {
+          ...state,
+          hasVault: true,
+          replaceable: true,
+          methods: { hasFile: false, hasPassword: true, hasPasskey: false },
+        };
+        return { outcome: 'created', vaultId: 'a'.repeat(32) };
+      },
+      'e2ee.saveRecoveryVaultFile': (method, options) => {
+        calls.push(['saveFile', method, options]);
+        state = {
+          ...state,
+          methods: { hasFile: true, hasPassword: true, hasPasskey: true },
+        };
+        return { outcome: 'saved', vaultId: 'a'.repeat(32) };
+      },
+      'e2ee.removeRecoveryPassword': (method, options) => {
+        calls.push(['removePassword', method, options]);
+        state = {
+          ...state,
+          methods: { hasFile: true, hasPassword: false, hasPasskey: true },
+        };
+        return { outcome: 'removed' };
+      },
+    });
+    try {
+      await view.click('e2ee.recovery.createWithPassword');
+      await typeInput('e2ee-recovery-new-password', 'short');
+      await typeInput('e2ee-recovery-confirm-password', 'short');
+      expect(dialogButton('e2ee.recovery.createWithPassword')?.disabled).toBe(true);
+      await typeInput('e2ee-recovery-new-password', 'correct-horse-battery-staple');
+      await typeInput('e2ee-recovery-confirm-password', 'mismatch-horse-battery-staple');
+      expect(dialogButton('e2ee.recovery.createWithPassword')?.disabled).toBe(true);
+      await typeInput('e2ee-recovery-confirm-password', 'correct-horse-battery-staple');
+      expect(dialogButton('e2ee.recovery.createWithPassword')?.disabled).toBe(false);
+      await act(async () => dialogButton('e2ee.recovery.createWithPassword')!.click());
+      for (let tick = 0; tick < 10; tick++) await act(async () => {});
+
+      expect(calls[0]).toEqual([
+        'create',
+        { method: 'password', password: 'correct-horse-battery-staple' },
+      ]);
+      // No recovery file saved yet: Save file leads instead of Check file.
+      expect(view.labels).toContain('e2ee.recovery.saveFile');
+      expect(view.labels).not.toContain('e2ee.recovery.check');
+      expect(view.primary).toEqual(['e2ee.recovery.saveFile']);
+
+      await view.click('e2ee.recovery.saveFile');
+      await typeInput('e2ee-recovery-unlock-password', 'correct-horse-battery-staple');
+      await act(async () => dialogButton('e2ee.lostAll.continue')!.click());
+      for (let tick = 0; tick < 10; tick++) await act(async () => {});
+
+      expect(calls[1]).toEqual([
+        'saveFile',
+        'password',
+        { password: 'correct-horse-battery-staple' },
+      ]);
+      // Now both Passkey and Password are active: the security nudge recommends removing password.
+      const nudge = document.body.querySelector('[data-testid="e2ee-recovery-password-nudge"]');
+      expect(nudge).not.toBeNull();
+      expect(nudge?.textContent).toContain('e2ee.recovery.passwordNudgeTitle');
+      await act(async () => nudge!.querySelector('button')!.click());
+      await act(async () => dialogButton('e2ee.recovery.passwordRemove')!.click());
+      for (let tick = 0; tick < 10; tick++) await act(async () => {});
+
+      expect(calls[2]).toEqual(['removePassword', 'file', undefined]);
+      expect(
+        document.body.querySelector('[data-testid="e2ee-recovery-password-nudge"]')
+      ).toBeNull();
     } finally {
       view.done();
     }
@@ -872,6 +1032,72 @@ describe('encrypted workspace settings', () => {
     for (let tick = 0; tick < 5; tick++) await act(async () => {});
     expect(page()).toContain('Host workspace');
     expect(page()).toContain('e2ee.recovery.setupAll');
+    expect(page()).not.toContain('e2ee.console.recoveryUnavailable');
+  });
+
+  it('renders the recovery section on the standalone console page instead of recoveryUnavailable', async () => {
+    const port = fakeRecoveryPort({
+      hasVault: true,
+      replacing: false,
+      covered: [{ id: 'workspace', name: 'Standalone workspace', status: { kind: 'notSet' } }],
+      uncovered: [],
+    });
+    const standalonePlatform = {
+      ...platform,
+      e2eeWorkspaces: {
+        ...platform.e2eeWorkspaces,
+        describe: async () => ({
+          workspaceId: 'workspace',
+          contentMode: 'e2ee' as const,
+          contentModeVersion: 1 as const,
+          genesisHash: '11'.repeat(32),
+          cryptoOrgId: '11'.repeat(32),
+          activation: 'control-only' as const,
+        }),
+        history: async () => ({
+          workspaceId: 'workspace',
+          genesisHash: '11'.repeat(32),
+          records: [],
+          checkpoint: { length: 0, headHash: null },
+          nextCursor: null,
+        }),
+        runtime: {
+          ...platform.e2eeWorkspaces!.runtime,
+          open: async () => ({
+            workspaceId: 'workspace',
+            genesisHash: '11'.repeat(32),
+            length: 0,
+            headHash: null,
+            deviceKind: 'personal' as const,
+            hasDeviceCredential: true,
+            hasCurrentKey: true,
+            memberRole: 'owner' as const,
+          }),
+          close: async () => {},
+          recordCreated: async () => {},
+          ledgerView: async () => {
+            throw new Error('skip');
+          },
+        },
+      },
+    } as unknown as PlatformProvider;
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <PlatformContext.Provider value={standalonePlatform}>
+            <E2eeRecoveryHostContext.Provider value={{ port }}>
+              <E2eeWorkspaceConsole
+                workspaceId="workspace"
+                presentation="page"
+                initialTab="recovery"
+              />
+            </E2eeRecoveryHostContext.Provider>
+          </PlatformContext.Provider>
+        </Provider>
+      )
+    );
+    for (let tick = 0; tick < 15; tick++) await act(async () => {});
+    expect(page()).toContain('Standalone workspace');
     expect(page()).not.toContain('e2ee.console.recoveryUnavailable');
   });
 

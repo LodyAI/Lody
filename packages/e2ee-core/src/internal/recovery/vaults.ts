@@ -1,7 +1,14 @@
 import { Context, Effect, Layer } from 'effect';
 import { own } from '../lifecycle';
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '../../services/recovery';
-import { createRecoveryVault, openRecoveryVault, openRecoveryVaultWithPasskey } from './vault';
+import {
+  createRecoveryVault,
+  createRecoveryVaultWithPasskey,
+  createRecoveryVaultWithPassword,
+  openRecoveryVault,
+  openRecoveryVaultWithPasskey,
+  openRecoveryVaultWithPassword,
+} from './vault';
 
 type WithoutStores<F extends (input: never) => unknown> = Omit<Parameters<F>[0], 'store' | 'local'>;
 
@@ -11,9 +18,11 @@ type WithoutStores<F extends (input: never) => unknown> = Omit<Parameters<F>[0],
  * {@link RecoveryVaultLocalStore}.
  *
  * `create` generates a new vault and returns its session together with the
- * recovery file the user keeps offline; `open` unlocks one from that file;
- * `openWithPasskey` unlocks one with a verified passkey PRF. A session's
- * operations are described in the whitepaper's backup and recovery section.
+ * recovery file the user keeps offline; `createWithPasskey` and
+ * `createWithPassword` generate a new vault wrapped directly by a passkey PRF
+ * or Argon2id password wrap; `open`, `openWithPasskey` and `openWithPassword`
+ * unlock an existing vault. A session's operations are described in the
+ * whitepaper's backup and recovery section.
  *
  * @category Workflows
  */
@@ -24,12 +33,24 @@ export class RecoveryVaults extends Context.Service<
     create(
       input: WithoutStores<typeof createRecoveryVault>
     ): ReturnType<typeof createRecoveryVault>;
+    /** Create a new vault wrapped by a verified passkey PRF; the session lives in the caller's Scope. */
+    createWithPasskey(
+      input: WithoutStores<typeof createRecoveryVaultWithPasskey>
+    ): ReturnType<typeof createRecoveryVaultWithPasskey>;
+    /** Create a new vault wrapped by an Argon2id password wrap; the session lives in the caller's Scope. */
+    createWithPassword(
+      input: WithoutStores<typeof createRecoveryVaultWithPassword>
+    ): ReturnType<typeof createRecoveryVaultWithPassword>;
     /** Unlock a vault from its recovery file; the session lives in the caller's Scope. */
     open(input: WithoutStores<typeof openRecoveryVault>): ReturnType<typeof openRecoveryVault>;
     /** Unlock a vault with a verified passkey PRF; the session lives in the caller's Scope. */
     openWithPasskey(
       input: WithoutStores<typeof openRecoveryVaultWithPasskey>
     ): ReturnType<typeof openRecoveryVaultWithPasskey>;
+    /** Unlock a vault with its password; the session lives in the caller's Scope. */
+    openWithPassword(
+      input: WithoutStores<typeof openRecoveryVaultWithPassword>
+    ): ReturnType<typeof openRecoveryVaultWithPassword>;
   }
 >()('@lody/e2ee-core/RecoveryVaults') {
   /** Requires {@link RecoveryVaultStore} and {@link RecoveryVaultLocalStore}. */
@@ -43,6 +64,14 @@ export class RecoveryVaults extends Context.Service<
           createRecoveryVault({ ...input, store, local }).pipe(
             Effect.withSpan('@lody/e2ee-core/RecoveryVaults.create')
           ),
+        createWithPasskey: (input) =>
+          createRecoveryVaultWithPasskey({ ...input, store, local }).pipe(
+            Effect.withSpan('@lody/e2ee-core/RecoveryVaults.createWithPasskey')
+          ),
+        createWithPassword: (input) =>
+          createRecoveryVaultWithPassword({ ...input, store, local }).pipe(
+            Effect.withSpan('@lody/e2ee-core/RecoveryVaults.createWithPassword')
+          ),
         open: (input) =>
           openRecoveryVault({ ...input, store, local }).pipe(
             Effect.withSpan('@lody/e2ee-core/RecoveryVaults.open')
@@ -50,6 +79,10 @@ export class RecoveryVaults extends Context.Service<
         openWithPasskey: (input) =>
           openRecoveryVaultWithPasskey({ ...input, store, local }).pipe(
             Effect.withSpan('@lody/e2ee-core/RecoveryVaults.openWithPasskey')
+          ),
+        openWithPassword: (input) =>
+          openRecoveryVaultWithPassword({ ...input, store, local }).pipe(
+            Effect.withSpan('@lody/e2ee-core/RecoveryVaults.openWithPassword')
           ),
       });
     })
