@@ -8,7 +8,7 @@
 
 - Chat list backdrop geometry must use visible supplementary view frames, never query layout attributes using visible header index paths during diffable updates. UIKit may retain old headers while the new snapshot has fewer sections. Refresh the backdrop from the collection view's finished layout pass, never `scrollViewDidScroll`, which sees pinned header frames from the previous offset and flickers the label and blur; refresh it again after snapshot completion and preserve native sticky-header hand-off. Regression: [home-grouping-crash.py](../../../../../apps/ios/verification/ui/home-grouping-crash.py) with the sticky-groups fixture.
 
-- The entire family line (`⌄ N opened chats`) toggles children, including blank space and status. The opener above opens the conversation.
+- The entire family line (`⌄ N opened chats`) toggles children, including blank space and status. The opener above opens the conversation. The line keeps a 44 pt target, but that target starts in the opener's blank bottom space and the text sits just under the opener, so the line reads as part of its opener rather than centred between rows.
 
 - Team conversation lists show a compact circular owner avatar after the trailing time/status (including children), resolved from the workspace member cache with a name-initial fallback. My tasks omit this avatar; special status stays trailing. Titles and project details share the leading edge.
 

@@ -638,7 +638,9 @@ private struct ChatRowContent: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
+    // The family line's 44 pt target starts inside the opener's blank bottom space, so its text
+    // sits just under the opener instead of centred between it and the next row.
+    VStack(alignment: .leading, spacing: expanded == nil ? 0 : -contentBottomInset) {
       content
       if let expanded { familyToggle(expanded) }
     }
@@ -717,6 +719,14 @@ private struct ChatRowContent: View {
     .frame(maxWidth: .infinity, minHeight: nested ? LodySize.controlMd : LodySize.listRow, alignment: .leading)
   }
 
+  /// Blank space `content` leaves below its last text line: the vertical padding of a two-line
+  /// row, or half the spare minimum height around a single title line.
+  private var contentBottomInset: CGFloat {
+    if snippet != nil || hasDetailLine { return LodySpacing.sm }
+    let line = nested ? LodyTextStyle.callout.lineHeight : LodyTextStyle.body.lineHeight
+    return max(0, ((nested ? LodySize.controlMd : LodySize.listRow) - line) / 2)
+  }
+
   /// Child count and expanded state for VoiceOver; the toggle is an accessibility action.
   private var familyLabel: String {
     guard let expanded else { return "" }
@@ -755,7 +765,8 @@ private struct ChatRowContent: View {
         }
       }
       .padding(.horizontal, LodyLayout.listEdgeX)
-      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .padding(.top, contentBottomInset + LodySpacing.xs)
+      .frame(maxWidth: .infinity, minHeight: LodySize.touchTarget, alignment: .topLeading)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
