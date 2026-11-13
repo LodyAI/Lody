@@ -1252,12 +1252,12 @@ describe('P10 public crypto and published SDK preparation', () => {
     }
   );
 
-  it.each(['recover', 'empty', 'foreign', 'close'] as const)(
-    'automatically requests a trimmed snapshot and handles %s',
+  it.each(['corrupted', 'empty'] as const)(
+    'rejects a trimmed unreadable encrypted snapshot (%s) without snapshot-repair polling',
     async (outcome) => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
       const server = createByteServer();
-      const writer = await openTab(`repair-w-${++sequence}` as WorkspaceId);
+      const writer = await openTab(`trimmed-w-${++sequence}` as WorkspaceId);
       const doc = (await writer.repo.openPersistedDoc('doc-a')).doc;
       const writerContent = cryptoContent();
       if (writerContent.mode !== 'protected') throw new Error('expected protected content');
@@ -1266,8 +1266,8 @@ describe('P10 public crypto and published SDK preparation', () => {
         debounceMs: 10,
         minBytesSinceRemoteSnapshot: 0,
       };
-      let sourceTransport = transportFor(writer, writerContent);
-      let source = sourceTransport.joinDocRoom('doc-a', doc);
+      const sourceTransport = transportFor(writer, writerContent);
+      const source = sourceTransport.joinDocRoom('doc-a', doc);
       await settle(source.firstSyncedWithRemote);
       doc.getMap('data').set('value', 'complete source');
       doc.commit();
@@ -1276,126 +1276,111 @@ describe('P10 public crypto and published SDK preparation', () => {
       await settle(server.snapshotReady);
       const url = docUrl(writer.workspaceId, 'doc-a');
       const stored = server.room(new URL(url).pathname);
-      const originalOffset = stored.snapshot!.offset;
-      source.unsubscribe();
-      await settle(sourceTransport.close());
-      // The online repair writer uses the production debounce and 1 MiB gate.
-      writerContent.snapshotUpload = {
-        canUpload: () => true,
-        debounceMs: 30_000,
-        minBytesSinceRemoteSnapshot: 1024 * 1024,
-      };
-      sourceTransport = transportFor(writer, writerContent);
-      source = sourceTransport.joinDocRoom('doc-a', doc);
-      await settle(source.firstSyncedWithRemote);
-      if (outcome === 'foreign') {
-        // A foreign update during local debounce suppresses ordinary publication.
-        doc.getMap('data').set('local', 'below the ordinary byte threshold');
-        doc.commit();
-        await settle(source.waitUntilSynced());
-        const peer = await openTab(`repair-peer-${sequence}` as WorkspaceId);
-        peer.workspaceId = writer.workspaceId;
-        const peerDoc = (await peer.repo.openPersistedDoc('doc-a')).doc;
-        const peerTransport = transportFor(peer, cryptoContent());
-        expect((await settle(peerTransport.syncDoc('doc-a', peerDoc))).ok).toBe(true);
-        peerDoc.getMap('data').set('foreign', 'complete after another writer');
-        peerDoc.commit();
-        expect((await settle(peerTransport.syncDoc('doc-a', peerDoc))).ok).toBe(true);
-        const arrived = Promise.withResolvers<void>();
-        const unsubscribe = doc.subscribe(() => {
-          if (doc.getMap('data').get('foreign') === 'complete after another writer')
-            arrived.resolve();
-        });
-        try {
-          server.live
-            .get(new URL(url).pathname)!
-            .enqueue(
-              new TextEncoder().encode(
-                `event: data\ndata: ${Buffer.from(stored.batches.at(-1)!).toString('base64')}\n\nevent: control\ndata: ${JSON.stringify({ streamNextOffset: server.tail(new URL(url).pathname), upToDate: true })}\n\n`
-              )
-            );
-          await settle(arrived.promise);
-          await settle(source.waitUntilSynced());
-        } finally {
-          unsubscribe();
-        }
-        expect(doc.toJSON()).toEqual(peerDoc.toJSON());
-        expect(Number(server.tail(new URL(url).pathname)) - Number(originalOffset)).toBeLessThan(
-          1024 * 1024
-        );
-      }
-      const repairOffset = server.tail(new URL(url).pathname);
       if (outcome === 'empty') stored.snapshot!.body = new Uint8Array();
       else stored.snapshot!.body[stored.snapshot!.body.length - 1] ^= 1;
       stored.trimmed = true;
-      const reader = await openTab(`repair-r-${sequence}` as WorkspaceId);
+
+      const reader = await openTab(`trimmed-r-${sequence}` as WorkspaceId);
       reader.workspaceId = writer.workspaceId;
       const restored = (await reader.repo.openPersistedDoc('doc-a')).doc;
-      const content = cryptoContent();
-      const recovery: boolean[] = [];
-      const rejected = Promise.withResolvers<void>();
-      if (content.mode !== 'protected') throw new Error('expected protected content');
-      content.snapshotUpload = {
-        canUpload: () => false,
-        onSnapshotRecovery: (_url, pending) => {
-          recovery.push(pending);
-          if (pending) rejected.resolve();
-        },
-      };
       const cursor = createResilientRemoteCursorStore({
         dbName: reader.cursorDbName,
         timeoutMs: 0,
       });
-      const readerTransport = transportFor(reader, content, cursor);
-      if (outcome === 'close') {
-        source.unsubscribe();
-        await settle(sourceTransport.close());
+      const readerTransport = transportFor(reader, cryptoContent(), cursor);
+      const syncResult = await settle(readerTransport.syncDoc('doc-a', restored));
+      expect(syncResult.ok).toBe(false);
+      if (!syncResult.ok) {
+        expect(syncResult.error?.message).toContain('protocol_error');
       }
-      const destination = readerTransport.joinDocRoom('doc-a', restored);
-      let firstSync = 'pending';
-      void destination.firstSyncedWithRemote.then(
-        () => {
-          firstSync = 'ready';
-        },
-        () => {
-          firstSync = 'failed';
-        }
-      );
-      await settle(rejected.promise);
-      await vi.advanceTimersByTimeAsync(10_000);
+      expect(restored.toJSON()).toEqual({});
+      expect(await cursor.load(url)).toBeNull();
+      await vi.advanceTimersByTimeAsync(15_000);
       expect(
-        server.requests.some(
-          (request) =>
-            request.method === 'POST' && request.url.pathname.endsWith(':snapshot-repair')
-        )
-      ).toBe(true);
-      if (outcome === 'close') {
-        expect(firstSync).toBe('pending');
-        expect(recovery.at(-1)).toBe(true);
-        expect(restored.toJSON()).toEqual({});
-        expect(await cursor.load(url)).toBeNull();
-        await settle(readerTransport.close());
-        await vi.waitFor(() => expect(firstSync).toBe('failed'), { interval: 0 });
-        const stopped = server.requests.length;
-        await vi.advanceTimersByTimeAsync(60_000);
-        expect(server.requests).toHaveLength(stopped);
-        return;
-      }
-      await settle(server.snapshotReplaced);
-      await vi.advanceTimersByTimeAsync(5_000);
-      await vi.waitFor(() => expect(firstSync).toBe('ready'), { interval: 0 });
-      expect(restored.toJSON()).toEqual(doc.toJSON());
-      expect(recovery).toContain(true);
-      expect(recovery.at(-1)).toBe(false);
-      // Repair may replace the same native offset: no new local edit was needed.
-      expect(stored.snapshot!.offset).toBe(repairOffset);
-      expect((await cursor.load(url))?.nextOffset).toBe(repairOffset);
-      const disk = await openTab(`repair-r-${sequence}` as WorkspaceId);
-      expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(doc.toJSON());
+        server.requests.some((request) => request.url.pathname.endsWith(':snapshot-repair'))
+      ).toBe(false);
       source.unsubscribe();
-      destination.unsubscribe();
     }
   );
+
+  it('uploads a snapshot after alternating foreign writes once maxBytesSinceRemoteSnapshot is reached', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const server = createByteServer();
+    const writer = await openTab(`max-bytes-w-${++sequence}` as WorkspaceId);
+    const doc = (await writer.repo.openPersistedDoc('doc-a')).doc;
+    const writerContent = cryptoContent();
+    if (writerContent.mode !== 'protected') throw new Error('expected protected content');
+    writerContent.snapshotUpload = {
+      canUpload: () => true,
+      debounceMs: 10,
+      minBytesSinceRemoteSnapshot: 200,
+      maxBytesSinceRemoteSnapshot: 2_000,
+    };
+    const sourceTransport = transportFor(writer, writerContent);
+    const source = sourceTransport.joinDocRoom('doc-a', doc);
+    await settle(source.firstSyncedWithRemote);
+
+    const url = docUrl(writer.workspaceId, 'doc-a');
+    const path = new URL(url).pathname;
+    const stored = server.room(path);
+
+    // 1. Local write above minBytes (200) but below maxBytes (2000), followed by a foreign writer.
+    doc.getMap('data').set('local-1', 'a'.repeat(400));
+    doc.commit();
+    await settle(source.waitUntilSynced());
+
+    const peer = await openTab(`max-bytes-peer-${sequence}` as WorkspaceId);
+    peer.workspaceId = writer.workspaceId;
+    const peerDoc = (await peer.repo.openPersistedDoc('doc-a')).doc;
+    const peerTransport = transportFor(peer, cryptoContent());
+    expect((await settle(peerTransport.syncDoc('doc-a', peerDoc))).ok).toBe(true);
+    peerDoc.getMap('data').set('foreign', 'competing writer');
+    peerDoc.commit();
+    expect((await settle(peerTransport.syncDoc('doc-a', peerDoc))).ok).toBe(true);
+
+    const arrived = Promise.withResolvers<void>();
+    const unsubscribe = doc.subscribe(() => {
+      if (doc.getMap('data').get('foreign') === 'competing writer') arrived.resolve();
+    });
+    try {
+      server.live
+        .get(path)!
+        .enqueue(
+          new TextEncoder().encode(
+            `event: data\ndata: ${Buffer.from(stored.batches.at(-1)!).toString('base64')}\n\nevent: control\ndata: ${JSON.stringify({ streamNextOffset: server.tail(path), upToDate: true })}\n\n`
+          )
+        );
+      await settle(arrived.promise);
+      await settle(source.waitUntilSynced());
+    } finally {
+      unsubscribe();
+    }
+
+    expect(Number(server.tail(path))).toBeGreaterThan(200);
+    expect(Number(server.tail(path))).toBeLessThan(2_000);
+    await vi.advanceTimersByTimeAsync(20);
+    // Below maxBytesSinceRemoteSnapshot, observedForeignWriter suppresses snapshot upload.
+    expect(stored.snapshot).toBeUndefined();
+
+    // 2. Subsequent local writes push stream byte delta past maxBytesSinceRemoteSnapshot (2000).
+    doc.getMap('data').set('local-2', 'b'.repeat(2_200));
+    doc.commit();
+    await settle(source.waitUntilSynced());
+    expect(Number(server.tail(path))).toBeGreaterThanOrEqual(2_000);
+    await vi.advanceTimersByTimeAsync(20);
+    await settle(server.snapshotReady);
+    expect(stored.snapshot).toBeDefined();
+    expect(stored.snapshot!.offset).toBe(server.tail(path));
+
+    const reader = await openTab(`max-bytes-r-${sequence}` as WorkspaceId);
+    reader.workspaceId = writer.workspaceId;
+    const restored = (await reader.repo.openPersistedDoc('doc-a')).doc;
+    expect((await settle(transportFor(reader, cryptoContent()).syncDoc('doc-a', restored))).ok).toBe(
+      true
+    );
+    expect(restored.toJSON()).toEqual(doc.toJSON());
+    source.unsubscribe();
+  });
 
   it('does not upload when the real AEAD cannot obtain secure randomness', async () => {
     const server = createByteServer();

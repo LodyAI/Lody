@@ -77,7 +77,6 @@ export function createE2eeContent(input: {
   onKeyUpdateRequired?: (source?: 'seal' | 'seal-complete') => void;
   /** Credential-authenticated member removal or revocation of this device. */
   onMemberRemoved?: (reason: E2eeAccessLoss) => void;
-  onSnapshotRecoveryChange?: (pending: boolean) => void;
   onPhase?: (phase: WorkspaceEpochPhase) => void;
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
@@ -114,30 +113,6 @@ export function createE2eeContent(input: {
   };
   // E2E-only: absent outside an automation window whose main registered the probe.
   const effects = clientLossEffects(input.workspaceId);
-  const recovering = new Set<string>();
-  const requested = new Map<string, number>();
-  const recovery = (stream: string, pending: boolean) => {
-    if (pending) recovering.add(stream);
-    else recovering.delete(stream);
-    try {
-      input.onSnapshotRecoveryChange?.(recovering.size > 0);
-    } catch {
-      /* Observational only. */
-    }
-  };
-  const snapshotRecovery = (stream: string, pending: boolean) => {
-    if (closed) return;
-    recovery(stream, pending);
-    if (!pending) return;
-    const now = Date.now();
-    if (now - (requested.get(stream) ?? -Infinity) < 30_000) return;
-    requested.set(stream, now);
-    // The existing host action relays fixed hints for read-only devices too.
-    void input.runtime.contentStreamsToken(input.workspaceId, undefined, stream).catch((error) => {
-      if (observeRemoval(error)) return;
-      console.warn('[e2ee] snapshot repair request failed; will retry');
-    });
-  };
   // One shared reception for every open waiting on a not-yet-received key.
   let reception: Promise<void> | undefined;
   const receiveKey = () =>
@@ -209,17 +184,12 @@ export function createE2eeContent(input: {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(input.genesisHash),
     snapshotUpload: {
-      // SDK rejection also covers absent/malformed envelopes before provider.open.
-      onSnapshotRecovery: (streamUrl, pending) =>
-        snapshotRecovery(
-          decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!),
-          pending
-        ),
-      // SDK schedules only after local writes, suppresses a competing writer,
-      // and checks the remote snapshot before exporting a new one.
+      // SDK schedules only after local writes, suppresses a competing writer
+      // until maxBytesSinceRemoteSnapshot, and checks the remote snapshot before exporting a new one.
       canUpload: () => !closed && !lost && transition.phase() !== 'closed',
       debounceMs: 30_000,
       minBytesSinceRemoteSnapshot: 1024 * 1024,
+      maxBytesSinceRemoteSnapshot: 4 * 1024 * 1024,
     },
     resolve: encryptedWorkspaceResolver(input.workspaceId, (room) =>
       transition.provider(

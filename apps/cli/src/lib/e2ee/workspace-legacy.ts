@@ -852,31 +852,6 @@ async function openWorkspaceOwned(
     string,
     Promise<Effect.Success<ReturnType<typeof opened.runtime.binding>>>
   >();
-  const snapshotRequests = new Map<string, number>();
-  const snapshotFlights = new Set<Promise<unknown>>();
-  const requestSnapshot = (stream: string) => {
-    if (closed) return;
-    const now = Date.now();
-    if (now - (snapshotRequests.get(stream) ?? -Infinity) < 30_000) return;
-    snapshotRequests.set(stream, now);
-    const flight = options.cloud.getContentToken({
-      workspaceId: options.workspaceId,
-      credential: opened.credential,
-      requestSnapshotFor: stream,
-    });
-    snapshotFlights.add(flight);
-    void flight.then(
-      () => snapshotFlights.delete(flight),
-      (cause) => {
-        snapshotFlights.delete(flight);
-        if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) {
-          credentialFailureHandler(cause);
-          return;
-        }
-        console.warn('[e2ee] snapshot repair request failed; will retry');
-      }
-    );
-  };
   // Waiting encrypted turns recheck on these events; their timer is only a fallback.
   // A room ID names one document's new frame; none means a confirmed ledger read.
   const evidenceListeners = new Set<(roomId?: string) => void>();
@@ -962,15 +937,12 @@ async function openWorkspaceOwned(
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
     snapshotUpload: {
-      onSnapshotRecovery: (streamUrl, needsSnapshot) => {
-        if (needsSnapshot)
-          requestSnapshot(decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!));
-      },
-      // SDK schedules only after local writes, suppresses a competing writer,
-      // and checks the remote snapshot before exporting a new one.
+      // SDK schedules only after local writes, suppresses a competing writer
+      // until maxBytesSinceRemoteSnapshot, and checks the remote snapshot before exporting a new one.
       canUpload: () => !closed && !ledgerBlocked,
       debounceMs: 30_000,
       minBytesSinceRemoteSnapshot: 1024 * 1024,
+      maxBytesSinceRemoteSnapshot: 4 * 1024 * 1024,
     },
     resolve: encryptedWorkspaceResolver(options.workspaceId, (room) => {
       const descriptor = encryptedWorkspaceRoom(options.workspaceId, room);
@@ -1447,7 +1419,6 @@ async function openWorkspaceOwned(
       await stopRpc();
       await epochTransition.close();
       await refresh;
-      await Promise.allSettled([...snapshotFlights]);
       // History/snapshot diagnosis may start while close drains those flights.
       // Keep custody alive through identity verification and the durable receipt,
       // never await the parent drain/full erasure that calls back into close.

@@ -293,62 +293,20 @@ describe('desktop E2EE content epoch safety', () => {
     }
   });
 
-  it('requests repair without blocking replay, then clears the recovery hint on a valid read', async () => {
-    const requests: unknown[][] = [];
-    const statuses: boolean[] = [];
-    const release = Promise.withResolvers<unknown>();
-    let valid = false;
-    const runtime = {
-      openContent: async () => {
-        if (!valid) throw new Error('snapshot rejected');
-        return new Uint8Array([7]);
-      },
-      contentStreamsToken: (...args: unknown[]) => {
-        requests.push(args);
-        return release.promise;
-      },
-    } as unknown as E2eeWorkspaceRuntime;
+  it('configures snapshot upload with a hard max byte threshold for multi-writer rooms', () => {
     const access = createDesktopE2eeContent({
-      runtime,
+      runtime: {} as unknown as E2eeWorkspaceRuntime,
       workspaceId: 'workspace',
       genesisHash: '11'.repeat(32),
       epoch: 0,
       authToken: () => null,
-      onSnapshotRecoveryChange: (pending) => statuses.push(pending),
     });
     if (access.content.mode !== 'protected') throw new Error('expected protected content');
-    const room = access.content.resolve({ kind: 'meta' });
-    if (room.mode !== 'protected') throw new Error('expected protected room');
-    const request = {
-      context: { ...context, kind: 'snapshot' as const, continuationOffset: '00000001' },
-      header: new Uint8Array([4]),
-      sealed: new Uint8Array([1]),
-      additionalData: new Uint8Array([2]),
-    };
-    try {
-      await expect(room.config.provider.open(request)).rejects.toThrow('snapshot rejected');
-      access.content.snapshotUpload.onSnapshotRecovery!(
-        'https://streams.invalid/ds/encrypted/workspace%3Ameta',
-        true
-      );
-      access.content.snapshotUpload.onSnapshotRecovery!(
-        'https://streams.invalid/ds/encrypted/workspace%3Ameta',
-        true
-      );
-      await expect(room.config.provider.open(request)).rejects.toThrow('snapshot rejected');
-      expect(requests).toEqual([['workspace', undefined, 'workspace:meta']]);
-      expect(statuses.at(-1)).toBe(true);
-      valid = true;
-      // The request action is still unsettled; retained history remains usable.
-      expect(await room.config.provider.open({ ...request, context })).toEqual(new Uint8Array([7]));
-      access.content.snapshotUpload.onSnapshotRecovery!(
-        'https://streams.invalid/ds/encrypted/workspace%3Ameta',
-        false
-      );
-      expect(statuses.at(-1)).toBe(false);
-    } finally {
-      release.resolve(undefined);
-    }
+    expect(access.content.snapshotUpload).toMatchObject({
+      debounceMs: 30_000,
+      minBytesSinceRemoteSnapshot: 1024 * 1024,
+      maxBytesSinceRemoteSnapshot: 4 * 1024 * 1024,
+    });
   });
   it('keeps one selected snapshot epoch across a concurrent key transition', async () => {
     const entered = Promise.withResolvers<void>(),
@@ -465,9 +423,7 @@ const desktopLoss = (code: string) => () =>
   new Error(`Error invoking remote method 'e2ee.contentStreamsToken': Error: ${code}`);
 it.each([
   ['token', 'e2ee_member_removed', desktopLoss('e2ee_member_removed')],
-  ['snapshot', 'e2ee_member_removed', desktopLoss('e2ee_member_removed')],
   ['token', 'e2ee_device_revoked', desktopLoss('e2ee_device_revoked')],
-  ['snapshot', 'e2ee_device_revoked', desktopLoss('e2ee_device_revoked')],
   // A phone or browser's personal host rejects its own revoked device from the verified
   // ledger; that must reach the re-pairing route instead of endless reconnecting.
   ['token', 'e2ee_device_revoked', () => new PersonalHostError({ code: 'revoked' })],
@@ -492,12 +448,7 @@ it.each([
     });
     const token = access.e2ee.createTokenProvider(new AbortController().signal);
     try {
-      if (source === 'token') await expect(token.getToken()).rejects.toThrow();
-      else
-        access.content.snapshotUpload?.onSnapshotRecovery?.(
-          'https://synthetic.invalid/stream/doc',
-          true
-        );
+      await expect(token.getToken()).rejects.toThrow();
       expect(await retired).toBe(code);
       expect(await access.content.snapshotUpload?.canUpload()).toBe(false);
       const room = access.content.resolve({ kind: 'doc', docId: 'session' });
