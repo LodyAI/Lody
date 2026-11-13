@@ -764,8 +764,7 @@ const prHistoryStyles = stylex.create({
     display: 'flex',
     alignItems: 'baseline',
     gap: space[2],
-    padding: space[2],
-    borderBottom: `1px solid ${colors.separator}`,
+    padding: `${space[2]} ${space[2]} ${space[1]}`,
     fontSize: text.footnoteSize,
   },
   title: { color: colors.label, fontWeight: 500 },
@@ -843,60 +842,63 @@ function PrHistoryControl({
         align="start"
         sideOffset={8}
         aria-label={label}
-        className="w-80 max-w-[min(20rem,90vw)] border-border/60 p-0 shadow-xl"
+        className="w-max max-w-[min(20rem,90vw)] border-border/60 p-0 shadow-xl"
       >
-        <div {...stylex.props(prHistoryStyles.header)}>
-          <span {...stylex.props(prHistoryStyles.title)}>
-            {t('sessions.pr.historyTitle', 'Pull requests')}
-          </span>
-          <span {...stylex.props(prHistoryStyles.count)}>{history.length}</span>
+        {/* One child: the popup surface spaces its direct children apart. */}
+        <div>
+          <div {...stylex.props(prHistoryStyles.header)}>
+            <span {...stylex.props(prHistoryStyles.title)}>
+              {t('sessions.pr.historyTitle', 'Pull requests')}
+            </span>
+            <span {...stylex.props(prHistoryStyles.count)}>{history.length}</span>
+          </div>
+          <ul {...stylex.props(prHistoryStyles.list)}>
+            {history.map((view, index) => {
+              const isCurrent = index === 0;
+              const openPr = isCurrent
+                ? onOpenCurrent
+                : onOpenOlder
+                  ? () => onOpenOlder(view)
+                  : undefined;
+              const content = (
+                <>
+                  <SessionPrIcon prStatus={view.status} prCiState={view.ci} />
+                  <span {...stylex.props(prHistoryStyles.number)}>
+                    {view.number != null ? `#${view.number}` : 'PR'}
+                  </span>
+                  <span {...stylex.props(prHistoryStyles.repo)}>{view.repoFullName ?? ''}</span>
+                  {isCurrent ? (
+                    <span {...stylex.props(prHistoryStyles.current)}>
+                      {t('sessions.pr.historyCurrent', 'Current')}
+                    </span>
+                  ) : null}
+                </>
+              );
+              return (
+                <li key={view.url}>
+                  {openPr ? (
+                    <button
+                      type="button"
+                      title={view.url}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      onClick={() => {
+                        setOpen(false);
+                        openPr();
+                      }}
+                      {...stylex.props(prHistoryStyles.row)}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <span {...stylex.props(prHistoryStyles.row, prHistoryStyles.rowStatic)}>
+                      {content}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         </div>
-        <ul {...stylex.props(prHistoryStyles.list)}>
-          {history.map((view, index) => {
-            const isCurrent = index === 0;
-            const openPr = isCurrent
-              ? onOpenCurrent
-              : onOpenOlder
-                ? () => onOpenOlder(view)
-                : undefined;
-            const content = (
-              <>
-                <SessionPrIcon prStatus={view.status} prCiState={view.ci} />
-                <span {...stylex.props(prHistoryStyles.number)}>
-                  {view.number != null ? `#${view.number}` : 'PR'}
-                </span>
-                <span {...stylex.props(prHistoryStyles.repo)}>{view.repoFullName ?? ''}</span>
-                {isCurrent ? (
-                  <span {...stylex.props(prHistoryStyles.current)}>
-                    {t('sessions.pr.historyCurrent', 'Current')}
-                  </span>
-                ) : null}
-              </>
-            );
-            return (
-              <li key={view.url}>
-                {openPr ? (
-                  <button
-                    type="button"
-                    title={view.url}
-                    aria-current={isCurrent ? 'true' : undefined}
-                    onClick={() => {
-                      setOpen(false);
-                      openPr();
-                    }}
-                    {...stylex.props(prHistoryStyles.row)}
-                  >
-                    {content}
-                  </button>
-                ) : (
-                  <span {...stylex.props(prHistoryStyles.row, prHistoryStyles.rowStatic)}>
-                    {content}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
       </Popover.Content>
     </Popover.Root>
   );
