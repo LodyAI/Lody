@@ -27,6 +27,7 @@ def show_list(ui):
 
 
 def panel_chrome(ui):
+    """The split column uses the iPhone header and a bottom glass bar for Settings and New Session."""
     panel = ui.element('ipad-panel')['frame']
 
     def find(match, message):
@@ -36,31 +37,48 @@ def panel_chrome(ui):
         'panel': panel,
         'workspace': find(lambda i: (i.get('AXLabel') or '').startswith('Switch workspace,'), 'Missing workspace switch'),
         'view': find(lambda i: i.get('AXLabel') == catalog.text('inbox.settings.section.view'), 'Missing view menu'),
-        'settings': find(lambda i: i.get('AXLabel') == catalog.text('tabs.settings'), 'Missing settings'),
-        'search': find(lambda i: i.get('subrole') == 'AXSearchField' or i.get('AXUniqueId') == 'sidebar-search', 'Missing sidebar search'),
-        'create': find(lambda i: i.get('AXLabel') == catalog.text('tabs.newSession'), 'Missing new session'),
+        'search': find(lambda i: i.get('AXUniqueId') == 'magnifyingglass' or i.get('subrole') == 'AXSearchField', 'Missing search button'),
+        'settings': find(lambda i: i.get('AXUniqueId') == 'home-settings', 'Missing settings'),
+        'create': find(lambda i: i.get('AXUniqueId') == 'home-create', 'Missing new session'),
     }
     bottom = panel['y'] + panel['height']
-    workspace, view, settings = (chrome[name]['frame'] for name in ('workspace', 'view', 'settings'))
-    search, create = chrome['search']['frame'], chrome['create']['frame']
+    workspace, view, search = (chrome[name]['frame'] for name in ('workspace', 'view', 'search'))
+    settings, create = chrome['settings']['frame'], chrome['create']['frame']
     middle = workspace['y'] + workspace['height'] / 2
     assert workspace['x'] < panel['x'] + 40 and workspace['y'] < panel['y'] + 90, (workspace, panel)
-    for action in (view, settings):
-        assert abs(action['y'] + action['height'] / 2 - middle) < 10, ('Filter and settings share the header row', action, workspace)
-    assert workspace['x'] + workspace['width'] <= view['x'] < settings['x'], (workspace, view, settings)
-    assert settings['x'] + settings['width'] <= panel['x'] + panel['width'] + .5, (settings, panel)
-    for item in (search, create):
-        assert item['y'] > bottom - 110, ('Search and New Session sit at the bottom', item, panel)
-    assert search['x'] < panel['x'] + 40 and search['width'] > panel['width'] / 2, ('Search fills the bottom row', search, panel)
-    assert search['x'] + search['width'] < create['x'] and create['x'] > panel['x'] + panel['width'] - 100, (search, create, panel)
-    assert create['x'] - (search['x'] + search['width']) <= 30, ('Search and New Session keep the system toolbar gap', search, create)
-    assert create['x'] + create['width'] <= panel['x'] + panel['width'], ('New Session stays inside the sidebar', create, panel)
-    assert not any(i.get('AXLabel') == catalog.system('hideSidebar') and settings['x'] - 10 < i['frame']['x'] < panel['x'] + panel['width']
-                   and i['frame']['y'] < panel['y'] + 90 for i in ui.state()), 'The sidebar header carries no system toggle beside settings'
+    for action in (view, search):
+        assert abs(action['y'] + action['height'] / 2 - middle) < 10, ('Search and the view menu share the header row', action, workspace)
+    assert workspace['x'] + workspace['width'] <= search['x'] < view['x'], ('Capsule, search, then the view menu', workspace, search, view)
+    assert view['x'] + view['width'] <= panel['x'] + panel['width'] + .5, (view, panel)
+    assert workspace['height'] <= 52, ('The capsule is one line: logo and name', workspace)
+    for item in (settings, create):
+        assert item['y'] > bottom - 110, ('Settings and New Session sit at the bottom', item, panel)
+        assert item['width'] >= 36 and item['height'] >= 36
+    assert settings['x'] < panel['x'] + 40, ('Settings leads the bottom bar', settings, panel)
+    assert create['x'] > panel['x'] + panel['width'] - 100, ('New Session trails the bottom bar', create, panel)
+    assert create['x'] + create['width'] <= panel['x'] + panel['width'], ('New Session stays inside the column', create, panel)
+    assert not any(i.get('AXLabel') == catalog.system('hideSidebar') and view['x'] - 10 < i['frame']['x'] < panel['x'] + panel['width']
+                   and i['frame']['y'] < panel['y'] + 90 for i in ui.state()), 'The column header carries no system toggle beside the view menu'
     assert workspace['width'] >= 44 and workspace['height'] >= 44
-    assert create['width'] >= 36 and create['height'] >= 36
     return chrome
 
+
+def open_search(ui):
+    """Expand the integrated search button into its field, as on iPhone, and return the field."""
+    if not any(i.get('subrole') == 'AXSearchField' and i.get('AXUniqueId') != 'chat-find-field' for i in ui.state()):
+        ui.axe('tap', '--id', 'magnifyingglass', '--post-delay', '.6')
+    return ui.wait(lambda items: next((i for i in items if i.get('subrole') == 'AXSearchField'
+                                       and i.get('AXUniqueId') != 'chat-find-field'), None), 'Missing Chats search field')
+
+
+def close_search(ui):
+    labels = {catalog.system('cancel').lower(), catalog.system('close').lower()}
+    button = ui.wait(lambda items: next((i for i in items if i.get('type') == 'Button'
+                                         and (i.get('AXLabel') or '').lower() in labels), None), 'Missing search dismiss button')
+    frame = button['frame']
+    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.8')
+    ui.wait(lambda items: not any(i.get('subrole') == 'AXSearchField' and i.get('AXUniqueId') != 'chat-find-field' for i in items)
+            or None, 'Search did not close')
 
 
 def record_tap(ui, label, name, screen, band, settle=1.2):
@@ -108,7 +126,7 @@ def bottom_marks(media, screen, band, start=None, seconds=None):
 
 
 def assert_bottom_travels(rest, tracks, name):
-    assert len(rest) >= 2, (f'{name}: the resting sidebar shows no search glyph and New Session', rest)
+    assert len(rest) >= 2, (f'{name}: the resting column shows no Settings and New Session', rest)
     glyph, plus = min(rest), max(rest)
     seen = [index for index, marks in enumerate(tracks) if marks]
     assert seen, (f'{name}: the recording never showed the bottom row', len(tracks))
@@ -118,7 +136,7 @@ def assert_bottom_travels(rest, tracks, name):
     assert moving, (f'{name}: no frame caught the bottom row moving', tracks)
     for marks in moving:
         assert any(abs(mark - (max(marks) - (plus - glyph))) <= 6 for mark in marks), \
-            (f'{name}: New Session moved without the search field beside it', marks, rest)
+            (f'{name}: New Session moved without Settings beside it', marks, rest)
     return len(moving)
 
 

@@ -46,9 +46,6 @@ try:
         rotate(ui, orientation)
         wide = orientation == 'landscape'
         pad.show_list(ui)
-        if not any(item.get('AXUniqueId') == 'ui-design' for item in ui.state()):
-            tap(max((item['frame'] for item in ui.state() if item.get('AXUniqueId') == 'toggle:ui:local:lody'),
-                    key=lambda value: value['width'] * value['height']))
         ui.axe('tap', '--id', 'ui-design', '--post-delay', '.8')
         ui.element('session-input')
 

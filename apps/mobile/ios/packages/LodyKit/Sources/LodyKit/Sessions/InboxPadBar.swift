@@ -1,51 +1,50 @@
 import UIKit
 
-// UIKit retires the primary column's toolbar while the split hides or shows it, so the
-// sidebar's bottom row lives inside the column and slides with it.
+// Regular width has no tab bar, so the list column carries the two actions iPhone keeps
+// there: Settings (leading) and new chat (trailing). Search lives in the navigation bar,
+// as on iPhone. UIKit retires the primary column's toolbar while the split hides or shows
+// it, so this row lives inside the column and slides with it.
 @MainActor
 final class InboxPadBar: UIView {
   static let height: CGFloat = 44
 
-  let search = UISearchTextField()
-  var searchChanged: ((String) -> Void)?
+  var openSettings: (() -> Void)?
+  var openDebug: (() -> Void)?
   var create: (() -> Void)?
   var canCreate = false { didSet { createButton.isEnabled = canCreate } }
-  private let searchGlass = UIVisualEffectView(effect: UIGlassEffect())
+  private let settingsButton = UIButton(configuration: .glass())
   private let createButton = UIButton(configuration: .glass())
   private let edge = UIScrollEdgeElementContainerInteraction()
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    searchGlass.cornerConfiguration = .capsule()
-    search.placeholder = String(localized: "search.field.placeholder", bundle: .lody)
-    search.borderStyle = .none
-    search.backgroundColor = .clear
-    search.returnKeyType = .search
-    search.accessibilityIdentifier = "sidebar-search"
-    search.accessibilityTraits.insert(.searchField)
-    search.addAction(UIAction { [weak self] _ in self?.searchChanged?(self?.search.text ?? "") }, for: .editingChanged)
-    search.addAction(UIAction { [weak self] _ in self?.search.resignFirstResponder() }, for: .editingDidEndOnExit)
-    var configuration = UIButton.Configuration.glass()
-    configuration.image = UIImage(systemName: "plus")
-    configuration.baseForegroundColor = .lodyAccent
-    createButton.configuration = configuration
+    var settings = UIButton.Configuration.glass()
+    settings.image = UIImage(systemName: "gearshape")
+    settings.baseForegroundColor = .label
+    settingsButton.configuration = settings
+    settingsButton.accessibilityLabel = String(localized: "tabs.settings", bundle: .lody)
+    settingsButton.accessibilityIdentifier = "home-settings"
+    settingsButton.addAction(UIAction { [weak self] _ in self?.openSettings?() }, for: .primaryActionTriggered)
+    // Long-press Settings opens Debug, as the iPhone Settings tab does.
+    let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+    settingsButton.addGestureRecognizer(hold)
+    var create = UIButton.Configuration.glass()
+    create.image = UIImage(systemName: "square.and.pencil")
+    create.baseForegroundColor = .lodyAccent
+    createButton.configuration = create
     createButton.accessibilityLabel = String(localized: "tabs.newSession", bundle: .lody)
+    createButton.accessibilityIdentifier = "home-create"
     createButton.addAction(UIAction { [weak self] _ in self?.create?() }, for: .primaryActionTriggered)
-    addSubview(searchGlass)
-    searchGlass.contentView.addSubview(search)
+    addSubview(settingsButton)
     addSubview(createButton)
-    for view in [searchGlass, search, createButton] { view.translatesAutoresizingMaskIntoConstraints = false }
+    for view in [settingsButton, createButton] { view.translatesAutoresizingMaskIntoConstraints = false }
     NSLayoutConstraint.activate([
       heightAnchor.constraint(equalToConstant: Self.height),
-      searchGlass.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-      searchGlass.topAnchor.constraint(equalTo: topAnchor),
-      searchGlass.bottomAnchor.constraint(equalTo: bottomAnchor),
-      search.leadingAnchor.constraint(equalTo: searchGlass.contentView.leadingAnchor, constant: 10),
-      search.trailingAnchor.constraint(equalTo: searchGlass.contentView.trailingAnchor, constant: -10),
-      search.topAnchor.constraint(equalTo: searchGlass.contentView.topAnchor),
-      search.bottomAnchor.constraint(equalTo: searchGlass.contentView.bottomAnchor),
-      createButton.leadingAnchor.constraint(equalTo: searchGlass.trailingAnchor, constant: 12),
-      createButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+      settingsButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      settingsButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+      settingsButton.widthAnchor.constraint(equalToConstant: Self.height),
+      settingsButton.heightAnchor.constraint(equalToConstant: Self.height),
+      createButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
       createButton.widthAnchor.constraint(equalToConstant: Self.height),
       createButton.heightAnchor.constraint(equalToConstant: Self.height),
@@ -56,6 +55,16 @@ final class InboxPadBar: UIView {
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
+
+  // Only the two buttons take touches; the list stays scrollable between them.
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    [settingsButton, createButton].contains { $0.frame.contains(point) }
+  }
+
+  @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
+    guard recognizer.state == .began else { return }
+    openDebug?()
+  }
 
   func attachScrollEdge(to scrollView: UIScrollView) {
     LodyScrollEdges.floatingControls(scrollView)

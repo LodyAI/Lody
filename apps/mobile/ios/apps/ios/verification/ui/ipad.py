@@ -1,4 +1,4 @@
-"""UIKit owns the iPad sidebar, column layout, navigation and reveal transitions."""
+"""UIKit owns the iPad list column, layout, navigation and reveal transitions."""
 import shutil
 import subprocess
 import sys
@@ -24,10 +24,6 @@ def labeled(label):
         ),
         f'Missing {label}',
     )
-
-
-def search_field():
-    return ui.wait(lambda items: next((item for item in items if item.get('subrole') == 'AXSearchField' or item.get('AXUniqueId') == 'sidebar-search'), None), 'Missing sidebar search')
 
 
 def assert_split_column(name):
@@ -69,35 +65,52 @@ assert screen_frame()['height'] > screen_frame()['width']
 assert_panel_chrome()
 assert_split_column('portrait-home')
 
-# Keep the same two-line rows and touch targets, with less empty space between projects.
-project_row = ui.element('toggle:ui:local:lody')['frame']
+# The column is the Chats list: full-width rows, and a group label folds its rows.
 session_row = ui.element('ui-design')['frame']
-empty_row = ui.element('project:ui:empty')['frame']
-assert project_row['height'] >= 44 and session_row['height'] >= 44
+assert session_row['height'] >= 44
 assert session_row['width'] >= ui.element('ipad-panel')['frame']['width'] - 24
-assert empty_row['y'] - project_row['y'] < 130, (project_row, empty_row)
-ui.axe('tap', '-x', str(project_row['x'] + 60),
-       '-y', str(project_row['y'] + project_row['height'] / 2), '--post-delay', '.6')
-ui.wait(lambda items: not any(item.get('AXUniqueId') == 'ui-design' for item in items),
-        'Sidebar project did not collapse')
-ui.capture('sidebar-project-collapsed')
-project_row = ui.element('toggle:ui:local:lody')['frame']
-ui.axe('tap', '-x', str(project_row['x'] + 60),
-       '-y', str(project_row['y'] + project_row['height'] / 2), '--post-delay', '.6')
-ui.element('ui-design')
-ui.capture('sidebar-project-expanded')
+ui.element('ui-pinned')
+pinned_label = ui.element('label:pinned')['frame']
+ui.axe('tap', '-x', str(pinned_label['x'] + 60),
+       '-y', str(pinned_label['y'] + pinned_label['height'] / 2), '--post-delay', '.6')
+ui.wait(lambda items: not any(item.get('AXUniqueId') == 'ui-pinned' for item in items),
+        'Pinned group did not collapse')
+ui.capture('list-group-collapsed')
+pinned_label = ui.element('label:pinned')['frame']
+ui.axe('tap', '-x', str(pinned_label['x'] + 60),
+       '-y', str(pinned_label['y'] + pinned_label['height'] / 2), '--post-delay', '.6')
+ui.element('ui-pinned')
+ui.capture('list-group-expanded')
 
-# The stacked native search drives the production filter and clears it again.
-field = search_field()['frame']
+# The integrated search button expands into the field and drives the production filter.
+field = pad.open_search(ui)['frame']
 ui.axe('tap', '-x', str(field['x'] + field['width'] / 2), '-y', str(field['y'] + field['height'] / 2), '--post-delay', '.5')
 ui.axe('type', 'lody')
 ui.element('ui-design')
+ui.element('project:ui:local:lody')
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'project:ui:empty' for item in items),
-        'Sidebar search did not filter the empty project')
-ui.capture('sidebar-search-keyboard')
-ui.axe('tap', '--label', catalog.system('clear'), '--post-delay', '.4')
-ui.axe('key', '40')
-ui.element('project:ui:empty')
+        'Search did not filter the empty project')
+ui.capture('list-search-keyboard')
+
+# A project hit is a second native page owned by the list navigation controller, with its own title
+# and native Back button while the root detail remains unchanged.
+ui.axe('tap', '--id', 'project:ui:local:lody', '--post-delay', '1')
+ui.wait(
+    lambda items: any(
+        (item.get('AXLabel') or '') == catalog.text('project.newSession.accessibility')
+        for item in items
+    ),
+    'Panel project action did not appear',
+)
+ui.element('BackButton')
+ui.wait(
+    lambda items: any((item.get('AXLabel') or '') == 'Lody iOS' for item in items),
+    'Panel project header did not appear',
+)
+ui.capture('project-pushed')
+ui.axe('tap', '--id', 'BackButton', '--tap-style', 'physical', '--post-delay', '.8')
+pad.close_search(ui)
+ui.element('ui-pinned')
 
 # New Session opens the shared creation sheet; its inner navigation stays in that sheet.
 ui.axe(
@@ -117,26 +130,6 @@ ui.wait(lambda items: not any(item.get('AXUniqueId') == 'create-session-input' f
         'Creation sheet did not close')
 pad.show_list(ui)
 labeled(catalog.text('tabs.newSession'))
-
-# The project is a second native page owned by the list navigation controller, with its own title
-# and native Back button while the root detail remains unchanged.
-ui.axe('tap', '--id', 'project:ui:empty', '--post-delay', '1')
-ui.wait(
-    lambda items: any(
-        (item.get('AXLabel') or '') == catalog.text('project.newSession.accessibility')
-        for item in items
-    ),
-    'Panel project action did not appear',
-)
-ui.element('BackButton')
-ui.wait(
-    lambda items: any((item.get('AXLabel') or '') == '空盒子' for item in items),
-    'Panel project header did not appear',
-)
-ui.capture('project-pushed')
-
-ui.axe('tap', '--id', 'BackButton', '--tap-style', 'physical', '--post-delay', '.8')
-
 
 def create_and_send(landscape):
     name = 'landscape' if landscape else 'portrait'

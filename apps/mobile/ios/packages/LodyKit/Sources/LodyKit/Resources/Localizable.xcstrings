@@ -20009,23 +20009,6 @@
         }
       }
     },
-    "inbox.header.running": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 个运行中"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld running"
-          }
-        }
-      }
-    },
     "inbox.review": {
       "extractionState": "manual",
       "localizations": {

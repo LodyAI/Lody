@@ -247,7 +247,6 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       accountEmail: state.accountEmail,
       workspaces: state.workspaces, selected: state.workspace,
       devices: InboxDevices(catalog: state.catalog, presence: state.presence),
-      running: state.catalog.sessions.filter { !$0.archived && SessionState($0) == .live }.count,
       connection: Self.connection(state)
     ))
   }
