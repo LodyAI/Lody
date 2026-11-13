@@ -95,10 +95,13 @@ class RuntimeProtocolTest {
   assertTrue(approval.awaitingPermission)
   assertEquals(ToolPermission("r",true,listOf(PermissionOption("yes","Yes","allow_once"),PermissionOption("no","No, keep planning","reject_once"))),approval.permission)
   assertEquals("Only a plan approval carries a plan",null,(items[2] as TurnItem.Tool).plan)
-  val chosen=RuntimeProtocol.detail(JSONObject().put("blocks",org.json.JSONArray()).put("outcome",JSONObject().put("outcome","selected").put("optionId","no")))
-  assertEquals("no",chosen.chosenOption)
-  assertFalse(chosen.withdrawn)
-  assertTrue(RuntimeProtocol.detail(JSONObject().put("outcome",JSONObject().put("outcome","cancelled"))).withdrawn)
+  fun settled(fields: String) = (((RuntimeProtocol.event(JSONObject().put("type","session").put("sessionId","s").put("session",
+   """{"v":1,"status":"live","entries":[{"id":"a","role":"assistant","finished":true,"items":[{"itemId":"x","type":"tool_call","kind":"switch_mode","title":"Ready to code?","status":"completed","permission":{"requestId":"r","pending":false,"kind":"permission","options":[{"optionId":"no","name":"No","kind":"reject_once"}]$fields}}]}]}"""))
+   as RuntimeEvent.SessionUpdated).snapshot.messages.single().items.single() as TurnItem.Tool).permission!!)
+  assertEquals("no",settled(",\"chosenOptionId\":\"no\"").chosenOptionId)
+  assertFalse(settled(",\"chosenOptionId\":\"no\"").withdrawn)
+  assertTrue(settled(",\"withdrawn\":true").withdrawn)
+  assertNull(settled(",\"withdrawn\":true").chosenOptionId)
  }
  @Test fun askUserQuestionParsesItsQuestionsAndFailsClosedWhenMalformed() {
   fun permission(meta: String) = JSONObject().put("type","tool_call").put("itemId","q").put("kind","other").put("title","Ask").put("status","pending")

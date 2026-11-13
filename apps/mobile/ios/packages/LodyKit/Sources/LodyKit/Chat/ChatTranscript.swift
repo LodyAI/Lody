@@ -209,7 +209,16 @@ struct ChatOperationPresentation: Decodable {
 
 struct ChatItem: Decodable {
   var references: [ChatTextReference]? = nil
-  struct Permission: Decodable { let requestId: String; let pending: Bool }
+  struct Permission: Decodable {
+    /// Lenient: a malformed option must not fail the whole transcript decode.
+    struct Option: Decodable { let optionId: String?; let name: String? }
+    let requestId: String
+    let pending: Bool
+    var options: [Option]? = nil
+    /// The option a settled request was answered with (runtime `chosenOptionId`).
+    var chosenOptionId: String? = nil
+    var withdrawn: Bool? = nil
+  }
   struct Plan: Decodable { let content: String; let status: String }
   struct NoticeMeta: Decodable, Equatable { let reason: String?; let code: String?; let message: String? }
   var operation: ChatOperationPresentation? = nil
@@ -861,6 +870,13 @@ struct ChatTranscript {
           row.text = item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.path ?? String(localized: "native.chat.transcript.tool", bundle: .lody)
           if item.permission?.pending == true { row.text = String.localizedStringWithFormat(String(localized: "native.chat.transcript.pending", bundle: .lody), String(describing: row.text)) }
           else if item.status == "failed" { row.text = String.localizedStringWithFormat(String(localized: "native.chat.transcript.failed", bundle: .lody), String(describing: row.text)) }
+          // Web `PermissionRequestBlock`: an answered plan approval reads as the chosen option.
+          if item.kind == "switch_mode", let permission = item.permission, !permission.pending, permission.withdrawn != true,
+             let chosen = permission.chosenOptionId,
+             let name = permission.options?.first(where: { $0.optionId == chosen })?.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+             !name.isEmpty {
+            row.text = name
+          }
           row.actionable = item.hasDetail == true || item.permission?.pending == true
         case "plan":
           row.text = (item.entries ?? []).map { planPrefix($0.status) + $0.content }.joined(separator: "\n")

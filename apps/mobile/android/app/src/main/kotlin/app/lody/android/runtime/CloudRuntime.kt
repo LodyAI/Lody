@@ -429,17 +429,11 @@ class ShortLivedGrant(val token: String, val gatewayBaseUrl: String, val expires
  * A tool step's detail, after upstream `itemDetail`: its content blocks in order. [truncated] when
  * the runtime cut a long detail; the rest stays on desktop.
  */
-/**
- * [chosenOption]: the option id a settled permission request was answered with; [withdrawn]: the
- * request was cancelled rather than answered.
- */
 data class StepDetail(
     val blocks: List<StepBlock>,
     val truncated: Boolean = false,
-    val chosenOption: String? = null,
     /** An answered ask-user-question's answers by question key (the outcome's `_meta`), each as its labels or text. */
     val answers: Map<String, List<String>> = emptyMap(),
-    val withdrawn: Boolean = false,
 )
 
 /** A tool step's permission request (web `permissionRequest`): [pending] until answered or withdrawn. */
@@ -451,6 +445,10 @@ data class ToolPermission(
     val question: Boolean = false,
     /** The questions, or null when absent or malformed: such a question is not answerable here. */
     val questions: QuestionMeta? = null,
+    /** The option a settled request was answered with (runtime `chosenOptionId`). */
+    val chosenOptionId: String? = null,
+    /** A settled request that was withdrawn (cancelled), not answered. */
+    val withdrawn: Boolean = false,
 ) {
     /**
      * Desktop `resolveSuggestedOptionId`: a request that leads with a refusal suggests the first

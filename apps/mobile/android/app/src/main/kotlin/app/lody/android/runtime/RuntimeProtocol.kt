@@ -219,14 +219,8 @@ internal object RuntimeProtocol {
                     .takeIf { it.isNotBlank() }?.let { StepBlock.Text(it) }
             }
         }
-        // A settled permission request's outcome: the chosen option, or withdrawn (cancelled).
-        val outcome = json.optJSONObject("outcome")
-        return StepDetail(
-            blocks, json.optBoolean("truncated"),
-            chosenOption = outcome?.takeIf { it.optString("outcome") == "selected" }?.optString("optionId")?.ifEmpty { null },
-            withdrawn = outcome?.optString("outcome") == "cancelled",
-            answers = answers(outcome),
-        )
+        // A settled question's answers; the decision itself travels on the step's summary.
+        return StepDetail(blocks, json.optBoolean("truncated"), answers = answers(json.optJSONObject("outcome")))
     }
 
     /** One upstream `ItemSummary`, leniently: unknown types and malformed fields are dropped. */
@@ -318,7 +312,11 @@ internal object RuntimeProtocol {
             }
         }.orEmpty()
         val question = json.optString("kind") == "ask_user_question"
-        return ToolPermission(requestId, json.optBoolean("pending"), options, question, if (question) questions(json.opt("questionMeta")) else null)
+        return ToolPermission(
+            requestId, json.optBoolean("pending"), options, question, if (question) questions(json.opt("questionMeta")) else null,
+            chosenOptionId = (json.opt("chosenOptionId") as? String)?.ifEmpty { null },
+            withdrawn = json.optBoolean("withdrawn"),
+        )
     }
 
     /**

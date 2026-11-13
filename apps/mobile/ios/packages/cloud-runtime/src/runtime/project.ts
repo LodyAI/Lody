@@ -80,6 +80,10 @@ export type ItemSummary =
         options?: { optionId: string; name: string; kind?: string }[];
         kind?: 'permission' | 'ask_user_question';
         questionMeta?: QuestionMeta;
+        /** The option a settled request was answered with (history `outcome.optionId`). */
+        chosenOptionId?: string;
+        /** The request was withdrawn (history outcome `cancelled`), not answered. */
+        withdrawn?: boolean;
       };
     }
   | {
@@ -371,16 +375,23 @@ function summarizeItem(
       !!questionMeta ||
       raw.permissionRequest?.kind === 'ask_user_question' ||
       raw.kind === 'ask_user_question';
+    // Only the decision itself: question answers (possibly secret) stay in `itemDetail`.
+    const outcome = raw.permissionRequest?.outcome;
     const permission =
       !parentItemId && raw.permissionRequest
         ? {
             requestId: String(raw.permissionRequest.requestId ?? ''),
-            pending: raw.permissionRequest.outcome == null,
+            pending: outcome == null,
             options: raw.permissionRequest.options,
             kind: isQuestion
               ? ('ask_user_question' as const)
               : ('permission' as const),
             questionMeta,
+            ...(outcome?.outcome === 'selected' &&
+            typeof outcome.optionId === 'string'
+              ? { chosenOptionId: outcome.optionId }
+              : {}),
+            ...(outcome?.outcome === 'cancelled' ? { withdrawn: true } : {}),
           }
         : undefined;
     const summary = {

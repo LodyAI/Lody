@@ -205,24 +205,27 @@ internal fun PermissionDecision(entryId: String, tool: TurnItem.Tool, details: S
         }
         return
     }
-    // Settled: the summary says only that it was answered, so the outcome is read from the step's detail.
-    val detailKey = "${tool.id}:permission:${permission.requestId}"
-    val detail = details.cache[detailKey]
-    if (details.available) {
-        LaunchedEffect(detailKey, permission.pending) {
-            if (permission.pending || detail != null) return@LaunchedEffect
-            try { details.cache[detailKey] = details.fetch(entryId, tool.id) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { }
+    // Settled: the summary carries the decision; only a question's answers (possibly secret)
+    // are read from the step's detail.
+    if (permission.withdrawn) return
+    val meta = permission.questions
+    if (meta != null) {
+        val detailKey = "${tool.id}:permission:${permission.requestId}"
+        val detail = details.cache[detailKey]
+        if (details.available) {
+            LaunchedEffect(detailKey) {
+                if (detail != null) return@LaunchedEffect
+                try { details.cache[detailKey] = details.fetch(entryId, tool.id) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { }
+            }
+        }
+        if (detail != null && detail.answers.isNotEmpty()) {
+            QuestionAnswers(meta, detail.answers)
+            return
         }
     }
-    if (detail?.withdrawn == true) return
-    val meta = permission.questions
-    if (detail != null && meta != null && detail.answers.isNotEmpty()) {
-        QuestionAnswers(meta, detail.answers)
-        return
-    }
-    val chosen = detail?.chosenOption ?: answered ?: return
+    val chosen = permission.chosenOptionId ?: answered ?: return
     val option = options.firstOrNull { it.optionId == chosen }
     // An unknown option id (stale history) reads as allowed (web `resolvePermissionRecord`).
     val label = option?.name ?: stringResource(R.string.chat_permission_approved)
