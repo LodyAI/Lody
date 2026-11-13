@@ -13,7 +13,6 @@ import { LODY_APP_INFO_UPDATED_EVENT } from '@/lib/native-app-info';
 import { recordClientError } from '@/lib/client-log';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 const refreshAtom = atom(0);
-let localOnlyRevision = -1;
 const styles = stylex.create({
   icon: { position: 'relative', display: 'inline-flex', width: '100%', height: '100%' },
   dot: {
@@ -35,6 +34,7 @@ export function useSecurityState() {
   const native = port?.runtime;
   const revision = useAtomValue(refreshAtom),
     bump = useSetAtom(refreshAtom);
+  const loadRef = useRef<((forceRefresh?: boolean) => Promise<void>) | undefined>(undefined);
   const encrypted =
     !!mode?.descriptor &&
     'contentMode' in mode.descriptor &&
@@ -51,25 +51,45 @@ export function useSecurityState() {
     isError: boolean;
   }>();
   useEffect(() => {
-    if (!workspaceId || !mode?.accountId || !native?.managementState) return undefined;
+    if (!workspaceId || !mode?.accountId || !native?.managementState) {
+      loadRef.current = undefined;
+      return undefined;
+    }
     let active = true,
-      pending = false;
+      pending = false,
+      queued = false,
+      queuedForceRefresh = false;
     const load = async (forceRefresh = false) => {
-      if (pending) return;
+      if (pending) {
+        queued = true;
+        queuedForceRefresh = queuedForceRefresh || forceRefresh;
+        return;
+      }
       pending = true;
+      let nextForceRefresh = forceRefresh;
       try {
-        // Offline refresh cannot erase verified local facts or pause the workspace.
-        if (forceRefresh || revision !== localOnlyRevision) {
-          try {
-            await native.refresh(workspaceId, { installKeys: false });
-          } catch {
-            /* Retry on the next probe. */
+        do {
+          queued = false;
+          const shouldRefresh = nextForceRefresh;
+          nextForceRefresh = false;
+          // Offline refresh cannot erase verified local facts or pause the workspace.
+          if (shouldRefresh) {
+            try {
+              await native.refresh(workspaceId, { installKeys: false });
+            } catch {
+              /* Retry on the next probe. */
+            }
           }
-        }
-        if (!active) return;
-        const data = await native.managementState!(workspaceId);
-        if (active && mode.accountId) notifyE2eeLedgerChanged(mode.accountId, workspaceId);
-        if (active) setSnapshot({ key, data, isError: false });
+          if (!active) return;
+          const data = await native.managementState!(workspaceId);
+          if (shouldRefresh && active && mode.accountId)
+            notifyE2eeLedgerChanged(mode.accountId, workspaceId);
+          if (active) setSnapshot({ key, data, isError: false });
+          if (queued) {
+            nextForceRefresh = queuedForceRefresh;
+            queuedForceRefresh = false;
+          }
+        } while (queued && active);
       } catch {
         if (active)
           setSnapshot((previous) => ({
@@ -81,23 +101,25 @@ export function useSecurityState() {
         pending = false;
       }
     };
-    void load();
+    loadRef.current = load;
+    void load(true);
     const timer = setInterval(() => {
       void load(true);
     }, 15_000);
     return () => {
       active = false;
+      if (loadRef.current === load) loadRef.current = undefined;
       clearInterval(timer);
     };
-  }, [key, mode?.accountId, workspaceId, native, revision]);
+  }, [key, mode?.accountId, workspaceId, native]);
+  useEffect(() => {
+    if (revision > 0) void loadRef.current?.(false);
+  }, [revision]);
   const state = {
     data: encrypted && snapshot?.key === key ? snapshot.data : undefined,
     isError: encrypted && snapshot?.key === key ? snapshot.isError : false,
     refetch: async () => {
-      bump((value) => {
-        localOnlyRevision = value + 1;
-        return value + 1;
-      });
+      bump((n) => n + 1);
     },
   };
   const localProfile = useLocalDeviceProfile();

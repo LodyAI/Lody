@@ -921,6 +921,9 @@ export function E2eeAutomaticPairingInbox({
   /** A request this device ended after too many wrong codes; shown until dismissed. */
   const [ended, setEnded] = useState<E2eeAutomaticPairingReview | null>(null);
   const deferred = useRef(new Set<string>());
+  /** Monotonic set of request IDs that have reached a terminal outcome in this session
+   * (approved, declined, code-locked, or joined by QR); never cleared by transient poll gaps. */
+  const settled = useRef(new Set<string>());
   const actionOwner = useRef({ runtime });
   if (actionOwner.current.runtime !== runtime) actionOwner.current = { runtime };
   useEffect(
@@ -968,6 +971,7 @@ export function E2eeAutomaticPairingInbox({
     selectedRef.current = null;
     setSelected(null);
     deferred.current.clear();
+    settled.current.clear();
     if (!runtime?.pendingAutomaticPairing) return;
     const tick = async () => {
       if (!alive) return;
@@ -980,11 +984,11 @@ export function E2eeAutomaticPairingInbox({
       try {
         do {
           queued = false;
-          const rows = await runtime.pendingAutomaticPairing!();
+          const rawRows = await runtime.pendingAutomaticPairing!();
           if (!alive) return;
+          const rows = rawRows.filter((row) => !settled.current.has(row.id));
           setRequests(rows);
           const ids = new Set(rows.map((row) => row.id));
-          for (const id of deferred.current) if (!ids.has(id)) deferred.current.delete(id);
           if (selectedRef.current && !ids.has(selectedRef.current)) {
             selectedRef.current = null;
             setSelected(null);
@@ -1009,7 +1013,8 @@ export function E2eeAutomaticPairingInbox({
             const next = rows.find(
               (row) =>
                 (row.phase === 'waiting' || (canPresentPreparing && row.phase === 'preparing')) &&
-                !deferred.current.has(row.id)
+                !deferred.current.has(row.id) &&
+                !settled.current.has(row.id)
             );
             if (next) {
               selectedRef.current = next.id;
@@ -1059,6 +1064,7 @@ export function E2eeAutomaticPairingInbox({
   useEffect(() => () => clearTimeout(dismissTimer.current), []);
   const qrJoined = (id: string) => {
     clearTimeout(dismissTimer.current);
+    settled.current.add(id);
     // Show the result briefly, then close without resurfacing the request it answered.
     dismissTimer.current = setTimeout(() => {
       if (qrForRef.current !== id) return;
@@ -1117,11 +1123,15 @@ export function E2eeAutomaticPairingInbox({
       deferred.current.add(target.id);
       setSelected(null);
       setQrFor(null);
-      if (!approve) setRequests((rows) => rows.filter((row) => row.id !== target.id));
+      if (!approve) {
+        settled.current.add(target.id);
+        setRequests((rows) => rows.filter((row) => row.id !== target.id));
+      }
     } catch (cause) {
       if (owner !== actionOwner.current) return;
       const refusal = accountPairingErrorCode(cause);
       if (refusal === 'pairing-code-locked') {
+        settled.current.add(target.id);
         deferred.current.add(target.id);
         setRequests((rows) => rows.filter((row) => row.id !== target.id));
         setSelected(null);
@@ -1216,7 +1226,9 @@ export function E2eeAutomaticPairingInbox({
         // The device that just scanned also has an automatic request; closing Settings
         // or the console must not pop it up again.
         for (const row of requestsRef.current)
-          if (row.phase === 'waiting' || row.phase === 'preparing') deferred.current.add(row.id);
+          if (row.phase === 'waiting' || row.phase === 'preparing') {
+            deferred.current.add(row.id);
+          }
       },
     }),
     [requestCount, handheld, qrSupported]

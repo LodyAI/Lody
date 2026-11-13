@@ -1,4 +1,4 @@
-import { Effect, Exit, Result } from 'effect';
+import { Effect, Exit, Fiber, Result } from 'effect';
 import type {
   E2eeAppendRecordRequest,
   E2eeWorkspaceHistoryPage,
@@ -515,6 +515,7 @@ export function makePortableAccountPairingApprover(input: {
     });
   const releaseQuietly = (session: AccountPairingApproverSession, scope: string) =>
     session.release ? session.release().pipe(Effect.catch(remember(scope))) : Effect.void;
+  const activeDeliveries = new Map<string, Fiber.Fiber<void, never>>();
   // Sessions opened before a later workspace fails are not returned, so the caller
   // cannot release them: release them here on any failure.
   const list = Effect.fnUntraced(function* (
@@ -599,6 +600,12 @@ export function makePortableAccountPairingApprover(input: {
         deliverKeys: (deviceBytes, requestId) =>
           Effect.gen(function* () {
             const device = toHex(deviceBytes);
+            const deliveryKey = `${workspaceId}:${device}`;
+            const previousFiber = activeDeliveries.get(deliveryKey);
+            if (previousFiber) {
+              activeDeliveries.delete(deliveryKey);
+              yield* Fiber.interrupt(previousFiber);
+            }
             const delays = input.keyDeliveryRetry?.delays ?? KEY_DELIVERY_RETRY_DELAYS;
             const sleep = input.keyDeliveryRetry?.sleep ?? ((ms: number) => Effect.sleep(ms));
             const report = (state: AccountPairingKeyDeliveryEvent['state'], code?: string) => {
@@ -651,15 +658,22 @@ export function makePortableAccountPairingApprover(input: {
             // The first hold is taken before approval continues, so the workflow may
             // release its own listing session without closing the reader underneath.
             const first = yield* acquire();
+            let current: AccountPairingApproverSession | null = first;
+            let fiberRef: Fiber.Fiber<void, never> | undefined;
             const deliver = Effect.gen(function* () {
-              let current: AccountPairingApproverSession | null = first;
               for (let retry = 0; ; retry++) {
-                if (!current) return report('ended', 'e2ee_key_delivery_closed');
+                if (!current) {
+                  return report('ended', 'e2ee_key_delivery_closed');
+                }
                 if (toHex(current.binding.device.toBytes()) !== owner) {
-                  yield* release(current);
+                  const foreign = current;
+                  current = null;
+                  yield* release(foreign);
                   return report('ended', 'e2ee_key_delivery_owner_changed');
                 }
-                const code = yield* attempt(current, retry);
+                const held = current;
+                current = null;
+                const code = yield* attempt(held, retry);
                 if (code === 'delivered') return report('delivered');
                 if (TERMINAL_KEY_DELIVERY.has(code) || retry >= delays.length)
                   return report('ended', code);
@@ -667,11 +681,29 @@ export function makePortableAccountPairingApprover(input: {
                 yield* sleep(delays[retry]!);
                 current = yield* acquire();
               }
-            });
-            report('running');
-            void Effect.runPromise(deliver).catch((cause: unknown) =>
-              report('ended', keyDeliveryCode(cause))
+            }).pipe(
+              Effect.catchDefect((defect) =>
+                Effect.sync(() => report('ended', keyDeliveryCode(defect)))
+              ),
+              Effect.ensuring(
+                Effect.suspend(() => {
+                  if (fiberRef && activeDeliveries.get(deliveryKey) === fiberRef) {
+                    activeDeliveries.delete(deliveryKey);
+                  }
+                  if (current) {
+                    const leftover = current;
+                    current = null;
+                    return release(leftover);
+                  }
+                  return Effect.void;
+                })
+              )
             );
+            report('running');
+            fiberRef = Effect.runFork(deliver);
+            if (fiberRef.pollUnsafe() === undefined) {
+              activeDeliveries.set(deliveryKey, fiberRef);
+            }
           }),
       });
     }
