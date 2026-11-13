@@ -97,7 +97,7 @@
   "src/runtime/machine-presence.ts": "69cad588be7ef5da3ab67994dfdf3e5a7490cc5ef3e99ced2e43bded40929b7c",
   "src/runtime/machine-rpc.ts": "e330f78a6c8e3ab257cd9addfce4cae46d1ade308b1416cf29943a09474b2d49",
   "src/runtime/mcp.ts": "83b0165578b7732bf4a3447f0c51a981ca57cd2f5e97a3f2bedbc60984433216",
-  "src/runtime/mention-expansion.ts": "dc0efec95ed5178b22b0c6b44e07d8984fada8aa90f0bb84110d4c87131b2721",
+  "src/runtime/mention-expansion.ts": "8ded140c1739f5e05938a2162ac3dad5879ced84ae34b0d0d0d0abd5efa00145",
   "src/runtime/mentions.ts": "0554d25c556d48db87753ea07c74b7d8956064ccb115acf254838f9c19e139f6",
   "src/runtime/operation-presentation.ts": "c29318aa2c0cbc896449e5935c002e6ec3ee1a85990e027f3574354f0f23003a",
   "src/runtime/preview.ts": "a8208d5b456ed48295f5fe96662b7574d539128834d84ed32d77fc4e3fb1e488",
