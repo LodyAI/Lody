@@ -1,8 +1,8 @@
-import { WorkspaceSettings } from './e2ee/workspace-security';
+const WorkspaceSettings = lazy(() => import('./e2ee/workspace-security').then((module) => ({ default: module.WorkspaceSettings })));
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
-import { MemorySetting } from './memory-setting';
+const MemorySetting = lazy(() => import('./memory-setting').then((module) => ({ default: module.MemorySetting })));
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Bug, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -33,21 +33,21 @@ import {
   type SettingsTabId,
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
-import { GeneralSettingsComponent } from './general-setting';
-import { AppearanceSettingsComponent } from './appearance-setting';
-import { AccountSettingsComponent } from './account-setting';
-import { BillingSettingsComponent } from './billing-setting';
-import { StatsSettingsComponent } from './stats-setting';
-import { ProjectSettingsComponent } from './project-settings';
-import { MachineAgentSettings } from './machine-agent-settings';
-import { LodyAgentSetting } from './lody-agent-setting';
-import { IntegrationsSettingsComponent } from './integrations-setting';
-import { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
-import { AboutSettingsComponent } from './about-setting';
-import { AgentRolesSetting } from './agent-roles-setting';
-import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
-import { McpSetting } from './mcp-setting';
-import { ShareManagementSetting } from './share-management-setting';
+const GeneralSettingsComponent = lazy(() => import('./general-setting').then((module) => ({ default: module.GeneralSettingsComponent })));
+const AppearanceSettingsComponent = lazy(() => import('./appearance-setting').then((module) => ({ default: module.AppearanceSettingsComponent })));
+const AccountSettingsComponent = lazy(() => import('./account-setting').then((module) => ({ default: module.AccountSettingsComponent })));
+const BillingSettingsComponent = lazy(() => import('./billing-setting').then((module) => ({ default: module.BillingSettingsComponent })));
+const StatsSettingsComponent = lazy(() => import('./stats-setting').then((module) => ({ default: module.StatsSettingsComponent })));
+const ProjectSettingsComponent = lazy(() => import('./project-settings').then((module) => ({ default: module.ProjectSettingsComponent })));
+const MachineAgentSettings = lazy(() => import('./machine-agent-settings').then((module) => ({ default: module.MachineAgentSettings })));
+const LodyAgentSetting = lazy(() => import('./lody-agent-setting').then((module) => ({ default: module.LodyAgentSetting })));
+const IntegrationsSettingsComponent = lazy(() => import('./integrations-setting').then((module) => ({ default: module.IntegrationsSettingsComponent })));
+const KeyboardShortcutsSetting = lazy(() => import('./keyboard-shortcuts-setting').then((module) => ({ default: module.KeyboardShortcutsSetting })));
+const AboutSettingsComponent = lazy(() => import('./about-setting').then((module) => ({ default: module.AboutSettingsComponent })));
+const AgentRolesSetting = lazy(() => import('./agent-roles-setting').then((module) => ({ default: module.AgentRolesSetting })));
+const PromptShortcutsSetting = lazy(() => import('./prompt-shortcuts-setting').then((module) => ({ default: module.PromptShortcutsSetting })));
+const McpSetting = lazy(() => import('./mcp-setting').then((module) => ({ default: module.McpSetting })));
+const ShareManagementSetting = lazy(() => import('./share-management-setting').then((module) => ({ default: module.ShareManagementSetting })));
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import { useResolvedTheme } from '@/theme-provider';
@@ -527,14 +527,14 @@ function SettingsModalBody() {
                     {usesInternalScrolling ? (
                       <div {...stylex.props(styles.fill, styles.paneInset)}>
                         <div {...stylex.props(styles.fill, styles.paneColumn)}>
-                          <SettingsTabContent tabId={resolvedActiveTab} />
+                          <Suspense fallback={null}><SettingsTabContent tabId={resolvedActiveTab} /></Suspense>
                         </div>
                       </div>
                     ) : (
                       <ScrollArea {...stylex.props(styles.fill)}>
                         <div {...stylex.props(styles.paneInset)}>
                           <div {...stylex.props(styles.paneColumn)}>
-                            <SettingsTabContent tabId={resolvedActiveTab} />
+                            <Suspense fallback={null}><SettingsTabContent tabId={resolvedActiveTab} /></Suspense>
                           </div>
                         </div>
                       </ScrollArea>

@@ -8,6 +8,8 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
+import { createFileRoute } from '@tanstack/react-router';
+
 import { Route as rootRouteImport } from './routes/__root';
 import { Route as ResetPasswordRouteImport } from './routes/reset-password';
 import { Route as RecoveryRouteImport } from './routes/recovery';
@@ -15,8 +17,6 @@ import { Route as OnboardingRouteImport } from './routes/onboarding';
 import { Route as NotFoundRouteImport } from './routes/notFound';
 import { Route as LoginRouteImport } from './routes/login';
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
-import { Route as EmailVerifiedRouteImport } from './routes/email-verified';
-import { Route as DeviceRouteImport } from './routes/device';
 import { Route as CompleteEmailRouteImport } from './routes/complete-email';
 import { Route as AppRouteImport } from './routes/app';
 import { Route as WorkspaceNameRouteImport } from './routes/$workspaceName';
@@ -32,39 +32,90 @@ import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_
 import { Route as WorkspaceE2eeWorkspaceIdRouteImport } from './routes/workspace/e2ee/$workspaceId';
 import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings';
 import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
-import { Route as WorkspaceNameAuthSchedulesRouteImport } from './routes/$workspaceName/_auth/schedules';
 import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat';
 import { Route as WorkspaceNameAuthArchiveRouteImport } from './routes/$workspaceName/_auth/archive';
 import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index';
 import { Route as WorkspaceNameAuthSchedulesIndexRouteImport } from './routes/$workspaceName/_auth/schedules.index';
-import { Route as WorkspaceNameAuthSettingsWorkspaceRouteImport } from './routes/$workspaceName/_auth/settings/workspace';
-import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$workspaceName/_auth/settings/stats';
-import { Route as WorkspaceNameAuthSettingsSharesRouteImport } from './routes/$workspaceName/_auth/settings/shares';
-import { Route as WorkspaceNameAuthSettingsPromptShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/prompt-shortcuts';
 import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects';
-import { Route as WorkspaceNameAuthSettingsPreferencesRouteImport } from './routes/$workspaceName/_auth/settings/preferences';
-import { Route as WorkspaceNameAuthSettingsPeopleRouteImport } from './routes/$workspaceName/_auth/settings/people';
 import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines';
-import { Route as WorkspaceNameAuthSettingsMemoryRouteImport } from './routes/$workspaceName/_auth/settings/memory';
-import { Route as WorkspaceNameAuthSettingsMcpRouteImport } from './routes/$workspaceName/_auth/settings/mcp';
 import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/$workspaceName/_auth/settings/machines';
-import { Route as WorkspaceNameAuthSettingsLodyAgentRouteImport } from './routes/$workspaceName/_auth/settings/lody-agent';
-import { Route as WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/keyboard-shortcuts';
-import { Route as WorkspaceNameAuthSettingsGithubRouteImport } from './routes/$workspaceName/_auth/settings/github';
-import { Route as WorkspaceNameAuthSettingsGeneralRouteImport } from './routes/$workspaceName/_auth/settings/general';
 import { Route as WorkspaceNameAuthSettingsDevicesRouteImport } from './routes/$workspaceName/_auth/settings/devices';
-import { Route as WorkspaceNameAuthSettingsBillingRouteImport } from './routes/$workspaceName/_auth/settings/billing';
-import { Route as WorkspaceNameAuthSettingsAppearanceRouteImport } from './routes/$workspaceName/_auth/settings/appearance';
-import { Route as WorkspaceNameAuthSettingsAiUsageRouteImport } from './routes/$workspaceName/_auth/settings/ai-usage';
 import { Route as WorkspaceNameAuthSettingsAgentsRouteImport } from './routes/$workspaceName/_auth/settings/agents';
-import { Route as WorkspaceNameAuthSettingsAgentRolesRouteImport } from './routes/$workspaceName/_auth/settings/agent-roles';
 import { Route as WorkspaceNameAuthSettingsAgentConfigRouteImport } from './routes/$workspaceName/_auth/settings/agent-config';
-import { Route as WorkspaceNameAuthSettingsAccountRouteImport } from './routes/$workspaceName/_auth/settings/account';
-import { Route as WorkspaceNameAuthSettingsAboutRouteImport } from './routes/$workspaceName/_auth/settings/about';
 import { Route as WorkspaceNameAuthSessionsSessionIdRouteImport } from './routes/$workspaceName/_auth/sessions/$sessionId';
 import { Route as WorkspaceNameAuthSchedulesScheduleIdRouteImport } from './routes/$workspaceName/_auth/schedules.$scheduleId';
 import { Route as WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport } from './routes/$workspaceName/_auth/local/$machineId/$localProjectId';
 
+const EmailVerifiedLazyRouteImport = createFileRoute('/email-verified')();
+const DeviceLazyRouteImport = createFileRoute('/device')();
+const WorkspaceNameAuthSchedulesLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/schedules'
+)();
+const WorkspaceNameAuthSettingsWorkspaceLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/workspace'
+)();
+const WorkspaceNameAuthSettingsStatsLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/stats'
+)();
+const WorkspaceNameAuthSettingsSharesLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/shares'
+)();
+const WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/prompt-shortcuts'
+)();
+const WorkspaceNameAuthSettingsPreferencesLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/preferences'
+)();
+const WorkspaceNameAuthSettingsPeopleLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/people'
+)();
+const WorkspaceNameAuthSettingsMemoryLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/memory'
+)();
+const WorkspaceNameAuthSettingsMcpLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/mcp'
+)();
+const WorkspaceNameAuthSettingsLodyAgentLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/lody-agent'
+)();
+const WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/keyboard-shortcuts'
+)();
+const WorkspaceNameAuthSettingsGithubLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/github'
+)();
+const WorkspaceNameAuthSettingsGeneralLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/general'
+)();
+const WorkspaceNameAuthSettingsBillingLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/billing'
+)();
+const WorkspaceNameAuthSettingsAppearanceLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/appearance'
+)();
+const WorkspaceNameAuthSettingsAiUsageLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/ai-usage'
+)();
+const WorkspaceNameAuthSettingsAgentRolesLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/agent-roles'
+)();
+const WorkspaceNameAuthSettingsAccountLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/account'
+)();
+const WorkspaceNameAuthSettingsAboutLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/about'
+)();
+
+const EmailVerifiedLazyRoute = EmailVerifiedLazyRouteImport.update({
+  id: '/email-verified',
+  path: '/email-verified',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() => import('./routes/email-verified.lazy').then((d) => d.Route));
+const DeviceLazyRoute = DeviceLazyRouteImport.update({
+  id: '/device',
+  path: '/device',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() => import('./routes/device.lazy').then((d) => d.Route));
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
@@ -93,16 +144,6 @@ const LoginRoute = LoginRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const EmailVerifiedRoute = EmailVerifiedRouteImport.update({
-  id: '/email-verified',
-  path: '/email-verified',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const DeviceRoute = DeviceRouteImport.update({
-  id: '/device',
-  path: '/device',
   getParentRoute: () => rootRouteImport,
 } as any);
 const CompleteEmailRoute = CompleteEmailRouteImport.update({
@@ -164,6 +205,11 @@ const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
   id: '/_auth',
   getParentRoute: () => WorkspaceNameRoute,
 } as any);
+const WorkspaceNameAuthSchedulesLazyRoute = WorkspaceNameAuthSchedulesLazyRouteImport.update({
+  id: '/schedules',
+  path: '/schedules',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any).lazy(() => import('./routes/$workspaceName/_auth/schedules.lazy').then((d) => d.Route));
 const WorkspaceE2eeWorkspaceIdRoute = WorkspaceE2eeWorkspaceIdRouteImport.update({
   id: '/workspace/e2ee/$workspaceId',
   path: '/workspace/e2ee/$workspaceId',
@@ -177,11 +223,6 @@ const WorkspaceNameAuthSettingsRoute = WorkspaceNameAuthSettingsRouteImport.upda
 const WorkspaceNameAuthSessionsRoute = WorkspaceNameAuthSessionsRouteImport.update({
   id: '/sessions',
   path: '/sessions',
-  getParentRoute: () => WorkspaceNameAuthRoute,
-} as any);
-const WorkspaceNameAuthSchedulesRoute = WorkspaceNameAuthSchedulesRouteImport.update({
-  id: '/schedules',
-  path: '/schedules',
   getParentRoute: () => WorkspaceNameAuthRoute,
 } as any);
 const WorkspaceNameAuthChatRoute = WorkspaceNameAuthChatRouteImport.update({
@@ -202,44 +243,154 @@ const WorkspaceNameAuthSettingsIndexRoute = WorkspaceNameAuthSettingsIndexRouteI
 const WorkspaceNameAuthSchedulesIndexRoute = WorkspaceNameAuthSchedulesIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => WorkspaceNameAuthSchedulesRoute,
+  getParentRoute: () => WorkspaceNameAuthSchedulesLazyRoute,
 } as any);
-const WorkspaceNameAuthSettingsWorkspaceRoute =
-  WorkspaceNameAuthSettingsWorkspaceRouteImport.update({
+const WorkspaceNameAuthSettingsWorkspaceLazyRoute =
+  WorkspaceNameAuthSettingsWorkspaceLazyRouteImport.update({
     id: '/workspace',
     path: '/workspace',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any);
-const WorkspaceNameAuthSettingsStatsRoute = WorkspaceNameAuthSettingsStatsRouteImport.update({
-  id: '/stats',
-  path: '/stats',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsSharesRoute = WorkspaceNameAuthSettingsSharesRouteImport.update({
-  id: '/shares',
-  path: '/shares',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsPromptShortcutsRoute =
-  WorkspaceNameAuthSettingsPromptShortcutsRouteImport.update({
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/workspace.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsStatsLazyRoute =
+  WorkspaceNameAuthSettingsStatsLazyRouteImport.update({
+    id: '/stats',
+    path: '/stats',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/stats.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsSharesLazyRoute =
+  WorkspaceNameAuthSettingsSharesLazyRouteImport.update({
+    id: '/shares',
+    path: '/shares',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/shares.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsPromptShortcutsLazyRoute =
+  WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport.update({
     id: '/prompt-shortcuts',
     path: '/prompt-shortcuts',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any);
-const WorkspaceNameAuthSettingsProjectsRoute = WorkspaceNameAuthSettingsProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsPreferencesRoute =
-  WorkspaceNameAuthSettingsPreferencesRouteImport.update({
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/prompt-shortcuts.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsPreferencesLazyRoute =
+  WorkspaceNameAuthSettingsPreferencesLazyRouteImport.update({
     id: '/preferences',
     path: '/preferences',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any);
-const WorkspaceNameAuthSettingsPeopleRoute = WorkspaceNameAuthSettingsPeopleRouteImport.update({
-  id: '/people',
-  path: '/people',
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/preferences.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsPeopleLazyRoute =
+  WorkspaceNameAuthSettingsPeopleLazyRouteImport.update({
+    id: '/people',
+    path: '/people',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/people.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsMemoryLazyRoute =
+  WorkspaceNameAuthSettingsMemoryLazyRouteImport.update({
+    id: '/memory',
+    path: '/memory',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/memory.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsMcpLazyRoute = WorkspaceNameAuthSettingsMcpLazyRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any).lazy(() =>
+  import('./routes/$workspaceName/_auth/settings/mcp.lazy').then((d) => d.Route)
+);
+const WorkspaceNameAuthSettingsLodyAgentLazyRoute =
+  WorkspaceNameAuthSettingsLodyAgentLazyRouteImport.update({
+    id: '/lody-agent',
+    path: '/lody-agent',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/lody-agent.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute =
+  WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport.update({
+    id: '/keyboard-shortcuts',
+    path: '/keyboard-shortcuts',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/keyboard-shortcuts.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsGithubLazyRoute =
+  WorkspaceNameAuthSettingsGithubLazyRouteImport.update({
+    id: '/github',
+    path: '/github',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/github.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsGeneralLazyRoute =
+  WorkspaceNameAuthSettingsGeneralLazyRouteImport.update({
+    id: '/general',
+    path: '/general',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/general.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsBillingLazyRoute =
+  WorkspaceNameAuthSettingsBillingLazyRouteImport.update({
+    id: '/billing',
+    path: '/billing',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/billing.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsAppearanceLazyRoute =
+  WorkspaceNameAuthSettingsAppearanceLazyRouteImport.update({
+    id: '/appearance',
+    path: '/appearance',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/appearance.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsAiUsageLazyRoute =
+  WorkspaceNameAuthSettingsAiUsageLazyRouteImport.update({
+    id: '/ai-usage',
+    path: '/ai-usage',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/ai-usage.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsAgentRolesLazyRoute =
+  WorkspaceNameAuthSettingsAgentRolesLazyRouteImport.update({
+    id: '/agent-roles',
+    path: '/agent-roles',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/agent-roles.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsAccountLazyRoute =
+  WorkspaceNameAuthSettingsAccountLazyRouteImport.update({
+    id: '/account',
+    path: '/account',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/account.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsAboutLazyRoute =
+  WorkspaceNameAuthSettingsAboutLazyRouteImport.update({
+    id: '/about',
+    path: '/about',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/about.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsProjectsRoute = WorkspaceNameAuthSettingsProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
   getParentRoute: () => WorkspaceNameAuthSettingsRoute,
 } as any);
 const WorkspaceNameAuthSettingsMyMachinesRoute =
@@ -248,41 +399,9 @@ const WorkspaceNameAuthSettingsMyMachinesRoute =
     path: '/my-machines',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any);
-const WorkspaceNameAuthSettingsMemoryRoute = WorkspaceNameAuthSettingsMemoryRouteImport.update({
-  id: '/memory',
-  path: '/memory',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsMcpRoute = WorkspaceNameAuthSettingsMcpRouteImport.update({
-  id: '/mcp',
-  path: '/mcp',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
 const WorkspaceNameAuthSettingsMachinesRoute = WorkspaceNameAuthSettingsMachinesRouteImport.update({
   id: '/machines',
   path: '/machines',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsLodyAgentRoute =
-  WorkspaceNameAuthSettingsLodyAgentRouteImport.update({
-    id: '/lody-agent',
-    path: '/lody-agent',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any);
-const WorkspaceNameAuthSettingsKeyboardShortcutsRoute =
-  WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport.update({
-    id: '/keyboard-shortcuts',
-    path: '/keyboard-shortcuts',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any);
-const WorkspaceNameAuthSettingsGithubRoute = WorkspaceNameAuthSettingsGithubRouteImport.update({
-  id: '/github',
-  path: '/github',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsGeneralRoute = WorkspaceNameAuthSettingsGeneralRouteImport.update({
-  id: '/general',
-  path: '/general',
   getParentRoute: () => WorkspaceNameAuthSettingsRoute,
 } as any);
 const WorkspaceNameAuthSettingsDevicesRoute = WorkspaceNameAuthSettingsDevicesRouteImport.update({
@@ -290,49 +409,17 @@ const WorkspaceNameAuthSettingsDevicesRoute = WorkspaceNameAuthSettingsDevicesRo
   path: '/devices',
   getParentRoute: () => WorkspaceNameAuthSettingsRoute,
 } as any);
-const WorkspaceNameAuthSettingsBillingRoute = WorkspaceNameAuthSettingsBillingRouteImport.update({
-  id: '/billing',
-  path: '/billing',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsAppearanceRoute =
-  WorkspaceNameAuthSettingsAppearanceRouteImport.update({
-    id: '/appearance',
-    path: '/appearance',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any);
-const WorkspaceNameAuthSettingsAiUsageRoute = WorkspaceNameAuthSettingsAiUsageRouteImport.update({
-  id: '/ai-usage',
-  path: '/ai-usage',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
 const WorkspaceNameAuthSettingsAgentsRoute = WorkspaceNameAuthSettingsAgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
   getParentRoute: () => WorkspaceNameAuthSettingsRoute,
 } as any);
-const WorkspaceNameAuthSettingsAgentRolesRoute =
-  WorkspaceNameAuthSettingsAgentRolesRouteImport.update({
-    id: '/agent-roles',
-    path: '/agent-roles',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any);
 const WorkspaceNameAuthSettingsAgentConfigRoute =
   WorkspaceNameAuthSettingsAgentConfigRouteImport.update({
     id: '/agent-config',
     path: '/agent-config',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any);
-const WorkspaceNameAuthSettingsAccountRoute = WorkspaceNameAuthSettingsAccountRouteImport.update({
-  id: '/account',
-  path: '/account',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsAboutRoute = WorkspaceNameAuthSettingsAboutRouteImport.update({
-  id: '/about',
-  path: '/about',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
 const WorkspaceNameAuthSessionsSessionIdRoute =
   WorkspaceNameAuthSessionsSessionIdRouteImport.update({
     id: '/$sessionId',
@@ -343,7 +430,7 @@ const WorkspaceNameAuthSchedulesScheduleIdRoute =
   WorkspaceNameAuthSchedulesScheduleIdRouteImport.update({
     id: '/$scheduleId',
     path: '/$scheduleId',
-    getParentRoute: () => WorkspaceNameAuthSchedulesRoute,
+    getParentRoute: () => WorkspaceNameAuthSchedulesLazyRoute,
   } as any);
 const WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute =
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport.update({
@@ -357,14 +444,14 @@ export interface FileRoutesByFullPath {
   '/$workspaceName': typeof WorkspaceNameAuthRouteWithChildren;
   '/app': typeof AppRoute;
   '/complete-email': typeof CompleteEmailRoute;
-  '/device': typeof DeviceRoute;
-  '/email-verified': typeof EmailVerifiedRoute;
   '/forgot-password': typeof ForgotPasswordRoute;
   '/login': typeof LoginRoute;
   '/notFound': typeof NotFoundRoute;
   '/onboarding': typeof OnboardingRoute;
   '/recovery': typeof RecoveryRoute;
   '/reset-password': typeof ResetPasswordRoute;
+  '/device': typeof DeviceLazyRoute;
+  '/email-verified': typeof EmailVerifiedLazyRoute;
   '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
   '/invite/$invitationId': typeof InviteInvitationIdRoute;
@@ -374,36 +461,36 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/': typeof WorkspaceNameIndexRoute;
   '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
-  '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
   '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
+  '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesLazyRouteWithChildren;
   '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
-  '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
-  '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
   '/$workspaceName/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute;
-  '/$workspaceName/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute;
   '/$workspaceName/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute;
-  '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute;
-  '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute;
-  '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute;
   '/$workspaceName/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute;
-  '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute;
-  '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute;
-  '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
-  '/$workspaceName/settings/lody-agent': typeof WorkspaceNameAuthSettingsLodyAgentRoute;
   '/$workspaceName/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
-  '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
-  '/$workspaceName/settings/memory': typeof WorkspaceNameAuthSettingsMemoryRoute;
   '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
-  '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
-  '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
   '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
-  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
-  '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
-  '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
-  '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutLazyRoute;
+  '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountLazyRoute;
+  '/$workspaceName/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesLazyRoute;
+  '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
+  '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
+  '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
+  '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
+  '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
+  '/$workspaceName/settings/lody-agent': typeof WorkspaceNameAuthSettingsLodyAgentLazyRoute;
+  '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpLazyRoute;
+  '/$workspaceName/settings/memory': typeof WorkspaceNameAuthSettingsMemoryLazyRoute;
+  '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleLazyRoute;
+  '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesLazyRoute;
+  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRoute;
+  '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesLazyRoute;
+  '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsLazyRoute;
+  '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceLazyRoute;
   '/$workspaceName/schedules/': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
@@ -412,14 +499,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute;
   '/app': typeof AppRoute;
   '/complete-email': typeof CompleteEmailRoute;
-  '/device': typeof DeviceRoute;
-  '/email-verified': typeof EmailVerifiedRoute;
   '/forgot-password': typeof ForgotPasswordRoute;
   '/login': typeof LoginRoute;
   '/notFound': typeof NotFoundRoute;
   '/onboarding': typeof OnboardingRoute;
   '/recovery': typeof RecoveryRoute;
   '/reset-password': typeof ResetPasswordRoute;
+  '/device': typeof DeviceLazyRoute;
+  '/email-verified': typeof EmailVerifiedLazyRoute;
   '/$workspaceName': typeof WorkspaceNameIndexRoute;
   '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
@@ -433,30 +520,30 @@ export interface FileRoutesByTo {
   '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
-  '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
-  '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
   '/$workspaceName/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute;
-  '/$workspaceName/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute;
   '/$workspaceName/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute;
-  '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute;
-  '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute;
-  '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute;
   '/$workspaceName/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute;
-  '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute;
-  '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute;
-  '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
-  '/$workspaceName/settings/lody-agent': typeof WorkspaceNameAuthSettingsLodyAgentRoute;
   '/$workspaceName/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
-  '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
-  '/$workspaceName/settings/memory': typeof WorkspaceNameAuthSettingsMemoryRoute;
   '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
-  '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
-  '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
   '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
-  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
-  '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
-  '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
-  '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutLazyRoute;
+  '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountLazyRoute;
+  '/$workspaceName/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesLazyRoute;
+  '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
+  '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
+  '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
+  '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
+  '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
+  '/$workspaceName/settings/lody-agent': typeof WorkspaceNameAuthSettingsLodyAgentLazyRoute;
+  '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpLazyRoute;
+  '/$workspaceName/settings/memory': typeof WorkspaceNameAuthSettingsMemoryLazyRoute;
+  '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleLazyRoute;
+  '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesLazyRoute;
+  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRoute;
+  '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesLazyRoute;
+  '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsLazyRoute;
+  '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceLazyRoute;
   '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
@@ -467,14 +554,14 @@ export interface FileRoutesById {
   '/$workspaceName': typeof WorkspaceNameRouteWithChildren;
   '/app': typeof AppRoute;
   '/complete-email': typeof CompleteEmailRoute;
-  '/device': typeof DeviceRoute;
-  '/email-verified': typeof EmailVerifiedRoute;
   '/forgot-password': typeof ForgotPasswordRoute;
   '/login': typeof LoginRoute;
   '/notFound': typeof NotFoundRoute;
   '/onboarding': typeof OnboardingRoute;
   '/recovery': typeof RecoveryRoute;
   '/reset-password': typeof ResetPasswordRoute;
+  '/device': typeof DeviceLazyRoute;
+  '/email-verified': typeof EmailVerifiedLazyRoute;
   '/$workspaceName/_auth': typeof WorkspaceNameAuthRouteWithChildren;
   '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
@@ -485,36 +572,36 @@ export interface FileRoutesById {
   '/$workspaceName/': typeof WorkspaceNameIndexRoute;
   '/$workspaceName/_auth/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/_auth/chat': typeof WorkspaceNameAuthChatRoute;
-  '/$workspaceName/_auth/schedules': typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   '/$workspaceName/_auth/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/_auth/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
   '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
+  '/$workspaceName/_auth/schedules': typeof WorkspaceNameAuthSchedulesLazyRouteWithChildren;
   '/$workspaceName/_auth/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/_auth/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
-  '/$workspaceName/_auth/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
-  '/$workspaceName/_auth/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
   '/$workspaceName/_auth/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute;
-  '/$workspaceName/_auth/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute;
   '/$workspaceName/_auth/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute;
-  '/$workspaceName/_auth/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute;
-  '/$workspaceName/_auth/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute;
-  '/$workspaceName/_auth/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute;
   '/$workspaceName/_auth/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute;
-  '/$workspaceName/_auth/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute;
-  '/$workspaceName/_auth/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute;
-  '/$workspaceName/_auth/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
-  '/$workspaceName/_auth/settings/lody-agent': typeof WorkspaceNameAuthSettingsLodyAgentRoute;
   '/$workspaceName/_auth/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
-  '/$workspaceName/_auth/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
-  '/$workspaceName/_auth/settings/memory': typeof WorkspaceNameAuthSettingsMemoryRoute;
   '/$workspaceName/_auth/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
-  '/$workspaceName/_auth/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
-  '/$workspaceName/_auth/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
   '/$workspaceName/_auth/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
-  '/$workspaceName/_auth/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
-  '/$workspaceName/_auth/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
-  '/$workspaceName/_auth/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
-  '/$workspaceName/_auth/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/_auth/settings/about': typeof WorkspaceNameAuthSettingsAboutLazyRoute;
+  '/$workspaceName/_auth/settings/account': typeof WorkspaceNameAuthSettingsAccountLazyRoute;
+  '/$workspaceName/_auth/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesLazyRoute;
+  '/$workspaceName/_auth/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
+  '/$workspaceName/_auth/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
+  '/$workspaceName/_auth/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/_auth/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
+  '/$workspaceName/_auth/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
+  '/$workspaceName/_auth/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
+  '/$workspaceName/_auth/settings/lody-agent': typeof WorkspaceNameAuthSettingsLodyAgentLazyRoute;
+  '/$workspaceName/_auth/settings/mcp': typeof WorkspaceNameAuthSettingsMcpLazyRoute;
+  '/$workspaceName/_auth/settings/memory': typeof WorkspaceNameAuthSettingsMemoryLazyRoute;
+  '/$workspaceName/_auth/settings/people': typeof WorkspaceNameAuthSettingsPeopleLazyRoute;
+  '/$workspaceName/_auth/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesLazyRoute;
+  '/$workspaceName/_auth/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRoute;
+  '/$workspaceName/_auth/settings/shares': typeof WorkspaceNameAuthSettingsSharesLazyRoute;
+  '/$workspaceName/_auth/settings/stats': typeof WorkspaceNameAuthSettingsStatsLazyRoute;
+  '/$workspaceName/_auth/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceLazyRoute;
   '/$workspaceName/_auth/schedules/': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/_auth/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/_auth/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
@@ -526,14 +613,14 @@ export interface FileRouteTypes {
     | '/$workspaceName'
     | '/app'
     | '/complete-email'
-    | '/device'
-    | '/email-verified'
     | '/forgot-password'
     | '/login'
     | '/notFound'
     | '/onboarding'
     | '/recovery'
     | '/reset-password'
+    | '/device'
+    | '/email-verified'
     | '/desktop/checkout-return'
     | '/desktop/github-install'
     | '/invite/$invitationId'
@@ -543,32 +630,32 @@ export interface FileRouteTypes {
     | '/$workspaceName/'
     | '/$workspaceName/archive'
     | '/$workspaceName/chat'
-    | '/$workspaceName/schedules'
     | '/$workspaceName/sessions'
     | '/$workspaceName/settings'
     | '/workspace/e2ee/$workspaceId'
+    | '/$workspaceName/schedules'
     | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
+    | '/$workspaceName/settings/agent-config'
+    | '/$workspaceName/settings/agents'
+    | '/$workspaceName/settings/devices'
+    | '/$workspaceName/settings/machines'
+    | '/$workspaceName/settings/my-machines'
+    | '/$workspaceName/settings/projects'
     | '/$workspaceName/settings/about'
     | '/$workspaceName/settings/account'
-    | '/$workspaceName/settings/agent-config'
     | '/$workspaceName/settings/agent-roles'
-    | '/$workspaceName/settings/agents'
     | '/$workspaceName/settings/ai-usage'
     | '/$workspaceName/settings/appearance'
     | '/$workspaceName/settings/billing'
-    | '/$workspaceName/settings/devices'
     | '/$workspaceName/settings/general'
     | '/$workspaceName/settings/github'
     | '/$workspaceName/settings/keyboard-shortcuts'
     | '/$workspaceName/settings/lody-agent'
-    | '/$workspaceName/settings/machines'
     | '/$workspaceName/settings/mcp'
     | '/$workspaceName/settings/memory'
-    | '/$workspaceName/settings/my-machines'
     | '/$workspaceName/settings/people'
     | '/$workspaceName/settings/preferences'
-    | '/$workspaceName/settings/projects'
     | '/$workspaceName/settings/prompt-shortcuts'
     | '/$workspaceName/settings/shares'
     | '/$workspaceName/settings/stats'
@@ -581,14 +668,14 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/complete-email'
-    | '/device'
-    | '/email-verified'
     | '/forgot-password'
     | '/login'
     | '/notFound'
     | '/onboarding'
     | '/recovery'
     | '/reset-password'
+    | '/device'
+    | '/email-verified'
     | '/$workspaceName'
     | '/desktop/checkout-return'
     | '/desktop/github-install'
@@ -602,26 +689,26 @@ export interface FileRouteTypes {
     | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
+    | '/$workspaceName/settings/agent-config'
+    | '/$workspaceName/settings/agents'
+    | '/$workspaceName/settings/devices'
+    | '/$workspaceName/settings/machines'
+    | '/$workspaceName/settings/my-machines'
+    | '/$workspaceName/settings/projects'
     | '/$workspaceName/settings/about'
     | '/$workspaceName/settings/account'
-    | '/$workspaceName/settings/agent-config'
     | '/$workspaceName/settings/agent-roles'
-    | '/$workspaceName/settings/agents'
     | '/$workspaceName/settings/ai-usage'
     | '/$workspaceName/settings/appearance'
     | '/$workspaceName/settings/billing'
-    | '/$workspaceName/settings/devices'
     | '/$workspaceName/settings/general'
     | '/$workspaceName/settings/github'
     | '/$workspaceName/settings/keyboard-shortcuts'
     | '/$workspaceName/settings/lody-agent'
-    | '/$workspaceName/settings/machines'
     | '/$workspaceName/settings/mcp'
     | '/$workspaceName/settings/memory'
-    | '/$workspaceName/settings/my-machines'
     | '/$workspaceName/settings/people'
     | '/$workspaceName/settings/preferences'
-    | '/$workspaceName/settings/projects'
     | '/$workspaceName/settings/prompt-shortcuts'
     | '/$workspaceName/settings/shares'
     | '/$workspaceName/settings/stats'
@@ -635,14 +722,14 @@ export interface FileRouteTypes {
     | '/$workspaceName'
     | '/app'
     | '/complete-email'
-    | '/device'
-    | '/email-verified'
     | '/forgot-password'
     | '/login'
     | '/notFound'
     | '/onboarding'
     | '/recovery'
     | '/reset-password'
+    | '/device'
+    | '/email-verified'
     | '/$workspaceName/_auth'
     | '/desktop/checkout-return'
     | '/desktop/github-install'
@@ -653,32 +740,32 @@ export interface FileRouteTypes {
     | '/$workspaceName/'
     | '/$workspaceName/_auth/archive'
     | '/$workspaceName/_auth/chat'
-    | '/$workspaceName/_auth/schedules'
     | '/$workspaceName/_auth/sessions'
     | '/$workspaceName/_auth/settings'
     | '/workspace/e2ee/$workspaceId'
+    | '/$workspaceName/_auth/schedules'
     | '/$workspaceName/_auth/schedules/$scheduleId'
     | '/$workspaceName/_auth/sessions/$sessionId'
+    | '/$workspaceName/_auth/settings/agent-config'
+    | '/$workspaceName/_auth/settings/agents'
+    | '/$workspaceName/_auth/settings/devices'
+    | '/$workspaceName/_auth/settings/machines'
+    | '/$workspaceName/_auth/settings/my-machines'
+    | '/$workspaceName/_auth/settings/projects'
     | '/$workspaceName/_auth/settings/about'
     | '/$workspaceName/_auth/settings/account'
-    | '/$workspaceName/_auth/settings/agent-config'
     | '/$workspaceName/_auth/settings/agent-roles'
-    | '/$workspaceName/_auth/settings/agents'
     | '/$workspaceName/_auth/settings/ai-usage'
     | '/$workspaceName/_auth/settings/appearance'
     | '/$workspaceName/_auth/settings/billing'
-    | '/$workspaceName/_auth/settings/devices'
     | '/$workspaceName/_auth/settings/general'
     | '/$workspaceName/_auth/settings/github'
     | '/$workspaceName/_auth/settings/keyboard-shortcuts'
     | '/$workspaceName/_auth/settings/lody-agent'
-    | '/$workspaceName/_auth/settings/machines'
     | '/$workspaceName/_auth/settings/mcp'
     | '/$workspaceName/_auth/settings/memory'
-    | '/$workspaceName/_auth/settings/my-machines'
     | '/$workspaceName/_auth/settings/people'
     | '/$workspaceName/_auth/settings/preferences'
-    | '/$workspaceName/_auth/settings/projects'
     | '/$workspaceName/_auth/settings/prompt-shortcuts'
     | '/$workspaceName/_auth/settings/shares'
     | '/$workspaceName/_auth/settings/stats'
@@ -693,14 +780,14 @@ export interface RootRouteChildren {
   WorkspaceNameRoute: typeof WorkspaceNameRouteWithChildren;
   AppRoute: typeof AppRoute;
   CompleteEmailRoute: typeof CompleteEmailRoute;
-  DeviceRoute: typeof DeviceRoute;
-  EmailVerifiedRoute: typeof EmailVerifiedRoute;
   ForgotPasswordRoute: typeof ForgotPasswordRoute;
   LoginRoute: typeof LoginRoute;
   NotFoundRoute: typeof NotFoundRoute;
   OnboardingRoute: typeof OnboardingRoute;
   RecoveryRoute: typeof RecoveryRoute;
   ResetPasswordRoute: typeof ResetPasswordRoute;
+  DeviceLazyRoute: typeof DeviceLazyRoute;
+  EmailVerifiedLazyRoute: typeof EmailVerifiedLazyRoute;
   DesktopCheckoutReturnRoute: typeof DesktopCheckoutReturnRoute;
   DesktopGithubInstallRoute: typeof DesktopGithubInstallRoute;
   InviteInvitationIdRoute: typeof InviteInvitationIdRoute;
@@ -712,6 +799,20 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/email-verified': {
+      id: '/email-verified';
+      path: '/email-verified';
+      fullPath: '/email-verified';
+      preLoaderRoute: typeof EmailVerifiedLazyRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/device': {
+      id: '/device';
+      path: '/device';
+      fullPath: '/device';
+      preLoaderRoute: typeof DeviceLazyRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/reset-password': {
       id: '/reset-password';
       path: '/reset-password';
@@ -752,20 +853,6 @@ declare module '@tanstack/react-router' {
       path: '/forgot-password';
       fullPath: '/forgot-password';
       preLoaderRoute: typeof ForgotPasswordRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/email-verified': {
-      id: '/email-verified';
-      path: '/email-verified';
-      fullPath: '/email-verified';
-      preLoaderRoute: typeof EmailVerifiedRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/device': {
-      id: '/device';
-      path: '/device';
-      fullPath: '/device';
-      preLoaderRoute: typeof DeviceRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/complete-email': {
@@ -852,6 +939,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthRouteImport;
       parentRoute: typeof WorkspaceNameRoute;
     };
+    '/$workspaceName/_auth/schedules': {
+      id: '/$workspaceName/_auth/schedules';
+      path: '/schedules';
+      fullPath: '/$workspaceName/schedules';
+      preLoaderRoute: typeof WorkspaceNameAuthSchedulesLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
     '/workspace/e2ee/$workspaceId': {
       id: '/workspace/e2ee/$workspaceId';
       path: '/workspace/e2ee/$workspaceId';
@@ -871,13 +965,6 @@ declare module '@tanstack/react-router' {
       path: '/sessions';
       fullPath: '/$workspaceName/sessions';
       preLoaderRoute: typeof WorkspaceNameAuthSessionsRouteImport;
-      parentRoute: typeof WorkspaceNameAuthRoute;
-    };
-    '/$workspaceName/_auth/schedules': {
-      id: '/$workspaceName/_auth/schedules';
-      path: '/schedules';
-      fullPath: '/$workspaceName/schedules';
-      preLoaderRoute: typeof WorkspaceNameAuthSchedulesRouteImport;
       parentRoute: typeof WorkspaceNameAuthRoute;
     };
     '/$workspaceName/_auth/chat': {
@@ -906,34 +993,132 @@ declare module '@tanstack/react-router' {
       path: '/';
       fullPath: '/$workspaceName/schedules/';
       preLoaderRoute: typeof WorkspaceNameAuthSchedulesIndexRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSchedulesRoute;
+      parentRoute: typeof WorkspaceNameAuthSchedulesLazyRoute;
     };
     '/$workspaceName/_auth/settings/workspace': {
       id: '/$workspaceName/_auth/settings/workspace';
       path: '/workspace';
       fullPath: '/$workspaceName/settings/workspace';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsWorkspaceRouteImport;
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsWorkspaceLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/stats': {
       id: '/$workspaceName/_auth/settings/stats';
       path: '/stats';
       fullPath: '/$workspaceName/settings/stats';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsRouteImport;
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/shares': {
       id: '/$workspaceName/_auth/settings/shares';
       path: '/shares';
       fullPath: '/$workspaceName/settings/shares';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsSharesRouteImport;
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsSharesLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/prompt-shortcuts': {
       id: '/$workspaceName/_auth/settings/prompt-shortcuts';
       path: '/prompt-shortcuts';
       fullPath: '/$workspaceName/settings/prompt-shortcuts';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRouteImport;
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/preferences': {
+      id: '/$workspaceName/_auth/settings/preferences';
+      path: '/preferences';
+      fullPath: '/$workspaceName/settings/preferences';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPreferencesLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/people': {
+      id: '/$workspaceName/_auth/settings/people';
+      path: '/people';
+      fullPath: '/$workspaceName/settings/people';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/memory': {
+      id: '/$workspaceName/_auth/settings/memory';
+      path: '/memory';
+      fullPath: '/$workspaceName/settings/memory';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMemoryLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/mcp': {
+      id: '/$workspaceName/_auth/settings/mcp';
+      path: '/mcp';
+      fullPath: '/$workspaceName/settings/mcp';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMcpLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/lody-agent': {
+      id: '/$workspaceName/_auth/settings/lody-agent';
+      path: '/lody-agent';
+      fullPath: '/$workspaceName/settings/lody-agent';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsLodyAgentLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/keyboard-shortcuts': {
+      id: '/$workspaceName/_auth/settings/keyboard-shortcuts';
+      path: '/keyboard-shortcuts';
+      fullPath: '/$workspaceName/settings/keyboard-shortcuts';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/github': {
+      id: '/$workspaceName/_auth/settings/github';
+      path: '/github';
+      fullPath: '/$workspaceName/settings/github';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsGithubLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/general': {
+      id: '/$workspaceName/_auth/settings/general';
+      path: '/general';
+      fullPath: '/$workspaceName/settings/general';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsGeneralLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/billing': {
+      id: '/$workspaceName/_auth/settings/billing';
+      path: '/billing';
+      fullPath: '/$workspaceName/settings/billing';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/appearance': {
+      id: '/$workspaceName/_auth/settings/appearance';
+      path: '/appearance';
+      fullPath: '/$workspaceName/settings/appearance';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAppearanceLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/ai-usage': {
+      id: '/$workspaceName/_auth/settings/ai-usage';
+      path: '/ai-usage';
+      fullPath: '/$workspaceName/settings/ai-usage';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAiUsageLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/agent-roles': {
+      id: '/$workspaceName/_auth/settings/agent-roles';
+      path: '/agent-roles';
+      fullPath: '/$workspaceName/settings/agent-roles';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentRolesLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/account': {
+      id: '/$workspaceName/_auth/settings/account';
+      path: '/account';
+      fullPath: '/$workspaceName/settings/account';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAccountLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/about': {
+      id: '/$workspaceName/_auth/settings/about';
+      path: '/about';
+      fullPath: '/$workspaceName/settings/about';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAboutLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/projects': {
@@ -943,39 +1128,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectsRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
-    '/$workspaceName/_auth/settings/preferences': {
-      id: '/$workspaceName/_auth/settings/preferences';
-      path: '/preferences';
-      fullPath: '/$workspaceName/settings/preferences';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPreferencesRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/people': {
-      id: '/$workspaceName/_auth/settings/people';
-      path: '/people';
-      fullPath: '/$workspaceName/settings/people';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
     '/$workspaceName/_auth/settings/my-machines': {
       id: '/$workspaceName/_auth/settings/my-machines';
       path: '/my-machines';
       fullPath: '/$workspaceName/settings/my-machines';
       preLoaderRoute: typeof WorkspaceNameAuthSettingsMyMachinesRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/memory': {
-      id: '/$workspaceName/_auth/settings/memory';
-      path: '/memory';
-      fullPath: '/$workspaceName/settings/memory';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMemoryRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/mcp': {
-      id: '/$workspaceName/_auth/settings/mcp';
-      path: '/mcp';
-      fullPath: '/$workspaceName/settings/mcp';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMcpRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/machines': {
@@ -985,60 +1142,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsMachinesRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
-    '/$workspaceName/_auth/settings/lody-agent': {
-      id: '/$workspaceName/_auth/settings/lody-agent';
-      path: '/lody-agent';
-      fullPath: '/$workspaceName/settings/lody-agent';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsLodyAgentRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/keyboard-shortcuts': {
-      id: '/$workspaceName/_auth/settings/keyboard-shortcuts';
-      path: '/keyboard-shortcuts';
-      fullPath: '/$workspaceName/settings/keyboard-shortcuts';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/github': {
-      id: '/$workspaceName/_auth/settings/github';
-      path: '/github';
-      fullPath: '/$workspaceName/settings/github';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsGithubRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/general': {
-      id: '/$workspaceName/_auth/settings/general';
-      path: '/general';
-      fullPath: '/$workspaceName/settings/general';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsGeneralRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
     '/$workspaceName/_auth/settings/devices': {
       id: '/$workspaceName/_auth/settings/devices';
       path: '/devices';
       fullPath: '/$workspaceName/settings/devices';
       preLoaderRoute: typeof WorkspaceNameAuthSettingsDevicesRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/billing': {
-      id: '/$workspaceName/_auth/settings/billing';
-      path: '/billing';
-      fullPath: '/$workspaceName/settings/billing';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/appearance': {
-      id: '/$workspaceName/_auth/settings/appearance';
-      path: '/appearance';
-      fullPath: '/$workspaceName/settings/appearance';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAppearanceRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/ai-usage': {
-      id: '/$workspaceName/_auth/settings/ai-usage';
-      path: '/ai-usage';
-      fullPath: '/$workspaceName/settings/ai-usage';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAiUsageRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/agents': {
@@ -1048,32 +1156,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentsRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
-    '/$workspaceName/_auth/settings/agent-roles': {
-      id: '/$workspaceName/_auth/settings/agent-roles';
-      path: '/agent-roles';
-      fullPath: '/$workspaceName/settings/agent-roles';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentRolesRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
     '/$workspaceName/_auth/settings/agent-config': {
       id: '/$workspaceName/_auth/settings/agent-config';
       path: '/agent-config';
       fullPath: '/$workspaceName/settings/agent-config';
       preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentConfigRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/account': {
-      id: '/$workspaceName/_auth/settings/account';
-      path: '/account';
-      fullPath: '/$workspaceName/settings/account';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAccountRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/about': {
-      id: '/$workspaceName/_auth/settings/about';
-      path: '/about';
-      fullPath: '/$workspaceName/settings/about';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAboutRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/sessions/$sessionId': {
@@ -1088,7 +1175,7 @@ declare module '@tanstack/react-router' {
       path: '/$scheduleId';
       fullPath: '/$workspaceName/schedules/$scheduleId';
       preLoaderRoute: typeof WorkspaceNameAuthSchedulesScheduleIdRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSchedulesRoute;
+      parentRoute: typeof WorkspaceNameAuthSchedulesLazyRoute;
     };
     '/$workspaceName/_auth/local/$machineId/$localProjectId': {
       id: '/$workspaceName/_auth/local/$machineId/$localProjectId';
@@ -1099,19 +1186,6 @@ declare module '@tanstack/react-router' {
     };
   }
 }
-
-interface WorkspaceNameAuthSchedulesRouteChildren {
-  WorkspaceNameAuthSchedulesScheduleIdRoute: typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
-  WorkspaceNameAuthSchedulesIndexRoute: typeof WorkspaceNameAuthSchedulesIndexRoute;
-}
-
-const WorkspaceNameAuthSchedulesRouteChildren: WorkspaceNameAuthSchedulesRouteChildren = {
-  WorkspaceNameAuthSchedulesScheduleIdRoute: WorkspaceNameAuthSchedulesScheduleIdRoute,
-  WorkspaceNameAuthSchedulesIndexRoute: WorkspaceNameAuthSchedulesIndexRoute,
-};
-
-const WorkspaceNameAuthSchedulesRouteWithChildren =
-  WorkspaceNameAuthSchedulesRoute._addFileChildren(WorkspaceNameAuthSchedulesRouteChildren);
 
 interface WorkspaceNameAuthSessionsRouteChildren {
   WorkspaceNameAuthSessionsSessionIdRoute: typeof WorkspaceNameAuthSessionsSessionIdRoute;
@@ -1126,58 +1200,60 @@ const WorkspaceNameAuthSessionsRouteWithChildren = WorkspaceNameAuthSessionsRout
 );
 
 interface WorkspaceNameAuthSettingsRouteChildren {
-  WorkspaceNameAuthSettingsAboutRoute: typeof WorkspaceNameAuthSettingsAboutRoute;
-  WorkspaceNameAuthSettingsAccountRoute: typeof WorkspaceNameAuthSettingsAccountRoute;
   WorkspaceNameAuthSettingsAgentConfigRoute: typeof WorkspaceNameAuthSettingsAgentConfigRoute;
-  WorkspaceNameAuthSettingsAgentRolesRoute: typeof WorkspaceNameAuthSettingsAgentRolesRoute;
   WorkspaceNameAuthSettingsAgentsRoute: typeof WorkspaceNameAuthSettingsAgentsRoute;
-  WorkspaceNameAuthSettingsAiUsageRoute: typeof WorkspaceNameAuthSettingsAiUsageRoute;
-  WorkspaceNameAuthSettingsAppearanceRoute: typeof WorkspaceNameAuthSettingsAppearanceRoute;
-  WorkspaceNameAuthSettingsBillingRoute: typeof WorkspaceNameAuthSettingsBillingRoute;
   WorkspaceNameAuthSettingsDevicesRoute: typeof WorkspaceNameAuthSettingsDevicesRoute;
-  WorkspaceNameAuthSettingsGeneralRoute: typeof WorkspaceNameAuthSettingsGeneralRoute;
-  WorkspaceNameAuthSettingsGithubRoute: typeof WorkspaceNameAuthSettingsGithubRoute;
-  WorkspaceNameAuthSettingsKeyboardShortcutsRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
-  WorkspaceNameAuthSettingsLodyAgentRoute: typeof WorkspaceNameAuthSettingsLodyAgentRoute;
   WorkspaceNameAuthSettingsMachinesRoute: typeof WorkspaceNameAuthSettingsMachinesRoute;
-  WorkspaceNameAuthSettingsMcpRoute: typeof WorkspaceNameAuthSettingsMcpRoute;
-  WorkspaceNameAuthSettingsMemoryRoute: typeof WorkspaceNameAuthSettingsMemoryRoute;
   WorkspaceNameAuthSettingsMyMachinesRoute: typeof WorkspaceNameAuthSettingsMyMachinesRoute;
-  WorkspaceNameAuthSettingsPeopleRoute: typeof WorkspaceNameAuthSettingsPeopleRoute;
-  WorkspaceNameAuthSettingsPreferencesRoute: typeof WorkspaceNameAuthSettingsPreferencesRoute;
   WorkspaceNameAuthSettingsProjectsRoute: typeof WorkspaceNameAuthSettingsProjectsRoute;
-  WorkspaceNameAuthSettingsPromptShortcutsRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
-  WorkspaceNameAuthSettingsSharesRoute: typeof WorkspaceNameAuthSettingsSharesRoute;
-  WorkspaceNameAuthSettingsStatsRoute: typeof WorkspaceNameAuthSettingsStatsRoute;
-  WorkspaceNameAuthSettingsWorkspaceRoute: typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  WorkspaceNameAuthSettingsAboutLazyRoute: typeof WorkspaceNameAuthSettingsAboutLazyRoute;
+  WorkspaceNameAuthSettingsAccountLazyRoute: typeof WorkspaceNameAuthSettingsAccountLazyRoute;
+  WorkspaceNameAuthSettingsAgentRolesLazyRoute: typeof WorkspaceNameAuthSettingsAgentRolesLazyRoute;
+  WorkspaceNameAuthSettingsAiUsageLazyRoute: typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
+  WorkspaceNameAuthSettingsAppearanceLazyRoute: typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
+  WorkspaceNameAuthSettingsBillingLazyRoute: typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  WorkspaceNameAuthSettingsGeneralLazyRoute: typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
+  WorkspaceNameAuthSettingsGithubLazyRoute: typeof WorkspaceNameAuthSettingsGithubLazyRoute;
+  WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
+  WorkspaceNameAuthSettingsLodyAgentLazyRoute: typeof WorkspaceNameAuthSettingsLodyAgentLazyRoute;
+  WorkspaceNameAuthSettingsMcpLazyRoute: typeof WorkspaceNameAuthSettingsMcpLazyRoute;
+  WorkspaceNameAuthSettingsMemoryLazyRoute: typeof WorkspaceNameAuthSettingsMemoryLazyRoute;
+  WorkspaceNameAuthSettingsPeopleLazyRoute: typeof WorkspaceNameAuthSettingsPeopleLazyRoute;
+  WorkspaceNameAuthSettingsPreferencesLazyRoute: typeof WorkspaceNameAuthSettingsPreferencesLazyRoute;
+  WorkspaceNameAuthSettingsPromptShortcutsLazyRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRoute;
+  WorkspaceNameAuthSettingsSharesLazyRoute: typeof WorkspaceNameAuthSettingsSharesLazyRoute;
+  WorkspaceNameAuthSettingsStatsLazyRoute: typeof WorkspaceNameAuthSettingsStatsLazyRoute;
+  WorkspaceNameAuthSettingsWorkspaceLazyRoute: typeof WorkspaceNameAuthSettingsWorkspaceLazyRoute;
   WorkspaceNameAuthSettingsIndexRoute: typeof WorkspaceNameAuthSettingsIndexRoute;
 }
 
 const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChildren = {
-  WorkspaceNameAuthSettingsAboutRoute: WorkspaceNameAuthSettingsAboutRoute,
-  WorkspaceNameAuthSettingsAccountRoute: WorkspaceNameAuthSettingsAccountRoute,
   WorkspaceNameAuthSettingsAgentConfigRoute: WorkspaceNameAuthSettingsAgentConfigRoute,
-  WorkspaceNameAuthSettingsAgentRolesRoute: WorkspaceNameAuthSettingsAgentRolesRoute,
   WorkspaceNameAuthSettingsAgentsRoute: WorkspaceNameAuthSettingsAgentsRoute,
-  WorkspaceNameAuthSettingsAiUsageRoute: WorkspaceNameAuthSettingsAiUsageRoute,
-  WorkspaceNameAuthSettingsAppearanceRoute: WorkspaceNameAuthSettingsAppearanceRoute,
-  WorkspaceNameAuthSettingsBillingRoute: WorkspaceNameAuthSettingsBillingRoute,
   WorkspaceNameAuthSettingsDevicesRoute: WorkspaceNameAuthSettingsDevicesRoute,
-  WorkspaceNameAuthSettingsGeneralRoute: WorkspaceNameAuthSettingsGeneralRoute,
-  WorkspaceNameAuthSettingsGithubRoute: WorkspaceNameAuthSettingsGithubRoute,
-  WorkspaceNameAuthSettingsKeyboardShortcutsRoute: WorkspaceNameAuthSettingsKeyboardShortcutsRoute,
-  WorkspaceNameAuthSettingsLodyAgentRoute: WorkspaceNameAuthSettingsLodyAgentRoute,
   WorkspaceNameAuthSettingsMachinesRoute: WorkspaceNameAuthSettingsMachinesRoute,
-  WorkspaceNameAuthSettingsMcpRoute: WorkspaceNameAuthSettingsMcpRoute,
-  WorkspaceNameAuthSettingsMemoryRoute: WorkspaceNameAuthSettingsMemoryRoute,
   WorkspaceNameAuthSettingsMyMachinesRoute: WorkspaceNameAuthSettingsMyMachinesRoute,
-  WorkspaceNameAuthSettingsPeopleRoute: WorkspaceNameAuthSettingsPeopleRoute,
-  WorkspaceNameAuthSettingsPreferencesRoute: WorkspaceNameAuthSettingsPreferencesRoute,
   WorkspaceNameAuthSettingsProjectsRoute: WorkspaceNameAuthSettingsProjectsRoute,
-  WorkspaceNameAuthSettingsPromptShortcutsRoute: WorkspaceNameAuthSettingsPromptShortcutsRoute,
-  WorkspaceNameAuthSettingsSharesRoute: WorkspaceNameAuthSettingsSharesRoute,
-  WorkspaceNameAuthSettingsStatsRoute: WorkspaceNameAuthSettingsStatsRoute,
-  WorkspaceNameAuthSettingsWorkspaceRoute: WorkspaceNameAuthSettingsWorkspaceRoute,
+  WorkspaceNameAuthSettingsAboutLazyRoute: WorkspaceNameAuthSettingsAboutLazyRoute,
+  WorkspaceNameAuthSettingsAccountLazyRoute: WorkspaceNameAuthSettingsAccountLazyRoute,
+  WorkspaceNameAuthSettingsAgentRolesLazyRoute: WorkspaceNameAuthSettingsAgentRolesLazyRoute,
+  WorkspaceNameAuthSettingsAiUsageLazyRoute: WorkspaceNameAuthSettingsAiUsageLazyRoute,
+  WorkspaceNameAuthSettingsAppearanceLazyRoute: WorkspaceNameAuthSettingsAppearanceLazyRoute,
+  WorkspaceNameAuthSettingsBillingLazyRoute: WorkspaceNameAuthSettingsBillingLazyRoute,
+  WorkspaceNameAuthSettingsGeneralLazyRoute: WorkspaceNameAuthSettingsGeneralLazyRoute,
+  WorkspaceNameAuthSettingsGithubLazyRoute: WorkspaceNameAuthSettingsGithubLazyRoute,
+  WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute:
+    WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute,
+  WorkspaceNameAuthSettingsLodyAgentLazyRoute: WorkspaceNameAuthSettingsLodyAgentLazyRoute,
+  WorkspaceNameAuthSettingsMcpLazyRoute: WorkspaceNameAuthSettingsMcpLazyRoute,
+  WorkspaceNameAuthSettingsMemoryLazyRoute: WorkspaceNameAuthSettingsMemoryLazyRoute,
+  WorkspaceNameAuthSettingsPeopleLazyRoute: WorkspaceNameAuthSettingsPeopleLazyRoute,
+  WorkspaceNameAuthSettingsPreferencesLazyRoute: WorkspaceNameAuthSettingsPreferencesLazyRoute,
+  WorkspaceNameAuthSettingsPromptShortcutsLazyRoute:
+    WorkspaceNameAuthSettingsPromptShortcutsLazyRoute,
+  WorkspaceNameAuthSettingsSharesLazyRoute: WorkspaceNameAuthSettingsSharesLazyRoute,
+  WorkspaceNameAuthSettingsStatsLazyRoute: WorkspaceNameAuthSettingsStatsLazyRoute,
+  WorkspaceNameAuthSettingsWorkspaceLazyRoute: WorkspaceNameAuthSettingsWorkspaceLazyRoute,
   WorkspaceNameAuthSettingsIndexRoute: WorkspaceNameAuthSettingsIndexRoute,
 };
 
@@ -1185,21 +1261,34 @@ const WorkspaceNameAuthSettingsRouteWithChildren = WorkspaceNameAuthSettingsRout
   WorkspaceNameAuthSettingsRouteChildren
 );
 
+interface WorkspaceNameAuthSchedulesLazyRouteChildren {
+  WorkspaceNameAuthSchedulesScheduleIdRoute: typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
+  WorkspaceNameAuthSchedulesIndexRoute: typeof WorkspaceNameAuthSchedulesIndexRoute;
+}
+
+const WorkspaceNameAuthSchedulesLazyRouteChildren: WorkspaceNameAuthSchedulesLazyRouteChildren = {
+  WorkspaceNameAuthSchedulesScheduleIdRoute: WorkspaceNameAuthSchedulesScheduleIdRoute,
+  WorkspaceNameAuthSchedulesIndexRoute: WorkspaceNameAuthSchedulesIndexRoute,
+};
+
+const WorkspaceNameAuthSchedulesLazyRouteWithChildren =
+  WorkspaceNameAuthSchedulesLazyRoute._addFileChildren(WorkspaceNameAuthSchedulesLazyRouteChildren);
+
 interface WorkspaceNameAuthRouteChildren {
   WorkspaceNameAuthArchiveRoute: typeof WorkspaceNameAuthArchiveRoute;
   WorkspaceNameAuthChatRoute: typeof WorkspaceNameAuthChatRoute;
-  WorkspaceNameAuthSchedulesRoute: typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   WorkspaceNameAuthSessionsRoute: typeof WorkspaceNameAuthSessionsRouteWithChildren;
   WorkspaceNameAuthSettingsRoute: typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  WorkspaceNameAuthSchedulesLazyRoute: typeof WorkspaceNameAuthSchedulesLazyRouteWithChildren;
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 
 const WorkspaceNameAuthRouteChildren: WorkspaceNameAuthRouteChildren = {
   WorkspaceNameAuthArchiveRoute: WorkspaceNameAuthArchiveRoute,
   WorkspaceNameAuthChatRoute: WorkspaceNameAuthChatRoute,
-  WorkspaceNameAuthSchedulesRoute: WorkspaceNameAuthSchedulesRouteWithChildren,
   WorkspaceNameAuthSessionsRoute: WorkspaceNameAuthSessionsRouteWithChildren,
   WorkspaceNameAuthSettingsRoute: WorkspaceNameAuthSettingsRouteWithChildren,
+  WorkspaceNameAuthSchedulesLazyRoute: WorkspaceNameAuthSchedulesLazyRouteWithChildren,
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute:
     WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute,
 };
@@ -1227,14 +1316,14 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspaceNameRoute: WorkspaceNameRouteWithChildren,
   AppRoute: AppRoute,
   CompleteEmailRoute: CompleteEmailRoute,
-  DeviceRoute: DeviceRoute,
-  EmailVerifiedRoute: EmailVerifiedRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   NotFoundRoute: NotFoundRoute,
   OnboardingRoute: OnboardingRoute,
   RecoveryRoute: RecoveryRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  DeviceLazyRoute: DeviceLazyRoute,
+  EmailVerifiedLazyRoute: EmailVerifiedLazyRoute,
   DesktopCheckoutReturnRoute: DesktopCheckoutReturnRoute,
   DesktopGithubInstallRoute: DesktopGithubInstallRoute,
   InviteInvitationIdRoute: InviteInvitationIdRoute,

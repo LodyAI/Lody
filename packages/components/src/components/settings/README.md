@@ -2,6 +2,22 @@
 
 Binding guidelines live in [AGENTS.md](AGENTS.md).
 
+## Loading settings
+
+Component-only settings routes use TanStack `.lazy.tsx` files. Search validation
+stays in the eager route files. These source boundaries apply to every application
+that consumes the shared route tree without requiring an application router plugin.
+The desktop modal loads on its first open and remains mounted afterward so closing
+preserves its existing behavior. Each selected panel loads through its own React
+Suspense boundary.
+
+Run `node apps/electron/scripts/check-settings-route-chunks.mjs` from the repository
+root to build the actual OSS renderer and verify that the modal, usage statistics,
+MCP and Lody Agent settings are outside the main entry's static chunk closure.
+The check uses the application's renderer configuration and dependencies, skips
+main/preload, and writes no build artifacts. It does not measure Cloud-specific
+composition overhead or navigation latency.
+
 PR review Markdown offers per-image HTTPS loading; automatic loading is a
 device-local preference, off by default. The isolated desktop image document
 keeps the main renderer's image policy unchanged. [Decision](../../../../../.agents/notes/implemented/feature/2026-11-02-pr-remote-images.md).
