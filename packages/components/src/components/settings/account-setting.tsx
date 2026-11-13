@@ -2,7 +2,9 @@ import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
+import { localMachineIdAtom } from '@/atoms/local-probe';
 import { settingsDialogOpenAtom } from '@/atoms';
 import { Button } from '@lody/ui/button';
 import { CompactRow } from './compact-layout';
@@ -227,6 +229,16 @@ function CloudAccountSettings({
   const sessionToken = rawSession?.session?.token ?? session?.session?.token ?? null;
   const authBaseUrl = import.meta.env.VITE_CONVEX_SITE_URL;
   const canGenerateCliApiKey = Boolean(authBaseUrl && sessionToken);
+  // Names the machines each CLI token signs in, and marks this computer's.
+  const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const cliApiKeyMachineNames = useMemo(
+    () =>
+      new Map(
+        Array.from(machineMetaMap.values(), (machine) => [machine.id, machine.name || machine.id])
+      ),
+    [machineMetaMap]
+  );
   const billingUiAvailable = !isNativeAppShell();
   const openAdmissionBilling = billingUiAvailable
     ? () => {
@@ -896,6 +908,8 @@ function CloudAccountSettings({
         onSetupPassword={handleSetupPassword}
         canGenerateCliApiKey={canGenerateCliApiKey}
         cliApiKeys={cliApiKeys}
+        cliApiKeyMachineNames={cliApiKeyMachineNames}
+        currentMachineId={localMachineId}
         isLoadingCliApiKeys={isLoadingCliApiKeys}
         isCreatingCliApiKey={isCreatingCliApiKey}
         hasGeneratedCliApiKey={Boolean(generatedCliApiKey)}
