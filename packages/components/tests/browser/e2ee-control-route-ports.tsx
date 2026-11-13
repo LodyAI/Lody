@@ -33,6 +33,7 @@ export const useRecoveryPort = () => null;
 export const isElectronRenderer = () => false;
 export const isNativeAppShell = () => false;
 export const setWorkspaceContextAtom = {};
+export const runtimeInitializingAtom = {};
 export const useE2eeAccountId = () => fixture.accountId;
 export const usePlatform = () => ({ e2eeWorkspaces: fixture.port });
 export const usePlatformSession = () => ({

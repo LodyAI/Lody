@@ -177,7 +177,10 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
         Effect.tap((value) =>
           Effect.gen(function* () {
             const local = yield* input.verified.current()
-            if (local.length !== value.checkpoint.length || !local.head.equals(value.checkpoint.head))
+            if (
+              local.length !== value.checkpoint.length ||
+              !local.head.equals(value.checkpoint.head)
+            )
               refreshedInTurn = false
             yield* refreshIfNeeded
           })
