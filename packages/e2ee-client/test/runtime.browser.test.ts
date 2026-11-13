@@ -160,6 +160,14 @@ function bundleControlRoute() {
               { filter: /^react(?:-dom)?(?:\/.*)?$|^effect$|^@lody\/e2ee-core\/protocol$/ },
               ({ path }) => ({ path: testRequire.resolve(path) })
             );
+            // Relatively imported lost-access display page and hosted workspace removal.
+            builder.onResolve(
+              {
+                filter:
+                  /^(?:\.\/|(?:\.\.\/)+components\/pages\/)e2ee-(?:lost-access|workspace-removal)$/,
+              },
+              () => ({ path: ports })
+            );
             builder.onResolve(
               {
                 filter:

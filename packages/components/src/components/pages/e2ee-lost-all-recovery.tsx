@@ -7,7 +7,7 @@ import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 
-type Method = 'passkey' | 'file' | 'none';
+type Method = 'passkey' | 'file';
 type RestoreResult = { workspaceId?: string; name: string; outcome: string };
 type Restored =
   | { outcome: 'cancelled' }
@@ -26,6 +26,12 @@ export interface E2eeLostAllRecoveryProps {
   restore: (method: 'file' | 'passkey') => Promise<Restored>;
   /** This workspace was restored: leave the waiting page and open it. */
   onRecovered: () => void;
+  /** A host whose results name no workspace IDs restored something: re-read this
+   * device's verified status, the only authority on whether this workspace is open.
+   * It never ends the pending request. */
+  onCheck?: () => void;
+  /** The person has neither backup: go on to what can still be done. */
+  onNoBackup?: () => void;
 }
 
 const styles = stylex.create({
@@ -71,6 +77,7 @@ const styles = stylex.create({
   },
   heading: { margin: 0, fontSize: type.headlineSize, fontWeight: 600 },
   actions: { display: 'flex', justifyContent: 'flex-end', gap: space[2], flexWrap: 'wrap' },
+  split: { justifyContent: 'space-between', alignItems: 'center' },
 });
 
 const resultBadge = (outcome: string): { key: string; tone: BadgeTone } =>
@@ -81,13 +88,15 @@ const resultBadge = (outcome: string): { key: string; tone: BadgeTone } =>
       : { key: 'e2ee.lostAll.result.failed', tone: 'warning' };
 
 const failureKey = (code: string) =>
-  code.includes('e2ee_recovery_prf-unavailable')
-    ? 'e2ee.recovery.passkeyUnsupported'
-    : /e2ee_recovery_(?:authentication|invalid-input)/.test(code)
-      ? 'e2ee.recovery.wrongFile'
-      : code.includes('e2ee_recovery_disabled')
-        ? 'e2ee.recovery.disabled'
-        : 'e2ee.recovery.failed';
+  code.includes('e2ee_recovery_missing')
+    ? 'e2ee.lostAll.missing'
+    : code.includes('e2ee_recovery_prf-unavailable')
+      ? 'e2ee.recovery.passkeyUnsupported'
+      : /e2ee_recovery_(?:authentication|invalid-input)/.test(code)
+        ? 'e2ee.recovery.wrongFile'
+        : code.includes('e2ee_recovery_disabled')
+          ? 'e2ee.recovery.disabled'
+          : 'e2ee.lostAll.failed';
 
 /** "I lost every authorized device": restore from a passkey or the recovery file, with
  * each workspace's outcome, and a pointer to revoking the lost devices afterwards. */
@@ -97,13 +106,9 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<readonly RestoreResult[] | null>(null);
-  const choices: Method[] = [
-    ...(props.passkeyAvailable ? (['passkey'] as const) : []),
-    'file',
-    'none',
-  ];
+  const choices: Method[] = [...(props.passkeyAvailable ? (['passkey'] as const) : []), 'file'];
   const run = async () => {
-    if (busy || method === 'none') return;
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -125,6 +130,10 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
     const current = results.some(
       (row) => row.workspaceId === props.workspaceId && row.outcome === 'Committed'
     );
+    // Hosts that report no IDs cannot say which row is this workspace; only a fresh
+    // read of this device's status can, and it never ends the pending request.
+    const unidentified =
+      !current && restored > 0 && results.every((row) => row.workspaceId === undefined);
     return (
       <div data-testid="e2ee-lost-all-results" {...stylex.props(styles.root)}>
         <h3 {...stylex.props(styles.heading)}>
@@ -152,18 +161,31 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
         {(unfinished > 0 || results.length === 0) && (
           <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.askAdmin')}</p>
         )}
-        {restored > 0 && !current && (
+        {restored > 0 && !current && !unidentified && (
           <p data-testid="e2ee-lost-all-current-pending" {...stylex.props(styles.lead)}>
             {t('e2ee.lostAll.result.currentPending')}
           </p>
+        )}
+        {unidentified && (
+          <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.checkCurrent')}</p>
         )}
         {restored > 0 && (
           <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.revokeHint')}</p>
         )}
         <div {...stylex.props(styles.actions)}>
+          {!current && props.onNoBackup && unfinished > 0 && (
+            <Button variant="secondary" onClick={props.onNoBackup}>
+              {t('e2ee.lostAll.cannotRestore')}
+            </Button>
+          )}
           {!current && (
             <Button variant="secondary" onClick={() => setResults(null)}>
               {t('e2ee.lostAll.tryAnother')}
+            </Button>
+          )}
+          {unidentified && props.onCheck && (
+            <Button data-testid="e2ee-lost-all-check" onClick={props.onCheck}>
+              {t('e2ee.lostAll.check')}
             </Button>
           )}
           {current && <Button onClick={props.onRecovered}>{t('e2ee.lostAll.open')}</Button>}
@@ -197,8 +219,18 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
           <Alert.Description>{t(error)}</Alert.Description>
         </Alert.Root>
       )}
-      <div {...stylex.props(styles.actions)}>
-        <Button disabled={busy || method === 'none'} onClick={() => void run()}>
+      <div {...stylex.props(styles.actions, props.onNoBackup && styles.split)}>
+        {props.onNoBackup && (
+          <Button
+            variant="link"
+            data-testid="e2ee-lost-all-no-backup"
+            disabled={busy}
+            onClick={props.onNoBackup}
+          >
+            {t('e2ee.lostAll.noBackup')}
+          </Button>
+        )}
+        <Button disabled={busy} onClick={() => void run()}>
           {t('e2ee.lostAll.continue')}
         </Button>
       </div>

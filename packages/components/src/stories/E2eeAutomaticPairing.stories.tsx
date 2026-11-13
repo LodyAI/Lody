@@ -24,11 +24,17 @@ function Layout({ form, children }: { form: 'phone' | 'desktop'; children: React
 function Preview({
   mode,
   backup = false,
+  access,
+  removal = 'removed',
   form = 'phone',
 }: {
   mode: 'awaiting' | 'waiting' | 'expired' | 'syncing' | 'approval' | 'previous' | 'addDevice';
-  /** This host can restore from a backup: "No other authorized device?" offers it. */
+  /** This host can restore from a backup: "Can't approve on another device?" offers it first. */
   backup?: boolean;
+  /** The account role the lost-access steps read; absent hides the way out. */
+  access?: 'owner' | 'member';
+  /** How the synthetic server answers a deletion or leave. */
+  removal?: 'removed' | 'pending' | 'not-owner' | 'billing';
   /** Phones scan codes; computers show them and take typed codes. */
   form?: 'phone' | 'desktop';
 }) {
@@ -127,9 +133,15 @@ function Preview({
         </div>
       </Layout>
     );
-  return <Layout form={form}>{body(mode, runtime, backup)}</Layout>;
+  return <Layout form={form}>{body(mode, runtime, backup, access, removal)}</Layout>;
 }
-function body(mode: string, runtime: E2eeWorkspaceRuntime, backup: boolean) {
+function body(
+  mode: string,
+  runtime: E2eeWorkspaceRuntime,
+  backup: boolean,
+  access: 'owner' | 'member' | undefined,
+  removal: 'removed' | 'pending' | 'not-owner' | 'billing'
+) {
   return mode === 'approval' ? (
     <E2eeAutomaticPairingInbox runtime={runtime}>
       <div className="min-h-dvh bg-background text-foreground">
@@ -152,19 +164,43 @@ function body(mode: string, runtime: E2eeWorkspaceRuntime, backup: boolean) {
       onJoined={() => {}}
       onBack={() => {}}
       onManual={() => {}}
-      {...(backup
+      {...(access
         ? {
-            lostAll: {
-              passkeyAvailable: true,
-              restore: async () => ({
-                outcome: 'restored' as const,
-                results: [
-                  { workspaceId: 'preview', name: 'Lody Design', outcome: 'Committed' },
-                  { workspaceId: 'platform', name: 'Platform', outcome: 'Committed' },
-                  { workspaceId: 'archive', name: 'Archive', outcome: 'Failed' },
-                ],
-              }),
-              onRecovered: () => {},
+            lostAccess: {
+              workspaceName: 'Lody Design',
+              accountRole: access,
+              ...(backup
+                ? {
+                    recovery: {
+                      passkeyAvailable: true,
+                      restore: async () => ({
+                        outcome: 'restored' as const,
+                        results: [
+                          { workspaceId: 'preview', name: 'Lody Design', outcome: 'Committed' },
+                          { workspaceId: 'platform', name: 'Platform', outcome: 'Committed' },
+                          { workspaceId: 'archive', name: 'Archive', outcome: 'Failed' },
+                        ],
+                      }),
+                      onRecovered: () => {},
+                    },
+                  }
+                : {}),
+              removal: {
+                submit: () =>
+                  removal === 'removed'
+                    ? Promise.resolve()
+                    : removal === 'pending'
+                      ? new Promise<void>(() => {})
+                      : Promise.reject(
+                          removal === 'billing'
+                            ? { status: 500, message: 'Workspace has an active subscription.' }
+                            : { status: 403, message: 'Forbidden' }
+                        ),
+                listed: async () => removal !== 'removed',
+                refresh: () => {},
+              },
+              onBackToWorkspaces: () => {},
+              onRemoved: () => {},
             },
           }
         : {})}
@@ -183,8 +219,26 @@ export const PhoneAwaitingDevice: Story = { args: { mode: 'awaiting' } };
 export const PhoneWaiting: Story = { args: { mode: 'waiting' } };
 /** A new computer shows a QR code for a phone beside the code another computer types. */
 export const DesktopNewDevice: Story = { args: { mode: 'waiting', form: 'desktop' } };
-/** Open "没有其他已授权设备？" → "用备份找回" for the passkey / file / neither choice. */
-export const PhoneWaitingWithBackup: Story = { args: { mode: 'waiting', backup: true } };
+/** Open "无法在其他设备上批准？": restore first, then "我没有设置过备份" → owner deletion. */
+export const PhoneWaitingWithBackup: Story = {
+  args: { mode: 'waiting', backup: true, access: 'owner' },
+};
+/** Desktop owner without a backup host: the steps start at deletion; type the name to submit. */
+export const DesktopOwnerLostAccess: Story = {
+  args: { mode: 'waiting', form: 'desktop', access: 'owner' },
+};
+/** A non-owner sees leave instead of delete. */
+export const DesktopMemberLostAccess: Story = {
+  args: { mode: 'waiting', form: 'desktop', access: 'member' },
+};
+/** A deletion the server never answers: slow notice at 10 s, unknown at 30 s. */
+export const DesktopOwnerDeletionUnanswered: Story = {
+  args: { mode: 'waiting', form: 'desktop', access: 'owner', removal: 'pending' },
+};
+/** The server refuses on billing grounds; nothing changed. */
+export const DesktopOwnerDeletionBillingRefused: Story = {
+  args: { mode: 'waiting', form: 'desktop', access: 'owner', removal: 'billing' },
+};
 export const PhoneExpired: Story = { args: { mode: 'expired' } };
 export const PhoneSyncing: Story = { args: { mode: 'syncing' } };
 /** Open “Restart this device’s previous pairing” to inspect its confirmation. */

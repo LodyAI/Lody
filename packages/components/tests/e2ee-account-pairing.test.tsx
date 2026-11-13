@@ -490,13 +490,9 @@ describe('account pairing relay operations', () => {
 });
 
 describe('automatic pairing product flow', () => {
-  it('restores from a backup when no other authorized device exists, and opens the result', async () => {
-    const { E2eeAutomaticPairingPage } =
-      await import('../src/components/pages/e2ee-automatic-pairing');
-    const cancelled: string[] = [];
-    const restores: string[] = [];
-    let recovered = 0;
-    const runtime = {
+  /** A waiting runtime for one workspace whose request the page may cancel. */
+  const waitingRuntime = (cancelled: string[]) =>
+    ({
       automaticPairingState: async () => ({
         id: 'request',
         workspaceId: 'w1',
@@ -509,56 +505,130 @@ describe('automatic pairing product flow', () => {
       cancelAutomaticPairing: async (workspaceId: string) => {
         cancelled.push(workspaceId);
       },
-    } as unknown as E2eeWorkspaceRuntime;
-    const page = (lostAll?: Parameters<typeof E2eeAutomaticPairingPage>[0]['lostAll']) =>
-      act(async () =>
-        root.render(
-          <E2eeAutomaticPairingPage
-            runtime={runtime}
-            workspaceId="w1"
-            onJoined={() => {}}
-            onBack={() => {}}
-            {...(lostAll ? { lostAll } : {})}
-          />
-        )
-      );
-    // Without a backup on this host, the entry explains where to go instead.
-    await page();
+    }) as unknown as E2eeWorkspaceRuntime;
+  const inDialog = (label: string) =>
+    [...document.body.querySelectorAll('button')].find((value) =>
+      (value.textContent ?? '').startsWith(label)
+    );
+  const pressInDialog = async (label: string) => {
+    const found = inDialog(label);
+    if (!found) throw new Error(`missing ${label}`);
+    await act(async () => found.click());
+  };
+  const testId = (id: string) => document.body.querySelector(`[data-testid="${id}"]`);
+  type LostAccess = NonNullable<
+    Parameters<
+      typeof import('../src/components/pages/e2ee-automatic-pairing').E2eeAutomaticPairingPage
+    >[0]['lostAccess']
+  >;
+  const renderWaiting = async (runtime: E2eeWorkspaceRuntime, lostAccess?: LostAccess) => {
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={runtime}
+          workspaceId="w1"
+          onJoined={() => {}}
+          onBack={() => {}}
+          {...(lostAccess ? { lostAccess } : {})}
+        />
+      )
+    );
     await tick(0);
+  };
+  /** An account removal port whose submit the test settles by hand. */
+  const removalPort = (listed: () => Promise<boolean | null>) => {
+    const port = {
+      submits: [] as Array<{ kind: string; workspaceId: string }>,
+      settle: null as null | { resolve: () => void; reject: (error: unknown) => void },
+      refreshes: 0,
+      removal: {
+        submit: (kind: 'delete' | 'leave', workspaceId: string) =>
+          new Promise<void>((resolve, reject) => {
+            port.submits.push({ kind, workspaceId });
+            port.settle = { resolve, reject };
+          }),
+        listed: () => listed(),
+        refresh: () => {
+          port.refreshes++;
+          // Refreshing the list after a removal may fail; that never undoes it.
+          throw new Error('list refresh failed');
+        },
+      },
+    };
+    return port;
+  };
+  const typeName = async (value: string) => {
+    const input = document.body.querySelector<HTMLInputElement>('#e2ee-lost-access-name')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+
+  it('restores from a configured backup when no other authorized device exists, and only this workspace ends its request', async () => {
+    const cancelled: string[] = [];
+    const restores: string[] = [];
+    let recovered = 0,
+      checked = 0,
+      back = 0;
+    const runtime = waitingRuntime(cancelled);
+    // Without a lost-access host, the entry only explains where to go instead.
+    await renderWaiting(runtime);
     expect(text()).toContain('e2ee.auto.waiting.help');
     expect(text()).toContain('e2ee.auto.expiresIn {"time":"5:00"}');
     expect(text()).toContain('e2ee.auto.noOtherDevice.elsewhere');
-    expect(text()).not.toContain('e2ee.auto.noOtherDevice.restore');
+    expect(container.querySelector('[data-testid="e2ee-lost-access-entry"]')).toBeNull();
 
-    const inDialog = (label: string) =>
-      [...document.body.querySelectorAll('button')].find((value) =>
-        (value.textContent ?? '').startsWith(label)
-      );
-    let restoreResults: { workspaceId: string; name: string; outcome: string }[] = [
+    let restoreResults: { workspaceId?: string; name: string; outcome: string }[] = [
       // Another workspace restored, this one not covered by the backup.
       { workspaceId: 'w2', name: 'Alpha', outcome: 'Committed' },
     ];
-    await page({
-      passkeyAvailable: true,
-      restore: async (method) => {
-        restores.push(method);
-        return { outcome: 'restored', results: restoreResults };
+    const lostAccess = (): LostAccess => ({
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      recovery: {
+        passkeyAvailable: true,
+        restore: async (method) => {
+          restores.push(method);
+          return { outcome: 'restored', results: restoreResults };
+        },
+        onRecovered: () => {
+          recovered++;
+        },
+        onCheck: () => {
+          checked++;
+        },
       },
-      onRecovered: () => {
-        recovered++;
+      onBackToWorkspaces: () => {
+        back++;
       },
+      onRemoved: () => {},
     });
-    await click('e2ee.auto.noOtherDevice.restore');
-    await act(async () => inDialog('e2ee.lostAll.continue')!.click());
+    await renderWaiting(runtime, lostAccess());
+    // The main pairing flow stays in place beside the way out.
+    expect(text()).toContain('123 456');
+    await click('e2ee.lostAccess.entry');
+    await pressInDialog('e2ee.lostAll.continue');
     // Another workspace's success never ends this workspace's pending approval,
     // even when the names match.
-    expect(
-      document.body.querySelector('[data-testid="e2ee-lost-all-current-pending"]')
-    ).not.toBeNull();
+    expect(testId('e2ee-lost-all-current-pending')).not.toBeNull();
     expect(inDialog('e2ee.lostAll.open')).toBeUndefined();
     expect(cancelled).toEqual([]);
     expect(recovered).toBe(0);
-    await act(async () => inDialog('e2ee.lostAll.tryAnother')!.click());
+
+    // A host that names no workspace IDs cannot say which row is this one: the page
+    // re-reads this device's status instead, and keeps the request.
+    await pressInDialog('e2ee.lostAll.tryAnother');
+    restoreResults = [{ name: 'Alpha', outcome: 'Committed' }];
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(testId('e2ee-lost-all-current-pending')).toBeNull();
+    await pressInDialog('e2ee.lostAll.check');
+    expect(checked).toBe(1);
+    expect(cancelled).toEqual([]);
+
+    await pressInDialog('e2ee.lostAll.tryAnother');
     restoreResults = [
       { workspaceId: 'w1', name: 'Alpha', outcome: 'Committed' },
       { workspaceId: 'w3', name: 'Design', outcome: 'Failed' },
@@ -568,9 +638,9 @@ describe('automatic pairing product flow', () => {
     expect(
       document.body.querySelector('[data-lost-all-method="passkey"]')?.getAttribute('aria-checked')
     ).toBe('true');
-    await act(async () => inDialog('e2ee.lostAll.continue')!.click());
+    await pressInDialog('e2ee.lostAll.continue');
     expect(restores).toEqual(['passkey']);
-    const results = document.body.querySelector('[data-testid="e2ee-lost-all-results"]');
+    const results = testId('e2ee-lost-all-results');
     expect(results?.querySelector('[data-lost-all-result="Committed"]')?.textContent).toContain(
       'Alpha'
     );
@@ -579,11 +649,158 @@ describe('automatic pairing product flow', () => {
     );
     expect(results?.textContent).toContain('e2ee.lostAll.result.askAdmin');
     expect(results?.textContent).toContain('e2ee.lostAll.result.revokeHint');
-    await act(async () => inDialog('e2ee.lostAll.open')!.click());
+    await pressInDialog('e2ee.lostAll.open');
     // The backup admitted this device, so the pending request ends and the host refreshes.
     expect(cancelled).toEqual(['w1']);
     expect(recovered).toBe(1);
+
+    // Going back from the lost-access steps keeps the pending request.
+    cancelled.length = 0;
+    await renderWaiting(runtime, lostAccess());
+    await click('e2ee.lostAccess.entry');
+    await pressInDialog('e2ee.lostAll.noBackup');
+    expect(testId('e2ee-lost-access-lost')?.textContent).toContain('e2ee.lostAccess.lost.body');
+    await pressInDialog('e2ee.lostAccess.back');
+    expect(back).toBe(1);
+    expect(cancelled).toEqual([]);
   });
+
+  it('lets an account owner with no authorized device delete the workspace, reporting background cleanup even when the list refresh fails', async () => {
+    let removed = 0;
+    const port = removalPort(async () => true);
+    await renderWaiting(waitingRuntime([]), {
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      removal: port.removal,
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {
+        removed++;
+      },
+    });
+    await click('e2ee.lostAccess.entry');
+    // No backup on this host: the steps start at what can still be done.
+    expect(testId('e2ee-lost-access-lost')?.textContent).toContain('e2ee.lostAccess.noRestore');
+    expect(document.body.querySelector('[data-lost-access-role="owner"]')).not.toBeNull();
+    expect(testId('e2ee-lost-access-leave')).toBeNull();
+    await act(async () => (testId('e2ee-lost-access-delete') as HTMLButtonElement).click());
+    const submit = () => testId('e2ee-lost-access-submit') as HTMLButtonElement;
+    expect(submit().disabled).toBe(true);
+    await typeName('Alph');
+    expect(submit().disabled).toBe(true);
+    await typeName('Alpha');
+    await act(async () => submit().click());
+    expect(port.submits).toEqual([{ kind: 'delete', workspaceId: 'w1' }]);
+    await act(async () => port.settle!.resolve());
+    const done = testId('e2ee-lost-access-removed');
+    expect(done?.textContent).toContain('e2ee.lostAccess.deleted');
+    expect(done?.textContent).toContain('e2ee.lostAccess.cleanupPending');
+    expect(port.refreshes).toBe(1);
+    await pressInDialog('e2ee.lostAccess.continue');
+    expect(removed).toBe(1);
+  });
+
+  it('offers a non-owner leave instead of delete, and shows a server refusal of an owner hint as refused', async () => {
+    const memberPort = removalPort(async () => true);
+    await renderWaiting(waitingRuntime([]), {
+      workspaceName: 'Alpha',
+      accountRole: 'member',
+      removal: memberPort.removal,
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {},
+    });
+    await click('e2ee.lostAccess.entry');
+    expect(document.body.querySelector('[data-lost-access-role="member"]')).not.toBeNull();
+    expect(testId('e2ee-lost-access-delete')).toBeNull();
+    expect(testId('e2ee-lost-access-leave')).not.toBeNull();
+    await act(async () => root.unmount());
+    root = createRoot(container);
+
+    // A stale owner hint: the server decides, and the workspace is still listed.
+    const port = removalPort(async () => true);
+    await renderWaiting(waitingRuntime([]), {
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      removal: port.removal,
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {},
+    });
+    await click('e2ee.lostAccess.entry');
+    await act(async () => (testId('e2ee-lost-access-delete') as HTMLButtonElement).click());
+    await typeName('Alpha');
+    await act(async () => (testId('e2ee-lost-access-submit') as HTMLButtonElement).click());
+    await act(async () => port.settle!.reject({ status: 403, message: 'not allowed' }));
+    expect(testId('e2ee-lost-access-refused')?.textContent).toContain(
+      'e2ee.lostAccess.refused.notOwner'
+    );
+    expect(testId('e2ee-lost-access-removed')).toBeNull();
+    expect(port.refreshes).toBe(0);
+  });
+
+  it('never reports an unanswered deletion as failed: the workspace list decides, and a late success still lands', async () => {
+    // This case owns its timeouts: reinstall the clock with setTimeout faked too.
+    vi.useRealTimers();
+    vi.useFakeTimers({
+      toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'],
+    });
+    vi.setSystemTime(NOW);
+    const { LOST_ACCESS_BOUND_MS, LOST_ACCESS_SLOW_MS } =
+      await import('../src/components/pages/e2ee-lost-access');
+    let listed: boolean | null = true;
+    const port = removalPort(async () => listed);
+    await renderWaiting(waitingRuntime([]), {
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      removal: port.removal,
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {},
+    });
+    await click('e2ee.lostAccess.entry');
+    await act(async () => (testId('e2ee-lost-access-delete') as HTMLButtonElement).click());
+    await typeName('Alpha');
+    await act(async () => (testId('e2ee-lost-access-submit') as HTMLButtonElement).click());
+    const phase = () => testId('e2ee-lost-access-confirm')?.getAttribute('data-lost-access-phase');
+    await tick(LOST_ACCESS_SLOW_MS);
+    expect(text() + document.body.textContent).toContain('e2ee.lostAccess.slow');
+    // An unanswered request cannot be dismissed while its result is pending.
+    await act(async () =>
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    );
+    expect(testId('e2ee-lost-access-confirm')).not.toBeNull();
+    await tick(LOST_ACCESS_BOUND_MS - LOST_ACCESS_SLOW_MS);
+    // Still listed after the bound: unknown, never failed or deleted.
+    expect(phase()).toBe('unknown');
+    expect(testId('e2ee-lost-access-refused')).toBeNull();
+    expect(port.refreshes).toBe(0);
+    // A late success is still the truth.
+    await act(async () => port.settle!.resolve());
+    expect(testId('e2ee-lost-access-removed')).not.toBeNull();
+
+    // A transport failure whose list read fails stays unknown; a retry that the list
+    // then shows as gone is reported as deleted.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    const second = removalPort(async () => listed);
+    listed = null;
+    await renderWaiting(waitingRuntime([]), {
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      removal: second.removal,
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {},
+    });
+    await click('e2ee.lostAccess.entry');
+    await act(async () => (testId('e2ee-lost-access-delete') as HTMLButtonElement).click());
+    await typeName('Alpha');
+    await act(async () => (testId('e2ee-lost-access-submit') as HTMLButtonElement).click());
+    await act(async () => second.settle!.reject(new TypeError('Failed to fetch')));
+    expect(phase()).toBe('unknown');
+    listed = false;
+    await act(async () => (testId('e2ee-lost-access-submit') as HTMLButtonElement).click());
+    await act(async () => second.settle!.reject(new TypeError('Failed to fetch')));
+    expect(testId('e2ee-lost-access-removed')).not.toBeNull();
+    expect(second.submits).toHaveLength(2);
+  });
+
   it('discards a late recovery result after switching account runtime and workspace', async () => {
     const { E2eeAutomaticPairingPage } =
       await import('../src/components/pages/e2ee-automatic-pairing');
