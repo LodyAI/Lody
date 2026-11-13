@@ -650,6 +650,11 @@ export function MachineAgentSettings({
       separatesPrivateMachines ? allItems.filter((item) => item.isOwn && !item.sharedWithTeam) : [],
     [allItems, separatesPrivateMachines]
   );
+  // With other members the main list holds only shared machines, so an empty one
+  // means nothing is shared yet, not that no machine is connected.
+  const emptyMachinesLabel = separatesPrivateMachines
+    ? t('settings.machines.noSharedMachines', 'No machines are shared with this workspace yet')
+    : t('workspace.machines.empty', 'No machines connected');
   const getAccordionMeta = useCallback(
     (item: MachineTabItem): WorkspaceMachineAccordionMeta => {
       const ownerUserId =
@@ -1654,6 +1659,7 @@ export function MachineAgentSettings({
               showFilter
               showOwner
               ownerByUserId={machineOwnerMap}
+              emptyLabel={mode === 'machines' ? emptyMachinesLabel : undefined}
             />
           </div>
           <OwnPrivateMachines
@@ -1889,7 +1895,7 @@ export function MachineAgentSettings({
           ) : (
             <div {...stylex.props(surface.card, styles.emptyNote)}>
               {modeTotalBeforeFilter === 0
-                ? t('workspace.machines.empty', 'No machines connected')
+                ? emptyMachinesLabel
                 : t(
                     'settings.agent.machineTabs.filter.noMatch',
                     'No machines match these filters.'

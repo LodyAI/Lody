@@ -147,8 +147,8 @@ const previewQueries: Record<string, unknown> = {
   'machineCredentials:getMachineCredentialState': { revocableCount: 1 },
   'machinePairing:listPendingMachinePairings': [],
 };
-/** A solo workspace shares nothing: every machine is the owner's private machine. */
-const soloPreviewQueries: Record<string, unknown> = {
+/** Nothing is shared: every machine is the owner's private machine. */
+const privatePreviewQueries: Record<string, unknown> = {
   ...previewQueries,
   'machines:listVisibleMachines': previewAccess.map((access) => ({
     ...access,
@@ -165,9 +165,9 @@ const createPreviewCloudApi = (queries: Record<string, unknown>): CloudApi => ({
   },
 });
 const previewCloudApi = createPreviewCloudApi(previewQueries);
-const soloPreviewCloudApi = createPreviewCloudApi(soloPreviewQueries);
+const privatePreviewCloudApi = createPreviewCloudApi(privatePreviewQueries);
 
-function MachinesCatalogFixture({ solo = false }: { solo?: boolean }) {
+function MachinesCatalogFixture({ allPrivate = false }: { allPrivate?: boolean }) {
   useLayoutEffect(() => {
     const originalFetch = window.fetch;
     const previewFetch: typeof fetch = (input, init) => {
@@ -199,9 +199,9 @@ function MachinesCatalogFixture({ solo = false }: { solo?: boolean }) {
     () => ({
       ...parent,
       kind: 'cloud' as const,
-      cloudApi: solo ? soloPreviewCloudApi : previewCloudApi,
+      cloudApi: allPrivate ? privatePreviewCloudApi : previewCloudApi,
     }),
-    [parent, solo]
+    [parent, allPrivate]
   );
   const [store] = useState(() => {
     const next = createStore();
@@ -341,11 +341,14 @@ function SettingsModalStory({
   tab,
   roles = [storyRole],
   solo = false,
+  noneShared = false,
 }: {
   tab: SettingsTabId;
   roles?: readonly AgentRole[];
   /** The workspace has no other members. */
   solo?: boolean;
+  /** No machine is shared with the workspace. */
+  noneShared?: boolean;
 }) {
   return (
     <SettingsStoryProviders
@@ -356,7 +359,7 @@ function SettingsModalStory({
     >
       <RoutedStory>
         {tab === 'machines' ? (
-          <MachinesCatalogFixture solo={solo} />
+          <MachinesCatalogFixture allPrivate={solo || noneShared} />
         ) : (
           <Provider>
             <OpenModalAt tab={tab}>
@@ -430,4 +433,10 @@ export const MachinesIdentityRecovery: Story = {
  * listed on the page rather than set apart as "your private machines". */
 export const MachinesSoloWorkspace: Story = {
   render: () => <SettingsModalStory tab="machines" solo />,
+};
+
+/** A team workspace where the owner has shared nothing yet: the list says so rather
+ * than claiming no machine is connected. */
+export const MachinesNoneShared: Story = {
+  render: () => <SettingsModalStory tab="machines" noneShared />,
 };
