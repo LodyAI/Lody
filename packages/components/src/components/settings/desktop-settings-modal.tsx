@@ -53,7 +53,6 @@ import { Dialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAppCapability } from '@/lib/app-platform';
-import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { SettingsDataCacheProvider } from './settings-data-cache';
 import {
@@ -281,7 +280,6 @@ function SettingsModalBody() {
   const setSelectedProjectKey = useSetAtom(settingsSelectedProjectKeyAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
   const canReportBug = useAppCapability('bugReport');
-  const { activeOrganization } = useOrganization();
   const { data: session } = useStableSession();
   const resolvedTheme = useResolvedTheme();
   const shortcutsAllowed = useWorkspaceFeature('shortcuts');
@@ -293,9 +291,6 @@ function SettingsModalBody() {
   const visibleTabs = isNativeAppShell()
     ? platformTabs.filter((tab) => tab.id !== 'billing')
     : platformTabs;
-  const navigationTabs = visibleTabs.filter(
-    (tab) => !tab.multiMemberOnly || (activeOrganization?.members.length ?? 0) > 1
-  );
 
   const handleReportBug = useCallback(() => {
     setBugReportDialogOpen(true);
@@ -402,7 +397,7 @@ function SettingsModalBody() {
                 {...stylex.props(styles.navScroll)}
               >
                 {groupedSections.map((section) => {
-                  const tabs = navigationTabs.filter((tab) => tab.section === section.id);
+                  const tabs = visibleTabs.filter((tab) => tab.section === section.id);
                   const showsAccountEntry = section.id === 'personal' && accountTab;
                   if (tabs.length === 0 && !showsAccountEntry) return null;
                   return (
