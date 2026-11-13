@@ -90,6 +90,7 @@ export function registerMentions(ctx: RuntimeContext) {
           return value;
         },
         () => state.presence,
+        catalogs.get('meta')?.machineNames,
       );
       check();
       return result;
