@@ -1,8 +1,37 @@
-const WorkspaceSettings = lazy(() => import('./e2ee/workspace-security').then((module) => ({ default: module.WorkspaceSettings })));
+import {
+  loadWorkspaceSettings,
+  loadMemorySetting,
+  loadGeneralSettingsComponent,
+  loadAppearanceSettingsComponent,
+  loadAccountSettingsComponent,
+  loadBillingSettingsComponent,
+  loadStatsSettingsComponent,
+  loadProjectSettingsComponent,
+  loadMachineAgentSettings,
+  loadLodyAgentSetting,
+  loadIntegrationsSettingsComponent,
+  loadKeyboardShortcutsSetting,
+  loadAboutSettingsComponent,
+  loadAgentRolesSetting,
+  loadPromptShortcutsSetting,
+  loadMcpSetting,
+  loadShareManagementSetting,
+  preloadSettingsPanel,
+} from './settings-code';
+const WorkspaceSettings = lazy(loadWorkspaceSettings);
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
-const MemorySetting = lazy(() => import('./memory-setting').then((module) => ({ default: module.MemorySetting })));
+const MemorySetting = lazy(loadMemorySetting);
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { lazy, Suspense, useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { Bug, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -33,21 +62,21 @@ import {
   type SettingsTabId,
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
-const GeneralSettingsComponent = lazy(() => import('./general-setting').then((module) => ({ default: module.GeneralSettingsComponent })));
-const AppearanceSettingsComponent = lazy(() => import('./appearance-setting').then((module) => ({ default: module.AppearanceSettingsComponent })));
-const AccountSettingsComponent = lazy(() => import('./account-setting').then((module) => ({ default: module.AccountSettingsComponent })));
-const BillingSettingsComponent = lazy(() => import('./billing-setting').then((module) => ({ default: module.BillingSettingsComponent })));
-const StatsSettingsComponent = lazy(() => import('./stats-setting').then((module) => ({ default: module.StatsSettingsComponent })));
-const ProjectSettingsComponent = lazy(() => import('./project-settings').then((module) => ({ default: module.ProjectSettingsComponent })));
-const MachineAgentSettings = lazy(() => import('./machine-agent-settings').then((module) => ({ default: module.MachineAgentSettings })));
-const LodyAgentSetting = lazy(() => import('./lody-agent-setting').then((module) => ({ default: module.LodyAgentSetting })));
-const IntegrationsSettingsComponent = lazy(() => import('./integrations-setting').then((module) => ({ default: module.IntegrationsSettingsComponent })));
-const KeyboardShortcutsSetting = lazy(() => import('./keyboard-shortcuts-setting').then((module) => ({ default: module.KeyboardShortcutsSetting })));
-const AboutSettingsComponent = lazy(() => import('./about-setting').then((module) => ({ default: module.AboutSettingsComponent })));
-const AgentRolesSetting = lazy(() => import('./agent-roles-setting').then((module) => ({ default: module.AgentRolesSetting })));
-const PromptShortcutsSetting = lazy(() => import('./prompt-shortcuts-setting').then((module) => ({ default: module.PromptShortcutsSetting })));
-const McpSetting = lazy(() => import('./mcp-setting').then((module) => ({ default: module.McpSetting })));
-const ShareManagementSetting = lazy(() => import('./share-management-setting').then((module) => ({ default: module.ShareManagementSetting })));
+const GeneralSettingsComponent = lazy(loadGeneralSettingsComponent);
+const AppearanceSettingsComponent = lazy(loadAppearanceSettingsComponent);
+const AccountSettingsComponent = lazy(loadAccountSettingsComponent);
+const BillingSettingsComponent = lazy(loadBillingSettingsComponent);
+const StatsSettingsComponent = lazy(loadStatsSettingsComponent);
+const ProjectSettingsComponent = lazy(loadProjectSettingsComponent);
+const MachineAgentSettings = lazy(loadMachineAgentSettings);
+const LodyAgentSetting = lazy(loadLodyAgentSetting);
+const IntegrationsSettingsComponent = lazy(loadIntegrationsSettingsComponent);
+const KeyboardShortcutsSetting = lazy(loadKeyboardShortcutsSetting);
+const AboutSettingsComponent = lazy(loadAboutSettingsComponent);
+const AgentRolesSetting = lazy(loadAgentRolesSetting);
+const PromptShortcutsSetting = lazy(loadPromptShortcutsSetting);
+const McpSetting = lazy(loadMcpSetting);
+const ShareManagementSetting = lazy(loadShareManagementSetting);
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import { useResolvedTheme } from '@/theme-provider';
@@ -385,6 +414,10 @@ function SettingsModalBody() {
                             data-id="settings:account"
                             data-scope-item="row"
                             data-settings-tab-id="account"
+                            onPointerEnter={() =>
+                              void preloadSettingsPanel('account').catch(() => {})
+                            }
+                            onFocus={() => void preloadSettingsPanel('account').catch(() => {})}
                           >
                             <SettingsAccountEntry
                               user={session?.user}
@@ -408,6 +441,12 @@ function SettingsModalBody() {
                                     data-id={`settings:${tab.id}`}
                                     data-scope-item="row"
                                     data-settings-tab-id={tab.id}
+                                    onPointerEnter={() =>
+                                      void preloadSettingsPanel(tab.id).catch(() => {})
+                                    }
+                                    onFocus={() =>
+                                      void preloadSettingsPanel(tab.id).catch(() => {})
+                                    }
                                     {...stylex.props(
                                       surface.listRow,
                                       styles.navRowRail,
@@ -527,14 +566,18 @@ function SettingsModalBody() {
                     {usesInternalScrolling ? (
                       <div {...stylex.props(styles.fill, styles.paneInset)}>
                         <div {...stylex.props(styles.fill, styles.paneColumn)}>
-                          <Suspense fallback={null}><SettingsTabContent tabId={resolvedActiveTab} /></Suspense>
+                          <Suspense fallback={null}>
+                            <SettingsTabContent tabId={resolvedActiveTab} />
+                          </Suspense>
                         </div>
                       </div>
                     ) : (
                       <ScrollArea {...stylex.props(styles.fill)}>
                         <div {...stylex.props(styles.paneInset)}>
                           <div {...stylex.props(styles.paneColumn)}>
-                            <Suspense fallback={null}><SettingsTabContent tabId={resolvedActiveTab} /></Suspense>
+                            <Suspense fallback={null}>
+                              <SettingsTabContent tabId={resolvedActiveTab} />
+                            </Suspense>
                           </div>
                         </div>
                       </ScrollArea>

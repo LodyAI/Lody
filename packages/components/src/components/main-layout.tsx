@@ -1,3 +1,7 @@
+import { SETTINGS_DEFAULT_TAB } from './settings/settings-tabs';
+import { loadSettingsModal, preloadSettings } from './settings/settings-code';
+import { scheduleIdleTask } from '@/lib/idle-task';
+import { useAppCapability } from '@/lib/app-platform';
 import { MagpieImportDialogContainer } from './settings/magpie-import-dialog-container';
 import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
 import { useAgentRoleSchemaReconciliation } from '@/hooks/use-agent-role-schema-reconciliation';
@@ -17,14 +21,19 @@ import { settingsDialogOpenAtom } from '@/atoms';
 import { ProjectEditorHost } from './settings/project-editor-host';
 import { PromptShortcutProvider } from '../providers/prompt-shortcut-provider';
 
-const DesktopSettingsModal = lazy(() =>
-  import('./settings/desktop-settings-modal').then((module) => ({
-    default: module.DesktopSettingsModal,
-  }))
-);
+const DesktopSettingsModal = lazy(loadSettingsModal);
 
 function DeferredDesktopSettingsModal() {
   const open = useAtomValue(settingsDialogOpenAtom);
+  const cloud = useAppCapability('cloudAccount');
+  const mobile = useIsMobile();
+  useEffect(
+    () =>
+      scheduleIdleTask(() => {
+        void preloadSettings(cloud ? SETTINGS_DEFAULT_TAB : 'preferences', mobile).catch(() => {});
+      }),
+    [cloud, mobile]
+  );
   const [opened, setOpened] = useState(false);
   useEffect(() => {
     if (open) setOpened(true);

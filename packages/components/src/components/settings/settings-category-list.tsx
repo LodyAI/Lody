@@ -1,3 +1,4 @@
+import { preloadSettingsPanel } from './settings-code';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useId } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -381,6 +382,8 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
       data-id="settings:account"
       data-scope-item="row"
       data-settings-tab-id={accountTab.id}
+      onPointerEnter={() => void preloadSettingsPanel(accountTab.id).catch(() => {})}
+      onFocus={() => void preloadSettingsPanel(accountTab.id).catch(() => {})}
     >
       <SettingsAccountEntry
         user={user}
@@ -603,6 +606,8 @@ function SettingsCategoryRow({
       data-id={`settings:${tab.id}`}
       data-scope-item="row"
       data-settings-tab-id={tab.id}
+      onPointerEnter={() => void preloadSettingsPanel(tab.id).catch(() => {})}
+      onFocus={() => void preloadSettingsPanel(tab.id).catch(() => {})}
       onClick={onSelect}
       {...stylex.props(styles.row, styles.rowPressed, hasDivider && surface.lineRuled)}
     >

@@ -9,7 +9,15 @@ stays in the eager route files. These source boundaries apply to every applicati
 that consumes the shared route tree without requiring an application router plugin.
 The desktop modal loads on its first open and remains mounted afterward so closing
 preserves its existing behavior. Each selected panel loads through its own React
-Suspense boundary.
+Suspense boundary. Once the workspace shell is ready, an idle task warms the
+modal shell and default panel (Account when cloud accounts are available,
+Preferences otherwise). Mobile warms only that panel. The task is canceled when
+the shell unmounts. Hovering or focusing the shared sidebar settings entry warms
+the same code; hovering or focusing a modal tab or mobile category warms only its
+panel. These shared boundaries apply to Web and Electron. Warming imports code
+without mounting a settings component or starting its subscriptions. Concurrent
+warm-up and opening share the loader promise; failed speculative loads are cleared
+so a later open can retry. Other panels remain deferred.
 
 Run `NODE_OPTIONS=--max-old-space-size=12288 node apps/electron/scripts/check-settings-route-chunks.mjs` from the repository
 root to build the actual OSS renderer and verify that the modal, usage statistics,

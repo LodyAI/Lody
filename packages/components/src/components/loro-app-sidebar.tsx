@@ -1572,7 +1572,7 @@ export function LoroAppSidebar({
   });
   const isMobile = useIsMobile();
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
-  const { openSettings } = useOpenSettings();
+  const { openSettings, preloadSettings } = useOpenSettings();
 
   const user = useAtomValue(userAtom);
   const userId = user?.id ?? null;
@@ -4016,6 +4016,7 @@ export function LoroAppSidebar({
         onFeedbackClicked={handleFeedbackClicked}
         onBugReportClicked={handleBugReportClicked}
         onSettingsClicked={handleSettingsClicked}
+        onSettingsIntent={() => preloadSettings()}
         settingsIcon={<E2eeSettingsIcon />}
         onInviteClicked={handleInviteClicked}
         onLinkRepoClicked={handleLinkRepoClicked}
