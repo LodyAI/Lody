@@ -303,7 +303,7 @@ void test('in-place and subframe navigation retain the ledger lease; document na
   await assert.rejects(ipc.status('workspace'), /e2ee_not_open/)
 })
 
-void test('uncertain admission preserves append and reconciliation failures, then accepts verified retry', async () => {
+void test('uncertain admission preserves append and reconciliation failures, then accepts verified retry with a bounded ledger handoff', async () => {
   const sender = Object.assign(new EventEmitter(), {
     id: 17,
     isDestroyed: () => false,
@@ -314,11 +314,22 @@ void test('uncertain admission preserves append and reconciliation failures, the
   const request = { workspaceId: 'workspace', requestId: 'stable-request', recordHex: 'aabb' }
   const submitted = []
   let committed = false
+  // The desktop's verified originals from genesis, handed to the local agent so it
+  // need not replay the same ledger over the network.
+  const ledgerView = (records) => ({
+    status: { length: records.length, position: `p1:workspace:${records.length}:offset:0` },
+    recordsHex: records,
+    recordPositions: records.map((_record, index) => index)
+  })
+  let ledger = ledgerView(['aa', 'bb'])
+  const activations = []
+  let activationRefusal
   const owner = {
     accountId: 'acc1',
     bootstrap: { deviceCredential: () => Effect.succeed('synthetic-credential') },
     readers: new Map([['workspace', new Set([sender.id])]]),
     host: {
+      ledgerView: () => Effect.succeed(ledger),
       localPairingContext: () => Effect.succeed({ pairingSessionId: '44'.repeat(16) }),
       approveLocalPairing: () => Effect.succeed(request),
       confirmLocalPairing: () =>
@@ -341,7 +352,12 @@ void test('uncertain admission preserves append and reconciliation failures, the
             prepareLocalE2eeDevice: async () => {
               throw localTimeout
             },
-            activateLocalE2eeDevice: async () => {}
+            activateLocalE2eeDevice: async (message) => {
+              activations.push(JSON.parse(JSON.stringify(message)))
+              const refusal = activationRefusal
+              activationRefusal = undefined
+              if (refusal) throw refusal
+            }
           }
         })
       },
@@ -407,6 +423,35 @@ void test('uncertain admission preserves append and reconciliation failures, the
     refreshes.map((options) => options?.keyMode),
     ['distribute', 'full']
   )
+  assert.deepEqual(activations, [
+    {
+      type: 'activate',
+      accountId: 'acc1',
+      workspaceId: 'workspace',
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      ledgerRecordsHex: ['aa', 'bb'],
+      ledgerPosition: 'p1:workspace:2:offset:0'
+    }
+  ])
+  // Past either IPC bound the handoff is omitted; the agent reads history itself.
+  const handoffs = []
+  for (const records of [
+    Array.from({ length: 2049 }, () => 'aa'),
+    ['aa'.repeat(8192), ...Array.from({ length: 32 }, () => 'bb'.repeat(8192))]
+  ]) {
+    ledger = ledgerView(records)
+    assert.equal((await ipc.admitLocalAgent('workspace', session)).ready, true)
+    handoffs.push(activations.at(-1).ledgerRecordsHex?.length ?? null)
+  }
+  // An older agent's strict schema refuses the fields; it is activated without them.
+  ledger = ledgerView(['aa', 'bb'])
+  activationRefusal = new Error('e2ee_local_agent_unavailable', {
+    cause: new Error('e2ee_invalid_input')
+  })
+  assert.equal((await ipc.admitLocalAgent('workspace', session)).ready, true)
+  handoffs.push(...activations.slice(-2).map((message) => message.ledgerRecordsHex?.length ?? null))
+  assert.deepEqual(handoffs, [null, null, 2, null])
   assert.deepEqual(warnings, [])
 })
 

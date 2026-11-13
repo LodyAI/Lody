@@ -513,14 +513,19 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
           return { view, records };
         })
       ),
-    /** The caller supplies raw, bounded cloud DTO pages. Every suffix is verified locally. */
-    ingest: (page: {
-      startIndex: number;
-      recordsHex: readonly string[];
-      position: string;
-      nextCursor: string | null;
-      checkpoint: { length: number; headHash: string };
-    }) =>
+    /** The caller supplies raw, bounded cloud DTO pages. Every suffix is verified locally.
+     * `local-handoff` admits one same-user desktop page of at most 2048 untrusted records,
+     * verified identically; verification precedes persistence, so a rejection keeps nothing. */
+    ingest: (
+      page: {
+        startIndex: number;
+        recordsHex: readonly string[];
+        position: string;
+        nextCursor: string | null;
+        checkpoint: { length: number; headHash: string };
+      },
+      source: 'cloud' | 'local-handoff' = 'cloud'
+    ) =>
       serial.withPermit(
         Effect.gen(function* () {
           yield* guard();
@@ -530,7 +535,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             !Number.isSafeInteger(page.startIndex) ||
             page.startIndex < 0 ||
             page.startIndex > start ||
-            page.recordsHex.length > 64 ||
+            page.recordsHex.length > (source === 'local-handoff' ? 2048 : 64) ||
             !page.position.startsWith(
               `p1:${options.workspaceId}:${page.startIndex + page.recordsHex.length}:`
             )

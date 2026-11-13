@@ -14,6 +14,9 @@ const machineId = z
       new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) === value
     );
   });
+/** Ledger handoff bounds: past either, the desktop omits the handoff and the CLI reads history. */
+export const LOCAL_E2EE_LEDGER_HANDOFF_MAX_RECORDS = 2048;
+export const LOCAL_E2EE_LEDGER_HANDOFF_MAX_HEX_CHARS = 512 * 1024;
 const hex32 = z.string().regex(/^[0-9a-f]{64}$/);
 const hex16 = z.string().regex(/^[0-9a-f]{32}$/);
 const common = {
@@ -38,6 +41,20 @@ export const LocalE2eeActivateRequestSchema = z
     type: z.literal('activate'),
     pairingSessionId: hex16,
     signingPublicKey: hex32,
+    /** Optional untrusted transport of the desktop's verified ledger originals from
+     * genesis, with that ledger's own resume position. The CLI verifies them from its
+     * pinned genesis exactly like history pages; they never confirm live authority. */
+    ledgerRecordsHex: z
+      .array(z.string().regex(/^(?:[0-9a-f]{2}){1,8192}$/))
+      .min(1)
+      .max(LOCAL_E2EE_LEDGER_HANDOFF_MAX_RECORDS)
+      .optional(),
+    ledgerPosition: z
+      .string()
+      .min(1)
+      .max(1024)
+      .regex(/^p1:\S+$/)
+      .optional(),
   })
   .strict();
 export const LocalE2eePairingRequestSchema = z.discriminatedUnion('type', [

@@ -77,7 +77,11 @@ import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
-import { LocalE2eeRecoveryFailureSchema } from '@lody/shared/e2ee-local-pairing'
+import {
+  LOCAL_E2EE_LEDGER_HANDOFF_MAX_HEX_CHARS,
+  LOCAL_E2EE_LEDGER_HANDOFF_MAX_RECORDS,
+  LocalE2eeRecoveryFailureSchema
+} from '@lody/shared/e2ee-local-pairing'
 import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import type { E2eeJoinSession, E2eePersonalPairingOffer } from '@lody/cloud-api'
 import type {
@@ -353,6 +357,29 @@ const keyDeliveryView = (requestId: string, delivery: MemberKeyDelivery) => ({
   ...(delivery.state === 'failed' && delivery.code ? { code: delivery.code } : {})
 })
 /** Explicit operations only: no arbitrary signing, secret export or unbound identity generation. */
+/** The local agent's optional ledger handoff: this host's complete verified originals
+ * from genesis and their resume position, only within the local IPC bounds. */
+function localLedgerHandoff(view: {
+  status: { length: number; position: string | null }
+  recordsHex: readonly string[]
+  recordPositions?: readonly number[]
+}) {
+  const { recordsHex, recordPositions, status } = view
+  if (
+    !status.position ||
+    status.position.length > 1024 ||
+    !/^p1:\S+$/.test(status.position) ||
+    recordsHex.length === 0 ||
+    recordsHex.length !== status.length ||
+    recordsHex.length > LOCAL_E2EE_LEDGER_HANDOFF_MAX_RECORDS ||
+    recordsHex.reduce((total, record) => total + record.length, 0) >
+      LOCAL_E2EE_LEDGER_HANDOFF_MAX_HEX_CHARS ||
+    (recordPositions !== undefined && recordPositions.some((position, index) => position !== index))
+  )
+    return undefined
+  return { ledgerRecordsHex: [...recordsHex], ledgerPosition: status.position }
+}
+
 export class E2eeIpc extends ProductWindowIpcService {
   static override readonly groupName = 'e2ee'
   // The decorator logs rejected errors. Retain only the latest local diagnostic
@@ -2636,12 +2663,33 @@ export class E2eeIpc extends ProductWindowIpcService {
       throw error
     }
     if (!distributed) return { admitted: true as const, ready: false }
-    try {
-      await getIpcServiceDeps().cliService.activateLocalE2eeDevice({
+    // The CLI verifies these same originals from its own pinned genesis instead of
+    // replaying history from the network; unavailable or oversized views are omitted.
+    const handoff = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === pending.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.ledgerView(workspaceId)
+          : Effect.fail(new Error('e2ee_account_mismatch')),
+      workspaceId,
+      false
+    ).then(localLedgerHandoff, () => undefined)
+    const activate = (ledger?: { ledgerRecordsHex: string[]; ledgerPosition: string }) =>
+      getIpcServiceDeps().cliService.activateLocalE2eeDevice({
         type: 'activate',
         accountId: pending.accountId,
         workspaceId,
-        ...confirmed
+        ...confirmed,
+        ...ledger
+      })
+    try {
+      await activate(handoff).catch((error: unknown) => {
+        // An older local agent's strict schema refuses the optional handoff fields.
+        if (
+          !handoff ||
+          (error as { cause?: { message?: unknown } })?.cause?.message !== 'e2ee_invalid_input'
+        )
+          throw error
+        return activate()
       })
       return { admitted: true as const, ready: true }
     } catch (error) {

@@ -1385,9 +1385,11 @@ describe('LodyFleet encrypted access loss', () => {
     const second = runtimeStub();
     const runtimes = [first, second];
     let accessLost: AccessLost | undefined;
+    const handed: unknown[] = [];
     const create = vi.spyOn(Lody, 'create').mockImplementation(async (options) => {
       accessLost ??= (options as unknown as { onEncryptedAccessLost?: AccessLost })
         .onEncryptedAccessLost;
+      handed.push(options.encryptedWorkspace);
       const next = runtimes.shift();
       if (!next) throw new Error('unexpected extra runtime');
       return next as never;
@@ -1395,9 +1397,11 @@ describe('LodyFleet encrypted access loss', () => {
     const validate = vi
       .spyOn(legacy, 'validateCliE2eePairingIntentLegacy')
       .mockResolvedValue(undefined as never);
+    const closed: unknown[] = [];
+    const promoted = { close: async () => void closed.push(promoted) };
     const activate = vi
-      .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
-      .mockResolvedValue(undefined as never);
+      .spyOn(legacy, 'activateAndPromoteCliE2eeWorkspaceLegacy')
+      .mockResolvedValue(promoted as never);
     const reconcile = vi
       .spyOn(projectMeta, 'reconcileMachineLocalProjectRootPaths')
       .mockResolvedValue(undefined);
@@ -1427,7 +1431,17 @@ describe('LodyFleet encrypted access loss', () => {
       for (const timer of fleet.retryTimers.values()) clearTimeout(timer);
       for (const spy of [create, validate, activate, reconcile, schedules]) spy.mockRestore();
     };
-    return { fleet, first, second, activate, accessLost: () => accessLost!, restore };
+    return {
+      fleet,
+      first,
+      second,
+      activate,
+      promoted,
+      handed,
+      closed,
+      accessLost: () => accessLost!,
+      restore,
+    };
   };
 
   it('keeps the workspace binding when only this machine identity is revoked, so the re-enrolled identity activates', async () => {
@@ -1461,6 +1475,48 @@ describe('LodyFleet encrypted access loss', () => {
       expect(fleet.waitingForPairing.has(encrypted.id)).toBe(false);
     } finally {
       restore();
+    }
+  });
+
+  const activation = {
+    type: 'activate',
+    machineId: 'machine-1',
+    accountId: 'user-1',
+    workspaceId: encrypted.id,
+    genesisHash,
+    pairingSessionId: 'ef'.repeat(16),
+    frontendSigningPublicKey: '12'.repeat(32),
+    signingPublicKey: 'de'.repeat(32),
+  };
+
+  it('starts the re-enrolled runtime on the activated owner instead of reopening it', async () => {
+    const t = await startedEncryptedWorkspace();
+    try {
+      await t.accessLost()(t.first, 'device-revoked');
+      await t.fleet.dispatchLocalE2eePairing(activation);
+      expect(t.fleet.runtimes.get(encrypted.id)?.lody).toBe(t.second);
+      expect(t.handed.at(-1)).toBe(t.promoted);
+      expect(t.closed).toEqual([]);
+    } finally {
+      t.restore();
+    }
+  });
+
+  it('closes the activated owner when Fleet stops before a runtime can take it', async () => {
+    const t = await startedEncryptedWorkspace();
+    try {
+      await t.accessLost()(t.first, 'device-revoked');
+      t.activate.mockImplementationOnce(async () => {
+        t.fleet.stopped = true;
+        return t.promoted as never;
+      });
+      await t.fleet.dispatchLocalE2eePairing(activation);
+      // Closed inside the activation flight that shutdown drains, never handed on.
+      expect(t.closed).toEqual([t.promoted]);
+      expect(t.handed).toEqual([undefined]);
+      expect(t.fleet.runtimes.has(encrypted.id)).toBe(false);
+    } finally {
+      t.restore();
     }
   });
 
