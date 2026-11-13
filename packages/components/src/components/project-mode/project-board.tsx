@@ -1,36 +1,42 @@
-import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { Badge } from '@lody/ui/badge';
-import { findFreshSessionPresenceState, type SessionStatus } from '@lody/shared';
-import { useRouter } from '@tanstack/react-router';
-import { useAtomValue } from 'jotai';
-import { memo, useCallback, useMemo, useRef, type MouseEvent } from 'react';
-import { useTranslation } from 'react-i18next';
-import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
-import { sessionSendStatesAtom } from '@/atoms/session-send-status';
-import { SessionRowStatusIndicator } from '@/components/sidebar-row-shared';
-import { buildChildSessionsByParent } from '@/components/sessions/session-list-rows';
-import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
-import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
-import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import * as stylex from "@stylexjs/stylex";
+import { colors, shadow } from "@lody/ui/tokens/colors.stylex";
+import { radius, space, text } from "@lody/ui/tokens/scales.stylex";
+import { Badge } from "@lody/ui/badge";
+import {
+  findFreshSessionPresenceState,
+  type SessionStatus,
+} from "@lody/shared";
+import { useRouter } from "@tanstack/react-router";
+import { useAtomValue } from "jotai";
+import { memo, type MouseEvent, useCallback, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  lodyPresenceNowMsAtom,
+  lodyPresenceStatesAtom,
+} from "@/atoms/presence";
+import { sessionSendStatesAtom } from "@/atoms/session-send-status";
+import { SessionRowStatusIndicator } from "@/components/sidebar-row-shared";
+import { buildChildSessionsByParent } from "@/components/sessions/session-list-rows";
+import { useVisibleSessionMetas } from "@/hooks/use-visible-session-metas";
+import { currentWorkspaceSlugAtom } from "@/atoms/workspace-context";
+import { toIntlLocaleOrEn } from "@/lib/intl-locale";
 import {
   buildProjectBoard,
-  PROJECT_BOARD_BUCKETS,
   type CoordinatorProjectKey,
+  PROJECT_BOARD_BUCKETS,
   type ProjectBoard as ProjectBoardData,
   type ProjectBoardBucket,
   type ProjectBoardRow,
-} from './project-board-model';
+} from "./project-board-model";
 
 const styles = stylex.create({
   column: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: space[4],
     minWidth: 0,
-    height: '100%',
-    overflowY: 'auto',
+    height: "100%",
+    overflowY: "auto",
     paddingBlock: space[4],
     paddingInline: space[4],
     backgroundColor: colors.secondaryBackground,
@@ -42,10 +48,15 @@ const styles = stylex.create({
     fontWeight: 600,
     color: colors.label,
   },
-  section: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  section: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[2],
+    minWidth: 0,
+  },
   heading: {
-    display: 'flex',
-    alignItems: 'baseline',
+    display: "flex",
+    alignItems: "baseline",
     gap: space[2],
     margin: 0,
     paddingInline: space[1],
@@ -56,43 +67,57 @@ const styles = stylex.create({
   },
   count: { fontWeight: 400, color: colors.secondaryLabel },
   card: {
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
     borderRadius: radius.large,
     backgroundColor: colors.elevatedBackground,
     boxShadow: shadow.card,
   },
   row: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: space[3],
     minWidth: 0,
     paddingBlock: space[3],
     paddingInline: space[3],
     color: colors.label,
-    textDecoration: 'none',
-    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    textDecoration: "none",
+    backgroundColor: { default: "transparent", ":hover": colors.hoverFill },
     // Ruled rows: the separator sits between rows, never around the card.
-    boxShadow: { default: 'none', ':not(:first-child)': `inset 0 0.5px 0 ${colors.separator}` },
+    boxShadow: {
+      default: "none",
+      ":not(:first-child)": `inset 0 0.5px 0 ${colors.separator}`,
+    },
   },
-  rowText: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flexGrow: 1 },
+  rowText: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    minWidth: 0,
+    flexGrow: 1,
+  },
   rowTitle: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     fontSize: text.bodySize,
     lineHeight: text.bodyLeading,
   },
   rowMeta: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
-  mark: { display: 'flex', width: '14px', flexShrink: 0, justifyContent: 'center' },
+  mark: {
+    display: "flex",
+    width: "14px",
+    flexShrink: 0,
+    justifyContent: "center",
+  },
   empty: {
     margin: 0,
     paddingInline: space[1],
@@ -102,11 +127,14 @@ const styles = stylex.create({
   },
 });
 
-const BUCKET_LABELS: Record<ProjectBoardBucket, [key: string, fallback: string]> = {
-  needsYou: ['projectMode.board.needsYou', 'Needs you'],
-  working: ['projectMode.board.working', 'In progress'],
-  unread: ['projectMode.board.unread', 'Unread'],
-  done: ['projectMode.board.done', 'Done'],
+const BUCKET_LABELS: Record<
+  ProjectBoardBucket,
+  [key: string, fallback: string]
+> = {
+  needsYou: ["projectMode.board.needsYou", "Needs you"],
+  working: ["projectMode.board.working", "In progress"],
+  unread: ["projectMode.board.unread", "Unread"],
+  done: ["projectMode.board.done", "Done"],
 };
 
 /**
@@ -121,7 +149,6 @@ export function ProjectBoard({
   coordinatorSessionId: string | null;
   project: CoordinatorProjectKey | null;
 }) {
-  const { t } = useTranslation();
   const { allActiveSessions } = useVisibleSessionMetas();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
@@ -135,7 +162,7 @@ export function ProjectBoard({
       const status = findFreshSessionPresenceState(
         presenceStates,
         session.id,
-        presenceNowMs
+        presenceNowMs,
       )?.status;
       if (status) next.set(session.id, status);
     }
@@ -153,7 +180,7 @@ export function ProjectBoard({
 
   const childSessionsByParent = useMemo(
     () => buildChildSessionsByParent(allActiveSessions),
-    [allActiveSessions]
+    [allActiveSessions],
   );
   const board = useMemo(
     () =>
@@ -172,7 +199,7 @@ export function ProjectBoard({
       liveSessionStatuses,
       project,
       sendStates,
-    ]
+    ],
   );
 
   const router = useRouter();
@@ -180,22 +207,26 @@ export function ProjectBoard({
   const getSessionHref = useCallback(
     (sessionId: string) =>
       router.buildLocation({
-        to: '/$workspaceName/sessions/$sessionId',
-        params: { workspaceName: workspaceSlug ?? '', sessionId },
+        to: "/$workspaceName/sessions/$sessionId",
+        params: { workspaceName: workspaceSlug ?? "", sessionId },
       }).href,
-    [router, workspaceSlug]
+    [router, workspaceSlug],
   );
   const openSession = useCallback(
     (sessionId: string) => {
       void router.navigate({
-        to: '/$workspaceName/sessions/$sessionId',
-        params: { workspaceName: workspaceSlug ?? '', sessionId },
+        to: "/$workspaceName/sessions/$sessionId",
+        params: { workspaceName: workspaceSlug ?? "", sessionId },
       });
     },
-    [router, workspaceSlug]
+    [router, workspaceSlug],
   );
   return (
-    <ProjectBoardView board={board} getSessionHref={getSessionHref} onOpenSession={openSession} />
+    <ProjectBoardView
+      board={board}
+      getSessionHref={getSessionHref}
+      onOpenSession={openSession}
+    />
   );
 }
 
@@ -212,11 +243,13 @@ export function ProjectBoardView({
   const { t } = useTranslation();
   return (
     <aside {...stylex.props(styles.column)} data-testid="project-board">
-      <h2 {...stylex.props(styles.title)}>{t('projectMode.board.title', 'All conversations')}</h2>
+      <h2 {...stylex.props(styles.title)}>
+        {t("projectMode.board.title", "All conversations")}
+      </h2>
       {PROJECT_BOARD_BUCKETS.map((bucket) => {
         const rows = board[bucket];
         // "In progress" is not one of the three columns the user watches; it shows only when busy.
-        if (bucket === 'working' && rows.length === 0) return null;
+        if (bucket === "working" && rows.length === 0) return null;
         const [key, fallback] = BUCKET_LABELS[bucket];
         return (
           <section
@@ -226,22 +259,28 @@ export function ProjectBoardView({
           >
             <h3 {...stylex.props(styles.heading)}>
               {t(key, fallback)}
-              {rows.length > 0 ? <span {...stylex.props(styles.count)}>{rows.length}</span> : null}
+              {rows.length > 0
+                ? <span {...stylex.props(styles.count)}>{rows.length}</span>
+                : null}
             </h3>
-            {rows.length > 0 ? (
-              <div {...stylex.props(styles.card)}>
-                {rows.map((row) => (
-                  <ProjectBoardRowLink
-                    key={row.session.id}
-                    row={row}
-                    href={getSessionHref(row.session.id)}
-                    onOpen={onOpenSession}
-                  />
-                ))}
-              </div>
-            ) : (
-              <p {...stylex.props(styles.empty)}>{t('projectMode.board.empty', 'Nothing here')}</p>
-            )}
+            {rows.length > 0
+              ? (
+                <div {...stylex.props(styles.card)}>
+                  {rows.map((row) => (
+                    <ProjectBoardRowLink
+                      key={row.session.id}
+                      row={row}
+                      href={getSessionHref(row.session.id)}
+                      onOpen={onOpenSession}
+                    />
+                  ))}
+                </div>
+              )
+              : (
+                <p {...stylex.props(styles.empty)}>
+                  {t("projectMode.board.empty", "Nothing here")}
+                </p>
+              )}
           </section>
         );
       })}
@@ -261,17 +300,23 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
   const { t, i18n } = useTranslation();
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     // Modified clicks keep the browser's own behaviour (new tab or window).
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    if (
+      event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0
+    ) return;
     event.preventDefault();
     onOpen(row.session.id);
   };
-  const title = row.session.title?.trim() || t('sessions.untitled', 'Untitled session');
-  const updated = new Date(row.latestMessageAt).toLocaleString(toIntlLocaleOrEn(i18n.language), {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const title = row.session.title?.trim() ||
+    t("sessions.untitled", "Untitled session");
+  const updated = new Date(row.latestMessageAt).toLocaleString(
+    toIntlLocaleOrEn(i18n.language),
+    {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    },
+  );
   return (
     <a
       href={href}
@@ -282,7 +327,8 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
       <span {...stylex.props(styles.mark)}>
         <SessionRowStatusIndicator
           // A pending question waits on the user exactly like a permission request.
-          isWaitingPermission={row.bucket === 'needsYou' && row.sendState !== 'failed'}
+          isWaitingPermission={row.bucket === "needsYou" &&
+            row.sendState !== "failed"}
           isWorking={row.isWorking}
           hasUnreadMessages={row.hasUnreadMessages}
           sendState={row.sendState}
@@ -292,9 +338,13 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
         <span {...stylex.props(styles.rowTitle)}>{title}</span>
         <span {...stylex.props(styles.rowMeta)}>{updated}</span>
       </span>
-      {row.createdManually ? (
-        <Badge tone="neutral">{t('projectMode.board.createdManually', 'Created manually')}</Badge>
-      ) : null}
+      {row.createdManually
+        ? (
+          <Badge tone="neutral">
+            {t("projectMode.board.createdManually", "Created manually")}
+          </Badge>
+        )
+        : null}
     </a>
   );
 });
