@@ -48,7 +48,6 @@ final class InboxChrome {
   private var syncState: HomeSyncState = .live
   private var syncShown: HomeSyncPill.Shown?
   private var recoveryTask: Task<Void, Never>?
-  private var sizeClassChanges: (any UITraitChangeRegistration)?
 
   init(searchPlaceholder: String = String(localized: "search.field.placeholder", bundle: .lody)) {
     workspace.accessibilityIdentifier = "workspace-menu"
@@ -59,7 +58,7 @@ final class InboxChrome {
     }
     // Every width: a search button that expands into the field (iOS 26 integratedButton).
     // No toolbar integration: with a toolbar-less page UIKit otherwise drops the button to the
-    // bottom edge, under the system tab bar. `update` places it in the trailing nav items instead.
+    // bottom edge, under the system tab bar; without it UIKit keeps the button in the navigation bar.
     search.configure(LodyNavigationSearch.Config(
       placeholder: searchPlaceholder, placement: "integratedButton", hideWhenScrolling: false,
       allowToolbarIntegration: false
@@ -81,22 +80,10 @@ final class InboxChrome {
   }
 
   func attach(to host: UIViewController, content: UIViewController, scrollView: UIScrollView) {
-    if let sizeClassChanges { self.host?.unregisterForTraitChanges(sizeClassChanges) }
     self.host = host
     self.content = content
     header = LodyNavigationHeader.of(host.navigationItem)
     padBar.attachScrollEdge(to: scrollView)
-    sizeClassChanges = host.registerForTraitChanges([UITraitHorizontalSizeClass.self]) { [weak self] (_: UIViewController, _: UITraitCollection) in
-      guard let self, let model = self.lastModel else { return }
-      self.update(model)
-    }
-  }
-
-  /// Called from the content's `viewIsAppearing`: the first point the page is in a window, so the
-  /// search placement item withheld by an earlier off-screen `update` can be placed.
-  func hostIsAppearing() {
-    guard let lastModel else { return }
-    update(lastModel)
   }
 
   func update(_ model: Model?) {
@@ -130,16 +117,11 @@ final class InboxChrome {
     filter.menu = pageMenu?() ?? compactMenu?() ?? viewMenu()
     if header.search !== search { header.search = search }
     // Destinations, Settings and create sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
-    // Right items run from the trailing edge: search, then the view menu (design).
-    // UIKit throws NSInvalidArgumentException ("searchBarPlacementBarButtonItem is only supported in
-    // UIToolbar") when the item enters the bar of a page that is not yet on screen: a cold launch's
-    // sign-in restore renders Home ~170 ms in, before it appears, and aborted on every launch. iPadOS 26
-    // throws even on screen, so only a compact iPhone page places it, and only once in a window;
-    // `hostIsAppearing` and size class changes re-run this. Elsewhere UIKit places the search itself.
-    let placesSearch = host.traitCollection.userInterfaceIdiom == .phone
-      && host.traitCollection.horizontalSizeClass == .compact
-      && host.viewIfLoaded?.window != nil
-    let right = placesSearch ? [filter, host.navigationItem.searchBarPlacementBarButtonItem] : [filter]
+    // The view menu is the only custom trailing item. UIKit places the integrated search button itself:
+    // iOS 26 throws NSInvalidArgumentException ("searchBarPlacementBarButtonItem is only supported in
+    // UIToolbar") when that item is put in navigation bar items, on iPad and on a compact iPhone tab
+    // page alike, which aborted every cold launch with a saved sign-in.
+    let right = [filter]
     (workspaceItem, filterItem) = (left[0], filter)
     let shownLeft = searching || detailTitle != nil ? [] : left
     host.navigationItem.title = detailTitle
@@ -158,8 +140,6 @@ final class InboxChrome {
 
   func detach() {
     clear()
-    if let sizeClassChanges { host?.unregisterForTraitChanges(sizeClassChanges) }
-    sizeClassChanges = nil
     header = nil
     host = nil
   }
@@ -169,7 +149,7 @@ final class InboxChrome {
     workspace.setItems([])
     guard let header else { return }
     if let item = workspaceItem, header.leftItems == [item] { header.leftItems = nil }
-    if let right = header.rightItems, right.contains(where: { $0 === filterItem || $0 === host?.navigationItem.searchBarPlacementBarButtonItem }) {
+    if let right = header.rightItems, right.contains(where: { $0 === filterItem }) {
       header.rightItems = nil
     }
     if header.search === search { header.search = nil }

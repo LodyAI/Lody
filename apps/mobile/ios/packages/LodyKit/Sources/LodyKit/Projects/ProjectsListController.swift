@@ -86,11 +86,6 @@ final class ProjectsListController: UIViewController, UICollectionViewDelegate {
     render()
   }
 
-  override func viewIsAppearing(_ animated: Bool) {
-    super.viewIsAppearing(animated)
-    chrome.hostIsAppearing()
-  }
-
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     LodyScrollEdges.bind(list, to: self)

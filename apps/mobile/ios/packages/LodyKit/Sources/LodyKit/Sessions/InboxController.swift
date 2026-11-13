@@ -57,11 +57,6 @@ final class InboxController: UIViewController {
     registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitHorizontalSizeClass.self]) { (self: Self, _: UITraitCollection) in self.render() }
   }
 
-  override func viewIsAppearing(_ animated: Bool) {
-    super.viewIsAppearing(animated)
-    chrome.hostIsAppearing()
-  }
-
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     LodyScrollEdges.bind(list.scrollView, to: self)
