@@ -57,6 +57,17 @@ for key in ('scope.mine', 'scope.team', 'grouping.time', 'grouping.project', 'gr
 ui.capture('sidebar-view-menu')
 tap_label(catalog.text('home.grouping.time'))
 ui.element('ui-design')
+
+# The bottom bar switches the column between Chats and Schedules, as the iPhone tabs do.
+ui.axe('tap', '--id', 'home-tab-schedules', '--tap-style', 'physical', '--post-delay', '.8')
+ui.element('home-schedules-list')
+assert not any(i.get('AXUniqueId') == 'home-chat-list' for i in ui.state()), 'Schedules replaces the Chats list'
+create = ui.element('home-create')
+assert create.get('AXLabel') == catalog.text('schedules.new'), create
+ui.capture('sidebar-schedules')
+ui.axe('tap', '--id', 'home-tab-chats', '--tap-style', 'physical', '--post-delay', '.8')
+ui.element('home-chat-list')
+assert ui.element('home-create').get('AXLabel') == catalog.text('tabs.newSession')
 tap_label(catalog.text('tabs.settings'))
 close_settings = catalog.text('accessibility.closeSheet', title=catalog.text('tabs.settings'))
 labeled(close_settings)

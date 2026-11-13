@@ -229,6 +229,8 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     chrome.openSettings = { [weak self] in LodyShell.shared.openPage("settings", options: ["present": true], from: self?.parent) }
     chrome.openDebug = { [weak self] in LodyShell.shared.openPage("debug", from: self?.parent) }
     chrome.newSession = { [weak self] in self?.newSchedule() }
+    chrome.destination = .schedules
+    chrome.selectDestination = { HomeController.current?.selectTab($0) }
     chrome.searchChanged = { [weak self] text in
       guard let self, text != self.query else { return }
       self.query = text

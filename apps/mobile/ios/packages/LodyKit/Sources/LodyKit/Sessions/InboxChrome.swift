@@ -17,6 +17,9 @@ final class InboxChrome {
   var openDebug: (() -> Void)?
   var newSession: (() -> Void)?
   var searchChanged: ((String) -> Void)?
+  /// Regular width: the Home destination this page is, and how to switch to another (`InboxPadBar`).
+  var destination: HomeTab = .chats { didSet { padBar.destination = destination } }
+  var selectDestination: ((HomeTab) -> Void)?
   /// Replaces the Chats view menu (the Projects tab has its own choices).
   var compactMenu: (() -> UIMenu)?
   /// Replaces the view menu on every size class for pages with their own choices (Schedules).
@@ -66,6 +69,7 @@ final class InboxChrome {
       default: break
       }
     }
+    padBar.select = { [weak self] tab in self?.selectDestination?(tab) }
     padBar.openSettings = { [weak self] in self?.openSettings?() }
     padBar.openDebug = { [weak self] in self?.openDebug?() }
     padBar.create = { [weak self] in self?.newSession?() }
@@ -106,9 +110,14 @@ final class InboxChrome {
     // Every size class shares the Chats view menu (grouping, scope, row details, archive).
     filter.menu = pageMenu?() ?? compactMenu?() ?? viewMenu()
     if header.search !== search { header.search = search }
-    // Settings and new chat sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
+    // Destinations, Settings and create sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
     // Right items run from the trailing edge: search, then the view menu (design).
-    let right = [filter, host.navigationItem.searchBarPlacementBarButtonItem]
+    // Only iPhone (including iPhone Duo at any width) accepts the search placement item in a
+    // navigation bar; iPadOS 26 throws NSInvalidArgumentException ("only supported in UIToolbar").
+    // This is an API constraint, not a layout choice: on iPad UIKit places the integrated search
+    // in the navigation bar itself.
+    let placesSearch = host.traitCollection.userInterfaceIdiom == .phone
+    let right = placesSearch ? [filter, host.navigationItem.searchBarPlacementBarButtonItem] : [filter]
     (workspaceItem, filterItem) = (left[0], filter)
     let shownLeft = searching ? [] : left
     if header.leftItems ?? [] != shownLeft { header.leftItems = shownLeft.isEmpty ? nil : shownLeft }

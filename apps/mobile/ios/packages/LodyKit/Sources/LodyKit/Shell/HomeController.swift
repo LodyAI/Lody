@@ -108,8 +108,8 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     primary.traitOverrides.horizontalSizeClass = traitCollection.horizontalSizeClass
     (folded ? foldHost?.controller : split)?.view.frame = view.bounds
     view.accessibilityIdentifier = traitCollection.horizontalSizeClass == .regular ? "ipad-home" : "home"
-    // Tabs exist only on compact width; a wide layout lists chats in its sidebar.
-    if traitCollection.horizontalSizeClass == .regular, selectedTab != .chats { selectTab(.chats) }
+    // Tabs exist only on compact width; a wide layout shows Chats or Schedules in its list column.
+    if traitCollection.horizontalSizeClass == .regular, selectedTab == .settings { selectTab(.chats) }
     updateTabContainer()
     layoutColumns()
   }
@@ -261,6 +261,8 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     if folded { setFolded(false) }
     split.setViewController(nil, for: .primary)
     if compact {
+      // The list column may hold Schedules at regular width; tabs own it again on compact width.
+      showInColumn(.chats)
       tabsHost.install { [weak self] destination in
         guard let self else { return UINavigationController() }
         return self.tabNavigation(destination)
@@ -272,14 +274,19 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     } else {
       compactNavigation.setViewControllers([], animated: false)
       tabsHost.tabs = []
-      selectedTab = .chats
+      if selectedTab == .settings { selectedTab = .chats }
+      showInColumn(selectedTab)
       split.setViewController(primary, for: .primary)
     }
     compactTabsInstalled = compact
   }
 
   private func tabNavigation(_ destination: HomeTab) -> UINavigationController {
-    if let navigation = tabNavigations[destination] { return navigation }
+    if let navigation = tabNavigations[destination] {
+      // Regular width moved this tab's root into the list column; take it back.
+      if navigation.viewControllers.isEmpty { navigation.setViewControllers([tabPage(destination)], animated: false) }
+      return navigation
+    }
     let navigation = UINavigationController(rootViewController: tabPage(destination))
     LodyShell.shared.configureNavigation(navigation)
     tabNavigations[destination] = navigation
@@ -295,9 +302,28 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
 
   func selectTab(_ next: HomeTab) {
+    guard compactTabsInstalled else {
+      // Regular width: the list column's bottom bar switches between Chats and Schedules.
+      guard next != .settings else { return }
+      if next == selectedTab { primary.popToRootViewController(animated: !UIAccessibility.isReduceMotionEnabled) }
+      selectedTab = next
+      showInColumn(next)
+      return
+    }
     if next == selectedTab { tabNavigations[next]?.popToRootViewController(animated: !UIAccessibility.isReduceMotionEnabled) }
     selectedTab = next
-    if compactTabsInstalled { tabsHost.show(next) }
+    tabsHost.show(next)
+  }
+
+  /// Regular width has no tab bar: the list column's root is the Chats or Schedules page.
+  /// A root page has one parent, so it leaves its compact tab navigation while it is here.
+  private func showInColumn(_ tab: HomeTab) {
+    let root = tabPage(tab)
+    guard primary.viewControllers.first !== root else { return }
+    if tab != .chats, let navigation = tabNavigations[tab], navigation !== primary {
+      navigation.setViewControllers([], animated: false)
+    }
+    primary.setViewControllers([root], animated: false)
   }
 
   private func tabPage(_ tab: HomeTab) -> LodyPageController {
