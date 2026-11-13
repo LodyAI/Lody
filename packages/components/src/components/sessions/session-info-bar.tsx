@@ -10,6 +10,7 @@ import type {
   SessionGoalMessage,
   SessionPullRequestCiState,
   SessionPullRequestMeta,
+  SessionPullRequestView,
 } from '@lody/shared';
 import { sanitizeGoalObjective } from '@lody/shared';
 import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
@@ -72,6 +73,10 @@ export type SessionInfoBarProps = {
   workspaceLocation?: { kind: WorkspaceLocationKind; path?: string | null } | null;
   pr?: SessionPullRequestMeta | null;
   onOpenPr?: () => void;
+  /** Every PR of the described context, `pr` first; more than one turns the
+   *  PR marker into a history list. */
+  prHistory?: readonly SessionPullRequestView[];
+  onOpenHistoryPr?: (view: SessionPullRequestView) => void;
   /** Agent-driven PR/worktree actions shown inside the context stage. */
   contextActions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff from the context diffstat. */
@@ -169,6 +174,8 @@ export function SessionInfoBar({
   workspaceLocation,
   pr,
   onOpenPr,
+  prHistory,
+  onOpenHistoryPr,
   contextActions,
   onOpenAllChanges,
   relations,
@@ -332,6 +339,8 @@ export function SessionInfoBar({
             workspaceLocation={workspaceLocation}
             pr={pr}
             onOpenPr={onOpenPr}
+            prHistory={prHistory}
+            onOpenHistoryPr={onOpenHistoryPr}
             actions={contextActions}
             onOpenAllChanges={onOpenAllChanges}
             diffStat={diffStat}

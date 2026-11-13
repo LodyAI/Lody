@@ -69,13 +69,15 @@ internal fun LazyListScope.turnBlocks(
     open: Map<String, Boolean>,
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
+    respond: PermissionResponder? = null,
 ) {
     val active = entry.layout.activeActivityKey(entry.working)
     for (block in blocks) {
         when (block) {
-            is TurnLayout.Content -> content(entry, block, open, toggle, details)
+            is TurnLayout.Content -> content(entry, block, open, toggle, details, respond)
             is TurnLayout.Activity -> {
-                val expanded = open[block.key] ?: false
+                // A step waiting on the reader's answer is never hidden inside a closed group (web).
+                val expanded = block.attention || (open[block.key] ?: false)
                 val running = block.key == active
                 item(key = block.key, contentType = "disclosure") {
                     Disclosure(activityLabel(block, running), expanded, Modifier.animateItem(), shimmer = running) { toggle(block.key, it) }
@@ -85,7 +87,7 @@ internal fun LazyListScope.turnBlocks(
                         val key = "${block.key}:${step.id}"
                         when (step) {
                             is TurnItem.Thought -> prose(key, entry.prose[step.id], secondary = true)
-                            is TurnItem.Tool -> step(entry, step, key, running && step == block.items.last(), open, toggle, details)
+                            is TurnItem.Tool -> step(entry, step, key, running && step == block.items.last(), open, toggle, details, respond)
                             else -> Unit
                         }
                     }
@@ -101,14 +103,19 @@ private fun LazyListScope.content(
     open: Map<String, Boolean>,
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
+    respond: PermissionResponder?,
 ) {
     when (val value = block.item) {
-        is TurnItem.Text, is TurnItem.ProposedPlan -> prose(block.key, entry.prose[value.id], secondary = false)
+        is TurnItem.Text -> prose(block.key, entry.prose[value.id], secondary = false)
+        is TurnItem.ProposedPlan -> proposedPlan(entry, value, block.key, open, toggle)
         is TurnItem.Checklist -> item(key = block.key, contentType = "checklist") { Checklist(value, Modifier.animateItem()) }
         is TurnItem.Notice -> item(key = block.key, contentType = "notice") { Notice(value, Modifier.animateItem()) }
         is TurnItem.Images -> item(key = block.key, contentType = "images") { TurnImages(value, Modifier.animateItem()) }
         is TurnItem.File -> item(key = block.key, contentType = "file") { AgentFileCard(value, Modifier.animateItem()) }
-        is TurnItem.Tool -> step(entry, value, block.key, entry.working && value.status == "in_progress", open, toggle, details)
+        // A plan approval renders as the plan and its decision; a bare mode switch stays a step.
+        is TurnItem.Tool ->
+            if (value.kind == "switch_mode" && (value.plan != null || value.permission != null)) planExit(entry, value, block.key, open, toggle, details, respond)
+            else step(entry, value, block.key, entry.working && value.status == "in_progress", open, toggle, details, respond)
         is TurnItem.Thought -> prose(block.key, entry.prose[value.id], secondary = true)
         is TurnItem.Task -> Unit
     }
@@ -116,7 +123,8 @@ private fun LazyListScope.content(
 
 /**
  * A step row, and when it is open its detail card as the next sibling row (web's ONE
- * `ToolDetailSheet`): the step's sentence is the disclosure, the card loads on first open.
+ * `ToolDetailSheet`): the step's sentence is the disclosure, the card loads on first open. A
+ * step with a permission request is followed by it ([stepPermission]).
  */
 private fun LazyListScope.step(
     entry: ChatEntry.Assistant,
@@ -126,6 +134,7 @@ private fun LazyListScope.step(
     open: Map<String, Boolean>,
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
+    respond: PermissionResponder?,
 ) {
     val detailKey = "$key#detail"
     val expandable = tool.hasDetail && details.available
@@ -140,6 +149,7 @@ private fun LazyListScope.step(
     if (expanded) {
         item(key = detailKey, contentType = "step-detail") { StepDetailCard(entry.id, tool, details, Modifier.animateItem()) }
     }
+    stepPermission(entry, tool, key, details, respond)
 }
 
 /** Each top-level Markdown block is its own lazy row, so streaming re-renders only the tail. */

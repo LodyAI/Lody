@@ -4,7 +4,11 @@
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import type { SessionPullRequestMeta } from '@lody/shared';
+import {
+  resolveSessionPullRequestHistory,
+  type SessionMeta,
+  type SessionPullRequestMeta,
+} from '@lody/shared';
 import { writeTextToClipboard } from '../src/lib/clipboard';
 import { ContextChip } from '../src/components/sessions/session-info-chips';
 
@@ -290,5 +294,53 @@ describe('ContextChip actions', () => {
     await act(async () => squashItem?.click());
     expect(onSelectMethod).toHaveBeenCalledWith('squash');
     expect(onMerge).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists every PR from the marker once a newer PR has taken the stage', async () => {
+    const older = 'https://github.com/loro-dev/lody/pull/2890';
+    const current = 'https://github.com/loro-dev/lody/pull/2894';
+    const history = resolveSessionPullRequestHistory({
+      pullRequests: [
+        { url: older, status: 'merged' },
+        { url: current, status: 'open' },
+      ],
+    } as SessionMeta);
+    const onOpenPr = vi.fn();
+    const onOpenHistoryPr = vi.fn();
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'stage',
+          branch: 'feature',
+          pr: history[0]!.pr,
+          prHistory: history,
+          onOpenPr,
+          onOpenHistoryPr,
+        })
+      );
+    });
+
+    const marker = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.includes('#2894')
+    );
+    expect(marker).toBeInstanceOf(HTMLButtonElement);
+    expect(container.textContent).not.toContain('#2890');
+
+    await act(async () => marker?.click());
+    expect(onOpenPr).not.toHaveBeenCalled();
+    const rows = () => Array.from(document.body.querySelectorAll<HTMLButtonElement>('li button'));
+    expect(rows().map((row) => row.title)).toEqual([current, older]);
+
+    await act(async () => rows()[1]?.click());
+    expect(onOpenHistoryPr).toHaveBeenCalledWith(expect.objectContaining({ url: older }));
+    expect(onOpenPr).not.toHaveBeenCalled();
+
+    await act(async () => marker?.click());
+    await act(async () => rows()[0]?.click());
+    expect(onOpenPr).toHaveBeenCalledTimes(1);
   });
 });

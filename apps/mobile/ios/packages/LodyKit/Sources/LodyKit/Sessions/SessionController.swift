@@ -34,6 +34,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   weak var processPage: ProcessController?
   weak var tasksPage: TasksController?
   var permissionPage: PermissionController?
+  /// The page opened by itself (not from the transcript), so a plan approval can hand it back.
+  var permissionOpenedAutomatically = false
   var permissionScope: (userId: String, workspaceId: String)?
   var openingFiles: Set<String> = []
   /// PR pages open from this conversation (`owner/repo#number`, lowercased) until their page closes.
