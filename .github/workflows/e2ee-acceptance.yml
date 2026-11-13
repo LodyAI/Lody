@@ -103,7 +103,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install custody acceptance dependencies
         # Cache/logout regression bundles the real component implementations.
-        run: pnpm --filter @lody/e2ee-client... --filter @lody/components... install --frozen-lockfile --ignore-scripts
+        run: pnpm --filter @lody/e2ee-client... --filter @lody/components... --filter acp-extension-core... --filter acp-extension-dsh... install --frozen-lockfile --ignore-scripts
       - name: Install Chromium and WebKit
         run: pnpm --filter @lody/e2ee-core exec playwright install --with-deps chromium webkit
       - name: Verify persisted KEK, installation recovery, journals and exclusion

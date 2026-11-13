@@ -58,19 +58,12 @@ compression, signing and upload run outside the edit queue. Upload failure logs
 and remains eligible after a later local write; it does not reject editing or
 incremental sending.
 
-The pinned streams-crdt 0.19.2 patch marks protected snapshot decode failures and
+`@loro-dev/streams-crdt@0.20.0` (upstream [loro-streams#457](https://github.com/loro-dev/loro-streams/pull/457)) natively marks protected snapshot decode failures and
 rejects an empty/missing snapshot at a non-origin position before CRDT import or
 cursor save. An empty response cannot certify a non-origin cursor. It discards the bootstrap suffix and reads from
 origin through the same protected update decoder and durability barriers (`catchupOrGone(this.createInitialCursor(), ...)`). If history is already trimmed (410 Gone), the rejected snapshot fails with the validated recovery cause while preserving local state and cursors. The earlier 5-second `<native-stream>:snapshot-repair` `HEAD` polling and hint channel were removed in [#2728](https://github.com/LodyAI/Lody/pull/2728) to eliminate continuous 404 polling overhead on live rooms.
 
-The root pnpm `patchedDependencies` applies
-`patches/@loro-dev__streams-crdt@0.19.2.patch`; the lockfile pins its hash. Frozen
-installation rejects a missing/inconsistent patch. On SDK upgrade, port the patch
-or prove equivalent native behavior by running the owning transport suite: bad
-signature/tag/offset/key replay cases and `maxBytesSinceRemoteSnapshot` forced-checkpoint thresholds. Removing the patch makes those behavioral tests fail. The
-private outer workspace must mirror the patch declaration using `lody-oss/patches/`
-and regenerate its own lockfile when adopting the merged public head. This PR does
-not change its gitlink.
+With the upgrade to `@loro-dev/streams-crdt@0.20.0`, the local `patches/@loro-dev__streams-crdt@0.19.2.patch` has been removed; protected snapshot history fallback, `maxBytesSinceRemoteSnapshot` forced-checkpoint thresholds, and Flock local export coalescing are all provided directly by the released SDK.
 
 ## Evidence and limits
 

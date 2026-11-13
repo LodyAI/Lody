@@ -1334,6 +1334,7 @@ it.each(['chromium', 'webkit'] as const)(
         format: 'iife',
         globalName: 'CustodyCacheFixture',
         target: 'safari16.4',
+        external: ['node:fs/promises'],
         write: false,
         logLevel: 'silent',
         alias: { '@': fileURLToPath(new URL('../../components/src', import.meta.url)) },

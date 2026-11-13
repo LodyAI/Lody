@@ -24,9 +24,9 @@ Owner 于 2026-10-27 选择直接使用原生快照，不保留历史快照，�
 
 SDK 在同一次串行捕获中取得原生状态和 offset；压缩、签名与上传不占用编辑队列。上传失败只记录日志，后续本地写入可以再试，不拒绝编辑或增量发送。
 
-固定 streams-crdt 0.19.2 补丁标记受保护快照的解码失败，并在 CRDT 导入和 cursor 保存之前拒绝非起点位置的缺失/空快照；空响应不能证明非起点 cursor。失败后丢弃 bootstrap 的后缀，通过相同加密增量验证及持久化屏障从头读取（`catchupOrGone(this.createInitialCursor(), ...)`）；若历史已被清理（410 Gone），则直接向上层报告受保护快照恢复失败并保留本地状态与 cursor。此前在每个在线加密房间每 5 秒对 `<native-stream>:snapshot-repair` 发起 `HEAD` 轮询及写补传标记的机制已在 [#2728](https://github.com/LodyAI/Lody/pull/2728) 中移除，避免常态下持续产生无意义的 404 轮询开销。
+`@loro-dev/streams-crdt@0.20.0`（上游 [loro-streams#457](https://github.com/loro-dev/loro-streams/pull/457)）原生支持标记受保护快照的解码失败，并在 CRDT 导入和 cursor 保存之前拒绝非起点位置的缺失/空快照；空响应不能证明非起点 cursor。失败后丢弃 bootstrap 的后缀，通过相同加密增量验证及持久化屏障从头读取（`catchupOrGone(this.createInitialCursor(), ...)`）；若历史已被清理（410 Gone），则直接向上层报告受保护快照恢复失败并保留本地状态与 cursor。此前在每个在线加密房间每 5 秒对 `<native-stream>:snapshot-repair` 发起 `HEAD` 轮询及写补传标记的机制已在 [#2728](https://github.com/LodyAI/Lody/pull/2728) 中移除，避免常态下持续产生无意义的 404 轮询开销。
 
-根 pnpm `patchedDependencies` 应用 `patches/@loro-dev__streams-crdt@0.19.2.patch`，lockfile 固定其 hash；frozen 安装拒绝缺失或不一致的补丁。升级 SDK 时应迁移补丁，或用所属 transport 测试证明上游已有等效行为：坏签名/tag/offset/key 的历史回退以及 `maxBytesSinceRemoteSnapshot` 强制快照门限。撤掉补丁会使这些行为测试失败。私有外层采用合入后的公共 head 时，必须用 `lody-oss/patches/` 路径同步补丁声明并更新自身 lockfile；本次不改 gitlink。
+升级至 `@loro-dev/streams-crdt@0.20.0` 后，原有的 `patches/@loro-dev__streams-crdt@0.19.2.patch` 已随上游正式发版一并移除；坏签名/tag/offset/key 的历史回退、`maxBytesSinceRemoteSnapshot` 强制快照门限以及 Flock 本地导出合并均由上游 SDK 原生提供。
 
 ## 证据与限制
 
