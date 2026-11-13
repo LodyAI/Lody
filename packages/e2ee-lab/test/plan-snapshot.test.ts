@@ -139,7 +139,9 @@ it.each(['loro', 'flock'] as const)(
           (row) => row.durability === 'violation' || row.durability === 'harness-error'
         )
       ).toEqual([]);
-      expect(observations.filter((_, index) => index !== replayed && !observations[index].reply.ok)).toEqual([]);
+      expect(
+        observations.filter((_, index) => index !== replayed && !observations[index].reply.ok)
+      ).toEqual([]);
       expect(observations[replayed].checks).toEqual({
         ok: 'pass',
         refusal: 'pass',
