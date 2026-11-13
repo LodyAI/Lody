@@ -151,7 +151,9 @@ export function makePortableAccountPairingRequester(input: {
   /** The signed-in account; its encoded user ID finds this account's ledger member. */
   accountId: string;
   diagnostics?: (tag: string, error: unknown) => void;
-}): () => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown> {
+}): (
+  hints?: readonly AccountPairingWorkspaceHint[]
+) => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown> {
   const remember = input.diagnostics ?? (() => {});
   const cachedByWorkspace = new Map<
     string,
@@ -261,9 +263,13 @@ export function makePortableAccountPairingRequester(input: {
     return mine[0]![0];
   });
 
-  return Effect.fnUntraced(function* () {
+  return Effect.fnUntraced(function* (hints?: readonly AccountPairingWorkspaceHint[]) {
     const result: AccountPairingRequesterWorkspace[] = [];
-    for (const hint of input.workspaces()) {
+    const byId = new Map<string, AccountPairingWorkspaceHint>();
+    for (const hint of input.workspaces()) byId.set(hint.workspaceId, hint);
+    for (const hint of hints ?? [])
+      if (!byId.has(hint.workspaceId)) byId.set(hint.workspaceId, hint);
+    for (const hint of byId.values()) {
       const host = yield* input.host(hint.workspaceId).pipe(
         Effect.catch((error) => {
           remember('account-pairing-host', error);

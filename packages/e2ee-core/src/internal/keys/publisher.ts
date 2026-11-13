@@ -464,7 +464,8 @@ export class EpochPublisher extends Context.Service<
             const bound = yield* bindingOf(view, row);
             const entry = yield* submit(submission.pending());
             if (entry.record && !bytesEqual(entry.record, row.record)) return yield* fail('busy');
-            if (row.outcome && !entry.record) return yield* confirm(row, row.outcome, key);
+            if (row.outcome && (!entry.record || entry.outcome === row.outcome))
+              return yield* confirm(row, row.outcome, key);
             // The immutable complete group is durable locally and remotely before the
             // first CAS may be attempted. A matching submission journal original
             // has already passed staging/readback; resume it without staging I/O.

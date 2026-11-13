@@ -28,6 +28,7 @@ import type { E2eeRuntimeStatus } from '@lody/platform';
 import { getPreferredOrdinaryWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
+import { runtimeInitializingAtom } from '@/atoms/control-connection';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
 import {
@@ -124,6 +125,7 @@ export function E2eeWorkspaceConsole({
   const port = platform.e2eeWorkspaces;
   const navigate = useNavigate();
   const clearWorkspace = useSetAtom(setWorkspaceContextAtom);
+  const setRuntimeInitializing = useSetAtom(runtimeInitializingAtom);
   // Restoring from a backup uses this host's recovery port (desktop main, Web or the
   // mobile webview) while the recovery switch is on.
   const recoveryPort = useRecoveryPort();
@@ -326,6 +328,7 @@ export function E2eeWorkspaceConsole({
               genesisHash: status.genesisHash,
               cryptoOrgId: status.genesisHash,
             };
+            retainEncryptedWorkspaceMode(localStorage, accountId, descriptor);
             let publication = 0;
             let published = status;
             const publish = async () => {
@@ -774,6 +777,7 @@ export function E2eeWorkspaceConsole({
     if (joinedKey) {
       join.cancel?.();
       accountPairingJoins.delete(identity);
+      setRuntimeInitializing(true);
       void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
       return;
     }
@@ -1013,11 +1017,13 @@ export function E2eeWorkspaceConsole({
             ? () => {
                 // Navigation is only an entry point. RuntimeProvider reopens this
                 // approved identity and acquires purpose-bound grants before content.
-                if (scopeRef.current === scope && readOwner.current && workspaceSlug)
+                if (scopeRef.current === scope && readOwner.current && workspaceSlug) {
+                  setRuntimeInitializing(true);
                   void navigate({
                     to: '/$workspaceName/chat',
                     params: { workspaceName: workspaceSlug },
                   });
+                }
               }
             : undefined
         }

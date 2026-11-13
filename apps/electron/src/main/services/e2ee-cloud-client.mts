@@ -770,9 +770,18 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       ),
     ledgerLog: (workspaceId: string, signal?: AbortSignal): LedgerLog['Service'] => {
       let observed: { head: string; length: number } | undefined
+      let cached:
+        | {
+            anchorHex: string
+            position: string
+            records: Uint8Array[]
+            bytes: number
+          }
+        | undefined
       return LedgerLog.of({
         read: (anchor) =>
           Effect.gen(function* () {
+            const anchorHex = hex(anchor.toBytes())
             const records: Uint8Array[] = []
             let cursor: string | undefined,
               fixed: { length: number; headHash: string } | undefined,
@@ -782,15 +791,29 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                 (client) =>
                   client.action(api.e2eeWorkspaces.history, {
                     workspaceId,
-                    ...(cursor ? { cursor, checkpoint: fixed } : {})
+                    ...(cursor
+                      ? { cursor, checkpoint: fixed }
+                      : cached && cached.anchorHex === anchorHex
+                        ? { after: cached.position }
+                        : {})
                   }),
                 historyPage,
                 signal
               )
+              if (
+                pageNumber === 0 &&
+                cached &&
+                cached.anchorHex === anchorHex &&
+                page.startIndex === cached.records.length &&
+                page.checkpoint.length >= cached.records.length
+              ) {
+                records.push(...cached.records)
+                bytes = cached.bytes
+              }
               fixed ??= page.checkpoint
               if (
                 page.workspaceId !== workspaceId ||
-                page.genesisHash !== hex(anchor.toBytes()) ||
+                page.genesisHash !== anchorHex ||
                 page.startIndex !== records.length ||
                 page.checkpoint.length !== fixed.length ||
                 page.checkpoint.headHash !== fixed.headHash
@@ -802,7 +825,13 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                 if (bytes > 33554432) return yield* unavailable()
                 records.push(original)
               }
-              if (!page.nextCursor)
+              if (!page.nextCursor) {
+                cached = {
+                  anchorHex,
+                  position: page.position,
+                  records: records.slice(),
+                  bytes
+                }
                 return {
                   records,
                   checkpoint: {
@@ -810,6 +839,7 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                     head: Result.getOrThrow(Bytes.recordHash(raw(fixed.headHash)))
                   }
                 }
+              }
               cursor = page.nextCursor
             }
             return yield* unavailable()
