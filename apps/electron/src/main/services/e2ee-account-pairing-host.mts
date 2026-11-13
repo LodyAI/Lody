@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { Effect, Result } from 'effect'
+import { Effect, Exit, Result } from 'effect'
 import type {
   E2eeAccountPairingReplies,
   E2eeAccountPairingRequests,
@@ -8,15 +8,18 @@ import type {
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
-import { accountUserId, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
+import { decodeRecord } from '@lody/e2ee-core/protocol'
+import {
+  makePortableAccountPairingRequester,
+  type AccountPairingIdentityHost
+} from '@lody/e2ee-client/account-requester'
 import type { EpochStagingStore, KeyMailbox } from '@lody/e2ee-core/services'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import {
   makeDesktopAccountPairing,
   type AccountPairingApproverFilter,
   type AccountPairingApproverWorkspace,
-  type AccountPairingRequesterFilter,
-  type AccountPairingRequesterWorkspace
+  type AccountPairingRequesterFilter
 } from './e2ee-account-pairing.mjs'
 import { verifyMemberHistory } from './e2ee-member-join.mjs'
 
@@ -140,7 +143,8 @@ export interface AccountPairingWorkspaceHint {
   genesisHash: string
 }
 
-export function makeDesktopAccountPairingHost(input: {
+/** Inputs of the desktop account-pairing host. */
+export interface DesktopAccountPairingHostInput {
   accountId: string
   deviceName: string
   db: DatabaseSync
@@ -161,7 +165,19 @@ export function makeDesktopAccountPairingHost(input: {
    * Must return at once; the approval never waits for delivery. */
   deliverKeys?: (workspaceId: string, requestId: string, device: string) => void
   now?: () => number
-}) {
+}
+
+/** Workspace inspections that run at once while listing approver or requester ports. */
+const LISTING_CONCURRENCY = 4
+
+/**
+ * The approver and requester ports of the shared workflow over this account's
+ * per-workspace owners. The requester side is the shared portable requester; this
+ * module supplies the desktop identity, join journal and activation.
+ */
+export function makeDesktopAccountPairingWorkspaces(
+  input: Omit<DesktopAccountPairingHostInput, 'deviceName' | 'db' | 'now'>
+) {
   const { cloud } = input
   function promise<A>(work: () => Promise<A>): Effect.Effect<A, unknown> {
     return Effect.tryPromise({ try: work, catch: (error) => error })
@@ -198,98 +214,6 @@ export function makeDesktopAccountPairingHost(input: {
       owner(workspaceId, (current) => current.host.status(workspaceId))
     ).pipe(Effect.orElseSucceed(() => null))
 
-  /** The remaining pages after `first`, read under its checkpoint. */
-  const pagesFrom = Effect.fnUntraced(function* (
-    workspaceId: string,
-    first: E2eeWorkspaceHistoryPage
-  ) {
-    const pages: E2eeWorkspaceHistoryPage[] = [first]
-    let cursor = first.nextCursor ?? undefined
-    for (let index = 1; cursor && index < 256; index++) {
-      const page = yield* cloud.history({ workspaceId, cursor, checkpoint: first.checkpoint })
-      pages.push(page)
-      if (page.nextCursor === null) return pages
-      cursor = page.nextCursor
-    }
-    if (cursor) return yield* Effect.fail(fail('ledger_budget_exceeded'))
-    return pages
-  })
-  /** The complete signed history, read with the account session. */
-  const history = Effect.fnUntraced(function* (workspaceId: string) {
-    return yield* pagesFrom(workspaceId, yield* cloud.history({ workspaceId }))
-  })
-  /** The last fully verified history per workspace, as in the portable requester. A later
-   * call asks only for records after its position; the combined history is verified again
-   * from genesis, so the cache saves downloads, never a verification. A suffix that does
-   * not continue at the cached length falls back to a complete read. */
-  const verifiedCache = new Map<
-    string,
-    {
-      genesisHash: string
-      pin: { workspaceId: string; genesisHash: string; genesisRecordHex: string }
-      pages: E2eeWorkspaceHistoryPage[]
-      view: import('@lody/e2ee-core/protocol').LedgerView
-      length: number
-      headHash: string
-      position: string
-    }
-  >()
-  /** Verifies the whole ledger from the genesis the caller already trusts. */
-  const verified = Effect.fnUntraced(function* (hint: AccountPairingWorkspaceHint) {
-    const cached = verifiedCache.get(hint.workspaceId)
-    let pages: E2eeWorkspaceHistoryPage[] | undefined
-    if (cached && cached.genesisHash === hint.genesisHash) {
-      const first = yield* cloud.history({ workspaceId: hint.workspaceId, after: cached.position })
-      if (first.startIndex === cached.length) {
-        const suffix = yield* pagesFrom(hint.workspaceId, first)
-        if (
-          suffix.every((page) => page.recordsHex.length === 0) &&
-          first.checkpoint.length === cached.length &&
-          first.checkpoint.headHash === cached.headHash
-        )
-          return { pin: cached.pin, pages: cached.pages, view: cached.view }
-        const combined = [...cached.pages, ...suffix.filter((page) => page.recordsHex.length > 0)]
-        const finalPosition = suffix.at(-1)?.position
-        if (combined.length <= 256 && suffix.at(-1)?.nextCursor === null)
-          pages = combined.map((page, index) => ({
-            ...page,
-            checkpoint: first.checkpoint,
-            nextCursor: index < combined.length - 1 ? (page.nextCursor ?? page.position) : null,
-            ...(index === combined.length - 1 && finalPosition ? { position: finalPosition } : {})
-          }))
-      } else if (first.startIndex === 0) pages = yield* pagesFrom(hint.workspaceId, first)
-    }
-    pages ??= yield* history(hint.workspaceId)
-    const genesisRecordHex = pages[0]?.recordsHex[0]
-    if (!genesisRecordHex) return yield* Effect.fail(fail('invalid-ledger'))
-    const pin = { workspaceId: hint.workspaceId, genesisHash: hint.genesisHash, genesisRecordHex }
-    const view = yield* verifyMemberHistory(pin, pages)
-    const last = pages.at(-1)
-    if (last?.position)
-      verifiedCache.set(hint.workspaceId, {
-        genesisHash: hint.genesisHash,
-        pin,
-        pages,
-        view,
-        length: last.checkpoint.length,
-        headHash: last.checkpoint.headHash,
-        position: last.position
-      })
-    return { pin, pages, view }
-  })
-  /** This account's single active membership in a verified view. */
-  const ownMembership = Effect.fnUntraced(function* (
-    view: import('@lody/e2ee-core/protocol').LedgerView
-  ) {
-    const userId = yield* Effect.mapError(Effect.fromResult(accountUserId(input.accountId)), () =>
-      fail('missing-binding')
-    )
-    const mine = [...view.inspectState().members.entries()].filter(([, member]) =>
-      member.userId.equals(userId)
-    )
-    if (mine.length !== 1) return yield* Effect.fail(fail('missing-binding'))
-    return mine[0]![0]
-  })
   /** Pulls the verified ledger forward after an append, outside any owner turn. */
   const refresh = Effect.fnUntraced(function* (workspaceId: string) {
     const status = yield* owner(workspaceId, (current) => current.host.status(workspaceId))
@@ -360,172 +284,200 @@ export function makeDesktopAccountPairingHost(input: {
       })
     )
 
-  const approverWorkspaces = Effect.fnUntraced(function* (filter?: AccountPairingApproverFilter) {
+  type Status = Effect.Success<ReturnType<AccountPairingOwner['host']['status']>>
+  const approves = (hint: AccountPairingWorkspaceHint, status: Status | null) =>
+    status?.deviceKind === 'personal' &&
+    status.genesisHash === hint.genesisHash &&
+    !!status.signingPublicKey
+  const approverWorkspace = (
+    hint: AccountPairingWorkspaceHint,
+    signingPublicKey: string
+  ): AccountPairingApproverWorkspace => {
+    const workspaceId = hint.workspaceId
+    return {
+      workspaceId,
+      name: hint.name,
+      genesis: raw(hint.genesisHash),
+      signingPublicKey: raw(signingPublicKey),
+      // The workflow's `releasing` bracket closes every listed workspace once at
+      // the end of inspection or approval, avoiding repeated SQLite reopen churn.
+      refresh: () => refresh(workspaceId),
+      sign: (row) =>
+        owner(workspaceId, (current) => current.host.signAccountAdmission(workspaceId, row)),
+      append: (requestId, record, credentialHash) =>
+        Effect.gen(function* () {
+          const appended = yield* Effect.result(
+            cloud.appendRecord({
+              workspaceId,
+              requestId,
+              recordHex: hex(record),
+              credentialHash: hex(credentialHash)
+            })
+          )
+          // Verified reads beat lost acknowledgements: settle from the ledger.
+          yield* refresh(workspaceId)
+          const settled = yield* disposition(workspaceId, record)
+          if (settled === 'committed') return undefined
+          if (settled === 'lost') return yield* Effect.fail(fail('admission-lost'))
+          if (Result.isFailure(appended)) return yield* Effect.fail(appended.failure)
+          return yield* Effect.fail(fail('append_unconfirmed'))
+        }),
+      invitation: (record) =>
+        owner(workspaceId, (current) => current.host.accountInvitation(workspaceId, record)),
+      access: () =>
+        owner(workspaceId, (current) =>
+          Effect.map(current.bootstrap.deviceCredential(workspaceId), (credential) => ({
+            workspaceId,
+            credential
+          }))
+        ),
+      release: () => release(workspaceId),
+      ...(input.deliverKeys
+        ? {
+            deliverKeys: (device: Uint8Array, requestId: string) =>
+              Effect.sync(() => input.deliverKeys!(workspaceId, requestId, hex(device)))
+          }
+        : {})
+    }
+  }
+
+  const approverWorkspaces = (filter?: AccountPairingApproverFilter) => {
+    const listed = input
+      .workspaces()
+      .filter(
+        (hint) =>
+          (!filter?.workspaceIds || filter.workspaceIds.has(hint.workspaceId)) &&
+          (!filter?.geneses || filter.geneses.has(hint.genesisHash))
+      )
+    // Every inspection that leaves its workspace open is recorded the moment it exits;
+    // any other exit, including interruption, closes it again. A failed or interrupted
+    // listing therefore releases every workspace opened by any concurrent inspection.
     const opened: string[] = []
-    return yield* Effect.gen(function* () {
-      const result: AccountPairingApproverWorkspace[] = []
-      for (const hint of input.workspaces()) {
-        if (filter?.workspaceIds && !filter.workspaceIds.has(hint.workspaceId)) continue
-        if (filter?.geneses && !filter.geneses.has(hint.genesisHash)) continue
-        const workspaceId = hint.workspaceId
-        const status = yield* owner(workspaceId, (current) =>
-          current.host.status(workspaceId)
-        ).pipe(Effect.orElseSucceed(() => null))
-        if (
-          status?.deviceKind !== 'personal' ||
-          status.genesisHash !== hint.genesisHash ||
-          !status.signingPublicKey
-        ) {
-          yield* release(workspaceId)
-          continue
-        }
-        opened.push(workspaceId)
-        result.push({
-          workspaceId,
-          name: hint.name,
-          genesis: raw(hint.genesisHash),
-          signingPublicKey: raw(status.signingPublicKey),
-          // The workflow's `releasing` bracket closes every listed workspace once at
-          // the end of inspection or approval, avoiding repeated SQLite reopen churn.
-          refresh: () => refresh(workspaceId),
-          sign: (row) =>
-            owner(workspaceId, (current) => current.host.signAccountAdmission(workspaceId, row)),
-          append: (requestId, record, credentialHash) =>
-            Effect.gen(function* () {
-              const appended = yield* Effect.result(
-                cloud.appendRecord({
-                  workspaceId,
-                  requestId,
-                  recordHex: hex(record),
-                  credentialHash: hex(credentialHash)
-                })
-              )
-              // Verified reads beat lost acknowledgements: settle from the ledger.
-              yield* refresh(workspaceId)
-              const settled = yield* disposition(workspaceId, record)
-              if (settled === 'committed') return undefined
-              if (settled === 'lost') return yield* Effect.fail(fail('admission-lost'))
-              if (Result.isFailure(appended)) return yield* Effect.fail(appended.failure)
-              return yield* Effect.fail(fail('append_unconfirmed'))
-            }),
-          invitation: (record) =>
-            owner(workspaceId, (current) => current.host.accountInvitation(workspaceId, record)),
-          access: () =>
-            owner(workspaceId, (current) =>
-              Effect.map(current.bootstrap.deviceCredential(workspaceId), (credential) => ({
-                workspaceId,
-                credential
-              }))
-            ),
-          release: () => release(workspaceId),
-          ...(input.deliverKeys
-            ? {
-                deliverKeys: (device: Uint8Array, requestId: string) =>
-                  Effect.sync(() => input.deliverKeys!(workspaceId, requestId, hex(device)))
-              }
-            : {})
+    return Effect.forEach(
+      listed,
+      (hint) =>
+        owner(hint.workspaceId, (current) => current.host.status(hint.workspaceId)).pipe(
+          Effect.orElseSucceed(() => null),
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) && approves(hint, exit.value)
+              ? Effect.sync(() => void opened.push(hint.workspaceId))
+              : release(hint.workspaceId)
+          )
+        ),
+      { concurrency: LISTING_CONCURRENCY }
+    ).pipe(
+      Effect.map((statuses) =>
+        listed.flatMap((hint, index) => {
+          const status = statuses[index] ?? null
+          return approves(hint, status) ? [approverWorkspace(hint, status!.signingPublicKey!)] : []
         })
-      }
-      return result
-    }).pipe(
+      ),
       Effect.onError(() =>
         Effect.forEach(opened, (workspaceId) => release(workspaceId), { discard: true })
       )
     )
-  })
+  }
 
-  const requesterWorkspaces = Effect.fnUntraced(function* (
-    _hints?: unknown,
-    filter?: AccountPairingRequesterFilter
-  ) {
-    const result: AccountPairingRequesterWorkspace[] = []
-    for (const hint of input.workspaces()) {
-      // Never open a workspace the step cannot use: each status read opens its store.
-      if (filter?.workspaceId !== undefined && filter.workspaceId !== hint.workspaceId) continue
-      if (filter?.geneses && !filter.geneses.has(hint.genesisHash)) continue
-      // Workspaces where this device already holds an active personal identity
-      // need no pairing.
-      const status = yield* statusOf(hint.workspaceId)
-      if (status?.deviceKind === 'personal') continue
-      const workspaceId = hint.workspaceId
-      let membershipId: string | undefined
-      let genesisRecordHex: string | undefined
-      result.push({
-        workspaceId,
-        name: hint.name,
-        genesis: raw(hint.genesisHash),
-        identity: () =>
-          Effect.gen(function* () {
-            const checked = yield* verified(hint)
-            const ownId = yield* ownMembership(checked.view)
-            membershipId = ownId
-            genesisRecordHex = checked.pin.genesisRecordHex
-            const pin = {
-              genesisHash: hint.genesisHash,
-              genesisRecordHex: checked.pin.genesisRecordHex,
-              membershipId: ownId
-            }
-            return yield* owner(
+  /** The desktop identity and join journal of one workspace, as the shared requester
+   * uses them. The pin of a later install keeps the membership and genesis record that
+   * this listing's identity step proved possession for. */
+  const identityHost = (hint: AccountPairingWorkspaceHint): AccountPairingIdentityHost => {
+    const workspaceId = hint.workspaceId
+    let proven: { membershipId: string; genesisRecordHex: string } | undefined
+    const install = (
+      pin: {
+        endorser: string
+        membershipId: string
+        genesisRecordHex: string
+        pairingSessionId: string
+      },
+      accept: (current: AccountPairingOwner) => Effect.Effect<unknown, unknown>
+    ) =>
+      Effect.gen(function* () {
+        yield* owner(
+          workspaceId,
+          (current) =>
+            current.bootstrap.preparePersonalJoin({
+              version: 1,
               workspaceId,
-              (current) => current.bootstrap.accountPairingIdentity(pin),
-              true
-            )
-          }),
-        accept: (invitation, admissionRecordHash) => install(admissionRecordHash, invitation),
-        // A Member approver sends no invitation: install from the verified full history.
-        acceptHistory: (admissionRecordHash) => install(admissionRecordHash, null)
+              genesisHash: hint.genesisHash,
+              genesisRecordHex: proven?.genesisRecordHex ?? pin.genesisRecordHex,
+              // The signer of the tag-authenticated admission record in the verified ledger.
+              endorser: pin.endorser,
+              membershipId: proven?.membershipId ?? pin.membershipId,
+              // A stable, request-independent session for the existing join journal.
+              pairingSessionId: pin.pairingSessionId
+            }),
+          true
+        )
+        yield* owner(workspaceId, accept)
       })
-      function install(admissionRecordHash: Uint8Array, invitation: Uint8Array | null) {
-        return Effect.gen(function* () {
-          // The approval tag authenticated this record hash; the endorser is the
-          // signer of exactly that record in the verified ledger.
-          const checked = yield* verified(hint)
-          const record = checked.pages
-            .flatMap((page) => page.recordsHex)
-            .map(raw)
-            .find((bytes) => hex(hashRecordBytes(bytes).toBytes()) === hex(admissionRecordHash))
-          if (!record) return yield* Effect.fail(fail('missing-binding'))
-          const decoded = decodeRecord(record)
-          if (Result.isFailure(decoded) || decoded.success.body.type !== 'ordinary')
-            return yield* Effect.fail(fail('invalid-ledger'))
-          const memberId = membershipId ?? (yield* ownMembership(checked.view))
-          const pin = {
-            version: 1 as const,
-            workspaceId,
-            genesisHash: hint.genesisHash,
-            genesisRecordHex: genesisRecordHex ?? checked.pin.genesisRecordHex,
-            endorser: hex(decoded.success.body.signer.toBytes()),
-            membershipId: memberId,
-            // A stable, request-independent session for the existing join journal.
-            pairingSessionId: hex(admissionRecordHash).slice(0, 32)
-          }
-          // An unrelated unfinished per-workspace exchange keeps its own journal
-          // row: report this workspace as blocked instead of overwriting it.
-          const pending = yield* owner(workspaceId, (current) =>
-            current.bootstrap.pendingPersonalJoin(workspaceId)
+    return {
+      workspaceId,
+      genesisHash: hint.genesisHash,
+      prepareAccountIdentity: (pin) => {
+        proven = { membershipId: pin.membershipId, genesisRecordHex: pin.genesisRecordHex }
+        return owner(
+          workspaceId,
+          (current) =>
+            current.bootstrap.accountPairingIdentity({
+              genesisHash: hint.genesisHash,
+              genesisRecordHex: pin.genesisRecordHex,
+              membershipId: pin.membershipId
+            }),
+          true
+        )
+      },
+      // An unrelated unfinished per-workspace exchange keeps its own journal row: the
+      // shared requester reports this workspace as blocked instead of overwriting it.
+      pendingPersonalJoin: () =>
+        Effect.map(
+          owner(workspaceId, (current) => current.bootstrap.pendingPersonalJoin(workspaceId)),
+          (pending) => (pending ? { pairingSessionId: pending.offer.pairingSessionId } : null)
+        ),
+      acceptAccountInvitation: (accepted) =>
+        Effect.asVoid(
+          install(accepted, (current) =>
+            current.bootstrap.acceptPersonalJoin(workspaceId, accepted.invitationHex)
           )
-          if (pending && pending.offer.pairingSessionId !== pin.pairingSessionId)
-            return yield* Effect.fail(fail('pairing-journal-busy'))
-          yield* owner(workspaceId, (current) => current.bootstrap.preparePersonalJoin(pin), true)
-          yield* owner(workspaceId, (current) =>
-            invitation
-              ? current.bootstrap.acceptPersonalJoin(workspaceId, hex(invitation))
-              : current.bootstrap.acceptPersonalHistory(workspaceId, checked.pages)
-          )
-          // Like the per-workspace claim: open, refresh and install current keys
-          // now. Best effort: opening the workspace later repeats this.
-          yield* activate(workspaceId).pipe(
-            Effect.catch((error) =>
-              Effect.sync(() => rememberDesktopE2eeFailure('account-pairing-activate', error))
+        ),
+      // A Member approver sends no invitation: install from the verified full history.
+      acceptAccountHistory: (accepted) =>
+        accepted.endorser
+          ? Effect.asVoid(
+              install({ ...accepted, endorser: accepted.endorser }, (current) =>
+                current.bootstrap.acceptPersonalHistory(workspaceId, accepted.pages)
+              )
             )
-          )
-          return undefined
-        })
-      }
+          : Effect.fail(fail('invalid-ledger')),
+      // Like the per-workspace claim: open, refresh and install current keys now. Best
+      // effort: the shared requester only records a failure, and opening repeats this.
+      activate: () => Effect.asVoid(activate(workspaceId))
     }
-    return result
-  })
+  }
 
+  const portableRequester = makePortableAccountPairingRequester({
+    accountId: input.accountId,
+    workspaces: input.workspaces,
+    history: (request) => cloud.history(request),
+    verifyHistory: verifyMemberHistory,
+    diagnostics: rememberDesktopE2eeFailure,
+    // Workspaces where this device already holds an active personal identity need no
+    // pairing. Each status read opens its store, so it is released right after.
+    host: (workspaceId, hint) =>
+      Effect.map(statusOf(workspaceId), (status) =>
+        status?.deviceKind === 'personal' ? null : identityHost(hint)
+      )
+  })
+  /** Routing hints come only from this account's workspace list, never from the caller. */
+  const requesterWorkspaces = (_hints?: unknown, filter?: AccountPairingRequesterFilter) =>
+    portableRequester(undefined, filter)
+
+  return { approverWorkspaces, requesterWorkspaces }
+}
+
+export function makeDesktopAccountPairingHost(input: DesktopAccountPairingHostInput) {
+  const { cloud } = input
   return makeDesktopAccountPairing({
     db: input.db,
     account: input.accountId,
@@ -537,8 +489,7 @@ export function makeDesktopAccountPairingHost(input: {
       publish: (request) => cloud.pairingPublish(request),
       claim: (lookupId) => cloud.pairingClaim({ lookupId })
     },
-    approverWorkspaces,
-    requesterWorkspaces,
+    ...makeDesktopAccountPairingWorkspaces(input),
     ...(input.now ? { now: input.now } : {})
   })
 }

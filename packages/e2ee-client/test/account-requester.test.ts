@@ -1,4 +1,4 @@
-import { Effect, Exit, Fiber, Result } from 'effect';
+import { Deferred, Effect, Exit, Fiber, Result } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { accountUserId, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
@@ -519,6 +519,71 @@ describe('portable account pairing approver key delivery', () => {
     const fiber = Effect.runFork(listing);
     await firstOpened;
     await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(rounds.released).toBe(1);
+  });
+
+  it('looks up at most four approving workspaces at once and lists them in hint order', async () => {
+    // Approval latency over many workspaces must not grow with one lookup per workspace,
+    // while the approval preview keeps the account's workspace order.
+    const hints = Array.from({ length: 6 }, (_, index) => ({
+      workspaceId: `w${index}`,
+      name: `Workspace ${index}`,
+      genesisHash: '11'.repeat(32),
+    }));
+    const gates = new Map(hints.map((hint) => [hint.workspaceId, Deferred.makeUnsafe<void>()]));
+    const rounds = { count: 0, released: 0 };
+    let active = 0;
+    let peak = 0;
+    const started: string[] = [];
+    const listing = makePortableAccountPairingApprover({
+      workspaces: () => hints,
+      session: (workspaceId) =>
+        Effect.gen(function* () {
+          started.push(workspaceId);
+          active += 1;
+          peak = Math.max(peak, active);
+          yield* Deferred.await(gates.get(workspaceId)!);
+          active -= 1;
+          return approverSession(rounds);
+        }),
+      appendRecord: () => Effect.void,
+    })();
+    const fiber = Effect.runFork(listing);
+    await vi.waitFor(() => expect(started).toHaveLength(4));
+    // Settle in reverse order; later lookups start only as earlier ones finish.
+    for (const hint of [...hints].reverse())
+      Effect.runSync(Deferred.succeed(gates.get(hint.workspaceId)!, undefined));
+    const workspaces = await Effect.runPromise(Fiber.join(fiber));
+    expect(peak).toBe(4);
+    expect(workspaces.map((item) => item.workspaceId)).toEqual(hints.map((h) => h.workspaceId));
+  });
+
+  it('releases a session whose lookup settles after another workspace failed to list', async () => {
+    const rounds = { count: 0, released: 0 };
+    const gate = Deferred.makeUnsafe<void>();
+    let failed: () => void = () => {};
+    const failure = new Promise<void>((resolve) => (failed = resolve));
+    const fiber = Effect.runFork(
+      makePortableAccountPairingApprover({
+        workspaces: () => [
+          { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+          { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+        ],
+        // The first lookup is still opening its session when the second one fails.
+        session: (workspaceId) =>
+          workspaceId === 'w1'
+            ? Effect.as(Deferred.await(gate), approverSession(rounds))
+            : Effect.suspend(() => {
+                failed();
+                return Effect.fail(new Error('synthetic approval session failure'));
+              }),
+        appendRecord: () => Effect.void,
+      })()
+    );
+    await failure;
+    Effect.runSync(Deferred.succeed(gate, undefined));
+    const exit = await Effect.runPromise(Fiber.await(fiber));
+    expect(Exit.isFailure(exit)).toBe(true);
     expect(rounds.released).toBe(1);
   });
 

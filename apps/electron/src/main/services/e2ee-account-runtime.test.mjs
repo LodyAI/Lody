@@ -2,6 +2,7 @@ import * as identityStorage from '@lody/shared/node/e2ee-identity'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { readFile, mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
 import {
   createCipheriv,
@@ -38,11 +39,15 @@ import { makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
 import { makeE2eeCloudClient } from './e2ee-cloud-client.mts'
-import { makeDesktopAccountPairingHost } from './e2ee-account-pairing-host.mts'
+import {
+  makeDesktopAccountPairingHost,
+  makeDesktopAccountPairingWorkspaces
+} from './e2ee-account-pairing-host.mts'
 import { makeOfflineAuthIdentityCache } from '../auth-storage.ts'
 import * as electronIpc from '../../../../../packages/shared/src/electron-ipc.ts'
 import { isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
 import * as memberJoining from './e2ee-member-join.mts'
+import { KEY_DELIVERY_RETRY_DELAYS } from '@lody/e2ee-client/account-requester'
 import { memberOfferSigningBytes } from '@lody/e2ee-client/member'
 import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
 import { desktopE2eeFailure, rememberDesktopE2eeFailure } from './e2ee-diagnostics.mts'
@@ -58,7 +63,12 @@ import {
 import * as proxyEnv from '../../../../../packages/shared/src/proxy-env.ts'
 const require = createRequire(import.meta.url)
 async function load(relative, dependencies, console = globalThis.console, env = {}, globals = {}) {
-  const source = await readFile(new URL(relative, import.meta.url), 'utf8')
+  return loadSync(relative, dependencies, console, env, globals)
+}
+/** Loads one module in the same sandbox and dependency map as its importer, so main
+ * modules split out of `E2eeIpc` share its console, clock and mocked account runtime. */
+function loadSync(relative, dependencies, console = globalThis.console, env = {}, globals = {}) {
+  const source = readFileSync(new URL(relative, import.meta.url), 'utf8')
   const exports = {}
   runInNewContext(
     ts.transpileModule(source.replaceAll('import.meta.env', JSON.stringify(env)), {
@@ -91,15 +101,28 @@ async function load(relative, dependencies, console = globalThis.console, env = 
                   ? { PersonalPairingOfferSchema }
                   : id === '../../services/e2ee-account-pairing-host.mjs'
                     ? { makeDesktopAccountPairingHost }
-                    : id === '../../services/e2ee-recovery-vault.mjs' ||
-                        id === '../../services/e2ee-passkey-macos.mjs'
-                      ? {}
-                      : id === '../../services/e2ee-client-loss-probe'
-                        ? // Production default: the E2E probe is disabled and forwards work.
-                          {
-                            observeClientLossOperation: (_kind, _workspace, _sender, work) => work()
-                          }
-                        : require(id)
+                    : id === '../../services/e2ee-key-delivery.mjs'
+                      ? loadSync('./e2ee-key-delivery.mts', dependencies, console, env, globals)
+                      : id === '../../services/e2ee-agent-pairing-service.mjs'
+                        ? loadSync(
+                            './e2ee-agent-pairing-service.mts',
+                            dependencies,
+                            console,
+                            env,
+                            globals
+                          )
+                        : id === '@lody/e2ee-client/account-requester'
+                          ? { KEY_DELIVERY_RETRY_DELAYS }
+                          : id === '../../services/e2ee-recovery-vault.mjs' ||
+                              id === '../../services/e2ee-passkey-macos.mjs'
+                            ? {}
+                            : id === '../../services/e2ee-client-loss-probe'
+                              ? // Production default: the E2E probe is disabled and forwards work.
+                                {
+                                  observeClientLossOperation: (_kind, _workspace, _sender, work) =>
+                                    work()
+                                }
+                              : require(id)
     }
   )
   return exports
@@ -3967,7 +3990,7 @@ void test('a late personal invitation publication cannot restart delivery after 
     await delivery
     publication.release.resolve()
     await assert.rejects(approval, /e2ee_account_mismatch/)
-    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
   } finally {
     f.keyGate.resolve()
     publication.release.resolve()
@@ -4015,7 +4038,7 @@ for (const change of [
       assert.ok(result.error, 'the old approval cannot authorize work under a later identity')
       assert.equal(f.published(), false)
       assert.equal(f.committed(), true)
-      assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+      assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
       assert.equal(f.ipc.personalApprovals.size, 0)
     } finally {
       invitationGate.release.resolve()
@@ -4058,17 +4081,17 @@ for (const resetScope of ['workspace', 'account'])
       const result = await second
       team.release.resolve()
       assert.ok((await first).error)
-      assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+      assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
       if (resetScope === 'account') {
         assert.ok(result.error)
-        assert.equal(f.ipc.keyDeliveries.has('A\nother'), false)
+        assert.equal(f.ipc.keyDelivery.slots.has('A\nother'), false)
       } else {
         assert.deepEqual(plain(result.value), { admitted: true, invitationPublished: true })
         await f.keyEntered.promise
         f.keyGate.resolve()
         await f.ipc.keyDeliveryIdle('A', 'other')
         assert.equal(
-          f.ipc.keyDeliveries.get('A\nother').requests.get(personalApprovalRequest).state,
+          f.ipc.keyDelivery.slots.get('A\nother').requests.get(personalApprovalRequest).state,
           'delivered'
         )
       }
@@ -4143,7 +4166,7 @@ void test('personal key failures keep admission, exhaust bounded backoff, and ac
       break
     }
     const timer = clock.pending.shift()
-    assert.equal(timer.ms, Math.min(10_000 * 2 ** retry, 300_000))
+    assert.equal(timer.ms, KEY_DELIVERY_RETRY_DELAYS[retry])
     now += timer.ms
     timer.run()
   }
@@ -4169,7 +4192,7 @@ for (const Terminal of [E2eeDeviceRevokedError, E2eeMemberRemovedError])
       invitationPublished: true
     })
     await f.ipc.keyDeliveryIdle('A', 'team')
-    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
     assert.equal(f.committed(), true)
     assert.deepEqual(clock.pending, [])
   })
@@ -4233,7 +4256,7 @@ void test('reset while native admission preparation is pending prevents any late
     assert.equal(f.committed(), false)
     assert.equal(f.writes.size, 0)
     assert.equal(f.published(), false)
-    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
   } finally {
     prepareGate.release.resolve()
     f.keyGate.resolve()
@@ -4264,7 +4287,7 @@ void test('a personal delivery retry cannot cross a same-account logout and logi
   clock.pending.shift().run()
   await f.ipc.keyDeliveryIdle('A', 'team')
   assert.deepEqual(delivered, [])
-  assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+  assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
   assert.deepEqual(clock.pending, [])
 })
 void test('a personal delivery registered before publication retires after same-account re-login', async () => {
@@ -4287,7 +4310,7 @@ void test('a personal delivery registered before publication retires after same-
     assert.ok((await approval).error)
     f.keyGate.resolve()
     await delivery
-    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
   } finally {
     publication.release.resolve()
     f.keyGate.resolve()
@@ -4417,7 +4440,7 @@ const fakeKeyDeliveryTimers = () => {
   }
 }
 const keyDeliveryState = (f, requestId) =>
-  plain(f.ipc.keyDeliveries.get('A\nteam')?.requests.get(requestId) ?? null)
+  plain(f.ipc.keyDelivery.slots.get('A\nteam')?.requests.get(requestId) ?? null)
 void test(
   'an account-pairing key delivery that fails is retried by main on its own due timer until delivered, with no page, poll or explicit retry',
   { timeout: 5000 },
@@ -4436,14 +4459,36 @@ void test(
     // Main scheduled the next round at the failure's backoff.
     assert.deepEqual(
       clock.pending.map((timer) => timer.ms),
-      [10_000]
+      [KEY_DELIVERY_RETRY_DELAYS[0]]
     )
-    now += 10_000
+    now += KEY_DELIVERY_RETRY_DELAYS[0]
     clock.pending.shift().run()
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.equal(keyDeliveryState(f, requestId).state, 'delivered')
     assert.equal(outcomes.length, 0)
     assert.deepEqual(clock.pending, [])
+  }
+)
+void test(
+  'a new device waiting for its key gets the first desktop delivery retry 500 ms after a failed delivery',
+  { timeout: 5000 },
+  async () => {
+    // A transient refusal right after approval must not hold the requester back for the
+    // long tail of the backoff: the first retry follows the shared fast schedule.
+    const f = await memberApprovalFixture(() => Effect.fail(new Error('e2ee_management_retry')))
+    f.ipc.keyDeliveryNow = () => 1_000
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    const requestId = `account-device-${randomUUID()}`
+    f.ipc.trackKeyDelivery('A', 'team', requestId, approvalDevice)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    const failed = keyDeliveryState(f, requestId)
+    assert.equal(failed.state, 'failed')
+    assert.equal(failed.retryAt, 1_500)
+    assert.deepEqual(
+      clock.pending.map((timer) => timer.ms),
+      [500]
+    )
   }
 )
 void test(
@@ -4486,7 +4531,7 @@ void test(
     clock.pending.shift().run()
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.equal(rounds, before)
-    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
   }
 )
 void test(
@@ -4563,7 +4608,7 @@ void test(
       .resetIdentity({ workspaceId: 'team', resetId: randomUUID(), confirm: true })
       .catch(() => {})
     assert.deepEqual(clock.pending, [])
-    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
     assert.equal(rounds, 1)
   }
 )
@@ -4590,7 +4635,7 @@ void test(
     f.holdCloud()
     f.ipc.trackKeyDelivery('A', 'team', `account-device-${randomUUID()}`, approvalDevice)
     await f.cloudEntered.promise
-    const inFlight = f.ipc.keyDeliveries.get('A\nteam').running
+    const inFlight = f.ipc.keyDelivery.slots.get('A\nteam').running
     await f.ipc
       .resetIdentity({ workspaceId: 'team', resetId: randomUUID(), confirm: true })
       .catch(() => {})
@@ -4598,7 +4643,7 @@ void test(
     await inFlight
     assert.equal(opens, 0)
     assert.equal(rounds, 0)
-    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
     assert.deepEqual(clock.pending, [])
   }
 )
@@ -4625,7 +4670,7 @@ void test(
     f.holdCloud()
     f.ipc.trackKeyDelivery('A', 'team', `account-device-${randomUUID()}`, approvalDevice)
     await f.cloudEntered.promise
-    const inFlight = f.ipc.keyDeliveries.get('A\nteam').running
+    const inFlight = f.ipc.keyDelivery.slots.get('A\nteam').running
     f.identity.userId = 'B'
     f.identity.generation++
     f.cloudGate.resolve()
@@ -4633,7 +4678,7 @@ void test(
     assert.equal(opens, 0)
     assert.equal(rounds, 0)
     // The slot is aborted and dropped, so no timer or poll resumes it for account B.
-    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
     assert.deepEqual(clock.pending, [])
   }
 )
@@ -4655,7 +4700,7 @@ void test(
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), failed)
     assert.equal(outcomes.length, 1)
-    now += 10_000
+    now += KEY_DELIVERY_RETRY_DELAYS[0]
     // The email admission worker's next poll drives the due retry.
     await f.ipc.memberJoinRequests('team')
     await f.ipc.keyDeliveryIdle('A', 'team')
@@ -4691,7 +4736,7 @@ void test(
     // The relay now serves the admission; the next due poll ingests before distributing.
     ledger.historyFails = false
     ledger.relayHasAdmission = true
-    now += 10_000
+    now += KEY_DELIVERY_RETRY_DELAYS[0]
     await f.ipc.memberJoinRequests('team')
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
@@ -4754,7 +4799,7 @@ void test(
       { requestId: approvalRequest, state: 'failed', code: 'e2ee_key_not_sent' }
     ])
     ledger.evidence = () => 'delivered'
-    now += 10_000
+    now += KEY_DELIVERY_RETRY_DELAYS[0]
     await f.ipc.memberJoinRequests('team')
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
@@ -4784,7 +4829,7 @@ void test(
     await f.ipc.keyDeliveryIdle('A', 'team')
     const [closed] = plain((await f.ipc.memberKeyDeliveries('team')).items)
     assert.equal(closed.state, 'failed')
-    now += 10_000
+    now += KEY_DELIVERY_RETRY_DELAYS[0]
     await f.ipc.memberJoinRequests('team')
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
@@ -4818,7 +4863,7 @@ void test(
       { requestId: approvalRequest, state: 'failed', code: 'e2ee_key_delivery_interrupted' }
     ])
     // Retryable with the usual backoff: the next due poll delivers it.
-    now += 10_000
+    now += KEY_DELIVERY_RETRY_DELAYS[0]
     await f.ipc.memberJoinRequests('team')
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
@@ -5093,6 +5138,104 @@ void test('installing an approval reads only the ledger records after the histor
   )
 })
 
+/** Approver listing over six synthetic personal workspaces whose status reads wait for
+ * the test. Records concurrent reads and every close. */
+function blockedApproverListing() {
+  const genesisHash = 'ab'.repeat(32)
+  const hints = Array.from({ length: 6 }, (_, index) => ({
+    workspaceId: `team-${index}`,
+    name: `Team ${index}`,
+    genesisHash
+  }))
+  const gates = new Map()
+  const started = []
+  const closed = []
+  let active = 0
+  let peak = 0
+  let notify = () => {}
+  const owner = {
+    accountId: 'A',
+    readers: new Map(),
+    host: {
+      status: (workspaceId) =>
+        Effect.promise(() => {
+          started.push(workspaceId)
+          active += 1
+          peak = Math.max(peak, active)
+          notify()
+          return new Promise((resolve) => gates.set(workspaceId, resolve)).then((value) => {
+            active -= 1
+            return value
+          })
+        }),
+      closeWorkspace: (workspaceId) => Effect.sync(() => void closed.push(workspaceId))
+    },
+    bootstrap: {}
+  }
+  const { approverWorkspaces } = makeDesktopAccountPairingWorkspaces({
+    accountId: 'A',
+    cloud: {},
+    withOwner: (_workspaceId, work) => Effect.runPromise(work(owner)),
+    run: (effect) => Effect.runPromise(effect),
+    workspaces: () => hints
+  })
+  const startedCount = (count) =>
+    new Promise((resolve) => {
+      notify = () => started.length >= count && resolve()
+      notify()
+    })
+  const settle = (workspaceId) =>
+    gates.get(workspaceId)({
+      deviceKind: 'personal',
+      genesisHash,
+      signingPublicKey: 'cd'.repeat(32)
+    })
+  return {
+    hints,
+    started,
+    closed,
+    peak: () => peak,
+    approverWorkspaces,
+    startedCount,
+    settle
+  }
+}
+
+void test('approving on a desktop with many workspaces inspects four at a time and keeps their order', async () => {
+  // Inspection latency must not grow by one owner turn per workspace, while the
+  // approval preview keeps the account's workspace order.
+  const listing = blockedApproverListing()
+  const done = Effect.runPromise(listing.approverWorkspaces())
+  await listing.startedCount(4)
+  assert.equal(listing.started.length, 4)
+  // Settling one inspection starts the next; later ones settle before earlier ones.
+  listing.settle('team-1')
+  await listing.startedCount(5)
+  listing.settle('team-3')
+  await listing.startedCount(6)
+  for (const workspaceId of ['team-5', 'team-4', 'team-2', 'team-0']) listing.settle(workspaceId)
+  const workspaces = await done
+  assert.equal(listing.peak(), 4)
+  assert.deepEqual(
+    workspaces.map((item) => item.workspaceId),
+    listing.hints.map((hint) => hint.workspaceId)
+  )
+  assert.deepEqual(listing.closed, [])
+})
+
+void test('an interrupted approver inspection closes every workspace any concurrent inspection opened', async () => {
+  // Pairing must not leave workspaces open that no window reads: settled ones and
+  // ones whose inspection was still running are all closed again.
+  const listing = blockedApproverListing()
+  const fiber = Effect.runFork(listing.approverWorkspaces())
+  await listing.startedCount(4)
+  listing.settle('team-0')
+  listing.settle('team-1')
+  await listing.startedCount(6)
+  await Effect.runPromise(Fiber.interrupt(fiber))
+  assert.deepEqual([...listing.closed].sort(), [...listing.started].sort())
+})
+
 void test('after a failed first delivery, main retries the account-pairing key on its own timer until the new device holds the current key', async (t) => {
   // Real custody, ledger hosts and reference mailbox on both devices. The approval hands
   // the admitted device to the real E2eeIpc delivery (trackKeyDelivery, distribute-only
@@ -5170,7 +5313,7 @@ void test('after a failed first delivery, main retries the account-pairing key o
   ipcFixture.ipc.keyDeliveryNow = () => now
   const clock = fakeKeyDeliveryTimers()
   ipcFixture.ipc.keyDeliveryTimers = clock.timers
-  const slot = () => ipcFixture.ipc.keyDeliveries.get(`A\n${f.workspaceId}`)
+  const slot = () => ipcFixture.ipc.keyDelivery.slots.get(`A\n${f.workspaceId}`)
   const approverCredential = await Effect.runPromise(
     approver.bootstrap.deviceCredential(f.workspaceId)
   )
