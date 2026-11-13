@@ -638,8 +638,8 @@ private struct ChatRowContent: View {
   }
 
   var body: some View {
-    // The family line's 44 pt target starts inside the opener's blank bottom space, so its text
-    // sits just under the opener instead of centred between it and the next row.
+    // The family line is a compact, full-width target that starts inside the opener's blank
+    // bottom space, so its text sits just under the opener instead of between rows.
     VStack(alignment: .leading, spacing: expanded == nil ? 0 : -contentBottomInset) {
       content
       if let expanded { familyToggle(expanded) }
@@ -766,7 +766,8 @@ private struct ChatRowContent: View {
       }
       .padding(.horizontal, LodyLayout.listEdgeX)
       .padding(.top, contentBottomInset + LodySpacing.xs)
-      .frame(maxWidth: .infinity, minHeight: LodySize.touchTarget, alignment: .topLeading)
+      .padding(.bottom, LodySpacing.xs)
+      .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
