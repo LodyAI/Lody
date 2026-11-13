@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { constants } from 'node:fs';
-import { Cause, Effect, Result } from 'effect';
+import { Cause, Deferred, Effect, Exit, Result } from 'effect';
 import { runCommandOk, squashProcessFailure, type NodeProcessApi } from '@lody/shared/node/process';
 import { platformLayer } from '../../platform/process-options';
 import {
@@ -76,6 +76,50 @@ const machineKeyringOperation = (account: string, create?: string) =>
       },
       catch: () => failure('corrupt'),
     });
+  });
+// Process-wide memory of KEK entries the default native helper has read, keyed by the
+// custody account. The entry is never replaced once written, so a read value stays the
+// entry's value; every open still checks its directory, selector and wrapped KEK on disk.
+// Only valid KEK values are kept: absence and failures are never remembered. Concurrent
+// opens join one in-flight helper instead of each starting a process.
+const keyringValues = new Map<string, string>();
+type KeyringRead = ReturnType<typeof machineKeyringOperation>;
+const keyringReads = new Map<
+  string,
+  Deferred.Deferred<Effect.Success<KeyringRead>, Effect.Error<KeyringRead>>
+>();
+const KEK_HEX = /^[0-9a-f]{64}$/;
+/** Forget the remembered KEK entry of one custody directory, for identity reset or erase. */
+export const clearCachedCliE2eeKeyring = (directory: string) => {
+  keyringValues.delete(createHash('sha256').update(directory).digest('hex'));
+};
+const cachedMachineKeyringOperation = (account: string, create?: string): KeyringRead =>
+  Effect.gen(function* () {
+    const known = keyringValues.get(account);
+    if (known !== undefined) return known;
+    const joined = keyringReads.get(account);
+    if (joined) {
+      const exit = yield* Effect.exit(Deferred.await(joined));
+      // An interrupted owner says nothing about the entry: this caller reads on its own.
+      if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
+        return yield* cachedMachineKeyringOperation(account, create);
+      const value = yield* exit;
+      // A joined plain read can find no entry; creation then runs its own helper.
+      if (value !== undefined || create === undefined) return value;
+      return yield* cachedMachineKeyringOperation(account, create);
+    }
+    const read = Deferred.makeUnsafe<Effect.Success<KeyringRead>, Effect.Error<KeyringRead>>();
+    keyringReads.set(account, read);
+    return yield* machineKeyringOperation(account, create).pipe(
+      Effect.onExit((exit) =>
+        Effect.gen(function* () {
+          if (keyringReads.get(account) === read) keyringReads.delete(account);
+          if (Exit.isSuccess(exit) && exit.value !== undefined && KEK_HEX.test(exit.value))
+            keyringValues.set(account, exit.value);
+          yield* Deferred.done(read, exit);
+        })
+      )
+    );
   });
 // Decode directly into owned memory; Buffer.from(hex, 'hex') uses the shared slab.
 const decodeHex = (value: string): Uint8Array => {
@@ -226,6 +270,9 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
   readonly requireOsProtection?: boolean;
   readonly keyring?: MachineKeyring;
   readonly nodeProcess?: NodeProcessApi;
+  /** Reuse a KEK entry the native helper already read in this process. Defaults to on
+   * for the production helper only: injected keyrings or process tables stay uncached. */
+  readonly rememberKeyring?: boolean;
   /** Native DACL boundary; tests can model interrupted initialization on any OS. */
   readonly directoryAcl?: (
     directory: string,
@@ -290,9 +337,13 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
           if ((await entry.getPassword()) !== create) throw failure('unavailable');
           return create;
         })
-      : machineKeyringOperation(account, create).pipe(
-          Effect.provide(platformLayer({ nodeProcess: options.nodeProcess }))
-        );
+      : (options.rememberKeyring ?? options.nodeProcess === undefined)
+        ? cachedMachineKeyringOperation(account, create).pipe(
+            Effect.provide(platformLayer({ nodeProcess: options.nodeProcess }))
+          )
+        : machineKeyringOperation(account, create).pipe(
+            Effect.provide(platformLayer({ nodeProcess: options.nodeProcess }))
+          );
   // Preserve the v1 hex password format so older CLI versions can still reopen it.
   let encoded: string | undefined;
 
@@ -348,7 +399,7 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
       encoded = yield* readKeyring(wrapped ? undefined : randomSecretHex());
       if (encoded === undefined) return yield* failure('identity-lost');
     }
-    if (!/^[0-9a-f]{64}$/.test(encoded)) return yield* failure('corrupt');
+    if (!KEK_HEX.test(encoded)) return yield* failure('corrupt');
     key = decodeHex(encoded);
   }
 

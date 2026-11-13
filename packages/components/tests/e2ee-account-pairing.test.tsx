@@ -170,6 +170,39 @@ describe('new device request', () => {
     expect(joined).toBe(1);
   });
 
+  it('learns of an approval from the relay hint before the next poll, and releases the hint once joined', async () => {
+    // Without the hint the new device sits idle until its poll; the poll stays the fallback.
+    const host = requesterHost();
+    const lookupId = 'ab'.repeat(16);
+    const hints = new Map<string, () => void>();
+    const runtime = {
+      ...host.runtime,
+      requestAccountPairing: async (input: { pairingString?: string }) => ({
+        ...(await host.runtime.requestAccountPairing!(input)),
+        lookupId,
+      }),
+      accountPairingRequest: async () => host.state && { ...host.state, lookupId },
+      subscribeAccountPairingRequest: (id: string, changed: () => void) => {
+        hints.set(id, changed);
+        return () => hints.delete(id);
+      },
+    };
+    let joined = 0;
+    await act(async () =>
+      root.render(
+        <E2eeAccountPairingRequest runtime={runtime} autoStart onJoined={() => joined++} />
+      )
+    );
+    expect([...hints.keys()]).toEqual([lookupId]);
+    host.state = { ...host.state!, status: 'joined', pairingString: null };
+    await act(async () => {
+      hints.get(lookupId)!();
+      await Promise.resolve();
+    });
+    expect(text()).toContain('e2ee.accountPair.request.joined');
+    expect(hints.size).toBe(0);
+  });
+
   // Desktop IPC carries only the message; the reason must survive to the screen
   // instead of a generic "Pairing failed".
   it.each(['pairing-unavailable', 'pairing-rate-limited', 'pairing-elsewhere'])(

@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { Result } from 'effect';
 import { ScanLine } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PAIRING_URL_PREFIX, parsePairingString } from '@lody/e2ee-core/protocol';
 import {
@@ -64,22 +64,51 @@ export function failureKey(error: unknown) {
     custodyFailureMessage(classifyE2eeControlFailure(error).kind) ?? 'e2ee.accountPair.error.failed'
   );
 }
-/** Runs `tick` every `ms` while `active`, never overlapping; the latest `tick` is used. */
-function usePoll(active: boolean, ms: number, tick: () => Promise<void>) {
+/** Runs `tick` every `ms` while `active`, never overlapping; the latest `tick` is used.
+ * An optional `subscribe` hint runs it at once on a change; the poll stays the fallback,
+ * and the hint is released whenever the poll stops. */
+function usePoll(
+  active: boolean,
+  ms: number,
+  tick: () => Promise<void>,
+  subscribe?: (changed: () => void) => () => void
+) {
   const latest = useRef(tick);
   latest.current = tick;
   useEffect(() => {
     if (!active) return undefined;
     let running = false;
-    const timer = setInterval(() => {
-      if (running) return;
+    let again = false;
+    let stopped = false;
+    const run = () => {
+      if (running) {
+        again = true;
+        return;
+      }
       running = true;
       void latest.current().finally(() => {
         running = false;
+        if (again && !stopped) {
+          again = false;
+          run();
+        }
       });
+    };
+    const timer = setInterval(() => {
+      if (!running) run();
     }, ms);
-    return () => clearInterval(timer);
-  }, [active, ms]);
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribe?.(run);
+    } catch {
+      /* Live hints are optional; the poll still reads the same verified state. */
+    }
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      unsubscribe?.();
+    };
+  }, [active, ms, subscribe]);
 }
 function useLive() {
   const live = useRef(true);
@@ -96,6 +125,7 @@ type RequestRuntime = Pick<
   E2eeWorkspaceRuntime,
   | 'requestAccountPairing'
   | 'accountPairingRequest'
+  | 'subscribeAccountPairingRequest'
   | 'cancelAccountPairing'
   | 'openBrowserRecovery'
   | 'requirePersonalComputer'
@@ -153,11 +183,17 @@ export function E2eeAccountPairingRequest(props: {
   };
   const start = (pairingString?: string) => {
     if (personalRequired && !personalComputer) return Promise.resolve();
-    if (props.onRequestApproval) { props.onRequestApproval(); return Promise.resolve(); }
+    if (props.onRequestApproval) {
+      props.onRequestApproval();
+      return Promise.resolve();
+    }
     return run(async () => accept(await runtime.requestAccountPairing!({ pairingString })));
   };
   useEffect(() => {
-    if (props.onRequestApproval) { setPhase('idle'); return undefined; }
+    if (props.onRequestApproval) {
+      setPhase('idle');
+      return undefined;
+    }
     // Approver-only portable hosts must not start an unsupported requester.
     if (!runtime.requestAccountPairing) return undefined;
     let cancelled = false;
@@ -179,6 +215,14 @@ export function E2eeAccountPairingRequest(props: {
     // Recovery and automatic start happen once per mounted host.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtime]);
+  const lookupId = state?.status === 'waiting' ? state.lookupId : undefined;
+  const subscribeRequest = useMemo(
+    () =>
+      lookupId && runtime.subscribeAccountPairingRequest
+        ? (changed: () => void) => runtime.subscribeAccountPairingRequest!(lookupId, changed)
+        : undefined,
+    [lookupId, runtime]
+  );
   usePoll(
     phase === 'ready' && state?.status === 'waiting' && Boolean(runtime.accountPairingRequest),
     props.pollMs ?? POLL_MS,
@@ -189,7 +233,8 @@ export function E2eeAccountPairingRequest(props: {
       } catch (failure) {
         if (live.current) setError(failureKey(failure));
       }
-    }
+    },
+    subscribeRequest
   );
   const restart = () =>
     run(async () => {

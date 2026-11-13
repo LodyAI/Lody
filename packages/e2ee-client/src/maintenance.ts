@@ -8,6 +8,14 @@ import {
   type WorkspaceKeyRoundCursors,
 } from '@lody/e2ee-core';
 
+/**
+ * Scope of one key round. `full` receives, reports, distributes and repairs;
+ * `receive` only installs this device's own current key; `distribute` only
+ * reconciles and sends this device's deliveries. Narrow modes never replace a later
+ * full round: their remaining work stays in the core journals.
+ */
+export type PersonalKeyRoundMode = 'full' | 'receive' | 'distribute';
+
 /** Workspace-owned paging hints. Originals and retry evidence remain in core journals. */
 export const makePersonalKeyMaintenance = Effect.fnUntraced(function* () {
   const repair = yield* KeyRepair;

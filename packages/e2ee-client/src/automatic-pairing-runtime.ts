@@ -27,6 +27,9 @@ type Hint = { workspaceId: string; name: string; genesisHash: string };
 /** The relay transports public originals only. It never receives a pairing secret. */
 export interface AutomaticPairingRelay {
   subscribe?(changed: () => void): () => void;
+  /** Optional push hint that one request row changed; `read` still verifies it. Lets a
+   * requester learn of approval without waiting for its next poll. */
+  subscribeRead?(id: string, changed: () => void): () => void;
   pending(): Effect.Effect<readonly E2eeAutomaticPairingRecord[], unknown>;
   read(id: string): Effect.Effect<E2eeAutomaticPairingRecord | null, unknown>;
   exchange(
@@ -116,12 +119,47 @@ export function makeAutomaticPairingRuntime(options: {
   // Every relay call is bounded, so none can hold an entry's gate indefinitely.
   const relay: AutomaticPairingRelay = {
     ...(options.relay.subscribe ? { subscribe: options.relay.subscribe } : {}),
+    ...(options.relay.subscribeRead ? { subscribeRead: options.relay.subscribeRead } : {}),
     pending: () => bounded(options.relay.pending(), limits.call),
     read: (id) => bounded(options.relay.read(id), limits.call),
     exchange: (command) => bounded(options.relay.exchange(command), limits.call),
   };
   const setup = Semaphore.makeUnsafe(1);
   let closed = false;
+  /** Page listeners and the request rows watched for them. A row is watched only while a
+   * listener exists and its requester entry is live; terminal or replaced entries, the
+   * last unsubscribe and disposal release it. */
+  const listeners = new Set<() => void>();
+  const readWatches = new Map<string, () => void>();
+  const wake = () => {
+    if (closed || (account && options.account() !== account)) return;
+    for (const listener of [...listeners]) listener();
+  };
+  const syncReadWatches = () => {
+    const live = new Set<string>();
+    if (!closed && listeners.size > 0 && relay.subscribeRead)
+      for (const value of requesting.values())
+        if (!['joined', 'declined', 'cancelled', 'expired'].includes(value.phase))
+          live.add(value.context.id);
+    for (const [id, release] of readWatches)
+      if (!live.has(id)) {
+        readWatches.delete(id);
+        try {
+          release();
+        } catch {
+          /* A failed release leaves only a hint subscription behind. */
+        }
+      }
+    for (const id of live)
+      if (!readWatches.has(id))
+        try {
+          readWatches.set(id, relay.subscribeRead!(id, wake));
+        } catch {
+          /* Live hints are optional; polling still verifies the same rows. */
+        }
+  };
+  /** Every requester operation may add, replace or end an entry. */
+  const watching = <A>(work: Promise<A>) => work.finally(syncReadWatches);
   let account: string | null = null;
   const check = () =>
     Effect.try({
@@ -225,7 +263,10 @@ export function makeAutomaticPairingRuntime(options: {
     let status = Result.isSuccess(inspected) ? inspected.success : null;
     if (status?.deviceKind === 'personal' && status.hasDeviceCredential && !status.hasCurrentKey) {
       const received = yield* Effect.result(
-        promise(() => runtime.refresh(value.context.workspaceId, { installKeys: true }))
+        // Only this device's own current key; a host without modes runs its full round.
+        promise(() =>
+          runtime.refresh(value.context.workspaceId, { installKeys: true, keyMode: 'receive' })
+        )
       );
       yield* check();
       if (Result.isSuccess(received)) status = received.success;
@@ -526,131 +567,154 @@ export function makeAutomaticPairingRuntime(options: {
     return result;
   });
   return {
-    ...(relay.subscribe
+    ...(relay.subscribe || relay.subscribeRead
       ? {
-          subscribeAutomaticPairing: (changed: () => void) =>
-            relay.subscribe!(() => {
-              if (!closed && (!account || options.account() === account)) changed();
-            }),
+          subscribeAutomaticPairing: (changed: () => void) => {
+            const listener = () => changed();
+            listeners.add(listener);
+            let unsubscribe: (() => void) | undefined;
+            try {
+              unsubscribe = relay.subscribe?.(() => {
+                if (!closed && (!account || options.account() === account)) changed();
+              });
+            } catch (error) {
+              listeners.delete(listener);
+              throw error;
+            }
+            syncReadWatches();
+            return () => {
+              listeners.delete(listener);
+              syncReadWatches();
+              unsubscribe?.();
+            };
+          },
         }
       : {}),
-    startAutomaticPairing: (workspaceId: string) => options.run(start(workspaceId)),
+    startAutomaticPairing: (workspaceId: string) => watching(options.run(start(workspaceId))),
     restartAutomaticPairing: (workspaceId: string, input: { expectedLookupId: string }) =>
-      options.run(
-        Effect.gen(function* () {
-          yield* check();
-          if (!workspace(workspaceId) || !/^[0-9a-f]{32}$/.test(input.expectedLookupId))
-            return yield* Effect.fail(refuse('invalid-input'));
-          const admitted = yield* setup.withPermit(
-            Effect.suspend(() => {
-              const previous = requesting.get(workspaceId);
-              const recovery = Effect.gen(function* () {
-                const current = yield* promise(() => runtime.accountPairingRequest!());
-                yield* check();
-                const joined = (state: typeof current) =>
-                  state?.workspaces.some(
-                    (row) => row.workspaceId === workspaceId && row.state === 'joined'
-                  ) === true;
-                if (current?.status === 'waiting' && !joined(current)) {
-                  if (!current.lookupId || !runtime.cancelAccountPairing)
-                    return yield* Effect.fail(refuse('pairing-update-required'));
-                  if (current.lookupId !== input.expectedLookupId)
-                    return yield* Effect.fail(refuse('pairing-elsewhere'));
-                  yield* promise(() =>
-                    runtime.cancelAccountPairing!({ expectedLookupId: input.expectedLookupId })
-                  );
+      watching(
+        options.run(
+          Effect.gen(function* () {
+            yield* check();
+            if (!workspace(workspaceId) || !/^[0-9a-f]{32}$/.test(input.expectedLookupId))
+              return yield* Effect.fail(refuse('invalid-input'));
+            const admitted = yield* setup.withPermit(
+              Effect.suspend(() => {
+                const previous = requesting.get(workspaceId);
+                const recovery = Effect.gen(function* () {
+                  const current = yield* promise(() => runtime.accountPairingRequest!());
                   yield* check();
-                }
-                // Cancellation is compare-and-set: another window may already have
-                // replaced the displayed request. Never authorize cancelling that one.
-                const after = yield* promise(() => runtime.accountPairingRequest!());
-                yield* check();
-                const completed = joined(current) || joined(after);
-                if (after?.status === 'waiting' && !completed)
-                  return yield* Effect.fail(refuse('pairing-elsewhere'));
-                if (previous) {
-                  previous.phase = 'cancelled';
-                  dispose(previous);
-                  if (requesting.get(workspaceId) === previous) requesting.delete(workspaceId);
-                }
-                // Discovery is advisory. Its old row expires naturally and indexed
-                // server cleanup owns erasure; no cleanup write can undo native cancel.
-                if (completed) {
-                  const hint = workspace(workspaceId)!;
-                  const value = entry(
-                    {
-                      version: 1,
-                      id: id(options.crypto),
-                      accountId: account!,
-                      workspaceId,
-                      genesisHash: hint.genesisHash,
-                      deviceName: options.deviceName,
-                      expiresAt: (yield* now) + 600_000,
-                    },
-                    'requester'
-                  );
-                  value.admitted = true;
-                  value.phase = 'syncing';
-                  requesting.set(workspaceId, value);
-                  return value;
-                }
-              });
-              return previous ? previous.gate.withPermit(recovery) : recovery;
-            })
-          );
-          if (admitted) {
-            yield* admitted.gate.withPermit(updateKeys(admitted));
-            return snapshot(admitted);
-          }
-          return yield* start(workspaceId);
-        })
+                  const joined = (state: typeof current) =>
+                    state?.workspaces.some(
+                      (row) => row.workspaceId === workspaceId && row.state === 'joined'
+                    ) === true;
+                  if (current?.status === 'waiting' && !joined(current)) {
+                    if (!current.lookupId || !runtime.cancelAccountPairing)
+                      return yield* Effect.fail(refuse('pairing-update-required'));
+                    if (current.lookupId !== input.expectedLookupId)
+                      return yield* Effect.fail(refuse('pairing-elsewhere'));
+                    yield* promise(() =>
+                      runtime.cancelAccountPairing!({ expectedLookupId: input.expectedLookupId })
+                    );
+                    yield* check();
+                  }
+                  // Cancellation is compare-and-set: another window may already have
+                  // replaced the displayed request. Never authorize cancelling that one.
+                  const after = yield* promise(() => runtime.accountPairingRequest!());
+                  yield* check();
+                  const completed = joined(current) || joined(after);
+                  if (after?.status === 'waiting' && !completed)
+                    return yield* Effect.fail(refuse('pairing-elsewhere'));
+                  if (previous) {
+                    previous.phase = 'cancelled';
+                    dispose(previous);
+                    if (requesting.get(workspaceId) === previous) requesting.delete(workspaceId);
+                  }
+                  // Discovery is advisory. Its old row expires naturally and indexed
+                  // server cleanup owns erasure; no cleanup write can undo native cancel.
+                  if (completed) {
+                    const hint = workspace(workspaceId)!;
+                    const value = entry(
+                      {
+                        version: 1,
+                        id: id(options.crypto),
+                        accountId: account!,
+                        workspaceId,
+                        genesisHash: hint.genesisHash,
+                        deviceName: options.deviceName,
+                        expiresAt: (yield* now) + 600_000,
+                      },
+                      'requester'
+                    );
+                    value.admitted = true;
+                    value.phase = 'syncing';
+                    requesting.set(workspaceId, value);
+                    return value;
+                  }
+                });
+                return previous ? previous.gate.withPermit(recovery) : recovery;
+              })
+            );
+            if (admitted) {
+              yield* admitted.gate.withPermit(updateKeys(admitted));
+              return snapshot(admitted);
+            }
+            return yield* start(workspaceId);
+          })
+        )
       ),
     automaticPairingState: (workspaceId: string) => {
       const value = requesting.get(workspaceId);
       return value
-        ? options.run(
-            value.gate.withPermit(
-              // A cancellation that held the gate first detached this request.
-              Effect.suspend(() =>
-                requesting.get(workspaceId) === value ? requesterTick(value) : Effect.succeed(null)
+        ? watching(
+            options.run(
+              value.gate.withPermit(
+                // A cancellation that held the gate first detached this request.
+                Effect.suspend(() =>
+                  requesting.get(workspaceId) === value
+                    ? requesterTick(value)
+                    : Effect.succeed(null)
+                )
               )
             )
           )
         : Promise.resolve(null);
     },
     cancelAutomaticPairing: (workspaceId: string) =>
-      options.run(
-        Effect.gen(function* () {
-          yield* check();
-          const value = requesting.get(workspaceId);
-          if (!value) return;
-          // Local state settles under the gate; the relay notice goes out after the
-          // gate is released, so an unreachable relay never blocks a new request.
-          const detached = yield* value.gate.withPermit(
-            Effect.gen(function* () {
-              if (value.admitted) return false;
-              if (value.attempted && value.lookupId)
-                yield* promise(() =>
-                  runtime.cancelAccountPairing!({ expectedLookupId: value.lookupId! })
-                );
-              value.phase = 'cancelled';
-              dispose(value);
-              // A detached request is never read again: the next start makes a fresh
-              // one with its own id and gate, not the dead `cancelled` original.
-              if (requesting.get(workspaceId) === value) requesting.delete(workspaceId);
-              return true;
-            })
-          );
-          if (!detached) return;
-          // Discovery is advisory: an undelivered notice only lets the other device's
-          // copy expire on its own.
-          yield* Effect.result(
-            bounded(
-              options.relay.exchange({ id: value.context.id, terminal: 'cancelled' }),
-              limits.cancelNotice
-            )
-          );
-        })
+      watching(
+        options.run(
+          Effect.gen(function* () {
+            yield* check();
+            const value = requesting.get(workspaceId);
+            if (!value) return;
+            // Local state settles under the gate; the relay notice goes out after the
+            // gate is released, so an unreachable relay never blocks a new request.
+            const detached = yield* value.gate.withPermit(
+              Effect.gen(function* () {
+                if (value.admitted) return false;
+                if (value.attempted && value.lookupId)
+                  yield* promise(() =>
+                    runtime.cancelAccountPairing!({ expectedLookupId: value.lookupId! })
+                  );
+                value.phase = 'cancelled';
+                dispose(value);
+                // A detached request is never read again: the next start makes a fresh
+                // one with its own id and gate, not the dead `cancelled` original.
+                if (requesting.get(workspaceId) === value) requesting.delete(workspaceId);
+                return true;
+              })
+            );
+            if (!detached) return;
+            // Discovery is advisory: an undelivered notice only lets the other device's
+            // copy expire on its own.
+            yield* Effect.result(
+              bounded(
+                options.relay.exchange({ id: value.context.id, terminal: 'cancelled' }),
+                limits.cancelNotice
+              )
+            );
+          })
+        )
       ),
     pendingAutomaticPairing: () => options.run(pending()),
     approveAutomaticPairing: (id: string, enteredCode: string) =>
@@ -727,6 +791,8 @@ export function makeAutomaticPairingRuntime(options: {
       requesting.clear();
       approving.clear();
       notified.clear();
+      listeners.clear();
+      syncReadWatches();
     },
   };
 }

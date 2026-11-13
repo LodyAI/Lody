@@ -32,6 +32,7 @@ import {
 import { fromHex, toHex } from './bytes';
 import { decodeMemberKeyPackage } from './member';
 import { captureSeal, captureOpen, capturePage } from './runtime-input';
+import type { PersonalKeyRoundMode } from './maintenance';
 
 const requesters = new WeakMap<E2eeWorkspaceRuntime, AccountPairingIdentityHost>();
 /** Purpose-bound account-pairing operations on this runtime's existing owned host.
@@ -269,9 +270,12 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     if ((yield* session.status()).usableEpoch === null) return yield* fail('keys-unavailable');
     return undefined;
   });
-  const installKeys = Effect.fnUntraced(function* (session: Session) {
+  const installKeys = Effect.fnUntraced(function* (
+    session: Session,
+    mode: PersonalKeyRoundMode = 'full'
+  ) {
     for (let pass = 0; pass < 4; pass++) {
-      if (!(yield* session.keyRound()).refreshRequired) return undefined;
+      if (!(yield* session.keyRound(mode)).refreshRequired) return undefined;
       yield* session.refresh();
     }
     return undefined;
@@ -367,7 +371,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           yield* Effect.result(
             session.refresh().pipe(Effect.timeoutOption(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))
           );
-        const round = yield* Effect.result(session.keyRound());
+        const round = yield* Effect.result(session.keyRound(retry === 0 ? 'distribute' : 'full'));
         const evidence = yield* Effect.result(session.keyDeliveryEvidence(device));
         if (Result.isSuccess(evidence) && evidence.success === 'delivered') return 'delivered';
         return Result.isSuccess(round) && Result.isSuccess(evidence)
@@ -732,7 +736,8 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               run(Effect.asVoid(lease.session.refresh(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))),
             // The session's existing key round, so an approver can send the device it
             // just admitted the current epoch key. No key or credential leaves.
-            keyRound: () => run(Effect.asVoid(lease.session.keyRound())),
+            keyRound: (mode?: 'full' | 'distribute') =>
+              run(Effect.asVoid(lease.session.keyRound(mode))),
             keyDeliveryEvidence: (device: string) => run(lease.session.keyDeliveryEvidence(device)),
           };
         })
@@ -782,8 +787,12 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       run(
         withSession(id, (session) =>
           Effect.gen(function* () {
+            // Here a refresh without `keyMode` runs a key round only for `installKeys: true`.
+            const mode = input?.keyMode ?? (input?.installKeys ? 'full' : 'none');
+            if (mode !== 'none' && mode !== 'full' && mode !== 'receive' && mode !== 'distribute')
+              return yield* fail('invalid-input');
             yield* session.refresh();
-            if (input?.installKeys) yield* installKeys(session);
+            if (mode !== 'none') yield* installKeys(session, mode);
             return yield* status(session);
           })
         )

@@ -1110,7 +1110,7 @@ it('waits for the current key after account pairing joins this device, and opens
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
   expect(fixture.navigation).toEqual([]);
-  expect(keyRefreshes).toEqual([{ installKeys: true }]);
+  expect(keyRefreshes).toEqual([{ installKeys: true, keyMode: 'receive' }]);
   await act(async () => installKey());
   await act(async () => {});
   expect(fixture.navigation).toEqual([
@@ -1299,16 +1299,16 @@ it('asks for the key once across a remount of the same account and workspace, th
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
-  expect(keyRefreshes).toEqual([{ installKeys: true }]);
+  expect(keyRefreshes).toEqual([{ installKeys: true, keyMode: 'receive' }]);
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
-  expect(keyRefreshes).toEqual([{ installKeys: true }]);
+  expect(keyRefreshes).toEqual([{ installKeys: true, keyMode: 'receive' }]);
   expect(fixture.navigation).toEqual([]);
   await act(async () => keyInstall.resolve());
   await act(async () => {});
-  expect(keyRefreshes).toEqual([{ installKeys: true }]);
+  expect(keyRefreshes).toEqual([{ installKeys: true, keyMode: 'receive' }]);
   expect(fixture.navigation).toEqual([
     { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
   ]);

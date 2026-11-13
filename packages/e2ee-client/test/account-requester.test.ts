@@ -224,6 +224,31 @@ describe('portable account pairing requester', () => {
     );
     expect(withHints.map((item) => item.workspaceId)).toEqual(['w1']);
   });
+
+  it('opens only the workspace hosts a single-workspace or retained request names', async () => {
+    // Each host open reads that workspace's local store; other workspaces stay closed.
+    const opened: string[] = [];
+    const req = makePortableAccountPairingRequester({
+      workspaces: () => [
+        { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+        { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+      ],
+      host: (workspaceId) => {
+        opened.push(workspaceId);
+        return Effect.succeed(null);
+      },
+      history: () => Effect.die('unused'),
+      accountId: 'acc1',
+    });
+    await Effect.runPromise(req(undefined, { workspaceId: 'w1' }));
+    expect(opened).toEqual(['w1']);
+    opened.length = 0;
+    await Effect.runPromise(req(undefined, { geneses: new Set(['22'.repeat(32)]) }));
+    expect(opened).toEqual(['w2']);
+    opened.length = 0;
+    await Effect.runPromise(req());
+    expect(opened).toEqual(['w1', 'w2']);
+  });
 });
 
 describe('account-level runtime', () => {
@@ -255,7 +280,7 @@ describe('account-level runtime', () => {
 describe('portable account pairing approver key delivery', () => {
   /** An approving session whose mailbox never confirms an envelope for the new device. */
   const approverSession = (
-    rounds: { count: number; released?: number },
+    rounds: { count: number; released?: number; modes?: (string | undefined)[] },
     device = 1
   ): AccountPairingApproverSession => ({
     release: () =>
@@ -270,9 +295,10 @@ describe('portable account pairing approver key delivery', () => {
       access: () => Effect.succeed({ workspaceId: 'w1', credential: 'synthetic' }),
     },
     refresh: () => Effect.void,
-    keyRound: () =>
+    keyRound: (mode) =>
       Effect.sync(() => {
         rounds.count += 1;
+        rounds.modes?.push(mode);
       }),
     keyDeliveryEvidence: () => Effect.succeed('e2ee_key_not_sent'),
   });
@@ -325,7 +351,7 @@ describe('portable account pairing approver key delivery', () => {
   });
 
   it('catches up with the ledger before retrying a delivery the mailbox refused as stale', async () => {
-    const rounds = { count: 0 };
+    const rounds = { count: 0, modes: [] as (string | undefined)[] };
     let ledgerCurrent = false;
     const session = {
       ...approverSession(rounds),
@@ -339,6 +365,9 @@ describe('portable account pairing approver key delivery', () => {
     const { events } = await deliver([session, session]);
     expect(events.at(-1)!.state).toBe('delivered');
     expect(rounds.count).toBe(2);
+    // The first attempt only sends from the approving device, which just signed the
+    // admission; a retry runs the full round so a device lacking the key receives it first.
+    expect(rounds.modes).toEqual(['distribute', 'full']);
   });
 
   it('still retries the round when the ledger catch-up fails', async () => {

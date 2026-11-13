@@ -369,7 +369,14 @@ void test('uncertain admission preserves append and reconciliation failures, the
     { warn: (...args) => warnings.push(args) }
   )
   const ipc = new E2eeIpc()
-  ipc.refresh = async () => {}
+  // Admitting the local agent sends only its envelope when this device holds the
+  // current key; a device without it keeps the full round that receives first.
+  const refreshes = []
+  let holdsKey = true
+  ipc.refresh = async (_workspaceId, options) => {
+    refreshes.push(options)
+  }
+  ipc.status = async () => ({ hasCurrentKey: holdsKey })
   const session = '44'.repeat(16)
   await assert.rejects(ipc.prepareLocalAgent('workspace'), (error) => {
     assert.equal(error.message, 'e2ee_local_agent_pending')
@@ -390,11 +397,16 @@ void test('uncertain admission preserves append and reconciliation failures, the
   // The same signed request can have committed despite the failed response.
   // Verified readback on retry wins over that attempt's lost acknowledgement.
   committed = true
+  holdsKey = false
   const result = await ipc.admitLocalAgent('workspace', session)
   assert.equal(result.admitted, true)
   assert.equal(result.ready, true)
   assert.equal(ipc.pairingFailure, undefined)
   assert.deepEqual(submitted, [request, request])
+  assert.deepEqual(
+    refreshes.map((options) => options?.keyMode),
+    ['distribute', 'full']
+  )
   assert.deepEqual(warnings, [])
 })
 
@@ -4897,13 +4909,48 @@ void test('the new device opens the paired workspace and asks for its keys right
     })
   )
   mailboxRequests.length = 0
+  const modes = []
+  const keyRound = newDevice.host.keyRound
+  newDevice.host.keyRound = (...args) => {
+    modes.push(args[4])
+    return keyRound(...args)
+  }
   assert.equal((await Effect.runPromise(requester.accountPairingRequest())).status, 'joined')
-  // Like the per-workspace claim: open, refresh and run a key round with this
-  // device's own credential, without waiting for the workspace to be opened later.
+  // Like the per-workspace claim: open, refresh and receive this device's own key with
+  // its own credential, without waiting for the workspace to be opened later. Reports,
+  // distribution and repair wait for a later full round.
   const credential = await Effect.runPromise(newDevice.bootstrap.deviceCredential(f.workspaceId))
   assert.deepEqual(
     mailboxRequests.map((item) => [item.workspaceId, item.credential]),
     [[f.workspaceId, credential]]
+  )
+  assert.deepEqual(modes, ['receive'])
+})
+
+void test('installing an approval reads only the ledger records after the history the request already verified', async (t) => {
+  // The request verified the full history from genesis; the claim reuses that verified
+  // prefix and downloads only later records instead of paging the whole ledger again.
+  const { f, cloud, requester, approving } = await accountPairingFixture(t)
+  const request = await Effect.runPromise(requester.requestAccountPairing({}))
+  const preview = await Effect.runPromise(approving.inspectAccountPairing(request.pairingString))
+  await Effect.runPromise(
+    approving.approveAccountPairing({
+      pairingString: request.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: [f.workspaceId]
+    })
+  )
+  const read = cloud.history
+  const requests = []
+  cloud.history = (input) => {
+    requests.push({ ...input })
+    return read(input)
+  }
+  assert.equal((await Effect.runPromise(requester.accountPairingRequest())).status, 'joined')
+  assert.ok(requests.length > 0)
+  assert.deepEqual(
+    requests.filter((input) => input.after === undefined && input.cursor === undefined),
+    []
   )
 })
 

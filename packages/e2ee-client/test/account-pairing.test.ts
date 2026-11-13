@@ -830,6 +830,73 @@ describe('portable account pairing workflow', () => {
   );
 });
 
+describe('automatic pairing requester wake-ups', () => {
+  it('watches its own live request row only while a page listens, and releases it when the request ends', async () => {
+    // A requester learns of approval from the relay hint instead of its next poll; the
+    // hint is held only for a live request and never outlives the page or the runtime.
+    const watched = new Map<string, () => void>();
+    let contexts = new Map<string, unknown>();
+    const relay = {
+      subscribeRead: (id: string, changed: () => void) => {
+        watched.set(id, changed);
+        return () => watched.delete(id);
+      },
+      pending: () => Effect.succeed([]),
+      read: () => Effect.succeed(null),
+      exchange: (command: { id: string; context?: unknown; terminal?: string }) => {
+        if (command.context) contexts.set(command.id, command.context);
+        return Effect.succeed({
+          id: command.id,
+          state: command.terminal ?? 'pending',
+          context: contexts.get(command.id),
+        } as unknown as E2eeAutomaticPairingRecord);
+      },
+    };
+    const make = () =>
+      makeAutomaticPairingRuntime({
+        relay,
+        runtime: {
+          requestAccountPairing: async () => {
+            throw new Error('unused');
+          },
+          accountPairingRequest: async () => null,
+          cancelAccountPairing: async () => {},
+        } as unknown as E2eeWorkspaceRuntime,
+        account: () => 'synthetic-account',
+        workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
+        deviceName: 'Synthetic phone',
+        canPresent: () => true,
+        crypto,
+        now: () => 1000,
+        run: Effect.runPromise,
+      });
+    const pairing = make();
+    let wakes = 0;
+    const unsubscribe = pairing.subscribeAutomaticPairing!(() => {
+      wakes += 1;
+    });
+    const started = await pairing.startAutomaticPairing('w1');
+    expect([...watched.keys()]).toEqual([started.id]);
+    watched.get(started.id)!();
+    expect(wakes).toBe(1);
+    await pairing.cancelAutomaticPairing('w1');
+    expect(watched.size).toBe(0);
+
+    await pairing.startAutomaticPairing('w1');
+    expect(watched.size).toBe(1);
+    unsubscribe();
+    expect(watched.size).toBe(0);
+
+    const disposed = make();
+    contexts = new Map();
+    disposed.subscribeAutomaticPairing!(() => {});
+    await disposed.startAutomaticPairing('w1');
+    expect(watched.size).toBe(1);
+    disposed.disposeAutomaticPairing();
+    expect(watched.size).toBe(0);
+  });
+});
+
 describe('automatic device verification before account admission', () => {
   const context = {
     version: 1 as const,

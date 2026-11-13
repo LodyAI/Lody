@@ -466,6 +466,8 @@ export function CloudPlatformProvider({
       relay: {
         subscribe: (changed) =>
           cloudClient.subscribe(cloudOperations.e2eeAutomaticPairing.pending, {}, changed),
+        subscribeRead: (id, changed) =>
+          cloudClient.subscribe(cloudOperations.e2eeAutomaticPairing.read, { id }, changed),
         pending: () =>
           io(() => cloudClient.query(cloudOperations.e2eeAutomaticPairing.pending, {})),
         read: (id) =>
@@ -487,9 +489,24 @@ export function CloudPlatformProvider({
   const e2eeWorkspaces = useMemo(
     () =>
       automaticPairing && baseE2eeWorkspaces.runtime
-        ? { ...baseE2eeWorkspaces, runtime: { ...baseE2eeWorkspaces.runtime, ...automaticPairing } }
+        ? {
+            ...baseE2eeWorkspaces,
+            runtime: {
+              ...baseE2eeWorkspaces.runtime,
+              ...automaticPairing,
+              // A hint only: the host still claims and verifies through its own relay.
+              subscribeAccountPairingRequest: (lookupId: string, changed: () => void) =>
+                /^[0-9a-f]{32}$/.test(lookupId)
+                  ? cloudClient.subscribe(
+                      cloudOperations.e2eeAccountPairing.claim,
+                      { lookupId },
+                      changed
+                    )
+                  : () => {},
+            },
+          }
         : baseE2eeWorkspaces,
-    [automaticPairing, baseE2eeWorkspaces]
+    [automaticPairing, baseE2eeWorkspaces, cloudClient]
   );
 
   const sessionAccess = useMemo(

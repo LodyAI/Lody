@@ -728,14 +728,18 @@ export function E2eeWorkspaceConsole({
     join.failed = false;
     join.request = (async () => {
       try {
-        const first = await runtime.refresh(workspaceId, { installKeys: true });
+        // Only this device's own current key; a host without modes runs its full round.
+        const first = await runtime.refresh(workspaceId, { installKeys: true, keyMode: 'receive' });
         if (!first || first.hasCurrentKey) return true;
         // Instant QR approval delivers mailbox keys asynchronously right after
         // publishing the admission. Poll briefly while the mailbox catches up.
         for (const delay of ACCOUNT_PAIRING_KEY_RETRY_MS) {
           await wait(delay);
           if (cancelled || accountPairingJoins.get(identity) !== join) return false;
-          const next = await runtime.refresh(workspaceId, { installKeys: true });
+          const next = await runtime.refresh(workspaceId, {
+            installKeys: true,
+            keyMode: 'receive',
+          });
           if (!next || next.hasCurrentKey) return true;
         }
         join.failed = true;
