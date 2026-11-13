@@ -23,6 +23,10 @@ rationale: [iroh transport decision](../../.agents/notes/implemented/architectur
 - Absence of the module, relays or a live connection means "use Streams RPC". Never
   let opening, dialing or a failed call delay an available later route, and retry
   only with the same original envelope.
+- Listeners admit at most 64 incoming connections including handshakes, and at
+  most four established connections per EndpointId. Refuse excess connections
+  without spawning waiters. Length headers must not trigger full-body allocation;
+  grow buffers only as payload arrives and reject truncated bodies.
 - Keep the iroh floor at 1.4.1 or later and follow upstream security advisories.
   Mobile bindings must disable port mapping and `fast-apple-datapath`.
   `Cargo.lock` holds `libc` at 0.2.189: 0.2.190 limits `in6_ifreq` to macOS, which
@@ -45,3 +49,18 @@ rationale: [iroh transport decision](../../.agents/notes/implemented/architectur
   ([iroh #4555](https://github.com/n0-computer/iroh/issues/4555)); the Android
   emulator returns EIO and stalled every call past the dispatch deadline. Re-enable
   it only on an iroh release that reads the limit per send.
+
+- `connectionPath` reads `Connection::paths()` and reports only the selected
+  `direct`, `relay` or `none` path. It never dials, waits for a dial, or exposes
+  addresses. Missing host support is an unknown diagnostic, never an RPC failure.
+- Personal clients with telemetry accumulate fixed dispatch/feature counters in
+  device-local storage under a Web Lock, across E2EE workspaces and windows.
+  No completed E2EE RPC means no report checks. Ordinary RPC never counts.
+  Primary totals and kind-prefixed distributions are `iroh_attempts`, `iroh_ready`,
+  `iroh_success`, `streams_attempts`, `streams_success`, `fallback_streams_attempts`,
+  `fallback_streams_success`. Commit each completed route atomically; exclude a
+  cancelled request that never reached Streams. Preserve success <= ready <=
+  attempts and fallback attempts = iroh attempts - iroh success. Streams success
+  requires a verified reply; caller durable dispatch is outside this diagnostic. They
+  enqueue at most one `e2ee/iroh_daily` per 24 hours. Target digests remain local;
+  local OSS composition and machine CLI do no counting or reporting.

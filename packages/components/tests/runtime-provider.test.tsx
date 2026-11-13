@@ -1026,6 +1026,62 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(readers).toEqual(new Set(['other-window']));
   });
 
+  it('keeps an encrypted runtime and its reader when Run local agent changes the sync mode', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    const opened: string[] = [];
+    const closed: string[] = [];
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+      readerOwner: 'this-window',
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async (id: string) => {
+        opened.push(id);
+        return status;
+      },
+      status: async () => status,
+      refresh: async () => status,
+      close: async (id: string) => {
+        closed.push(id);
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    for (const mode of ['dual', 'cloud', 'dual']) {
+      environment.mode = mode;
+      await render();
+    }
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+    expect(opened).toEqual(['local:workspace']);
+    expect(closed).toEqual([]);
+    expect(vi.mocked(createWorkspaceRuntime).mock.calls.map(([options]) => options.syncMode)).toEqual(
+      ['cloud']
+    );
+  });
+
+  it('reopens an ordinary workspace runtime in the sync mode Run local agent selects', async () => {
+    ordinaryCloud();
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    const first = prepared;
+    const next = runtimeFixture();
+    vi.mocked(createWorkspaceRuntime).mockResolvedValue(next as never);
+    environment.mode = 'dual';
+    await render();
+    expect(first.disposed).toBe(true);
+    expect(store.get(runtimeAtom)).toBe(next);
+    expect(vi.mocked(createWorkspaceRuntime).mock.calls.map(([options]) => options.syncMode)).toEqual(
+      ['cloud', 'dual']
+    );
+  });
+
   it('opens an independent ordinary workspace while an encrypted workspace retains incomplete native close', async () => {
     ordinaryCloud();
     listEncrypted();

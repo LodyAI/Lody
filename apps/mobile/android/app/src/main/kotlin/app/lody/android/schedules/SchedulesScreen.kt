@@ -1,5 +1,7 @@
 // The Schedules tab (web `schedule-list.tsx` on mobile) in the Chats list's design language: flat
-// rows grouped by state (needs attention, active, paused, ended) under Chats-style titles. Line 1 is
+// rows grouped as on web into Scheduled tasks and Scheduled messages under Chats-style titles, each
+// group ordered by state (needs attention, active, paused, ended). Ended schedules (they will not run
+// again) stay hidden unless the view menu's Show finished switch is on. Line 1 is
 // the name and the status in words; line 2 is a kind glyph, the frequency and computer · project.
 package app.lody.android.schedules
 
@@ -147,7 +149,7 @@ fun rememberSchedulesState(service: ScheduleService?, scope: RuntimeScope?): Sch
     remember(service, scope) { if (service != null && scope != null) SchedulesState(service, scope) else null }
 
 /**
- * The list under the Home header. [query] filters by title. Row actions follow web: Pause /
+ * The list under the Home header. [query] filters by title; [showFinished] includes ended schedules. Row actions follow web: Pause /
  * Resume for a timed task (owner), Run for a manual one, Delete (always confirmed), and the last
  * run's chat.
  */
@@ -156,6 +158,8 @@ fun rememberSchedulesState(service: ScheduleService?, scope: RuntimeScope?): Sch
 fun SchedulesList(
     state: SchedulesState?,
     query: String,
+    showFinished: Boolean,
+    onShowFinished: () -> Unit,
     padding: PaddingValues,
     onOpen: (ScheduleItem) -> Unit,
     onNew: () -> Unit,
@@ -209,10 +213,18 @@ fun SchedulesList(
             else -> {
                 val needle = query.trim()
                 val searched = list.items.filter { needle.isEmpty() || it.title.contains(needle, ignoreCase = true) }
-                val groups = scheduleGroupOrder.mapNotNull { group ->
-                    searched.filter { it.state.group == group }.takeIf { it.isNotEmpty() }?.let { group to it }
+                val shown = if (showFinished) searched else searched.filter { it.state.group != "ended" }
+                // Tasks, then messages; within each, the state order, keeping the runtime's order inside a state.
+                val groups = listOf(false to R.string.schedules_section_tasks, true to R.string.schedules_section_messages).mapNotNull { (messages, title) ->
+                    val members = shown.filter { it.scheduledMessage == messages }
+                    scheduleGroupOrder.flatMap { group -> members.filter { it.state.group == group } }
+                        .takeIf { it.isNotEmpty() }?.let { title to it }
                 }
-                if (groups.isEmpty()) Message(stringResource(R.string.schedules_search_empty, needle), bottom)
+                if (groups.isEmpty() && searched.isNotEmpty()) Message(
+                    stringResource(R.string.schedules_finished_hidden), bottom, icon = LodyIcons.Clock,
+                    action = stringResource(R.string.schedules_view_show_finished), onAction = onShowFinished,
+                )
+                else if (groups.isEmpty()) Message(stringResource(R.string.schedules_search_empty, needle), bottom)
                 else LazyColumn(Modifier.fillMaxSize(), contentPadding = bottom) {
                     if (failure != null) item(key = "failure") {
                         Text(
@@ -221,8 +233,8 @@ fun SchedulesList(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = LodyLayout.screenPaddingX, vertical = LodySpacing.xs),
                         )
                     }
-                    for ((group, rows) in groups) {
-                        item(key = "group:$group") { SectionTitle(stringResource(groupTitle(group))) }
+                    for ((title, rows) in groups) {
+                        item(key = "group:$title") { SectionTitle(stringResource(title)) }
                         items(rows, key = { it.scheduleId }) { item ->
                             ScheduleRow(item, pending = state.isPending(item.scheduleId), onOpen = { onOpen(item) }, onAction = { run(item, it) }, onDelete = { deleting = item }, onOpenSession = onOpenSession)
                         }
@@ -265,13 +277,6 @@ internal fun rowActions(item: ScheduleItem): List<String> {
         }
         add("delete")
     }
-}
-
-private fun groupTitle(group: String) = when (group) {
-    "attention" -> R.string.schedules_overview_attention
-    "paused" -> R.string.schedules_overview_paused
-    "ended" -> R.string.schedules_overview_ended
-    else -> R.string.schedules_overview_active
 }
 
 /** The Chats tab's group title. */

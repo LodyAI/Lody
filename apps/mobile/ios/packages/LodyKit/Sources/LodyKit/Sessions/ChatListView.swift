@@ -2,7 +2,7 @@ import LodyDesignSystem
 import SwiftUI
 import UIKit
 
-// The iPhone Home list in the mobile design language. Reference design:
+// The Home list in the mobile design language, on iPhone and in the iPad / iPhone Duo split. Reference design:
 // the native mobile chat-list layout.
 //
 // It renders the same `InboxSections` projection as the other list hosts and emits
@@ -36,7 +36,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   /// Repository of each project group's label (project grouping), drawn as its logo.
   private var titleRepositories: [String: String] = [:]
   private let placeholder = UILabel()
-  private let topBackdrop = ChatHeaderBackdrop()
+  private let topBackdrop = LodyPinnedLabelBackdrop()
   private var placeholderText = ""
   var owners: [String: WorkspaceMember] = [:] { didSet { if owners != oldValue { detailsChanged() } } }
   private var details = ChatRowDetails.stored
@@ -45,11 +45,16 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   /// Openers whose nested chats are hidden; default unfolded, as on web. Stored per device.
   private var foldedOpeners = Set(UserDefaults.standard.stringArray(forKey: ChatListView.foldedKey) ?? [])
   private static let foldedKey = "homeFoldedOpeners"
+  /// Home group labels the person collapsed; their headers stay, their rows leave the list.
+  private let groupFolds = ChatGroupFolds()
+  /// Whether the projection has any row, collapsed or not (the empty-state text hides otherwise).
+  private var hasRows = false
   /// UIKit owns a single section header and its push-off at the next section.
-  /// Search labels remain in the flow.
+  /// Search labels remain in the flow and never collapse.
   var pinsGroupLabels = true {
     didSet {
       guard pinsGroupLabels != oldValue else { return }
+      groupFolds.enabled = pinsGroupLabels
       collection.collectionViewLayout.invalidateLayout()
       updateBackdrop()
     }
@@ -67,8 +72,20 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       guard archivedStyle != oldValue else { return }
       backgroundColor = archivedStyle ? LodyUIColor.bgArchived : LodyUIColor.bgBase
       topBackdrop.archived = archivedStyle
+      groupFolds.scope = archivedStyle ? "archived:" : ""
       var snapshot = dataSource.snapshot()
       snapshot.reconfigureItems(snapshot.itemIdentifiers)
+      dataSource.apply(snapshot, animatingDifferences: false)
+    }
+  }
+  /// The conversation shown beside the list (iPad and unfolded iPhone Duo split); it stays highlighted.
+  var selectedRowId = "" {
+    didSet {
+      guard selectedRowId != oldValue else { return }
+      var snapshot = dataSource.snapshot()
+      let affected = snapshot.itemIdentifiers.filter { $0.row == selectedRowId || $0.row == oldValue }
+      guard !affected.isEmpty else { return }
+      snapshot.reconfigureItems(affected)
       dataSource.apply(snapshot, animatingDifferences: false)
     }
   }
@@ -128,8 +145,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       let id = self?.dataSource.sectionIdentifier(for: path.section)
       let title = id.flatMap { self?.titles[$0] } ?? ""
       let repository = id.flatMap { self?.titleRepositories[$0] } ?? ""
+      guard let folds = self?.groupFolds else { return }
       view.contentConfiguration = UIHostingConfiguration {
-        SectionTitle(text: title, repository: repository)
+        SectionTitle(text: title, repository: repository, folds: folds, groupId: id ?? "") { [weak self] in
+          if let id { self?.toggleGroup(id) }
+        }
       }
       .margins(.all, 0)
       view.backgroundConfiguration = .clear()
@@ -196,6 +216,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     sectionGeneration += 1
     let generation = sectionGeneration
     lastSections = sections
+    hasRows = sections.contains { !$0.rows.isEmpty }
     var snapshot = NSDiffableDataSourceSnapshot<String, Item>()
     var next: [Item: Entry] = [:]
     var nextTitles: [String: String] = [:]
@@ -209,6 +230,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
          let repository = section.rows.first?.repository, !repository.isEmpty {
         nextRepositories[section.id] = repository
       }
+      // A collapsed group keeps its label, which UIKit still lays out for an empty section.
+      if !(nextTitles[section.id] ?? "").isEmpty, groupFolds.isCollapsed(section.id) { continue }
       let children = section.rows.contains { !$0.parent }
       for row in section.rows {
         let item = Item(section: section.id, row: row.id)
@@ -261,7 +284,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     let snapshot = dataSource.snapshot()
     let sections = Dictionary(lastSections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let items: [InboxProjectIndex.Item] = projectIndexEnabled ? snapshot.sectionIdentifiers.compactMap { id in
-      guard let section = sections[id], snapshot.numberOfItems(inSection: id) > 0 else { return nil }
+      // Collapsed groups have no items but stay destinations through their label.
+      guard let section = sections[id] else { return nil }
       let tints = section.rows.flatMap { [$0.imageTint, $0.collapsedImageTint] }
       let tint = ["danger", "warning", "blue"].first(where: tints.contains)
         ?? (section.rows.contains(where: \.unread) ? "blue" : "")
@@ -303,17 +327,25 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   private func jumpToSection(_ id: String) {
     guard projectIndexEnabled, !applyingSections else { return }
     let snapshot = dataSource.snapshot()
-    guard snapshot.sectionIdentifiers.contains(id), let item = snapshot.itemIdentifiers(inSection: id).first,
-      let path = dataSource.indexPath(for: item),
-      let attributes = collection.layoutAttributesForItem(at: path) else { return }
+    guard let sectionIndex = snapshot.indexOfSection(id) else { return }
     // Item geometry is unpinned and belongs to the committed snapshot. Never query
     // supplementary attributes with a path retained across a diffable update.
-    let headerHeight = collection.collectionViewLayout.layoutAttributesForSupplementaryView(
-      ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: path.section)
-    )?.frame.height ?? 0
+    let header = collection.collectionViewLayout.layoutAttributesForSupplementaryView(
+      ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: sectionIndex)
+    )
+    let top: CGFloat
+    if let item = snapshot.itemIdentifiers(inSection: id).first, let path = dataSource.indexPath(for: item),
+       let attributes = collection.layoutAttributesForItem(at: path) {
+      top = attributes.frame.minY - (header?.frame.height ?? 0)
+    } else if let header, snapshot.numberOfItems(inSection: id) == 0 {
+      // A collapsed group has only its label; with no rows below it the label is not pinned.
+      top = header.frame.minY
+    } else {
+      return
+    }
     let lower = -collection.adjustedContentInset.top
     let upper = max(lower, collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
-    let y = min(upper, max(lower, attributes.frame.minY - headerHeight - collection.adjustedContentInset.top))
+    let y = min(upper, max(lower, top - collection.adjustedContentInset.top))
     collection.setContentOffset(CGPoint(x: collection.contentOffset.x, y: y), animated: false)
     collection.layoutIfNeeded()
   }
@@ -324,32 +356,14 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     setSections(lastSections)
   }
 
-  /// One continuous backdrop runs from the pinned label to the window top.
-  /// Keep UIKit's original supplementary label, including its native push-off.
+  /// The label's chevron turns while the group's rows animate out of or into the list.
+  private func toggleGroup(_ id: String) {
+    groupFolds.toggle(id)
+    setSections(lastSections)
+  }
+
   private func updateBackdrop() {
-    let top = collection.contentOffset.y + collection.adjustedContentInset.top
-    // At rest the first label already sits at the top edge; it only counts as pinned (and
-    // brings the blur) once content has actually scrolled under it.
-    let scrolled = top > 0.5
-    // During a diffable update UIKit can still display headers from the old snapshot.
-    // Their index paths are not valid in the new layout. Read the actual visible views'
-    // frames instead of asking UICollectionView to resolve transitional index paths.
-    let headers = collection.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionHeader)
-    let active = headers.filter { header in
-      pinsGroupLabels && scrolled && header.frame.minY <= top + 1
-    }.max { $0.frame.minY < $1.frame.minY }
-    // A departing header falls behind the continuous backdrop as it moves above the slot.
-    for header in headers {
-      header.layer.zPosition = pinsGroupLabels && header.frame.minY < top - 1 ? 0 : 2
-    }
-    // A second system edge would introduce a seam in the middle of the gradient.
-    collection.topEdgeEffect.isHidden = active != nil
-    topBackdrop.isHidden = active == nil
-    if let header = active {
-      topBackdrop.frame = CGRect(x: collection.bounds.minX, y: collection.bounds.minY,
-                                width: collection.bounds.width,
-                                height: collection.adjustedContentInset.top + header.frame.height + LodySpacing.xxl)
-    }
+    topBackdrop.update(in: collection, pinsLabels: pinsGroupLabels)
   }
 
   private static func same(_ a: LodyListRow, _ b: LodyListRow, _ ea: Bool?, _ eb: Bool?) -> Bool {
@@ -361,7 +375,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 
   private func updatePlaceholder() {
     placeholder.text = placeholderText
-    placeholder.isHidden = !entries.isEmpty || placeholderText.isEmpty
+    placeholder.isHidden = hasRows || placeholderText.isEmpty
   }
 
   // MARK: Cells
@@ -369,20 +383,28 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   private func configure(_ cell: UICollectionViewListCell, _ item: Item) {
     guard let entry = entries[item] else { return }
     let muted = archivedStyle
+    let current = entry.kind == .session && entry.row.id == selectedRowId
     let emit: (String) -> Void = { [weak self] action in
       self?.forwarded?("rowAction", ["id": entry.row.id, "actionId": action])
     }
     cell.contentConfiguration = UIHostingConfiguration {
+      // UI Verify and VoiceOver tooling address rows by their stable row id.
       switch entry.kind {
-      case .header: GroupHeader(row: entry.row, expanded: entry.expanded, canToggle: entry.canToggle, onAction: emit)
-      case .link: GroupHeader(row: entry.row, expanded: nil, canToggle: false, onAction: emit)
+      case .header:
+        GroupHeader(row: entry.row, expanded: entry.expanded, canToggle: entry.canToggle, onAction: emit)
+          .accessibilityIdentifier(entry.row.id)
+      case .link:
+        GroupHeader(row: entry.row, expanded: nil, canToggle: false, onAction: emit)
+          .accessibilityIdentifier(entry.row.id)
       case .session:
         ChatRowContent(
           row: entry.row, details: details, owner: owners[entry.row.id], muted: muted,
           expanded: entry.canToggle ? entry.expanded : nil,
           onToggle: { [weak self] in self?.toggleOpener(entry.row.id) }
         )
-      case .more: MoreRowContent(title: entry.row.title)
+        .accessibilityAddTraits(current ? .isSelected : [])
+        .accessibilityIdentifier(entry.row.id)
+      case .more: MoreRowContent(title: entry.row.title).accessibilityIdentifier(entry.row.id)
       }
     }
     .margins(.all, 0)
@@ -391,9 +413,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     // iOS highlights rows on press; Android uses ripple.
     // The archived page is already as grey as fill.pressed, so it highlights with a translucent fill.
     let pressed = archivedStyle ? LodyUIColor.fillSelected : LodyUIColor.fillPressed
+    cell.accessibilityIdentifier = entry.row.id
+    cell.accessibilityTraits = current ? [.button, .selected] : .button
     cell.configurationUpdateHandler = { cell, state in
       var background = UIBackgroundConfiguration.clear()
-      background.backgroundColor = state.isHighlighted || state.isSelected ? pressed : .clear
+      background.backgroundColor = state.isHighlighted || state.isSelected ? pressed : current ? LodyUIColor.fillSelected : .clear
       cell.backgroundConfiguration = background
     }
   }
@@ -447,93 +471,6 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       })
     }
   }
-}
-
-/// Keep a blurred base under the upper gradient: fading a single blur view mixes
-/// sharp source text back in. Only the tail below the label fades to clear.
-private final class ChatHeaderBackdrop: UIView {
-  private let base = ChatBlurLayer(intensity: 0.2)
-  private let upper = ChatBlurLayer(intensity: 0.75)
-  var archived = false { didSet { if archived != oldValue { updateTone() } } }
-
-  init() {
-    super.init(frame: .zero)
-    isUserInteractionEnabled = false
-    addSubview(base)
-    addSubview(upper)
-    updateTone()
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: ChatHeaderBackdrop, _: UITraitCollection) in
-      view.updateTone()
-    }
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) { fatalError() }
-
-  private func updateTone() {
-    let dark = traitCollection.userInterfaceStyle == .dark
-    // Dark mode keeps its page tint; light mode tints only the archived page's grey.
-    let page = archived ? LodyUIColor.bgArchived : LodyUIColor.bgBase
-    let (baseAlpha, upperAlpha): (CGFloat, CGFloat) = if dark {
-      (0.1, 0.3)
-    } else if archived {
-      (0.3, 0.6)
-    } else {
-      (0, 0)
-    }
-    base.contentView.backgroundColor = baseAlpha > 0 ? page.withAlphaComponent(baseAlpha) : .clear
-    upper.contentView.backgroundColor = upperAlpha > 0 ? page.withAlphaComponent(upperAlpha) : .clear
-  }
-
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    base.frame = bounds
-    upper.frame = bounds
-    let labelEnd = max(0, min(1, (bounds.height - LodySpacing.xxl) / max(1, bounds.height)))
-    base.setFade(colors: [1, 0.85, 0], locations: [0, labelEnd, 1])
-    upper.setFade(colors: [1, 0, 0], locations: [0, labelEnd, 1])
-  }
-}
-
-private final class ChatBlurLayer: UIVisualEffectView {
-  private let fadeView = ChatBlurMask()
-  private var animator: UIViewPropertyAnimator?
-  private var lastSize = CGSize.zero
-  private var lastLocations: [CGFloat] = []
-
-  init(intensity: CGFloat) {
-    super.init(effect: nil)
-    let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { [weak self] in
-      self?.effect = UIBlurEffect(style: .regular)
-    }
-    animator.pausesOnCompletion = true
-    animator.fractionComplete = intensity
-    self.animator = animator
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) { fatalError() }
-
-  isolated deinit { animator?.stopAnimation(true) }
-
-  func setFade(colors: [CGFloat], locations: [CGFloat]) {
-    guard lastSize != bounds.size || lastLocations != locations else { return }
-    lastSize = bounds.size
-    lastLocations = locations
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    fadeView.frame = bounds
-    let gradient = fadeView.layer as! CAGradientLayer
-    gradient.colors = colors.map { UIColor.black.withAlphaComponent($0).cgColor }
-    gradient.locations = locations.map { NSNumber(value: Double($0)) }
-    mask = nil
-    mask = fadeView
-    CATransaction.commit()
-  }
-}
-
-private final class ChatBlurMask: UIView {
-  override class var layerClass: AnyClass { CAGradientLayer.self }
 }
 
 // MARK: - Content
@@ -884,30 +821,78 @@ private struct MoreRowContent: View {
   }
 }
 
+/// Home group labels the person collapsed, stored per device by section id. Headers observe it,
+/// so a toggle turns the chevron of the label already on screen.
+@MainActor @Observable
+private final class ChatGroupFolds {
+  private static let key = "homeCollapsedGroups"
+  private var collapsed = Set(UserDefaults.standard.stringArray(forKey: ChatGroupFolds.key) ?? [])
+  /// Home labels collapse; search labels do not.
+  var enabled = true
+  /// Archived buckets reuse the activity ids, so they fold separately.
+  var scope = ""
+
+  func isCollapsed(_ id: String) -> Bool { enabled && collapsed.contains(scope + id) }
+
+  func toggle(_ id: String) {
+    let key = scope + id
+    if collapsed.remove(key) == nil { collapsed.insert(key) }
+    UserDefaults.standard.set(Array(collapsed).sorted(), forKey: Self.key)
+  }
+}
+
 private struct SectionTitle: View {
   let text: String
   var repository = ""
+  let folds: ChatGroupFolds
+  let groupId: String
+  let onToggle: () -> Void
 
   var body: some View {
     if text.isEmpty {
       Color.clear.frame(height: LodySpacing.sm)
-    } else {
-      HStack(spacing: LodySpacing.xs) {
-        if !repository.isEmpty {
-          // The project's logo in its original colours, unlike the muted row marks.
-          RepositoryIcon(repository: repository, muted: false)
-        }
-        Text(text)
-          .lodyTextStyle(.groupLabel)
-          .foregroundStyle(LodyColor.textTertiary)
+    } else if folds.enabled {
+      let collapsed = folds.isCollapsed(groupId)
+      Button(action: onToggle) {
+        label(chevron: collapsed)
+          .contentShape(Rectangle())
       }
-      .padding(.horizontal, LodyLayout.listEdgeX)
-      .padding(.top, LodySpacing.xs)
-      .padding(.bottom, LodySpacing.xs)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .buttonStyle(.plain)
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(.isHeader)
+      .accessibilityValue(String(localized: String.LocalizationValue(collapsed ? "native.list.collapsed" : "native.list.expanded"), bundle: .lody))
+      .accessibilityIdentifier("label:" + groupId)
+    } else {
+      label(chevron: nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("label:" + groupId)
     }
+  }
+
+  /// `chevron` is the collapsed state when the group can fold: pointing down while open, right when collapsed.
+  private func label(chevron collapsed: Bool?) -> some View {
+    HStack(spacing: LodySpacing.xs) {
+      if !repository.isEmpty {
+        // The project's logo in its original colours, unlike the muted row marks.
+        RepositoryIcon(repository: repository, muted: false)
+      }
+      Text(text)
+        .lodyTextStyle(.groupLabel)
+        .foregroundStyle(LodyColor.textTertiary)
+      if let collapsed {
+        Image(systemName: "chevron.right")
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(LodyColor.textTertiary)
+          .rotationEffect(.degrees(collapsed ? 0 : 90))
+          .animation(LodySpring.snappy, value: collapsed)
+          .accessibilityHidden(true)
+      }
+    }
+    .padding(.horizontal, LodyLayout.listEdgeX)
+    .padding(.top, LodySpacing.xs)
+    .padding(.bottom, LodySpacing.xs)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 

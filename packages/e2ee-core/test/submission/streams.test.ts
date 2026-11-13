@@ -11,18 +11,30 @@ import {
   makeStreamsLedgerLog,
   makeLedgerStreamReader,
 } from '@lody/e2ee-core/adapters/loro-streams';
-import { LedgerLog } from '@lody/e2ee-core/services';
+import { LedgerLog, SubmissionJournal } from '@lody/e2ee-core/services';
 import { submitRecord, resumeSubmission } from './fixture';
 import { sqliteSubmissionJournal } from '@lody/e2ee-core/adapters/node-sqlite';
 import { frameLedgerRecord } from '@lody/e2ee-core/protocol';
 import { extendLedger, hashRecordBytes, requireLedgerContinuation } from '@lody/e2ee-core/protocol';
-import { anchor, checkpoint, genesis, host, rotate, filled, owner, signed } from './fixture';
+import {
+  anchor,
+  checkpoint,
+  genesis,
+  host,
+  rotate,
+  filled,
+  owner,
+  signed,
+  selfAdmission,
+} from './fixture';
 import { Bytes } from '@lody/e2ee-core/protocol';
 const ok = Result.getOrThrow;
 async function localHost() {
   const dir = mkdtempSync(path.join(tmpdir(), 'submission-sdk-')),
     store = host(path.join(dir, 'host.sqlite'));
   let mode:
+    | 'quota'
+    | 'generic-quota'
     | 'normal'
     | 'lost-ack'
     | 'unsupported'
@@ -98,6 +110,16 @@ async function localHost() {
               ? req.headers['stream-expected-offset']
               : null;
         requests.push({ expected, body });
+        if (mode === 'quota' || mode === 'generic-quota') {
+          res.writeHead(429, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: mode === 'quota' ? 'self-service-rate-limited' : 'upstream-busy',
+              retryAt: 3600000,
+            })
+          );
+          return;
+        }
         if (mode === 'unsupported') {
           send(res, 501, tail());
           return;
@@ -523,3 +545,43 @@ describe('released SDK CAS bound to independently verified ledger endpoint', () 
     }
   });
 });
+
+it.each(['quota', 'generic-quota'] as const)(
+  'qualifies an actual SDK HTTP %s response before releasing a fresh self-service original',
+  async (mode) => {
+    const f = await localHost();
+    try {
+      f.mode(mode);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const log = yield* f.make();
+            const result = yield* Effect.result(
+              submitRecord(anchor, selfAdmission()).pipe(Effect.provideService(LedgerLog, log))
+            );
+            expect(Result.isFailure(result) && result.failure).toMatchObject({
+              reason: mode === 'quota' ? 'self-service-rate-limited' : 'unconfirmed',
+            });
+            const journal = yield* SubmissionJournal;
+            const entry = yield* journal.load(anchor);
+            expect(entry.record).toEqual(mode === 'quota' ? null : selfAdmission());
+            expect(f.store.read()).toEqual([genesis]);
+            if (mode === 'quota') {
+              f.mode('normal');
+              const governance = yield* submitRecord(anchor, rotate()).pipe(
+                Effect.provideService(LedgerLog, log)
+              );
+              expect(governance.outcome).toBe('Committed');
+            }
+          }).pipe(
+            Effect.provide(
+              sqliteSubmissionJournal({ path: path.join(f.dir, 'quota-journal.sqlite') })
+            )
+          )
+        )
+      );
+    } finally {
+      await f.close();
+    }
+  }
+);

@@ -176,4 +176,39 @@ class AgentSettingsTest {
         assertEquals(listOf(provider, otherProvider).toSet(), state.snapshot!!.providers.toSet())
     }
 
+
+    @Test fun modelRefreshNamesTheModelBeingReadAndRereadsTheList() = runTest {
+        val reading = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        var lists = 0
+        val state = AgentSettingsState(object : AgentProviderService {
+            override suspend fun perform(scope: RuntimeScope, action: ProviderAction): AgentProviders {
+                check(action == ProviderAction.List || action is ProviderAction.ListMachine) { "refresh must not write the list" }
+                lists += 1
+                return snapshot()
+            }
+            override suspend fun refreshModels(scope: RuntimeScope, machineId: String, id: String): ProviderProbe {
+                reading.complete(Unit)
+                finish.await()
+                return ProviderProbe(true, false, ProviderCapabilities())
+            }
+        }, scope)
+        state.refresh()
+        val pending = async { state.refreshModels(provider) }
+        reading.await()
+        assertEquals(provider.id, state.refreshing)
+        // Another provider's frame is ignored; this one names the model.
+        state.onRefreshProgress(RuntimeEvent.ProviderRefreshProgress(machine.id, "other", "Other", 1, 2))
+        assertNull(state.refreshProgress)
+        val frame = RuntimeEvent.ProviderRefreshProgress(machine.id, provider.id, "GPT-6 Astra", 2, 7)
+        state.onRefreshProgress(frame)
+        assertEquals(frame, state.refreshProgress)
+        assertFalse("a second refresh waits for the first", state.refreshModels(provider))
+        finish.complete(Unit)
+        assertTrue(pending.await())
+        assertNull(state.refreshing)
+        assertNull(state.refreshProgress)
+        assertEquals(2, lists)
+        assertTrue(state.canManage(machine))
+    }
 }

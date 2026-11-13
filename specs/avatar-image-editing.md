@@ -8,8 +8,8 @@ Translation: current
 ## Scenario
 
 When a user chooses a user or workspace avatar, the editor opens before any
-network request. The user can drag the image and adjust its zoom inside a fixed
-square selection, then either cancel or confirm the result. A confirmed edit is
+network request. The user can drag a square selection box over the image and resize it by its
+corners, then either cancel or confirm the result. A confirmed edit is
 uploaded through the existing avatar endpoint and becomes the new avatar only
 after the upload and persistence callback succeeds.
 
@@ -35,7 +35,7 @@ and externally uploaded avatars.
 ## Interactions
 
 The editor is modal and owns a temporary object URL for the selected file. The
-zoom slider and pointer/keyboard crop interactions update local state only. The
+selection box pointer and keyboard interactions update local state only. The
 confirm action is disabled until the cropper reports a pixel area, and it stays
 busy while the canvas export and upload are in progress. The same file can be
 selected again after cancellation because the file input is cleared after every

@@ -7,6 +7,7 @@ import { encodeCbor } from '@lody/e2ee-core/protocol';
 
 import { hashRecordBytes } from '@lody/e2ee-core/protocol';
 import {
+  verifyLedger,
   prepareDeviceAdmission,
   prepareJoinRequest,
   prepareLedgerCommand,
@@ -176,6 +177,7 @@ describe('genuine ledger Lab gateway policy (HTTP authentication not implemented
               'unauthorized'
             );
             const gateway = yield* makeLabControlGateway({
+              quotaPath: join(f.dir, 'ledger-quota.sqlite'),
               genesis: f.anchor,
               stream,
               checkpoint: () =>
@@ -257,7 +259,7 @@ describe('genuine ledger Lab gateway policy (HTTP authentication not implemented
             const machineConsent = yield* prepareDeviceAdmission({
               genesis: f.anchor,
               membershipId: f.membership,
-              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(151))),
+              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(51))),
               kind: 'machine',
               machineId: 'synthetic-machine',
               signer: replacement,
@@ -334,6 +336,7 @@ describe('public submission consumer behind the Lab control gateway', () => {
         Effect.scoped(
           Effect.gen(function* () {
             const gateway = yield* makeLabControlGateway({
+              quotaPath: join(f.dir, 'ledger-quota.sqlite'),
               genesis: f.anchor,
               stream,
               checkpoint: () =>
@@ -401,4 +404,107 @@ describe('public submission consumer behind the Lab control gateway', () => {
       await f.close();
     }
   });
+});
+
+it('persists per-membership hourly/daily self-service quotas, exempts management and preserves exact retries', async () => {
+  const f = await fixture();
+  const records = [...f.records];
+  let now = 1000,
+    failBeforeAppend = true;
+  const checkpoint = () => ({ head: hashRecordBytes(records.at(-1)!), length: records.length });
+  const view = () => ok(verifyLedger({ anchor: f.anchor, records, checkpoint: checkpoint() }));
+  const stream = {
+    read: f.sdk.read.bind(f.sdk),
+    appendCas: async (input: Parameters<LedgerSubmissionStream['appendCas']>[0]) => {
+      if (failBeforeAppend) {
+        failBeforeAppend = false;
+        throw new Error('unknown dispatch');
+      }
+      const output = await f.sdk.appendCas(input);
+      if (output.ok && output.result.kind === 'ok')
+        records.push(new Uint8Array(input.part.body.subarray(4)));
+      return output;
+    },
+  };
+  const config = {
+    quotaPath: join(f.dir, 'quota.sqlite'),
+    genesis: f.anchor,
+    stream,
+    checkpoint: () => Effect.sync(checkpoint),
+    now: () => now,
+    budget: { maxRecords: 100, maxBytes: 1024 * 1024 },
+  };
+  const request = (record: Uint8Array) => ({
+    authenticatedCredential: { device: f.owner.publicKey, genesis: f.anchor },
+    requestGenesis: f.anchor,
+    record,
+  });
+  let seed = 1,
+    refused: Uint8Array;
+  const candidate = Effect.fnUntraced(function* () {
+    const signer = syntheticSigner(++seed + 100);
+    const consent = yield* prepareDeviceAdmission({
+      genesis: f.anchor,
+      membershipId: f.membership,
+      signer,
+      kind: 'personal',
+      encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(seed))),
+    });
+    return yield* signLedgerRecord(
+      ok(prepareLedgerCommand(view(), f.owner.publicKey, consent)),
+      f.owner
+    );
+  });
+  const limited = (result: Result.Result<unknown, unknown>, retryAt: number) => {
+    expect(Result.isFailure(result) && result.failure).toMatchObject({
+      code: 'self-service-rate-limited',
+      retryAt,
+    });
+  };
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const gateway = yield* makeLabControlGateway(config);
+          const first = yield* candidate();
+          expect(Result.isFailure(yield* Effect.result(gateway.append(request(first))))).toBe(true);
+          yield* gateway.append(request(first));
+          now = 999; // NTP rollback: the second admission clamps to the persisted 1000.
+          for (let i = 1; i < 10; i++) yield* gateway.append(request(yield* candidate()));
+          refused = yield* candidate();
+          limited(yield* Effect.result(gateway.append(request(refused))), 3601000);
+          const management = yield* signLedgerRecord(
+            ok(
+              prepareLedgerCommand(view(), f.owner.publicKey, {
+                _tag: 'DeclareCapabilities',
+                capabilities: [1],
+              })
+            ),
+            f.owner
+          );
+          yield* gateway.append(request(management));
+          refused = yield* candidate();
+        })
+      )
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const gateway = yield* makeLabControlGateway(config);
+          limited(yield* Effect.result(gateway.append(request(refused!))), 3601000);
+          for (let hour = 1; hour <= 2; hour++) {
+            now = 1000 + hour * 3600000;
+            for (let i = 0; i < 10; i++) yield* gateway.append(request(yield* candidate()));
+          }
+          refused = yield* candidate();
+          limited(yield* Effect.result(gateway.append(request(refused))), 86401000);
+          now = 86401000;
+          yield* gateway.append(request(refused));
+          expect(records.length).toBe(f.records.length + 32);
+        })
+      )
+    );
+  } finally {
+    await f.close();
+  }
 });

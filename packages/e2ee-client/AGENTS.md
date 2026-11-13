@@ -34,6 +34,21 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Replacement verifies new desktop approval, drains the old incarnation and uses
   the approved atomic archive/current switch. Preserve old pins, wrappers and
   journals. Logout, close and ordinary cache cleanup never delete identity.
+- Exact access loss comes only from the session's verified ledger classifying its own
+  key as revoked or member-removed, or from a trusted adapter's typed
+  `PersonalAccessLoss`; the runtime boundary projects either to `e2ee_device_revoked`
+  or `e2ee_member_removed`. Messages, codes and transport, JWT or parse failures never
+  do. Opens and admitted operations refuse such a device; ledger reads stay usable, and
+  a confirmed self-revocation still reports success.
+- A revoked device keeps its identity until replaced. A new personal offer prepares a
+  replacement identity. Account pairing prepares one only when the complete history,
+  verified from the pinned genesis, classifies the current identity as lost; its offer
+  session derives from the replaced key, so the revoked key is never reused.
+- Each remote round under a serial permit is bounded (`boundedBy`, injectable sleep):
+  at the deadline it is interrupted, releases the permit and fails as `network`. Its
+  outcome is unknown: retained originals and journals stay, and the retry resends or
+  resumes them. Governance commands settle a journaled original first and never sign
+  the same command again.
 - RPC exposes the existing closed product methods and exact original retries,
   never private keys, credentials or generic signing to product callers. Real
   injected implementations are required; no empty handler substitutes for support.
@@ -59,6 +74,8 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - `personalRuntimeRecovery` exposes only closed setup/restore commands on the
   existing owned host. Setup requires an active reader; callers release only
   their own reader. Recovery failure never retires unrelated content readers.
+  Setup serializes per session without holding the session round permit across
+  caller vault or submission I/O; caller restore page streams own their transport deadlines.
 
 - Member approval on the portable runtime uses the optional `members` platform port with
   the session's own credential. A listed key package is pinned per session; approval
@@ -94,6 +111,16 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   only `cancelled` writes the terminal receipt that settles it. The old credential is
   pinned to that membership, so the new one gets a replacement identity, activated only
   after its own verified admission. An admitted or still-live join keeps refusing.
-- Automatic pairing approval signs only after the person types the code the new
-  device shows and it equals this device's derived code. Reviews never expose that
-  code, and the third wrong entry ends the request on the approver before any signing.
+- Automatic pairing approval signs only after the person enters the code the new
+  device shows, typed or scanned from that screen, and it equals this device's derived
+  code. Reviews never expose that code, and the third wrong entry ends the request on
+  the approver before any signing. A request verified under an approver's own shown
+  account pairing QR code is signed for every listed workspace without another
+  confirmation; showing it on a computer as a request arrives is an owner decision.
+  An approver publishes only once every workspace it admitted has its invitation, so
+  the requester's `omitted` coverage is exact.
+
+- Management exposes last-personal-device risk from the verified ledger and requires
+  explicit recovery-only confirmation before signing its revocation. Restores report
+  partial epoch-key recovery separately from admission and content readiness, and
+  retain its retryable journal until the current epoch key is installed.

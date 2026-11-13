@@ -54,8 +54,8 @@ body.flex-col {
   color: hsl(205 100% 96%);
   --site-content-max: 1200px;
   --site-content-width: min(var(--site-content-max), 92vw);
-  --lody-docs-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    sans-serif;
+  --lody-docs-font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --lody-docs-font-heading: var(--lody-docs-font-sans);
   --landing-ink: 205 100% 96%;
   --landing-ink-muted: 203 38% 78%;
@@ -333,6 +333,10 @@ html.light .underwater-hero__lead {
 
 .underwater-hero__cta-links {
   gap: 0.4rem 0.55rem;
+}
+
+.underwater-hero__github-mobile {
+  display: none;
 }
 
 .underwater-hero__more {
@@ -618,6 +622,28 @@ html.light .underwater-hero__lead {
   .underwater-hero__cta-wrap {
     margin-top: 0.2rem;
     gap: 0.5rem;
+    width: min(100%, 24rem);
+  }
+
+  .underwater-hero__cta {
+    width: 100%;
+    gap: 0.65rem;
+  }
+
+  .underwater-hero__cta > .underwater-btn {
+    width: 100%;
+  }
+
+  .underwater-hero__cta > .underwater-hero__github-desktop {
+    display: none;
+  }
+
+  .underwater-hero__github-mobile {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2.75rem;
+    margin-right: 0.65rem;
   }
 
   .underwater-hero__scroll-hint {

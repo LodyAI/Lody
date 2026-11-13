@@ -40,7 +40,9 @@ import type { MessageAuthor, AgentMessageAuthor } from '@lody/shared';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   getDeclaredModelControls,
-  getModelEffortChoices,
+  getAcpModelEffortChoices,
+  getAcpModelFastSupport,
+  withAcpConfigOptionsForModel,
   machineSupportsPreparedSessionInputProtocol,
   machineSupportsMemoryProviders,
   resolveNewSessionHistoryBackend,
@@ -195,26 +197,32 @@ export type DelegatedSessionRequester = {
 
 /** Delegation without provenance must never be recorded as human input. */
 /**
- * Encrypted workspaces: classify an Agent-delegated input before writing it. Owner
- * work is unchanged; a shared member's derivation returns the origin to record as
- * the signed `derivedFrom`, so the start re-authorizes that member. Anything the
- * daemon cannot verify is refused rather than written as machine-owned work.
+ * Classify encrypted delegation before writing. Same-machine inputs retain the
+ * signed human root and verified principal. Cross-machine Owner work keeps the
+ * machine-signed path; unverifiable origins refuse.
  */
 async function classifyDelegatedEncryptedInput(
   manager: LoroDocumentManager,
   delegatedRequester: DelegatedSessionRequester | undefined,
-  targetMachineId: string
-): Promise<{ sessionId: string; userTurnId: string } | undefined> {
+  targetMachineId: string,
+  userTurnId: string
+): Promise<
+  | { principal: 'owner' | 'member'; derivedFrom?: { sessionId: string; userTurnId: string } }
+  | undefined
+> {
   if (!delegatedRequester || !manager.isEncryptedWorkspace()) return undefined;
   const author = delegatedRequester.author;
   const daemon = getDaemonWorkspace();
   if (!author || !daemon?.classifyEncryptedDerivation || daemon.manager !== manager)
     throw new Error('e2ee_derivation_unavailable');
   const origin = { sessionId: author.sessionId, userTurnId: author.turnId };
-  return (await daemon.classifyEncryptedDerivation(origin, { machineId: targetMachineId })) ===
-    'member'
-    ? origin
-    : undefined;
+  const resolved = await daemon.classifyEncryptedDerivation(origin, {
+    machineId: targetMachineId,
+    userTurnId,
+  });
+  return resolved === 'owner'
+    ? { principal: 'owner' }
+    : { principal: resolved.principal, derivedFrom: resolved.origin };
 }
 
 const resolveSessionInputAuthor = (
@@ -1525,7 +1533,7 @@ export async function appendUserPromptHistory(args: {
   knownHistory?: readonly SessionHistory[];
   /** Offer the turn to a running turn: write `pending_apply` without activation. */
   steer?: boolean;
-  /** Encrypted shared-member derivation origin; part of the signed input. */
+  /** Encrypted same-machine derivation root; part of the signed input. */
   derivedFrom?: { sessionId: string; userTurnId: string };
   /** Encrypted: this machine's signed intent for the input, written in the same commit. */
   signMachineInput?: (input: {
@@ -2003,10 +2011,13 @@ function validateModelDependentTurnConfigOptionValues(
   }
   const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
   const optionsById = new Map(
-    (capability.configOptions ?? []).map((option) => [option.id, option])
+    (withAcpConfigOptionsForModel(capability, targetModelId).configOptions ?? []).map((option) => [
+      option.id,
+      option,
+    ])
   );
-  const efforts = getModelEffortChoices(capability, targetModelId);
-  const declaredFast = getDeclaredModelControls(capability, targetModelId)?.fastMode;
+  const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const declaredFast = getAcpModelFastSupport(capability, targetModelId);
   for (const [id, value] of Object.entries(values)) {
     if (isTurnEffortEntry(optionsById, id)) {
       if (typeof value !== 'string') {
@@ -2083,14 +2094,19 @@ export function filterCompatibleTurnConfigOptionValues(
     return undefined;
   }
   const optionsById = new Map(
-    (capability.configOptions ?? []).map((option) => [option.id, option])
+    (withAcpConfigOptionsForModel(capability, targetModelId).configOptions ?? []).map((option) => [
+      option.id,
+      option,
+    ])
   );
   const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
-  const efforts = getModelEffortChoices(capability, targetModelId);
-  const declared = getDeclaredModelControls(capability, targetModelId);
+  const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const fastSupport = getAcpModelFastSupport(capability, targetModelId);
   // A different (or unknown) probe model cannot invalidate the target's
   // recorded controls. Without per-model data, preserve them for runtime.
-  const keepUnverified = targetModelId !== probedModelId || declared !== undefined;
+  const keepUnverified =
+    targetModelId !== probedModelId ||
+    getDeclaredModelControls(capability, targetModelId) !== undefined;
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       if (targetModelId) {
@@ -2098,8 +2114,8 @@ export function filterCompatibleTurnConfigOptionValues(
           if (efforts !== undefined) return typeof value === 'string' && efforts.includes(value);
           if (keepUnverified) return typeof value === 'string';
         } else if (isAcpFastModeConfigId(id)) {
-          // A model declared without Fast has nothing to carry a Fast value to.
-          if (declared?.fastMode === false) return false;
+          // A model known without Fast has nothing to carry a Fast value to.
+          if (fastSupport === false) return false;
           if (keepUnverified) {
             return (
               typeof value === 'boolean' ||
@@ -2414,7 +2430,7 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
   );
   validateTurnConfigOptionValues(
     args.dispatchConfig.configOptionValues,
-    args.capability,
+    args.capability && withAcpConfigOptionsForModel(args.capability, targetModelId),
     validatedIds,
     freshness
   );
@@ -3745,7 +3761,7 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   ]);
   validateTurnConfigOptionValues(
     requested.config.configOptionValues,
-    capability,
+    capability && withAcpConfigOptionsForModel(capability, targetModelId),
     validatedConfigIds,
     freshness
   );
@@ -3982,13 +3998,16 @@ export async function prepareSessionInput(
     // the provenance fields no longer need a local intersection here.
   } satisfies SessionMeta;
 
-  const derivedFrom = await classifyDelegatedEncryptedInput(
+  const derivedInputId = options.userTurnId ?? uuidV4();
+  const derivation = await classifyDelegatedEncryptedInput(
     manager,
     options.delegatedRequester,
-    targetMachine.id
+    targetMachine.id,
+    derivedInputId
   );
+  const derivedFrom = derivation?.derivedFrom;
   const userTurn: SessionHistoryInput = {
-    id: options.userTurnId ?? uuidV4(),
+    id: derivedInputId,
     role: 'user',
     timestamp: meta.createdAt,
     ...(derivedFrom ? { derivedFrom } : {}),
@@ -4354,15 +4373,19 @@ export async function sendSessionChatResult(
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
   const environment = getSessionCommandEnvironment();
-  const derivedFrom = await classifyDelegatedEncryptedInput(
+  const derivedInputId = orchestration?.userTurnId ?? uuidV4();
+  const derivation = await classifyDelegatedEncryptedInput(
     manager,
     delegatedRequester,
-    session.machineId
+    session.machineId,
+    derivedInputId
   );
+  const derivedFrom = derivation?.derivedFrom;
+  const maySteer = derivation?.principal !== 'member';
   const remoteMachine = session.machineId !== auth.machineId;
   // A shared member's derivation never steers another principal's running turn.
   const steerTurnId =
-    orchestration?.steerActiveTurn && !derivedFrom
+    orchestration?.steerActiveTurn && maySteer
       ? remoteMachine
         ? resolveActiveAssistantTurnId(historyForDefaults)
         : environment?.host.readActiveTurnId(sessionId)
@@ -4396,7 +4419,7 @@ export async function sendSessionChatResult(
         chainDepth: orchestration?.chainDepth,
       }),
     },
-    preallocatedId: orchestration?.userTurnId,
+    preallocatedId: orchestration?.userTurnId ?? (derivation ? derivedInputId : undefined),
   });
   const userTurnId = userTurn.id;
   const result = {
@@ -4512,7 +4535,7 @@ export async function sendSessionChatResult(
   // A busy target without an applied steer (including an unconfirmed remote one)
   // runs this input after the current turn. Retries keep their earlier outcome.
   const ordinaryDelivery: SessionChatDelivery | undefined =
-    !orchestration?.steerActiveTurn || derivedFrom || userTurn.existingStatus !== undefined
+    !orchestration?.steerActiveTurn || !maySteer || userTurn.existingStatus !== undefined
       ? undefined
       : steerTurnId === undefined
         ? 'dispatched'

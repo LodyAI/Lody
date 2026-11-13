@@ -76,9 +76,25 @@ export type E2eeWorkspaceHistoryPage = {
   nextCursor: string | null;
 };
 
+/** Minimal self-reported display data. Never identity or authorization evidence. */
+export type E2eeDeviceProfile = {
+  client: 'mobile' | 'desktop' | 'daemon' | 'web';
+  name?: string;
+  model?: string;
+  os?: string;
+  osVersion?: string;
+  appVersion?: string;
+};
+export type E2eeDeviceProfileUpdate = {
+  workspaceId: string;
+  signingPublicKey: string;
+  profile: E2eeDeviceProfile;
+};
+
 /** Account directory labels only; these never establish ledger membership or key trust. */
 export type E2eeWorkspaceMemberProfilesRequest = { workspaceId: string };
 export type E2eeWorkspaceMemberProfiles = {
   workspaceId: string;
+  devices?: { signingPublicKey: string; profile: E2eeDeviceProfile }[];
   profiles: { cryptoUserId: string; name: string | null; image: string | null }[];
 };

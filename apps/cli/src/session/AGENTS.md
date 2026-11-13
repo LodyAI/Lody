@@ -3,8 +3,8 @@
 `CLAUDE.md` links here; edit this file.
 
 The 1,320-word ceiling preserves complete dispatch identity and output-lifetime rules alongside
-existing authorization and execution boundaries, including the rule that an encrypted start runs
-only its signed input; the default ceiling had no room for those rules.
+existing authorization and execution boundaries, including encrypted starts that run
+only signed input; the default ceiling had no room for those rules.
 
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
@@ -75,7 +75,8 @@ only its signed input; the default ceiling had no room for those rules.
   preserve/discard and cancels pre-Stop queued eligibility; Edit & Resend uses preserve/keep,
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
-  Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
+  Unknown never replays; RPC ACKs never revive history. Encrypted recovery preserves terminal
+  decisions and newer pointers, closes partial replies with one notice, and isolates unrelated failures.
 - Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.

@@ -31,17 +31,28 @@ enum ScheduleTone {
     }
   }
 
-  static func label(_ group: RuntimeContract.ScheduleStateGroup) -> String {
-    switch group {
-    case .running: ScheduleFormat.text("overview.active")
-    case .attention: ScheduleFormat.text("overview.attention")
-    case .paused: ScheduleFormat.text("overview.paused")
-    case .ended: ScheduleFormat.text("overview.ended")
-    }
+  /// The order rows follow within a list group: what needs a look first.
+  static let order: [RuntimeContract.ScheduleStateGroup] = [.attention, .running, .paused, .ended]
+}
+
+/// The Schedules list's groups, as web `ScheduleList`: recurring and manual tasks, then one-off
+/// messages written in a chat with "Schedule send…".
+enum ScheduleListSection: String, CaseIterable, Sendable {
+  case tasks
+  case messages
+
+  init(_ item: ScheduleItem) {
+    self = item.scheduledMessage ? .messages : .tasks
   }
 
-  /// The order list groups follow: what needs a look first.
-  static let order: [RuntimeContract.ScheduleStateGroup] = [.attention, .running, .paused, .ended]
+  @MainActor var label: String { ScheduleFormat.text("section." + rawValue) }
+}
+
+/// The view menu's "Show finished" switch. In memory like `HomeArchive`, so every launch hides
+/// schedules that will not run again (state group `ended`) until asked for.
+@MainActor
+enum ScheduleFinishedVisibility {
+  static var shown = false
 }
 
 /// The schedule's Agent mark inside a tinted rounded tile, with the state glyph as a badge.

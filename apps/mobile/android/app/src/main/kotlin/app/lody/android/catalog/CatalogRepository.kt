@@ -26,16 +26,20 @@ class CatalogRepository(private val account: AccountController, private val owne
  private var epoch = 0L
  init {
   tasks.launch {
-   account.state.map { it.account to it.verified }.distinctUntilChanged().collectLatest { (user, _) ->
+   var wasVerified = false
+   account.state.map { it.account to it.verified }.distinctUntilChanged().collectLatest { (user, verified) ->
     if (user == null) {
      if (mutable.value.workspace != null) disconnect()
     } else {
      val context = cached { store.readContext() }
      val selected = mutable.value.workspace?.id ?: context?.takeIf { it.account.id == user.id }?.workspaceId
      val workspace = user.workspaces.firstOrNull { it.id == selected }
-     if (workspace != null) select(workspace)
+     if (workspace != null) {
+      if (workspace != mutable.value.workspace || (!wasVerified && verified)) select(workspace)
+     }
      else if (mutable.value.workspace != null) disconnect()
     }
+    wasVerified = verified
    }
   }
  }
@@ -52,11 +56,16 @@ class CatalogRepository(private val account: AccountController, private val owne
    val user = account.state.value.account ?: return@launch
    if (user.workspaces.none { it.id == workspace.id }) return@launch
    val scope = RuntimeScope(user.id, workspace.id)
+   cached { store.select(scope) }
+   try { account.requirePlaintext(scope) }
+   catch (error: AuthFailure) {
+    mutable.value = CatalogState(workspace, ConnectionPhase.UNAVAILABLE, failure = error.code)
+    return@launch
+   }
    val saved = cached { store.read(scope) }
    ensureActive()
    if (identity != epoch) return@launch
    mutable.value = mutable.value.copy(snapshot = saved?.snapshot, syncedAt = saved?.syncedAt, cached = saved != null)
-   cached { store.select(scope) }
    if (!account.state.value.verified) {
     mutable.value = mutable.value.copy(phase = ConnectionPhase.DISCONNECTED)
     return@launch
@@ -89,25 +98,53 @@ class CatalogRepository(private val account: AccountController, private val owne
    }
    var pending: CatalogSnapshot? = null
    var pendingGeneration = -1L
+   var generation = -1L
+   var syncPhase = ConnectionPhase.SYNCING
+   var confirmed: SavedCatalog? = null
+   fun enterGeneration(current: Long) {
+    if (generation == current) return
+    generation = current
+    pending = null
+    pendingGeneration = -1L
+    confirmed = null
+    syncPhase = ConnectionPhase.SYNCING
+    mutable.value = mutable.value.copy(failure = null)
+   }
+   fun projectedPhase(phase: RuntimePhase) = when (phase) {
+    RuntimePhase.STARTING -> ConnectionPhase.CONNECTING
+    RuntimePhase.READY -> syncPhase
+    RuntimePhase.SUSPENDED -> ConnectionPhase.PAUSED
+    RuntimePhase.FAILED -> ConnectionPhase.UNAVAILABLE
+    RuntimePhase.STOPPED -> ConnectionPhase.DISCONNECTED
+   }
    launch(start = CoroutineStart.UNDISPATCHED) {
     owner.events.collect { scoped ->
      if (identity != epoch || scoped.scope != scope || scoped.generation != owner.state.value.status.generation) return@collect
+     enterGeneration(scoped.generation)
      when (val event = scoped.event) {
       is RuntimeEvent.CatalogUpdated -> { pending = event.snapshot; pendingGeneration = scoped.generation }
       is RuntimeEvent.Synced -> {
        val snapshot = pending
        if (snapshot == null || snapshot.revision != event.revision || pendingGeneration != owner.state.value.status.generation) return@collect
-       val saved = SavedCatalog(snapshot, System.currentTimeMillis())
-       mutable.value = mutable.value.copy(snapshot = snapshot, syncedAt = saved.syncedAt, cached = false, phase = ConnectionPhase.LIVE, streams = event.streams, failure = null)
-       writes.trySend(saved)
+       val unchanged = confirmed?.snapshot == snapshot
+       val saved = confirmed?.takeIf { unchanged } ?: SavedCatalog(snapshot, System.currentTimeMillis())
+       confirmed = saved
+       syncPhase = ConnectionPhase.LIVE
+       mutable.value = mutable.value.copy(snapshot = snapshot, syncedAt = saved.syncedAt, cached = false, phase = projectedPhase(owner.state.value.status.phase), streams = event.streams, failure = null)
+       if (!unchanged || mutable.value.cacheFailure) writes.trySend(saved)
       }
       is RuntimeEvent.SyncFailed -> {
        if (event.reason == "grant_endpoint_changed") mutable.value.workspace?.let { select(it) }
-       else mutable.value = mutable.value.copy(phase = ConnectionPhase.UNAVAILABLE, failure = event.reason)
+       else {
+        syncPhase = ConnectionPhase.UNAVAILABLE
+        mutable.value = mutable.value.copy(phase = projectedPhase(owner.state.value.status.phase),
+         failure = mutable.value.failure?.takeIf { it == "catalog_limit" } ?: event.reason)
+       }
       }
       is RuntimeEvent.SessionUpdated -> Unit
       is RuntimeEvent.CreationChanged -> Unit
       is RuntimeEvent.ProviderProgress -> Unit
+      is RuntimeEvent.ProviderRefreshProgress -> Unit
       is RuntimeEvent.ProvidersChanged -> Unit
       RuntimeEvent.GrantRequested -> Unit
       is RuntimeEvent.ShortcutCloudRequested -> Unit
@@ -116,16 +153,10 @@ class CatalogRepository(private val account: AccountController, private val owne
     }
    }
    launch {
-    owner.state.map { Triple(it.scope, it.status.phase, it.status.generation) }.distinctUntilChanged().collect { (current, phase, _) ->
+    owner.state.map { Triple(it.scope, it.status.phase, it.status.generation) }.distinctUntilChanged().collect { (current, phase, currentGeneration) ->
      if (identity != epoch || current != scope) return@collect
-     val next = when (phase) {
-      RuntimePhase.STARTING -> ConnectionPhase.CONNECTING
-      RuntimePhase.READY -> ConnectionPhase.SYNCING
-      RuntimePhase.SUSPENDED -> ConnectionPhase.PAUSED
-      RuntimePhase.FAILED -> ConnectionPhase.UNAVAILABLE
-      RuntimePhase.STOPPED -> ConnectionPhase.DISCONNECTED
-     }
-     mutable.value = mutable.value.copy(phase = next)
+     enterGeneration(currentGeneration)
+     mutable.value = mutable.value.copy(phase = projectedPhase(phase))
     }
    }
   }
@@ -135,7 +166,15 @@ class CatalogRepository(private val account: AccountController, private val owne
   if (!auth.verified) {
    if (auth.account != null && !auth.busy) account.restore()
   } else if (mutable.value.phase == ConnectionPhase.UNAVAILABLE) {
-   mutable.value.workspace?.let { select(it) }
+   mutable.value.workspace?.let { workspace ->
+    val runtime = owner.state.value
+    val usableLease = runtime.scope == RuntimeScope(auth.account?.id ?: return, workspace.id) &&
+     runtime.status.phase in setOf(RuntimePhase.READY, RuntimePhase.STARTING, RuntimePhase.SUSPENDED)
+    // catalog_limit ends the watcher even though the WebView remains READY.
+    if (!usableLease || mutable.value.failure == "catalog_limit") {
+     if (workspace.contentMode == WorkspaceContentMode.UNKNOWN) account.refreshWorkspaceModes() else select(workspace)
+    }
+   }
   }
  }
  suspend fun disconnect() {

@@ -53,6 +53,18 @@ final class LocalStore: @unchecked Sendable {
   static func bind(_ scroll: UIScrollView, to: UIViewController) {}
 }
 
+actor ModeRefreshGate {
+  private var waiting: CheckedContinuation<Void, Never>?
+  private var entered: CheckedContinuation<Void, Never>?
+  private var hasEntered = false
+  func wait() async {
+    hasEntered = true; entered?.resume(); entered = nil
+    await withCheckedContinuation { waiting = $0 }
+  }
+  func started() async { if hasEntered { return }; await withCheckedContinuation { entered = $0 } }
+  func release() { waiting?.resume(); waiting = nil }
+}
+
 @main struct AuthSessionCheck {
   @MainActor static func main() async throws {
     let visual = LoginDitherView(frame: CGRect(x: 0, y: 0, width: 378, height: 360))
@@ -182,6 +194,32 @@ final class LocalStore: @unchecked Sendable {
     NotificationCenter.default.post(name: changed, object: nil)
     precondition(LodyShell.shared.finished, "The native form closes only after account publication")
     print("PASS: native email form uses secure input, clears passwords and follows session-owned completion")
+    let retrySession = AuthSession()
+    let retryPins = WorkspaceModePins(file: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("pins.json"))
+    retrySession.api.modePins = retryPins
+    retrySession.api.loginTransport = { _ in AuthAPI.Reply(data: Data("{\"token\":\"mode-session\"}".utf8), status: 200) }
+    retrySession.api.transport = { request in
+      if request.url?.path.hasSuffix("get-session") == true { return (Data("{\"user\":{\"id\":\"mode-user\",\"email\":\"mode@example.test\"}}".utf8),200) }
+      if request.url?.path.hasSuffix("organization/list") == true { return (Data("[{\"id\":\"target\",\"name\":\"Target\"}]".utf8),200) }
+      return (Data("{}".utf8),503)
+    }
+    await retrySession.login(.email("mode@example.test", "synthetic-password"))
+    precondition(retrySession.snapshot.account?.workspaces.first?.contentMode == .unknown)
+    let gate = ModeRefreshGate()
+    retrySession.api.transport = { request in
+      if request.url?.path.hasSuffix("convex/token") == true { return (Data("{\"token\":\"jwt\"}".utf8),200) }
+      await gate.wait()
+      return (Data("{\"status\":\"success\",\"value\":{\"workspaceId\":\"target\",\"admission\":\"legacy-unclassified\"}}".utf8),200)
+    }
+    let refreshing = Task { await retrySession.refreshWorkspaceModes() }
+    await gate.started()
+    precondition(retrySession.snapshot.account?.user.id == "mode-user" && !retrySession.snapshot.busy && AuthKeychain.token == "mode-session", "A mode retry preserves account, credential and login UI")
+    await gate.release(); await refreshing.value
+    precondition(retrySession.snapshot.account?.workspaces.first?.contentMode == .plaintext)
+    retrySession.api.transport = { _ in throw URLError(.notConnectedToInternet) }
+    await retrySession.refreshWorkspaceModes()
+    precondition(retrySession.snapshot.account?.user.id == "mode-user" && !retrySession.snapshot.busy && retrySession.snapshot.account?.workspaces.first?.contentMode == .plaintext)
+    print("PASS: mode refresh preserves login/credentials while pending and keeps plaintext admission after offline failure")
     print("PASS: AuthSession fences cancelled Keychain commits and recovers for later login/logout")
   }
 }

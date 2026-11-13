@@ -24,7 +24,6 @@ export type LandingCtaCopy = {
   allPlatformsHref: string;
   github: string;
   githubHref: string;
-  /** Still resolves the browser-platform primary action; no longer a link. */
   webAppHref: string;
   /** Low-key "book a call with the founder" link in the secondary row. */
   bookCall: string;
@@ -44,9 +43,9 @@ export function LandingCtaSection({ copy }: { copy: LandingCtaCopy }) {
       resolvePrimaryDownloadAction({
         platform,
         labels: copy.labels,
-        webAppHref: copy.webAppHref,
+        allPlatforms: { label: copy.allPlatforms, href: copy.allPlatformsHref },
       }),
-    [copy.labels, copy.webAppHref, platform]
+    [copy.allPlatforms, copy.allPlatformsHref, copy.labels, platform]
   );
 
   return (
@@ -77,11 +76,21 @@ export function LandingCtaSection({ copy }: { copy: LandingCtaCopy }) {
           >
             {primary.label}
           </SiteAnchor>
+          <SiteAnchor
+            className="uw-cta__book-call underwater-btn underwater-btn--ghost"
+            href={copy.webAppHref}
+          >
+            {copy.labels.browser}
+          </SiteAnchor>
           <div className="uw-cta__secondary">
-            <SiteAnchor href={copy.allPlatformsHref}>{copy.allPlatforms}</SiteAnchor>
-            <span className="uw-cta__dot" aria-hidden="true">
-              ·
-            </span>
+            {primary.key !== 'browser' ? (
+              <>
+                <SiteAnchor href={copy.allPlatformsHref}>{copy.allPlatforms}</SiteAnchor>
+                <span className="uw-cta__dot" aria-hidden="true">
+                  ·
+                </span>
+              </>
+            ) : null}
             <SiteAnchor href={copy.githubHref} rel="noreferrer" target="_blank">
               {copy.github}
             </SiteAnchor>

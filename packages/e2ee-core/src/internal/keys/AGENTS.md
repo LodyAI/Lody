@@ -52,13 +52,14 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
   unpublished keys or re-sign an uncertain record. Delete staged
   groups only for a genuine different commitment at the same epoch, by the group's
   signing device. Storage never supplies ledger authority.
-- `InstalledEpochHistory` recovers from the installed latest key only, verifies the
+- `InstalledEpochHistory` recovers from the highest installed key at or below the
+  verified ledger's current epoch, skipping only missing keys while searching.
+  Recovering a missing key requires a starting epoch above the requested one. It verifies the
   whole chain before writes, wipes copies on every exit and retries only genuinely
   missing keys. It restores no envelopes, publishes nothing, selects no vault.
 
 - Envelopes keep `AAD || enc32 || ct48 || signature64` and `lody-e2ee/epoch-env/v1\0`;
   context comes from the caller, never the frame. Check the outer signature before
   decryption and current authority after it. Recovery devices cannot send.
-- History packets keep the v1 commitment/AAD domains and epoch-zero exception; no
-  nonce override. `recoverLedgerHistory` requires a genuine view and returns all
-  epochs or none.
+- Ordinary history packets keep the v1 commitment/AAD domains and epoch-zero exception; tag11 uses a distinct abandonment AAD bound to both epochs. No
+  nonce override. `recoverLedgerHistory` requires a genuine view and returns the complete reachable chain or no keys, skipping abandoned epochs.

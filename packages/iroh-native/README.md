@@ -8,6 +8,10 @@ of encrypted Streams RPC and durable dispatch. Rules: [AGENTS.md](AGENTS.md).
 - `core/`: the `lody-iroh` crate. Endpoint lifecycle, ALPN `lody/e2ee-rpc/1`
   framing (one bidirectional stream per request, big-endian `u32` length-prefixed
   messages up to 2 MiB + 4 KiB) and the one-endpoint-per-key registry.
+  Incoming handshakes and connections share 64 slots, with at most four live
+  connections per EndpointId and 32 streams per connection. Excess connections
+  are refused; request reads time out after 30 seconds. Receive buffers start
+  at at most 16 KiB and grow with received payload, regardless of declared length.
 - `napi/`: the Node-API binding used by the Electron main process and the CLI.
 - `index.js` / `index.d.ts`: an explicit-path loader. `loadIrohNative(file)` returns
   `undefined` when the file is unset, missing or unloadable.

@@ -22,6 +22,13 @@ Older agents advertising `collaboration_mode` retain
 their `default`/`plan` select values; do not rewrite those cached contracts into
 new wire ids. A live `configOptions` snapshot determines the current controls.
 
+A capability snapshot's `configOptions` describe only the model that was current
+when it was taken. A refresh a person asks for on a built-in agent switches the
+probe session to every model and stores each model's own options in
+`acpModelConfigOptions` rows, one stored list shared by every model that reported it; selectors and CLI/MCP validation compose the selected
+model's options from them, falling back to the snapshot for an unrecorded model
+([design](../notes/proposed/architecture/2026-11-11-observed-model-config-options.md)).
+
 Scope: `packages/components/src/components/sessions`. Binding rules and the
 pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);

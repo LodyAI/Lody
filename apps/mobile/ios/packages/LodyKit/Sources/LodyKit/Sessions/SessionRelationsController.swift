@@ -24,9 +24,11 @@ final class SessionRelationsController: UIViewController, UICollectionViewDelega
   override func viewDidLoad() {
     super.viewDidLoad()
     var layout = UICollectionLayoutListConfiguration(appearance: .plain)
-    layout.backgroundColor = .lodyGround
+    // Clear so the compact sheet keeps its system Liquid Glass surface.
+    layout.backgroundColor = .clear
     layout.showsSeparators = false
     collection = UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewCompositionalLayout.list(using: layout))
+    collection.backgroundColor = .clear
     collection.frame = view.bounds
     collection.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     collection.delegate = self
@@ -106,6 +108,7 @@ private final class SessionRelationCell: UICollectionViewListCell {
     backgroundConfiguration = .clear()
     isAccessibilityElement = false
     rail.showsAgent = false
+    strip.rowPadding = LodySpacing.sm
     rail.accessibilityElementsHidden = true
     contentView.addSubview(rail)
     contentView.addSubview(strip)
@@ -126,7 +129,9 @@ private final class SessionRelationCell: UICollectionViewListCell {
     rail.ancestorRails = branch.ancestors
     rail.frame = CGRect(x: margin, y: 0, width: CGFloat(branch.depth) * 24, height: bounds.height)
     rail.setNeedsLayout()
-    strip.frame = CGRect(x: rail.frame.maxX, y: 0, width: max(0, bounds.width - rail.frame.maxX - margin), height: bounds.height)
+    // The strip's overflow fade masks its bounds, so it spans the capsule's padding instead of letting it overflow.
+    let pad = strip.rowPadding
+    strip.frame = CGRect(x: rail.frame.maxX - pad, y: 0, width: max(0, bounds.width - rail.frame.maxX - margin + 2 * pad), height: bounds.height)
   }
   override func prepareForReuse() {
     super.prepareForReuse()

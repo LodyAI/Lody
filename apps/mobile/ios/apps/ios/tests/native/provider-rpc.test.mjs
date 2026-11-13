@@ -38,6 +38,42 @@ const { outputFiles } = await build({
 const { createProviderRpc } = await import(
   `data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`
 );
+const detailBuild = await build({
+  entryPoints: [
+    new URL(
+      '../../../../packages/cloud-runtime/src/runtime/provider-detail.ts',
+      import.meta.url,
+    ).pathname,
+  ],
+  bundle: true,
+  format: 'esm',
+  platform: 'browser',
+  write: false,
+  plugins: [
+    {
+      name: 'synthetic-machine',
+      setup(b) {
+        b.onResolve({ filter: /^\.\/settings$/ }, () => ({
+          path: 'settings',
+          namespace: 'fixture',
+        }));
+        b.onResolve({ filter: /^\.\/machine-rpc$/ }, () => ({
+          path: 'rpc',
+          namespace: 'fixture',
+        }));
+        b.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({
+          contents:
+            path === 'settings'
+              ? 'export const openSettings=(...args)=>globalThis.__providerFixture.open(...args);'
+              : 'export const machineRpc=(...args)=>globalThis.__providerFixture.rpc(...args);',
+        }));
+      },
+    },
+  ],
+});
+const { probeProvider } = await import(
+  `data:text/javascript;base64,${Buffer.from(detailBuild.outputFiles[0].text).toString('base64')}`
+);
 const scope = {
   workspaceId: 'workspace',
   userId: 'owner',
@@ -695,4 +731,89 @@ test('draft binary operations validate catalog selection and keep distinct provi
     /unsupported/,
   );
   assert.equal(f.calls.length, 2);
+});
+
+test('a model refresh reads every model only on a machine that advertises it, and names each model', async (t) => {
+  const f = fixture(t);
+  const sent = [];
+  f.dispatch((_w, _m, method, params, _grant, _signal, notify, timeoutMs) => {
+    sent.push({
+      params,
+      timeoutMs,
+      streamsProgress: typeof notify === 'function',
+    });
+    notify?.({
+      type: 'machine/acp-binary-progress',
+      machineId: 'machine',
+      agentType: 'codex',
+      status: 'downloading',
+    });
+    notify?.({
+      type: 'machine/acp-binary-progress',
+      machineId: 'machine',
+      agentType: 'codex',
+      status: 'reading-model-options',
+      configId: 'other',
+      modelId: 'x',
+      modelIndex: 1,
+      modelCount: 2,
+    });
+    notify?.({
+      type: 'machine/acp-binary-progress',
+      machineId: 'machine',
+      agentType: 'codex',
+      status: 'reading-model-options',
+      configId: 'provider',
+      modelId: 'gpt-6-astra',
+      modelName: 'GPT-6 Astra',
+      modelIndex: 2,
+      modelCount: 7,
+    });
+    return {
+      result: {
+        machineId: 'machine',
+        configId: 'provider',
+        cliType: 'builtin',
+        agentType: 'codex',
+        success: true,
+        capability: {},
+      },
+    };
+  });
+  const progress = [];
+  const probe = (args) =>
+    probeProvider(
+      args,
+      async () => ({ token: 't', gatewayBaseUrl: 'https://example.invalid' }),
+      new AbortController().signal,
+      () => {},
+      (p) => progress.push(p),
+    );
+
+  // Older daemon: its strict schema would reject the field, so it is not sent.
+  assert.equal(
+    (await probe({ ...scope, readModelOptions: true })).success,
+    true,
+  );
+  assert.deepEqual(sent[0].params, { configId: 'provider', force: true });
+  assert.equal(sent[0].timeoutMs, 120000);
+  assert.deepEqual(progress, []);
+
+  f.protocol.acpModelOptionsRead = 1;
+  await probe({ ...scope, readModelOptions: true });
+  assert.deepEqual(sent[1].params, {
+    configId: 'provider',
+    force: true,
+    readModelOptions: true,
+  });
+  assert.ok(sent[1].timeoutMs > 120000);
+  // Only this provider's model frames reach the caller, named by the model.
+  assert.deepEqual(progress, [
+    { modelId: 'gpt-6-astra', modelName: 'GPT-6 Astra', index: 2, total: 7 },
+  ]);
+
+  // A plain probe stays quick on the same machine.
+  await probe(scope);
+  assert.deepEqual(sent[2].params, { configId: 'provider', force: true });
+  assert.equal(sent[2].timeoutMs, 120000);
 });

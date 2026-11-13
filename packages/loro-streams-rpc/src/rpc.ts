@@ -445,6 +445,7 @@ export const LoroMachineAcpCapabilitiesRefreshRpcRequestSchema = BaseRpcRequestS
     .object({
       configId: AgentConfigIdSchema,
       force: z.boolean().optional(),
+      readModelOptions: z.literal(true).optional(),
     })
     .strict(),
 }).strict();
@@ -3168,6 +3169,8 @@ export class LoroStreamsMachineRpcClient {
   async requestMachineAcpCapabilitiesRefresh(options: {
     configId: AgentConfigId;
     force?: boolean;
+    /** Only for a daemon that advertised `acpModelOptionsRead`; its params are strict. */
+    readModelOptions?: true;
     onProgress?: (message: MachineAcpBinaryProgressMessage) => void;
     signal?: AbortSignal;
     timeoutMs?: number;
@@ -3180,6 +3183,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         configId: options.configId,
         ...(options.force ? { force: true } : {}),
+        ...(options.readModelOptions ? { readModelOptions: true } : {}),
       },
     })) as MachineAcpCapabilitiesRefreshResponse | null;
   }

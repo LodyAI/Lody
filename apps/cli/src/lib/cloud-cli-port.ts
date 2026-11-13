@@ -1,3 +1,5 @@
+import { hostname, type as osType, release as osRelease } from 'node:os';
+import { getLodyCLIVersion } from '@/utils';
 import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas';
 import { StreamsClient } from '@loro-dev/streams-client';
 import {
@@ -269,6 +271,29 @@ export function irohRelaysFromEnv(
 export function createCloudE2eePort(
   options: Pick<CloudCliPortOptions, 'authBaseUrl' | 'logger'> & { token?: string }
 ): CloudE2eePort {
+  const displayReports = new Map<string, string>();
+  const reportDisplay = (input: { workspaceId: string; credential: string }) => {
+    if (displayReports.get(input.workspaceId) === input.credential) return;
+    displayReports.set(input.workspaceId, input.credential);
+    // Display data has no effect on history/access. The existing credential binds
+    // it to this machine; failed/old endpoints can be retried on the next refresh.
+    void client(AbortSignal.timeout(10_000))
+      .mutation(api.e2eeWorkspaces.reportDeviceProfile, {
+        ...input,
+        ...(options.token === undefined ? {} : { cliToken: options.token }),
+        profile: {
+          client: 'daemon',
+          name: hostname().slice(0, 128),
+          os: osType(),
+          osVersion: osRelease(),
+          appVersion: getLodyCLIVersion(),
+        },
+      })
+      .catch(() => {
+        if (displayReports.get(input.workspaceId) === input.credential)
+          displayReports.delete(input.workspaceId);
+      });
+  };
   const irohRelays = irohRelaysFromEnv();
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
   const fetchImpl = getCliHttpFetch({ logger: options.logger });
@@ -388,7 +413,7 @@ export function createCloudE2eePort(
     getHistory: async (input) => {
       let status: number | undefined;
       try {
-        return e2eeHistoryPageSchema.parse(
+        const result = e2eeHistoryPageSchema.parse(
           await client(AbortSignal.timeout(30_000), (value) => {
             status = value;
           }).action(api.e2eeWorkspaces.history, {
@@ -396,6 +421,8 @@ export function createCloudE2eePort(
             ...(options.token === undefined ? {} : { cliToken: options.token }),
           })
         );
+        reportDisplay({ workspaceId: input.workspaceId, credential: input.credential });
+        return result;
       } catch (cause) {
         try {
           return classifyE2eeRejection(cause);

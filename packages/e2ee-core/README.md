@@ -243,3 +243,5 @@ device approval/open/key delivery/management/RPC over these ports. Its paged
 public approval evidence and encrypted RPC originals use the stable client
 layout; stores still grant no permission. This does not enable product runtime
 assembly or native mobile custody.
+
+Owner personal devices can recover a stranded epoch from a held base key using `EpochPublisher.publishAbandoning(baseEpoch)` after declaring capability 2. See [control-plane availability](../../specs/e2ee/control-plane-availability.md).

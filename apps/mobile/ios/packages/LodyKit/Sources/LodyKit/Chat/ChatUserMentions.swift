@@ -14,7 +14,8 @@ import UIKit
       guard reference.start >= cursor, reference.end > reference.start, reference.end <= source.length else { continue }
       result.append(decorate(source.attributedSubstring(from: NSRange(location: cursor, length: reference.start - cursor)), repository: repository, traits: traits))
       let label = NSMutableAttributedString(attributedString: source.attributedSubstring(from: NSRange(location: reference.start, length: reference.end - reference.start)))
-      label.addAttribute(.foregroundColor, value: UIColor.lodyAccent, range: NSRange(location: 0, length: label.length))
+      label.addAttributes([.foregroundColor: UIColor.lodyAccent, .lodyReferenceChip: ChatReferenceNode.chipFill],
+        range: NSRange(location: 0, length: label.length))
       if ["file", "dir", "skill"].contains(reference.kind), let path = reference.target.flatMap(fileTarget) {
         label.addAttribute(.link, value: path, range: NSRange(location: 0, length: label.length))
       }
@@ -62,6 +63,7 @@ import UIKit
       } else { continue }
       var attributes = source.attributes(at: match.range.location, effectiveRange: nil)
       attributes[.foregroundColor] = UIColor.lodyAccent
+      attributes[.lodyReferenceChip] = ChatReferenceNode.chipFill
       attributes[.link] = target
       let font = attributes[.font] as? UIFont ?? .preferredFont(forTextStyle: .body)
       let size = font.pointSize * 0.85

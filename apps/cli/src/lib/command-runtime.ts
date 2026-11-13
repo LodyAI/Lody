@@ -567,6 +567,7 @@ export async function withWorkspaceManager<T>(
               await import('./e2ee/workspace-legacy')
             )
               .openCliE2eeWorkspaceLegacy({
+                machineId: commandAuth.machineId,
                 accountId: commandAuth.userId,
                 workspaceId: workspace.id,
                 genesisHash: workspace.genesisHash ?? '',

@@ -71,7 +71,7 @@ extension DataRuntime {
   }
   private func fetchGrant() {
     guard grantTask == nil else { return }
-    guard let workspace, let view = webView else { deliverGrant(nil); return }
+    guard let workspace, WorkspaceModePins.shared.mode(workspace) == .plaintext, let view = webView else { deliverGrant(nil); return }
     do {
       guard let token = try AuthKeychain.read() else { throw NSError(domain: "MissingAuth", code: 1) }
       var request = URLRequest(url: URL(string: "\(BackendEnvironment.site)/api/loro-streams/token")!, timeoutInterval: 15)
@@ -84,7 +84,7 @@ extension DataRuntime {
           guard let self, let view, self.webView === view else { return }
           self.grantTask = nil
           var grant: RuntimeContract.Grant?
-          if error == nil, (response as? HTTPURLResponse)?.statusCode == 200, let data,
+          if WorkspaceModePins.shared.mode(workspace) == .plaintext, error == nil, (response as? HTTPURLResponse)?.statusCode == 200, let data,
              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
              let token = value["token"] as? String, !token.isEmpty,
              let address = value["gatewayBaseUrl"] as? String,

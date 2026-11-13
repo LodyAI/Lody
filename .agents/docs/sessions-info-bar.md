@@ -109,6 +109,13 @@ labelClassName`) so the stage diffstat never clips. Wired from
   the PR marker opens the PR tab, branch copies the current branch, and ±diff
   opens the existing fixed All Changes side-panel tab; file-row and comment-reference
   actions may still create a diff viewer because they carry a precise file/comment focus.
+  A conversation can create several PRs over its life. Associations are
+  append-only (the reconciler only reorders `pullRequests` so the current PR is
+  last), and `resolveSessionPullRequestHistory` lists every PR in the scope the
+  stage describes, the primary PR first and older ones newest first. With more
+  than one, the PR marker keeps showing the primary PR, gains a chevron, and
+  opens that list instead: the current row opens the PR tab as before, while an
+  older row opens on GitHub because the PR tab is bound to the current PR.
   The context stage is also the single owner of agent-driven GitHub/worktree actions:
   a changed GitHub-capable workspace without a PR shows `Create PR` + `Commit & Push`,
   including a direct Local Project with a resolved GitHub repository. For an open

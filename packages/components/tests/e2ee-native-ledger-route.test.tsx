@@ -762,6 +762,33 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
   expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
 });
 
+it('stops reopening a host that keeps refusing a revoked identity and offers re-pairing', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  let opens = 0;
+  // Every reopen reaches the same revoked identity again: one retry, then guidance.
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      opens += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_device_revoked');
+    },
+    refresh: async () => local.status,
+    close: async () => {},
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  for (let turn = 0; turn < 20; turn++) await act(async () => {});
+  expect(opens).toBe(2);
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
+});
+
 it.each(['describe', 'history'] as const)(
   'reopens a confirmed closed reader before obsolete public %s returns',
   async (paused) => {
@@ -2034,5 +2061,118 @@ it('opened from Settings keeps the running workspace, closes instead of navigati
     expect(leases.size).toBe(0);
   } finally {
     fixture.clear = previousClear;
+  }
+});
+
+it('renders automatic pairing before public describe/history settle and retries empty mailbox after Instant QR join', async () => {
+  vi.useFakeTimers();
+  try {
+    fixture.session.user.id = 'account-instant-fast';
+    fixture.workspaces = {
+      status: 'ready',
+      activeWorkspaceId: workspaceId,
+      workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+    };
+    const neverDescribe = new Promise<never>(() => {});
+    let joined = false;
+    let keyInstalled = false;
+    let refreshCount = 0;
+    const status = () => ({
+      ...local.status,
+      hasCurrentKey: keyInstalled,
+      writeEpoch: keyInstalled ? 0 : null,
+      hasDeviceCredential: true,
+    });
+    fixture.port = {
+      create: async () => {
+        throw new Error('unused');
+      },
+      describe: () => neverDescribe,
+      history: () => neverDescribe,
+      runtime: {
+        open: async () => {
+          if (!joined)
+            throw new Error(
+              "Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding"
+            );
+          return status();
+        },
+        close: async () => {},
+        status: async () => status(),
+        ledgerView: async () => ({ ...local, status: status() }),
+        ingestLedgerRecords: async () => status(),
+        recordCreated: async () => {
+          throw new PersonalHostError({ code: 'unsupported' });
+        },
+        startAutomaticPairing: async () => ({
+          id: 'auto-1',
+          workspaceId,
+          workspaceName: 'Protected',
+          deviceName: 'Phone',
+          comparisonCode: null,
+          expiresAt: Date.now() + 600_000,
+          phase: 'preparing',
+        }),
+        automaticPairingState: async () => null,
+        requestAccountPairing: async () => {
+          throw new Error('unused');
+        },
+        accountPairingRequest: async () =>
+          joined
+            ? {
+                direction: 'approver-shows',
+                pairingString: '50M6-HA79-55MT',
+                expiresAt: Date.now() + 600_000,
+                status: 'joined',
+                workspaces: [{ workspaceId, name: 'Protected', state: 'joined' }],
+              }
+            : null,
+        refresh: async (_id: string, options?: { installKeys?: boolean }) => {
+          if (options?.installKeys !== true) throw new Error('expected installKeys');
+          refreshCount += 1;
+          // First mailbox check arrives 100ms before desktop finishes uploading the key; second succeeds.
+          if (refreshCount >= 2) keyInstalled = true;
+          return status();
+        },
+      },
+    } as unknown as PlatformE2eeWorkspaces;
+
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    // Automatic pairing UI renders immediately even though describe() & history() have not settled!
+    expect(container.querySelector('[data-testid="e2ee-awaiting-device"]')).not.toBeNull();
+
+    // Now simulate Instant QR / account-pairing join where mailbox key arrives on the 2nd check (after 300ms retry).
+    delete (fixture.port.runtime as Record<string, unknown>).startAutomaticPairing;
+    delete (fixture.port.runtime as Record<string, unknown>).automaticPairingState;
+    (fixture.port.runtime as Record<string, unknown>).accountPairingRequest = async () => {
+      joined = true;
+      return {
+        direction: 'approver-shows',
+        pairingString: '50M6-HA79-55MT',
+        expiresAt: Date.now() + 600_000,
+        status: 'joined',
+        workspaces: [{ workspaceId, name: 'Protected', state: 'joined' }],
+      };
+    };
+    fixture.port.describe = displayPort(async () => [] as never).describe;
+    fixture.port.history = displayPort(async () => [] as never).history;
+    await act(async () => root.render(createElement('div')));
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    await act(async () => {});
+    expect(refreshCount).toBe(1);
+    expect(fixture.navigation).toEqual([]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350);
+    });
+    await act(async () => {});
+    expect(refreshCount).toBe(2);
+    expect(fixture.navigation).toEqual([
+      { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+    ]);
+  } finally {
+    vi.useRealTimers();
   }
 });

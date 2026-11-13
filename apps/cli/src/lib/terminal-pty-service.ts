@@ -37,6 +37,8 @@ const OSC_TITLE_REGEX = new RegExp(`${ESC}\\](?:0|2);([^${BEL}${ESC}]*)(?:${BEL}
 const TERMINAL_ENV_BLOCKLIST = new Set([
   'ELECTRON_RUN_AS_NODE',
   'LODY_CLI_TOKEN',
+  // Human terminals must not inherit the daemon's Agent-only command restriction.
+  'LODY_AGENT_SESSION_ID',
   'LODY_ELECTRON_BOOTSTRAP',
   'LODY_ELECTRON_SESSION_TOKEN',
   'LODY_GIT_CRED_BROKER_STATE_FILE',

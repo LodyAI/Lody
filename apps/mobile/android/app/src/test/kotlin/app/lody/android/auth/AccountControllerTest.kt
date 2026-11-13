@@ -21,7 +21,7 @@ class AccountControllerTest {
  }
  private open class Api:CloudAuthApi {
   override suspend fun email(email:String,password:String):Credential=Credential("fixture-secret")
-  override suspend fun account(credential:Credential)=Account("user","Fixture",listOf(Workspace("workspace","Fixture")))
+  override suspend fun account(credential:Credential)=Account("user","Fixture",listOf(Workspace("workspace","Fixture", contentMode = WorkspaceContentMode.PLAINTEXT)))
   override suspend fun grant(credential:Credential,workspaceId:String)=ShortLivedGrant("short","https://streams.lody.ai",60)
   override suspend fun signOut(credential:Credential)=Unit
  }
@@ -49,7 +49,7 @@ class AccountControllerTest {
    val entered=CompletableDeferred<Unit>();val release=CompletableDeferred<Unit>()
    var suspendTeardown=false
    val api=object:Api(){override suspend fun account(credential:Credential)=
-    Account(if(credential.token=="old") "old-user" else "successor","Fixture",listOf(Workspace("workspace","Fixture")))}
+    Account(if(credential.token=="old") "old-user" else "successor","Fixture",listOf(Workspace("workspace","Fixture", contentMode = WorkspaceContentMode.PLAINTEXT)))}
    val controller=AccountController(api,store,backgroundScope,cache){
     if(suspendTeardown){suspendTeardown=false;entered.complete(Unit);release.await()}
    }
@@ -117,7 +117,7 @@ class AccountControllerTest {
   assertEquals("new",store.saved?.token);assertNotNull(controller.state.value.account)
  }
 
- private class Context(var saved:AccountContext? = AccountContext(Account("user","Cached",listOf(Workspace("workspace","Work"))),"workspace")):AccountContextStore {
+ private class Context(var saved:AccountContext? = AccountContext(Account("user","Cached",listOf(Workspace("workspace","Work", contentMode = WorkspaceContentMode.PLAINTEXT))),"workspace")):AccountContextStore {
   override suspend fun readContext()=saved
   override suspend fun saveAccount(account:Account){saved=AccountContext(account,saved?.workspaceId)}
   override suspend fun clear(){saved=null}
@@ -153,7 +153,7 @@ class AccountControllerTest {
  }
  @Test fun revokedAccountIsHiddenEvenWhenCacheDeletionFails()=runTest {
   val cache=object:AccountContextStore {
-   override suspend fun readContext()=AccountContext(Account("user","Cached",listOf(Workspace("workspace","Work"))))
+   override suspend fun readContext()=AccountContext(Account("user","Cached",listOf(Workspace("workspace","Work", contentMode = WorkspaceContentMode.PLAINTEXT))))
    override suspend fun saveAccount(account:Account)=Unit
    override suspend fun clear():Unit=throw java.io.IOException("disk")
   }

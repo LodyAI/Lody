@@ -41,6 +41,8 @@ acknowledge(r):  释放已完成的结果
 
 签名设备在此期间被吊销时，记录以 `Conflict` 结束，不会重新签名。日志记住观察到的最新检查点，拒绝已回滚的日志。
 
+自助设备记录若在 CAS 前明确收到 `LedgerLogError.reason = self-service-rate-limited`，P09 仅在本次新建槽位的首次尝试且修订号未被其他尝试推进时释放该原件，保留检查点并返回 `retryAt`。SQLite 与 IndexedDB 原子核对原件、检查点、修订号；SQLite 对既有日志只增补修订字段，保留待定原件与检查点。结果未知、旧 pending、并发尝试及普通 HTTP 429 都继续保留原件，不允许借后续拒绝抹掉先前可能生效的请求。
+
 ## InstalledEpochKeys 与 InstalledEpochHistory
 
 _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`、`InstalledKeyStore`。_
@@ -55,6 +57,8 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`�
 无法读取的已存密钥块，只能被已成功打开并匹配的新块替换。`read(epoch)` 返回由调用方释放的全新不透明密钥。两者在每个异步步骤之后都会重新确认本设备仍是有效成员。
 
 `InstalledEpochHistory.read(epoch)` 返回已安装的密钥。只有该密钥确实缺失时，才从最新已安装的密钥出发验证整条签名历史包链，保存恢复出的旧密钥，并返回所请求的那个。损坏、权限和存储失败从不被“恢复”。这只恢复已安装的历史，不是 vault。
+
+恢复从账本当前 Epoch 向下寻找本地已安装的最高 Epoch 密钥，因此当前信封尚未送达时仍可读取旧历史。请求的密钥缺失时，必须有更高 Epoch 的已安装密钥才能回溯。查找只跳过缺失记录，其他错误直接上抛。`recoverLedgerHistory(view, key, startEpoch?)` 使用对应 Epoch 的已验证承诺校验起始密钥，包括 Epoch 0；省略 `startEpoch` 时使用账本当前 Epoch。
 
 ## KeyReceiver
 
@@ -110,6 +114,11 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpoch
 
 换代纪元密钥（`publish`），或在一条签名记录中移除成员并换代（`publishRemoving`，仅 owner）。
 
+本地候选信封列表使用独立的规范 CBOR 限制：最多 4096 个信封，编码后不超过 2 MiB。
+账本记录和背书快照仍保留数组最多 32 项的限制。
+
+`publishAbandoning(baseEpoch)` 仅允许已声明 capability 2 的 Owner 个人设备：读取本地持有的未废弃 baseEpoch 密钥，沿同一候选／暂存流程签署 tag11，历史钥链跳过废弃区间；调用方负责明确确认。所有重试保留原始字节。见[控制面可用性](../../../specs/e2ee/control-plane-availability.zh.md)。
+
 ```text
 生成密钥 → 封装历史包 → 签名记录 → 为每台设备生成信封
 → 保存候选（由 CandidateProtector 保护）并回读
@@ -150,7 +159,9 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 ## 恢复
 
-`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。passkey 需要一次报告 `enabled: true` 的注册，以及一次带用户验证并返回 32 字节 `results.first` 的认证；WebAuthn 在认证时从不报告 `enabled`。所有 ceremony 都使用 `vaultPrfInput()`，`user.id` 为 `passkeyUserHandle(vaultId)`，所以没有恢复文件的新设备可以从 ceremony 得知保险库。加密索引列出每个 passkey，CAS 引用它的包装，服务端不能把它当作未引用条目删除。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复。整库换新时，`revokeOtherRecoveryDevices` 依据已验证的账本撤销这个成员的其他恢复设备。恢复时：账本必须包含恢复包的 `head` 和 `length` 检查点，否则停止；恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。passkey 需要一次报告 `enabled: true` 的注册，以及一次带用户验证并返回 32 字节 `results.first` 的认证；WebAuthn 在认证时从不报告 `enabled`。所有 ceremony 都使用 `vaultPrfInput()`，`user.id` 为 `passkeyUserHandle(vaultId)`，所以没有恢复文件的新设备可以从 ceremony 得知保险库。加密索引列出每个 passkey，CAS 引用它的包装，服务端不能把它当作未引用条目删除。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复。整库换新时，`revokeOtherRecoveryDevices` 依据已验证的账本撤销这个成员的其他恢复设备。恢复时：账本必须包含恢复包的 `head` 和 `length` 检查点，否则停止；恢复先尝试当前代次，再尝试最高可用已提交代次，并验证、安装其完整历史链。当前信封缺失或无效时，只要旧代次可用，仍可接纳新个人设备；epoch 0 时，经过验证的恢复身份本身即可接纳。`partialEpochKey` 表示只恢复了治理入口，较新代次仍需修复或废弃；`epoch` 为最高恢复代次，没有密钥时为 null。账号恢复的进度保持为可重试的 `partial`，直到补齐当前代次密钥。epoch 0 的信封投递在途时保持 `Pending`，不接纳零密钥设备。账本、本机加密能力与存储故障仍会失败。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+
+设置、个人设备恢复和替换时的撤销操作在 Pending 或尚未证实的 Conflict 后保留签名原件。只有已验证历史证明原位置被其他记录占据，才可使用同一组设备密钥重签。压缩裁剪了该位置的哈希时，位置之后的真实视图可用完整设备历史证明目标从未被准入，或用目标仍有效的状态证明撤销从未发生；本地日志通过 CAS 替换后，由下一次调用提交。旧设置日志仅在未完成登记时回推位置；R 已有效时，即使准入哈希被裁剪，也可在原件提交对账后完成。完成登记后清理原件与位置，单独保留 R 公钥供显式放弃流程使用。
 
 ## 文档
 
@@ -166,17 +177,28 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 ### 保留状态起点
 
-retained 起点包含本调用方导出的完整 v2 状态，以及紧接其后的数据源 `offset`。
-恢复保留“完整历史 / 背书快照”的来源。损坏、未知版本或其他 genesis 返回
-`retained-cache-invalid`，可用独立验证的原始记录重建可选缓存。缓存长度超过 pin
-也属于缓存无效；长度相等必须 head 相等。pin 更长时提供 `LedgerFeedSource`，
-打开过程先验证后缀并证明 pin 位置的哈希，再保存新增记录。缺失或冲突的证据返回
-`local-evidence-conflict`，不能据此重置 pin。
+retained 起点包含本调用方导出的本地 v5 状态与数据源 `offset`，保留来源、
+该视图已有的全部已验证哈希，以及用定长头部标明长度的二进制表保存的代次发布原件，不受 CBOR 数组项数上限限制。
+保留状态编解码器和 feed 适配器共用 64 MiB 上限，每个 feed 仍遵守其配置的字节预算。
+因此压缩不会删除未决提交、
+候选代次或安装日志依赖的锚点。这些证据仍受 feed 字节预算限制；容量不足时
+保留原缓存和日志。远端快照、比较摘要与本地保留状态均使用 v5。快照导入不会
+虚构旧哈希或发布原件：当前密钥可通过已认证的普通邮箱安装，后续发布记录
+则恢复正常的 staging 发现路径。
 
-建议每新增至少 64 条记录调用一次 `rebase()`，提供运行时共用的 `VerifiedLedger`。
-它先推进 pin，再在一次存储事务中 CAS 替换起点并删除已覆盖的 feed 行；保存返回的
-起点供下次打开。界面需要的原始历史另行保留。压缩中断后可从原件重建，或读取后缀
-证明已有 pin，不得降低 pin。
+建议每新增至少 64 条记录，提供运行时共用的 `VerifiedLedger` 调用 `rebase()`。
+它先推进单调防回滚 pin，再在一次事务中替换起点、删除覆盖行并保存位置。
+重开时识别事务已保存的本地起点，即使进程未及另存返回值便崩溃也能恢复。
+较新的缓存必须包含独立 pin；位置相同必须 head 相同。
+
+打开时提供 `LedgerPinStore` 与 `LedgerFeedSource`，以启用有界恢复。缓存损坏
+或格式过旧时，SQLite 与 IndexedDB 的 `rebuild` 先从 genesis 重放原件，证明
+最高缓存末尾及独立 pin，再在一次事务中 CAS 替换 feed 缓存。写入中断保留旧缓存；
+pin 和工作流日志从不清空。缺失历史、网络或存储失败、证据冲突都会保留可重试的
+失败，不能据此降低检查点。无效 genesis/快照起点、协议升级要求和原生验证不可用直接返回，不触发网络修复。
+以 genesis 为起点的有效缓存落后于独立 pin 时，也会通过数据源追赶。
+未实现 `rebuild` 的自定义存储对不可用缓存返回
+`retained-cache-invalid`。
 
 `InstalledEpochKeys.check(epoch)` 检查已安装密钥的当前资格和承诺，随后释放临时
 密钥材料；状态读取方无需领取秘密。
@@ -203,6 +225,8 @@ UTF-8 字段（工作区 ID、目标机器 ID、作用域、消息 ID，各不�
 桌面维护的错误分类、独立分页与终态消费见[收发钥可用性](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.zh.md)。`MailboxInstallError.cryptographicRejection` 仅标记信封验证阶段确定的拒绝；本地写入、报告签名和未知原生错误不能授权拒绝信封。
 
 恢复也可以修复已获准、但本地工作区密钥丢失的个人设备。验证恢复设备、
-包内检查点与当前密钥信封后，必须匹配当前个人设备的签名、公钥和成员身份，
+包内检查点与可用已提交代次信封（epoch 0 也可仅验证恢复身份）后，必须匹配当前个人设备的签名、公钥和成员身份，
 再通过原有密钥安装边界恢复，不重复接纳设备。已撤销或身份不匹配的设备不会
 因此获得权限。
+
+`WorkspaceControl.execute` 发起所有者转让时，要求目标至少有一台活跃个人设备。撤销成员最后一台个人设备需要 `confirmedRecoveryOnly: true`；该确认仅用于工作流，不进入 v1 签名字节。已有 v1 记录仍按原规则回放，保留所有者治理设备检查。

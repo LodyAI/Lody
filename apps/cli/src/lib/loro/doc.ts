@@ -59,6 +59,8 @@ import {
   NEW_SESSION_HISTORY_BACKEND,
   LEGACY_SESSION_HISTORY_BACKEND,
   getMachineFlockAcpCapabilities,
+  getAcpConfigOptionsModelId,
+  writeAcpModelConfigOptionsToFlock,
   getMachineFlockProviderSetupCancellations,
   getMachineFlockProviderSetups,
   getMachineFlockDocId,
@@ -376,6 +378,7 @@ export interface LoroDocumentManagerOptions {
     | 'repositoryDirectory'
     | 'attachmentToken'
     | 'signMachineInput'
+    | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
   >;
@@ -461,6 +464,7 @@ export class LoroDocumentManager {
     | 'repositoryDirectory'
     | 'attachmentToken'
     | 'signMachineInput'
+    | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
   >;
@@ -488,6 +492,15 @@ export class LoroDocumentManager {
     const e2ee = this.encryptedWorkspace;
     if (!e2ee) throw new Error('e2ee_access_unavailable');
     return await Effect.runPromise(e2ee.authorizeMachineTarget(machineId, localProjectId));
+  }
+
+  /** Sign only a Schedule addressed to this machine, using its encrypted runtime. */
+  async signScheduleDeclaration(
+    document: Parameters<CliE2eeWorkspaceLegacy['signScheduleDeclaration']>[0],
+    manualRunKey?: string
+  ): Promise<string> {
+    if (!this.encryptedWorkspace) throw new Error('e2ee_signature_unavailable');
+    return this.encryptedWorkspace.signScheduleDeclaration(document, manualRunKey);
   }
 
   /** Encrypted workspaces: the signed intent for an input this machine writes itself, to
@@ -551,6 +564,7 @@ export class LoroDocumentManager {
         | 'repositoryDirectory'
         | 'attachmentToken'
         | 'signMachineInput'
+        | 'signScheduleDeclaration'
         | 'authorizeMachineTarget'
         | 'authorizeSessionTarget'
       >;
@@ -3982,6 +3996,11 @@ export type AcpCapabilityWriteOptions = {
    */
   modelCapabilities?: Record<string, AcpModelControls>;
   /**
+   * Each model's own option list, read by a refresh that switched the probe
+   * session to every model. Stored one row per model beside the snapshot.
+   */
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
+  /**
    * Sign-in methods the probe read from the agent's `initialize` response.
    * Absent means this probe did not ask (a built-in provider with its own
    * login command); an empty array records that the agent advertises none, so
@@ -4177,6 +4196,19 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         key: machineFlockKeys.acpModelCapability(configId),
         value: { version: 1, sourceVersion, models: options.modelCapabilities },
       });
+    // The snapshot is also its own model's answer; keep it beside the other
+    // models' answers so a later snapshot of another model does not lose it.
+    const modelAnswers: Record<string, AcpConfigOptionSummary[]> = {
+      ...options.modelConfigOptions,
+    };
+    const snapshotModelId = getAcpConfigOptionsModelId(entry.configOptions);
+    if (snapshotModelId && entry.configOptions) modelAnswers[snapshotModelId] = entry.configOptions;
+    const modelAnswersChanged = writeAcpModelConfigOptionsToFlock(
+      handle.flock,
+      configId,
+      sourceVersion,
+      modelAnswers
+    );
     const capabilityUnchanged =
       existing &&
       serializeAcpCapabilityWithoutFetchTime(existing) ===
@@ -4192,7 +4224,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         key: machineFlockKeys.acpCapability(configId),
         value: entry,
       });
-    if (changed || modelCapabilitiesChanged) {
+    if (changed || modelCapabilitiesChanged || modelAnswersChanged) {
       await this.repo.flush();
       if (this.markMachineFlockDirty) {
         this.markMachineFlockDirty('acp-capability-update');

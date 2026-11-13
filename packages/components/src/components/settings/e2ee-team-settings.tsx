@@ -13,6 +13,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { getAppShareUrl } from '@/lib/app-location';
+import { memberJoinPath } from '@/lib/e2ee-member-offer';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { SeatCostNotice, SeatAdmissionActions, isSeatAdmissionReady } from './invite-member-dialog';
 
@@ -63,7 +64,7 @@ const deviceFingerprint = (key: string) =>
     .replace(/(.{4})(?=.)/g, '$1 ');
 
 export const memberInvitationUrl = (offer: E2eeMemberOffer) =>
-  getAppShareUrl(`/join/${offer.token}#e2ee=${encodeURIComponent(JSON.stringify(offer))}`);
+  getAppShareUrl(memberJoinPath(offer));
 
 type Member = { membershipId: string; role: string; name?: string };
 export function E2eeTeamSettings(props: {

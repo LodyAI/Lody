@@ -1,7 +1,36 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyMachineFlockRowEvents, applyProviderSetupCancellationToFlock, deleteAgentConfigFromFlock, getMachineFlockAcpCapabilities, getMachineFlockAgentConfigs, getMachineFlockBuiltinAgentOptOuts, getMachineFlockLocalProjects, getMachineFlockRateLimits, getSessionLaunchConfigLegacyFields, machineFlockKeys, readMachineFlockRowsFromFlock, serializeMachineFlockKey, writeAgentConfigToFlock, writeMachineFlockRowToFlock, type AgentConfigMeta, type MachineFlockKey, type MachineFlockWritableFlock } from '../src/machine-flock';
-import { getRateLimitEntryKey, parseRateLimitEntryKey, getAcpCapabilityCacheKey, type AgentConfigId, type LocalProjectId, type MachineId, type SessionId, type SessionLegacyMetaFields, type SessionMeta } from '../src';
+import {
+  applyMachineFlockRowEvents,
+  applyProviderSetupCancellationToFlock,
+  deleteAgentConfigFromFlock,
+  getMachineFlockAcpCapabilities,
+  getMachineFlockAgentConfigs,
+  getMachineFlockBuiltinAgentOptOuts,
+  getMachineFlockLocalProjects,
+  getMachineFlockRateLimits,
+  getSessionLaunchConfigLegacyFields,
+  machineFlockKeys,
+  readMachineFlockRowsFromFlock,
+  serializeMachineFlockKey,
+  writeAcpModelConfigOptionsToFlock,
+  writeAgentConfigToFlock,
+  writeMachineFlockRowToFlock,
+  type AgentConfigMeta,
+  type MachineFlockKey,
+  type MachineFlockWritableFlock,
+} from '../src/machine-flock';
+import {
+  getRateLimitEntryKey,
+  parseRateLimitEntryKey,
+  getAcpCapabilityCacheKey,
+  type AgentConfigId,
+  type LocalProjectId,
+  type MachineId,
+  type SessionId,
+  type SessionLegacyMetaFields,
+  type SessionMeta,
+} from '../src';
 
 class FakeMachineFlock implements MachineFlockWritableFlock {
   readonly rows = new Map<string, { key: MachineFlockKey; value: unknown }>();
@@ -38,7 +67,6 @@ class FakeMachineFlock implements MachineFlockWritableFlock {
 }
 
 describe('machine Flock helpers', () => {
-
   it('reads legacy launch config fields from old session meta', () => {
     expect(
       getSessionLaunchConfigLegacyFields({
@@ -147,6 +175,118 @@ describe('machine Flock helpers', () => {
       getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock))[key]
         ?.declaredModelControls
     ).toBeUndefined();
+  });
+
+  describe('per-model option lists', () => {
+    const configId = 'config-1' as AgentConfigId;
+    const key = getAcpCapabilityCacheKey(configId);
+    const effort = (values: string[], currentValue = values[0] ?? '') => ({
+      id: 'thought_level',
+      name: 'Thinking',
+      category: 'thought_level',
+      type: 'select' as const,
+      currentValue,
+      options: values.map((value) => ({ value, name: value, description: `${value} effort` })),
+    });
+    const permission = {
+      id: 'mode',
+      name: 'Permission',
+      category: 'mode',
+      type: 'select' as const,
+      currentValue: 'ask',
+      options: ['ask', 'auto', 'full'].map((value) => ({
+        value,
+        name: value,
+        description: `Runs tools with ${value} approval and a description long enough to matter`,
+      })),
+    };
+    const withCapability = () => {
+      const flock = new FakeMachineFlock();
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.acpCapability(configId),
+        value: {
+          cliType: 'builtin',
+          agentType: 'devin',
+          cacheVersion: 2,
+          sourceVersion: 'v2',
+          modes: [],
+          models: [],
+          fetchedAt: 1,
+        },
+      });
+      return flock;
+    };
+    const observed = (flock: FakeMachineFlock) =>
+      getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock))[key]
+        ?.observedModelConfigOptions;
+    const ladders = [['medium', 'high', 'max'], ['low', 'medium', 'high', 'xhigh', 'max'], []];
+    const answers = Object.fromEntries(
+      Array.from({ length: 100 }, (_, index) => {
+        const ladder = ladders[index % ladders.length] ?? [];
+        return [`model-${index}`, ladder.length ? [permission, effort(ladder)] : [permission]];
+      })
+    );
+
+    it('stores identical lists once and resolves every model to its own list', () => {
+      const flock = withCapability();
+      expect(writeAcpModelConfigOptionsToFlock(flock, configId, 'v2', answers)).toBe(true);
+
+      const shapeRows = [...flock.rows.values()].filter(
+        (row) => row.key[0] === 'acpModelConfigOptionsShape'
+      );
+      const pointerRows = [...flock.rows.values()].filter(
+        (row) => row.key[0] === 'acpModelConfigOptions'
+      );
+      expect(shapeRows).toHaveLength(3);
+      expect(pointerRows).toHaveLength(100);
+      const storedBytes = JSON.stringify([...shapeRows, ...pointerRows]).length;
+      const perModelBytes = JSON.stringify(Object.values(answers)).length;
+      // One list per model would store every list in full; sharing stores three.
+      expect(storedBytes).toBeLessThan(perModelBytes / 4);
+      expect(observed(flock)?.['model-1']).toEqual([
+        permission,
+        effort(['low', 'medium', 'high', 'xhigh', 'max']),
+      ]);
+      expect(observed(flock)?.['model-2']).toEqual([permission]);
+      // An unchanged read keeps the merged entry's identity for React consumers.
+      expect(getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock))[key]).toBe(
+        getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock))[key]
+      );
+    });
+
+    it('skips current-value-only changes and removes lists no model uses', () => {
+      const flock = withCapability();
+      writeAcpModelConfigOptionsToFlock(flock, configId, 'v2', {
+        a: [effort(['low', 'max'])],
+        b: [effort(['high'])],
+      });
+      const commits = flock.commits;
+      expect(
+        writeAcpModelConfigOptionsToFlock(flock, configId, 'v2', {
+          a: [effort(['low', 'max'], 'max')],
+        })
+      ).toBe(false);
+      expect(flock.commits).toBe(commits);
+
+      // b now shares a's list, so b's old list has no model left.
+      writeAcpModelConfigOptionsToFlock(flock, configId, 'v2', { b: [effort(['low', 'max'])] });
+      expect(
+        [...flock.rows.values()].filter((row) => row.key[0] === 'acpModelConfigOptionsShape')
+      ).toHaveLength(1);
+      expect(observed(flock)).toEqual({ a: [effort(['low', 'max'])], b: [effort(['low', 'max'])] });
+    });
+
+    it('keeps an older source version’s answer and ignores rows without a capability', () => {
+      const flock = withCapability();
+      writeAcpModelConfigOptionsToFlock(flock, configId, 'v1', { a: [effort(['low'])] });
+      writeAcpModelConfigOptionsToFlock(flock, 'other' as AgentConfigId, 'v2', {
+        a: [effort(['high'])],
+      });
+
+      const capabilities = getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock));
+      expect(capabilities[key]?.observedModelConfigOptions).toEqual({ a: [effort(['low'])] });
+      expect(Object.keys(capabilities)).toEqual([key]);
+    });
   });
 
   it('rejects an agent config whose value id does not match its row key', () => {

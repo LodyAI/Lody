@@ -129,6 +129,29 @@ export async function invoke(action: string, n = 0) {
           }
           case 'appendInvalid':
             return yield* feed.append(tail(1), [record(2)], { ...tail(2), count: 99 });
+          case 'largeRebase': {
+            const origin = new Uint8Array(17 * 1024 * 1024).fill(7);
+            yield* feed.rebase(tail(1), origin, 2, { ...tail(1), bytes: origin.length });
+            const saved = yield* feed.load(100);
+            return {
+              size: saved?.origin.length,
+              count: saved?.tail.count,
+              records: saved?.records.length,
+            };
+          }
+          case 'largeSize': {
+            const saved = yield* feed.load(100);
+            return {
+              size: saved?.origin.length,
+              count: saved?.tail.count,
+              records: saved?.records.length,
+            };
+          }
+          case 'rebuild':
+            return yield* feed.rebuild!(tail(1), retained.bytes, 2, {
+              ...tail(1),
+              bytes: retained.bytes.length,
+            });
           case 'rebase':
             return yield* feed.rebase(tail(1), retained.bytes, 2, {
               ...tail(1),

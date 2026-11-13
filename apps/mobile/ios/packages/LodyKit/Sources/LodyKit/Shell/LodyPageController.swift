@@ -2,7 +2,14 @@ import UIKit
 import ObjectiveC
 
 /// Content that renders navigation chrome inside its own transitioning page.
-@MainActor protocol LodyPageOwnedHeader: AnyObject {}
+@MainActor protocol LodyPageOwnedHeader: AnyObject {
+  /// False while the content's own navigation should take the edge swipe (a pushed picker).
+  var allowsPageSwipeBack: Bool { get }
+}
+
+extension LodyPageOwnedHeader {
+  var allowsPageSwipeBack: Bool { true }
+}
 
 struct ShellPageSpec {
   var title: String
@@ -27,6 +34,7 @@ final class LodyPageController: UIViewController {
   private var headerHidden: Bool?
   private let content: UIViewController
   var ownsHeader: Bool { content is LodyPageOwnedHeader }
+  var allowsPageSwipeBack: Bool { (content as? LodyPageOwnedHeader)?.allowsPageSwipeBack ?? true }
 
   init(spec: ShellPageSpec, inSheet: Bool, content: UIViewController) {
     self.spec = spec
@@ -142,6 +150,7 @@ final class LodyPageController: UIViewController {
     closed = true
     let completion = onClose
     onClose = nil; onResult = nil; onCallback = nil
+    (content as? LodyPageStackHost)?.closePages()
     completion?()
     NotificationCenter.default.post(name: .lodyPageDidClose, object: self)
   }
@@ -198,10 +207,10 @@ final class PageHeaderPopGestureDelegate: NSObject, UIGestureRecognizerDelegate 
     guard let navigation else { return false }
     let top = navigation.topViewController
     let page = (top as? UINavigationController)?.topViewController ?? top
-    guard (page as? LodyPageController)?.ownsHeader == true else {
+    guard let page = page as? LodyPageController, page.ownsHeader else {
       return original?.gestureRecognizerShouldBegin?(gestureRecognizer) ?? true
     }
-    guard navigation.viewControllers.count > 1, navigation.transitionCoordinator == nil,
+    guard page.allowsPageSwipeBack, navigation.viewControllers.count > 1, navigation.transitionCoordinator == nil,
           navigation.presentedViewController == nil else { return false }
     // UIKit’s recognizers own directional recognition; their pan values may reset before this callback.
     return true

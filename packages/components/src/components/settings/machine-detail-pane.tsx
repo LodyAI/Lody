@@ -52,7 +52,7 @@ import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { useMachineActionState } from '@/hooks/use-machine-action-state';
 import { MobileSettingsDetailHeader } from '@/components/mobile/mobile-settings-layout';
 import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
-import { ProviderRow } from './provider-row';
+import { ProviderRow, type ProviderRefreshHandler } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
 import { CompactSection, SettingsEmptyList, settingsRecordsCard } from './compact-layout';
@@ -238,7 +238,7 @@ export type MachineProvidersSectionProps = {
   onAddConfig: () => void;
   onEditConfig: (config: AgentConfigMeta) => void;
   onDeleteConfig?: (config: AgentConfigMeta) => Promise<void>;
-  onRefreshConfig?: (config: AgentConfigMeta) => Promise<void>;
+  onRefreshConfig?: ProviderRefreshHandler;
   onRetrySetup?: (setup: ProviderSetupTask) => Promise<void>;
   onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
   /** Desktop pills content is flush with the title — no extra horizontal inset. */
@@ -397,7 +397,7 @@ export type MachineDetailPaneProps = {
   onAddConfig: () => void;
   onEditConfig: (config: AgentConfigMeta) => void;
   onDeleteConfig?: (config: AgentConfigMeta) => Promise<void>;
-  onRefreshConfig?: (config: AgentConfigMeta) => Promise<void>;
+  onRefreshConfig?: ProviderRefreshHandler;
   onRetrySetup?: (setup: ProviderSetupTask) => Promise<void>;
   onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
   onPing?: (machineId: MachineId) => Promise<number>;

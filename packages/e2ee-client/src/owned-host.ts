@@ -206,6 +206,7 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         removeMember: (...args: Parameters<RawSession['removeMember']>) =>
           call(raw.removeMember(...args)),
         rotate: () => call(raw.rotate()),
+        abandonEpoch: (baseEpoch: number) => call(raw.abandonEpoch(baseEpoch)),
         recoverHistory: () => call(raw.recoverHistory()),
         resumeRotation: () => call(raw.resumeRotation()),
         contentToken: (...args: Parameters<RawSession['contentToken']>) =>
@@ -250,6 +251,7 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
           call(raw.prepareFeature(...args)),
         acceptFeatureResponse: (...args: Parameters<RawSession['acceptFeatureResponse']>) =>
           call(raw.acceptFeatureResponse(...args)),
+        irohPath: (...args: Parameters<RawSession['irohPath']>) => call(raw.irohPath(...args)),
         irohRoute: (...args: Parameters<RawSession['irohRoute']>) => call(raw.irohRoute(...args)),
         document: (...args: Parameters<RawSession['document']>) =>
           call(

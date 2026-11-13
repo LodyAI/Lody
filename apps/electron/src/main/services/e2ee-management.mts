@@ -36,7 +36,7 @@ import { E2eeStagingCapacityError } from './e2ee-cloud-client.mjs'
 
 export type DesktopE2eeManagementCommand =
   | { type: 'rotate' }
-  | { type: 'revoke'; target: string }
+  | { type: 'revoke'; target: string; confirmedRecoveryOnly?: boolean }
   | { type: 'removeMember'; membershipId: string }
   | { type: 'setRole'; membershipId: string; role: 'admin' | 'member' | 'guest' }
   | { type: 'transferOwner'; membershipId: string }
@@ -252,7 +252,11 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
       )
       const view = yield* input.verified.current()
       if (!view.inspectState().devices.has(command.target)) return 'Committed'
-      const result = yield* control.execute({ _tag: 'RevokeDevice', target })
+      const result = yield* control.execute({
+        _tag: 'RevokeDevice',
+        target,
+        confirmedRecoveryOnly: command.confirmedRecoveryOnly === true
+      })
       yield* control.acknowledge(result)
       return result.outcome
     }

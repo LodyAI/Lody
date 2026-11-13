@@ -90,9 +90,9 @@ execution/consent rules. These rules also bind CLI callers outside that director
   never rewrite the exact opener to the root or treat either as `parentSessionId`.
 - INVARIANT: reasoning effort and fast mode are per MODEL. Apply mode, then model, then dependent
   options, for both top-level and config-option selections. A probe's `configOptions` describe only
-  its current model. Validate effort against the TARGET model using
-  `getModelEffortChoices` (the stored per-model declaration first, then
-  `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
+  its current model; that model and every model a requested refresh read are also kept in
+  `acpModelConfigOptions` rows. Validate effort against the TARGET model using `getAcpModelEffortChoices` (the stored
+  per-model declaration first, then `modelReasoningEfforts`, then that model's recorded list) and skip the resulting `validatedConfigIds` in
   `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
   runtime rejections in debug diagnostics. Codex/Claude effort, Fast and Plan rejections stay hidden;
   model rejections always emit `agent_warning` in the GUI. Claude Fable
@@ -102,10 +102,9 @@ execution/consent rules. These rules also bind CLI callers outside that director
   a `createAgent` failure detaches the instance BEFORE its cleanup `terminate`; otherwise a
   recovery such as the resume-to-replay fallback loses every update of the replacement agent
   ([note](../../.agents/notes/implemented/bug-fix/2026-09-11-failed-session-create-lifecycle-events.md)).
-- Only coordinator conversations (`SessionMeta.coordinator`) send a system prompt, and only
-  as ACP `systemPrompt` on every session establishment; an agent that does not advertise
-  it fails startup. Never fold it into user text or send it elsewhere
-  ([details](src/agent/README.md#client-system-prompts-coordinator-conversations)).
+- Only coordinator conversations send a system prompt, as ACP `systemPrompt` on every
+  session start; an agent without that capability fails startup. Never fold it into user
+  text ([details](src/agent/README.md#client-system-prompts-coordinator-conversations)).
 - `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text and CLI
   version, platform, and architecture — never cwd, paths, hostname, environment, logs, prompts,
   history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.

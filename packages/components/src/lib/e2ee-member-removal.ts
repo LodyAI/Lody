@@ -1,4 +1,5 @@
 import { createSessionInputStorage } from './session-input-storage';
+import { personalHostFailureCode } from './e2ee-control-failure';
 import { removeEagerSyncHighWaterNamespace } from './eager-sync-high-water-cache';
 import {
   encryptedLocalNamespace,
@@ -12,11 +13,27 @@ export type E2eeAccessLoss = 'e2ee_member_removed' | 'e2ee_device_revoked';
 const accessLossPattern =
   /^(?:Error invoking remote method 'e2ee[.:](?:open|refresh|contentStreamsToken|removeMember|setMemberRole|transferOwnership)': Error: )?(e2ee_member_removed|e2ee_device_revoked)$/;
 
-/** Only these exact native results trigger terminal cleanup; any other error never does. */
-export const e2eeAccessLoss = (error: unknown): E2eeAccessLoss | null =>
-  error instanceof Error
+/** Only these exact native results trigger terminal cleanup; any other error never does.
+ * A personal-device host (phone, browser) reports its own device absent from the
+ * verified ledger as typed `revoked`; that is this device's revocation. Membership
+ * is not inferred from it: the control page reads the ledger and shows removal. */
+export const e2eeAccessLoss = (error: unknown): E2eeAccessLoss | null => {
+  if (personalHostFailureCode(error) === 'revoked') return 'e2ee_device_revoked';
+  // A portable host's typed loss, from its verified ledger or a credential-bound
+  // adapter's parsed refusal: only its tag with an exact code, never a substring
+  // or a bare `code` field on an unrelated network or JWT error.
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { _tag?: unknown })._tag === 'PersonalAccessLoss'
+  ) {
+    const code = (error as { code?: unknown }).code;
+    return code === 'e2ee_member_removed' || code === 'e2ee_device_revoked' ? code : null;
+  }
+  return error instanceof Error
     ? ((accessLossPattern.exec(error.message)?.[1] as E2eeAccessLoss | undefined) ?? null)
     : null;
+};
 export const isE2eeMemberRemoved = (error: unknown): boolean =>
   e2eeAccessLoss(error) === 'e2ee_member_removed';
 export const isE2eeDeviceRevoked = (error: unknown): boolean =>

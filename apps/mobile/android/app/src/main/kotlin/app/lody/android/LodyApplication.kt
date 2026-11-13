@@ -66,7 +66,7 @@ open class LodyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         app.lody.android.home.AvatarImages.initialize(this)
-        runtimeOwner = RuntimeOwner(::createRuntime, Dispatchers.Main.immediate)
+        runtimeOwner = RuntimeOwner(::createRuntime, Dispatchers.Main.immediate) { account.requirePlaintext(it) }
         val cache = AtomicCatalogStore(this)
         settingsCache = cache
         val scheduleCache = app.lody.android.schedules.ScheduleDisplayCache(cache)
@@ -101,7 +101,7 @@ open class LodyApplication : Application() {
         sessionImages = app.lody.android.chat.SessionImageReader { scope, sessionId, image, width ->
             account.withVerifiedAccount(scope) { credential -> imageReads.read(credential.token, scope.workspaceId, image.storageSessionId ?: sessionId, image.id, width) }
         }
-        account = AccountController(CloudAuthHttp(OkHttpAuthTransport()), KeystoreCredentialStore(this), applicationScope, cache) {
+        account = AccountController(CloudAuthHttp(WorkspaceModePins(java.io.File(noBackupFilesDir, "workspace-modes" + BackendEnvironment.storageSuffix + ".json")), OkHttpAuthTransport()), KeystoreCredentialStore(this), applicationScope, cache) {
             if (::notifications.isInitialized) notifications.clear()
             scheduleCache.invalidate()
             prepared = null

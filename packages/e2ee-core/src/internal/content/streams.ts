@@ -188,6 +188,7 @@ export function makeStreamsUpdateBinding(input: {
       if (writeEpoch !== 'current' || !missing(first.failure))
         return yield* error('missing-read-key');
       for (let epoch = current - 1; epoch >= 0; epoch--) {
+        if ((yield* Effect.fromResult(epochHistoryPacket(view, epoch))).abandoned) continue;
         const result = yield* Effect.result(readKey(epoch));
         if (Result.isSuccess(result)) return { epoch, owned: result.success };
         if (!missing(result.failure)) return yield* error('missing-read-key');

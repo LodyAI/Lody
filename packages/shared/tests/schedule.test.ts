@@ -7,7 +7,11 @@ import {
   previewSchedule,
   validateScheduleTrigger,
 } from '../src/schedule-time';
-import { scheduleDefinitionFingerprint } from '../src/schedule-registry';
+import {
+  manualScheduleRunKey,
+  scheduleRegistryKeys,
+  scheduleDefinitionFingerprint,
+} from '../src/schedule-registry';
 import {
   normalizeLegacyScheduleAgent,
   SCHEDULED_MESSAGE_RETENTION_MS,
@@ -15,6 +19,7 @@ import {
   ScheduleDefinitionSchema,
 } from '../src/schedule-types';
 import { scheduleDeclarationSubject } from '../src/e2ee-execution-intent';
+import { readScheduleAuthorization } from '../src/schedule-authorization';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
 import { zonedLocalInputToInstant, instantToZonedLocalInput } from '../src/schedule-recurrence';
 
@@ -153,20 +158,23 @@ describe('Schedule persistence contract', () => {
     ).rejects.toThrow('e2ee_signature_unavailable');
     expect(docs.get('schedule-signed')?.toJSON() ?? {}).toEqual({});
     const signed: { fingerprint: string; manualRunKey?: string }[] = [];
-    await save(
-      new ScheduleRepository(port, 'workspace' as never, {
-        protectedContent: true,
-        signDeclaration: async (document, manualRunKey) => {
-          signed.push({
-            fingerprint: scheduleDeclarationSubject(document, manualRunKey).contentDigest,
-            ...(manualRunKey ? { manualRunKey } : {}),
-          });
-          return 'A'.repeat(131);
-        },
-      })
-    );
+    let rejectManual = false;
+    const protectedRepo = new ScheduleRepository(port, 'workspace' as never, {
+      protectedContent: true,
+      signDeclaration: async (document, manualRunKey) => {
+        if (rejectManual && manualRunKey) throw new Error('manual signer unavailable');
+        signed.push({
+          fingerprint: scheduleDeclarationSubject(document, manualRunKey).contentDigest,
+          ...(manualRunKey ? { manualRunKey } : {}),
+        });
+        return 'A'.repeat(131);
+      },
+    });
+    await save(protectedRepo);
+    const signedDoc = docs.get('schedule-signed');
+    if (!signedDoc) throw new Error('missing signed Schedule');
     const declared = (
-      docs.get('schedule-signed')!.toJSON() as {
+      signedDoc.toJSON() as {
         scheduleAuthorizations: { definitionFingerprint: string; e2eeIntent?: string }[];
       }
     ).scheduleAuthorizations;
@@ -176,6 +184,60 @@ describe('Schedule persistence contract', () => {
         e2eeIntent: 'A'.repeat(131),
       }),
     ]);
+    const unsigned = new ScheduleRepository(port, 'workspace' as never, { protectedContent: true });
+    const pause = {
+      scheduleId: 'signed',
+      enabled: false,
+      actorId: 'owner',
+      now: 2,
+      activationId: 'pause',
+      requestId: 'pause',
+    };
+    await unsigned.setEnabled(pause);
+    await unsigned.setEnabled(pause);
+    expect((await unsigned.read('signed'))?.definition).toMatchObject({
+      enabled: false,
+      activationId: 'pause',
+    });
+    expect((await unsigned.list())[0]?.enabled).toBe(false);
+    expect(
+      (signedDoc.toJSON() as { scheduleAuthorizations: unknown }).scheduleAuthorizations
+    ).toEqual(declared);
+    const manual = { scheduleId: 'signed', actorId: 'owner', manualRunId: 'paused-run', now: 3 };
+    rejectManual = true;
+    await expect(protectedRepo.requestRun(manual)).rejects.toThrow('manual signer unavailable');
+    expect(
+      (signedDoc.toJSON() as { scheduleAuthorizations: unknown }).scheduleAuthorizations
+    ).toEqual(declared);
+    expect(
+      rows.get(JSON.stringify(scheduleRegistryKeys.manual('signed', 'paused-run')))
+    ).toBeUndefined();
+    rejectManual = false;
+    await protectedRepo.requestRun(manual);
+    const paused = await protectedRepo.read('signed');
+    if (!paused) throw new Error('missing paused Schedule');
+    expect(readScheduleAuthorization(signedDoc)?.value).toMatchObject({
+      kind: 'definition',
+      definitionFingerprint: scheduleDefinitionFingerprint(paused),
+    });
+    expect(
+      readScheduleAuthorization(signedDoc, manualScheduleRunKey('signed', 'paused-run'))?.value
+    ).toMatchObject({
+      kind: 'manual',
+      definitionFingerprint: scheduleDefinitionFingerprint(paused),
+    });
+    const authorizations = signedDoc.toJSON().scheduleAuthorizations;
+    await protectedRepo.requestRun(manual);
+    expect(signedDoc.toJSON().scheduleAuthorizations).toEqual(authorizations);
+    expect(
+      rows.get(JSON.stringify(scheduleRegistryKeys.manual('signed', 'paused-run')))
+    ).toMatchObject({ activationId: 'pause' });
+    expect(paused.definition.enabled).toBe(false);
+    signedDoc.getText('prompt').insert(0, 'tampered');
+    await expect(
+      unsigned.setEnabled({ ...pause, enabled: true, requestId: 'resume', activationId: 'resume' })
+    ).rejects.toThrow('e2ee_signature_unavailable');
+    expect((await unsigned.read('signed'))?.definition.enabled).toBe(false);
   });
 
   it('writes the definition durably before enabling its Registry and reads absent docs without seeding', async () => {

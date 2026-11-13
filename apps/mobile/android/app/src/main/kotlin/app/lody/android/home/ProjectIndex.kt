@@ -40,7 +40,7 @@ import kotlin.math.roundToInt
 /** Indices refer to the rendered list, after family folding, including each header. */
 internal fun projectIndexTargets(sections: List<HomeSection>): List<Int> {
     var index = 0
-    return sections.map { section -> index.also { index += 1 + section.chats.size } }
+    return sections.map { section -> index.also { index += 1 + if (section.collapsed) 0 else section.chats.size } }
 }
 
 /** Capsule-local coordinates; retain the down target inside touch slop, then use absolute cells. */

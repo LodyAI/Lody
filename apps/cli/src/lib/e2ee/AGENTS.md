@@ -3,7 +3,8 @@
 `CLAUDE.md` aliases this; CLI rules apply.
 
 - Lazy machine-only; ordinary startup never probes keyring.
-- Creation probes OS keystore write/read; fixes OS/file protection permanently.
+- Creation reads, or writes and reads back, the KEK keyring entry in one helper process;
+  never replace an existing entry. It fixes OS/file protection permanently.
   Reopen: original selector/KEK; no re-probe/switch.
 - File protection: owner-only dirs/files, no symlinks. Windows: owner/DACL via official
   process Layer, never Unix mode bits.
@@ -25,14 +26,16 @@
   never network-retry.
   A shared grant pins the ledger generation after its policy check, then rechecks the
   signer and machine against that ledger; a later ingest fails `isCurrent()`.
-  Claims record the principal; history `userId` is display data. A shared member's
-  derivation is written with signed `derivedFrom`, same-machine only, and starts with
-  that member's rights ([derivation](../../../../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md)). Origins are signed execution intents
-  stored with their content ([intent](../../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
-- Journal originals before feed/pin; rebase core pin first after 64 records.
-  Retired cache cleanup must fail closed.
-- The iroh listener (`iroh-listener.ts`) runs beside the Streams listener with its own receivers,
-  sharing their journal and claim; see [iroh rules](../../../../../packages/iroh-native/AGENTS.md).
+  Claims record verified principals, never history `userId`. Signed `derivedFrom` names
+  the human root; member delegation stays on this machine and rechecks the root's rights.
+  Members share 20 durable reservations across restart/reset; Owners remain unbounded
+  ([derivation](../../../../../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)).
+  Origins bind signatures to content ([intent](../../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
+- Retain originals before feed/pin. Pin before compaction, attempted every
+  64 records; its failures only warn. Retired cache cleanup must fail closed.
+- Iroh and Streams receivers share journal claims and live write completions, registered before
+  invocation. Only ownerless uncertain writes return errors; see [iroh rules](../../../../../packages/iroh-native/AGENTS.md).
+- Follow [Schedule rules](../schedules/AGENTS.md).
 - No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
   plaintext publish/receive allowlists, ordinary adaptor/90s TTL.
 - `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.
@@ -40,7 +43,7 @@
   No auto-replace/GC/archive replay/import. Exact originals/first outcome;
   uncertain=unknown/no takeover; independent IDs. Floors: genesis/workspace.
   Feature writes reject local >10min ahead of authenticated now, never frame
-  time; no reference: scoped max/reset. Execution records (`expiresAt` 0) skip that clock. Reset: stop owners, archive/new ID;
+  time; no reference: current local time, no retained peak. Execution records (`expiresAt` 0) skip that clock. Reset: stop owners, archive/new ID;
   keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
   failed main close. Bound permits/cleanup; reply before send; exact retries.
   `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer + host

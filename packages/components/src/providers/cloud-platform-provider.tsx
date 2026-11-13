@@ -298,6 +298,7 @@ export function CloudPlatformProvider({
                       pairingString: input.pairingString,
                       expiresAt: input.expiresAt,
                       preserveExisting: input.preserveExisting,
+                      workspaceId: input.workspace?.workspaceId,
                     },
                     input.workspace ? [input.workspace] : accountPairingHints(workspacesStore.get())
                   )
@@ -344,8 +345,8 @@ export function CloudPlatformProvider({
                 native.admitLocalAgent(workspaceId, pairingSessionId),
               managementState: (workspaceId) => native.managementState(workspaceId),
               updateKeys: (workspaceId) => native.updateKeys(workspaceId),
-              revokeDevice: (workspaceId, signingPublicKey) =>
-                native.revokeDevice(workspaceId, signingPublicKey),
+              revokeDevice: (workspaceId, signingPublicKey, confirmation) =>
+                native.revokeDevice(workspaceId, signingPublicKey, confirmation),
               refresh: (workspaceId, options) => native.refresh(workspaceId, options),
               contentStreamsToken: (workspaceId, rejectedToken, requestSnapshotFor, rpcOnly) =>
                 native.contentStreamsToken(workspaceId, rejectedToken, requestSnapshotFor, rpcOnly),
@@ -363,6 +364,7 @@ export function CloudPlatformProvider({
                 native.signScheduleDeclaration(workspaceId, document, manualRunKey),
               acceptDispatchResponse: (workspaceId, machineId, input, frame) =>
                 native.acceptDispatchResponse(workspaceId, machineId, input, frame),
+              irohPath: (workspaceId, machineId) => native.irohPath(workspaceId, machineId),
               irohReady: (workspaceId, machineId) => native.irohReady(workspaceId, machineId),
               irohCall: (workspaceId, machineId, envelope, timeoutMs) =>
                 native.irohCall(workspaceId, machineId, envelope, timeoutMs),
@@ -387,6 +389,8 @@ export function CloudPlatformProvider({
           ? { runtime: portableRuntime }
           : {}),
       remote: {
+        reportDeviceProfile: (request) =>
+          cloudClient.mutation(cloudOperations.e2eeWorkspaces.reportDeviceProfile, request),
         subscribeLedgerHead: (request, changed, failed) =>
           cloudClient.subscribeValue(
             cloudOperations.e2eeWorkspaces.ledgerHead,
@@ -443,7 +447,10 @@ export function CloudPlatformProvider({
       },
       workspaces: () => accountPairingHints(workspacesStore.get()),
       deviceName: electron ? 'Lody desktop' : 'Lody mobile',
-      canPresent: () => document.visibilityState === 'visible' && document.hasFocus(),
+      // A visible but unfocused window (another app in front, a second screen) still
+      // answers; only a hidden window falls back to the system notification.
+      canPresent: () => document.visibilityState === 'visible',
+      includePreparingReviews: Boolean(electron && runtime.accountPairingCode),
       notifyPending: (id) => {
         if (!electron) return;
         void getIpcServices()

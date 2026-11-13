@@ -101,9 +101,10 @@ final class WorkspaceSwitcherPanel: UIViewController, UIPopoverPresentationContr
 
   private func choose(_ id: String) {
     let picked = picked
-    let current = items.first(where: { $0.id == id })?.selected == true
+    let item = items.first(where: { $0.id == id })
+    let current = item?.selected == true
     dismiss(animated: true) {
-      if !current { picked(id) }
+      if !current || item?.retrySelection == true { picked(id) }
     }
   }
 
@@ -124,6 +125,7 @@ private final class WorkspaceSwitcherRow: UIControl {
   private let check = UIImageView()
   private let avatar = UIImageView()
   private let name = LodyFadingLabel()
+  private let lock = UIImageView()
 
   init(item: LodyMenuItem, avatarSide: CGFloat, checkSlot: CGFloat, photoLoaded: @escaping () -> Void) {
     super.init(frame: .zero)
@@ -135,7 +137,12 @@ private final class WorkspaceSwitcherRow: UIControl {
     avatar.layer.cornerRadius = avatarSide / 2
     avatar.clipsToBounds = true
     name.text = item.title
-    for view in [check, avatar, name] as [UIView] {
+    lock.image = UIImage(systemName: "lock.fill")
+    lock.tintColor = .secondaryLabel
+    lock.contentMode = .scaleAspectFit
+    lock.isHidden = !item.encrypted
+    lock.accessibilityIdentifier = "workspace-encrypted:" + item.id
+    for view in [check, avatar, name, lock] as [UIView] {
       view.translatesAutoresizingMaskIntoConstraints = false
       view.isUserInteractionEnabled = false
       addSubview(view)
@@ -149,13 +156,17 @@ private final class WorkspaceSwitcherRow: UIControl {
       avatar.widthAnchor.constraint(equalToConstant: avatarSide),
       avatar.heightAnchor.constraint(equalToConstant: avatarSide),
       name.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: 12),
-      name.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+      name.trailingAnchor.constraint(equalTo: lock.leadingAnchor, constant: item.encrypted ? -8 : 0),
+      lock.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+      lock.centerYAnchor.constraint(equalTo: centerYAnchor),
+      lock.widthAnchor.constraint(equalToConstant: item.encrypted ? 16 : 0),
+      lock.heightAnchor.constraint(equalToConstant: 16),
       name.topAnchor.constraint(equalTo: topAnchor),
       name.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
     isAccessibilityElement = true
     accessibilityIdentifier = "workspace-row:" + item.id
-    accessibilityLabel = item.title
+    accessibilityLabel = item.encrypted ? item.title + ", E2EE" : item.title
     accessibilityTraits = item.selected ? [.button, .selected] : [.button]
   }
 

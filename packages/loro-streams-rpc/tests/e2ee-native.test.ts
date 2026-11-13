@@ -1,3 +1,5 @@
+import { LocalMachineRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+import { E2eeFeatureInputSchema } from '@lody/shared/e2ee-rpc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,6 +19,7 @@ import { Result } from 'effect';
 import { verifyExecutionIntent } from '@lody/e2ee-core/protocol';
 import { decodeE2eeIntentRecord, E2EE_INTENT_KIND, turnExecutionDigest } from '@lody/shared';
 import { copyEpochKeyBytes } from '../../e2ee-core/src/internal/foundation/epoch-key';
+import { SessionIdSchema } from '@lody/shared';
 
 const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
 const fixture = () => {
@@ -662,6 +665,67 @@ describe('trusted-host encrypted dispatch originals', () => {
   });
 });
 
+it.each(['member', 'guest'] as const)(
+  'reads shared history across machine memberships with retained originals (%s)',
+  async (role) => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    if (role === 'guest') f.ledger.append([3, new Uint8Array(16).fill(13), 3]);
+    const sender = f.native('teammate');
+    const input = E2eeFeatureInputSchema.parse({
+      requestId: 'ac'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'session/history-read' as const,
+        params: { sessionId: f.input.sessionId, query: { kind: 'count' as const } },
+      },
+    });
+    const original = await Effect.runPromise(sender.prepareFeature(input));
+    const reopened = f.native('teammate');
+    expect(await Effect.runPromise(reopened.prepareFeature(input))).toEqual(original);
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    if (!opened) throw new Error('missing shared history request');
+    expect(opened.input).toEqual(input);
+    const result = {
+      ok: true as const,
+      result: {
+        type: 'session/history-read_response' as const,
+        sessionId: SessionIdSchema.parse(f.input.sessionId),
+        success: true,
+        result: 7,
+        historyRevision: 1,
+        historyCount: 7,
+      },
+    };
+    const frames = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, result)
+    );
+    expect(
+      await Effect.runPromise(
+        reopened.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+      )
+    ).toEqual(result);
+    for (const request of [
+      { method: 'machine/status' as const, params: { includeDisk: true } },
+      { method: 'machine/ping' as const, params: { requestId: 'ping' } },
+    ] as const) {
+      await expect(
+        Effect.runPromise(
+          sender.prepareFeature({
+            requestId: 'ad'.repeat(16),
+            request: {
+              workspaceId: f.workspaceId,
+              machineId: f.machineId,
+              ...request,
+            },
+          })
+        )
+      ).rejects.toThrow('e2ee_machine_not_owned');
+    }
+  }
+);
+
 it('protects feature requests and chunked results with workspace signatures and exact retained originals', async () => {
   const f = fixture();
   const input = {
@@ -831,6 +895,125 @@ it('reassembles a large save from signed chunks and rejects a response from anot
   const reopened = f.native('owner');
   expect(await Effect.runPromise(reopened.prepareFeature(input))).toEqual(original);
   expect(readFileSync(join(f.directory, 'owner.sqlite')).includes(Buffer.from(text))).toBe(false);
+});
+
+it.each([-600_000, -300_000, 300_000, 600_000])(
+  'round-trips encrypted file/history reads and writes with sender clock offset %i ms',
+  async (offset) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = 10_000_000;
+    vi.setSystemTime(now);
+    const f = fixture();
+    try {
+      const requests = [
+        {
+          method: 'file/preview' as const,
+          params: { v: 3 as const, sessionId: f.input.sessionId, path: 'private.ts' },
+        },
+        {
+          method: 'code-collab/open-text' as const,
+          params: { sessionId: f.input.sessionId, path: 'private.ts' },
+        },
+        {
+          method: 'session/history-read' as const,
+          params: { sessionId: f.input.sessionId, query: { kind: 'readMetadata' as const } },
+        },
+        {
+          method: 'code-collab/save-text' as const,
+          params: {
+            sessionId: f.input.sessionId,
+            requestedByUserId: 'owner',
+            path: 'private.ts',
+            baseDigest: `sha256:${'11'.repeat(32)}`,
+            text: { encoding: 'plain' as const, text: 'saved', rawBytes: 5 },
+          },
+        },
+      ];
+      for (const [index, request] of requests.entries()) {
+        const input = E2eeFeatureInputSchema.parse({
+          requestId: (index + 100).toString(16).padStart(32, '0'),
+          request: { workspaceId: f.workspaceId, machineId: f.machineId, ...request },
+        });
+        vi.setSystemTime(now + offset);
+        const original = await Effect.runPromise(f.sender.prepareFeature(input));
+        vi.setSystemTime(now);
+        const opened = await Effect.runPromise(
+          f.receiver.openFeature(f.machineId, original.frameHex)
+        );
+        expect(opened?.input).toEqual(input);
+        if (!opened) throw new Error('missing feature request');
+        expect(opened.expiresAt).toBeGreaterThan(now);
+        const text = { encoding: 'plain' as const, text: 'saved', rawBytes: 5 };
+        const file = {
+          status: 'ok' as const,
+          path: 'private.ts',
+          digest: `sha256:${'11'.repeat(32)}`,
+        };
+        const result = LocalMachineRpcResponseSchema.parse({
+          ok: true,
+          result:
+            request.method === 'session/history-read'
+              ? {
+                  type: 'session/history-read_response',
+                  sessionId: f.input.sessionId,
+                  success: true,
+                  result: { title: 'Synthetic session' },
+                  historyRevision: 1,
+                  historyCount: 0,
+                }
+              : request.method === 'file/preview'
+                ? {
+                    ...file,
+                    v: 3,
+                    kind: 'text',
+                    content: { ...text, encoding: 'utf8-plain' },
+                    sizeBytes: 5,
+                  }
+                : request.method === 'code-collab/open-text'
+                  ? { ...file, text }
+                  : { ...file, rawBytes: 5 },
+        });
+        const frames = await Effect.runPromise(
+          f.receiver.sealFeatureResult(f.machineId, opened, result)
+        );
+        vi.setSystemTime(now + offset);
+        expect(
+          await Effect.runPromise(
+            f.sender.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+          )
+        ).toEqual(result);
+        expect(await Effect.runPromise(f.sender.prepareFeature(input))).toEqual(original);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+);
+
+it('rejects feature deadlines beyond the clock skew budget', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const now = 10_000_000;
+  vi.setSystemTime(now + 600_001);
+  const f = fixture();
+  try {
+    const original = await Effect.runPromise(
+      f.sender.prepareFeature({
+        requestId: '98'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'code-collab/open-text',
+          params: { sessionId: f.input.sessionId, path: 'private.ts' },
+        },
+      })
+    );
+    vi.setSystemTime(now);
+    await expect(
+      Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex))
+    ).rejects.toThrow('e2ee_feature_expiry');
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('rejects expired feature requests before admitting even a single chunk', async () => {

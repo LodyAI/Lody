@@ -1,4 +1,6 @@
+import { useAtomValue } from 'jotai';
 import { createContext, useContext, useState, type ComponentType } from 'react';
+import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { desktopRecoveryPort } from './recovery-desktop-port';
 
@@ -96,6 +98,8 @@ export type RecoverySetupResult = {
   readonly recoverable: boolean;
 };
 export type RecoveryRestoreResult = {
+  /** Admission succeeded with newer epoch keys still awaiting repair. */
+  readonly partialEpochKey?: boolean;
   readonly name: string;
   readonly outcome: RecoveryCommitOutcome;
 };
@@ -151,14 +155,19 @@ export type E2eeRecoveryHost =
 export const E2eeRecoveryHostContext = createContext<E2eeRecoveryHost | null>(null);
 
 /** This host's recovery port: the composed host's, else the desktop main-process
- * vault, else undefined. */
+ * vault, else undefined. Undefined while the renderer's recovery switch is off, so
+ * no surface offers a section that has nothing to show. The switch only hides or
+ * shows the port: desktop main still refuses every vault call unless it started
+ * with its own env gate. */
 export function useRecoveryPort(): RecoveryPort | undefined {
   const host = useContext(E2eeRecoveryHostContext);
+  const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
   // The IPC proxy is new on every call; build the desktop port once.
   const [desktop] = useState(() => {
     const e2ee = getIpcServices()?.e2ee;
     return e2ee ? desktopRecoveryPort(e2ee) : undefined;
   });
+  if (!enabled) return undefined;
   if (host) return 'port' in host ? host.port : undefined;
   return desktop;
 }

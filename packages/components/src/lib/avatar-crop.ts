@@ -67,7 +67,7 @@ const drawCrop = (
 };
 
 /**
- * Export the square selected by react-easy-crop as a small uploadable File.
+ * Export the square selected in the crop dialog as a small uploadable File.
  * The crop coordinates are in the source image's pixel space, as emitted by
  * the cropper's `onCropComplete` callback.
  */

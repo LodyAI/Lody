@@ -8,10 +8,22 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
+import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { Result } from 'effect';
+import {
+  encodeCbor,
+  hashRecordBytes,
+  recordSigningBytes,
+  type CborValue,
+} from '@lody/e2ee-core/protocol';
 import { join } from 'node:path';
 import { E2eeWorkspaceControlPage } from '../src/components/pages/e2ee-workspace-control-page';
-import { appendLedgerHistory, type VerifiedLedgerHistory } from '../src/lib/e2ee-ledger-history';
+import {
+  appendLedgerHistory,
+  bytesToHex,
+  type VerifiedLedgerHistory,
+} from '../src/lib/e2ee-ledger-history';
 import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
 import { ledgerVerificationCode } from '../src/lib/e2ee-ledger-verification';
 
@@ -167,10 +179,38 @@ describe('encrypted workspace control page reading', () => {
     genesisHash: vector.anchor,
     localPin,
   });
-  // The final record declares an unsupported capability after independent removal.
+  // Append an unsupported capability record signed by Carol (the current Owner at vector end).
+  const carolKey = createPrivateKey({
+    key: Buffer.concat([
+      Buffer.from('302e020100300506032b657004220420', 'hex'),
+      Buffer.alloc(32, 3),
+    ]),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  const carolPublicKey = new Uint8Array(
+    createPublicKey(carolKey).export({ format: 'der', type: 'spki' }).subarray(-32)
+  );
+  const futureBody: CborValue = [
+    new Uint8Array(Buffer.from(vector.records.at(-1)!.hash, 'hex')),
+    carolPublicKey,
+    [9, [3]],
+  ];
+  const futureBodyBytes = Result.getOrThrow(encodeCbor(futureBody));
+  const futureRecord = Result.getOrThrow(
+    encodeCbor([
+      futureBody,
+      new Uint8Array(sign(null, recordSigningBytes(futureBodyBytes), carolKey)),
+    ])
+  );
+  const futureHash = bytesToHex(hashRecordBytes(futureRecord).toBytes());
   const full = appendLedgerHistory(
     null,
-    page(vector.records.length, vector.records.at(-1)!.hash),
+    {
+      ...page(vector.records.length, vector.records.at(-1)!.hash),
+      checkpoint: { headHash: futureHash, length: vector.records.length + 1 },
+      recordsHex: [...vector.records.map((record) => record.hex), bytesToHex(futureRecord)],
+    },
     expected(vector.anchor)
   );
   const history = (localPin: string | null) =>
@@ -459,7 +499,7 @@ it('lets only the owner transfer ownership, after a confirmation that states the
     membershipId: '56'.repeat(16),
     userId: '67'.repeat(32),
     role: 'admin' as const,
-    devices: [],
+    devices: [] as { key: string; kind: 'personal' | 'recovery' }[],
   };
   const management = (actorRole: 'owner' | 'admin') => ({
     actorRole,
@@ -495,7 +535,15 @@ it('lets only the owner transfer ownership, after a confirmation that states the
   expect(workspace.owner).toBe('self');
   const confirmation = document.querySelector('[role="dialog"]')?.textContent ?? '';
   // The confirmation describes the transfer, not a removal.
-  expect(confirmation).toContain('e2ee.members.transferLead');
+  expect(confirmation).toContain('e2ee.members.transferNeedsPersonal');
+  const blocked = document.querySelector(
+    '[data-testid="e2ee-member-transfer-confirm"]'
+  ) as HTMLButtonElement;
+  expect(blocked.disabled).toBe(true);
+  await act(async () => blocked.click());
+  expect(workspace.owner).toBe('self');
+  member.devices.push({ key: '78'.repeat(32), kind: 'personal' });
+  await openMenu('owner');
   expect(confirmation).not.toContain('e2ee.members.removeLead');
   expect(confirmation).toContain('e2ee.members.transferEffectOwner');
   expect(confirmation).toContain('e2ee.members.transferEffectYou');
@@ -506,4 +554,63 @@ it('lets only the owner transfer ownership, after a confirmation that states the
   );
   expect(workspace.owner).toBe(member.membershipId);
   expect(document.querySelector('[data-testid="e2ee-member-transfer-dialog"]')).toBeNull();
+});
+
+describe('QR camera', () => {
+  const mount = async (getUserMedia: (constraints: MediaStreamConstraints) => Promise<unknown>) => {
+    const { useQrCamera } = await import('../src/components/pages/e2ee-ledger-verification');
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    const states: string[] = [];
+    function Probe() {
+      const { video, state } = useQrCamera(true, () => {});
+      states.push(state);
+      return <video ref={video} />;
+    }
+    const host = document.createElement('div');
+    document.body.append(host);
+    const probeRoot = createRoot(host);
+    await act(async () => probeRoot.render(<Probe />));
+    for (let turn = 0; turn < 5; turn++) await act(async () => {});
+    return {
+      states,
+      unmount: async () => {
+        await act(async () => probeRoot.unmount());
+        host.remove();
+        delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+      },
+    };
+  };
+  const failure = (name: string) => Object.assign(new Error(name), { name });
+
+  it('never asks a camera that was denied a second time', async () => {
+    const asked: MediaStreamConstraints[] = [];
+    const probe = await mount(async (constraints) => {
+      asked.push(constraints);
+      throw failure('NotAllowedError');
+    });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.video).toMatchObject({
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 720 },
+    });
+    expect(probe.states.at(-1)).toBe('unavailable');
+    await probe.unmount();
+  });
+
+  it('retries with plain video only when the rear-camera request cannot be met', async () => {
+    const asked: MediaStreamConstraints[] = [];
+    const probe = await mount(async (constraints) => {
+      asked.push(constraints);
+      throw failure(asked.length === 1 ? 'OverconstrainedError' : 'NotReadableError');
+    });
+    expect(asked.map((constraints) => constraints.video)).toEqual([
+      expect.objectContaining({ facingMode: { ideal: 'environment' } }),
+      true,
+    ]);
+    expect(probe.states.at(-1)).toBe('unavailable');
+    await probe.unmount();
+  });
 });

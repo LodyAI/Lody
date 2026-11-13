@@ -1,9 +1,15 @@
+import { LedgerError } from './errors';
 import { VerifiedLedger } from './verified-ledger';
 import { own } from '../lifecycle';
 import { Context, Effect, Layer, Option, Result, Semaphore } from 'effect';
 import * as Bytes from '../foundation/bytes';
-import { bytesEqual } from '../foundation/cbor';
-import { LedgerFeedSource, LedgerFeedInvalidation, LedgerViewSource } from '../../services/ledger';
+import { bytesEqual, decodeRetainedCbor, MAX_RETAINED_STATE_BYTES } from '../foundation/cbor';
+import {
+  LedgerFeedSource,
+  LedgerFeedInvalidation,
+  LedgerViewSource,
+  LedgerPinStore,
+} from '../../services/ledger';
 import { LedgerViewSourceError } from '../../services/errors';
 import { LedgerFeedStore, type LedgerFeedTail } from '../../services/stores';
 import { WorkspaceScope } from '../../services/workspace';
@@ -47,8 +53,14 @@ const fromStore = (error: LocalStoreError) =>
             ? 'read-too-large'
             : 'corrupt'
   );
-const toLedgerError = (error: { readonly code: string }) =>
-  fail(error.code === 'native-unavailable' ? 'native-unavailable' : 'wrong-parent');
+const toLedgerError = (error: { readonly code: string; readonly position?: number }) =>
+  new LedgerFeedError({
+    code:
+      error.code === 'native-unavailable' || error.code === 'upgrade-required'
+        ? error.code
+        : 'wrong-parent',
+    ...(error.position === undefined ? {} : { position: error.position }),
+  });
 
 /**
  * An endorsed snapshot a feed starts from instead of genesis. `trust` qualifies
@@ -62,7 +74,7 @@ export interface SnapshotFeedOrigin {
   readonly offset: string;
 }
 
-/** Where a {@link LedgerFeed} starts: genesis, an endorsed snapshot, or this caller's retained v2 state and source position. */
+/** Where a {@link LedgerFeed} starts: genesis, an endorsed snapshot, or this caller's retained v5 state and source position. */
 export type LedgerFeedOrigin =
   | { readonly kind: 'genesis'; readonly record: Uint8Array }
   | { readonly kind: 'snapshot'; readonly snapshot: SnapshotFeedOrigin }
@@ -77,7 +89,7 @@ export interface LedgerFeedOptions {
    * record). On first use it must equal the origin.
    */
   readonly expected: LedgerCheckpoint;
-  /** Upper bounds on records and bytes kept locally. */
+  /** maxRecords bounds appended records after the verified origin; rebase resets that suffix budget. maxBytes includes the origin and retained suffix. */
   readonly budget: { readonly maxRecords: number; readonly maxBytes: number };
 }
 
@@ -115,8 +127,15 @@ const verifyOrigin = (anchor: Bytes.GenesisHash, origin: LedgerFeedOrigin) =>
       if (origin.kind === 'retained') {
         if (!validLedgerOffset(origin.offset)) throw fail('retained-cache-invalid');
         const restored = restoreVerifiedState(origin.state);
-        if (Result.isFailure(restored) || !anchor.equals(restored.success.genesis))
+        if (Result.isFailure(restored)) {
+          if (
+            restored.failure.code === 'upgrade-required' ||
+            restored.failure.code === 'native-unavailable'
+          )
+            throw toLedgerError(restored.failure);
           throw fail('retained-cache-invalid');
+        }
+        if (!anchor.equals(restored.success.genesis)) throw fail('retained-cache-invalid');
         return {
           bytes: new Uint8Array(origin.state.bytes),
           view: restored.success,
@@ -165,7 +184,12 @@ const verifyOrigin = (anchor: Bytes.GenesisHash, origin: LedgerFeedOrigin) =>
       if (!anchor.equals(view.genesis)) throw fail('wrong-parent');
       return { bytes, view, offset: source.offset, bootstrap: false };
     },
-    catch: (error) => (error instanceof LedgerFeedError ? error : fail('wrong-parent')),
+    catch: (error) =>
+      error instanceof LedgerFeedError
+        ? error
+        : error instanceof LedgerError
+          ? toLedgerError(error)
+          : fail('wrong-parent'),
   });
 
 /**
@@ -185,7 +209,7 @@ export class LedgerFeed extends Context.Service<
   {
     /** Return the verified in-memory view and durable position; a closed owner fails with LedgerFeedError. */
     current(): Effect.Effect<LedgerFeedState, LedgerFeedError>;
-    /** Persist the verified pin first, then atomically replace the origin with the current retained v2 state. Save the returned local-only origin for reopen. */
+    /** Persist the verified pin first, then atomically replace the origin with the current retained v5 state. Save the returned local-only origin for reopen. */
     rebase(): Effect.Effect<
       Extract<LedgerFeedOrigin, { kind: 'retained' }>,
       LedgerFeedError,
@@ -213,31 +237,219 @@ export class LedgerFeed extends Context.Service<
           budget.maxRecords > 1_000_000 ||
           !Number.isSafeInteger(budget.maxBytes) ||
           budget.maxBytes < 1 ||
-          budget.maxBytes > 64 * 1024 * 1024
+          budget.maxBytes > MAX_RETAINED_STATE_BYTES
         )
           return yield* fail('invalid-frame');
-        const expected = {
+        let expected = {
           head: yield* Effect.fromResult(Bytes.recordHash(options.expected.head.toBytes())),
           length: options.expected.length,
         };
         if (!Number.isSafeInteger(expected.length) || expected.length < 1)
           return yield* fail('invalid-frame');
-        const retained = options.origin.kind === 'retained';
-        const origin = yield* Effect.fromResult(verifyOrigin(anchor, options.origin));
-        if (retained && expected.length < origin.view.length)
-          return yield* fail('retained-cache-invalid');
+        const local = <A>(effect: Effect.Effect<A, LocalStoreError>) =>
+          effect.pipe(Effect.mapError(fromStore));
+        // The pin is independent of the disposable feed cache and is never reset.
+        const pins = yield* Effect.serviceOption(LedgerPinStore);
+        if (Option.isSome(pins)) {
+          const pin = yield* local(pins.value.read());
+          if (pin && pin.length >= expected.length) {
+            if (pin.length === expected.length && !pin.head.equals(expected.head))
+              return yield* fail('local-evidence-conflict');
+            expected = pin;
+          }
+        }
+        let retained = options.origin.kind === 'retained';
+        let originResult = verifyOrigin(anchor, options.origin);
+        if (
+          Result.isFailure(originResult) &&
+          !(retained && originResult.failure.code === 'retained-cache-invalid')
+        )
+          return yield* originResult.failure;
+        const loaded = yield* Effect.result(local(store.load(budget.maxRecords)));
+        if (Result.isFailure(loaded) && loaded.failure.code !== 'corrupt')
+          return yield* loaded.failure;
+        let contents = Result.isSuccess(loaded) ? loaded.success : null;
+        // A successful rebase commits its local origin and suffix in one store transaction.
+        // Recover that origin even if the process died before returning it to its caller.
+        if (
+          contents &&
+          (Result.isFailure(originResult) ||
+            !bytesEqual(contents.origin, originResult.success.bytes))
+        ) {
+          const root = decodeRetainedCbor(contents.origin);
+          if (
+            Result.isSuccess(root) &&
+            Array.isArray(root.success) &&
+            root.success[3] instanceof Uint8Array
+          ) {
+            const head = Bytes.recordHash(root.success[3]);
+            if (Result.isSuccess(head)) {
+              const restored = restoreVerifiedState({
+                bytes: contents.origin,
+                genesis: anchor,
+                head: head.success,
+                length: contents.originCount,
+              });
+              if (Result.isSuccess(restored)) {
+                originResult = Result.succeed({
+                  bytes: new Uint8Array(contents.origin),
+                  view: restored.success,
+                  offset: contents.records.length === 0 ? contents.tail.offset : '-1',
+                  bootstrap: false,
+                });
+                retained = true;
+              }
+            }
+          }
+        }
+        let preverified: LedgerView | undefined;
+        let invalidSuffix = false;
+        if (contents && Result.isSuccess(originResult)) {
+          const base = originResult.success,
+            tail = contents.tail;
+          const hash = Bytes.recordHash(tail.head);
+          invalidSuffix =
+            contents.originCount !== base.view.length ||
+            tail.count !== base.view.length + contents.records.length ||
+            tail.bytes !==
+              contents.origin.length + contents.records.reduce((sum, row) => sum + row.length, 0) ||
+            !validLedgerOffset(tail.offset) ||
+            (tail.bootstrap &&
+              (!base.bootstrap || tail.offset !== '-1' || contents.records.length !== 0));
+          if (!invalidSuffix && Result.isSuccess(hash)) {
+            const checked = yield* Effect.result(
+              base.bootstrap
+                ? verifyLedgerEffect({
+                    anchor,
+                    records: [base.bytes, ...contents.records],
+                    checkpoint: { head: hash.success, length: tail.count },
+                  })
+                : extendLedgerEffect(base.view, contents.records, {
+                    head: hash.success,
+                    length: tail.count,
+                  })
+            );
+            if (Result.isSuccess(checked)) preverified = checked.success;
+            else if (
+              checked.failure.code === 'native-unavailable' ||
+              checked.failure.code === 'upgrade-required'
+            )
+              return yield* toLedgerError(checked.failure);
+            else invalidSuffix = true;
+          } else invalidSuffix = true;
+        }
+        const missingPin =
+          preverified &&
+          preverified.length >= expected.length &&
+          !Result.getOrElse(hasVerifiedCheckpoint(preverified, expected), () => false);
+        const needsRebuild =
+          missingPin ||
+          invalidSuffix ||
+          Result.isFailure(loaded) ||
+          Result.isFailure(originResult) ||
+          (!retained &&
+            Result.isSuccess(originResult) &&
+            expected.length > (contents?.tail.count ?? originResult.success.view.length)) ||
+          (contents !== null &&
+            Result.isSuccess(originResult) &&
+            !bytesEqual(contents.origin, originResult.success.bytes)) ||
+          (Result.isSuccess(originResult) &&
+            originResult.success.view.length > expected.length &&
+            !Result.getOrElse(
+              hasVerifiedCheckpoint(originResult.success.view, expected),
+              () => false
+            ));
+        if (needsRebuild) {
+          const source = yield* Effect.serviceOption(LedgerFeedSource);
+          const storedTail = yield* local(store.tail());
+          if (Option.isNone(source) || (storedTail && !store.rebuild))
+            return yield* fail('retained-cache-invalid');
+          const target =
+            storedTail && storedTail.count > expected.length
+              ? {
+                  length: storedTail.count,
+                  head: yield* Effect.fromResult(Bytes.recordHash(storedTail.head)).pipe(
+                    Effect.mapError(toLedgerError)
+                  ),
+                }
+              : expected;
+          if (
+            storedTail &&
+            storedTail.count === expected.length &&
+            !bytesEqual(storedTail.head, expected.head.toBytes())
+          )
+            return yield* fail('local-evidence-conflict');
+          let offset = '-1';
+          const originals: Uint8Array[] = [];
+          let bytes = 0;
+          for (let pageIndex = 0; originals.length < target.length; pageIndex++) {
+            if (pageIndex >= 256) return yield* fail('read-too-large');
+            const page = yield* source.value.readAfter(offset);
+            if (
+              page.requestOffset !== offset ||
+              !validLedgerOffset(page.nextOffset) ||
+              !Array.isArray(page.records) ||
+              page.records.length === 0 ||
+              page.records.length > 4096
+            )
+              return yield* fail('invalid-frame');
+            for (const record of page.records) {
+              if (!(record instanceof Uint8Array) || record.length < 1 || record.length > 8192)
+                return yield* fail('invalid-frame');
+              bytes += record.length;
+              if (bytes > budget.maxBytes || originals.length >= budget.maxRecords)
+                return yield* fail('read-too-large');
+              originals.push(new Uint8Array(record));
+            }
+            if (page.nextOffset === offset) return yield* fail('invalid-offset');
+            offset = page.nextOffset;
+          }
+          const rebuilt = yield* verifyLedgerEffect({
+            anchor,
+            records: originals,
+            checkpoint: { length: originals.length, head: hashRecordBytes(originals.at(-1)!) },
+          }).pipe(Effect.mapError(toLedgerError));
+          const evidence = [expected, target];
+          if (storedTail)
+            evidence.push({
+              length: storedTail.count,
+              head: yield* Effect.fromResult(Bytes.recordHash(storedTail.head)).pipe(
+                Effect.mapError(toLedgerError)
+              ),
+            });
+          for (const point of evidence) {
+            const included = hasVerifiedCheckpoint(rebuilt, point);
+            if (Result.isFailure(included) || !included.success)
+              return yield* fail('local-evidence-conflict');
+          }
+          const saved = yield* Effect.fromResult(exportVerifiedState(rebuilt)).pipe(
+            Effect.mapError(toLedgerError)
+          );
+          if (saved.bytes.length > budget.maxBytes) return yield* fail('read-too-large');
+          const next = tailOf({ view: rebuilt, offset, bootstrap: false }, saved.bytes.length);
+          yield* local(
+            storedTail
+              ? store.rebuild!(storedTail, saved.bytes, saved.length, next)
+              : store.initialize(saved.bytes, saved.length, next)
+          );
+          contents = { origin: saved.bytes, originCount: saved.length, tail: next, records: [] };
+          originResult = Result.succeed({
+            bytes: new Uint8Array(saved.bytes),
+            view: rebuilt,
+            offset,
+            bootstrap: false,
+          });
+          retained = true;
+          preverified = rebuilt;
+        }
+        const origin = yield* Effect.fromResult(originResult);
         if (
           retained &&
           expected.length === origin.view.length &&
           !expected.head.equals(origin.view.head)
         )
           return yield* fail('local-evidence-conflict');
-        if (origin.view.length > budget.maxRecords || origin.bytes.length > budget.maxBytes)
-          return yield* fail('read-too-large');
-        const local = <A>(effect: Effect.Effect<A, LocalStoreError>) =>
-          effect.pipe(Effect.mapError(fromStore));
-
-        let contents = yield* local(store.load(budget.maxRecords));
+        if (origin.bytes.length > budget.maxBytes) return yield* fail('read-too-large');
         if (!contents) {
           if (
             !retained &&
@@ -248,6 +460,7 @@ export class LedgerFeed extends Context.Service<
           yield* local(store.initialize(origin.bytes, origin.view.length, tail));
           contents = { origin: origin.bytes, originCount: origin.view.length, tail, records: [] };
         }
+        let budgetOriginCount = origin.view.length;
         const { tail, records } = contents;
         const recordBytes = records.reduce((size, record) => size + record.length, 0);
         if (
@@ -255,7 +468,7 @@ export class LedgerFeed extends Context.Service<
           contents.originCount !== origin.view.length ||
           !Number.isSafeInteger(tail.count) ||
           tail.count !== origin.view.length + records.length ||
-          tail.count > budget.maxRecords ||
+          records.length > budget.maxRecords ||
           !validLedgerOffset(tail.offset) ||
           tail.bytes !== origin.bytes.length + recordBytes ||
           tail.bytes > budget.maxBytes ||
@@ -269,16 +482,18 @@ export class LedgerFeed extends Context.Service<
         if (!retained && (!expected.head.equals(head.success) || expected.length !== tail.count))
           return yield* fail('wrong-parent');
         // Authenticate the local suffix against its stored endpoint, then prove the independent pin.
-        let view: LedgerView = origin.bootstrap
-          ? yield* verifyLedgerEffect({
-              anchor,
-              records: [origin.bytes, ...records],
-              checkpoint: { head: head.success, length: tail.count },
-            }).pipe(Effect.mapError(toLedgerError))
-          : yield* extendLedgerEffect(origin.view, records, {
-              head: head.success,
-              length: tail.count,
-            }).pipe(Effect.mapError(toLedgerError));
+        let view: LedgerView =
+          preverified ??
+          (origin.bootstrap
+            ? yield* verifyLedgerEffect({
+                anchor,
+                records: [origin.bytes, ...records],
+                checkpoint: { head: head.success, length: tail.count },
+              }).pipe(Effect.mapError(toLedgerError))
+            : yield* extendLedgerEffect(origin.view, records, {
+                head: head.success,
+                length: tail.count,
+              }).pipe(Effect.mapError(toLedgerError)));
         if (retained && view.length < expected.length) {
           const source = yield* Effect.serviceOption(LedgerFeedSource);
           if (Option.isNone(source)) return yield* fail('local-evidence-conflict');
@@ -311,7 +526,7 @@ export class LedgerFeed extends Context.Service<
               checkpoint
             );
             bytes += incoming.reduce((sum, record) => sum + record.length, 0);
-            if (next.view.length > budget.maxRecords || bytes > budget.maxBytes)
+            if (next.view.length - budgetOriginCount > budget.maxRecords || bytes > budget.maxBytes)
               return yield* fail('read-too-large');
             additions.push(...incoming);
             pending = next;
@@ -351,6 +566,7 @@ export class LedgerFeed extends Context.Service<
           const saved = yield* Effect.fromResult(exportVerifiedState(state.view)).pipe(
             Effect.mapError(toLedgerError)
           );
+          if (saved.bytes.length > budget.maxBytes) return yield* fail('read-too-large');
           // Never let interruption reverse the required durable ordering.
           yield* Effect.uninterruptible(
             Effect.gen(function* () {
@@ -363,6 +579,7 @@ export class LedgerFeed extends Context.Service<
                 )
               );
               totalBytes = saved.bytes.length;
+              budgetOriginCount = saved.length;
             })
           );
           return { kind: 'retained' as const, state: saved, offset: state.offset };
@@ -403,7 +620,7 @@ export class LedgerFeed extends Context.Service<
           // A bootstrap page repeats the stored genesis record.
           const additions = copied.slice(observed.bootstrap ? 1 : 0);
           const bytes = additions.reduce((size, record) => size + record.length, totalBytes);
-          if (next.view.length > budget.maxRecords || bytes > budget.maxBytes)
+          if (next.view.length - budgetOriginCount > budget.maxRecords || bytes > budget.maxBytes)
             return yield* fail('read-too-large');
           if (state !== observed) return yield* fail('conflict');
           yield* local(store.append(tailOf(observed, totalBytes), additions, tailOf(next, bytes)));

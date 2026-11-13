@@ -16,7 +16,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import app.lody.android.R
 import app.lody.android.designsystem.*
-import app.lody.android.runtime.RoostPreferences
 
 /**
  * iOS `PreferencesController`: language and notifications open the system's own pages for this
@@ -28,8 +27,6 @@ internal fun PreferencesScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
     var behavior by remember { mutableStateOf(AppPreferences.queuedMessageBehavior(context)) }
-    var developer by remember { mutableStateOf(RoostPreferences.developer(context)) }
-    var roost by remember { mutableStateOf(RoostPreferences.experiment(context)) }
     var menu by remember { mutableStateOf(false) }
     BackHandler(onBack = onBack)
     val open = { intent: Intent ->
@@ -79,29 +76,6 @@ internal fun PreferencesScreen(onBack: () -> Unit) {
                                 })
                             }
                         }
-                    }
-                }
-            }
-            item {
-                SettingsGroup(stringResource(R.string.settings_developer)) {
-                    SettingsLine(stringResource(R.string.settings_developer_mode), LodyIcons.Settings, trailing = {
-                        Switch(checked = developer, onCheckedChange = {
-                            developer = it
-                            RoostPreferences.setDeveloper(context, it)
-                        })
-                    })
-                }
-            }
-            if (developer) {
-                item {
-                    SettingsGroup {
-                        SettingsLine(stringResource(R.string.settings_roost_history), LodyIcons.Server,
-                            subtitle = stringResource(R.string.settings_roost_history_hint), trailing = {
-                                Switch(checked = roost, onCheckedChange = {
-                                    roost = it
-                                    RoostPreferences.setExperiment(context, it)
-                                })
-                            })
                     }
                 }
             }

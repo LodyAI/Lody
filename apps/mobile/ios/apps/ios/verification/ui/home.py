@@ -1,5 +1,4 @@
 """Native Home lists, creation drafts, search, grouping and session actions."""
-import subprocess
 import sys
 import time
 from driver import UI
@@ -41,49 +40,28 @@ def assert_swipe_has_no_selection(action_label):
     assert 'selected' not in str(row.get('traits') or []).lower(), row
 
 
-def assert_flat_ground(row, project):
-    if any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in ui.state()):
-        ui.axe('tap', '-x', str(screen / 2), '-y', '700', '--post-delay', '.6')
-    ui.wait(lambda items: not any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in items), 'The workspace menu must not cover the list')
-    ui.screenshot('rail-ground')
-    width = round(screen)
-    pixels = subprocess.check_output([
-        'ffmpeg', '-v', 'error', '-i', str(ui.output / 'rail-ground.png'),
-        '-vf', f'scale={width}:-1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
-    ], timeout=20)
-
-    def sample(x, y):
-        return tuple(pixels[(round(y) * width + round(x)) * 3 + channel] for channel in range(3))
-    edge = sample(4, row['y'] + row['height'] / 2)
-    beside = sample(4, project['y'] + project['height'] / 2)
-    gap = sample(4, project['y'] - 2)
-    assert max(abs(a - b) for a, b in zip(edge, gap)) <= 6, ('Rows sit on the list ground, not an inset card', edge, gap)
-    assert max(abs(a - b) for a, b in zip(beside, gap)) > 6, ('Project headers stand on their own band', beside, gap)
-    native = subprocess.check_output([
-        'ffmpeg', '-v', 'error', '-i', str(ui.output / 'rail-ground.png'),
-        '-f', 'rawvideo', '-pix_fmt', 'gray', '-',
-    ], timeout=20)
-    native_width = int(subprocess.check_output([
-        'ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width', '-of', 'csv=p=0',
-        str(ui.output / 'rail-ground.png'),
-    ], timeout=20).decode().strip())
-    scale = native_width / screen
-    boundary = round((row['y'] + row['height']) * scale)
-
-    def darkest(x):
-        return min(native[(y * native_width) + round(x * scale)] for y in range(boundary - 3, boundary + 3))
-    ground_level = native[(boundary - 12) * native_width + round(200 * scale)]
-    for x in [30, 200, screen - 6]:
-        assert abs(ground_level - darkest(x)) <= 3, ('Rows carry no hairline; spacing separates modules', x, ground_level, darkest(x))
-    group = ui.element('toggle:pinned')['frame']
-    top = round((group['y'] + group['height'] / 2 - 8) * scale)
-    chevron = min(
-        native[y * native_width + x]
-        for y in range(top, top + round(16 * scale))
-        for x in range(round((screen - 34) * scale), round((screen - 14) * scale))
+def hold(identifier):
+    frame = ui.element(identifier)['frame']
+    ui.axe(
+        'touch',
+        '-x', str(frame['x'] + min(120, frame['width'] / 2)),
+        '-y', str(frame['y'] + frame['height'] / 2),
+        '--down', '--up', '--delay', '1.2',
     )
-    band_level = native[(top + round(8 * scale)) * native_width + round(4 * scale)]
-    assert abs(band_level - chevron) <= 3, ('Group rows draw no disclosure chevron', band_level, chevron)
+    time.sleep(1)
+
+
+def tap_menu_option(label):
+    # Project also appears among the row-detail options; grouping is the upper menu section.
+    option = ui.wait(lambda items: min((i for i in items if i.get('AXLabel') == label),
+                     key=lambda i: i['frame']['y'], default=None), f'Missing menu option {label}')
+    frame = option['frame']
+    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.8')
+
+
+def tap_label(identifier):
+    frame = ui.element(identifier)['frame']
+    ui.axe('tap', '-x', str(frame['x'] + 60), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.8')
 
 
 close_create = catalog.text('accessibility.closeSheet', title=catalog.text('create.title'))
@@ -92,28 +70,18 @@ home_ready()
 workspace = next(item for item in ui.state() if item.get('AXLabel') == avatar_label)
 assert workspace['frame']['width'] > 200, workspace['frame']
 
-def assert_model_row():
-    item = ui.element('ui-design')
-    labels = [item.get('AXLabel') or ''] + [child.get('AXLabel') or '' for child in item.get('children') or []]
-    label = ' '.join(labels)
-    assert label.index('feature/session-model') < label.index('GPT-6'), label
-
-assert_model_row()
-pinned = ui.element('toggle:pinned')
-project = ui.element('toggle:ui:local:lody')
-pinned_row = ui.element('ui-pinned')
-assert pinned['frame']['y'] < project['frame']['y'], (pinned['frame'], project['frame'])
-assert pinned_row['frame']['y'] < project['frame']['y'], (
-    pinned_row['frame'],
-    project['frame'],
-)
+# Every grouping starts with the Pinned group: its label, then its rows, above the other chats.
+pinned = ui.element('label:pinned')['frame']
+pinned_row = ui.element('ui-pinned')['frame']
+design_row = ui.element('ui-design')['frame']
+assert pinned['y'] < pinned_row['y'] < design_row['y'], (pinned, pinned_row, design_row)
+assert '置顶的首页会话' in (ui.element('ui-pinned').get('AXLabel') or '')
 if any(i.get('AXUniqueId') == 'xmark' and i.get('AXLabel') == catalog.system('close') for i in ui.state()):
     ui.axe('tap', '--id', 'xmark', '--post-delay', '1')
 ui.capture('home')
 rail_row = ui.element('ui-design')['frame']
 screen = ui.state()[0]['frame']['width']
 assert abs(rail_row['x']) <= 0.5 and abs(rail_row['width'] - screen) <= 1, ('Content rows span the full width', rail_row, screen)
-assert_flat_ground(rail_row, ui.element('toggle:ui:local:lody')['frame'])
 row = ui.element('ui-design')['frame']
 y = row['y'] + row['height'] / 2
 left = row['x'] + 12
@@ -294,6 +262,16 @@ ui.axe('tap', '--label', catalog.system('clear'))
 commit('Lody')
 ui.element('project:ui:local:lody')
 ui.capture('project-search')
+hold('project:ui:local:lody')
+ui.wait(
+    lambda items: any(catalog.text('project.action.copyPath') in (i.get('AXLabel') or '') for i in items),
+    'Project long-press must show the copy-path action',
+)
+assert any(catalog.text('project.action.open') in (i.get('AXLabel') or '') for i in ui.state())
+assert any(catalog.text('session.action.newSession') in (i.get('AXLabel') or '') for i in ui.state())
+ui.capture('project-menu')
+ui.axe('tap', '-x', '24', '-y', '120', '--post-delay', '.6')
+ui.element('project:ui:local:lody')
 ui.axe('tap', '--label', catalog.system('clear'))
 commit('NoSuchSession')
 ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('search.placeholder.noMatch') for i in items), 'Missing empty search state')
@@ -305,80 +283,40 @@ ui.capture('cancelled')
 
 view_label = catalog.text('inbox.settings.section.view')
 ui.axe('tap', '--label', view_label, '--post-delay', '.8')
+for key in ('scope.mine', 'scope.team', 'grouping.time', 'grouping.project', 'grouping.status', 'view.project', 'view.archived'):
+    ui.wait(lambda items, key=key: any(i.get('AXLabel') == catalog.text('home.' + key) for i in items), f'Missing view option {key}')
 ui.capture('view-menu')
-ui.axe('tap', '--label', catalog.text('inbox.settings.view.activity'), '--post-delay', '.8')
+tap_menu_option(catalog.text('home.grouping.project'))
+ui.element('label:group:ui:local:lody')
 ui.element('ui-design')
-assert not any(i.get('AXUniqueId') == 'toggle:ui:local:lody' for i in ui.state())
-ui.capture('activity-view')
-assert_model_row()
-ui.axe('tap', '--label', view_label, '--post-delay', '.8')
-ui.axe('tap', '--label', catalog.text('inbox.settings.view.chat'), '--post-delay', '.8')
 ui.element('ui-chat')
-chat = ui.element('ui-chat')
-assert catalog.text('session.notRun') in str(chat), chat
-assert not any(i.get('AXUniqueId') == 'toggle:ui:local:lody' for i in ui.state())
-ui.capture('chat-view')
-ui.axe('tap', '--label', view_label, '--post-delay', '.8')
-ui.axe('tap', '--label', catalog.text('inbox.settings.sort.activity'), '--post-delay', '.8')
-ui.axe('tap', '--label', view_label, '--post-delay', '.8')
-ui.axe('tap', '--label', catalog.text('inbox.settings.view.projects'), '--post-delay', '.8')
-ui.element('toggle:chat')
-ui.element('toggle:pinned')
-ui.element('ui-pinned')
-project = ui.element('toggle:ui:local:lody')
-# The outline parent is an accessibility container; its content view carries the label.
-assert any('Lody iOS' in (child.get('AXLabel') or '') for child in project.get('children') or []), project
+project_label = ui.element('label:group:ui:local:lody')['frame']
+assert project_label['y'] < ui.element('ui-design')['frame']['y'], 'Project grouping lists chats under their project label'
+ui.capture('project-grouping')
 
-
-def tap_project():
-    frame = ui.element('toggle:ui:local:lody')['frame']
-    ui.axe('tap', '-x', str(frame['x'] + 120), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.8')
-
-
-def group_actions(item):
-    return sum([entry.get('custom_actions') or [] for entry in [item] + (item.get('children') or [])], [])
-
-
-if catalog.text('native.list.collapse') not in group_actions(project):
-    tap_project()
-    project = ui.element('toggle:ui:local:lody')
-assert catalog.text('native.list.collapse') in group_actions(project), project
-tap_project()
-ui.wait(lambda items: not any(i.get('AXUniqueId') == 'ui-design' for i in items), 'Collapsing the project must hide its sessions')
+# A group label folds its rows and keeps its own place.
+tap_label('label:group:ui:local:lody')
+ui.wait(lambda items: not any(i.get('AXUniqueId') == 'ui-design' for i in items), 'Collapsing the project group must hide its chats')
+ui.element('label:group:ui:local:lody')
 ui.capture('project-collapsed')
-tap_project()
+tap_label('label:group:ui:local:lody')
 ui.element('ui-design')
 ui.capture('project-expanded')
 
-empty = ui.element('project:ui:empty')
-empty_label = empty.get('AXLabel') or ''
-if not empty_label:
-    empty_label = ' '.join(
-        child.get('AXLabel') or '' for child in empty.get('children') or []
-    )
-assert '0' in empty_label, empty
+ui.axe('tap', '--label', view_label, '--post-delay', '.8')
+tap_menu_option(catalog.text('home.grouping.status'))
+ui.element('ui-design')
 
-
-def hold(identifier):
-    frame = ui.element(identifier)['frame']
-    ui.axe(
-        'touch',
-        '-x', str(frame['x'] + min(120, frame['width'] / 2)),
-        '-y', str(frame['y'] + frame['height'] / 2),
-        '--down', '--up', '--delay', '1.2',
-    )
-    time.sleep(1)
-
-
-hold('project:ui:empty')
-ui.wait(
-    lambda items: any(catalog.text('project.action.copyPath') in (i.get('AXLabel') or '') for i in items),
-    'Project long-press must show the copy-path action',
-)
-assert any(catalog.text('project.action.open') in (i.get('AXLabel') or '') for i in ui.state())
-assert any(catalog.text('session.action.newSession') in (i.get('AXLabel') or '') for i in ui.state())
-ui.capture('project-menu')
-ui.axe('tap', '-x', '24', '-y', '120', '--post-delay', '.6')
+# The Archived switch turns Chats into the archived list and back.
+ui.axe('tap', '--label', view_label, '--post-delay', '.8')
+tap_menu_option(catalog.text('home.view.archived'))
+ui.element('ui-search')
+assert not any(i.get('AXUniqueId') == 'ui-design' for i in ui.state()), 'Archived mode lists only archived chats'
+ui.capture('archived')
+ui.axe('tap', '--label', view_label, '--post-delay', '.8')
+tap_menu_option(catalog.text('home.view.archived'))
+ui.element('ui-design')
+assert not any(i.get('AXUniqueId') == 'ui-search' for i in ui.state())
 
 hold('ui-design')
 ui.wait(
@@ -408,4 +346,4 @@ ui.wait(
 ui.capture('session-rename')
 ui.axe('tap', '--label', catalog.text('common.cancel'), '--post-delay', '.6')
 
-print('PASS: native Home create/draft handoff, integrated search, grouping, session preview and rename cancellation.')
+print('PASS: native Home create/draft handoff, integrated search, project menu, grouping, folding, archive switch, session preview and rename cancellation.')

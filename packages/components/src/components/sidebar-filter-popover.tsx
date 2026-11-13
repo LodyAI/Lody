@@ -1,6 +1,7 @@
 import { type ReactElement, type ReactNode, useId, useState } from 'react';
 import {
   Check,
+  CircleDot,
   Clock,
   Eye,
   Folder,
@@ -34,6 +35,7 @@ export type SidebarFilterLabels = {
   detailsHeading: string;
   organizeProject: string;
   organizeUpdated: string;
+  organizeStatus: string;
   updatedProjectNames: string;
   showBranchNames: string;
   showMyTasks: string;
@@ -52,6 +54,7 @@ const defaultLabels: SidebarFilterLabels = {
   detailsHeading: 'Details',
   organizeProject: 'Project',
   organizeUpdated: 'Updated',
+  organizeStatus: 'Status',
   updatedProjectNames: 'Show Project',
   showBranchNames: 'Show Branch',
   showMyTasks: 'My Tasks',
@@ -263,6 +266,12 @@ export function SidebarFilterPopover({
             icon={Clock}
             selected={organize === 'updated'}
             onSelect={() => handleOrganizeSelect('updated')}
+          />
+          <MenuOption
+            label={merged.organizeStatus}
+            icon={CircleDot}
+            selected={organize === 'status'}
+            onSelect={() => handleOrganizeSelect('status')}
           />
         </div>
         <div className={menuSeparatorClassName} aria-hidden="true" />

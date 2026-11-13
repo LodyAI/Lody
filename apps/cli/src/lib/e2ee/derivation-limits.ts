@@ -7,10 +7,11 @@ export const MAX_DERIVED_TURNS_PER_ORIGIN = 20;
 
 /**
  * Write-time decision for an Agent-delegated encrypted input. `live` is the active
- * driving turn's reserved principal (undefined when inactive or over the bound);
- * `verified` is its signed origin's classification. Owner work keeps today's
+ * driving turn's principal (undefined when inactive);
+ * `verified` is its signed root's current classification. Owner work keeps today's
  * behavior, including recovery after its turn ended. A shared member's
- * derivation must come from its active turn and stay on this machine.
+ * derivation must come from its active driving turn and stay on this machine.
+ * Every member descendant shares the root's durable start quota; Owner work is unbounded.
  */
 export function decideEncryptedDerivation(input: {
   readonly live: 'owner' | 'member' | undefined;
@@ -18,7 +19,7 @@ export function decideEncryptedDerivation(input: {
   readonly targetMachineId: string;
   readonly machineId: string;
 }): 'owner' | 'member' {
-  if (input.live === 'owner') return 'owner';
+  if (input.live === 'owner' && input.verified === 'owner') return 'owner';
   if (input.verified === 'owner' && input.live === undefined) return 'owner';
   if (input.verified === 'member' && input.live === 'member') {
     if (input.targetMachineId !== input.machineId)

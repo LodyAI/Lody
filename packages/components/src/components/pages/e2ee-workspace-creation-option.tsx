@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import type { PendingE2eeWorkspace } from '@/lib/e2ee-workspace-storage';
+import { E2eeCreationRequestList } from './e2ee-creation-request-list';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { shadow } from '@lody/ui/tokens/colors.stylex';
@@ -72,8 +73,15 @@ export function E2eeWorkspaceCreationOption(props: {
   paidRequired: boolean;
   onChange: (selected: boolean) => void;
   requests?: PendingE2eeWorkspace[];
+  /** Saved requests the user archived: hidden from the default list, restorable. */
+  archivedRequests?: PendingE2eeWorkspace[];
   selectedRequestId?: string | null;
   onSelectRequest?: (requestId: string) => void;
+  onArchiveRequest?: (requestId: string) => void;
+  onRestoreRequest?: (requestId: string) => void;
+  onDeleteRequest?: (requestId: string) => void;
+  deletingRequestId?: string | null;
+  defaultArchiveOpen?: boolean;
   onNewRequest?: () => void;
   /** Stop resuming the selected saved request (kept in the list) and edit freely. */
   onSetAside?: () => void;
@@ -140,27 +148,35 @@ export function E2eeWorkspaceCreationOption(props: {
           {t('e2ee.create.pending')}
         </p>
       )}
-      {Boolean(props.requests?.length) && (
+      {Boolean(props.requests?.length || props.archivedRequests?.length) && (
         <div {...stylex.props(styles.requests)}>
-          <p>{t('e2ee.create.savedRequests')}</p>
-          {props.requests?.map((request) => (
-            <Button
-              key={request.requestId}
-              variant="secondary"
-              aria-pressed={props.selectedRequestId === request.requestId}
-              disabled={props.disabled}
-              onClick={() => props.onSelectRequest?.(request.requestId)}
-            >
-              {request.name} · {request.slug}
-            </Button>
-          ))}
+          <E2eeCreationRequestList
+            requests={props.requests ?? []}
+            archivedRequests={props.archivedRequests ?? []}
+            selectedRequestId={props.selectedRequestId ?? null}
+            disabled={props.disabled}
+            defaultArchiveOpen={props.defaultArchiveOpen}
+            onSelectRequest={(requestId) => props.onSelectRequest?.(requestId)}
+            onArchiveRequest={(requestId) => props.onArchiveRequest?.(requestId)}
+            onRestoreRequest={(requestId) => props.onRestoreRequest?.(requestId)}
+            onDeleteRequest={(requestId) => props.onDeleteRequest?.(requestId)}
+            deletingRequestId={props.deletingRequestId ?? null}
+          />
           {props.onNewRequest && (
-            <Button variant="ghost" disabled={props.disabled} onClick={props.onNewRequest}>
+            <Button
+              variant="ghost"
+              disabled={props.disabled || Boolean(props.deletingRequestId)}
+              onClick={props.onNewRequest}
+            >
               {t('e2ee.create.newRequest')}
             </Button>
           )}
           {props.onSetAside && (
-            <Button variant="ghost" disabled={props.disabled} onClick={props.onSetAside}>
+            <Button
+              variant="ghost"
+              disabled={props.disabled || Boolean(props.deletingRequestId)}
+              onClick={props.onSetAside}
+            >
               {t('e2ee.create.setAside')}
             </Button>
           )}

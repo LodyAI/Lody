@@ -53,11 +53,7 @@ final class PreferencesController: UIViewController {
       image: "arrow.uturn.forward"
     )
     queued.options = ["queue", "guide"].map { option($0, text("queuedMessageBehavior.\($0)"), selected: $0 == current) }
-    var developer = LodyListRow.item("developer-mode", text("developerMode"), value: text(LodyPreferences.developerModeEnabled ? "on" : "off"), image: "hammer")
-    developer.options = ["off", "on"].map { option($0, text($0), selected: ($0 == "on") == LodyPreferences.developerModeEnabled) }
-    var roost = LodyListRow.item("roost-history", text("roostHistory"), value: text(LodyPreferences.roostHistoryExperimentEnabled ? "on" : "off"), image: "externaldrive")
-    roost.options = ["off", "on"].map { option($0, text($0), selected: ($0 == "on") == LodyPreferences.roostHistoryExperimentEnabled) }
-    var sections: [LodyListSection] = [
+    let sections: [LodyListSection] = [
       .group("general", header: text("preferences.general"), [
         .item(
           "language", text("preferences.language"), value: language, image: "globe", disclosure: true,
@@ -68,22 +64,16 @@ final class PreferencesController: UIViewController {
       .group("chat", header: text("preferences.chat"), [
         queued,
       ]),
-      .group("developer", [developer]),
+      .group("appearance", header: text("preferences.appearance"), [appIconRow()]),
     ]
-    if LodyPreferences.developerModeEnabled {
-      sections.append(.group("beta", header: text("betaFeatures"), footer: text("roostHistoryHint"), [roost]))
-    }
-    sections.append(.group("appearance", header: text("preferences.appearance"), [appIconRow()]))
-    list.setSections(sections)
+    // A choice re-renders while its menu is still dismissing; animating the reconfigure
+    // under it reads as rows jumping, and this page's structure never changes.
+    list.setSections(sections, animated: false)
   }
 
   private func event(_ name: String, _ body: [String: Any]) {
     guard let id = body["id"] as? String else { return }
     switch (name, id, body["actionId"] as? String) {
-    case ("rowAction", "developer-mode", let value?) where ["on", "off"].contains(value):
-      LodyPreferences.saveDeveloperMode(value == "on")
-    case ("rowAction", "roost-history", let value?) where ["on", "off"].contains(value):
-      LodyPreferences.saveRoostHistoryExperiment(value == "on")
     case ("rowAction", "queued-message-behavior", let value?) where ["queue", "guide"].contains(value):
       LodyPreferences.saveQueuedMessageBehavior(value)
     case ("rowPress", "app-icon", _):

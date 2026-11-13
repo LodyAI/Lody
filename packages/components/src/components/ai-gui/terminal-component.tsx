@@ -198,6 +198,7 @@ export const TerminalComponent = memo(function TerminalComponent({
               )}
               onClick={onHeaderClick}
               aria-expanded={headerExpanded}
+              data-conversation-disclosure={headerExpanded === undefined ? undefined : 'inline'}
             >
               {headerContent}
             </button>

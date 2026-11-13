@@ -86,7 +86,9 @@ final class NativeAuthProviders: NSObject, ASAuthorizationControllerDelegate, AS
         browserReply = continuation
         let id = UUID()
         browserID = id
-        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "lody") { [weak self] url, error in
+        // AuthenticationServices calls this off the main thread. Without @Sendable, Swift 6
+        // infers main-actor isolation from this context and traps on entry.
+        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "lody") { @Sendable [weak self] url, error in
           Task { @MainActor in
             guard let self, self.browserID == id, let reply = self.browserReply else { return }
             self.browserReply = nil

@@ -43,6 +43,8 @@ export function providerTestActivityFromProgress(
     case 'publishing':
       return { phase: 'installing-runtime' };
     case 'installed':
+    // The runtime is up and the probe is reading each model's options.
+    case 'reading-model-options':
       return { phase: 'probing-provider' };
     case 'unsupported-platform':
     case 'incompatible-host':
@@ -93,6 +95,7 @@ export function agentRuntimeReadinessFromProgress(
     case 'verifying':
     case 'extracting':
     case 'publishing':
+    case 'reading-model-options':
       return { readiness: 'arriving', percent: null };
     case 'unsupported-platform':
     case 'incompatible-host':
@@ -118,9 +121,7 @@ export function agentRuntimeReadinessFromActivity(
     return {
       readiness: 'arriving',
       percent:
-        typeof activity.percent === 'number'
-          ? Math.min(100, Math.max(0, activity.percent))
-          : null,
+        typeof activity.percent === 'number' ? Math.min(100, Math.max(0, activity.percent)) : null,
     };
   }
   return { readiness: 'arriving', percent: null };

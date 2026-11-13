@@ -41,6 +41,9 @@ final class AgentProvidersController: UIViewController {
   private var loadedAt: Double?
   private var observer: NSObjectProtocol?
   private var providersObserver: NSObjectProtocol?
+  private var refreshObserver: NSObjectProtocol?
+  /// The provider whose models are being read, with its current progress line.
+  private var refreshing: (id: String, text: String)?
   private var pendingMachines: Set<String> = []
   /// Whether the shown list came from a live read this session; a cached list never authorizes writes.
   private var live = false
@@ -62,6 +65,7 @@ final class AgentProvidersController: UIViewController {
   isolated deinit {
     if let observer { NotificationCenter.default.removeObserver(observer) }
     if let providersObserver { NotificationCenter.default.removeObserver(providersObserver) }
+    if let refreshObserver { NotificationCenter.default.removeObserver(refreshObserver) }
   }
 
   override func viewDidLoad() {
@@ -86,6 +90,16 @@ final class AgentProvidersController: UIViewController {
       MainActor.assumeIsolated {
         guard let self, self.scope.valid, eventScope == self.scope.key else { return }
         self.pendingMachines.insert(event.machineId)
+        self.render()
+      }
+    }
+    refreshObserver = NotificationCenter.default.addObserver(forName: .lodyProviderRefreshProgress, object: nil, queue: .main) { [weak self] notification in
+      guard let progress = notification.object as? RuntimeContract.AgentProviderRefreshProgress else { return }
+      let eventScope = notification.userInfo?["scopeKey"] as? String
+      MainActor.assumeIsolated {
+        guard let self, self.scope.valid, eventScope == self.scope.key, self.refreshing?.id == progress.id else { return }
+        self.refreshing = (progress.id, String.localizedStringWithFormat(
+          AgentProviderSections.text("readingModelOptions"), progress.modelName, progress.index, progress.total))
         self.render()
       }
     }
@@ -177,7 +191,10 @@ final class AgentProvidersController: UIViewController {
     ), to: list)
     list.setRefreshing(false)
     list.setPlaceholder(snapshot?.machines.isEmpty == true ? AgentProviderSections.text("noMachines") : "")
-    list.setSections(snapshot.map { AgentProviderSections.make($0, selectedID: selectedID, busy: busy || !live, usage: RemoteSettingsContext.current().agentUsage) } ?? [])
+    list.setSections(snapshot.map {
+      AgentProviderSections.make($0, selectedID: selectedID, busy: busy || !live,
+                                 usage: RemoteSettingsContext.current().agentUsage, refreshing: refreshing)
+    } ?? [])
     renderHeader()
   }
 
@@ -202,7 +219,7 @@ final class AgentProvidersController: UIViewController {
       case "delete" where live && !item.readOnly && !machine.readOnly:
         confirmDelete(name: item.name) { [weak self] in self?.mutate("delete", item: item) }
       case "refresh" where live && machine.online && !item.readOnly && !machine.readOnly:
-        mutate("refresh", item: item)
+        refreshModels(item, machine: machine)
       default: break
       }
     } else if let setup = snapshot?.setups.first(where: { "provider-setup:\($0.id)" == id && $0.machineId == machine.id }) {
@@ -303,6 +320,33 @@ final class AgentProvidersController: UIViewController {
         self.render()
         self.refresh()
       }
+    }
+  }
+
+  /// Refreshes one provider and reads every model's options, naming each model in its row.
+  private func refreshModels(_ item: AgentProviderItem, machine: AgentProviderMachine) {
+    guard !busy, live else { return }
+    generation += 1
+    let version = generation, key = scope.key
+    busy = true
+    refreshing = (item.id, AgentProviderSections.text("refreshing"))
+    render()
+    let target = ProviderTarget(workspaceId: scope.workspaceId, machineId: machine.id, id: item.id, readModelOptions: true)
+    Task { [weak self, details] in
+      var message = "operationUnknown"
+      var kind: LodyToastKind = .error
+      do {
+        let result = try await details.probe(target)
+        message = result.success ? "refreshDone" : "operationFailed"
+        kind = result.success ? .success : .warning
+        if result.authRequired { message = "authRequired" }
+      } catch {}
+      guard let self, self.generation == version, self.scope.key == key else { return }
+      self.busy = false
+      self.refreshing = nil
+      LodyToastOverlay.shared.show(message: AgentProviderSections.text(message), kind: kind)
+      self.render()
+      self.refresh()
     }
   }
 

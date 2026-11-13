@@ -1132,6 +1132,13 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
   lastHandledUserMsgId?: string;
+  /**
+   * Latest user history entry id whose turn ended in failure, written together with
+   * `lastHandledUserMsgId`. It stays set; read it only through
+   * {@link hasFailedLatestTurn}, so a later handled or canceled turn retires it without
+   * another write.
+   */
+  lastFailedUserMsgId?: string;
   /** User history entry id currently being processed by the machine. */
   processingUserMsgId?: string;
   /**
@@ -1219,6 +1226,21 @@ export function isMissingHistoryUserTurn(
     !!turnId &&
     (meta?.lastMissingHistoryUserMsgId === turnId ||
       meta?.missingHistoryUserMsgIds?.[turnId] === true)
+  );
+}
+
+/**
+ * Whether the conversation's latest finished turn ended in failure: the failed marker still
+ * names the turn the machine handled last. Lets lists show a failed conversation from
+ * metadata alone, without opening its history.
+ */
+export function hasFailedLatestTurn(
+  meta: Pick<SessionMeta, 'lastFailedUserMsgId' | 'lastHandledUserMsgId'>
+): boolean {
+  return (
+    typeof meta.lastFailedUserMsgId === 'string' &&
+    meta.lastFailedUserMsgId.length > 0 &&
+    meta.lastFailedUserMsgId === meta.lastHandledUserMsgId
   );
 }
 

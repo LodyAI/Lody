@@ -8,8 +8,17 @@ import {
 import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
 import { openSqliteMachineSharingStore } from '@lody/e2ee-machine-sharing/sqlite';
 import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
-import { getScheduleIdFromRoomId, type ScheduleAuthorizationRequest } from '@lody/shared';
-import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
+import {
+  getScheduleIdFromRoomId,
+  scheduleDeclarationSubject,
+  type ScheduleDocument,
+  type ScheduleAuthorizationRequest,
+} from '@lody/shared';
+import {
+  makeEncryptedFeatureReceiver,
+  makeEncryptedFeatureAuthorization,
+  type EncryptedFeatureHandler,
+} from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
 import { runMachineIrohListener } from './iroh-listener';
 import { loadIrohNative, proxyUrlFromEnv } from '@lody/iroh-native';
@@ -120,6 +129,19 @@ async function retireRevokedMachineIdentity(options: {
   const device = machineDevicePath(directory, options.genesisHash);
   if (!existsSync(device)) return;
   const cloud = options.cloud;
+  const receipt = await (async () => {
+    try {
+      return RevokedDevice.parse(
+        JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
+      );
+    } catch {
+      return null;
+    }
+  })();
+  const matchingReceipt = receipt?.genesisHash === options.genesisHash ? receipt : null;
+  // Offline local-agent preparation needs no second OS-keyring subprocess when no
+  // revocation receipt exists for this workspace.
+  if (!matchingReceipt && !cloud) return;
   const revoked = await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -132,17 +154,7 @@ async function retireRevokedMachineIdentity(options: {
         const genesis = yield* Effect.fromResult(Bytes.genesisHash(bytes(options.genesisHash)));
         const current = yield* custody.openDevice(genesis);
         const key = hex(current.publicKey.toBytes());
-        const receipt = yield* Effect.promise(async () => {
-          try {
-            return RevokedDevice.parse(
-              JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
-            );
-          } catch {
-            return null;
-          }
-        });
-        if (receipt?.genesisHash === options.genesisHash && receipt.signingPublicKey === key)
-          return key;
+        if (matchingReceipt?.signingPublicKey === key) return key;
         if (!cloud) return undefined;
         const credential = yield* custody.deviceCredential(genesis, current.publicKey);
         const exact = yield* Effect.tryPromise({
@@ -397,7 +409,7 @@ async function prepareMachine(
       checkpoint: { length: 1, head: hashRecordBytes(bytes(binding.genesisRecordHex)) },
     })
   );
-  await retainCliE2eeWorkspaceBinding(options.accountId, binding);
+  await retainBinding(options.accountId, binding);
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -440,6 +452,8 @@ async function prepareMachine(
  * work on open. Delete this facade when those application owners compose Effects.
  */
 type CliE2eeWorkspaceOptions = {
+  /** Required to enable local Schedule signing; must match the admitted device. */
+  machineId?: string;
   accountId: string;
   workspaceId: string;
   genesisHash: string;
@@ -1603,6 +1617,42 @@ async function openWorkspaceOwned(
         );
         return result.allowed;
       }),
+    /** Machine custody can endorse only schedules addressed to this admitted machine. */
+    signScheduleDeclaration: (
+      document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+      manualRunKey?: string
+    ) =>
+      run(
+        Effect.gen(function* () {
+          if (closed) return yield* Effect.fail(new Error('e2ee_closed'));
+          const state = (yield* opened.runtime.executionLedger()).inspectState();
+          const self = state.devices.get(opened.signingPublicKey);
+          if (
+            !options.machineId ||
+            self?.kind !== 'machine' ||
+            self.machineId !== options.machineId ||
+            document.definition.machineId !== options.machineId
+          )
+            return yield* Effect.fail(
+              new Error(
+                'Machine keys can sign schedules only for this machine; use a personal device in the desktop app to manage schedules on another machine'
+              )
+            );
+          const subject = yield* Effect.try(() =>
+            scheduleDeclarationSubject(document, manualRunKey)
+          );
+          const signature = yield* opened.runtime.signExecutionIntent({
+            ...subject,
+            workspaceId: options.workspaceId,
+            contentDigest: bytes(subject.contentDigest),
+          });
+          return encodeE2eeIntentRecord({
+            kind: E2EE_INTENT_KIND.scheduleDeclaration,
+            signer: bytes(opened.signingPublicKey),
+            signature,
+          });
+        })
+      ),
     signMachineInput,
     startRpc: (
       machineId: string,
@@ -1616,6 +1666,11 @@ async function openWorkspaceOwned(
       run(
         Effect.gen(function* () {
           if (rpcFiber || closed) return;
+          const featureAuthorization = makeEncryptedFeatureAuthorization({
+            authorization: opened.executionAuthorization,
+            executionAuthoritySignal: () => opened.runtime.executionAuthoritySignal(),
+            resolveHistoryTarget,
+          });
           let attempts = 0;
           rpcFiber = yield* Effect.forkIn(
             Effect.scoped(
@@ -1661,34 +1716,7 @@ async function openWorkspaceOwned(
                       machineId,
                       native: dispatchNative,
                       journal: rpcJournal,
-                      authorize: opened.executionAuthorization.authorizeOwnedExecution,
-                      authorizeRead: opened.executionAuthorization.authorizeRead,
-                      authorizeHistoryRead: (workspaceId, requester, sessionId) =>
-                        Effect.gen(function* () {
-                          if (!resolveHistoryTarget)
-                            return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
-                          const target = yield* Effect.tryPromise({
-                            try: () => resolveHistoryTarget(sessionId),
-                            catch: (cause) => cause,
-                          });
-                          const editing = yield* opened.executionAuthorization.authorizeExecution(
-                            workspaceId,
-                            requester,
-                            target.localProjectId
-                          );
-                          if (editing._tag === 'Authorized') return editing;
-                          return yield* opened.executionAuthorization.authorizeSessionRead(
-                            workspaceId,
-                            requester,
-                            target.rootSessionId,
-                            target.sessionOwnerUserId
-                          );
-                        }),
-                      authoritySignal: () =>
-                        AbortSignal.any([
-                          opened.runtime.executionAuthoritySignal(),
-                          opened.executionAuthorization.authoritySignal,
-                        ]),
+                      ...featureAuthorization,
                       isOpen: () => !closed,
                       handle: handleFeature,
                       client,
@@ -1760,13 +1788,7 @@ async function openWorkspaceOwned(
                       machineId,
                       native: dispatchNative,
                       journal: rpcJournal,
-                      authorize: opened.executionAuthorization.authorizeOwnedExecution,
-                      authorizeRead: opened.executionAuthorization.authorizeRead,
-                      authoritySignal: () =>
-                        AbortSignal.any([
-                          opened.runtime.executionAuthoritySignal(),
-                          opened.executionAuthorization.authoritySignal,
-                        ]),
+                      ...featureAuthorization,
                       isOpen: () => !closed,
                       handle: handleFeature,
                     })

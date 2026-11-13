@@ -55,6 +55,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   iosSimulatorExterior: 'iosSimulatorExterior',
   piExtensions: 'piExtensions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
+  acpModelOptionsRead: 'acpModelOptionsRead',
   providerRateLimitsRefresh: 'providerRateLimitsRefresh',
   codeCollabAllChangesScope: 'codeCollabAllChangesScope',
   codeCollabDiffBlobs: 'codeCollabDiffBlobs',
@@ -111,6 +112,8 @@ export const IOS_SIMULATOR_PROTOCOL_VERSION = 1;
 export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
+/** `machine/acp-capabilities-refresh` accepts `readModelOptions` and reports `reading-model-options`. */
+export const ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION = 1;
 export const CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION = 1;
 export const CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION = 1;
 /** v4 adds purpose-bound member read/edit proofs; older strict payloads are incompatible. */
@@ -236,6 +239,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead]: ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope]:
     CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
@@ -520,6 +524,25 @@ export function negotiatedAcpCapabilitiesRefreshForce(
 ): { force?: true } {
   return force === true && machineSupportsAcpCapabilityRefreshCacheProtocol(machine)
     ? { force: true }
+    : {};
+}
+
+/**
+ * The `readModelOptions` field to put in a `machine/acp-capabilities-refresh`
+ * request. Like `force`, it is omitted for a daemon that did not advertise
+ * `acpModelOptionsRead`: its strict request schema rejects the key.
+ */
+export function negotiatedAcpModelOptionsRead(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  readModelOptions: boolean | undefined
+): { readModelOptions?: true } {
+  return readModelOptions === true &&
+    machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead,
+      ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION
+    )
+    ? { readModelOptions: true }
     : {};
 }
 

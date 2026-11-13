@@ -255,6 +255,37 @@ describe('local session control node validators', () => {
   });
 });
 
+it('carries a model-reading refresh and its progress through both local validators', () => {
+  const request = {
+    type: 'machine/acp-capabilities-refresh' as const,
+    machineId: 'machine-1',
+    workspaceId: 'workspace-1',
+    configId: 'config-1',
+    force: true,
+    readModelOptions: true,
+  };
+  const progress = {
+    type: 'machine/acp-binary-progress' as const,
+    machineId: 'machine-1',
+    agentType: 'dimcode',
+    status: 'reading-model-options',
+    configId: 'config-1',
+    modelId: 'deepseek-flash',
+    modelName: 'DeepSeek Flash',
+    modelIndex: 2,
+    modelCount: 40,
+  };
+  for (const [isRequest, isResponse] of [
+    [isLocalSessionControlRequest, isLocalSessionControlResponse],
+    [isLocalSessionControlRequestCjs, isLocalSessionControlResponseCjs],
+  ] as const) {
+    expect(isRequest(request)).toBe(true);
+    expect(isRequest({ ...request, readModelOptions: false })).toBe(false);
+    expect(isResponse(progress)).toBe(true);
+    expect(isResponse({ ...progress, modelIndex: 0 })).toBe(false);
+  }
+});
+
 it('routes Provider quota refresh by persisted config only in both local validators', () => {
   const request = {
     type: 'machine/provider-rate-limits-refresh',

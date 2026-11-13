@@ -279,6 +279,7 @@ async function runWorktreeScript(options: {
             ...process.env,
             LODY_WORKSPACE_ID: options.workspaceId,
             LODY_SESSION_ID: options.sessionId,
+            LODY_AGENT_SESSION_ID: options.sessionId,
             LODY_WORKTREE_PATH: options.workdir,
             LODY_WORKTREE_BRANCH: options.branch,
             LODY_WORKTREE_SCRIPT_PHASE: options.phase,

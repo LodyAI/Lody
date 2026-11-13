@@ -14,7 +14,8 @@ internal object ProviderDetailsJson {
             put("cliType", command.cliType); put("agentType", command.agentType)
         }
     }
-    fun target(machineId: String, id: String) = JSONObject().put("machineId", machineId).put("id", id)
+    fun target(machineId: String, id: String, readModelOptions: Boolean = false) = JSONObject().put("machineId", machineId).put("id", id)
+        .apply { if (readModelOptions) put("readModelOptions", true) }
     private fun choices(value: JSONObject, key: String) = value.rows(key).map { ProviderChoice(it.getString("id"), it.getString("name")) }
     fun capabilities(v: JSONObject) = ProviderCapabilities(choices(v, "models"), choices(v, "modes"), v.optBoolean("sessionTitle"), v.rows("options").map {
         ProviderOption(it.getString("id"), it.getString("name"), it.getString("type"), (it.opt("value") as? String), it.opt("value") as? Boolean, choices(it, "choices"))

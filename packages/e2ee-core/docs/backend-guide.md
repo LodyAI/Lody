@@ -49,6 +49,8 @@ Loro / Durable Streams provides this directly: the adapters in
 `@lody/e2ee-core/adapters/loro-streams` use a control stream with offset CAS
 and u32be-framed records.
 
+An application ledger host validates signature, authority and parent before durably reserving per-membership self-service device quota: 10 in a rolling hour and 30 in 24 hours. Reserve before CAS dispatch, retain unknown outcomes and charge identical originals once. Management operations are exempt. Return `self-service-rate-limited` with absolute millisecond `retryAt`. The public reference is Lab `control-gateway.ts` with SQLite quota storage; private Cloud enforcement/deployment needs separate verification. See [control-plane availability](../../../specs/e2ee/control-plane-availability.md).
+
 ## 2. Key mailbox
 
 The server keeps, per workspace, epoch and recipient: stored envelopes, a
@@ -67,8 +69,14 @@ server.
 3. `id` is the 16-byte delivery id (hex). An existing `(epoch, sender, id)`
    with a different digest is refused (`replay`). The same bytes again are a
    no-op.
-4. Keep at most 16 live (non-rejected) envelopes per sender, recipient and
-   epoch. Refuse the 17th distinct frame.
+4. Keep at most 16 non-rejected envelopes per sender, recipient, epoch and
+   current repair revision. Stamp new envelopes with the slot revision inside
+   the quota-check transaction. Historical envelopes remain readable and keep
+   their delivery IDs and rejected-digest entries, but do not consume the new
+   revision quota. Exact retries do not change an envelope's revision. Refuse
+   the 17th distinct frame in the current revision.
+   The SQLite reference host adds a revision column to existing databases;
+   legacy envelopes retain revision zero because their delivery round is unknown.
 
 **`read(id)`** — return the frame the principal stored under `id` for the
 current epoch, or nothing.
@@ -212,3 +220,5 @@ can hide unknown withdrawal indefinitely despite those reads. Signatures and
 local chains provide no globally-latest proof; trusting complete latest delivery
 remains pending owner confirmation. No network or execution integration is enabled
 by this contract. See the [pending Spec increment](../../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
+
+A host `self-service-rate-limited` response must mean this attempt never entered CAS; never relabel an unknown upstream outcome with it. Clients use this guarantee only for a fresh first attempt; old pending originals still reconcile. The reference host clamps clock rollback to the member’s latest persisted issue time and maps storage/closed/transport failures to 500/503/502.

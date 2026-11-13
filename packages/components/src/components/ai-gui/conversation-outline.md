@@ -30,8 +30,9 @@ full because the topic outgrew that index.
 - `scrollRowToTop` is the only row-index-to-scroll conversion: it adds
   `leadingRowCount` and compensates viewport top padding so reads and writes
   share one coordinate space. Outline jumps, search, and imperative scrolling
-  use it; do not scroll the conversation list any other way. Group toggles never
-  scroll — expansion reveals rows in place.
+  use it; do not scroll the conversation list any other way. Group toggles follow
+  the [manual disclosure contract](README.md#manual-disclosures), preserving the
+  clicked header instead of navigating to the row.
 - A jump is issued once. It sets the scroll engine's reading anchor to the
   round's row, which stays at the top while rows around it are measured and
   placeholders hydrate, and which releases follow-output by itself. Never

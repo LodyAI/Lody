@@ -1,5 +1,5 @@
 import { own } from '../lifecycle';
-import { Context, Effect, Layer, Schema } from 'effect';
+import { Context, Effect, Layer, Schema, Result } from 'effect';
 import type { GenesisHash } from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
 import {
@@ -58,8 +58,10 @@ export type SubmissionFailure = SubmissionError | LedgerLogError | LedgerError;
  * One record per workspace is in flight at a time. `submit` saves the original
  * in {@link SubmissionJournal}, appends it with compare-and-swap at its parent
  * and reads the log back to decide `Committed` (these exact bytes are in the
- * log) or `Conflict` (another record took the parent). Any failure or
- * interruption keeps the original for `resume`, which is the only retry path:
+ * log) or `Conflict` (another record took the parent). A fresh self-service
+ * original explicitly refused before CAS may release its slot at its unchanged
+ * first-attempt revision. Other failures and interruptions keep the original for
+ * `resume`, which is the only retry path:
  * it never re-signs. Finite: no timer or background retry.
  *
  * @category Workflows
@@ -135,7 +137,8 @@ export class LedgerSubmission extends Context.Service<
       });
 
       const recover = Effect.fnUntraced(function* (
-        expectedRecord?: Uint8Array
+        expectedRecord?: Uint8Array,
+        creationRevision?: number
       ): Effect.fn.Return<SubmissionResult | null, SubmissionFailure> {
         const entry = yield* store(journal.load(anchor));
         if (expectedRecord && (!entry.record || !bytesEqual(entry.record, expectedRecord)))
@@ -151,10 +154,30 @@ export class LedgerSubmission extends Context.Service<
           return { outcome: entry.outcome, record: new Uint8Array(record) };
         }
         if (!checked.outcome) {
-          yield* store(journal.observe(anchor, record, entry.checkpoint, checked.checkpoint));
+          const attemptRevision = yield* store(
+            journal.observe(anchor, record, entry.checkpoint, checked.checkpoint)
+          );
           // Even a typed lost-response failure requires readback. An interruption leaves
           // the saved original bytes for the next owning Scope to recover.
-          yield* Effect.result(log.appendCas(anchor, checked.checkpoint, new Uint8Array(record)));
+          const appended = yield* Effect.result(
+            log.appendCas(anchor, checked.checkpoint, new Uint8Array(record))
+          );
+          if (
+            Result.isFailure(appended) &&
+            appended.failure.reason === 'self-service-rate-limited' &&
+            creationRevision !== undefined &&
+            attemptRevision === creationRevision + 1
+          ) {
+            const decoded = yield* Effect.fromResult(decodeRecord(record));
+            if (
+              decoded.body.type === 'ordinary' &&
+              ['admitDevice', 'revokeDevice'].includes(decoded.body.operation.type) &&
+              (yield* store(
+                journal.rejectUnsent(anchor, record, checked.checkpoint, attemptRevision)
+              ))
+            )
+              return yield* appended.failure;
+          }
           checked = yield* inspect(record, checked.checkpoint);
           if (!checked.outcome) return yield* fail('unconfirmed');
           const observed = yield* store(journal.load(anchor));
@@ -180,11 +203,12 @@ export class LedgerSubmission extends Context.Service<
           const record = (yield* Effect.fromResult(decodeRecord(input))).recordBytes;
           const entry = yield* store(journal.load(anchor));
           if (entry.record && !bytesEqual(entry.record, record)) return yield* fail('busy');
+          let creationRevision: number | undefined;
           if (!entry.record) {
             yield* inspect(record, entry.checkpoint);
-            yield* store(journal.prepare(anchor, record));
+            creationRevision = (yield* store(journal.prepare(anchor, record))) ?? undefined;
           }
-          const result = yield* recover(record);
+          const result = yield* recover(record, creationRevision);
           if (!result) return yield* fail('corrupt');
           return result;
         }),

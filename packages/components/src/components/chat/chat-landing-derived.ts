@@ -1,5 +1,10 @@
 import type { ChatLandingHintType } from './chat-landing-view';
 import type { SessionContextType } from './context-switch';
+import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
+import {
+  getLocalProjectVisibilityKey,
+  type LocalProjectVisibilityAccess,
+} from '@/lib/visible-local-project-index';
 
 type ChatLandingProjectRefLike =
   | {
@@ -33,6 +38,32 @@ export type ChatLandingProjectRecency = {
 };
 
 export type SharingReviewActionTarget = 'machines' | 'projects' | null;
+
+/** Composer reminders concern only the resources selected for this conversation. */
+export function getChatLandingSharingReviewActionTarget({
+  currentUserId,
+  machineId,
+  localProjectIds,
+  machineAccessByMachineId,
+  localProjectAccessByKey,
+}: {
+  currentUserId: string | null;
+  machineId: string | null;
+  localProjectIds: readonly string[];
+  machineAccessByMachineId: ReadonlyMap<string, MachineVisibilityAccess>;
+  localProjectAccessByKey: ReadonlyMap<string, LocalProjectVisibilityAccess>;
+}): SharingReviewActionTarget {
+  if (!currentUserId || !machineId) return null;
+  const machine = machineAccessByMachineId.get(machineId);
+  if (machine?.ownerUserId !== currentUserId) return null;
+  if (!machine.sharedWithTeam) return 'machines';
+  return localProjectIds.some((id) => {
+    const project = localProjectAccessByKey.get(getLocalProjectVisibilityKey(machineId, id));
+    return project?.ownerUserId === currentUserId && !project.sharedWithTeam;
+  })
+    ? 'projects'
+    : null;
+}
 
 export function getSharingReviewActionTarget({
   privateMachineCount,

@@ -5,8 +5,14 @@ import type {
   E2eeWorkspaceHistoryRequest,
 } from '@lody/cloud-api';
 import type { E2eeAccountPairingRuntime, E2eeWorkspaceRuntime } from '@lody/platform';
-import { accountUserId, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol';
+import {
+  accountUserId,
+  decodeRecord,
+  hashRecordBytes,
+  type LedgerView,
+} from '@lody/e2ee-core/protocol';
 import type {
+  AccountPairingApproverFilter,
   AccountPairingApproverWorkspace,
   AccountPairingRequesterWorkspace,
 } from './account-pairing';
@@ -43,10 +49,14 @@ export interface AccountPairingIdentityHost {
   readonly workspaceId: string;
   readonly genesisHash: string;
   /** Creates this workspace's identity once, or reuses the retained one, bound to
-   * the verified genesis record and membership. Never replaces an identity. */
+   * the verified genesis record and membership. `history` is the complete public signed
+   * history the workflow verified; a host that verifies it again from its own pinned
+   * genesis may prepare a replacement identity when it classifies the retained one as
+   * revoked or its member removed. Without that classification nothing is replaced. */
   prepareAccountIdentity(pin: {
     readonly genesisRecordHex: string;
     readonly membershipId: string;
+    readonly history?: readonly E2eeWorkspaceHistoryPage[];
   }): Effect.Effect<AccountPairingIdentity, unknown>;
   /** An unfinished per-workspace pairing exchange already journaled on this device. */
   pendingPersonalJoin(): Effect.Effect<{ readonly pairingSessionId: string } | null, unknown>;
@@ -83,15 +93,22 @@ export function personalHostAccountPairing(
     workspaceId: host.scope.workspaceId,
     genesisHash: toHex(host.scope.genesis.toBytes()),
     prepareAccountIdentity: (pin) =>
-      Effect.map(host.prepareAccount(pin), (prepared) => {
-        const request = decodePersonalRequest(prepared.requestHex);
-        return {
-          signingPublicKey: fromHex(request.signingPublicKey),
-          encryptionPublicKey: fromHex(request.encryptionPublicKey),
-          possessionProof: fromHex(request.possessionSignature),
-          credentialHash: fromHex(request.credentialHash),
-        };
-      }),
+      Effect.map(
+        host.prepareAccount({
+          genesisRecordHex: pin.genesisRecordHex,
+          membershipId: pin.membershipId,
+          ...(pin.history ? { history: pin.history } : {}),
+        }),
+        (prepared) => {
+          const request = decodePersonalRequest(prepared.requestHex);
+          return {
+            signingPublicKey: fromHex(request.signingPublicKey),
+            encryptionPublicKey: fromHex(request.encryptionPublicKey),
+            possessionProof: fromHex(request.possessionSignature),
+            credentialHash: fromHex(request.credentialHash),
+          };
+        }
+      ),
     // Not tracked on portable hosts yet: an unfinished per-workspace join there is
     // not reported as blocked (recorded limit).
     pendingPersonalJoin: () => Effect.succeed(null),
@@ -136,37 +153,105 @@ export function makePortableAccountPairingRequester(input: {
   diagnostics?: (tag: string, error: unknown) => void;
 }): () => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown> {
   const remember = input.diagnostics ?? (() => {});
-  const pages = Effect.fnUntraced(function* (workspaceId: string) {
-    const all: E2eeWorkspaceHistoryPage[] = [];
-    let cursor: string | undefined;
-    for (let index = 0; index < 256; index++) {
+  const cachedByWorkspace = new Map<
+    string,
+    {
+      genesisHash: string;
+      genesisRecordHex: string;
+      history: E2eeWorkspaceHistoryPage[];
+      view: LedgerView;
+      length: number;
+      headHash: string;
+      position: string;
+    }
+  >();
+  const pagesFrom = Effect.fnUntraced(function* (
+    workspaceId: string,
+    firstPage: E2eeWorkspaceHistoryPage
+  ) {
+    const all: E2eeWorkspaceHistoryPage[] = [firstPage];
+    let cursor = firstPage.nextCursor ?? undefined;
+    for (let index = 1; cursor && index < 256; index++) {
       const page = yield* input.history({
         workspaceId,
-        ...(cursor ? { cursor } : {}),
-        ...(all[0] ? { checkpoint: all[0].checkpoint } : {}),
+        cursor,
+        checkpoint: firstPage.checkpoint,
       });
       all.push(page);
       if (page.nextCursor === null) return all;
       cursor = page.nextCursor;
     }
-    return yield* Effect.fail(fail('ledger_budget_exceeded'));
+    if (cursor) return yield* Effect.fail(fail('ledger_budget_exceeded'));
+    return all;
   });
-  /** The full signed history, verified from the genesis this device already trusts. */
+  const pages = Effect.fnUntraced(function* (workspaceId: string) {
+    const firstPage = yield* input.history({ workspaceId });
+    return yield* pagesFrom(workspaceId, firstPage);
+  });
+  /** The full signed history, verified from the genesis this device already trusts.
+   * When `identity()` already verified a prefix, `accept()` asks only for records
+   * after `position` and re-verifies or reuses the prefix without re-downloading. */
   const verified = Effect.fnUntraced(function* (hint: AccountPairingWorkspaceHint) {
-    const history = yield* pages(hint.workspaceId);
+    const cached = cachedByWorkspace.get(hint.workspaceId);
+    let history: E2eeWorkspaceHistoryPage[] | undefined;
+    if (cached && cached.genesisHash === hint.genesisHash && cached.position) {
+      const deltaFirst = yield* input.history({
+        workspaceId: hint.workspaceId,
+        after: cached.position,
+      });
+      if (deltaFirst.startIndex === cached.length) {
+        const deltaPages = yield* pagesFrom(hint.workspaceId, deltaFirst);
+        const appended = deltaPages.some((page) => page.recordsHex.length > 0);
+        if (
+          !appended &&
+          deltaFirst.checkpoint.length === cached.length &&
+          deltaFirst.checkpoint.headHash === cached.headHash
+        ) {
+          return {
+            history: cached.history,
+            view: cached.view,
+            genesisRecordHex: cached.genesisRecordHex,
+          };
+        }
+        const nonEmptyDelta = deltaPages.filter((page) => page.recordsHex.length > 0);
+        const combined = [...cached.history, ...nonEmptyDelta];
+        const finalPosition = deltaPages.at(-1)?.position;
+        if (combined.length <= 256 && deltaPages.at(-1)?.nextCursor === null) {
+          history = combined.map((page, index) => ({
+            ...page,
+            checkpoint: deltaFirst.checkpoint,
+            nextCursor: index < combined.length - 1 ? (page.nextCursor ?? page.position) : null,
+            ...(index === combined.length - 1 && finalPosition ? { position: finalPosition } : {}),
+          }));
+        }
+      } else if (deltaFirst.startIndex === 0) {
+        history = yield* pagesFrom(hint.workspaceId, deltaFirst);
+      }
+    }
+    if (!history) history = yield* pages(hint.workspaceId);
     const genesisRecordHex = history[0]?.recordsHex[0];
     if (!genesisRecordHex) return yield* Effect.fail(fail('invalid-ledger'));
     const view = yield* verifyPersonalHistory(
       { workspaceId: hint.workspaceId, genesisHash: hint.genesisHash, genesisRecordHex },
       history
     );
+    const lastPage = history.at(-1);
+    if (lastPage?.position) {
+      cachedByWorkspace.set(hint.workspaceId, {
+        genesisHash: hint.genesisHash,
+        genesisRecordHex,
+        history,
+        view,
+        length: lastPage.checkpoint.length,
+        headHash: lastPage.checkpoint.headHash,
+        position: lastPage.position,
+      });
+    }
     return { history, view, genesisRecordHex };
   });
   /** This account's single active membership in a verified view. A wrong answer
    * from the service only makes the possession proof fail; it is never pinned. */
-  const membership = Effect.fnUntraced(function* (
-    view: Effect.Success<ReturnType<typeof verified>>['view']
-  ) {
+  const membership = Effect.fnUntraced(function* (view: LedgerView) {
     const userId = accountUserId(input.accountId);
     if (Result.isFailure(userId)) return yield* Effect.fail(fail('missing-binding'));
     const mine = [...view.inspectState().members.entries()].filter(([, member]) =>
@@ -197,6 +282,7 @@ export function makePortableAccountPairingRequester(input: {
             const identity = yield* host.prepareAccountIdentity({
               genesisRecordHex: checked.genesisRecordHex,
               membershipId,
+              history: checked.history,
             });
             return {
               signingPublicKey: identity.signingPublicKey,
@@ -374,7 +460,9 @@ export function makePortableAccountPairingApprover(input: {
   };
   /** Bounded local diagnostics for failures no caller awaits (a background release). */
   diagnostics?: (scope: string, cause: unknown) => void;
-}): () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown> {
+}): (
+  filter?: AccountPairingApproverFilter
+) => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown> {
   const remember = (scope: string) => (cause: unknown) =>
     Effect.sync(() => {
       try {
@@ -387,9 +475,14 @@ export function makePortableAccountPairingApprover(input: {
     session.release ? session.release().pipe(Effect.catch(remember(scope))) : Effect.void;
   // Sessions opened before a later workspace fails are not returned, so the caller
   // cannot release them: release them here on any failure.
-  const list = Effect.fnUntraced(function* (opened: AccountPairingApproverSession[]) {
+  const list = Effect.fnUntraced(function* (
+    opened: AccountPairingApproverSession[],
+    filter?: AccountPairingApproverFilter
+  ) {
     const result: AccountPairingApproverWorkspace[] = [];
     for (const hint of input.workspaces()) {
+      if (filter?.workspaceIds && !filter.workspaceIds.has(hint.workspaceId)) continue;
+      if (filter?.geneses && !filter.geneses.has(hint.genesisHash)) continue;
       const session = yield* input.session(hint.workspaceId);
       if (!session) continue;
       opened.push(session);
@@ -507,9 +600,9 @@ export function makePortableAccountPairingApprover(input: {
     }
     return result;
   });
-  return () => {
+  return (filter?: AccountPairingApproverFilter) => {
     const opened: AccountPairingApproverSession[] = [];
-    return list(opened).pipe(
+    return list(opened, filter).pipe(
       Effect.onError(() =>
         Effect.forEach(opened, (session) => releaseQuietly(session, 'account-pairing-release'), {
           discard: true,

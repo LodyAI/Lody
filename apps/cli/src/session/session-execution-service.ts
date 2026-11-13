@@ -381,7 +381,7 @@ type TurnRuntimeState = {
   /** Encrypted member turns only: the verified origin device and reached projects. */
   encryptedOrigin?: { requesterDevice: string; localProjectIds: readonly string[] };
   /** Inputs derived from this member turn so far (owner decision: bounded per origin). */
-  encryptedDerivations?: number;
+  encryptedDerivations?: Set<string>;
   inboxNotificationWork?: { userId: string; originTurnIds: string[] };
   goalControl?: GoalPromptControl;
   session?: ISession;
@@ -744,6 +744,8 @@ export type SessionExecutionServiceDeps = {
     signal?: AbortSignal
   ) => Promise<string | null>;
   turnFinalization: TurnFinalizationEffects;
+  /** Borrow the existing bounded user-history gate before recovery list writes. */
+  awaitTurnHistoryGate?: (sessionId: SessionId) => Promise<void>;
   recordChatFailure: (
     sessionDoc: SessionDocument,
     reason: ChatFailedReason,
@@ -808,6 +810,8 @@ export type SessionExecutionServiceDeps = {
     capabilitySourceVersion?: string;
     /** Sign-in methods the probe read from `initialize`, when it could. */
     authMethods?: readonly AuthMethod[];
+    /** Each model's own option list, when the refresh asked to read them. */
+    modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   }>;
   /**
    * The `capabilitySourceVersion` a probe would stamp right now, resolved without
@@ -3845,6 +3849,132 @@ export class SessionExecutionService {
     );
   }
 
+  /** Called only by the serialized dispatch watcher with no live turn owner. */
+  async recoverUncertainEncryptedTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    const gate = this.deps.encryptedExecution;
+    if (!gate || this.getExecutionSnapshot(sessionId).hasActiveTurn) return false;
+    const release = this.tryAcquireSessionRewriteConflictLease(sessionId);
+    if (!release) return false;
+    try {
+      const meta = await this.getSessionMeta(sessionId);
+      const backend = await createSessionBackend(sessionDoc, meta);
+      const read = await backend.readTurn(userTurnId);
+      if (
+        read.state === 'ready' &&
+        ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '') &&
+        meta?.processingUserMsgId !== userTurnId
+      )
+        return false;
+      const state = await Effect.runPromise(gate.readState({ sessionId, userTurnId }));
+      if (state !== 'uncertain') return false;
+      return await this.settleUncertainEncryptedTurn(sessionId, sessionDoc, userTurnId);
+    } finally {
+      release();
+    }
+  }
+
+  private async settleUncertainEncryptedTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    await this.deps.awaitTurnHistoryGate?.(sessionId);
+    const backend = await this.getSessionBackend(sessionDoc, sessionId);
+    const user = await backend.readTurn(userTurnId);
+    if (
+      user.state === 'ready' &&
+      ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(user.turn.status ?? '')
+    ) {
+      const meta = await this.getSessionMeta(sessionId);
+      if (meta?.processingUserMsgId !== userTurnId) return false;
+      // A stale running pointer does not undo a user's terminal decision.
+      await this.upsertSessionMeta(sessionId, { processingUserMsgId: undefined });
+      await sessionDoc.setStatus(SessionStatusFactory.idle());
+      await backend.flushLocalWrites();
+      return true;
+    }
+    const noticeId = `e2ee-interrupted:${userTurnId}`;
+    const output = await backend.readHistorySelection((rows) => {
+      const start = rows.findIndex((row) => row.id === userTurnId);
+      let end = rows.length;
+      for (let i = start + 1; i < rows.length; i++) {
+        if (rows[i]?.role === 'user') {
+          end = i;
+          break;
+        }
+      }
+      return rows.flatMap((row, index) =>
+        row.id === noticeId ||
+        (row.role === 'assistant' && row.userTurnId === userTurnId) ||
+        (start >= 0 && index > start && index < end && row.role === 'system')
+          ? [index]
+          : []
+      );
+    });
+    const hasNotice = output.some(
+      (entry) =>
+        entry.id === noticeId ||
+        entry.items?.some((item) => item.type === 'system_notice' && item.name === 'chat_failed')
+    );
+    // A completed reply is positive completion evidence, unless it was closed by
+    // this recovery (the durable notice is written before any terminal stamp).
+    if (
+      !hasNotice &&
+      output.some((entry) => entry.role === 'assistant' && typeof entry.endedAt === 'number')
+    )
+      return false;
+    if (!hasNotice) {
+      await backend.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: noticeId,
+          role: 'system',
+          userTurnId,
+          timestamp: new Date().toISOString(),
+          fileDiff: [],
+          items: [
+            {
+              type: 'system_notice',
+              name: 'chat_failed',
+              meta: {
+                reason: 'turn_pre_prompt_failed',
+                message:
+                  'The previous run was interrupted by a device shutdown or crash. Its outcome is unknown, so it was not retried automatically to avoid duplicate execution. Check its effects before sending a new message.',
+              },
+            },
+          ],
+        },
+      });
+      await backend.flushLocalWrites();
+    }
+    for (const entry of output) {
+      if (entry.role === 'assistant' && typeof entry.endedAt !== 'number')
+        await backend.applyHistoryAction({
+          kind: 'finish-assistant',
+          turnId: entry.id,
+          endedAt: Date.now(),
+        });
+    }
+    await this.setTerminalUserTurnStatus(sessionId, sessionDoc, userTurnId, 'failed');
+    const meta = await this.getSessionMeta(sessionId);
+    // Recovery settles an old identity, not the latest execution. Never replace
+    // another turn's handled/processing pointers with this interrupted turn.
+    await this.upsertSessionMeta(sessionId, {
+      ...(!meta?.lastHandledUserMsgId || meta.lastHandledUserMsgId === userTurnId
+        ? { lastHandledUserMsgId: userTurnId, lastFailedUserMsgId: userTurnId }
+        : {}),
+      ...(meta?.processingUserMsgId === userTurnId ? { processingUserMsgId: undefined } : {}),
+    });
+    if (!meta?.processingUserMsgId || meta.processingUserMsgId === userTurnId)
+      await sessionDoc.setStatus(SessionStatusFactory.idle());
+    await backend.flushLocalWrites();
+    return true;
+  }
+
   private async recordKnownChatFailure(options: {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
@@ -5412,7 +5542,7 @@ export class SessionExecutionService {
                       localProjectIds: [...authorized],
                     }
                   : undefined;
-                runtime.encryptedDerivations = 0;
+                runtime.encryptedDerivations = new Set();
                 // Authorization may have yielded while Stop was requested.
                 yield* abortIfCancelled();
                 self.deps.logger.debug('[e2ee-rpc-timing]', {
@@ -5421,6 +5551,14 @@ export class SessionExecutionService {
                   at: yield* Clock.currentTimeMillis,
                 });
                 return authorized;
+              }
+              if (result.state === 'uncertain' && userTurnId) {
+                yield* self.tryPromise(() =>
+                  self.settleUncertainEncryptedTurn(sessionId, sessionDoc, userTurnId)
+                );
+                return yield* Effect.fail(
+                  new SessionTurnClaimContended({ sessionId, turnId: runtime.turnId })
+                );
               }
               if (result.state === 'completed' && userTurnId) {
                 const backend = yield* self.tryPromise(() =>
@@ -5449,13 +5587,11 @@ export class SessionExecutionService {
                 userTurnId,
                 reason: 'turn_pre_prompt_failed',
                 message:
-                  result.state === 'uncertain'
-                    ? 'Result unknown. This encrypted turn may already have started and will not be started again. Send a new turn to continue.'
-                    : result.state === 'completed'
-                      ? 'This encrypted turn already finished and will not be started again.'
-                      : result.state === 'denied' && result.reason
-                        ? encryptedRefusalMessage(result.reason)
-                        : 'This encrypted turn is not authorized for execution.',
+                  result.state === 'completed'
+                    ? 'This encrypted turn already finished and will not be started again.'
+                    : result.state === 'denied' && result.reason
+                      ? encryptedRefusalMessage(result.reason)
+                      : 'This encrypted turn is not authorized for execution.',
               });
             });
 
@@ -6023,21 +6159,27 @@ export class SessionExecutionService {
 
   /**
    * Encrypted only: the verified principal of the active turn driving `sourceTurnId`.
-   * A member result reserves one of that origin's bounded derivations; past the
-   * bound, or for any other turn, the result is undefined and callers fail closed.
+   * After write authorization, reserve one slot per request; identical retries reuse it. Past the
+   * bound, new requests fail closed; accepted IDs can retry within the same turn.
    */
   reserveEncryptedDerivation(
     sessionId: SessionId,
-    sourceTurnId: string
+    sourceTurnId: string,
+    requestId: string
   ): { kind: 'owner' } | { kind: 'member' } | undefined {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     if (!runtime || runtime.cancelRequested || runtime.invocation?.sourceTurnId !== sourceTurnId)
       return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
-    if (runtime.encryptedPrincipal !== 'member' || !runtime.encryptedOrigin) return undefined;
-    const used = runtime.encryptedDerivations ?? 0;
-    if (used >= MAX_DERIVED_TURNS_PER_ORIGIN) return undefined;
-    runtime.encryptedDerivations = used + 1;
+    if (
+      (runtime.encryptedPrincipal !== 'member' && runtime.encryptedPrincipal !== 'derived') ||
+      !runtime.encryptedOrigin
+    )
+      return undefined;
+    if (!requestId) return undefined;
+    const used = (runtime.encryptedDerivations ??= new Set<string>());
+    if (!used.has(requestId) && used.size >= MAX_DERIVED_TURNS_PER_ORIGIN) return undefined;
+    used.add(requestId);
     return { kind: 'member' };
   }
 
@@ -6051,7 +6193,10 @@ export class SessionExecutionService {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     if (!runtime || runtime.cancelRequested) return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
-    if (runtime.encryptedPrincipal === 'member' && runtime.encryptedOrigin)
+    if (
+      (runtime.encryptedPrincipal === 'member' || runtime.encryptedPrincipal === 'derived') &&
+      runtime.encryptedOrigin
+    )
       return { kind: 'member', ...runtime.encryptedOrigin };
     return undefined;
   }
@@ -6079,11 +6224,12 @@ export class SessionExecutionService {
     // In encrypted workspaces the history row's userId is unauthenticated display
     // data and never authority. Derived work from an owner turn keeps today's
     // behavior; from a shared member's turn it is re-authorized as that member when
-    // written and when it starts. Derived, steered or unclaimed turns expose none.
+    // written and when it starts. Unclaimed turns expose no invocation identity.
     if (
       (this.deps.encryptedExecution || this.deps.encryptedWorkspace) &&
       runtime.encryptedPrincipal !== 'owner' &&
-      runtime.encryptedPrincipal !== 'member'
+      runtime.encryptedPrincipal !== 'member' &&
+      runtime.encryptedPrincipal !== 'derived'
     ) {
       return undefined;
     }
@@ -6490,6 +6636,7 @@ export class SessionExecutionService {
     await this.setTerminalUserTurnStatus(sessionId, sessionDoc, userTurnId, 'failed');
     await this.upsertSessionMeta(sessionId, {
       lastHandledUserMsgId: userTurnId,
+      lastFailedUserMsgId: userTurnId,
       processingUserMsgId: undefined,
     });
   }
@@ -9120,7 +9267,9 @@ export class SessionExecutionService {
   ): Promise<MachineAcpCapabilitiesRefreshResponse> {
     // Config identity is part of the key because the response and cache row are
     // both config-scoped even when two configs share identical launch inputs.
-    const dedupeKey = computeAcpRefreshDedupeKey(
+    // A refresh that reads every model's options does more work than one that
+    // does not, so the two never share an in-flight probe.
+    const dedupeKey = `${computeAcpRefreshDedupeKey(
       message.configId,
       message.cliType,
       message.agentType,
@@ -9128,7 +9277,7 @@ export class SessionExecutionService {
       message.customAcp,
       message.runtimeOverrides,
       message.magpieGatewayUrl
-    );
+    )}${message.readModelOptions ? ':model-options' : ''}`;
 
     this.deps.logger.debug(
       `[acp-capabilities] Refresh requested (cliType=${message.cliType} agentType=${message.agentType} force=${message.force === true})`
@@ -9305,6 +9454,7 @@ export class SessionExecutionService {
         modelCapabilities,
         capabilitySourceVersion,
         authMethods,
+        modelConfigOptions,
       } = await this.deps.fetchAcpCapabilities(
         message.cliType,
         message.agentType,
@@ -9322,6 +9472,29 @@ export class SessionExecutionService {
               toManagedRuntimeProgressMessage(this.deps.machineId, event)
             );
           },
+          // Built-in adapters only switch models in-session. A registry or
+          // custom agent may persist each switch (registry Cursor rewrites
+          // its global default model), so they refresh as before.
+          ...(message.readModelOptions && message.cliType === 'builtin'
+            ? {
+                readModelOptions: {
+                  onProgress: (progress) => {
+                    if (options.signal?.aborted) return;
+                    options.onAcpBinaryProgress?.({
+                      type: 'machine/acp-binary-progress',
+                      machineId: this.deps.machineId,
+                      agentType: message.agentType,
+                      status: 'reading-model-options',
+                      configId: message.configId,
+                      modelId: progress.modelId,
+                      modelName: progress.modelName,
+                      modelIndex: progress.index,
+                      modelCount: progress.total,
+                    });
+                  },
+                },
+              }
+            : {}),
         }
       );
 
@@ -9364,6 +9537,7 @@ export class SessionExecutionService {
           rateLimits,
           modelCapabilities,
           authMethods: advertisedAuthMethods,
+          modelConfigOptions,
         }
       );
       this.acpCapabilityLaunchInputFingerprints.set(

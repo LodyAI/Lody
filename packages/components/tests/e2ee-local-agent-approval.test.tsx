@@ -4,7 +4,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
-import { E2eeLocalAgentApproval } from '../src/components/e2ee-local-agent-approval';
+import {
+  E2eeLocalAgentApproval,
+  LOCAL_AGENT_RECHECK_DELAYS_MS,
+  LOCAL_AGENT_STEP_DEADLINE_MS,
+} from '../src/components/e2ee-local-agent-approval';
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 describe('local encrypted agent approval', () => {
@@ -268,6 +272,131 @@ describe('local encrypted agent approval', () => {
     await click('e2ee.localAgent.allow');
     expect(activationRequested).toBe(true);
     expect(container.textContent).toBe('');
+  });
+  it('finishes a slow start on its own after approval, without asking again', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      await render();
+      await click('e2ee.localAgent.enable');
+      await click('e2ee.localAgent.allow');
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      ready = true;
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_RECHECK_DELAYS_MS[0]!));
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('moves an unanswered admission to waiting, ignores its late answer, and rejoins it', async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: string[] = [];
+      let answer: (value: { admitted: true; ready: boolean }) => void = () => {};
+      runtime.admitLocalAgent = (_workspace: string, approvedSession: string) => {
+        calls.push(approvedSession);
+        return new Promise((resolve) => (answer = resolve));
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      await click('e2ee.localAgent.allow');
+      expect(container.textContent).toContain('e2ee.localAgent.working');
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_STEP_DEADLINE_MS));
+      // The button is usable again instead of saying "Preparing…" forever.
+      expect(container.textContent).toContain('common.tryAgain');
+      const stale = answer;
+      // The automatic check re-prepares the same, already approved session.
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_RECHECK_DELAYS_MS[0]!));
+      expect(calls).toEqual(['synthetic-session', 'synthetic-session']);
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      // The first attempt answering late cannot decide the newer attempt's result.
+      await act(async () => stale({ admitted: true, ready: true }));
+      expect(container.textContent).toContain('e2ee.localAgent.working');
+      await act(async () => answer({ admitted: true, ready: true }));
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops checking automatically after its bounded rounds and leaves retry to the user', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      let admissions = 0;
+      const admitOriginal = runtime.admitLocalAgent!;
+      runtime.admitLocalAgent = async (...args) => {
+        admissions++;
+        return admitOriginal(...args);
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      await click('e2ee.localAgent.allow');
+      for (const delay of LOCAL_AGENT_RECHECK_DELAYS_MS)
+        await act(async () => vi.advanceTimersByTime(delay));
+      expect(admissions).toBe(1 + LOCAL_AGENT_RECHECK_DELAYS_MS.length);
+      await act(async () => vi.advanceTimersByTime(10 * LOCAL_AGENT_STEP_DEADLINE_MS));
+      expect(admissions).toBe(1 + LOCAL_AGENT_RECHECK_DELAYS_MS.length);
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      ready = true;
+      await click('common.tryAgain');
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops an approval when the workspace changes', async () => {
+    ready = false;
+    await render();
+    await click('e2ee.localAgent.enable');
+    await click('e2ee.localAgent.allow');
+    expect(container.textContent).toContain('e2ee.localAgent.waiting');
+    admitted = false;
+    let admittedOther = false;
+    runtime.admitLocalAgent = async () => {
+      admittedOther = true;
+      return { admitted: true, ready: true };
+    };
+    await act(async () =>
+      root.render(<E2eeLocalAgentApproval workspaceId="other" runtime={runtime} enabled />)
+    );
+    expect(container.textContent).toContain('e2ee.localAgent.enable');
+    await click('e2ee.localAgent.enable');
+    // The same pairing session id in another workspace still needs its own consent.
+    expect(admittedOther).toBe(false);
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  });
+
+  it('does not re-open the confirmation dialog when a settled session rotates during slow activation', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      const admittedSessions: string[] = [];
+      runtime.admitLocalAgent = async (_workspace: string, approvedSession: string) => {
+        if (approvedSession !== session) throw new Error('wrong session');
+        admitted = true;
+        admittedSessions.push(approvedSession);
+        return { admitted: true, ready };
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+      await click('e2ee.localAgent.allow');
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      // Main rotates pairingSessionId after settling admission while machine activation finishes.
+      session = 'rotated-settled-session';
+      ready = true;
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_RECHECK_DELAYS_MS[0]!));
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(admittedSessions).toEqual(['synthetic-session', 'rotated-settled-session']);
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

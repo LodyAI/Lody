@@ -15,8 +15,9 @@ android {
 
     defaultConfig {
         applicationId = "ai.lody.android"
-        // Public OAuth Web client ID, never a client secret. Empty disables Google clearly.
-        val googleClient = providers.gradleProperty("LODY_GOOGLE_WEB_CLIENT_ID").orElse("").get()
+        // Public OAuth Web client ID, never a client secret. An explicit empty property disables Google clearly.
+        val googleClient = providers.gradleProperty("LODY_GOOGLE_WEB_CLIENT_ID")
+            .orElse("853929047386-vd1k5ashcs4i5pa66pa4iqbouk9ra57a.apps.googleusercontent.com").get()
         require(googleClient.matches(Regex("[A-Za-z0-9._-]*")))
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleClient\"")
         for (key in listOf("CONVEX_URL", "CONVEX_SITE_URL", "CF_WORKER_URL", "STORAGE_SUFFIX")) {

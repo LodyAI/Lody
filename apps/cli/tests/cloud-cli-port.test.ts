@@ -667,12 +667,30 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     deliver?.(authorized);
     expect(states).toEqual([authorized]);
     expect(await port.e2ee!.getHistory({ workspaceId, credential })).toMatchObject({ workspaceId });
-    expect(packets).toEqual([
-      expect.objectContaining({
-        path: 'e2eeWorkspaces:history',
-        args: [expect.objectContaining({ workspaceId, credential })],
-      }),
-    ]);
+    expect(packets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'e2eeWorkspaces:history',
+          args: [expect.objectContaining({ workspaceId, credential })],
+        }),
+        expect.objectContaining({
+          path: 'e2eeWorkspaces:reportDeviceProfile',
+          args: [
+            expect.objectContaining({
+              workspaceId,
+              credential,
+              profile: expect.objectContaining({
+                client: 'daemon',
+                name: expect.any(String),
+                os: expect.any(String),
+                osVersion: expect.any(String),
+                appVersion: expect.any(String),
+              }),
+            }),
+          ],
+        }),
+      ])
+    );
     await port.e2ee!.readEpochGroup!({
       workspaceId,
       credential,

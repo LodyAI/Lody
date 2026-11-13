@@ -570,3 +570,268 @@ describe('independently encoded recovery vault', () => {
     )
   );
 });
+
+describe('recovery admission during an undelivered epoch', () => {
+  it.each([
+    'complete',
+    'missing',
+    'corrupt',
+    'intermediate',
+    'zero-missing',
+    'storage-failure',
+    'readback-failure',
+    'native-failure',
+    'unavailable',
+  ] as const)('restores only authenticated committed keys: %s', async (mode) => {
+    const { envelopeFixture } = await import('./keys/fixture');
+    const { Bytes, makeWorkspaceRecovery } = await import('@lody/e2ee-core');
+    const {
+      prepareDeviceAdmission,
+      prepareLedgerCommand,
+      signLedgerRecord,
+      verifyLedger,
+      hashRecordBytes,
+      prepareEpochEnvelope,
+      commitEpochKey,
+      sealHistoryPacket,
+    } = await import('@lody/e2ee-core/protocol');
+    const { HpkePrimitiveError } = await import('../src/internal/crypto/hpke');
+    const { importRecoveryIdentity } = await import('../src/internal/recovery/identity');
+    const { copyEpochKeyBytes, disposeEpochKey } =
+      await import('../src/internal/foundation/epoch-key');
+    const { encodeCbor } = await import('../src/internal/foundation/cbor');
+    const { prepareLedgerRecord: prepareRecord } = await import('@lody/e2ee-core/protocol');
+    const ok = Result.getOrThrow;
+    const f = envelopeFixture();
+    const records: Uint8Array[] = f.records();
+    const view = () =>
+      ok(
+        verifyLedger({
+          anchor: f.context.genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
+        })
+      );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const stores = memoryStores();
+          const { vault } = yield* createRecoveryVault({ locator: 'recovery-test', ...stores });
+          const bundle = yield* generateRecoveryPackage({
+            genesis: Buffer.from(f.context.genesis.toBytes()).toString('hex'),
+            membershipId: '0a'.repeat(16),
+            generation: 0,
+            trust: {
+              source: 'synthetic',
+              genesisRecord: records[0]!,
+              head: Buffer.from(view().head.toBytes()).toString('hex'),
+              length: view().length,
+            },
+          });
+          const identity = yield* importRecoveryIdentity(bundle);
+          const reference = yield* vault.upload(bundle);
+          yield* vault.reserve(reference);
+          wipeRecoveryPackage(bundle);
+          const admit = yield* prepareDeviceAdmission({
+            genesis: f.context.genesis,
+            membershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(10))),
+            encryptionPublicKey: identity.encryptionPublicKey,
+            kind: 'recovery',
+            signer: identity,
+          });
+          records.push(
+            yield* signLedgerRecord(
+              ok(prepareLedgerCommand(view(), f.owner.publicKey, admit)),
+              f.owner.signer
+            )
+          );
+          const envelopes = new Map<number, Uint8Array>();
+          const keys = [f.secret, ok(Bytes.epochKey(new Uint8Array(32).fill(0x72)))];
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              keys.forEach(disposeEpochKey);
+            })
+          );
+          envelopes.set(
+            0,
+            yield* prepareEpochEnvelope({
+              context: { ...f.context, recipient: identity.publicKey },
+              key: keys[0]!,
+              signer: f.owner.signer,
+              ledger: () => Effect.sync(view),
+            })
+          );
+          if (mode !== 'zero-missing') {
+            const op = [
+              7,
+              1,
+              ok(commitEpochKey(f.context.genesis, 1, keys[1]!)).toBytes(),
+              ok(
+                sealHistoryPacket({
+                  genesis: f.context.genesis,
+                  epoch: 1,
+                  currentKey: keys[1]!,
+                  previousKey: keys[0]!,
+                })
+              ),
+            ];
+            // Use the ordinary record preparer so the fixture publication is fully verified.
+            const body = ok(
+              encodeCbor([
+                view().head.toBytes(),
+                f.owner.raw,
+                op as import('../src/internal/foundation/cbor').CborValue,
+              ])
+            );
+            records.push(yield* signLedgerRecord(ok(prepareRecord(view(), body)), f.owner.signer));
+            if (mode !== 'missing') {
+              const frame = yield* prepareEpochEnvelope({
+                context: {
+                  ...f.context,
+                  epoch: ok(Bytes.epochNumber(1)),
+                  recipient: identity.publicKey,
+                },
+                key: keys[1]!,
+                signer: f.owner.signer,
+                ledger: () => Effect.sync(view),
+              });
+              if (mode === 'corrupt') frame[frame.length - 1] ^= 1;
+              envelopes.set(1, frame);
+            }
+          } else envelopes.clear();
+          if (mode === 'intermediate') {
+            const next = ok(Bytes.epochKey(new Uint8Array(32).fill(0x73)));
+            keys.push(next);
+            const body = ok(
+              encodeCbor([
+                view().head.toBytes(),
+                f.owner.raw,
+                [
+                  7,
+                  2,
+                  ok(commitEpochKey(f.context.genesis, 2, next)).toBytes(),
+                  ok(
+                    sealHistoryPacket({
+                      genesis: f.context.genesis,
+                      epoch: 2,
+                      currentKey: next,
+                      previousKey: keys[1]!,
+                    })
+                  ),
+                ],
+              ])
+            );
+            records.push(yield* signLedgerRecord(ok(prepareRecord(view(), body)), f.owner.signer));
+          }
+          if (mode === 'unavailable') envelopes.clear();
+          const installed = new Map<number, Uint8Array>();
+          const workflow = yield* makeWorkspaceRecovery({
+            vault,
+            local: stores.local,
+            genesis: f.context.genesis,
+            membershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(10))),
+            personalSigner: f.owner.signer,
+            ledger: () => Effect.sync(view),
+            trust: {
+              source: 'synthetic',
+              genesisRecord: records[0]!,
+              head: Buffer.from(view().head.toBytes()).toString('hex'),
+              length: view().length,
+            },
+            submitOriginal: () => Effect.die('restore cannot use personal submission'),
+            fetchCurrentEnvelope: (_recipient, epoch, _identity, credential) =>
+              mode === 'native-failure'
+                ? Effect.suspend(() => {
+                    credential.fill(0);
+                    return Effect.fail(new HpkePrimitiveError({ code: 'native-unavailable' }));
+                  })
+                : Effect.sync(() => {
+                    credential.fill(0);
+                    const frame = envelopes.get(epoch);
+                    return frame
+                      ? { sender: f.owner.publicKey, frame }
+                      : { pending: true as const };
+                  }),
+            installed: {
+              saveAndReload: (epoch, key) =>
+                mode === 'storage-failure'
+                  ? Effect.fail(new Error('disk unavailable'))
+                  : Effect.sync(() => {
+                      installed.set(epoch, copyEpochKeyBytes(key));
+                    }),
+              read: (epoch) =>
+                Effect.sync(() =>
+                  ok(
+                    Bytes.epochKey(
+                      mode === 'readback-failure'
+                        ? new Uint8Array(32).fill(99)
+                        : installed.get(epoch)!
+                    )
+                  )
+                ),
+            },
+          });
+          const personal = {
+            ...f.ed(23).signer,
+            encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(23))),
+          };
+          const restore = () =>
+            workflow.restoreFromRecovery({
+              personal,
+              submitOriginalAsRecovery: (record, _r, credential) =>
+                Effect.sync(() => {
+                  credential.fill(0);
+                  records.push(record);
+                  view();
+                  return { outcome: 'Committed' as const, record };
+                }),
+            });
+          const result = yield* Effect.result(restore());
+          const admitted = view()
+            .inspectState()
+            .devices.has(Buffer.from(personal.publicKey.toBytes()).toString('hex'));
+          if (['storage-failure', 'readback-failure', 'native-failure'].includes(mode)) {
+            expect(Result.isFailure(result)).toBe(true);
+            expect(admitted).toBe(false);
+            return;
+          }
+          const restored = ok(result);
+          if (mode === 'unavailable' || mode === 'zero-missing') {
+            expect(restored.outcome).toBe('Pending');
+            expect(admitted).toBe(false);
+            if (mode === 'zero-missing') {
+              expect(installed.size).toBe(0);
+              const beforeAdmission = records.length;
+              envelopes.set(
+                0,
+                yield* prepareEpochEnvelope({
+                  context: { ...f.context, recipient: identity.publicKey },
+                  key: f.secret,
+                  signer: f.owner.signer,
+                  ledger: () => Effect.sync(view),
+                })
+              );
+              expect(yield* restore()).toMatchObject({
+                outcome: 'Committed',
+                epoch: 0,
+                partialEpochKey: false,
+              });
+              expect([...installed.keys()]).toEqual([0]);
+              expect(records.length).toBe(beforeAdmission + 1);
+              yield* restore();
+              expect(records.length).toBe(beforeAdmission + 1);
+            }
+            return;
+          }
+          expect(restored.outcome).toBe('Committed');
+          expect(admitted).toBe(true);
+          expect(restored.partialEpochKey).toBe(mode !== 'complete');
+          expect(restored.epoch).toBe(mode === 'complete' || mode === 'intermediate' ? 1 : 0);
+          expect([...installed.keys()].sort()).toEqual(
+            mode === 'complete' || mode === 'intermediate' ? [0, 1] : [0]
+          );
+        })
+      )
+    );
+  });
+});

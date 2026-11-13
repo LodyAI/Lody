@@ -71,11 +71,7 @@ assert(alpha(of: squareAvatar, at: CGPoint(x: 4, y: 4)) < 60, "The monogram is a
 assert(alpha(of: squareAvatar, at: CGPoint(x: 16, y: 1.5)) > 200 && alpha(of: squareAvatar, at: CGPoint(x: 1.5, y: 16)) > 200,
        "The circle fills the avatar side")
 let headerMenu = UIButton(type: .system)
-LodyMenuButtonStyle.apply(label: "Innei", detail: "3 machines · 2 running", avatar: squareAvatar, to: headerMenu)
-let headerDetail = NSAttributedString(headerMenu.configuration!.attributedSubtitle!)
-assert(headerDetail.string == "3 machines · 2 running", "The status line sits under the workspace name")
-let headerDetailFont = headerDetail.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
-assert(headerDetailFont.fontDescriptor.symbolicTraits.contains(.traitMonoSpace), "The status line is monospaced")
+LodyMenuButtonStyle.apply(label: "Innei", avatar: squareAvatar, to: headerMenu)
 let headerTitle = NSAttributedString(headerMenu.configuration!.attributedTitle!)
 assert(headerTitle.string.hasPrefix("Innei"))
 let headerTitleFont = headerTitle.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
@@ -87,12 +83,8 @@ headerTitle.enumerateAttribute(.attachment, in: NSRange(location: 0, length: hea
   headerChevron = headerChevron ?? (value as? NSTextAttachment)?.image
 }
 assert(ink(headerChevron!) > ink(boldChevron), "The header chevron is heavier than a bold 10 pt chevron beside the semibold name")
-LodyMenuButtonStyle.apply(label: "Design states", detail: "2 online / 2 devices · 3 running", avatar: squareAvatar, to: headerMenu)
-let narrowHeader = headerMenu.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude))
-assert(narrowHeader.height <= LodyMenuButtonStyle.height, "A long status line truncates instead of wrapping: \(narrowHeader.height)")
-LodyMenuButtonStyle.apply(label: "Innei", avatar: squareAvatar, to: headerMenu)
-assert(headerMenu.configuration?.attributedSubtitle == nil, "No status leaves a single-line button")
-print("PASS: the workspace header draws a square monogram, a semibold name with chevron and a mono status line")
+assert(headerMenu.configuration?.attributedSubtitle == nil, "The capsule is a single line: logo and name")
+print("PASS: the workspace header draws a circular monogram and a semibold name with chevron on one line")
 
 var swipedState = UICellConfigurationState(traitCollection: UITraitCollection())
 swipedState.isSwiped = true
@@ -271,7 +263,7 @@ assert(projectFont == modelFont, "Line two uses one face for project, branch and
 assert(!projectFont.fontDescriptor.symbolicTraits.contains(.traitMonoSpace), "Line two is not monospaced")
 assert(treePath(in: primary) == nil, "A row outside a group draws no tree line")
 assert(reviewButton(in: primary) == nil)
-assert(LodySessionRowView.textLeading(for: LodyListRow(), density: .regular) == 46)
+assert(LodySessionRowView.textLeading(for: LodyListRow()) == 46)
 
 let child = laidOutSessionRow(LodySessionRowContent(
   row: LodyListRow(title: "Test on macOS", modelName: "Codex", value: "3m", imageTint: "blue", parentId: "ship")
@@ -285,7 +277,7 @@ assert(abs(child.bounds.height - 40) <= 4, "A child row is about 40 pt: \(child.
 let trunk = treePath(in: child)!.boundingBox
 assert(trunk.minY <= 0.5 && trunk.maxY >= child.bounds.height - 0.5, "Earlier children carry the trunk through the row")
 assert(abs(trunk.minX - 23.5) <= 1, "The trunk runs at the rail center")
-assert(LodySessionRowView.textLeading(for: LodyListRow(parentId: "ship"), density: .regular) == 62)
+assert(LodySessionRowView.textLeading(for: LodyListRow(parentId: "ship")) == 62)
 
 let lastChild = laidOutSessionRow(LodySessionRowContent(
   row: LodyListRow(title: "Land upstream fix", value: "5m", parentId: "ship", lastChild: true)
@@ -324,18 +316,6 @@ assert(visibleLabel(attention, containing: "Needs approval") == nil, "Status pil
 assert(attention.accessibilityLabel?.contains("Needs approval") == true, "VoiceOver still hears the state")
 _ = attention.accessibilityCustomActions?.first?.actionHandler?(attention.accessibilityCustomActions!.first!)
 assert(reviewed == 1, "VoiceOver reaches Review as a custom action")
-var compactAttention = LodySessionRowContent(
-  row: LodyListRow(title: "Migrate auth middleware", value: "2m", imageTint: "warning"), onReview: {}
-)
-compactAttention.density = .compact
-let compactRow = laidOutSessionRow(compactAttention)
-assert(reviewButton(in: compactRow) == nil, "Compact rows rely on the glyph alone")
-assert(abs(frame(statusGlyph(in: compactRow), in: compactRow).midX - 10) < 0.5, "Compact rail centers at 10 pt")
-var compactChild = LodySessionRowContent(row: LodyListRow(title: "Child", value: "1m", parentId: "p"))
-compactChild.density = .compact
-let compactChildRow = laidOutSessionRow(compactChild)
-assert(abs(frame(statusGlyph(in: compactChildRow), in: compactChildRow).midX - LodyDesign.Rail.compactChildCenter) < 0.5)
-assert(LodySessionRowView.textLeading(for: LodyListRow(parentId: "p"), density: .compact) == LodyDesign.Rail.compactChildText)
 
 print("PASS: rail rows place glyphs, text, tree lines and Review on the design grid")
 
@@ -348,40 +328,6 @@ assert(addRange.location != NSNotFound && delRange.location != NSNotFound, stats
 let addColor = stats.attribute(.foregroundColor, at: addRange.location, effectiveRange: nil) as! UIColor
 let delColor = stats.attribute(.foregroundColor, at: delRange.location, effectiveRange: nil) as! UIColor
 assert(addColor.isEqual(UIColor.lodySecondary) && delColor.isEqual(UIColor.lodySecondary), "List diff summaries stay quiet; only needs-you keeps a color")
-
-// Compare the same real content view at the same width, including reuse back
-// into the default host. Sidebar typography can shrink, but not text or touch targets.
-@MainActor func fittedHeight(_ view: UIView) -> CGFloat {
-  view.systemLayoutSizeFitting(
-    CGSize(width: 288, height: 0),
-    withHorizontalFittingPriority: .required,
-    verticalFittingPriority: .fittingSizeLevel
-  ).height
-}
-
-let densityRow = LodyListRow(title: "Review sidebar", subtitle: "feature/sidebar", modelName: "GPT-6", value: "Now")
-let sessionContent = LodySessionRowContent(row: densityRow)
-let densitySession = LodySessionRowView(sessionContent)
-let groupedSessionHeight = fittedHeight(densitySession)
-let groupedSessionLabel = densitySession.accessibilityLabel
-let groupedTitleFont = sessionLabel(densitySession, densityRow.title).font!
-var sidebarSession = sessionContent
-sidebarSession.density = .compact
-densitySession.configuration = sidebarSession
-assert(fittedHeight(densitySession) < groupedSessionHeight, "Sidebar must fit more rows at the same width")
-assert(fittedHeight(densitySession) >= 44, "Compact rows must keep a 44 pt touch target")
-assert(densitySession.accessibilityLabel == groupedSessionLabel, "Sidebar must retain all session information")
-assert(sessionLabel(densitySession, densityRow.title).font.pointSize < groupedTitleFont.pointSize, "Sidebar title must be quieter than the grouped title")
-assert(sessionLabel(densitySession, densityRow.title).adjustsFontForContentSizeCategory)
-let groupedMetaFont = LodySessionRowView.meta(for: densityRow).attribute(.font, at: 0, effectiveRange: nil) as! UIFont
-let sidebarMetaFont = visibleLabel(densitySession, containing: densityRow.subtitle)!.attributedText!.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
-assert(sidebarMetaFont.pointSize < groupedMetaFont.pointSize, "Attributed branch text must follow sidebar density too")
-densitySession.configuration = sessionContent
-assert(sessionLabel(densitySession, densityRow.title).font == groupedTitleFont, "Reuse must restore the phone title size")
-assert(abs(fittedHeight(densitySession) - groupedSessionHeight) < 0.5, "Reuse must restore grouped row spacing")
-sidebarSession.row = LodyListRow(title: "No metadata")
-densitySession.configuration = sidebarSession
-assert(fittedHeight(densitySession) >= 44, "A one-line sidebar row must still be tappable")
 
 let pinnedHeader = laidOut(LodyProjectRowView(LodyProjectRowContent(row: LodyListRow(title: "Pinned", image: "pin.fill"))))
 let pinnedSymbol = pinnedHeader.subviews.compactMap { $0 as? UIImageView }.first { $0.image != nil && !$0.isHidden }!
@@ -418,14 +364,9 @@ assert(visibleLabel(failedProject, containing: "1 failed")!.textColor == .lodySe
 let railProjectCount = visibleLabel(railProject, containing: "7")!
 assert(abs(frame(railProjectCount, in: railProject).maxX - (390 - 16)) < 0.5, "The collapsed count sits in the time column")
 assert(visibleLabel(railProject, containing: "2 running") == nil, "A collapsed band shows its count instead of its state")
-let compactProject = laidOut(LodyProjectRowView(LodyProjectRowContent(row: LodyListRow(title: "lody-ios"), density: .compact)))
-assert(abs(frame(statusGlyph(in: compactProject), in: compactProject).midX - LodyDesign.Rail.compactCenter) < 0.5)
-assert(abs(compactProject.bounds.height - 44) <= 0.5, "A compact project band keeps a 44 pt target: \(compactProject.bounds.height)")
-assert(compactProject.layer.cornerRadius >= 8 && compactProject.layer.cornerCurve == .continuous, "Inset sidebar bands round their corners")
-assert(railProject.layer.cornerRadius == 0, "Full-bleed phone bands stay square")
 var bandAlpha: CGFloat = 0
 UIColor.lodyBand.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)).getWhite(nil, alpha: &bandAlpha)
-assert(bandAlpha < 0.2, "The band is a wash so it reads on both the phone ground and the sidebar ground")
+assert(bandAlpha < 0.2, "The band is a wash so it reads on the list ground")
 
 func projectAvatar(_ view: UIView) -> UIImageView? {
   view.subviews.compactMap { $0 as? UIImageView }.first { $0.accessibilityIdentifier == "project-avatar" && !$0.isHidden && $0.image != nil }
@@ -441,8 +382,6 @@ assert(avatar!.layer.cornerRadius > 2 && avatar!.layer.cornerRadius < 9 && avata
 assert(alpha(avatar!.image!, x: 0, y: 0) > 0.9, "The project avatar is not pre-cropped to a circle")
 assert(statusGlyph(in: avatarProject).isHidden, "The avatar replaces the folder glyph")
 assert(abs(frame(sessionLabel(avatarProject, "lody-ios"), in: avatarProject).minX - 46) < 0.5, "The avatar keeps the text column")
-let compactAvatar = laidOut(LodyProjectRowView(LodyProjectRowContent(row: LodyListRow(title: "lody-ios", image: disk.absoluteString), density: .compact)))
-assert(abs(frame(projectAvatar(compactAvatar)!, in: compactAvatar).midX - LodyDesign.Rail.compactCenter) < 0.5, "Compact rows center the avatar on their rail")
 let pendingAvatar = laidOut(LodyProjectRowView(LodyProjectRowContent(row: LodyListRow(title: "lody-ios", image: "https://avatars.invalid/lody?size=96"))))
 assert(projectAvatar(pendingAvatar) == nil && !statusGlyph(in: pendingAvatar).isHidden, "A loading avatar keeps the folder glyph")
 let reused = laidOut(LodyProjectRowView(LodyProjectRowContent(row: LodyListRow(title: "lody-ios", image: disk.absoluteString))))
@@ -522,37 +461,7 @@ assert(expandChildren != nil, "VoiceOver can expand sub-agents")
 _ = expandChildren!.actionHandler!(expandChildren!)
 assert(sessionToggles == 1, "The toggle folds the sub-agents, not the session")
 assert(reviewButton(in: parent) == nil, "Without a toggle handler the parent draws no control")
-let compactFold = laidOutSessionRow(LodySessionRowContent(
-  row: LodyListRow(title: "Refactor catalog sync", subtitle: "feature/sync", modelName: "Codex", value: "1h", collapsedValue: "3 sessions"),
-  density: .compact,
-  expanded: false,
-  onToggle: { sessionToggles += 1 }
-))
-let compactToggle = compactFold.subviews.compactMap { $0 as? UIButton }.first { !$0.isHidden }
-assert(compactToggle?.configuration?.attributedTitle.map { String($0.characters) }?.contains("3 sessions") == true, "The sidebar folds sub-agents on line two too")
-assert(visibleLabel(compactFold, containing: "1h") != nil, "A folded sidebar parent keeps its time")
-var compactGroup = LodyProjectRowContent(row: LodyListRow(title: "lody-ios", subtitle: "~/git/lody-ios"), density: .compact, expanded: true)
-compactGroup.onToggle = {}
-let compactGroupView = LodyProjectRowView(compactGroup)
-assert(compactGroupView.subviews.contains { ($0 as? UIImageView)?.isHidden == false && ($0 as? UIImageView)?.image != nil }, "Sidebar groups draw the inline fold mark")
 print("PASS: groups and sub-agent parents fold through inline marks, not trailing accessories")
-
-let projectContent = LodyProjectRowContent(row: LodyListRow(title: "Lody", subtitle: "/tmp/lody", monogram: "L"))
-let densityProject = LodyProjectRowView(projectContent)
-let groupedProjectHeight = fittedHeight(densityProject)
-let groupedProjectLabel = densityProject.accessibilityLabel
-let groupedProjectFont = sessionLabel(densityProject, "Lody").font!
-var sidebarProject = projectContent
-sidebarProject.density = .compact
-densityProject.configuration = sidebarProject
-assert(fittedHeight(densityProject) <= groupedProjectHeight)
-assert(fittedHeight(densityProject) >= 44)
-assert(densityProject.accessibilityLabel == groupedProjectLabel)
-assert(sessionLabel(densityProject, "Lody").font.pointSize < groupedProjectFont.pointSize)
-densityProject.configuration = projectContent
-assert(sessionLabel(densityProject, "Lody").font == groupedProjectFont, "Reuse must restore the phone project size")
-assert(abs(fittedHeight(densityProject) - groupedProjectHeight) < 0.5)
-print("PASS: sidebar uses quieter typography with complete text and 44 pt targets; grouped reuse restores its font and spacing")
 
 assert(
   LodyListSectionAnimation.itemCountsCrossEmpty(previous: ["settings": 0], next: ["settings": 3]),
@@ -783,10 +692,12 @@ assert(fades.first { $0.text == "Other" }?.layer.mask == nil, "A short workspace
 let rows = switcherViews(switcher.view, UIControl.self).filter { $0.accessibilityIdentifier?.hasPrefix("workspace-row:") == true }
 assert(rows.map(\.accessibilityLabel) == [longWorkspace, "Other"], "Rows keep full names for VoiceOver")
 assert(rows[0].accessibilityTraits.contains(.selected) && !rows[1].accessibilityTraits.contains(.selected), "VoiceOver reads the current workspace as selected")
-switcher.update(items: [LodyMenuItem(id: "other", title: "Renamed", selected: true)], accountEmail: "")
+switcher.update(items: [LodyMenuItem(id: "other", title: "Renamed", selected: true, encrypted: true, retrySelection: true)], accountEmail: "")
 switcher.view.layoutIfNeeded()
 assert(!switcherViews(switcher.view, UILabel.self).contains { $0.text == "preview@example.test" }, "Clearing account identity removes the heading")
 assert(switcherViews(switcher.view, LodyFadingLabel.self).map(\.text) == ["Renamed"], "Catalog changes refresh the panel")
+assert(switcherViews(switcher.view, UIImageView.self).contains { $0.accessibilityIdentifier == "workspace-encrypted:other" && !$0.isHidden }, "Encrypted workspaces remain listed with a visible lock")
+assert(switcherViews(switcher.view, UIControl.self).contains { $0.accessibilityLabel == "Renamed, E2EE" }, "VoiceOver announces encryption")
 print("PASS: the workspace switcher keeps names on one line with a trailing fade, full VoiceOver names and selection")
 
 // Chat renders this shared cached photo at 36 pt. A 3x display needs 108 real pixels.
@@ -820,3 +731,37 @@ let black = Int(detailPixels[(54 * 108 + 52) * 4])
 let white = Int(detailPixels[(54 * 108 + 53) * 4])
 assert(white - black > 200, "One-pixel avatar detail must survive, not be blurred by a 1x intermediate")
 print("PASS: cached circular avatars preserve Retina resolution and image detail")
+
+// Only list rendering is stubbed here; retry ownership, UIButton and trait switching
+// run through the production SessionListView wrapper.
+struct WorkspaceMember: Equatable {}
+struct LodyListSection { var rows: [LodyListRow] = [] }
+@MainActor final class ChatListView: UIView {
+  let collection = UIScrollView()
+  var forwarded: ((String, [String: Any]) -> Void)?
+  var owners: [String: WorkspaceMember] = [:]
+  var archivedStyle = false
+  var projectIndexEnabled = false
+  var pinsGroupLabels = false
+  var selectedRowId = ""
+  func setPlaceholder(_ value: String) {}
+  func setSections(_ value: [LodyListSection]) {}
+}
+let retryList = SessionListView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+var retries = 0
+for sizeClass in [UIUserInterfaceSizeClass.compact, .regular] {
+  retryList.traitOverrides.horizontalSizeClass = sizeClass
+  retryList.setSections([])
+  retryList.setRetry { retries += 1 }
+  retryList.layoutIfNeeded()
+  let button = retryList.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == "workspace-mode-retry" }!
+  assert(!button.isHidden && button.bounds.height >= 44 && retryList.subviews.last === button, "Unknown-workspace retry stays visible and tappable on phone and split layouts")
+  let before = retries
+  button.sendActions(for: .primaryActionTriggered)
+  assert(retries == before + 1, "The retry button invokes its non-destructive refresh action")
+  retryList.setSections([LodyListSection(rows: [LodyListRow(title: "Ready")])])
+  assert(button.isHidden, "A populated ordinary workspace removes the unknown empty-state action")
+  retryList.setRetry(nil)
+  assert(button.isHidden)
+}
+print("PASS: unknown-workspace Retry is clickable in compact and regular layouts and disappears after admission")

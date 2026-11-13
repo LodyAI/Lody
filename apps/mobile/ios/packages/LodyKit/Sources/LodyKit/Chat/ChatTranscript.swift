@@ -78,13 +78,6 @@ struct ChatMessageAttachment: Decodable, Equatable {
   var mimeType: String? = nil
 }
 
-struct ChatTextReference: Decodable, Equatable {
-  var start: Int
-  var end: Int
-  let kind: String
-  let target: String?
-}
-
 struct ChatOperationCard: Decodable, Equatable {
   let id: String
   let kind: String
@@ -1108,7 +1101,8 @@ extension ChatPendingSend {
       }
       let body = displayText ?? text
       if !body.isEmpty {
-        result.append(ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body))
+        result.append(ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body,
+          references: displayText == nil ? [] : references ?? []))
       }
       // A local send in flight is the signed-in user's own turn; its first row carries the header.
       if !result.isEmpty {

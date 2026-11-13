@@ -185,6 +185,8 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 
 `LedgerFeedStore.rebase` 比对完整的预期末尾，在同一事务内替换起点和长度、删除
 已覆盖记录，并写入和读回核对新末尾。末尾不符返回 conflict，不修改数据。
+可选的 `rebuild` 在工作流独立重放并证明最高检查点后，以同样的原子方式替换
+缓存；它不修改 pin 或其他日志。
 
 ## 浏览器曲线适配
 
@@ -313,3 +315,5 @@ strict durability 仍只是提示；这些测试不证明 iOS 16.4 真机、断�
 端口不包含私有 credential、授权判断、网络操作，也不在 IDB 事务内等待密码/网络。
 可选 [`@lody/e2ee-client`](../../e2ee-client/README.zh.md) host 负责证明验证、实际
 保管读回、审批、当前成员状态及确认/ACK。
+
+`SubmissionJournal.prepare` 返回新槽位的唯一修订号；同一待定原件返回 null。`observe` 每次推进修订号（检查点不变也推进）；`rejectUnsent` 仅在原件、检查点、修订号全部匹配且未完成时清理槽位，保留 pin。只有 P09 已确认首次尝试在 CAS 前限流的流程使用它。

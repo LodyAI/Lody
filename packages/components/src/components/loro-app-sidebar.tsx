@@ -2585,6 +2585,7 @@ export function LoroAppSidebar({
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
+        hasFailedTurn: task.hasFailedTurn,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
         openedBySessionId: task.openedBySessionId ?? null,
@@ -2612,6 +2613,7 @@ export function LoroAppSidebar({
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
+        hasFailedTurn: task.hasFailedTurn,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2650,6 +2652,7 @@ export function LoroAppSidebar({
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
+        hasFailedTurn: task.hasFailedTurn,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2703,6 +2706,7 @@ export function LoroAppSidebar({
             hasUnreadMessages: activity.hasUnreadMessages,
             isOffline,
             isWaitingPermission: activity.isWaitingPermission,
+            hasFailedTurn: activity.hasFailedTurn,
             prStatus: prInfo.status,
             prCiState: prInfo.ciState,
             prReadiness: prInfo.readiness,
@@ -2862,6 +2866,7 @@ export function LoroAppSidebar({
       showHeading: t('sidebar.filter.showHeading', 'Tasks'),
       organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
+      organizeStatus: t('sidebar.filter.organizeStatus', 'Status'),
       detailsHeading: t('sidebar.filter.detailsHeading', 'Details'),
       updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Show Project'),
       showBranchNames: t('sidebar.filter.showBranchNames', 'Show Branch'),
@@ -4043,8 +4048,8 @@ export function LoroAppSidebar({
         },
         updated: {
           items: updatedItems,
-          collapsed: updatedBucketCollapseState.all ?? false,
-          showFull: updatedBucketShowFullState.all ?? false,
+          collapsedBuckets: updatedBucketCollapseState,
+          showFullBuckets: updatedBucketShowFullState,
         },
       }),
     [
@@ -4058,8 +4063,8 @@ export function LoroAppSidebar({
       pinnedSectionCollapsed,
       repos,
       showFullSessionGroups,
-      updatedBucketCollapseState.all,
-      updatedBucketShowFullState.all,
+      updatedBucketCollapseState,
+      updatedBucketShowFullState,
       updatedItems,
       workspaceChatSessions,
       workspaceRepoSessions,
@@ -4160,7 +4165,7 @@ export function LoroAppSidebar({
         updatedSelectedItemId={updatedSelectedItemId}
         updatedBucketsCollapsed={updatedBucketCollapseState}
         updatedShowFullBuckets={updatedBucketShowFullState}
-        updatedIsLoading={organizeMode === 'updated' && sessionsListLoading}
+        updatedIsLoading={organizeMode !== 'workspace' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
         showUpdatedProjectNames={showUpdatedProjectNames}
         onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}

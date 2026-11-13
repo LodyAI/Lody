@@ -730,6 +730,67 @@ void test('the member list stays usable when it holds an unsigned or unreadable 
   ])
 })
 
+for (const paymentAction of ['method_required', 'payment_required', 'refresh']) {
+  void test(`member approval preserves ${paymentAction} and its cost details for payment recovery`, async () => {
+    const seatPreview = {
+      status: 'billed',
+      interval: 'month',
+      unitAmount: 1000,
+      proratedAmount: 500,
+      currentPeriodEnd: null,
+      seatCount: 1,
+      nextSeatCount: 2,
+      nextRenewalAmount: 2000,
+      currency: 'usd',
+      paymentAction,
+      addedSeats: 1,
+      invoiceAt: null
+    }
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.flatMap(
+          build(async () => response({ invitations: [], items: [], hasMore: false, seatPreview })),
+          (client) => client.memberPending(access)
+        )
+      )
+    )
+    assert.deepEqual(result.seatPreview, seatPreview)
+  })
+}
+
+for (const invalid of [
+  { paymentAction: 'unknown' },
+  { addedSeats: 'one' },
+  { invoiceAt: 'tomorrow' }
+]) {
+  void test(`member approval refuses an invalid payment preview: ${JSON.stringify(invalid)}`, async () => {
+    const seatPreview = {
+      status: 'billed',
+      interval: 'month',
+      unitAmount: 1000,
+      proratedAmount: 500,
+      currentPeriodEnd: null,
+      seatCount: 1,
+      nextSeatCount: 2,
+      nextRenewalAmount: 2000,
+      ...invalid
+    }
+    await assert.rejects(
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.flatMap(
+            build(async () =>
+              response({ invitations: [], items: [], hasMore: false, seatPreview })
+            ),
+            (client) => client.memberPending(access)
+          )
+        )
+      ),
+      (error) => error.reason === 'invalid-response'
+    )
+  })
+}
+
 void test('an invitation refused for a still-waiting applicant keeps its code for the administrator', async () => {
   const result = await Effect.runPromise(
     Effect.scoped(

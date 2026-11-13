@@ -7,7 +7,12 @@
   userTurnId journal claim. Both handoff and actual start require the definition's
   verified original signer, and manual runs also require the request signer.
   Schedule ownership fields and machine-derived turn signatures never grant that
-  authority. [Origin contract](../../../../../.agents/notes/implemented/bug-fix/2026-10-28-e2ee-schedule-origin-authorization.md).
+  authority by themselves. Local human CLI commands may sign declarations with the
+  admitted machine key only for that same machine; cross-machine edits require a
+  personal device. Pause preserves declarations without signing; resume signs the
+  current definition again. Pause rotates activation to revoke older queued runs.
+  Disabled definitions block automatic execution; a later human Run now retains
+  the paused state and requires matching definition and manual-request signatures. [Origin contract](../../../../../.agents/notes/implemented/bug-fix/2026-10-28-e2ee-schedule-origin-authorization.md).
 - Schedule definitions live in `schedule-<id>` Loro docs. The workspace `:sr`
   Flock Registry is the execution gate. A definition must match its published
   fingerprint; existence discovery must never republish or enable an orphan.
@@ -40,7 +45,11 @@
   Official MCP has list/show/propose/pause only and is registered for every
   Agent session; the service re-checks that the caller owns the invoking
   Session on this machine. A proposal takes effect only after the person
-  confirms its card. Human commands are not a security boundary against an Agent with shell access.
+  confirms its card. Only the command client resolves `LODY_AGENT_SESSION_ID`
+  from Agent/script children; human desktop terminals clear that marker. The
+  service uses only the explicit requester and waits for workspace metadata before
+  cloud Session-owner checks. Daemon environment never supplies request identity.
+  These restrictions do not isolate arbitrary shell access.
   `propose` takes a NAMED rule (`ScheduleProposalRuleSchema`), never cron, and
   validates it as a trigger before writing; it publishes one idempotent
   `schedule_proposal` system notice per `requestId` through

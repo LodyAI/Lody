@@ -78,7 +78,7 @@ import { IPC_PUSH_CHANNELS, IPC_SEND_CHANNELS } from '@lody/shared/electron-ipc'
 import { PublicBrowserService } from './services/public-browser-service'
 import { desktopInstallationProfile, isLocalPlatform } from './platform'
 import { mainPlatformKind } from './platform'
-import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
+import { getLocalDaemonRunFilePath, readLocalDaemonRunFile } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
 import {
   getInitialDesktopPath,
@@ -258,9 +258,11 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       })
     }
     let terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
-    let loroDataPlaneRelay = new LoroDataPlaneRelay(
-      getLocalLoroDataPlaneSocketPath(mainPlatformKind)
-    )
+    let loroDataPlaneRelay = new LoroDataPlaneRelay(() => {
+      const run = readLocalDaemonRunFile(getLocalDaemonRunFilePath(mainPlatformKind))
+      if (!run.token || !run.dataPlaneSocketPath) throw new Error('local_ipc_credentials_missing')
+      return { socketPath: run.dataPlaneSocketPath, token: run.token }
+    })
     loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
 
     const appUpdaterService = new AppUpdaterService({
@@ -464,9 +466,12 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         applicationRuntime = createShellRuntime()
         bindUserShellEnvCacheLegacy(applicationRuntime)
         terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
-        loroDataPlaneRelay = new LoroDataPlaneRelay(
-          getLocalLoroDataPlaneSocketPath(mainPlatformKind)
-        )
+        loroDataPlaneRelay = new LoroDataPlaneRelay(() => {
+          const run = readLocalDaemonRunFile(getLocalDaemonRunFilePath(mainPlatformKind))
+          if (!run.token || !run.dataPlaneSocketPath)
+            throw new Error('local_ipc_credentials_missing')
+          return { socketPath: run.dataPlaneSocketPath, token: run.token }
+        })
         loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
         ipcDeps.terminalRelay = terminalRelay
         ipcDeps.loroDataPlaneRelay = loroDataPlaneRelay

@@ -53,7 +53,6 @@ import {
   hasOtherDevinSubagentMeta,
   parseDevinSubagentTaskMeta,
 } from '@lody/shared';
-import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
 import { buildLodyMcpHttpHeaders } from '@/mcp/lody-mcp-http-protocol';
 import { TerminalManager, TerminalSpawnError } from '@/session/terminal-manager';
@@ -754,7 +753,6 @@ export class AgentClient implements acp.Client {
       { name: 'LODY_MCP_SESSION_ID', value: this.options.sessionId },
       { name: 'LODY_MCP_WORKSPACE_ID', value: this.options.workspaceId },
       { name: 'LODY_MCP_MACHINE_ID', value: this.options.machineId },
-      { name: 'LODY_MCP_SOCKET_PATH', value: getLocalControlSocketPath() },
       { name: 'LODY_MCP_WORKDIR', value: workdir },
     ];
 
@@ -762,6 +760,9 @@ export class AgentClient implements acp.Client {
     // invokes normal CLI services, so forward their public deployment endpoints
     // while keeping credentials out of the agent-visible server config.
     for (const [name, value] of [
+      ['LODY_PLATFORM', process.env.LODY_PLATFORM],
+      ['LODY_DATA_DIR', process.env.LODY_DATA_DIR],
+      ['LODY_MCP_SOCKET_PATH', process.env.LODY_MCP_SOCKET_PATH],
       ['LODY_AUTH_URL', LODY_AUTH_URL],
       ['LODY_AUTH_SITE_URL', LODY_AUTH_SITE_URL],
       ['LODY_SERVER_URL', LODY_SERVER_URL],

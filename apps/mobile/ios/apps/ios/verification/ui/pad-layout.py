@@ -54,9 +54,6 @@ def change_with_sheet(name, change):
 
 restore_portrait(ui)
 pad.show_list(ui)
-if not any(item.get('AXUniqueId') == 'ui-design' for item in ui.state()):
-    tap(max((item['frame'] for item in ui.state() if item.get('AXUniqueId') == 'toggle:ui:local:lody'),
-            key=lambda value: value['width'] * value['height']))
 ui.axe('tap', '--id', 'ui-design', '--tap-style', 'physical', '--post-delay', '.8')
 ui.element('session-input')
 title = chat_title()
@@ -87,6 +84,15 @@ try:
     ui.wait(lambda items: not any(item.get('AXLabel') == close_activity for item in items) or None,
             'Activity did not close')
     session_kept('regular')
+
+    # A second collapse must reuse the existing UITab/controller association.
+    # Recreating tabs around the retained navigation controllers crashes UIKit.
+    for cycle in range(3):
+        set_width(ui, 'compact')
+        ui.element('BackButton')
+        session_kept(f'compact-repeat-{cycle}')
+        set_width(ui, 'regular')
+        session_kept(f'regular-repeat-{cycle}')
 finally:
     set_width(ui, 'system')
     restore_portrait(ui)

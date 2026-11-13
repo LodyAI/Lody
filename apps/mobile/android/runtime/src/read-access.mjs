@@ -32,7 +32,8 @@ export function createReadAccess(fetch, emit=()=>{}) {
  }
  function setActive(value) {
   active=value;
-  if(!active) for(const controller of requests) controller.abort();
+  // Distinguish host suspension from a transport AbortError after SDK wrapping.
+  if(!active) for(const controller of requests) controller.abort(new DOMException('runtime_suspended','AbortError'));
   else {for(const wake of [...waiters]) wake();}
  }
  async function guardedFetch(input, init) {

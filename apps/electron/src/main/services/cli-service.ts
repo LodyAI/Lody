@@ -862,7 +862,7 @@ export class CliService {
     if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
     return Effect.runPromise(
       this.localControlClient
-        .e2eeActivate(message, { timeoutMs: 30_000 })
+        .e2eeActivate(message, { timeoutMs: 45_000 })
         .pipe(
           Effect.mapError(
             (error) =>

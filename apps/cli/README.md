@@ -87,13 +87,17 @@ lody e2ee journal reset --file /absolute/path/to/journal.sqlite --json
 
 The command works offline and returns `archivePath` and `journalPath`. It renames
 and preserves the old execution log, creates a fresh log, and retains old current-format
-request ID fences in the adjacent `.control.sqlite`. Keep that file and the archive;
+request ID fences and root derivation quota receipts in the adjacent `.control.sqlite`.
+Reset does not replenish the shared-member 20-start quota; Owner starts are unbounded. Reservations commit before starts; a
+failed or interrupted start may consume a slot, while an exact retry reuses it.
+Keep that file and the archive;
 unknown results are not automatically retried. Restart owners after reset. Retrying
 this command completes an interrupted reset using the same archive path.
 
 A clock error asks you to calibrate the system clock. Without trusted reference time,
-a bad observation can still reject new claims in its workspace until explicit reset;
-other workspaces and completed evidence remain available. Empty interrupted first
+claims use the current local clock, so correcting a bad forward observation recovers
+new claims without reset. Started request IDs still cannot execute twice, and
+completed evidence remains available. Empty interrupted first
 creation initializes automatically. An unknown schema is archived and reported,
 then waits for explicit reset. An incomplete current-format store still retires all
 readable request keys before archival; unreadable current request keys refuse reset
@@ -118,6 +122,19 @@ once; a fallback timer doubles from one second to at most five minutes. Stop can
 watcher's delayed retry. A cancelled input that never started is retired in the journal.
 Member removal retains its identity-verified receipt/erasure path; single-device
 revocation closes the workspace while retaining local state.
+After a crash, an encrypted start with no completion receipt is never replayed.
+Recovery closes any partial assistant reply, fails the user turn and writes one
+interruption notice per turn before returning the session to idle. Repeated
+restarts keep that notice. Already terminal turns retain their outcome, and recovery
+never replaces a newer handled pointer. An old turn's journal failure cannot block
+an independently selected new turn. Check any external effects before sending a new message.
+Iroh and Streams share live write completion signals, registered together with the
+journal claim before invoking a handler. A duplicate waits for that owner within
+its request deadline and returns the committed response frames. A retried encrypted
+feature write with no live owner and an unknown outcome returns
+`e2ee_outcome_uncertain`; it does not execute the write again. Sealed frames retained
+after a persistence failure remain retryable across both receivers.
+
 Ordinary workspaces do not open this log.
 Transport frames keep their own original request/response receipts; execution evidence
 contains intent identities and a settlement marker, never prompt or response plaintext.

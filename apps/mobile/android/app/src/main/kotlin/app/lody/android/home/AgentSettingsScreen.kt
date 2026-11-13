@@ -41,6 +41,9 @@ internal fun AgentSettingsScreen(home: ChatListUiState, service: AgentProviderSe
     LaunchedEffect(state, service, scope) {
         if (state != null && service != null && scope != null) service.changes(scope).collect { state.refresh(it) }
     }
+    LaunchedEffect(state, service, scope) {
+        if (state != null && service != null && scope != null) service.refreshProgress(scope).collect { state.onRefreshProgress(it) }
+    }
     val canManage = state?.canManage(machine) == true
     BackHandler { if (editor != null) editor = null else onBack() }
     val editing = editor
@@ -89,7 +92,8 @@ internal fun AgentSettingsScreen(home: ChatListUiState, service: AgentProviderSe
                 items(providers, key = { "provider-${it.id}" }) { provider ->
                     var menu by remember(provider.id) { mutableStateOf(false) }
                     SettingsLine(provider.name, LodyIcons.Agent,
-                        provider.agentType, onClick = { editor = ProviderEditor(provider) },
+                        if (state?.refreshing == provider.id) refreshLine(state.refreshProgress) else provider.agentType,
+                        onClick = { editor = ProviderEditor(provider) },
                         leading = { AgentMark(provider.cliType, provider.agentType, LodyTheme.colors.textPrimary, Modifier.size(LodyIconSize.lg)) }, trailing = {
                             Box {
                                 IconButton(onClick = { menu = true }, enabled = canManage && !provider.readOnly) {
@@ -97,7 +101,7 @@ internal fun AgentSettingsScreen(home: ChatListUiState, service: AgentProviderSe
                                 }
                                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                     DropdownMenuItem(text = { Text(stringResource(R.string.settings_agent_edit)) }, onClick = { menu = false; editor = ProviderEditor(provider) })
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.settings_agent_refresh)) }, onClick = { menu = false; tasks.launch { state?.perform(ProviderAction.Refresh(provider)) } })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.settings_agent_refresh)) }, onClick = { menu = false; tasks.launch { state?.refreshModels(provider) } })
                                     DropdownMenuItem(text = { Text(stringResource(R.string.settings_agent_delete), color = LodyTheme.colors.dangerDefault) }, onClick = {
                                         menu = false; deletionName = provider.name; deletion = ProviderAction.Delete(provider)
                                     })
@@ -155,6 +159,12 @@ internal data class ProviderEditor(val base: AgentProvider? = null, val id: Stri
 private fun machineLine(machine: ProviderMachine): String =
     stringResource(if (machine.online) R.string.settings_agent_online else R.string.settings_agent_offline) + " · " +
         stringResource(if (machine.readOnly) R.string.settings_agent_teammate_machine else R.string.settings_agent_own_machine)
+
+/** "Reading options for <model> (3/40)" while a refresh reads models; "Refreshing…" before the first. */
+@Composable
+internal fun refreshLine(progress: RuntimeEvent.ProviderRefreshProgress?): String =
+    if (progress == null) stringResource(R.string.settings_agent_refreshing)
+    else stringResource(R.string.settings_agent_reading_model_options, progress.modelName, progress.index, progress.total)
 
 @Composable
 private fun PresenceDot(online: Boolean) {

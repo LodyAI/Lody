@@ -165,7 +165,7 @@ const navBase = {
     chatSessions: [] as SessionListRow[],
     chatsCollapsed: false,
   },
-  updated: { items: [] as SidebarUpdatedItem[], collapsed: false, showFull: false },
+  updated: { items: [] as SidebarUpdatedItem[], collapsedBuckets: {}, showFullBuckets: {} },
 };
 
 describe('keyboard navigation for a child-tab opener', () => {

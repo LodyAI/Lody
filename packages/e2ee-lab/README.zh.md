@@ -273,3 +273,5 @@ occupied 元组，也不能删除别人的组。
 canary 检查，不能证明压缩、任意编码或未捕获路由的安全性。`test/canary.test.ts`
 使用真实的加密 Loro/Flock 对端和本地 HTTP，扫描请求体及 Riverrun 原始存储，并验证
 主动注入明文会失败。完整产品验收仍须在真实应用操作中捕获全部 Convex、Worker、Streams 请求。
+
+控制账本网关在 `quotaPath` 的独立 SQLite 文件中预留每成员实例的自助配额（滚动 10/小时、30/天）。未知 CAS 结果保留预留，同一原件重试不重复计数；管理记录不计入。HTTP 超额返回 429、`self-service-rate-limited` 和 `retryAt`。这不是私有 Cloud 部署证据。

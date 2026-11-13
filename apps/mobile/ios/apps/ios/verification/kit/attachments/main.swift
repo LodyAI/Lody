@@ -180,6 +180,16 @@ final class UploadProtocol: URLProtocol {
 
 @main struct Check {
   static func main() async throws {
+    let pinDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: pinDirectory) }
+    let pins = WorkspaceModePins(file: pinDirectory.appendingPathComponent("pins.json"))
+    try pins.observe("encrypted", mode: .e2ee)
+    for blocked in ["encrypted", "unknown"] {
+      do { _ = try await SessionAttachments.upload([], workspace: blocked, session: "s1", pins: pins); preconditionFailure("Blocked attachment upload") }
+      catch WorkspaceContentError.blocked { }
+    }
+    try pins.observe("w1", mode: .plaintext)
+    print("PASS: attachment upload rejects encrypted/unknown workspaces before reading credentials or bytes")
     let original = SessionAttachments.imageDownloadURL(workspace: "ws", session: "source", imageId: "img1")
     assert(original.absoluteString == "https://api.lody.ai/api/workspaces/ws/session-images/source/img1")
     assert(!original.path.contains("thumbnail"), "Full image download must not use the thumbnail route")
@@ -215,7 +225,7 @@ final class UploadProtocol: URLProtocol {
       ["id": url.lastPathComponent, "uri": url.absoluteString, "name": url.lastPathComponent, "kind": kind]
     }
     let smallProgress = UploadRecorder()
-    let small = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", onProgress: smallProgress.record)
+    let small = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", pins: pins, onProgress: smallProgress.record)
     assert(smallProgress.progress.first?.1 == "preparing" && smallProgress.progress.last?.1 == "complete")
     assert(smallProgress.progress.allSatisfy { $0.0 == "test.txt" })
     assert(small[0]["fileId"] as? String == "file1")
@@ -224,7 +234,7 @@ final class UploadProtocol: URLProtocol {
     let renderer = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10))
     try renderer.pngData { context in UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 10, height: 10)) }.write(to: image)
     let imageProgress = UploadRecorder()
-    let images = try await SessionAttachments.upload([attachment(image, "image")], workspace: "w1", session: "s1", onProgress: imageProgress.record)
+    let images = try await SessionAttachments.upload([attachment(image, "image")], workspace: "w1", session: "s1", pins: pins, onProgress: imageProgress.record)
     assert(imageProgress.progress.contains { $0.1 == "uploading" && $0.2 == 0 })
     assert(imageProgress.progress.last?.0 == "photo.png" && imageProgress.progress.last?.1 == "complete")
     assert(images[0]["imageId"] as? String == "image1")
@@ -232,7 +242,7 @@ final class UploadProtocol: URLProtocol {
     let edited = root.appendingPathComponent("IMG_9744.PNG")
     let jpegBytes = UIImage(contentsOfFile: image.path)!.jpegData(compressionQuality: 0.9)!
     try jpegBytes.write(to: edited)
-    _ = try await SessionAttachments.upload([attachment(edited, "image")], workspace: "w1", session: "s1")
+    _ = try await SessionAttachments.upload([attachment(edited, "image")], workspace: "w1", session: "s1", pins: pins)
     let editedPart = UploadProtocol.imageParts.last!
     assert(editedPart.0 == "image/jpeg", "Declare the image type from its bytes, not its file extension")
     assert(editedPart.1.range(of: Data("filename=\"IMG_9744.jpeg\"".utf8)) != nil, "Rename to match the uploaded type")
@@ -241,23 +251,23 @@ final class UploadProtocol: URLProtocol {
     let destination = CGImageDestinationCreateWithURL(tiff as CFURL, "public.tiff" as CFString, 1, nil)!
     CGImageDestinationAddImage(destination, UIImage(contentsOfFile: image.path)!.cgImage!, nil)
     assert(CGImageDestinationFinalize(destination))
-    _ = try await SessionAttachments.upload([attachment(tiff, "image")], workspace: "w1", session: "s1")
+    _ = try await SessionAttachments.upload([attachment(tiff, "image")], workspace: "w1", session: "s1", pins: pins)
     let disguised = root.appendingPathComponent("disguised.png")
     try FileManager.default.copyItem(at: tiff, to: disguised)
-    _ = try await SessionAttachments.upload([attachment(disguised, "image")], workspace: "w1", session: "s1")
+    _ = try await SessionAttachments.upload([attachment(disguised, "image")], workspace: "w1", session: "s1", pins: pins)
     assert(UploadProtocol.imageParts.last!.0 == "image/jpeg", "Unsupported content behind an image extension converts to JPEG")
     assert(UploadProtocol.imageParts.last!.1.range(of: Data("filename=\"disguised.jpg\"".utf8)) != nil)
     let video = root.appendingPathComponent("IMG_3933.mov")
     try Data("hi!".utf8).write(to: video)
     UploadProtocol.requests = []
-    let videos = try await SessionAttachments.upload([attachment(video, "image")], workspace: "w1", session: "s1")
+    let videos = try await SessionAttachments.upload([attachment(video, "image")], workspace: "w1", session: "s1", pins: pins)
     assert(videos[0]["fileId"] as? String == "file1")
     assert(UploadProtocol.requests.contains { $0.url!.path.contains("session-files") })
     assert(!UploadProtocol.requests.contains { $0.url!.path.contains("session-images") })
     try Data(repeating: 65, count: 16 * 1024 * 1024 + 1).write(to: file)
     UploadProtocol.requests = []
     let multipartProgress = UploadRecorder()
-    _ = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", onProgress: multipartProgress.record)
+    _ = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", pins: pins, onProgress: multipartProgress.record)
     let percentages = multipartProgress.progress.compactMap { $0.2 }
     assert(percentages == percentages.sorted() && percentages.first == 0 && percentages.last == 100,
       "Multipart progress must accumulate across parts without resetting")
@@ -267,7 +277,7 @@ final class UploadProtocol: URLProtocol {
     UploadProtocol.failPart = true
     let failedProgress = UploadRecorder()
     do {
-      _ = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", onProgress: failedProgress.record)
+      _ = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", pins: pins, onProgress: failedProgress.record)
       fatalError("Failed upload must not produce an attachment")
     } catch { assert(UploadProtocol.requests.last!.url!.lastPathComponent == "abort") }
     assert(!failedProgress.progress.contains { $0.1 == "complete" }, "A failed upload must never report completion")
@@ -376,7 +386,7 @@ final class UploadProtocol: URLProtocol {
     print("PASS: exported upload diagnostics distinguish HTTP, quota, transport and invalid-response failures without private data")
     let before = UploadProtocol.requests.count
     do {
-      _ = try await SessionAttachments.upload([attachment(URL(fileURLWithPath: "/etc/passwd"))], workspace: "w1", session: "s1")
+      _ = try await SessionAttachments.upload([attachment(URL(fileURLWithPath: "/etc/passwd"))], workspace: "w1", session: "s1", pins: pins)
       fatalError("Must reject files outside picker storage")
     } catch { assert(UploadProtocol.requests.count == before) }
     let downloadDirectory = root.appendingPathComponent("download")

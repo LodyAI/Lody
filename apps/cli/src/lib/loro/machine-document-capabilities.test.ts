@@ -5,6 +5,7 @@ import {
   getAcpCapabilityCacheKey,
   getMachineFlockAcpCapabilities,
   machineFlockKeys,
+  getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
   readMachineFlockRowsFromFlock,
   type AgentConfigMeta,
@@ -126,6 +127,89 @@ describe('MachineDocument ACP capabilities', () => {
 
     await write(false);
     expect(canStartCoordinatorSession(currentDaemon, stored())).toBe(false);
+  });
+});
+
+describe('MachineDocument per-model option lists', () => {
+  const effort = (values: string[], currentValue = values[0] ?? '') => ({
+    id: 'thought_level',
+    name: 'Thinking',
+    category: 'thought_level',
+    type: 'select' as const,
+    currentValue,
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const model = (currentValue: string) => ({
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select' as const,
+    currentValue,
+    options: ['mimo', 'deepseek-flash'].map((value) => ({ value, name: value })),
+  });
+
+  it('keeps every model’s own answer and writes only when what it offers changes', async () => {
+    const flock = new FakeMachineFlock();
+    const flush = vi.fn(async () => undefined);
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => undefined) })),
+      flush,
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId
+    );
+    const configId = 'config-1' as AgentConfigId;
+    const observed = () =>
+      getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock))[configId]
+        ?.observedModelConfigOptions;
+    const refresh = (
+      sourceVersion: string,
+      modelConfigOptions?: Record<string, ReturnType<typeof effort>[]>
+    ) =>
+      document.updateAcpCapabilities(
+        configId,
+        'builtin',
+        'dimcode',
+        [],
+        [],
+        [model('mimo'), effort(['auto', 'none', 'low'])],
+        undefined,
+        false,
+        sourceVersion,
+        undefined,
+        false,
+        undefined,
+        { modelConfigOptions }
+      );
+
+    // A refresh that read every model stores each answer; the snapshot is
+    // its own model's answer.
+    await refresh('dimcode@0.5.25', {
+      'deepseek-flash': [model('deepseek-flash'), effort(['auto', 'low', 'max'])],
+    });
+    expect(observed()).toEqual({
+      mimo: [effort(['auto', 'none', 'low'])],
+      'deepseek-flash': [effort(['auto', 'low', 'max'])],
+    });
+
+    // A later answer that changes only a current value costs no write.
+    flush.mockClear();
+    await refresh('dimcode@0.5.25', {
+      'deepseek-flash': [model('deepseek-flash'), effort(['auto', 'low', 'max'], 'max')],
+    });
+    expect(flush).not.toHaveBeenCalled();
+
+    // A snapshot-only write (a created session) keeps the other models' answers.
+    await refresh('dimcode@0.5.25');
+    expect(observed()?.['deepseek-flash']).toEqual([effort(['auto', 'low', 'max'])]);
+
+    // A new ladder, or a new runtime version, replaces the stored answer.
+    await refresh('dimcode@0.5.26', {
+      'deepseek-flash': [model('deepseek-flash'), effort(['auto', 'low', 'high', 'max'])],
+    });
+    expect(observed()?.['deepseek-flash']).toEqual([effort(['auto', 'low', 'high', 'max'])]);
   });
 });
 

@@ -1,3 +1,8 @@
+import {
+  getLocalIpcServerCredentials,
+  matchesLocalIpcToken,
+  LOCAL_IPC_TOKEN_HEADER,
+} from '@lody/shared/node/local-ipc-auth';
 import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -6,6 +11,7 @@ import path from 'node:path';
 import {
   ensureLocalDaemonRunDir,
   getLocalControlSocketPath,
+  getLocalLoroDataPlaneSocketPath,
   getLocalDaemonLockFilePath,
   getLocalDaemonRunFilePath,
   getLocalProbeSocketPath,
@@ -43,6 +49,8 @@ type SocketServerState = {
   controlSocketPath: string;
   runFilePath: string;
   activeConnections: Set<net.Socket>;
+  token: string;
+  dataPlaneSocketPath: string;
 };
 
 let socketServerState: SocketServerState | null = null;
@@ -173,11 +181,29 @@ async function shutdownSocketServerState(state: SocketServerState): Promise<void
   removeLocalDaemonRunFile(state.runFilePath);
 }
 
+function authenticateLocalRequest(
+  token: string,
+  handler: http.RequestListener
+): http.RequestListener {
+  return (request, response) => {
+    if (!matchesLocalIpcToken(token, request.headers[LOCAL_IPC_TOKEN_HEADER])) {
+      response.writeHead(401, { 'Content-Type': 'application/json', Connection: 'close' });
+      response.end(JSON.stringify({ ok: false, error: 'local_ipc_unauthorized' }));
+      return;
+    }
+    handler(request, response);
+  };
+}
+
 async function startLocalIpcSocketServersInner(
   config: LocalIpcSocketServerConfig
 ): Promise<LocalDaemonRunFile> {
-  const probeSocketPath = config.paths?.probeSocketPath ?? getLocalProbeSocketPath();
-  const controlSocketPath = config.paths?.controlSocketPath ?? getLocalControlSocketPath();
+  const { token, pipeSuffix } = getLocalIpcServerCredentials();
+  const dataPlaneSocketPath = getLocalLoroDataPlaneSocketPath(undefined, pipeSuffix);
+  const probeSocketPath =
+    config.paths?.probeSocketPath ?? getLocalProbeSocketPath(undefined, pipeSuffix);
+  const controlSocketPath =
+    config.paths?.controlSocketPath ?? getLocalControlSocketPath(undefined, pipeSuffix);
   const runFilePath = config.paths?.runFilePath ?? getLocalDaemonRunFilePath();
   const lockFilePath = config.paths?.lockFilePath ?? getLocalDaemonLockFilePath();
 
@@ -185,9 +211,11 @@ async function startLocalIpcSocketServersInner(
     await removeStaleUnixSocket(probeSocketPath, 'local_ipc_socket_in_use');
     await removeStaleUnixSocket(controlSocketPath, 'local_ipc_socket_in_use');
 
-    const probeServer = http.createServer(createLocalProbeRequestHandler(config.probe));
+    const probeServer = http.createServer(
+      authenticateLocalRequest(token, createLocalProbeRequestHandler(config.probe))
+    );
     const controlServer = http.createServer(
-      createLocalSessionControlRequestHandler(config.control)
+      authenticateLocalRequest(token, createLocalSessionControlRequestHandler(config.control))
     );
     const activeConnections = new Set<net.Socket>();
     trackConnections(probeServer, activeConnections);
@@ -199,6 +227,8 @@ async function startLocalIpcSocketServersInner(
       controlSocketPath,
       runFilePath,
       activeConnections,
+      token,
+      dataPlaneSocketPath,
     };
     // A post-listen server error leaves the server dead; clear the singleton
     // and clean up so a later start actually restarts instead of returning a
@@ -225,6 +255,8 @@ async function startLocalIpcSocketServersInner(
       await listenOnSocket(controlServer, controlSocketPath, 'control', config.probe);
 
       const runFile: LocalDaemonRunFile = {
+        token,
+        dataPlaneSocketPath,
         pid: process.pid,
         socketPath: probeSocketPath,
         controlSocketPath,
@@ -255,6 +287,8 @@ export async function startLocalIpcSocketServers(
 ): Promise<LocalDaemonRunFile> {
   if (socketServerState) {
     return {
+      token: socketServerState.token,
+      dataPlaneSocketPath: socketServerState.dataPlaneSocketPath,
       pid: process.pid,
       socketPath: socketServerState.probeSocketPath,
       controlSocketPath: socketServerState.controlSocketPath,

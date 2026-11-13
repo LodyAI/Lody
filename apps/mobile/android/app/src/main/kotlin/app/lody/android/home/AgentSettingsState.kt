@@ -12,6 +12,9 @@ interface AgentProviderService {
     fun progress(scope: RuntimeScope): Flow<RuntimeEvent.ProviderProgress> = emptyFlow()
     suspend fun detail(scope: RuntimeScope, machineId: String, id: String): ProviderDetail = error("provider_detail_unavailable")
     suspend fun probe(scope: RuntimeScope, machineId: String, id: String): ProviderProbe = error("provider_probe_unavailable")
+    /** Refreshes the provider and reads every model's options; [refreshProgress] names each model. */
+    suspend fun refreshModels(scope: RuntimeScope, machineId: String, id: String): ProviderProbe = probe(scope, machineId, id)
+    fun refreshProgress(scope: RuntimeScope): Flow<RuntimeEvent.ProviderRefreshProgress> = emptyFlow()
     suspend fun operation(scope: RuntimeScope, machineId: String, id: String?, action: String, cliType: String? = null, agentType: String? = null): ProviderOperation = error("provider_operation_unavailable")
     suspend fun auth(scope: RuntimeScope, request: ProviderAuthRequest): ProviderAuthState = error("provider_auth_unavailable")
     suspend fun perform(scope: RuntimeScope, action: ProviderAction): AgentProviders
@@ -21,6 +24,11 @@ class RuntimeAgentProviderService(private val owner: RuntimeOwner) : AgentProvid
     override fun progress(scope: RuntimeScope): Flow<RuntimeEvent.ProviderProgress> = owner.events.filter { it.scope == scope }.mapNotNull { it.event as? RuntimeEvent.ProviderProgress }
     override suspend fun detail(scope: RuntimeScope, machineId: String, id: String) = owner.use(scope) { (it.execute(RuntimeCommand.ProviderDetail(machineId, id)) as RuntimeResult.ProviderDetail).value }
     override suspend fun probe(scope: RuntimeScope, machineId: String, id: String) = owner.use(scope) { (it.execute(RuntimeCommand.ProviderProbe(machineId, id)) as RuntimeResult.ProviderProbe).value }
+    override suspend fun refreshModels(scope: RuntimeScope, machineId: String, id: String) = owner.use(scope) {
+        (it.execute(RuntimeCommand.ProviderProbe(machineId, id, readModelOptions = true)) as RuntimeResult.ProviderProbe).value
+    }
+    override fun refreshProgress(scope: RuntimeScope): Flow<RuntimeEvent.ProviderRefreshProgress> =
+        owner.events.filter { it.scope == scope }.mapNotNull { it.event as? RuntimeEvent.ProviderRefreshProgress }
     override suspend fun operation(scope: RuntimeScope, machineId: String, id: String?, action: String, cliType: String?, agentType: String?) = owner.use(scope) { (it.execute(RuntimeCommand.ProviderOperation(machineId, id, action, cliType, agentType)) as RuntimeResult.ProviderOperation).value }
     override suspend fun auth(scope: RuntimeScope, request: ProviderAuthRequest) = owner.use(scope) { (it.execute(RuntimeCommand.ProviderAuth(request)) as RuntimeResult.ProviderAuth).value }
     override suspend fun perform(scope: RuntimeScope, action: ProviderAction): AgentProviders = owner.use(scope) {
@@ -37,6 +45,28 @@ internal class AgentSettingsState(private val service: AgentProviderService, pri
     var live by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
     var authRequired by mutableStateOf(false); private set
+    /** The provider whose models are being read, and the model being read right now. */
+    var refreshing by mutableStateOf<String?>(null); private set
+    var refreshProgress by mutableStateOf<RuntimeEvent.ProviderRefreshProgress?>(null); private set
+    fun onRefreshProgress(progress: RuntimeEvent.ProviderRefreshProgress) {
+        if (progress.id == refreshing) refreshProgress = progress
+    }
+    /** Refreshes one provider through every model, then reads the list again. Never replayed. */
+    suspend fun refreshModels(provider: AgentProvider): Boolean {
+        if (busy || !live || !canManage(snapshot?.machines?.find { it.id == provider.machineId })) return false
+        if (!operations.tryLock()) return false
+        busy = true; error = null; authRequired = false
+        refreshing = provider.id; refreshProgress = null
+        val result = try { service.refreshModels(scope, provider.machineId, provider.id) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            error = (failure as? app.lody.android.runtime.RuntimeException)?.fault?.code ?: "provider_write_unknown"
+            null
+        } finally { busy = false; refreshing = null; refreshProgress = null; operations.unlock() }
+        if (result != null) authRequired = result.authRequired
+        refresh(provider.machineId)
+        return result?.success == true
+    }
     suspend fun refresh(machineId: String? = null) = operations.withLock {
         busy = true
         try {

@@ -18,6 +18,10 @@ enum SessionState: String, Sendable {
       return
     }
     let state = Self.statuses[session.status] ?? .idle
+    if state != .live, session.latestTurnFailed {
+      self = .failed
+      return
+    }
     self = session.awaitingUserSince != nil && state != .live ? .attention : state
   }
 

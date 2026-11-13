@@ -1,7 +1,12 @@
 import { Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as Bytes from '../foundation/bytes';
-import { bytesEqual, decodeSnapshotCbor, encodeCbor, encodeSnapshotCbor } from '../foundation/cbor';
+import {
+  bytesEqual,
+  decodeCandidateEnvelopesCbor,
+  encodeCbor,
+  encodeCandidateEnvelopesCbor,
+} from '../foundation/cbor';
 import { copyEpochKeyBytes, disposeEpochKey } from '../foundation/epoch-key';
 import { keyId } from '../foundation/identifiers';
 import {
@@ -121,8 +126,13 @@ const purpose = new TextEncoder().encode('lody-e2ee/local-epoch-candidate/v1\0')
 const HEADER = purpose.length + 32 * 6 + 4 * 3;
 const publication = (
   operation: Operation
-): operation is Extract<Operation, { type: 'publishEpoch' | 'removeMemberAndPublishEpoch' }> =>
-  operation.type === 'publishEpoch' || operation.type === 'removeMemberAndPublishEpoch';
+): operation is Extract<
+  Operation,
+  { type: 'publishEpoch' | 'removeMemberAndPublishEpoch' | 'abandonEpoch' }
+> =>
+  operation.type === 'abandonEpoch' ||
+  operation.type === 'publishEpoch' ||
+  operation.type === 'removeMemberAndPublishEpoch';
 const fromHex = (hex: string) => Uint8Array.from(hex.match(/../g) ?? [], (x) => parseInt(x, 16));
 const same = (a: EpochCandidateRow, b: EpochCandidateRow) =>
   a.id === b.id &&
@@ -162,6 +172,8 @@ export class EpochPublisher extends Context.Service<
     publishRemoving(
       membership: Bytes.MembershipId
     ): Effect.Effect<EpochPublishResult, EpochPublishFailure>;
+    /** Owner-only recovery from a held, non-abandoned base key; requires declared capability 2. */
+    publishAbandoning(baseEpoch: number): Effect.Effect<EpochPublishResult, EpochPublishFailure>;
     /** Finish the unfinished rotation, if any. */
     resume(): Effect.Effect<EpochPublishResult | null, EpochPublishFailure>;
     /** The local result of the unconsumed rotation, without contacting the backend. */
@@ -271,7 +283,7 @@ export class EpochPublisher extends Context.Service<
         return undefined;
       });
       const group = (row: EpochCandidateRow): EpochStagedGroup => {
-        const decoded = Result.getOrThrow(decodeSnapshotCbor(row.envelopes));
+        const decoded = Result.getOrThrow(decodeCandidateEnvelopesCbor(row.envelopes));
         if (!Array.isArray(decoded)) throw fail('corrupt');
         const envelopes = decoded.map((item) => {
           if (
@@ -563,24 +575,37 @@ export class EpochPublisher extends Context.Service<
         view: LedgerView,
         target: Bytes.MembershipId | undefined,
         previous: Bytes.EpochKey,
-        key: Bytes.EpochKey
+        key: Bytes.EpochKey,
+        baseEpoch?: number
       ) {
         const state = view.inspectState(),
           epoch = yield* Effect.fromResult(Bytes.epochNumber(state.epoch.number + 1));
-        const old = yield* Effect.fromResult(commitEpochKey(anchor, state.epoch.number, previous));
-        if (!old.equals(state.epoch.keyCommitment)) return yield* fail('corrupt');
+        const old = yield* Effect.fromResult(
+          commitEpochKey(anchor, baseEpoch ?? state.epoch.number, previous)
+        );
+        const prior = yield* Effect.fromResult(
+          epochHistoryPacket(view, baseEpoch ?? state.epoch.number)
+        );
+        if (!old.equals(prior.commitment)) return yield* fail('corrupt');
         const commitment = yield* Effect.fromResult(commitEpochKey(anchor, epoch, key)),
           packet = yield* Effect.fromResult(
-            sealHistoryPacket({ genesis: anchor, epoch, currentKey: key, previousKey: previous })
+            sealHistoryPacket({
+              genesis: anchor,
+              epoch,
+              baseEpoch,
+              currentKey: key,
+              previousKey: previous,
+            })
           );
         yield* Effect.acquireUseRelease(
-          Effect.fromResult(openHistoryPacket({ genesis: anchor, epoch, currentKey: key, packet })),
+          Effect.fromResult(
+            openHistoryPacket({ genesis: anchor, epoch, baseEpoch, currentKey: key, packet })
+          ),
           Effect.fnUntraced(function* (restored) {
             const restoredCommitment = yield* Effect.fromResult(
-              commitEpochKey(anchor, state.epoch.number, restored)
+              commitEpochKey(anchor, baseEpoch ?? state.epoch.number, restored)
             );
-            if (!restoredCommitment.equals(state.epoch.keyCommitment))
-              return yield* fail('corrupt');
+            if (!restoredCommitment.equals(prior.commitment)) return yield* fail('corrupt');
             return undefined;
           }),
           (restored) => Effect.sync(() => disposeEpochKey(restored))
@@ -589,9 +614,11 @@ export class EpochPublisher extends Context.Service<
           encodeCbor([
             view.head.toBytes(),
             publicKey.toBytes(),
-            target
-              ? [8, target.toBytes(), epoch, commitment.toBytes(), packet]
-              : [7, epoch, commitment.toBytes(), packet],
+            baseEpoch !== undefined
+              ? [11, epoch, commitment.toBytes(), baseEpoch, packet]
+              : target
+                ? [8, target.toBytes(), epoch, commitment.toBytes(), packet]
+                : [7, epoch, commitment.toBytes(), packet],
           ])
         );
         const proposal = yield* Effect.fromResult(prepareLedgerRecord(view, body));
@@ -631,7 +658,7 @@ export class EpochPublisher extends Context.Service<
         );
         yield* Effect.fromResult(authenticateEpochStagedGroup(proposed, originals, true));
         const envelopeBytes = yield* Effect.fromResult(
-          encodeSnapshotCbor(
+          encodeCandidateEnvelopesCbor(
             originals.envelopes.map((item) => [fromHex(item.recipient), item.frame])
           )
         );
@@ -665,7 +692,10 @@ export class EpochPublisher extends Context.Service<
         return { ...row, blob };
       });
 
-      const publish = Effect.fnUntraced(function* (removing?: Bytes.MembershipId) {
+      const publish = Effect.fnUntraced(function* (
+        removing?: Bytes.MembershipId,
+        baseEpoch?: number
+      ) {
         const target = removing
           ? yield* Effect.fromResult(Bytes.membershipId(removing.toBytes()))
           : undefined;
@@ -675,10 +705,13 @@ export class EpochPublisher extends Context.Service<
           const decoded = yield* Effect.fromResult(decodeRecord(existing.record));
           if (
             decoded.body.type !== 'ordinary' ||
-            (target
-              ? decoded.body.operation.type !== 'removeMemberAndPublishEpoch' ||
-                !decoded.body.operation.membershipId.equals(target)
-              : decoded.body.operation.type !== 'publishEpoch')
+            (baseEpoch !== undefined
+              ? decoded.body.operation.type !== 'abandonEpoch' ||
+                decoded.body.operation.baseEpoch !== baseEpoch
+              : target
+                ? decoded.body.operation.type !== 'removeMemberAndPublishEpoch' ||
+                  !decoded.body.operation.membershipId.equals(target)
+                : decoded.body.operation.type !== 'publishEpoch')
           )
             return yield* fail('busy');
           return yield* settle(existing);
@@ -690,20 +723,36 @@ export class EpochPublisher extends Context.Service<
             return yield* fail('busy');
           const operation = decoded.body.operation;
           if (
-            target
-              ? operation.type !== 'removeMemberAndPublishEpoch' ||
-                !operation.membershipId.equals(target)
-              : operation.type !== 'publishEpoch'
+            baseEpoch !== undefined
+              ? operation.type !== 'abandonEpoch' || operation.baseEpoch !== baseEpoch
+              : target
+                ? operation.type !== 'removeMemberAndPublishEpoch' ||
+                  !operation.membershipId.equals(target)
+                : operation.type !== 'publishEpoch'
           )
             return yield* fail('busy');
           const recovered = yield* recoverMissing();
           return recovered ?? (yield* fail('candidate-missing'));
         }
         yield* manager(view, target);
-        if (!target && !view.inspectState().epoch.rotationRequired)
+        if (baseEpoch !== undefined) {
+          const state = view.inspectState();
+          const device = state.devices.get(publisher);
+          if (
+            !device?.membershipId.equals(state.owner) ||
+            !state.capabilities.includes(2) ||
+            !Number.isSafeInteger(baseEpoch) ||
+            baseEpoch < 0 ||
+            baseEpoch >= state.epoch.number
+          )
+            return yield* fail('unauthorized');
+          const prior = yield* Effect.fromResult(epochHistoryPacket(view, baseEpoch));
+          if (prior.abandoned) return yield* fail('unauthorized');
+        }
+        if (baseEpoch === undefined && !target && !view.inspectState().epoch.rotationRequired)
           return yield* fail('rotation-not-required');
         const row = yield* Effect.acquireUseRelease(
-          installed.read(view.inspectState().epoch.number),
+          installed.read(baseEpoch ?? view.inspectState().epoch.number),
           (previous) =>
             Effect.acquireUseRelease(
               Effect.try({
@@ -717,7 +766,7 @@ export class EpochPublisher extends Context.Service<
                 },
                 catch: () => fail('storage'),
               }),
-              (key) => generate(view, target, previous, key),
+              (key) => generate(view, target, previous, key, baseEpoch),
               (key) => Effect.sync(() => disposeEpochKey(key))
             ),
           (previous) => Effect.sync(() => disposeEpochKey(previous))
@@ -794,6 +843,11 @@ export class EpochPublisher extends Context.Service<
         publishRemoving: Effect.fn('@lody/e2ee-core/EpochPublisher.publishRemoving')(
           function* (membership) {
             return yield* lease(publish(membership));
+          }
+        ),
+        publishAbandoning: Effect.fn('@lody/e2ee-core/EpochPublisher.publishAbandoning')(
+          function* (baseEpoch) {
+            return yield* lease(publish(undefined, baseEpoch));
           }
         ),
         resume: Effect.fn('@lody/e2ee-core/EpochPublisher.resume')(function* () {

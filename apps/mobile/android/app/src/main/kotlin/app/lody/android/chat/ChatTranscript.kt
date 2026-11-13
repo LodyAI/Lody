@@ -7,6 +7,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
@@ -381,6 +382,7 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState, onForge
     val colors = LodyTheme.colors
     var expanded by androidx.compose.runtime.saveable.rememberSaveable(entry.id) { mutableStateOf(false) }
     var overflowing by remember(entry.text) { mutableStateOf(false) }
+    var bubbleLayout by remember(entry.text) { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     var menu by remember(entry.id) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     Row(
@@ -426,20 +428,23 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState, onForge
             if (entry.text.isNotBlank()) Text(
                 androidx.compose.ui.text.buildAnnotatedString {
                     append(entry.text)
+                    // References read as the composer's chips (MentionPresentation): accent text
+                    // on a rounded accent-subtle capsule drawn behind each line's run.
                     entry.references.forEach { reference ->
                         if (reference.start >= 0 && reference.end <= length && reference.end > reference.start)
-                            addStyle(androidx.compose.ui.text.SpanStyle(color = colors.textLink), reference.start, reference.end)
+                            addStyle(androidx.compose.ui.text.SpanStyle(color = colors.accentOnSubtle, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium), reference.start, reference.end)
                     }
                 },
                 style = LodyTheme.typography.reading,
                 color = colors.textPrimary,
                 maxLines = if (expanded) Int.MAX_VALUE else 6,
                 overflow = TextOverflow.Ellipsis,
-                onTextLayout = { if (!expanded) overflowing = it.hasVisualOverflow },
+                onTextLayout = { bubbleLayout = it; if (!expanded) overflowing = it.hasVisualOverflow },
                 modifier = Modifier
                     .widthIn(max = LodyLayout.readableMaxWidth)
                     .background(colors.fillSecondary, RoundedCornerShape(UserBubbleRadius))
-                    .padding(horizontal = LodySpacing.lg, vertical = LodySpacing.lg),
+                    .padding(horizontal = LodySpacing.lg, vertical = LodySpacing.lg)
+                    .drawBehind { bubbleLayout?.let { drawReferenceChips(it, entry.references, colors.accentSubtle) } },
             )
             if (overflowing || expanded) app.lody.android.designsystem.LodyTextButton(onClick = { expanded = !expanded }) {
                 Text(stringResource(if (expanded) R.string.message_show_less else R.string.message_show_more), color = colors.textSecondary)
@@ -460,6 +465,40 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState, onForge
         }
         // Beside the bubble's top: past the header line and the gap under it.
         Avatar(entry.who.image, entry.who.name, UserAvatarSize, Modifier.padding(top = UserHeaderHeight + LodySpacing.xs))
+    }
+}
+
+/** A rounded chip behind each line's run of every reference, as the composer shows them. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawReferenceChips(
+    layout: androidx.compose.ui.text.TextLayoutResult,
+    references: List<app.lody.android.runtime.MessageReference>,
+    fill: androidx.compose.ui.graphics.Color,
+) {
+    val length = layout.layoutInput.text.length
+    val pad = 3.dp.toPx()
+    val inset = 1.dp.toPx()
+    references.forEach { reference ->
+        if (reference.start < 0 || reference.end > length || reference.end <= reference.start) return@forEach
+        val first = layout.getLineForOffset(reference.start)
+        val last = layout.getLineForOffset(reference.end - 1)
+        for (line in first..last) {
+            if (line >= layout.lineCount) break
+            val start = maxOf(reference.start, layout.getLineStart(line))
+            val end = minOf(reference.end, layout.getLineEnd(line, visibleEnd = true))
+            if (end <= start) continue
+            val left = layout.getBoundingBox(start).left
+            val right = layout.getBoundingBox(end - 1).right
+            val top = layout.getLineTop(line) + inset
+            val bottom = layout.getLineBottom(line) - inset
+            if (right <= left || bottom <= top) continue
+            val radius = minOf(6.dp.toPx(), (bottom - top) / 2)
+            drawRoundRect(
+                fill,
+                topLeft = androidx.compose.ui.geometry.Offset(left - pad, top),
+                size = androidx.compose.ui.geometry.Size(right - left + pad * 2, bottom - top),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+            )
+        }
     }
 }
 

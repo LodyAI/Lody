@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ReactElement,
+  type MouseEvent,
 } from 'react';
 import { flushSync } from 'react-dom';
 import {
@@ -20,6 +21,7 @@ import {
 } from '@/lib/conversation-scroll/saved-state';
 import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
+import { useIsMobile } from '@/hooks/use-mobile';
 import type { ConversationRowComponent, ConversationScrollerProps } from './types';
 import { compensateConversationScroll } from './scroll-compensation';
 
@@ -141,12 +143,14 @@ export function EngineConversationScroller({
   bufferSize,
   handleRef,
 }: ConversationScrollerProps) {
+  const isMobile = useIsMobile();
   const [, forceCommit] = useReducer((count: number) => count + 1, 0);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement | null>(null);
   const rowElements = useRef(new Map<string, HTMLElement>());
   const keyOfElement = useRef(new WeakMap<Element, string>());
+  const pendingDisclosureReveal = useRef<{ button: HTMLElement; rowKey: string } | null>(null);
   const rowObserver = useRef<ResizeObserver | null>(null);
   const inLayoutEffect = useRef(false);
   const widthRef = useRef(0);
@@ -309,7 +313,40 @@ export function EngineConversationScroller({
   useLayoutEffect(() => {
     inLayoutEffect.current = true;
     try {
-      controller.afterCommit();
+      if (!controller.afterCommit()) return;
+      const pending = pendingDisclosureReveal.current;
+      if (!pending) return;
+      if (!pending.button.isConnected) {
+        pendingDisclosureReveal.current = null;
+        return;
+      }
+      // A memoized tool leaf can commit its body after the list's own update.
+      // Its row resize will finish the check; a later toggle replaces this request.
+      if (pending.button.getAttribute('aria-expanded') !== 'true') return;
+      const row = rowElements.current.get(pending.rowKey);
+      const viewport = viewportRef.current;
+      if (!row || !viewport) return;
+      const body =
+        pending.button.dataset.conversationDisclosure === 'group'
+          ? row.nextElementSibling
+          : pending.button.nextElementSibling;
+      const detail =
+        pending.button.dataset.conversationDisclosure === 'group'
+          ? (body?.querySelector('[data-native-selection-allow]') ?? body)
+          : (body?.firstElementChild ?? body);
+      if (!detail) return;
+      pendingDisclosureReveal.current = null;
+      const viewportRect = viewport.getBoundingClientRect();
+      // Check the newly measured body, including spacing and removed tail padding.
+      if (detail.getBoundingClientRect().top < viewportRect.bottom - 0.5) return;
+      const scale = viewportRect.height / viewport.clientHeight;
+      if (!(scale > 0)) return;
+      const rowTop = row.getBoundingClientRect().top;
+      controller.preserveDisclosure(
+        pending.rowKey,
+        (pending.button.getBoundingClientRect().top - rowTop) / scale,
+        (detail.getBoundingClientRect().top - rowTop) / scale
+      );
     } finally {
       inLayoutEffect.current = false;
     }
@@ -558,6 +595,31 @@ export function EngineConversationScroller({
   }, []);
 
   const ready = initialWindowReady && revealed;
+  const preserveDisclosure = (event: MouseEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest<HTMLElement>('[data-conversation-disclosure]');
+    const viewport = viewportRef.current;
+    if (!button || !viewport || button.closest('[data-conversation-scroll-engine]') !== viewport)
+      return;
+    // Links inside a tool header open the file rather than toggling the body.
+    if (
+      event.target.closest('a, [role="button"]')?.closest('[data-conversation-disclosure]') ===
+      button
+    )
+      return;
+    let row: HTMLElement | null = button;
+    while (row && !keyOfElement.current.has(row)) row = row.parentElement;
+    if (!row) return;
+    const rowKey = keyOfElement.current.get(row)!;
+    const viewportRect = viewport.getBoundingClientRect();
+    const scale = viewport.clientHeight > 0 ? viewportRect.height / viewport.clientHeight : 1;
+    if (!(scale > 0)) return;
+    const rowRect = row.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    pendingDisclosureReveal.current =
+      isMobile && button.getAttribute('aria-expanded') === 'false' ? { button, rowKey } : null;
+    controller.preserveDisclosure(rowKey, (buttonRect.top - rowRect.top) / scale);
+  };
   return (
     <div
       ref={setViewport}
@@ -566,6 +628,7 @@ export function EngineConversationScroller({
       data-window-session-stream-ready={ready ? sessionId : undefined}
       className={viewportClassName}
       style={viewportStyle}
+      onClickCapture={preserveDisclosure}
     >
       {/* The rows container: the engine sets its height (the scroll extent)
           imperatively and it clips in the block direction, so no row can

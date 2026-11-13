@@ -25,6 +25,7 @@ import {
   WorkspaceControl,
 } from '@lody/e2ee-core';
 import {
+  epochHistoryPacket,
   getCommittedEpochStagingKey,
   requireLedgerContinuation,
   decodeRecord,
@@ -73,6 +74,7 @@ import {
   type PreparedPersonalIdentity,
 } from './installation';
 import { PersonalHostPlatform, PersonalMachineSharing, type PersonalApproval } from './platform';
+import { boundedBy } from './deadline';
 import { assertPersonalAdmission } from './admission';
 import { fail } from './errors';
 import type { PersonalRecoverySetupInput } from './recovery-restore';
@@ -203,7 +205,14 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     // Readable ledger precedes lazy acquisition of every key store/backend.
     yield* ledger();
     const fibers = yield* Scope.provide(FiberSet.make(), operationsScope),
-      serial = yield* Semaphore.make(1);
+      serial = yield* Semaphore.make(1),
+      recoverySerial = yield* Semaphore.make(1);
+    // Every round held under the serial permit is bounded: a stalled remote call is
+    // interrupted at its deadline and releases the permit, so later refreshes, key rounds
+    // and management are never blocked behind it. Core keeps an interrupted write's
+    // original journaled for its exact resume; nothing is re-signed or regenerated.
+    const bounded = boundedBy(platform.deadlines);
+    const serialRound = <A, E, R>(work: Effect.Effect<A, E, R>) => serial.withPermit(bounded(work));
     const run = <A, E>(effect: Effect.Effect<A, E>, dispose?: (value: A) => void) =>
       Effect.gen(function* () {
         yield* guard;
@@ -304,7 +313,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         return value;
       });
     const keyRound = () =>
-      serial.withPermit(
+      serialRound(
         withKeys((ctx) =>
           Effect.gen(function* () {
             const view = yield* admitted(),
@@ -387,6 +396,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           const installed = Context.get(ctx, InstalledEpochKeys);
           let usableEpoch: number | null = null;
           for (let epoch = state.epoch.number; epoch >= 0; epoch--) {
+            const packet = epochHistoryPacket(view, epoch);
+            if (Result.isFailure(packet) || packet.success.abandoned) continue;
             const checked = yield* Effect.result(installed.check(epoch));
             if (Result.isSuccess(checked)) {
               usableEpoch = epoch;
@@ -520,7 +531,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         })
       );
     const management = (command: LedgerCommand) =>
-      serial.withPermit(
+      serialRound(
         Effect.gen(function* () {
           yield* admitted();
           // An occupied journal must be explicitly resumed/ACKed, never converted to another user intent.
@@ -584,6 +595,20 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           devices: [...state.devices].map(([key, entry]) => ({
             key,
             kind: entry.kind,
+            cryptoUserId: toHex(
+              state.members.get(toHex(entry.membershipId.toBytes()))!.userId.toBytes()
+            ),
+            recoveryDeviceAvailable: [...state.devices.values()].some(
+              (other) => other.kind === 'recovery' && other.membershipId.equals(entry.membershipId)
+            ),
+            requiresRecoveryConfirmation:
+              entry.kind === 'personal' &&
+              ![...state.devices.entries()].some(
+                ([otherKey, other]) =>
+                  otherKey !== key &&
+                  other.kind === 'personal' &&
+                  other.membershipId.equals(entry.membershipId)
+              ),
             machineId: entry.machineId ?? null,
             self: key === toHex(device.publicKey.toBytes()),
             mayRevoke: Result.isSuccess(
@@ -625,7 +650,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         possessionProof: Uint8Array;
       }) =>
         run(
-          serial.withPermit(
+          serialRound(
             Effect.gen(function* () {
               const view = yield* admitted();
               const proposal = yield* Effect.fromResult(
@@ -655,7 +680,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
        * not yet decided. */
       settle: (record: Uint8Array) =>
         run(
-          serial.withPermit(
+          serialRound(
             Effect.gen(function* () {
               yield* control.refresh();
               const { view, signed, admittedDevice } = yield* ownAdmission(record);
@@ -907,10 +932,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       /** Set up this workspace's recovery without exposing its signer or epoch keys. */
       setupRecovery: (input: PersonalRecoverySetupInput) =>
         run(
-          serial.withPermit(
+          recoverySerial.withPermit(
             withKeys((ctx) =>
               Effect.gen(function* () {
-                yield* control.refresh();
+                yield* serialRound(control.refresh());
                 const view = yield* admitted();
                 const workflow = yield* makeWorkspaceRecovery({
                   vault: input.vault,
@@ -931,11 +956,20 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                   submitOriginal: (record, registration) =>
                     input
                       .submitOriginal(record, registration)
-                      .pipe(Effect.tap(() => control.refresh())),
+                      .pipe(Effect.tap(() => serialRound(Effect.interruptible(control.refresh())))),
                   fetchCurrentEnvelope: (...args) =>
                     Effect.gen(function* () {
                       // A failed independent receive/repair must not hide an already delivered R envelope.
-                      yield* Effect.exit(maintenance!(view.inspectState().epoch.number));
+                      yield* Effect.exit(
+                        serialRound(
+                          Effect.interruptible(
+                            Effect.gen(function* () {
+                              const latest = yield* admitted();
+                              return yield* maintenance!(latest.inspectState().epoch.number);
+                            })
+                          )
+                        )
+                      );
                       return yield* input.fetchCurrentEnvelope(...args);
                     }),
                 });
@@ -973,13 +1007,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       managementState: () => run(managementState()),
       readMachineSharing: (machineId: string) =>
         run(
-          Effect.gen(function* () {
-            yield* control.refresh();
-            yield* admitted();
-            const result = yield* (yield* sharingOwner()).read(machineId);
-            yield* admitted();
-            return result;
-          })
+          bounded(
+            Effect.gen(function* () {
+              yield* control.refresh();
+              yield* admitted();
+              const result = yield* (yield* sharingOwner()).read(machineId);
+              yield* admitted();
+              return result;
+            })
+          )
         ),
       updateMachineSharing: (
         machineId: string,
@@ -988,18 +1024,20 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         change: import('@lody/platform').E2eeMachineSharingChange
       ) =>
         run(
-          Effect.gen(function* () {
-            yield* control.refresh();
-            yield* admitted();
-            const result = yield* (yield* sharingOwner()).update(
-              machineId,
-              generation,
-              requestId,
-              change
-            );
-            yield* admitted();
-            return result;
-          })
+          bounded(
+            Effect.gen(function* () {
+              yield* control.refresh();
+              yield* admitted();
+              const result = yield* (yield* sharingOwner()).update(
+                machineId,
+                generation,
+                requestId,
+                change
+              );
+              yield* admitted();
+              return result;
+            })
+          )
         ),
       ledger: () => run(ledger()),
       /** Public signed proof already verified and retained for this approval. */
@@ -1012,7 +1050,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           )
         ),
       refresh: (timeoutMs?: number) => {
-        const refresh = serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())));
+        const refresh = serialRound(control.refresh().pipe(Effect.andThen(ledger())));
         return run(timeoutMs === undefined ? refresh : refresh.pipe(Effect.timeout(timeoutMs)));
       },
       keyRound: () => run(keyRound()),
@@ -1026,19 +1064,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       execute: (command: LedgerCommand) => run(management(command)),
       resume: () =>
         run(
-          serial.withPermit(
+          serialRound(
             admitted().pipe(Effect.andThen(ownSubmission), Effect.andThen(control.resume()))
           )
         ),
       acknowledge: (result: Parameters<typeof control.acknowledge>[0]) =>
         run(
-          serial.withPermit(
-            ownRecord(result.record).pipe(Effect.andThen(control.acknowledge(result)))
-          )
+          serialRound(ownRecord(result.record).pipe(Effect.andThen(control.acknowledge(result))))
         ),
       removeMember: (membership: import('@lody/e2ee-core/protocol').Bytes.MembershipId) =>
         run(
-          serial.withPermit(
+          serialRound(
             ownSubmission.pipe(
               Effect.andThen(
                 withKeys((ctx) => Context.get(ctx, EpochPublisher).publishRemoving(membership))
@@ -1046,9 +1082,19 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             )
           )
         ),
+      abandonEpoch: (baseEpoch: number) =>
+        run(
+          serialRound(
+            ownSubmission.pipe(
+              Effect.andThen(
+                withKeys((ctx) => Context.get(ctx, EpochPublisher).publishAbandoning(baseEpoch))
+              )
+            )
+          )
+        ),
       rotate: () =>
         run(
-          serial.withPermit(
+          serialRound(
             ownSubmission.pipe(
               Effect.andThen(withKeys((ctx) => Context.get(ctx, EpochPublisher).publish()))
             )
@@ -1058,7 +1104,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         run(withKeys((ctx) => Context.get(ctx, InstalledEpochHistory).recover())),
       resumeRotation: () =>
         run(
-          serial.withPermit(
+          serialRound(
             ownSubmission.pipe(
               Effect.andThen(withKeys((ctx) => Context.get(ctx, EpochPublisher).resume()))
             )
@@ -1066,7 +1112,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         ),
       acknowledgeRotation: (result: Parameters<EpochPublisher['Service']['acknowledge']>[0]) =>
         run(
-          serial.withPermit(
+          serialRound(
             ownSubmission.pipe(
               Effect.andThen(
                 withKeys((ctx) => Context.get(ctx, EpochPublisher).acknowledge(result))
@@ -1115,6 +1161,14 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.acceptFeatureResponse(...args))),
       /** Resolves the machine's route from the admitted ledger; callers run the
        * returned route's network waits outside every session lock. */
+      irohPath: (machineId: string) =>
+        run(
+          Effect.gen(function* () {
+            const key = irohTargetDevice(yield* admitted(), machineId);
+            if (!key || !irohEndpoint) return undefined;
+            return makePersonalIrohRoute(irohEndpoint, key, irohWarming);
+          })
+        ),
       irohRoute: (machineId: string) =>
         run(
           Effect.gen(function* () {

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context, Effect, Layer, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { Bytes } from '@lody/e2ee-core';
-import { encodeCbor } from '@lody/e2ee-core/protocol';
+import { Bytes, LedgerFeed, VerifiedLedger, type LedgerView } from '@lody/e2ee-core';
+import { encodeCbor, signLedgerSnapshot, type SnapshotTrust } from '@lody/e2ee-core/protocol';
 import {
   E2eePasskeyCancelled,
   enrollVaultPasskey,
@@ -58,6 +58,7 @@ import {
   verifyLedger,
   hashRecordBytes,
   epochHistoryPacket,
+  restoreVerifiedState,
 } from '@lody/e2ee-core/protocol';
 import {
   decodeRecord,
@@ -69,11 +70,20 @@ import { prepareLedgerRecord, signLedgerRecord } from '@lody/e2ee-core/protocol'
 import { prepareEpochEnvelope } from '@lody/e2ee-core/protocol';
 import { commitEpochKey, sealHistoryPacket } from '@lody/e2ee-core/protocol';
 import { makeSqliteProtectedEpochKeys } from '@lody/e2ee-core/internal';
-import { LedgerLog, LedgerLogError, SubmissionJournal } from '@lody/e2ee-core/services';
+import {
+  WorkspaceScope,
+  LedgerViewSource,
+  LedgerViewSourceError,
+  LedgerLog,
+  LedgerLogError,
+  SubmissionJournal,
+} from '@lody/e2ee-core/services';
 import { submitRecord, acknowledgeSubmission } from '@lody/e2ee-core/internal';
 import {
   sqliteRecoveryVaultLocalStore,
   sqliteSubmissionJournal,
+  sqliteLedgerFeedStore,
+  sqliteLedgerPinStore,
 } from '@lody/e2ee-core/adapters/node-sqlite';
 import { generateDevice } from '../src/platform/device';
 import { labSyntheticProtector } from '../src/platform/synthetic-protection';
@@ -150,6 +160,111 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       ledger: () => Effect.sync(f.view),
       protector: labSyntheticProtector,
     });
+  let compactView: LedgerView | undefined;
+  const ledger = () =>
+    Effect.sync(() => {
+      if (!compactView) return f.view();
+      const full = f.view();
+      compactView = ok(
+        extendLedger(compactView, f.records.slice(compactView.length), {
+          head: full.head,
+          length: full.length,
+        })
+      );
+      return compactView;
+    });
+  const advance = Effect.fnUntraced(function* () {
+    // 65 genuine, authorized records move the pending position outside the
+    // retained hash window without changing the recovery devices or epoch.
+    for (let n = 0; n < 33; n++) {
+      const peer = yield* generateDevice();
+      const admission = yield* prepareDeviceAdmission({
+        genesis: f.initial.genesis,
+        membershipId: f.membership,
+        encryptionPublicKey: peer.enc,
+        kind: 'personal',
+        signer: peer,
+      });
+      const commands =
+        n === 32
+          ? [admission]
+          : [admission, { _tag: 'RevokeDevice', target: peer.publicKey } as const];
+      for (const command of commands)
+        f.records.push(
+          new Uint8Array(
+            yield* signLedgerRecord(
+              ok(prepareLedgerCommand(f.view(), f.owner.publicKey, command)),
+              f.owner
+            )
+          )
+        );
+    }
+  });
+  const compact = Effect.fnUntraced(function* () {
+    const prefix = f.records.slice(0, f.records.length - 64);
+    const snapView = ok(
+      verifyLedger({
+        anchor: f.initial.genesis,
+        records: prefix,
+        checkpoint: { head: hashRecordBytes(prefix[prefix.length - 1]!), length: prefix.length },
+      })
+    );
+    const endorsed = yield* signLedgerSnapshot({
+      signer: f.owner,
+      ledger: () => Effect.succeed(snapView),
+    });
+    const trust: SnapshotTrust = {
+      source: 'external-confirmation',
+      genesis: f.initial.genesis,
+      head: snapView.head,
+      length: snapView.length,
+      endorser: f.owner.publicKey,
+      membershipId: f.membership,
+      role: 'owner',
+      kind: 'personal',
+      headSignature: endorsed.headSignature,
+    };
+    const stores = Layer.mergeAll(
+      sqliteLedgerFeedStore({ path: join(dir, 'compact-feed.sqlite'), mode: 'create-or-open' }),
+      sqliteLedgerPinStore({ path: join(dir, 'compact-pin.sqlite'), mode: 'create-or-open' })
+    ).pipe(Layer.provideMerge(Layer.succeed(WorkspaceScope, { genesis: f.initial.genesis })));
+    const context = yield* Layer.build(
+      LedgerFeed.layer({
+        origin: {
+          kind: 'snapshot',
+          snapshot: { bytes: endorsed.snapshot, trust, offset: 'compact:snap' },
+        },
+        expected: { head: snapView.head, length: snapView.length },
+        budget: { maxRecords: 1000, maxBytes: 1_000_000 },
+      }).pipe(Layer.provide(stores))
+    );
+    const feed = Context.get(context, LedgerFeed);
+    const full = f.view();
+    yield* feed.accept(
+      {
+        requestOffset: 'compact:snap',
+        nextOffset: 'compact:end',
+        records: f.records.slice(prefix.length),
+        upToDate: true,
+      },
+      { head: full.head, length: full.length }
+    );
+    const verified = VerifiedLedger.layer.pipe(
+      Layer.provide(stores),
+      Layer.provide(
+        Layer.succeed(LedgerViewSource, {
+          current: () =>
+            feed.current().pipe(
+              Effect.map((state) => state.view),
+              Effect.mapError((cause) => new LedgerViewSourceError({ cause }))
+            ),
+        })
+      )
+    );
+    const saved = yield* feed.rebase().pipe(Effect.provide(verified));
+    compactView = ok(restoreVerifiedState(saved.state));
+    return compactView;
+  });
   let intercept:
     | ((record: Uint8Array) => Effect.Effect<RecoverySubmitResult | void, unknown>)
     | null = null;
@@ -202,7 +317,7 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       genesis: f.initial.genesis,
       membershipId: f.membership,
       personalSigner: f.owner,
-      ledger: () => Effect.sync(f.view),
+      ledger,
       submitOriginal: submit,
       installed: keys,
       trust: {
@@ -249,6 +364,14 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       : submit(record);
   return {
     f,
+    compact,
+    advance,
+    useView: (view: LedgerView) => {
+      compactView = view;
+    },
+    useFullHistory: () => {
+      compactView = undefined;
+    },
     oldVault,
     fetchEnvelope,
     submitOnce,
@@ -274,6 +397,149 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
   };
 });
 describe('encrypted recovery vault and genuine workflow', () => {
+  it.each([
+    { operation: 'setup', compacted: false },
+    { operation: 'restore', compacted: false },
+    { operation: 'replace', compacted: false },
+    { operation: 'setup', compacted: true },
+    { operation: 'restore', compacted: true },
+    { operation: 'replace', compacted: true },
+  ] as const)(
+    '$operation (compacted=$compacted) retains originals until verified displacement, then retries with the same device',
+    ({ operation, compacted }) =>
+      inDir(async (dir) => {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const r = yield* replacementFixture(dir);
+              if (operation === 'restore') yield* r.newOwner.setup();
+              const workflow = operation === 'replace' ? r.oldOwner : r.newOwner;
+              const invoke = (): Effect.Effect<unknown, unknown> =>
+                operation === 'setup'
+                  ? workflow.setup()
+                  : operation === 'restore'
+                    ? workflow.restoreFromRecovery({
+                        personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+                        submitOriginalAsRecovery: (record, _identity, credential) => {
+                          credential.fill(0);
+                          return r.submit(record);
+                        },
+                      })
+                    : workflow.replace({ requestId: 'displaced-revoke', compromised: true });
+              const originals: Uint8Array[] = [];
+              let displace = false;
+              r.interceptSubmit((record) =>
+                Effect.gen(function* () {
+                  originals.push(record.slice());
+                  if (displace) {
+                    displace = false;
+                    const peer = yield* generateDevice();
+                    const command = yield* prepareDeviceAdmission({
+                      genesis: r.f.initial.genesis,
+                      membershipId: r.f.membership,
+                      encryptionPublicKey: peer.enc,
+                      kind: 'personal',
+                      signer: peer,
+                    });
+                    r.f.records.push(
+                      new Uint8Array(
+                        yield* signLedgerRecord(
+                          ok(prepareLedgerCommand(r.f.view(), r.f.owner.publicKey, command)),
+                          r.f.owner
+                        )
+                      )
+                    );
+                  }
+                  if (compacted && originals.length === 3) {
+                    yield* r.advance();
+                    return { outcome: 'Pending' as const, record: record.slice() };
+                  }
+                  return { outcome: 'Conflict' as const, record: record.slice() };
+                })
+              );
+              // A service hint alone cannot authorize another signature.
+              yield* Effect.result(invoke());
+              yield* Effect.result(invoke());
+              expect(originals).toHaveLength(2);
+              expect(originals[1]).toEqual(originals[0]);
+              displace = true;
+              yield* Effect.result(invoke());
+              expect(originals[2]).toEqual(originals[0]);
+              if (compacted) {
+                // The owner observes the advanced full head before feed retention,
+                // just as VerifiedLedger does before rebase. Its next Conflict is
+                // checked against the compact view, with the pending position gone.
+                yield* workflow.status();
+                const view = yield* r.compact();
+                expect(view.historyStart).toBeGreaterThanOrEqual(r.f.records.length - 65);
+                if (operation === 'restore') {
+                  // Package-checkpoint qualification still requires full history;
+                  // compact again only for the post-submission conflict proof.
+                  r.useFullHistory();
+                  r.interceptSubmit((record) =>
+                    Effect.sync(() => {
+                      originals.push(record.slice());
+                      r.useView(view);
+                      return { outcome: 'Conflict' as const, record: record.slice() };
+                    })
+                  );
+                }
+                yield* Effect.result(invoke());
+                expect(originals[3]).toEqual(originals[0]);
+              }
+
+              // Reopen the workflow to prove the replacement was persisted, not cached.
+              r.interceptSubmit(null);
+              // Restore must requalify the package's earlier checkpoint from full
+              // history. The conflicting submission above used the rebased view.
+              if (operation === 'restore') r.useFullHistory();
+              const reopened = yield* r.owner(
+                operation === 'replace' ? r.oldVault.vault : r.newVault.vault
+              );
+              if (operation === 'setup') {
+                expect((yield* reopened.setup()).status.recoverable).toBe(true);
+              } else if (operation === 'restore') {
+                expect(
+                  (yield* reopened.restoreFromRecovery({
+                    personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+                    submitOriginalAsRecovery: (record, _identity, credential) => {
+                      credential.fill(0);
+                      return r.submit(record);
+                    },
+                  })).outcome
+                ).toBe('Committed');
+                expect(
+                  r.f.view().inspectState().devices.has(hex(r.f.personal.publicKey.toBytes()))
+                ).toBe(true);
+              } else {
+                expect(
+                  (yield* reopened.replace({ requestId: 'displaced-revoke', compromised: true }))
+                    .recoverable
+                ).toBe(true);
+                expect(r.recoveryDevices()).not.toContain(r.oldR);
+              }
+              const oldBody = ok(decodeRecord(originals[0]!)).body;
+              const replacement = r.f.records
+                .map((raw) => ok(decodeRecord(raw)).body)
+                .find(
+                  (body) =>
+                    body.type === 'ordinary' &&
+                    oldBody.type === 'ordinary' &&
+                    body.operation.type === oldBody.operation.type &&
+                    (body.operation.type === 'admitDevice' &&
+                    oldBody.operation.type === 'admitDevice'
+                      ? body.operation.signingPublicKey.equals(oldBody.operation.signingPublicKey)
+                      : body.operation.type === 'revokeDevice' &&
+                        oldBody.operation.type === 'revokeDevice' &&
+                        body.operation.target.equals(oldBody.operation.target))
+                );
+              expect(replacement).toBeDefined();
+              expect(r.f.records.some((raw) => hex(raw) === hex(originals[0]!))).toBe(false);
+            })
+          )
+        );
+      })
+  );
   it('opens the same V from a recovery file and actual PRF result, authenticates AAD, rejects unsupported PRF and index rollback', async () =>
     inDir(async (dir) => {
       await Effect.runPromise(
@@ -1349,7 +1615,10 @@ describe('encrypted recovery vault and genuine workflow', () => {
       startIndex,
       recordsHex: records.map(hex),
       nextCursor: null,
-      checkpoint: null,
+      checkpoint: {
+        headHash: hex(hashRecordBytes(records.at(-1) ?? f.initial.record).toBytes()),
+        length: records.length,
+      },
     });
     const ledger = (pages: readonly ReturnType<typeof page>[]) =>
       Effect.runPromise(
@@ -1361,6 +1630,30 @@ describe('encrypted recovery vault and genuine workflow', () => {
     expect(await ledger([page(f.records, 1)])).toMatchObject({ _tag: 'Failure' });
     expect(await ledger([page(other.records)])).toMatchObject({ _tag: 'Failure' });
     expect(await ledger([])).toMatchObject({ _tag: 'Failure' });
+    expect(await ledger([page([])])).toMatchObject({
+      _tag: 'Failure',
+      failure: { code: 'authentication' },
+    });
+    expect(
+      await ledger([
+        {
+          ...page(f.records),
+          checkpoint: { headHash: hex(other.view().head.toBytes()), length: f.records.length },
+        },
+      ])
+    ).toMatchObject({ _tag: 'Failure' });
+    expect(
+      await ledger([
+        {
+          ...page(f.records),
+          checkpoint: { headHash: hex(f.view().head.toBytes()), length: f.records.length + 1 },
+        },
+      ])
+    ).toMatchObject({ _tag: 'Failure' });
+    expect(await ledger([{ ...page(f.records), recordsHex: ['zz'] }])).toMatchObject({
+      _tag: 'Failure',
+      failure: { code: 'authentication' },
+    });
   });
   it('installs recovered keys in SQLite and wipes temporary copies when the restore cache closes', () =>
     inDir(async (dir) => {
@@ -1431,9 +1724,9 @@ describe('encrypted recovery vault and genuine workflow', () => {
         }
         expect(f.records.length).toBe(69);
         const size = 25;
-        const fixed = { head: hex(f.view().head.toBytes()), length: f.records.length };
+        const fixed = { headHash: hex(f.view().head.toBytes()), length: f.records.length };
         const history = (next?: { readonly cursor: string; readonly checkpoint: typeof fixed }) => {
-          if (next && next.checkpoint?.head !== fixed.head)
+          if (next && next.checkpoint?.headHash !== fixed.headHash)
             return Effect.fail(new Error('e2ee_invalid_cursor'));
           const startIndex = next ? Number(next.cursor) : 0;
           const end = startIndex + size;
@@ -1499,7 +1792,12 @@ describe('encrypted recovery vault and genuine workflow', () => {
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
             expect(yield* run()).toEqual([
-              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
             ]);
             expect(adoptions).toBe(2);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
@@ -1563,7 +1861,12 @@ describe('encrypted recovery vault and genuine workflow', () => {
               restoreVaultWorkspaces({ vault, local: r.local, targets: [target()] });
             // The old vault restores and finishes.
             expect(yield* run(r.oldVault.vault)).toEqual([
-              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             // Finished work is not repeated.
@@ -1581,7 +1884,12 @@ describe('encrypted recovery vault and genuine workflow', () => {
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
             failInstall = false;
             expect(yield* run(r.newVault.vault)).toEqual([
-              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             expect(yield* run(r.newVault.vault)).toEqual([]);
@@ -1674,7 +1982,12 @@ describe('encrypted recovery vault and genuine workflow', () => {
             // Once the check works again, the retry restores it.
             identity = false;
             expect(yield* run()).toEqual([
-              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
             ]);
             expect(connected).toBe(1);
           })

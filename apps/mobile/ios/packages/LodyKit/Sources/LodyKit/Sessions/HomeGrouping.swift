@@ -1,14 +1,15 @@
 import Foundation
 
 /// How iPhone Home groups chats; chosen in the view menu, stored per device. Within a group
-/// chats are always newest activity first, so there is no separate sort setting.
+/// chats are always newest activity first, so there is no separate sort setting. Defaults to
+/// status, so what needs the person leads.
 enum HomeGrouping: String, CaseIterable, Sendable {
   case time, project, status
 
   private static let key = "homeChatGrouping"
 
   static var stored: HomeGrouping {
-    UserDefaults.standard.string(forKey: key).flatMap(HomeGrouping.init(rawValue:)) ?? .time
+    UserDefaults.standard.string(forKey: key).flatMap(HomeGrouping.init(rawValue:)) ?? .status
   }
 
   static func store(_ value: HomeGrouping) {
@@ -18,14 +19,14 @@ enum HomeGrouping: String, CaseIterable, Sendable {
 }
 
 /// Whose chats Home lists: only the signed-in user's, or the whole workspace's. Chosen in the
-/// view menu, stored per device; defaults to the team so nothing disappears unasked.
+/// view menu, stored per device; defaults to My tasks, so a new person starts on their own chats.
 enum HomeScope: String, CaseIterable, Sendable {
   case mine, team
 
   private static let key = "homeChatScope"
 
   static var stored: HomeScope {
-    UserDefaults.standard.string(forKey: key).flatMap(HomeScope.init(rawValue:)) ?? .team
+    UserDefaults.standard.string(forKey: key).flatMap(HomeScope.init(rawValue:)) ?? .mine
   }
 
   static func store(_ value: HomeScope) {
@@ -47,17 +48,18 @@ enum HomeArchive {
   }
 }
 
-/// "By status" groups, most pressing first. Mirrors web `lib/home-now.ts`: every chat lands in
-/// exactly one group, under the first reason that applies.
+/// "By status" groups in display order. Classification mirrors web `lib/home-now.ts`: every chat
+/// lands in exactly one group, under the first reason that applies (see `init`). Running chats are
+/// listed just above idle ones, after the groups that need a look.
 enum HomeStatusGroup: String, CaseIterable, Sendable {
   /// Failed, waiting on the person, CI failed on an idle chat's open PR, or a draft PR.
   case attention
   /// Finished since the person last looked.
   case finished
-  /// Working, even when unread or its CI is red: it may be fixing exactly that.
-  case running
   /// An open pull request with passing or pending CI.
   case pullRequest
+  /// Working, even when unread or its CI is red: it may be fixing exactly that.
+  case running
   /// Everything else, including chats whose PR is merged or closed.
   case idle
 

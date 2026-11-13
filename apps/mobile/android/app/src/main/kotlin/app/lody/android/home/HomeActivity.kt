@@ -1,5 +1,7 @@
 package app.lody.android.home
 
+import app.lody.android.auth.WorkspaceContentMode
+
 import app.lody.android.BackendEnvironment
 
 import app.lody.android.auth.WorkspaceMember
@@ -181,7 +183,10 @@ class HomeActivity : ComponentActivity() {
                         } else screens.SaveableStateProvider("list/${user.id}/${workspace?.id}") {
                             ChatListScreen(
                                 state = uiState(account, catalog).copy(members = members + listOfNotNull(user?.let { it.id to (members[it.id] ?: WorkspaceMember(it.id, it.name, it.image)) }).toMap()),
-                                onSelectWorkspace = { app.cloud.select(it) },
+                                onSelectWorkspace = {
+                                    app.cloud.select(it)
+                                    if (it.contentMode == WorkspaceContentMode.UNKNOWN) app.account.refreshWorkspaceModes()
+                                },
                                 onSignOut = { app.account.logout() },
                                 onOpenChat = { row ->
                                     val session = catalog.snapshot?.sessions?.firstOrNull { it.id == row.id }
@@ -224,6 +229,8 @@ private fun uiState(auth: AuthState, catalog: CatalogState): ChatListUiState {
         else -> HomeSyncState.Live
     }
     val placeholder = when {
+        workspace?.contentMode == app.lody.android.auth.WorkspaceContentMode.E2EE -> stringResource(R.string.workspace_e2ee_unsupported)
+        workspace?.contentMode == app.lody.android.auth.WorkspaceContentMode.UNKNOWN -> stringResource(R.string.workspace_mode_unconfirmed)
         snapshot == null && catalog.phase in setOf(ConnectionPhase.UNAVAILABLE, ConnectionPhase.PAUSED) -> stringResource(R.string.home_offline)
         snapshot == null && user?.workspaces?.isEmpty() == true -> stringResource(R.string.home_no_workspaces)
         snapshot == null -> stringResource(R.string.home_loading)

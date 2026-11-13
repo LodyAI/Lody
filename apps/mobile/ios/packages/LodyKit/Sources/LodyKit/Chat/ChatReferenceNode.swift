@@ -46,7 +46,9 @@ final class ChatReferenceNode: TextNode {
     return attributes
   }
 
-  private static let chipFill = UIColor.lodyAccent.withAlphaComponent(0.14)
+  /// Shared with the transcript's user bubbles (`ChatMessageContent`), so a sent reference keeps
+  /// the chip it had in the composer.
+  static let chipFill = UIColor.lodyAccent.withAlphaComponent(0.14)
 
   /// Draws each line's run of a reference as a rounded chip, so a chosen reference reads apart
   /// from the typed text (web's mention chip) rather than as accent-coloured text alone.

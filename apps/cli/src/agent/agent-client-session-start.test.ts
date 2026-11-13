@@ -908,6 +908,44 @@ describe('AgentClient session startup', () => {
     expect(connectionMocks.loadSession).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, '/synthetic/override.sock'])(
+    'starts stdio MCP without daemon discovery and preserves scoped environment (override=%s)',
+    async (override) => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      const directory = await mkdtemp(join(tmpdir(), 'lody-mcp-start-'));
+      vi.stubEnv('LODY_PLATFORM', 'local');
+      vi.stubEnv('LODY_DATA_DIR', directory);
+      vi.stubEnv('LODY_MCP_SOCKET_PATH', override ?? '');
+      try {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const client = new AgentClient({
+          logger: createLogger(),
+          sessionId: 'session-direct' as SessionId,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          machineId: 'machine-1' as MachineId,
+          terminalManager: {} as never,
+          agentConfig: { cliType: 'builtin', agentType: 'deepseek' },
+          onUpdateMessage: vi.fn(),
+          onRequestPermission: vi.fn(),
+        });
+        await client.startSession({} as never, '/workdir');
+        const request = connectionMocks.newSession.mock.calls.at(-1)?.[0];
+        const env = Object.fromEntries(
+          request.mcpServers[0].env.map(({ name, value }: { name: string; value: string }) => [
+            name,
+            value,
+          ])
+        );
+        expect(env).toMatchObject({ LODY_PLATFORM: 'local', LODY_DATA_DIR: directory });
+        expect(env.LODY_MCP_SOCKET_PATH).toBe(override);
+      } finally {
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('injects Lody MCP into DeepSeek Harness sessions', async () => {
     const client = new AgentClient({
       logger: createLogger(),

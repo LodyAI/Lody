@@ -443,6 +443,7 @@ import {
   getChatLandingSelectedMachineProjectStatus,
   getEmptyLocalProjectsMessageKey,
   getSharingReviewActionTarget,
+  getChatLandingSharingReviewActionTarget,
   getSharingReviewSourceRevision,
   getSharingReviewSourcesReady,
   getSharingReviewTeamHasNoVisibleLocalResources,
@@ -6299,8 +6300,24 @@ function WorkspaceChatLanding({
       ) : null}
     </div>
   ) : null;
+  const selectedSharingReviewActionTarget = getChatLandingSharingReviewActionTarget({
+    currentUserId: userId ?? null,
+    machineId: selectedMachineId,
+    localProjectIds:
+      projectGroupLaunchTarget?.kind === 'ready'
+        ? projectGroupLaunchTarget.members.flatMap((member) =>
+            member.source.kind === 'local' && member.source.machineId === selectedMachineId
+              ? [member.source.localProjectId]
+              : []
+          )
+        : contextType === 'local' && selectedLocalProject?.machineId === selectedMachineId
+          ? [selectedLocalProject.localProjectId]
+          : [],
+    machineAccessByMachineId: accessByMachineId,
+    localProjectAccessByKey: visibleLocalProjectAccess,
+  });
   const sharingReviewRow =
-    sharingReviewState.ready && sharingReviewState.active
+    sharingReviewState.ready && sharingReviewState.active && selectedSharingReviewActionTarget
       ? inboxRows?.find((item) => item.kind === 'sharing_review')
       : undefined;
   const sharingReviewNoticeNode = sharingReviewRow ? (
@@ -6311,23 +6328,18 @@ function WorkspaceChatLanding({
           {t('inbox.sharingReview.title', 'Review what your team can see')}
         </div>
         <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-          {sharingReviewState.teamLooksEmpty
+          {selectedSharingReviewActionTarget === 'machines'
             ? t(
-                'inbox.sharingReview.emptyTeam',
-                'Nothing is visible in this team workspace yet. Ask a teammate to share a machine or project if you expected to see their conversations.'
+                'inbox.sharingReview.selectedMachine',
+                'The selected machine is private. Share it so your teammates can use it.'
               )
-            : sharingReviewState.privateMachineCount + sharingReviewState.privateProjectCount === 0
-              ? t(
-                  'inbox.sharingReview.noLocalResources',
-                  'No team machines or local projects are visible to you. A teammate may need to share them before their local conversations appear.'
-                )
-              : t(
-                  'inbox.sharingReview.landing',
-                  'Private machines and projects are only visible to you. Share the ones your teammates should be able to use.'
-                )}
+            : t(
+                'inbox.sharingReview.selectedProject',
+                'A selected project is private. Share it so your teammates can use it.'
+              )}
         </p>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-          {sharingReviewState.actionTarget ? (
+          {selectedSharingReviewActionTarget ? (
             <button
               type="button"
               className="text-xs font-semibold text-primary hover:underline"
@@ -6335,10 +6347,10 @@ function WorkspaceChatLanding({
                 void markInboxItemRead({ itemId: sharingReviewRow._id }).catch((error) =>
                   console.error('Failed to mark sharing review read', error)
                 );
-                openSettings(sharingReviewState.actionTarget ?? 'projects');
+                openSettings(selectedSharingReviewActionTarget);
               }}
             >
-              {sharingReviewState.actionTarget === 'machines'
+              {selectedSharingReviewActionTarget === 'machines'
                 ? t('inbox.sharingReview.actionDevices', 'Review machines')
                 : t('inbox.sharingReview.action', 'Review projects')}
             </button>

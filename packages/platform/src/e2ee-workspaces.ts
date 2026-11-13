@@ -4,6 +4,7 @@ import type {
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest,
   E2eePersonalPairingOffer,
+  E2eeDeviceProfileUpdate,
   E2eeWorkspaceMemberProfilesRequest,
   E2eeWorkspaceMemberProfiles,
   WorkspaceAdmissionDescriptor,
@@ -71,6 +72,9 @@ export interface PlatformE2eeWorkspaces {
   readonly memberProfiles?: (
     input: E2eeWorkspaceMemberProfilesRequest
   ) => Promise<E2eeWorkspaceMemberProfiles>;
+  /** Best-effort display update for an admitted device owned by the live account.
+   * Does not grant access. The caller never submits another device's local metadata. */
+  readonly reportDeviceProfile?: (input: E2eeDeviceProfileUpdate) => Promise<null>;
   /** Absent when this platform has no installed, persistent key-custody adapter.
    * A failed/unknown creation preserves its original local intent for reconciliation.
    */
@@ -139,9 +143,15 @@ export interface E2eeManagementState {
   readonly devices: readonly {
     key: string;
     kind: 'personal' | 'machine' | 'recovery';
+    /** Account display lookup key derived from this device's verified ledger member. */
+    cryptoUserId?: string;
     machineId: string | null;
     self: boolean;
     mayRevoke: boolean;
+    /** Removing this member's last personal device leaves recovery credentials as its only way back. */
+    requiresRecoveryConfirmation?: boolean;
+    /** Whether this member has an active recovery device in the verified ledger. */
+    recoveryDeviceAvailable?: boolean;
   }[];
 }
 /** Purpose-limited account-pairing admission signing. It exposes only the operations
@@ -197,7 +207,11 @@ export interface E2eeWorkspaceRuntime
 
   managementState?(workspaceId: string): Promise<E2eeManagementState>;
   updateKeys?(workspaceId: string): Promise<void>;
-  revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
+  revokeDevice?(
+    workspaceId: string,
+    signingPublicKey: string,
+    confirmation?: { confirmedRecoveryOnly: true }
+  ): Promise<void>;
   /** Explicit management intent; the host signs once and retains the exact original. */
   removeMember?(workspaceId: string, membershipId: string): Promise<void>;
   /** Owner-only Admin promotion/demotion, checked against the latest verified ledger. */
@@ -349,6 +363,7 @@ export interface E2eeWorkspaceRuntime
    * frames, which the caller verifies with the accept methods. Neither prepares,
    * signs nor authorizes anything; failures mean "use Streams RPC".
    */
+  irohPath?(workspaceId: string, targetMachineId: string): Promise<'direct' | 'relay' | 'none'>;
   irohReady?(workspaceId: string, targetMachineId: string): Promise<boolean>;
   irohCall?(
     workspaceId: string,

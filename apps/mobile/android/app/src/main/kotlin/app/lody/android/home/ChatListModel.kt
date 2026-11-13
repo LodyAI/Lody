@@ -58,27 +58,38 @@ enum class HomeScope(val key: String) { Mine("mine"), Team("team") }
 enum class HomeGrouping(val key: String) { Time("time"), Project("project"), Status("status") }
 
 /**
- * "By status" groups, most pressing first. Mirrors web `lib/home-now.ts` (iOS `HomeStatusGroup`):
- * every chat lands in exactly one group, under the first reason that applies.
+ * "By status" groups in display order (iOS `HomeStatusGroup`). Classification mirrors web
+ * `lib/home-now.ts`: every chat lands in exactly one group, under the first reason that applies
+ * (see [ChatListModel.statusGroup]). Running chats are listed just above idle ones.
  */
 enum class StatusGroup {
     /** Failed, waiting on the person, CI failed on an idle chat's open PR, or a draft PR. */
     Attention,
     /** Finished since the person last looked. */
     Finished,
-    /** Working, even when unread or its CI is red: it may be fixing exactly that. */
-    Running,
     /** An open pull request with passing or pending CI. */
     PullRequest,
+    /** Working, even when unread or its CI is red: it may be fixing exactly that. */
+    Running,
     /** Everything else, including chats whose PR is merged or closed. */
     Idle,
 }
 
-/** One Home group; the screen localizes [header]. */
-data class HomeSection(val id: String, val header: Header, val chats: List<ChatItem>, val repository: String? = null) {
+/**
+ * One Home group; the screen localizes [header]. A [collapsed] group shows only its label; its
+ * [chats] stay for the project index's status tint.
+ */
+data class HomeSection(
+    val id: String,
+    val header: Header,
+    val chats: List<ChatItem>,
+    val repository: String? = null,
+    val collapsed: Boolean = false,
+) {
     val rootCount: Int get() = chats.count { it.nestedUnder == null }
-    val folds: Boolean get() = (header as? Header.Status)?.group == StatusGroup.Idle && rootCount > ChatListModel.IDLE_LIMIT
+    val folds: Boolean get() = !collapsed && (header as? Header.Status)?.group == StatusGroup.Idle && rootCount > ChatListModel.IDLE_LIMIT
     fun visibleChats(idleExpanded: Boolean): List<ChatItem> {
+        if (collapsed) return emptyList()
         if (!folds || idleExpanded) return chats
         val roots = chats.filter { it.nestedUnder == null }.take(ChatListModel.IDLE_LIMIT).mapTo(mutableSetOf()) { it.id }
         return chats.filter { it.id in roots || it.nestedUnder in roots }
@@ -123,11 +134,22 @@ object ChatListModel {
         else -> null
     }
 
-    /** Status first; an idle chat still flags an open question (`awaitingUserSince`) or an unread reply. */
+    /**
+     * The latest finished turn failed (web `hasFailedLatestTurn`): the failure marker still names
+     * the turn handled last. A later handled or canceled turn moves that pointer on.
+     */
+    fun latestTurnFailed(session: CatalogSession): Boolean =
+        session.lastFailedUserMsgId != null && session.lastFailedUserMsgId == session.lastHandledUserMsgId
+
+    /**
+     * Status first; a failed latest turn shows unless the agent is running again, and an idle chat
+     * still flags an open question (`awaitingUserSince`) or an unread reply.
+     */
     fun attention(session: CatalogSession): ChatAttention? {
         val status = attention(session.status)
         return when {
             status == ChatAttention.Failed -> status
+            status != ChatAttention.Running && latestTurnFailed(session) -> ChatAttention.Failed
             session.awaitingUserSince != null && status != ChatAttention.Running -> ChatAttention.Waiting
             status != null -> status
             isUnread(session) -> ChatAttention.Unread

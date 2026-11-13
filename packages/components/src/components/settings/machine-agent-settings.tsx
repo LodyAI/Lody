@@ -119,6 +119,7 @@ import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
 import { SettingsLineTabs } from './settings-line-tabs';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
+import type { ProviderRefreshHandler } from './provider-row';
 
 const TRUNCATE = {
   minWidth: 0,
@@ -1265,11 +1266,12 @@ export function MachineAgentSettings({
     [requestMachineLifecycle]
   );
 
-  const handleRefreshConfig = useCallback(
-    async (config: AgentConfigMeta) => {
+  const handleRefreshConfig = useCallback<ProviderRefreshHandler>(
+    async (config, options) => {
       await refreshCapabilities({
         machineId: config.machineId,
         configId: config.id,
+        onModelOptionsProgress: options?.onModelOptionsProgress,
       });
     },
     [refreshCapabilities]

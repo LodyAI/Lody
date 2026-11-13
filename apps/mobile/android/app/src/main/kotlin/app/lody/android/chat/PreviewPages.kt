@@ -26,6 +26,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -95,27 +97,22 @@ internal fun BrowserPreviewPage(label: String, url: String, stopping: Boolean, o
     }
 }
 
-/** When both device previews are available, the reader picks one. */
+/** A device preview capsule in the action bar; tapping opens the device page (resume or picker). */
 @Composable
-internal fun DevicePreviewChooser(onPick: (DevicePlatform) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.preview_choose_title)) },
-        text = {
-            Column {
-                listOf(DevicePlatform.IOS to R.string.preview_ios, DevicePlatform.ANDROID to R.string.preview_android).forEach { (platform, label) ->
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(LodyRadius.md)).clickable(role = Role.Button) { onPick(platform) }
-                        .padding(vertical = LodySpacing.md, horizontal = LodySpacing.sm), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(if (platform == DevicePlatform.IOS) LodyIcons.Machine else LodyIcons.Desktop, null, tint = LodyTheme.colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
-                        Spacer(Modifier.width(LodySpacing.md))
-                        Text(stringResource(label), style = LodyTheme.typography.body, color = LodyTheme.colors.textPrimary)
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.preview_cancel)) } },
-    )
+internal fun DevicePreviewChip(platform: DevicePlatform, preview: DevicePreviewSession, onOpen: () -> Unit) {
+    val colors = LodyTheme.colors
+    val label = preview.name.takeIf { preview.running && it.isNotEmpty() }
+        ?: stringResource(if (platform == DevicePlatform.IOS) R.string.preview_ios else R.string.preview_android)
+    Box(
+        Modifier.size(36.dp).clip(CircleShape).background(colors.bgRaised)
+            .border(0.5.dp, colors.borderSubtle, CircleShape)
+            .clickable(role = Role.Button, onClickLabel = label, onClick = onOpen)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (preview.connecting) CircularProgressIndicator(Modifier.size(LodyIconSize.sm), strokeWidth = 2.dp, color = colors.iconSecondary)
+        else Icon(if (platform == DevicePlatform.IOS) LodyIcons.Machine else LodyIcons.Desktop, null, tint = colors.accentFg, modifier = Modifier.size(LodyIconSize.sm))
+    }
 }
 
 /** A device control the toolbar sends through the viewer (shared `DevicePreviewControl`). */
@@ -375,19 +372,3 @@ private fun DeviceInputDialog(url: Boolean, onDismiss: () -> Unit, onSend: (Stri
     )
 }
 
-/** The agent asked to show a device preview: a slim prompt above the action bar until opened or dismissed. */
-@Composable
-internal fun PreviewRequestBanner(platform: DevicePlatform, onShow: () -> Unit, onDismiss: () -> Unit) {
-    val colors = LodyTheme.colors
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = TranscriptMargin, vertical = LodySpacing.xs)
-            .clip(RoundedCornerShape(LodyRadius.lg)).background(colors.bgRaised).border(0.5.dp, colors.borderSubtle, RoundedCornerShape(LodyRadius.lg))
-            .padding(start = LodySpacing.md),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(stringResource(if (platform == DevicePlatform.IOS) R.string.preview_requested_ios else R.string.preview_requested_android),
-            style = LodyTheme.typography.subhead, color = colors.textPrimary, modifier = Modifier.weight(1f))
-        TextButton(onClick = onShow) { Text(stringResource(R.string.preview_show), color = colors.accentFg) }
-        IconButton(onClick = onDismiss) { Icon(LodyIcons.Close, stringResource(R.string.preview_dismiss), tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm)) }
-    }
-}

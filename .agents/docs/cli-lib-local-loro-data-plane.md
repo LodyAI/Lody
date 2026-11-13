@@ -27,6 +27,13 @@ bind that file.
 Protocol v7, push-only, peer-scoped. A dedicated `lody-loro-data-plane` socket in the
 0700 run dir routes persistent connections to per-workspace
 `LocalLoroDataPlaneServerLegacy` engines (`@lody/shared`, owned by `LoroDocumentManager`).
+Before protocol messages, each socket exchanges an `authenticate` token frame and
+an `authenticated` receipt. Electron reads the current address and token from the
+private daemon run file on each dial and exposes connected status only after that
+receipt. Windows uses a random per-process pipe suffix separate from the secret.
+See the [security decision](../notes/implemented/bug-fix/2026-11-12-local-ipc-and-native-preview-security.md)
+for compatibility and filesystem limits.
+
 Every message carries `workspaceId` + `peerId` (a per-adapter uuid), and the server
 keys sync state per PEER (`lastSentVV`, flock bundle hash), so multiple windows
 multiplexed over the one relay socket sync independently and a sender's own ops are

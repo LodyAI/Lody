@@ -40,15 +40,48 @@ export function applyProxyEnvFallback(env: NodeJS.ProcessEnv, proxyEnv: NodeJS.P
   }
 }
 
+/** How long one system proxy lookup may take. A stalled PAC script or WPAD discovery
+ * can otherwise hold `resolveProxy` for minutes; the lookup then counts as direct. */
+export const SYSTEM_PROXY_LOOKUP_TIMEOUT_MS = 3_000
+
+/** One bounded lookup: a late answer is ignored and never rejects. */
+function lookupWithin(lookup: Promise<string>, timeoutMs: number): Promise<string> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(''), timeoutMs)
+    lookup.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(timer)
+        resolve('')
+      }
+    )
+  })
+}
+
 export async function resolveSystemProxyEnv(
-  probeUrls: readonly string[] = DEFAULT_SYSTEM_PROXY_PROBE_URLS
+  probeUrls: readonly string[] = DEFAULT_SYSTEM_PROXY_PROBE_URLS,
+  options: {
+    readonly timeoutMs?: number
+    readonly resolveProxy?: (url: string) => Promise<string>
+  } = {}
 ): Promise<NodeJS.ProcessEnv> {
   if (process.env.LODY_ELECTRON_DISABLE_SYSTEM_PROXY_ENV === '1') {
     return {}
   }
+  const resolveProxy =
+    options.resolveProxy ?? ((url: string) => session.defaultSession.resolveProxy(url))
 
   for (const probeUrl of probeUrls) {
-    const resolved = await session.defaultSession.resolveProxy(probeUrl).catch(() => '')
+    let lookup: Promise<string>
+    try {
+      lookup = resolveProxy(probeUrl)
+    } catch {
+      continue
+    }
+    const resolved = await lookupWithin(lookup, options.timeoutMs ?? SYSTEM_PROXY_LOOKUP_TIMEOUT_MS)
     const proxyUrl = parseResolvedProxyRules(resolved)
     if (proxyUrl) {
       return {

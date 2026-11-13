@@ -132,11 +132,9 @@ Cancellation retains selection and cannot remove a user destination.
 
 ## ACP selectors
 
-- Built-in Codex reasoning selectors normalize cached options against exact model support
-  in `components/shared/acp-selector-options.ts`: GPT-6 Astra/Sol and GPT-5.6 Sol/Terra
-  expose Max/Ultra; GPT-6 Luna and GPT-5.6 Luna expose Max only. Keep this aligned with
-  the ACP model catalog; a model version threshold cannot represent per-model differences,
-  and cached efforts may belong to a different selected model.
+- Effort ladders follow the selected model: its recorded options, then the adapter's
+  per-model declaration, then `modelReasoningEfforts` (`components/shared/acp-selector-options.ts`).
+  Never hard-code a provider's per-model tiers; cached efforts may belong to another model.
 
 ## ACP authentication
 

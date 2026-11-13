@@ -1,20 +1,36 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type { E2eeAutomaticPairingState, E2eeWorkspaceRuntime } from '@lody/platform';
 import {
   E2eeAutomaticPairingInbox,
   E2eeAutomaticPairingPage,
   E2eeDeviceRequestsButton,
 } from '@/components/pages/e2ee-automatic-pairing';
+import { E2eeAddDeviceCard } from '@/components/pages/e2ee-instant-qr';
+import { ForceDesktopLayoutProvider, ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+
+/** Synthetic one-time code; this preview never verifies or signs a request under it. */
+const SYNTHETIC_PAIRING = '50M6-HA79-55MT-KTHA-DANE-PAVB-NF38';
+
+function Layout({ form, children }: { form: 'phone' | 'desktop'; children: ReactNode }) {
+  return form === 'phone' ? (
+    <ForceMobileLayoutProvider force>{children}</ForceMobileLayoutProvider>
+  ) : (
+    <ForceDesktopLayoutProvider>{children}</ForceDesktopLayoutProvider>
+  );
+}
 
 /** Production components over a synthetic capability; never performs cryptographic approval. */
 function Preview({
   mode,
   backup = false,
+  form = 'phone',
 }: {
-  mode: 'waiting' | 'expired' | 'syncing' | 'approval' | 'previous';
+  mode: 'awaiting' | 'waiting' | 'expired' | 'syncing' | 'approval' | 'previous' | 'addDevice';
   /** This host can restore from a backup: "No other authorized device?" offers it. */
   backup?: boolean;
+  /** Phones scan codes; computers show them and take typed codes. */
+  form?: 'phone' | 'desktop';
 }) {
   const runtime = useMemo(() => {
     const state: E2eeAutomaticPairingState & { requestId: string } = {
@@ -23,8 +39,13 @@ function Preview({
       workspaceName: 'Lody Design',
       deviceName: 'Zixuan 的 iPhone',
       requestId: 'synthetic-request',
-      comparisonCode: '528193',
-      phase: mode === 'approval' || mode === 'previous' ? 'waiting' : mode,
+      comparisonCode: mode === 'awaiting' ? null : '528193',
+      phase:
+        mode === 'approval' || mode === 'previous' || mode === 'addDevice'
+          ? 'waiting'
+          : mode === 'awaiting'
+            ? 'preparing'
+            : mode,
       expiresAt: Date.now() + 600_000,
     };
     let terminal = false;
@@ -82,8 +103,33 @@ function Preview({
       declineAutomaticPairing: async () => {
         terminal = true;
       },
+      requestAccountPairing: async () => ({
+        direction: 'approver-shows',
+        pairingString: null,
+        status: 'waiting',
+        expiresAt: state.expiresAt,
+        workspaces: [{ workspaceId: 'preview', name: 'Lody Design', state: 'pending' }],
+      }),
+      accountPairingCode: async () => ({
+        pairingString: SYNTHETIC_PAIRING,
+        expiresAt: Date.now() + 600_000,
+      }),
+      // No request ever arrives under the synthetic code, so nothing is signed.
+      inspectAccountPairing: async () => null,
+      approveAccountPairing: async () => ({ workspaces: [] }),
     } as unknown as E2eeWorkspaceRuntime;
   }, [mode]);
+  if (mode === 'addDevice')
+    return (
+      <Layout form={form}>
+        <div className="mx-auto max-w-xl p-8">
+          <E2eeAddDeviceCard runtime={runtime} />
+        </div>
+      </Layout>
+    );
+  return <Layout form={form}>{body(mode, runtime, backup)}</Layout>;
+}
+function body(mode: string, runtime: E2eeWorkspaceRuntime, backup: boolean) {
   return mode === 'approval' ? (
     <E2eeAutomaticPairingInbox runtime={runtime}>
       <div className="min-h-dvh bg-background text-foreground">
@@ -132,11 +178,20 @@ const meta = {
 } satisfies Meta<typeof Preview>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+/** No signed-in device has answered yet: the page says where to go and offers scanning. */
+export const PhoneAwaitingDevice: Story = { args: { mode: 'awaiting' } };
 export const PhoneWaiting: Story = { args: { mode: 'waiting' } };
+/** A new computer shows a QR code for a phone beside the code another computer types. */
+export const DesktopNewDevice: Story = { args: { mode: 'waiting', form: 'desktop' } };
 /** Open "没有其他已授权设备？" → "用备份找回" for the passkey / file / neither choice. */
 export const PhoneWaitingWithBackup: Story = { args: { mode: 'waiting', backup: true } };
 export const PhoneExpired: Story = { args: { mode: 'expired' } };
 export const PhoneSyncing: Story = { args: { mode: 'syncing' } };
 /** Open “Restart this device’s previous pairing” to inspect its confirmation. */
 export const PhonePreviousRequest: Story = { args: { mode: 'previous' } };
-export const DeviceApproval: Story = { args: { mode: 'approval' } };
+/** A computer approving: reveal a QR code for a new phone, or type a new computer's code. */
+export const DeviceApproval: Story = { args: { mode: 'approval', form: 'desktop' } };
+/** A phone approving: scan the new device's screen, or type its code. */
+export const DeviceApprovalOnPhone: Story = { args: { mode: 'approval' } };
+/** The console's Devices tab entry. */
+export const AddDeviceCard: Story = { args: { mode: 'addDevice', form: 'desktop' } };

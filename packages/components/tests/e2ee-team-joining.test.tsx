@@ -8,11 +8,13 @@ import { appendLedgerHistory, bytesToHex } from '../src/lib/e2ee-ledger-history'
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
+import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { E2eeMemberJoin } from '../src/components/pages/e2ee-member-join';
 import {
   E2eeTeamSettings,
   E2eeTeamSettingsHost,
+  memberInvitationUrl,
 } from '../src/components/settings/e2ee-team-settings';
 import {
   E2eeTeamInboxHost,
@@ -22,6 +24,7 @@ import {
   desktopMemberJoinLink,
   memberJoinPath,
   parseMemberOffer,
+  sameMemberOffer,
 } from '../src/lib/e2ee-member-offer';
 import { resolveDesktopInviteDeepLinkPath } from '../src/lib/desktop-invite-deep-link';
 vi.mock('react-i18next', () => {
@@ -315,6 +318,131 @@ describe('encrypted team joining', () => {
     );
     expect(button('e2ee.team.submit')).toBeUndefined();
   });
+  it.each(['method_required', 'payment_required', 'refresh'] as const)(
+    'blocks encrypted approval for %s and resumes after payment recovery refresh',
+    async (paymentAction) => {
+      let ready = false,
+        admitted = false,
+        billingOpened = false;
+      const refreshed = deferred<void>();
+      const seatPreview = () =>
+        SeatInvitePreviewSchema.parse({
+          status: 'billed',
+          interval: 'month',
+          unitAmount: 1000,
+          proratedAmount: 500,
+          currentPeriodEnd: null,
+          seatCount: 1,
+          nextSeatCount: 2,
+          nextRenewalAmount: 2000,
+          paymentAction: ready ? undefined : paymentAction,
+          addedSeats: 1,
+          invoiceAt: null,
+        });
+      await render(
+        <E2eeTeamSettings
+          workspaceId="team"
+          runtime={{
+            createMemberInvitation: async () => offer,
+            memberJoinRequests: async () => ({
+              ...empty,
+              seatPreview: seatPreview(),
+              items: admitted ? [] : [application('applicant', 'link')],
+            }),
+            approveMemberJoin: async () => {
+              admitted = true;
+              return { admitted: true, keyPending: false };
+            },
+            rejectMemberJoin: async () => ({ state: 'rejected' }),
+            revokeMemberInvitation: async () => ({ revoked: true }),
+          }}
+          onOpenBilling={() => {
+            billingOpened = true;
+          }}
+          onRefreshBilling={async () => {
+            await refreshed.promise;
+            ready = true;
+          }}
+        />
+      );
+      await settle();
+      expect(
+        container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')?.disabled
+      ).toBe(true);
+      expect(admitted).toBe(false);
+      if (paymentAction !== 'refresh') {
+        await act(async () =>
+          button(
+            paymentAction === 'method_required'
+              ? 'billing.seatResolveMethod'
+              : 'billing.seatResolvePayment'
+          ).click()
+        );
+        expect(billingOpened).toBe(true);
+      }
+      const refresh = button('billing.seatRefreshPayment');
+      expect(refresh).toBeDefined();
+      await act(async () => refresh.click());
+      expect(
+        container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')?.disabled
+      ).toBe(true);
+      await act(async () => refreshed.resolve());
+      await settle();
+      expect(button('billing.seatRefreshPayment')).toBeUndefined();
+      const approve = container.querySelector<HTMLButtonElement>(
+        '[data-testid="e2ee-join-approve"]'
+      )!;
+      expect(approve.disabled).toBe(false);
+      await act(async () => approve.click());
+      expect(admitted).toBe(true);
+      expect(container.querySelector('[data-testid="e2ee-join-approve"]')).toBeNull();
+    }
+  );
+
+  it.each(['method_required', 'payment_required'] as const)(
+    'explains native-shell %s without adding a payment destination',
+    async (paymentAction) => {
+      await render(
+        <E2eeTeamSettings
+          workspaceId="team"
+          runtime={{
+            createMemberInvitation: async () => offer,
+            memberJoinRequests: async () => ({
+              ...empty,
+              items: [application('applicant', 'link')],
+              seatPreview: SeatInvitePreviewSchema.parse({
+                status: 'billed',
+                interval: 'month',
+                unitAmount: 1000,
+                proratedAmount: 500,
+                currentPeriodEnd: null,
+                seatCount: 1,
+                nextSeatCount: 2,
+                nextRenewalAmount: 2000,
+                paymentAction,
+              }),
+            }),
+            approveMemberJoin: async () => {
+              throw new Error('payment must be resolved first');
+            },
+            rejectMemberJoin: async () => ({ state: 'rejected' }),
+            revokeMemberInvitation: async () => ({ revoked: true }),
+          }}
+          onRefreshBilling={async () => {}}
+        />
+      );
+      await settle();
+      expect(
+        container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')?.disabled
+      ).toBe(true);
+      expect(container.textContent).toContain('billing.seatResolveOnWeb');
+      expect(button('billing.seatRefreshPayment')).toBeDefined();
+      expect(button('billing.seatResolveMethod')).toBeUndefined();
+      expect(button('billing.seatResolvePayment')).toBeUndefined();
+      expect(container.querySelector('a[href*="billing"]')).toBeNull();
+    }
+  );
+
   it('states the added seat cost beside approve when the workspace is billed', async () => {
     await render(
       <E2eeTeamSettings
@@ -757,6 +885,71 @@ describe('encrypted team joining', () => {
       expect(create()).toBeUndefined();
     }
   );
+  it('matches signed pending offers with unsigned link pins in either order', () => {
+    const signed = { ...offer, signature: 'aa'.repeat(64) };
+    const parsed = parseMemberOffer(JSON.stringify(signed))!;
+    expect(parsed).toEqual(offer);
+    expect(sameMemberOffer(signed, parsed)).toBe(true);
+    expect(sameMemberOffer(parsed, signed)).toBe(true);
+    expect(sameMemberOffer(signed, { ...offer, signature: 'bb'.repeat(64) })).toBe(true);
+  });
+  it.each([
+    ['version', 2],
+    ['workspaceId', 'other'],
+    ['genesisHash', '99'.repeat(32)],
+    ['genesisRecordHex', 'cdef'],
+    ['endorser', '99'.repeat(32)],
+    ['token', '99'.repeat(32)],
+    ['mode', 'email'],
+    ['expiresAt', 3000],
+  ])('rejects a different %s when matching invitation pins', (key, value) => {
+    const changed = { ...offer, [key]: value } as E2eeMemberOffer;
+    expect(sameMemberOffer(offer, changed)).toBe(false);
+    expect(sameMemberOffer(changed, offer)).toBe(false);
+  });
+  it.each([2049, 8192])('accepts a %i-byte genesis through link and desktop handoff', (size) => {
+    const large = {
+      ...offer,
+      genesisRecordHex: 'ab'.repeat(size),
+      workspaceId: 'a'.repeat(128),
+      expiresAt: Number.MAX_SAFE_INTEGER,
+    };
+    expect(parseMemberOffer(JSON.stringify(large))).toEqual(large);
+    expect(resolveDesktopInviteDeepLinkPath(desktopMemberJoinLink(large))).toBe(
+      memberJoinPath(large)
+    );
+  });
+  it.each([
+    { genesisRecordHex: 'ab'.repeat(8193) },
+    { genesisRecordHex: '' },
+    { genesisRecordHex: 'abc' },
+    { genesisRecordHex: 'AB' },
+    { workspaceId: '' },
+    { workspaceId: 'a'.repeat(129) },
+    { workspaceId: 'team/name' },
+    { workspaceId: 'team name' },
+    { expiresAt: 0 },
+    { expiresAt: -1 },
+    { expiresAt: 1.5 },
+    { expiresAt: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects invitation pins outside the protocol bounds (case %#)', (invalid) => {
+    expect(parseMemberOffer(JSON.stringify({ ...offer, ...invalid }))).toBeNull();
+  });
+  it('accepts the minimum expiry and workspace identifier alphabet, but bounds total input', () => {
+    const minimum = { ...offer, workspaceId: 'Team_123-abc', expiresAt: 1 };
+    expect(parseMemberOffer(JSON.stringify(minimum))).toEqual(minimum);
+    expect(parseMemberOffer(JSON.stringify(offer).padEnd(20481, ' '))).toBeNull();
+  });
+  it('publishes only unsigned pins in browser, settings and desktop invitation links', () => {
+    const signed = { ...offer, signature: 'aa'.repeat(64), needsReissue: true };
+    for (const link of [memberJoinPath(signed), memberInvitationUrl(signed)]) {
+      const url = new URL(link, 'https://synthetic.test');
+      expect(JSON.parse(new URLSearchParams(url.hash.slice(1)).get('e2ee')!)).toEqual(offer);
+    }
+    const desktop = new URL(desktopMemberJoinLink(signed));
+    expect(JSON.parse(desktop.searchParams.get('memberOffer')!)).toEqual(offer);
+    expect(signed.signature).toBe('aa'.repeat(64));
+  });
   it('preserves independent genesis pins through desktop handoff and rejects a different token', () => {
     const path = resolveDesktopInviteDeepLinkPath(desktopMemberJoinLink(offer));
     expect(path).toBe(memberJoinPath(offer));

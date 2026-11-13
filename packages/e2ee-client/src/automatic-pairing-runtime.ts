@@ -63,6 +63,13 @@ const id = (crypto: Crypto) =>
   ).join('');
 /** Bound for the native decline at lockout; the hosted client may hold calls while offline. */
 const LOCKOUT_DECLINE_TIMEOUT_MS = 5_000;
+/** Bound for each relay call: a hosted client queues writes while offline and would
+ * otherwise hold a request's gate, and every later read of that request, forever. */
+const RELAY_TIMEOUT_MS = 15_000;
+/** Bound for the best-effort `cancelled` notice sent after a local cancellation. */
+const CANCEL_NOTICE_TIMEOUT_MS = 5_000;
+const bounded = <A>(work: Effect.Effect<A, unknown>, ms: number) =>
+  work.pipe(Effect.timeoutOrElse({ duration: ms, orElse: () => Effect.fail(refuse('network')) }));
 /** Wrong codes an approving device accepts for one request before it ends that request. */
 export const AUTOMATIC_PAIRING_CODE_ATTEMPTS = 3;
 const sameCode = (entered: string, expected: string) => {
@@ -89,14 +96,30 @@ export function makeAutomaticPairingRuntime(options: {
   readonly canPresent: () => boolean;
   /** Advisory background hint only, after retained local identity verification. */
   readonly notifyPending?: (id: string) => void;
+  /** Surfaces `preparing` reviews once this device's local identity is verified, so
+   * Instant QR hosts can present their one-time QR immediately while ECDH finishes. */
+  readonly includePreparingReviews?: boolean;
   readonly crypto: Crypto;
   readonly now?: () => number;
   readonly run: <A>(work: Effect.Effect<A, unknown>) => Promise<A>;
+  /** Overrides the relay call bounds (tests). */
+  readonly relayTimeoutMs?: { readonly call: number; readonly cancelNotice: number };
 }) {
   const requesting = new Map<string, Entry>();
   const approving = new Map<string, Entry>();
   const notified = new Map<string, number>();
-  const { runtime, relay } = options;
+  const { runtime } = options;
+  const limits = options.relayTimeoutMs ?? {
+    call: RELAY_TIMEOUT_MS,
+    cancelNotice: CANCEL_NOTICE_TIMEOUT_MS,
+  };
+  // Every relay call is bounded, so none can hold an entry's gate indefinitely.
+  const relay: AutomaticPairingRelay = {
+    ...(options.relay.subscribe ? { subscribe: options.relay.subscribe } : {}),
+    pending: () => bounded(options.relay.pending(), limits.call),
+    read: (id) => bounded(options.relay.read(id), limits.call),
+    exchange: (command) => bounded(options.relay.exchange(command), limits.call),
+  };
   const setup = Semaphore.makeUnsafe(1);
   let closed = false;
   let account: string | null = null;
@@ -338,26 +361,41 @@ export function makeAutomaticPairingRuntime(options: {
       yield* approveTick(value);
       return value.phase === 'joined' ? null : review(value, value.nativeRequestId ?? '');
     }
+    if (row.state !== 'pending') {
+      value.phase = row.state === 'approved' ? 'joined' : row.state;
+      dispose(value);
+      return null;
+    }
     const exchange = yield* exchangeFor(value);
     const commitment = exchange.commitment!;
     if (!row.commitment)
       row = yield* checked(value, yield* relay.exchange({ id: value.context.id, commitment }));
+    if (row.state !== 'pending') {
+      value.phase = row.state === 'approved' ? 'joined' : row.state;
+      dispose(value);
+      return null;
+    }
     if (
       row.commitment?.peerId !== commitment.peerId ||
       row.commitment.commitment !== commitment.commitment
     )
       return null;
-    if (!row.requesterKey) return null;
+    if (!row.requesterKey) return options.includePreparingReviews ? review(value, '') : null;
     const reveal = yield* exchange.reveal(row.requesterKey);
     if (!row.reveal)
       row = yield* checked(value, yield* relay.exchange({ id: value.context.id, reveal }));
+    if (row.state !== 'pending') {
+      value.phase = row.state === 'approved' ? 'joined' : row.state;
+      dispose(value);
+      return null;
+    }
     if (row.reveal?.publicKey !== reveal.publicKey || row.reveal.nonce !== reveal.nonce)
       return yield* Effect.fail(refuse('pairing-tampered'));
     channel(value, yield* exchange.finish(row.requesterKey!));
     const preview = yield* promise(() => runtime.inspectAccountPairing!(value.code!));
     yield* check();
-    if (!preview || !preview.workspaces.some((w) => w.workspaceId === value.context.workspaceId))
-      return null;
+    if (!preview) return options.includePreparingReviews ? review(value, '') : null;
+    if (!preview.workspaces.some((w) => w.workspaceId === value.context.workspaceId)) return null;
     if (preview.expiresAt !== value.context.expiresAt)
       return yield* Effect.fail(refuse('pairing-tampered'));
     value.nativeRequestId = preview.requestId;
@@ -558,7 +596,14 @@ export function makeAutomaticPairingRuntime(options: {
     automaticPairingState: (workspaceId: string) => {
       const value = requesting.get(workspaceId);
       return value
-        ? options.run(value.gate.withPermit(requesterTick(value)))
+        ? options.run(
+            value.gate.withPermit(
+              // A cancellation that held the gate first detached this request.
+              Effect.suspend(() =>
+                requesting.get(workspaceId) === value ? requesterTick(value) : Effect.succeed(null)
+              )
+            )
+          )
         : Promise.resolve(null);
     },
     cancelAutomaticPairing: (workspaceId: string) =>
@@ -567,17 +612,31 @@ export function makeAutomaticPairingRuntime(options: {
           yield* check();
           const value = requesting.get(workspaceId);
           if (!value) return;
-          yield* value.gate.withPermit(
+          // Local state settles under the gate; the relay notice goes out after the
+          // gate is released, so an unreachable relay never blocks a new request.
+          const detached = yield* value.gate.withPermit(
             Effect.gen(function* () {
-              if (value.admitted) return;
-              yield* relay.exchange({ id: value.context.id, terminal: 'cancelled' });
+              if (value.admitted) return false;
               if (value.attempted && value.lookupId)
                 yield* promise(() =>
                   runtime.cancelAccountPairing!({ expectedLookupId: value.lookupId! })
                 );
               value.phase = 'cancelled';
               dispose(value);
+              // A detached request is never read again: the next start makes a fresh
+              // one with its own id and gate, not the dead `cancelled` original.
+              if (requesting.get(workspaceId) === value) requesting.delete(workspaceId);
+              return true;
             })
+          );
+          if (!detached) return;
+          // Discovery is advisory: an undelivered notice only lets the other device's
+          // copy expire on its own.
+          yield* Effect.result(
+            bounded(
+              options.relay.exchange({ id: value.context.id, terminal: 'cancelled' }),
+              limits.cancelNotice
+            )
           );
         })
       ),
