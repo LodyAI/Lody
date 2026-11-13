@@ -19,7 +19,7 @@ export const useE2eeDeviceRequests = () => useContext(E2eeDeviceRequestsContext)
  * or `lody://auto-pair?…`). The native shell parks the URL on
  * `window.__LODY_PENDING_E2EE_PAIR_URL__` and dispatches `lody:e2ee-pair-url`. The most
  * recently mounted handler that accepts it consumes it; an unaccepted link is retried
- * on `retryE2eePairLink` (a request that has not been fetched yet) until it goes stale.
+ * on `retryE2eePairLink` (a request or join page that is not ready yet) until it goes stale.
  */
 type PairLinkHandler = (url: string) => boolean;
 const handlers: PairLinkHandler[] = [];
@@ -65,9 +65,13 @@ function listen() {
   });
 }
 /** Registers a handler and returns its removal. */
-export function registerE2eePairLinkHandler(handler: PairLinkHandler) {
+export function registerE2eePairLinkHandler(
+  handler: PairLinkHandler,
+  options?: { readonly fallback?: boolean }
+) {
   listen();
-  handlers.push(handler);
+  if (options?.fallback) handlers.unshift(handler);
+  else handlers.push(handler);
   retryE2eePairLink();
   return () => {
     const index = handlers.lastIndexOf(handler);

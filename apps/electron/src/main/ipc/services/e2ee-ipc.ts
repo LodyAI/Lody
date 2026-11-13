@@ -2014,7 +2014,12 @@ export class E2eeIpc extends ProductWindowIpcService {
   }
   @IpcMethod()
   async requestAccountPairing(
-    input: { pairingString?: string; expiresAt?: number; preserveExisting?: true },
+    input: {
+      pairingString?: string
+      expiresAt?: number
+      preserveExisting?: true
+      workspaceId?: string
+    },
     workspaces: unknown
   ) {
     sender()
@@ -2023,9 +2028,12 @@ export class E2eeIpc extends ProductWindowIpcService {
       throw new Error('e2ee_invalid-input')
     if (input?.expiresAt !== undefined && !Number.isSafeInteger(input.expiresAt))
       throw new Error('e2ee_invalid-input')
+    if (input?.preserveExisting !== undefined && input.preserveExisting !== true)
+      throw new Error('e2ee_invalid-input')
     if (
-      input?.preserveExisting !== undefined &&
-      (input.preserveExisting !== true || hints.length !== 1)
+      input?.workspaceId !== undefined &&
+      (typeof input.workspaceId !== 'string' ||
+        !hints.some((hint) => hint.workspaceId === input.workspaceId))
     )
       throw new Error('e2ee_invalid-input')
     const pairing = await this.accountPairing(hints)
@@ -2034,9 +2042,8 @@ export class E2eeIpc extends ProductWindowIpcService {
         pairing.requestAccountPairing({
           ...(input?.pairingString === undefined ? {} : { pairingString: input.pairingString }),
           ...(input?.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
-          ...(input?.preserveExisting
-            ? { preserveExisting: true as const, workspaceId: hints[0]!.workspaceId }
-            : {})
+          ...(input?.preserveExisting ? { preserveExisting: true as const } : {}),
+          ...(input?.workspaceId === undefined ? {} : { workspaceId: input.workspaceId })
         })
       )
     )

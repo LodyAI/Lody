@@ -705,7 +705,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         )
           return yield* fail('scope-mismatch');
         const current = () =>
-          Effect.flatMap(bounded(input.pages()), (pages) => verifyPersonalHistory(offer, pages));
+          Effect.flatMap(input.pages(), (pages) => verifyPersonalHistory(offer, pages));
         const initial = yield* current();
         const user = yield* Effect.fromResult(accountUserId(platform.scope.accountId));
         const member = initial.inspectState().members.get(pin.membershipId);
@@ -751,7 +751,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
             const approval = yield* acceptAccountHistory({
               ...pin,
               offer,
-              pages: yield* bounded(input.pages()),
+              pages: yield* input.pages(),
             });
             // Only the admitted session installs recovered opaque keys, through the same
             // InstalledEpochKeys commitment/protection/readback boundary as normal reception.

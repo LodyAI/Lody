@@ -205,7 +205,7 @@ export function E2eeAccountPairingRequest(props: {
   if (!runtime.requestAccountPairing) return null;
   const terminal = state && state.status !== 'waiting' && state.status !== 'joined';
   return (
-    <Card.Root data-testid="e2ee-account-pairing-request">
+    <Card.Root data-testid="e2ee-account-pairing-request" data-e2ee-pairing-surface="">
       <Card.Title>{t('e2ee.accountPair.request.title')}</Card.Title>
       {phase === 'idle' && !state && (
         <>
@@ -433,7 +433,7 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
     setError(null);
   };
   return (
-    <Card.Root data-testid="e2ee-account-pairing-approve">
+    <Card.Root data-testid="e2ee-account-pairing-approve" data-e2ee-pairing-surface="">
       <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>
       {phase.kind === 'enter' && (
         <>

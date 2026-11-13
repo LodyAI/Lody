@@ -834,6 +834,10 @@ it.each([
     expected: { ok: true, sealed: true, partialEpochKey: true },
   },
   { options: { setup: true }, expected: { ok: true, sealed: true, recoveryVerified: true } },
+  {
+    options: { setup: true, slowRecoveryIo: true },
+    expected: { ok: true, sealed: true, recoveryVerified: true, refreshedDuringSetup: true },
+  },
   { options: { repair: true }, expected: { ok: true, sealed: true, noDuplicateAdmission: true } },
   { options: { repair: true, revokePersonal: true }, expected: { ok: false } },
   { options: { wrongAccount: true }, expected: { ok: false, phase: null } },

@@ -205,7 +205,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     // Readable ledger precedes lazy acquisition of every key store/backend.
     yield* ledger();
     const fibers = yield* Scope.provide(FiberSet.make(), operationsScope),
-      serial = yield* Semaphore.make(1);
+      serial = yield* Semaphore.make(1),
+      recoverySerial = yield* Semaphore.make(1);
     // Every round held under the serial permit is bounded: a stalled remote call is
     // interrupted at its deadline and releases the permit, so later refreshes, key rounds
     // and management are never blocked behind it. Core keeps an interrupted write's
@@ -931,10 +932,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       /** Set up this workspace's recovery without exposing its signer or epoch keys. */
       setupRecovery: (input: PersonalRecoverySetupInput) =>
         run(
-          serialRound(
+          recoverySerial.withPermit(
             withKeys((ctx) =>
               Effect.gen(function* () {
-                yield* control.refresh();
+                yield* serialRound(control.refresh());
                 const view = yield* admitted();
                 const workflow = yield* makeWorkspaceRecovery({
                   vault: input.vault,
@@ -955,15 +956,19 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                   submitOriginal: (record, registration) =>
                     input
                       .submitOriginal(record, registration)
-                      .pipe(Effect.tap(() => control.refresh())),
+                      .pipe(Effect.tap(() => serialRound(Effect.interruptible(control.refresh())))),
                   fetchCurrentEnvelope: (...args) =>
                     Effect.gen(function* () {
                       // A failed independent receive/repair must not hide an already delivered R envelope.
                       yield* Effect.exit(
-                        Effect.gen(function* () {
-                          const latest = yield* admitted();
-                          return yield* maintenance!(latest.inspectState().epoch.number);
-                        })
+                        serialRound(
+                          Effect.interruptible(
+                            Effect.gen(function* () {
+                              const latest = yield* admitted();
+                              return yield* maintenance!(latest.inspectState().epoch.number);
+                            })
+                          )
+                        )
                       );
                       return yield* input.fetchCurrentEnvelope(...args);
                     }),

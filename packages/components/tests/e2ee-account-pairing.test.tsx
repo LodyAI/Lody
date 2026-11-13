@@ -172,12 +172,16 @@ describe('new device request', () => {
 
   // Desktop IPC carries only the message; the reason must survive to the screen
   // instead of a generic "Pairing failed".
-  it.each(['pairing-unavailable', 'pairing-rate-limited'])(
+  it.each(['pairing-unavailable', 'pairing-rate-limited', 'pairing-elsewhere'])(
     'explains a relay refusal (%s) from the desktop host',
     async (code) => {
       const host = requesterHost();
       host.runtime.requestAccountPairing = () =>
-        withAccountPairingCode(Promise.reject(new Error(`e2ee_${code}`)));
+        withAccountPairingCode(
+          Promise.reject(
+            new Error(`Error invoking remote method 'e2ee.requestAccountPairing': Error: e2ee_${code}`)
+          )
+        );
       await act(async () =>
         root.render(
           <E2eeAccountPairingRequest runtime={host.runtime} autoStart onJoined={() => {}} />
@@ -1527,29 +1531,80 @@ describe('pairing hardening', () => {
     return () => delete (navigator as { mediaDevices?: unknown }).mediaDevices;
   };
 
-  it('approves a request from a link opened by the system camera once that request is fetched', async () => {
+  it('prefills a request from an external auto-pair link and waits for explicit approval', async () => {
     const { E2eeAutomaticPairingInbox } =
       await import('../src/components/pages/e2ee-automatic-pairing');
+    const other = { ...review, id: 'other-request', deviceName: 'Other laptop' };
     let rows: (typeof review)[] = [];
     const entered: [string, string][] = [];
+    const joined: { pairingString: string; preserveExisting?: boolean }[] = [];
     const runtime = {
       pendingAutomaticPairing: async () => rows,
       approveAutomaticPairing: async (id: string, code: string) => {
         entered.push([id, code]);
       },
       declineAutomaticPairing: async () => {},
+      requestAccountPairing: async (input: { pairingString: string; preserveExisting?: boolean }) => {
+        joined.push(input);
+        return {
+          lookupId: 'a'.repeat(32),
+          direction: 'approver-shows',
+          pairingString: null,
+          expiresAt: NOW + 600_000,
+          status: 'joined',
+          workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'joined', approval: 'approved' }],
+        };
+      },
+      accountPairingRequest: async () => null,
+      cancelAccountPairing: async () => {},
     } as unknown as E2eeWorkspaceRuntime;
-    // The app was woken by the link before the request reached this device.
+    // The app was woken by the link before the request reached this device; even if another
+    // waiting row arrives ahead of it, the link claims its own row rather than the first row.
     (window as { __LODY_PENDING_E2EE_PAIR_URL__?: string }).__LODY_PENDING_E2EE_PAIR_URL__ =
       'lody://auto-pair?id=request&code=246810';
     await act(async () => root.render(<E2eeAutomaticPairingInbox runtime={runtime} />));
     await flush();
     expect(entered).toEqual([]);
-    rows = [review];
+    rows = [other, review];
     await tick(2000);
     await flush();
+    // External BROWSABLE links are untrusted: prefill the code, never sign without a click.
+    expect(entered).toEqual([]);
+    expect(document.body.textContent).toContain('Phone');
+    expect(
+      (document.querySelector('[data-testid="e2ee-approval-code"]') as HTMLInputElement | null)
+        ?.value
+    ).toBe('246810');
+    // While an approval surface is already open, neither an auto-pair link for another waiting
+    // request nor a stray pair link can swap the target or start a background join.
+    await act(async () =>
+      window.dispatchEvent(
+        new CustomEvent('lody:e2ee-pair-url', {
+          detail: { url: 'lody://auto-pair?id=other-request&code=135790' },
+        })
+      )
+    );
+    await act(async () =>
+      window.dispatchEvent(
+        new CustomEvent('lody:e2ee-pair-url', {
+          detail: { url: `lody://pair/${CODE.replace(/-/g, '')}` },
+        })
+      )
+    );
+    await flush();
+    expect(joined).toEqual([]);
+    expect(document.body.textContent).toContain('Phone');
+    expect(
+      (document.querySelector('[data-testid="e2ee-approval-code"]') as HTMLInputElement | null)
+        ?.value
+    ).toBe('246810');
+    await act(async () =>
+      (document.querySelector('[data-testid="e2ee-approval-authorize"]') as HTMLButtonElement).click()
+    );
+    await flush();
     expect(entered).toEqual([['request', '246810']]);
-    // A link for a request this device does not have sends nothing.
+    rows = [review];
+    // A link for a request this device does not have opens and sends nothing.
     await act(async () =>
       window.dispatchEvent(
         new CustomEvent('lody:e2ee-pair-url', {
@@ -1558,7 +1613,161 @@ describe('pairing hardening', () => {
       )
     );
     await flush();
+    expect(document.querySelector('[data-testid="e2ee-approval-code"]')).toBeNull();
     expect(entered).toEqual([['request', '246810']]);
+  });
+
+  it('keeps cold-parked pair links across inbox remounts and stages confirmation only on the join page', async () => {
+    const {
+      derivePairingKeys,
+      disposePairingKeys,
+      encodePairingSecret,
+      formatPairingString,
+      parsePairingString,
+    } = await import('@lody/e2ee-core/protocol');
+    const { Result } = await import('effect');
+    const { E2eeAutomaticPairingInbox, E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const { ForceMobileLayoutProvider } = await import('../src/hooks/use-mobile');
+    const secondCode = Result.getOrThrow(encodePairingSecret(new Uint8Array(16).fill(7)));
+    const pairUrl = `lody://pair/${CODE.replace(/-/g, '')}`;
+    const secondPairUrl = `lody://pair/${formatPairingString(secondCode).replace(/-/g, '')}`;
+    const lookupOf = (url: string) => {
+      const secret = Result.getOrThrow(parsePairingString(url));
+      const keys = Result.getOrThrow(derivePairingKeys(secret));
+      const hex = Array.from(keys.lookupId, (b) => b.toString(16).padStart(2, '0')).join('');
+      disposePairingKeys(keys);
+      secret.fill(0);
+      return hex;
+    };
+    const expectedFirstLookup = lookupOf(pairUrl);
+    const expectedSecondLookup = lookupOf(secondPairUrl);
+
+    const requested: { pairingString?: string; preserveExisting?: boolean }[] = [];
+    const cancelled: ({ expectedLookupId: string } | undefined)[] = [];
+    let joinedCount = 0;
+    let autoStarted = 0;
+    let currentState: E2eeAccountPairingRequestState | null = null;
+    const runtime = {
+      pendingAutomaticPairing: async () => [],
+      automaticPairingState: async () => null,
+      startAutomaticPairing: async () => {
+        autoStarted += 1;
+        return {
+          id: 'request',
+          workspaceId: 'w1',
+          workspaceName: 'Alpha',
+          deviceName: 'Phone',
+          comparisonCode: null,
+          expiresAt: NOW + 300_000,
+          phase: 'preparing' as const,
+        };
+      },
+      cancelAutomaticPairing: async () => {},
+      requestAccountPairing: async (input: {
+        pairingString?: string;
+        preserveExisting?: boolean;
+      }) => {
+        requested.push(input);
+        return currentState!;
+      },
+      accountPairingRequest: async () => currentState,
+      cancelAccountPairing: async (input?: { expectedLookupId: string }) => {
+        cancelled.push(input);
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+
+    // 1. Cold launch with key="signed-out" -> authenticated user remount does not consume or drop
+    // the parked pair link while no join page is open.
+    currentState = {
+      lookupId: expectedFirstLookup,
+      direction: 'approver-shows',
+      pairingString: null,
+      expiresAt: NOW + 600_000,
+      status: 'waiting',
+      workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'pending', approval: 'waiting' }],
+    };
+    (window as { __LODY_PENDING_E2EE_PAIR_URL__?: string }).__LODY_PENDING_E2EE_PAIR_URL__ = pairUrl;
+    await act(async () =>
+      root.render(<E2eeAutomaticPairingInbox key="signed-out" runtime={runtime} />)
+    );
+    await flush();
+    expect(requested).toEqual([]);
+    await act(async () =>
+      root.render(
+        <ForceMobileLayoutProvider force>
+          <E2eeAutomaticPairingInbox key="user-1" runtime={runtime}>
+            <E2eeAutomaticPairingPage
+              runtime={runtime}
+              workspaceId="w1"
+              onJoined={() => {
+                joinedCount += 1;
+              }}
+              onBack={() => {}}
+            />
+          </E2eeAutomaticPairingInbox>
+        </ForceMobileLayoutProvider>
+      )
+    );
+    await flush();
+    expect(autoStarted).toBe(0);
+    expect(requested).toEqual([]);
+    expect(document.querySelectorAll('[data-testid="e2ee-link-join-confirm"]')).toHaveLength(1);
+
+    // 2. Leaving/unmounting while the confirmed link request is still waiting cancels its lookupId.
+    await act(async () =>
+      (document.querySelector('[data-testid="e2ee-link-join-confirm"]') as HTMLButtonElement).click()
+    );
+    await flush();
+    expect(requested).toEqual([{ pairingString: pairUrl }]);
+    await act(async () => root.render(<div />));
+    await flush();
+    expect(cancelled).toEqual([{ expectedLookupId: expectedFirstLookup }]);
+
+    // 3. Partial join where w1 joined and w2 was omitted cancels expectedLookupId once settled.
+    requested.length = 0;
+    cancelled.length = 0;
+    currentState = {
+      lookupId: expectedSecondLookup,
+      direction: 'approver-shows',
+      pairingString: null,
+      expiresAt: NOW + 600_000,
+      status: 'waiting',
+      workspaces: [
+        { workspaceId: 'w1', name: 'Alpha', state: 'joined', approval: 'approved' },
+        { workspaceId: 'w2', name: 'Beta', state: 'pending', approval: 'omitted' },
+      ],
+    };
+    await act(async () =>
+      root.render(
+        <ForceMobileLayoutProvider force>
+          <E2eeAutomaticPairingInbox key="user-1" runtime={runtime}>
+            <E2eeAutomaticPairingPage
+              runtime={runtime}
+              workspaceId="w1"
+              onJoined={() => {
+                joinedCount += 1;
+              }}
+              onBack={() => {}}
+            />
+          </E2eeAutomaticPairingInbox>
+        </ForceMobileLayoutProvider>
+      )
+    );
+    await flush();
+    await act(async () =>
+      window.dispatchEvent(
+        new CustomEvent('lody:e2ee-pair-url', { detail: { url: secondPairUrl } })
+      )
+    );
+    await flush();
+    await act(async () =>
+      (document.querySelector('[data-testid="e2ee-link-join-confirm"]') as HTMLButtonElement).click()
+    );
+    await flush();
+    expect(requested).toEqual([{ pairingString: secondPairUrl }]);
+    expect(joinedCount).toBe(1);
+    expect(cancelled).toEqual([{ expectedLookupId: expectedSecondLookup }]);
   });
 
   it('keeps a device that joined by code from popping its request up afterwards', async () => {
@@ -1587,10 +1796,7 @@ describe('pairing hardening', () => {
         workspaces: [{ workspaceId: 'w1', outcome: 'admitted' }],
       }),
     } as unknown as E2eeWorkspaceRuntime;
-    // A pairing surface (the console's own code) is already open: the popup waits.
-    const surface = document.createElement('div');
-    surface.setAttribute('data-e2ee-pairing-surface', '');
-    document.body.append(surface);
+    // The console's own QR card marks itself as a pairing surface: the popup waits.
     await act(async () =>
       root.render(
         <E2eeAutomaticPairingInbox runtime={runtime}>
@@ -1607,7 +1813,6 @@ describe('pairing hardening', () => {
     await flush();
     expect(text()).toContain('e2ee.instantQr.joined');
     expect(text()).toContain('e2ee.instantQr.unavailable {"count":1,"names":"Omega"}');
-    surface.remove();
     await tick(2000);
     await flush();
     expect(document.querySelector('[data-testid="e2ee-approval-code"]')).toBeNull();
