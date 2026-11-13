@@ -20,6 +20,8 @@ final class InboxController: UIViewController {
   private var memberTask: Task<Void, Never>?
   private var observers: [NSObjectProtocol] = []
   private var renderedInput: (userId: String, workspaceId: String, catalog: SessionCatalog)?
+  /// Account/workspace whose catalog has loaded empty once; later resyncs or reconnects keep the guide.
+  private var onboardingSettledKey: String?
 
   init(source: SessionSource = .live) {
     self.source = source
@@ -41,6 +43,11 @@ final class InboxController: UIViewController {
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.accessibilityIdentifier = "ipad-inbox-list"
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
+    list.shareOnboarding = { [weak self] items, source in
+      let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
+      sheet.popoverPresentationController?.sourceView = source
+      self?.present(sheet, animated: true)
+    }
     view.addSubview(list)
     wireChrome()
     observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged, .lodyProjectGroupsDidChange]).map { name in
@@ -94,6 +101,11 @@ final class InboxController: UIViewController {
       if term.isEmpty { list.setPlaceholder(listPlaceholder(state)) }
       let unknown = source === SessionSource.live && state.workspace?.resolvedMode == .unknown
       list.setRetry(unknown && term.isEmpty ? { Task { await AuthSession.shared.refreshWorkspaceModes() } } : nil)
+    }
+    // The guide follows loading / connection too, so it is set before the content-only guard.
+    if list.setOnboarding(term.isEmpty && showsOnboarding(state)) {
+      LodyScrollEdges.bind(list.scrollView, to: self)
+      chrome.attachScrollEdge(list.scrollView)
     }
     // Presence and connection updates still refresh chrome, but cannot change rows.
     // Explicit renders bypass this guard for search results, identities and watermarks.
@@ -214,6 +226,21 @@ final class InboxController: UIViewController {
   private func syncState(_ state: SessionListState) -> HomeSyncState {
     if !state.connected { return .connecting }
     return state.loading ? .syncing : .live
+  }
+
+  /// Web mobile Home's first-run guide: a signed-in plaintext workspace, outside Archived,
+  /// with neither a computer nor a conversation. Like web it waits only for the first
+  /// loaded, connected catalog of that account/workspace; a later foreground resync or
+  /// reconnect keeps it until a computer or conversation appears. Search is excluded by the caller.
+  private func showsOnboarding(_ state: SessionListState) -> Bool {
+    let empty = state.catalog.machineIds.isEmpty && state.catalog.sessions.isEmpty
+    if !empty || state.key.isEmpty {
+      onboardingSettledKey = nil
+    } else if !state.loading, state.connected {
+      onboardingSettledKey = state.key
+    }
+    guard empty, !state.userId.isEmpty, !HomeArchive.shown, state.workspace?.resolvedMode == .plaintext else { return false }
+    return onboardingSettledKey == state.key
   }
 
   private func listPlaceholder(_ state: SessionListState) -> String {

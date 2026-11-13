@@ -86,6 +86,9 @@ final class InboxChrome {
     padBar.attachScrollEdge(to: scrollView)
   }
 
+  /// The list column's scroll view changed (the first-run guide replaced the empty list).
+  func attachScrollEdge(_ scrollView: UIScrollView) { padBar.attachScrollEdge(to: scrollView) }
+
   func update(_ model: Model?) {
     guard let host, let header else { return }
     guard let model else {
