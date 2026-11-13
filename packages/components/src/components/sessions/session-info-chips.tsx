@@ -38,6 +38,7 @@ import {
   type SessionPullRequestView,
 } from '@lody/shared';
 import { cn } from '@/lib/utils';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
@@ -796,7 +797,6 @@ const prHistoryStyles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  current: { flexShrink: 0, color: colors.secondaryLabel, fontSize: text.captionSize },
 });
 
 /**
@@ -867,11 +867,7 @@ function PrHistoryControl({
                     {view.number != null ? `#${view.number}` : 'PR'}
                   </span>
                   <span {...stylex.props(prHistoryStyles.repo)}>{view.repoFullName ?? ''}</span>
-                  {isCurrent ? (
-                    <span {...stylex.props(prHistoryStyles.current)}>
-                      {t('sessions.pr.historyCurrent', 'Current')}
-                    </span>
-                  ) : null}
+                  {isCurrent ? <Badge>{t('sessions.pr.historyCurrent', 'Current')}</Badge> : null}
                 </>
               );
               return (
