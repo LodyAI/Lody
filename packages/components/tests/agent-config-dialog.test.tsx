@@ -940,7 +940,9 @@ describe('AgentConfigDialog', () => {
     expect(document.body.textContent).toContain('Ready');
     expect(store.get(getAllProviderSetupsAtom)).toEqual([]);
     expect(store.get(getAllAgentConfigAtom).map((config) => config.id)).toEqual([setup.id]);
-    expect(refresh).toHaveBeenCalledWith({ machineId, configId: setup.id });
+    expect(refresh).toHaveBeenCalledWith(
+      expect.objectContaining({ machineId, configId: setup.id })
+    );
   });
 
   const getTabByName = (name: string): HTMLButtonElement => {

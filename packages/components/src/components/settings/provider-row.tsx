@@ -23,6 +23,8 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
+import type { AcpModelOptionsRefreshProgress } from '@/hooks/use-refresh-machine-acp-capabilities';
+import { formatModelOptionsProgressText } from './model-options-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { formatLocalizedRelativeTime } from '@/lib/format-relative-time';
@@ -34,6 +36,12 @@ import {
   getAgentRateLimitEntries,
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
+
+/** Refreshes one Provider; `onModelOptionsProgress` names each model whose options are read. */
+export type ProviderRefreshHandler = (
+  config: AgentConfigMeta,
+  options?: { onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void }
+) => Promise<void>;
 
 /** The panel, rather than the viewport, decides whether quota fits beside the name. */
 const ROOMY = '@container (min-width: 28rem)';
@@ -100,7 +108,7 @@ export type ProviderRowProps = {
   machine: MachineViewMeta | undefined;
   onEdit: (config: AgentConfigMeta) => void;
   onDelete?: (config: AgentConfigMeta) => Promise<void>;
-  onRefresh?: (config: AgentConfigMeta) => Promise<void>;
+  onRefresh?: ProviderRefreshHandler;
   /**
    * Density: `card` is the compact line of the desktop provider card, `list`
    * the roomier mobile one. Neither draws a surface: the list draws one card
@@ -196,6 +204,7 @@ export function ProviderRow({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [modelProgress, setModelProgress] = useState<AcpModelOptionsRefreshProgress | null>(null);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const binaryProgress = useMachineAcpBinaryProgress(
     runtime,
@@ -223,7 +232,7 @@ export function ProviderRow({
     if (!onRefresh) return;
     try {
       setRefreshing(true);
-      await onRefresh(config);
+      await onRefresh(config, { onModelOptionsProgress: setModelProgress });
       toast.success(
         t('settings.agent.provider.refreshSuccess', 'Refreshed {{name}}', { name: config.name })
       );
@@ -236,6 +245,7 @@ export function ProviderRow({
       );
     } finally {
       setRefreshing(false);
+      setModelProgress(null);
     }
   };
 
@@ -350,9 +360,9 @@ export function ProviderRow({
           ) : null}
         </div>
       </div>
-      {refreshing && binaryProgressText ? (
+      {refreshing && (modelProgress || binaryProgressText) ? (
         <div role="status" {...stylex.props(styles.progress)}>
-          {binaryProgressText}
+          {modelProgress ? formatModelOptionsProgressText(t, modelProgress) : binaryProgressText}
         </div>
       ) : null}
       <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>

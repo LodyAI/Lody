@@ -1,4 +1,7 @@
 import {
+  getAcpConfigOptionsModelId,
+  type ACPSessionId,
+  type AcpConfigOptionSummary,
   type AgentConfigCliType,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
@@ -19,8 +22,10 @@ import { probeBuiltinAuthentication } from '@/agent/acp-authentication';
 import { isAntigravityRegistryAgent } from './antigravity-quota';
 import {
   normalizeAcpSessionCapabilities,
+  normalizeConfigOptions,
   type AcpCapabilitiesResult,
 } from '@/agent/acp-capability-normalization';
+import type { AgentClient } from '@/agent/agent-client';
 
 export { normalizeConfigOptions } from '@/agent/acp-capability-normalization';
 export type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';
@@ -32,7 +37,30 @@ export type FetchAcpCapabilitiesOptions = {
   verifyCodexCredential?: boolean;
   onManagedRuntimeProgress?: ManagedRuntimeProgressCallback;
   signal?: AbortSignal;
+  /**
+   * Switch the probe session to every advertised model and record the option
+   * list the agent reports for each. Only a refresh a person asked for sets
+   * this: it costs one `session/set_config_option` round trip per model.
+   */
+  readModelOptions?: {
+    onProgress?: (progress: AcpModelOptionsReadProgress) => void;
+  };
 };
+
+/** The model whose options are being read, `index` of `total` (1-based). */
+export type AcpModelOptionsReadProgress = {
+  modelId: string;
+  modelName: string;
+  index: number;
+  total: number;
+};
+
+/**
+ * Upper bound for one model switch. The read has no overall deadline, because
+ * a person is watching its progress; this only stops an agent that never
+ * answers from holding the refresh forever.
+ */
+export const ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS = 60_000;
 
 export type FetchedAcpCapabilities = AcpCapabilitiesResult & {
   capabilitySourceVersion?: string;
@@ -45,7 +73,85 @@ export type FetchedAcpCapabilities = AcpCapabilitiesResult & {
    * (older test doubles and adapters that cannot report them).
    */
   authMethods?: readonly AuthMethod[];
+  /** Each model's own option list, when `readModelOptions` was requested. */
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
 };
+
+class ModelSwitchTimeoutError extends Error {}
+
+const withSwitchTimeout = async <T>(promise: Promise<T>): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new ModelSwitchTimeoutError('Model switch timed out')),
+          ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+/**
+ * Switches the probe session to each advertised model in turn and keeps the
+ * list the agent answers with. The `session/new` snapshot is the current
+ * model's answer. A model whose switch fails or answers without a list for
+ * that model is skipped; an unanswered switch ends the read, since every later
+ * switch would wait on the same agent. What was read so far is kept.
+ */
+export async function readEveryModelConfigOptions(args: {
+  client: Pick<AgentClient, 'setSessionConfigOption'>;
+  acpSessionId: ACPSessionId;
+  snapshot: AcpConfigOptionSummary[] | undefined;
+  onProgress?: (progress: AcpModelOptionsReadProgress) => void;
+  logger: Logger;
+  signal?: AbortSignal;
+}): Promise<Record<string, AcpConfigOptionSummary[]> | undefined> {
+  const modelOption = args.snapshot?.find(
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  const currentModelId = getAcpConfigOptionsModelId(args.snapshot);
+  if (!args.snapshot || !modelOption || !currentModelId) return undefined;
+  const read: Record<string, AcpConfigOptionSummary[]> = { [currentModelId]: args.snapshot };
+  const total = modelOption.options.length;
+  const ordered = [
+    ...modelOption.options.filter((choice) => choice.value === currentModelId),
+    ...modelOption.options.filter((choice) => choice.value !== currentModelId),
+  ];
+  for (const [position, choice] of ordered.entries()) {
+    args.signal?.throwIfAborted();
+    args.onProgress?.({
+      modelId: choice.value,
+      modelName: choice.name,
+      index: position + 1,
+      total,
+    });
+    if (choice.value === currentModelId) continue;
+    try {
+      const reported = normalizeConfigOptions(
+        await withSwitchTimeout(
+          args.client.setSessionConfigOption(args.acpSessionId, modelOption.id, choice.value)
+        )
+      );
+      if (reported && getAcpConfigOptionsModelId(reported) === choice.value) {
+        read[choice.value] = reported;
+      }
+    } catch (error) {
+      args.signal?.throwIfAborted();
+      args.logger.debug(
+        `[acp-capabilities] Could not read options for model ${choice.value}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      if (error instanceof ModelSwitchTimeoutError) break;
+    }
+  }
+  return read;
+}
 
 /**
  * Spawns a temporary ACP agent to discover the capabilities returned by session/new.
@@ -193,21 +299,33 @@ export async function fetchAcpCapabilities(
           await broker.close();
         }
       }
+      const capabilities = normalizeAcpSessionCapabilities(sessionResponse, {
+        sessionFork: client.supportsSessionFork?.() === true,
+        sessionTitle: client.supportsSessionTitleGeneration(),
+        rateLimits:
+          client.getRateLimitsCapability() ??
+          (isAntigravityRegistryAgent({ cliType, agentType })
+            ? { version: 1, query: true }
+            : undefined),
+        acknowledgedSteer: client.supportsAcknowledgedSteer(),
+        goalActions: client.getGoalCapability()?.actions.slice(),
+        agent: { cliType, agentType },
+      });
+      const modelConfigOptions = options.readModelOptions
+        ? await readEveryModelConfigOptions({
+            client,
+            acpSessionId,
+            snapshot: capabilities.configOptions,
+            onProgress: options.readModelOptions.onProgress,
+            logger,
+            signal: options.signal,
+          })
+        : undefined;
       return {
-        ...normalizeAcpSessionCapabilities(sessionResponse, {
-          sessionFork: client.supportsSessionFork?.() === true,
-          sessionTitle: client.supportsSessionTitleGeneration(),
-          rateLimits:
-            client.getRateLimitsCapability() ??
-            (isAntigravityRegistryAgent({ cliType, agentType })
-              ? { version: 1, query: true }
-              : undefined),
-          acknowledgedSteer: client.supportsAcknowledgedSteer(),
-          goalActions: client.getGoalCapability()?.actions.slice(),
-          agent: { cliType, agentType },
-        }),
+        ...capabilities,
         capabilitySourceVersion,
         authMethods: client.getAuthMethods(),
+        ...(modelConfigOptions ? { modelConfigOptions } : {}),
       };
     } finally {
       await shutdownLocalAcpAgent({

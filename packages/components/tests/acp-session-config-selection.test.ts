@@ -175,8 +175,9 @@ describe('ACP session config derivation', () => {
     /* An authoritative capability refresh removed the persisted extended Codex
        model (`gpt-5.6-sol`). The selector catalog was built for that stale
        CANDIDATE, so the reasoning selector still carries the extended tiers —
-       without re-normalization, `max` would stay valid and dispatchable after
-       the model resolved to one that does not support it. */
+       without re-normalization against the resolved model's declared ladder,
+       `max` would stay valid and dispatchable after the model resolved to one
+       that does not support it. */
     const staleNormalizedReasoningSelector = {
       configId: 'reasoning_effort',
       label: 'Reasoning effort',
@@ -204,6 +205,8 @@ describe('ACP session config derivation', () => {
         defaultModeId: null,
         defaultModelId: 'gpt-5.5',
         configOptionSelectors: [staleNormalizedReasoningSelector],
+        modelReasoningEfforts: undefined,
+        declaredModelControls: { 'gpt-5.5': { effortValues: ['medium', 'high'] } },
       },
       { cliType: 'builtin', agentType: 'codex' }
     );

@@ -1511,6 +1511,7 @@ export const MachineAcpCapabilitiesRefreshRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     configId: AgentConfigIdSchema,
     force: z.boolean().optional(),
+    readModelOptions: z.literal(true).optional(),
   })
   .strict();
 
@@ -1767,6 +1768,7 @@ export const MachineAcpBinaryProgressMessageSchema = z
       'unsupported-platform',
       'incompatible-host',
       'error',
+      'reading-model-options',
     ]),
     downloadedBytes: z.number().int().nonnegative().optional(),
     totalBytes: z.number().int().nonnegative().optional(),
@@ -1777,6 +1779,11 @@ export const MachineAcpBinaryProgressMessageSchema = z
     required: SharedOptionalStringSchema,
     command: SharedOptionalStringSchema,
     error: SharedOptionalStringSchema,
+    configId: AgentConfigIdSchema.optional(),
+    modelId: SharedOptionalStringSchema,
+    modelName: SharedOptionalStringSchema,
+    modelIndex: z.number().int().positive().optional(),
+    modelCount: z.number().int().positive().optional(),
   })
   .strict();
 

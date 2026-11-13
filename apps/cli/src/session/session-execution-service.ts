@@ -809,6 +809,8 @@ export type SessionExecutionServiceDeps = {
     capabilitySourceVersion?: string;
     /** Sign-in methods the probe read from `initialize`, when it could. */
     authMethods?: readonly AuthMethod[];
+    /** Each model's own option list, when the refresh asked to read them. */
+    modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   }>;
   /**
    * The `capabilitySourceVersion` a probe would stamp right now, resolved without
@@ -9261,7 +9263,9 @@ export class SessionExecutionService {
   ): Promise<MachineAcpCapabilitiesRefreshResponse> {
     // Config identity is part of the key because the response and cache row are
     // both config-scoped even when two configs share identical launch inputs.
-    const dedupeKey = computeAcpRefreshDedupeKey(
+    // A refresh that reads every model's options does more work than one that
+    // does not, so the two never share an in-flight probe.
+    const dedupeKey = `${computeAcpRefreshDedupeKey(
       message.configId,
       message.cliType,
       message.agentType,
@@ -9269,7 +9273,7 @@ export class SessionExecutionService {
       message.customAcp,
       message.runtimeOverrides,
       message.magpieGatewayUrl
-    );
+    )}${message.readModelOptions ? ':model-options' : ''}`;
 
     this.deps.logger.debug(
       `[acp-capabilities] Refresh requested (cliType=${message.cliType} agentType=${message.agentType} force=${message.force === true})`
@@ -9445,6 +9449,7 @@ export class SessionExecutionService {
         modelCapabilities,
         capabilitySourceVersion,
         authMethods,
+        modelConfigOptions,
       } = await this.deps.fetchAcpCapabilities(
         message.cliType,
         message.agentType,
@@ -9462,6 +9467,29 @@ export class SessionExecutionService {
               toManagedRuntimeProgressMessage(this.deps.machineId, event)
             );
           },
+          // Built-in adapters only switch models in-session. A registry or
+          // custom agent may persist each switch (registry Cursor rewrites
+          // its global default model), so they refresh as before.
+          ...(message.readModelOptions && message.cliType === 'builtin'
+            ? {
+                readModelOptions: {
+                  onProgress: (progress) => {
+                    if (options.signal?.aborted) return;
+                    options.onAcpBinaryProgress?.({
+                      type: 'machine/acp-binary-progress',
+                      machineId: this.deps.machineId,
+                      agentType: message.agentType,
+                      status: 'reading-model-options',
+                      configId: message.configId,
+                      modelId: progress.modelId,
+                      modelName: progress.modelName,
+                      modelIndex: progress.index,
+                      modelCount: progress.total,
+                    });
+                  },
+                },
+              }
+            : {}),
         }
       );
 
@@ -9503,6 +9531,7 @@ export class SessionExecutionService {
           rateLimits,
           modelCapabilities,
           authMethods: advertisedAuthMethods,
+          modelConfigOptions,
         }
       );
       this.acpCapabilityLaunchInputFingerprints.set(

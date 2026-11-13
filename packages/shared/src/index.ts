@@ -33,6 +33,7 @@ export type {
 export * from './message';
 export * from './ai';
 export * from './acp-model-capabilities';
+export * from './acp-model-config-options';
 export * from './pi-provider-migration';
 export * from './message-quote';
 export * from './message-text-spans';
