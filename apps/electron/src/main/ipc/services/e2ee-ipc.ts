@@ -633,7 +633,8 @@ export class E2eeIpc extends ProductWindowIpcService {
             accountId,
             workspaceId,
             new Set(covered.map((delivery) => delivery.device)),
-            () => slot.aborted === true || !this.keyDeliveryCurrent(accountId, slot)
+            () => slot.aborted === true || !this.keyDeliveryCurrent(accountId, slot),
+            covered.every((delivery) => delivery.attempts === 0)
           )
         } catch (cause) {
           this.pairingFailure = cause
@@ -720,7 +721,8 @@ export class E2eeIpc extends ProductWindowIpcService {
     accountId: string,
     workspaceId: string,
     devices: Set<string>,
-    aborted: () => boolean = () => false
+    aborted: () => boolean = () => false,
+    skipIngestIfAdmitted = false
   ) {
     const scope = this.memberScope(workspaceId)
     const cloud = await desktopE2eeCloudClient()
@@ -740,12 +742,29 @@ export class E2eeIpc extends ProductWindowIpcService {
             })
     )
     try {
-      try {
-        await this.ingestForKeyDelivery(accountId, workspaceId, scope, cloud)
-      } catch (cause) {
-        // A lagging relay leaves targets unconfirmed below; only terminal causes stop here.
-        if (TERMINAL_KEY_DELIVERY.has(keyDeliveryCode(cause))) throw cause
-        this.pairingFailure = cause
+      // Right after local admission + refresh, every target device is already in the
+      // verified local ledger; skip the redundant history round-trip on the initial pass.
+      // Any retry pass re-ingests first in case epoch/membership advanced in the meantime.
+      let needsIngest = !skipIngestIfAdmitted
+      if (!needsIngest) {
+        for (const device of devices) {
+          if (
+            !device ||
+            !(await scope((owner) => owner.host.keyDeliveryTarget(workspaceId, device)))
+          ) {
+            needsIngest = true
+            break
+          }
+        }
+      }
+      if (needsIngest) {
+        try {
+          await this.ingestForKeyDelivery(accountId, workspaceId, scope, cloud)
+        } catch (cause) {
+          // A lagging relay leaves targets unconfirmed below; only terminal causes stop here.
+          if (TERMINAL_KEY_DELIVERY.has(keyDeliveryCode(cause))) throw cause
+          this.pairingFailure = cause
+        }
       }
       const evidence = new Map<string, string>()
       const targets: string[] = []

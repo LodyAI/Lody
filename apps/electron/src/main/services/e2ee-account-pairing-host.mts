@@ -13,6 +13,7 @@ import type { EpochStagingStore, KeyMailbox } from '@lody/e2ee-core/services'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import {
   makeDesktopAccountPairing,
+  type AccountPairingApproverFilter,
   type AccountPairingApproverWorkspace,
   type AccountPairingRequesterWorkspace
 } from './e2ee-account-pairing.mjs'
@@ -296,33 +297,37 @@ export function makeDesktopAccountPairingHost(input: {
       })
     )
 
-  const approverWorkspaces = Effect.fnUntraced(function* () {
-    const result: AccountPairingApproverWorkspace[] = []
-    for (const hint of input.workspaces()) {
-      const status = yield* statusOf(hint.workspaceId)
-      if (
-        status?.deviceKind !== 'personal' ||
-        status.genesisHash !== hint.genesisHash ||
-        !status.signingPublicKey
-      )
-        continue
-      const workspaceId = hint.workspaceId
-      result.push({
-        workspaceId,
-        name: hint.name,
-        genesis: raw(hint.genesisHash),
-        signingPublicKey: raw(status.signingPublicKey),
-        // Pull the verified head forward before signing; the workflow then checks
-        // the request's tag and expiry again before calling `sign`.
-        refresh: () => transient(workspaceId, refresh(workspaceId)),
-        sign: (row) =>
-          transient(
-            workspaceId,
-            owner(workspaceId, (current) => current.host.signAccountAdmission(workspaceId, row))
-          ),
-        append: (requestId, record, credentialHash) =>
-          transient(
-            workspaceId,
+  const approverWorkspaces = Effect.fnUntraced(function* (filter?: AccountPairingApproverFilter) {
+    const opened: string[] = []
+    return yield* Effect.gen(function* () {
+      const result: AccountPairingApproverWorkspace[] = []
+      for (const hint of input.workspaces()) {
+        if (filter?.workspaceIds && !filter.workspaceIds.has(hint.workspaceId)) continue
+        if (filter?.geneses && !filter.geneses.has(hint.genesisHash)) continue
+        const workspaceId = hint.workspaceId
+        const status = yield* owner(workspaceId, (current) =>
+          current.host.status(workspaceId)
+        ).pipe(Effect.orElseSucceed(() => null))
+        if (
+          status?.deviceKind !== 'personal' ||
+          status.genesisHash !== hint.genesisHash ||
+          !status.signingPublicKey
+        ) {
+          yield* release(workspaceId)
+          continue
+        }
+        opened.push(workspaceId)
+        result.push({
+          workspaceId,
+          name: hint.name,
+          genesis: raw(hint.genesisHash),
+          signingPublicKey: raw(status.signingPublicKey),
+          // The workflow's `releasing` bracket closes every listed workspace once at
+          // the end of inspection or approval, avoiding repeated SQLite reopen churn.
+          refresh: () => refresh(workspaceId),
+          sign: (row) =>
+            owner(workspaceId, (current) => current.host.signAccountAdmission(workspaceId, row)),
+          append: (requestId, record, credentialHash) =>
             Effect.gen(function* () {
               const appended = yield* Effect.result(
                 cloud.appendRecord({
@@ -339,29 +344,31 @@ export function makeDesktopAccountPairingHost(input: {
               if (settled === 'lost') return yield* Effect.fail(fail('admission-lost'))
               if (Result.isFailure(appended)) return yield* Effect.fail(appended.failure)
               return yield* Effect.fail(fail('append_unconfirmed'))
-            })
-          ),
-        invitation: (record) =>
-          transient(
-            workspaceId,
-            owner(workspaceId, (current) => current.host.accountInvitation(workspaceId, record))
-          ),
-        access: () =>
-          owner(workspaceId, (current) =>
-            Effect.map(current.bootstrap.deviceCredential(workspaceId), (credential) => ({
-              workspaceId,
-              credential
-            }))
-          ),
-        ...(input.deliverKeys
-          ? {
-              deliverKeys: (device: Uint8Array, requestId: string) =>
-                Effect.sync(() => input.deliverKeys!(workspaceId, requestId, hex(device)))
-            }
-          : {})
-      })
-    }
-    return result
+            }),
+          invitation: (record) =>
+            owner(workspaceId, (current) => current.host.accountInvitation(workspaceId, record)),
+          access: () =>
+            owner(workspaceId, (current) =>
+              Effect.map(current.bootstrap.deviceCredential(workspaceId), (credential) => ({
+                workspaceId,
+                credential
+              }))
+            ),
+          release: () => release(workspaceId),
+          ...(input.deliverKeys
+            ? {
+                deliverKeys: (device: Uint8Array, requestId: string) =>
+                  Effect.sync(() => input.deliverKeys!(workspaceId, requestId, hex(device)))
+              }
+            : {})
+        })
+      }
+      return result
+    }).pipe(
+      Effect.onError(() =>
+        Effect.forEach(opened, (workspaceId) => release(workspaceId), { discard: true })
+      )
+    )
   })
 
   const requesterWorkspaces = Effect.fnUntraced(function* () {

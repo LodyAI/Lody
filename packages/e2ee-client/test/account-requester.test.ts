@@ -121,6 +121,68 @@ describe('portable account pairing requester', () => {
     expect(JSON.stringify(blocked)).toContain('pairing-journal-busy');
     expect(calls).toEqual([]);
   });
+
+  it('reuses verified history from identity() and queries only incremental records on accept()', async () => {
+    const f = envelopeFixture(0, 100, Result.getOrThrow(accountUserId('acc1')).toBytes());
+    const genesisHash = hex(f.context.genesis.toBytes());
+    const allRecords = f.records();
+    const initialRecords = allRecords.slice(0, -1);
+    const admission = allRecords.at(-1)!;
+    const queries: { workspaceId: string; after?: string }[] = [];
+    const req = makePortableAccountPairingRequester({
+      workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash }],
+      host: () =>
+        Effect.succeed({
+          workspaceId: 'w1',
+          genesisHash,
+          prepareAccountIdentity: () =>
+            Effect.succeed({
+              signingPublicKey: new Uint8Array(32).fill(1),
+              encryptionPublicKey: new Uint8Array(32).fill(2),
+              possessionProof: new Uint8Array(64).fill(3),
+              credentialHash: new Uint8Array(32).fill(4),
+            }),
+          pendingPersonalJoin: () => Effect.succeed(null),
+          acceptAccountInvitation: () => Effect.void,
+          activate: () => Effect.void,
+        }),
+      history: (input) =>
+        Effect.sync(() => {
+          queries.push(input);
+          if (input.after === 'pos-1') {
+            return {
+              workspaceId: 'w1',
+              genesisHash,
+              checkpoint: { length: allRecords.length, headHash: hex(f.view().head.toBytes()) },
+              startIndex: initialRecords.length,
+              recordsHex: [hex(admission)],
+              position: 'pos-2',
+              nextCursor: null,
+            };
+          }
+          return {
+            workspaceId: 'w1',
+            genesisHash,
+            checkpoint: {
+              length: initialRecords.length,
+              headHash: hex(hashRecordBytes(initialRecords.at(-1)!).toBytes()),
+            },
+            startIndex: 0,
+            recordsHex: initialRecords.map(hex),
+            position: 'pos-1',
+            nextCursor: null,
+          };
+        }),
+      accountId: 'acc1',
+    });
+    const [first] = await Effect.runPromise(req());
+    await Effect.runPromise(first!.identity());
+    const [second] = await Effect.runPromise(req());
+    await Effect.runPromise(
+      second!.accept(new Uint8Array([9, 9]), hashRecordBytes(admission).toBytes())
+    );
+    expect(queries).toEqual([{ workspaceId: 'w1' }, { workspaceId: 'w1', after: 'pos-1' }]);
+  });
 });
 
 describe('account-level runtime', () => {
@@ -387,6 +449,29 @@ describe('portable account pairing approver key delivery', () => {
     const fiber = Effect.runFork(listing);
     await firstOpened;
     await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(rounds.released).toBe(1);
+  });
+
+  it('opens only workspaces matching the approver filter', async () => {
+    const opened: string[] = [];
+    const rounds = { count: 0, released: 0 };
+    const workspaces = await Effect.runPromise(
+      makePortableAccountPairingApprover({
+        workspaces: () => [
+          { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+          { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+        ],
+        session: (workspaceId) =>
+          Effect.sync(() => {
+            opened.push(workspaceId);
+            return approverSession(rounds);
+          }),
+        appendRecord: () => Effect.void,
+      })({ geneses: new Set(['22'.repeat(32)]), workspaceIds: new Set(['w2']) })
+    );
+    expect(opened).toEqual(['w2']);
+    expect(workspaces.map((item) => item.workspaceId)).toEqual(['w2']);
+    await Effect.runPromise(workspaces[0]!.release!());
     expect(rounds.released).toBe(1);
   });
 });

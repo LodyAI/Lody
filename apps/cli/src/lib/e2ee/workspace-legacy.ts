@@ -129,6 +129,19 @@ async function retireRevokedMachineIdentity(options: {
   const device = machineDevicePath(directory, options.genesisHash);
   if (!existsSync(device)) return;
   const cloud = options.cloud;
+  const receipt = await (async () => {
+    try {
+      return RevokedDevice.parse(
+        JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
+      );
+    } catch {
+      return null;
+    }
+  })();
+  const matchingReceipt = receipt?.genesisHash === options.genesisHash ? receipt : null;
+  // Offline local-agent preparation needs no second OS-keyring subprocess when no
+  // revocation receipt exists for this workspace.
+  if (!matchingReceipt && !cloud) return;
   const revoked = await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -141,17 +154,7 @@ async function retireRevokedMachineIdentity(options: {
         const genesis = yield* Effect.fromResult(Bytes.genesisHash(bytes(options.genesisHash)));
         const current = yield* custody.openDevice(genesis);
         const key = hex(current.publicKey.toBytes());
-        const receipt = yield* Effect.promise(async () => {
-          try {
-            return RevokedDevice.parse(
-              JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
-            );
-          } catch {
-            return null;
-          }
-        });
-        if (receipt?.genesisHash === options.genesisHash && receipt.signingPublicKey === key)
-          return key;
+        if (matchingReceipt?.signingPublicKey === key) return key;
         if (!cloud) return undefined;
         const credential = yield* custody.deviceCredential(genesis, current.publicKey);
         const exact = yield* Effect.tryPromise({
@@ -406,7 +409,7 @@ async function prepareMachine(
       checkpoint: { length: 1, head: hashRecordBytes(bytes(binding.genesisRecordHex)) },
     })
   );
-  await retainCliE2eeWorkspaceBinding(options.accountId, binding);
+  await retainBinding(options.accountId, binding);
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {

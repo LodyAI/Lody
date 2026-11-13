@@ -96,6 +96,9 @@ export function makeAutomaticPairingRuntime(options: {
   readonly canPresent: () => boolean;
   /** Advisory background hint only, after retained local identity verification. */
   readonly notifyPending?: (id: string) => void;
+  /** Surfaces `preparing` reviews once this device's local identity is verified, so
+   * Instant QR hosts can present their one-time QR immediately while ECDH finishes. */
+  readonly includePreparingReviews?: boolean;
   readonly crypto: Crypto;
   readonly now?: () => number;
   readonly run: <A>(work: Effect.Effect<A, unknown>) => Promise<A>;
@@ -358,26 +361,41 @@ export function makeAutomaticPairingRuntime(options: {
       yield* approveTick(value);
       return value.phase === 'joined' ? null : review(value, value.nativeRequestId ?? '');
     }
+    if (row.state !== 'pending') {
+      value.phase = row.state === 'approved' ? 'joined' : row.state;
+      dispose(value);
+      return null;
+    }
     const exchange = yield* exchangeFor(value);
     const commitment = exchange.commitment!;
     if (!row.commitment)
       row = yield* checked(value, yield* relay.exchange({ id: value.context.id, commitment }));
+    if (row.state !== 'pending') {
+      value.phase = row.state === 'approved' ? 'joined' : row.state;
+      dispose(value);
+      return null;
+    }
     if (
       row.commitment?.peerId !== commitment.peerId ||
       row.commitment.commitment !== commitment.commitment
     )
       return null;
-    if (!row.requesterKey) return null;
+    if (!row.requesterKey) return options.includePreparingReviews ? review(value, '') : null;
     const reveal = yield* exchange.reveal(row.requesterKey);
     if (!row.reveal)
       row = yield* checked(value, yield* relay.exchange({ id: value.context.id, reveal }));
+    if (row.state !== 'pending') {
+      value.phase = row.state === 'approved' ? 'joined' : row.state;
+      dispose(value);
+      return null;
+    }
     if (row.reveal?.publicKey !== reveal.publicKey || row.reveal.nonce !== reveal.nonce)
       return yield* Effect.fail(refuse('pairing-tampered'));
     channel(value, yield* exchange.finish(row.requesterKey!));
     const preview = yield* promise(() => runtime.inspectAccountPairing!(value.code!));
     yield* check();
-    if (!preview || !preview.workspaces.some((w) => w.workspaceId === value.context.workspaceId))
-      return null;
+    if (!preview) return options.includePreparingReviews ? review(value, '') : null;
+    if (!preview.workspaces.some((w) => w.workspaceId === value.context.workspaceId)) return null;
     if (preview.expiresAt !== value.context.expiresAt)
       return yield* Effect.fail(refuse('pairing-tampered'));
     value.nativeRequestId = preview.requestId;
