@@ -1,4 +1,4 @@
-import { Effect, Exit, Fiber, Result } from 'effect';
+import { Deferred, Effect, Exit, FiberMap, Result, Scope } from 'effect';
 import type {
   E2eeAppendRecordRequest,
   E2eeWorkspaceHistoryPage,
@@ -515,7 +515,12 @@ export function makePortableAccountPairingApprover(input: {
     });
   const releaseQuietly = (session: AccountPairingApproverSession, scope: string) =>
     session.release ? session.release().pipe(Effect.catch(remember(scope))) : Effect.void;
-  const activeDeliveries = new Map<string, Fiber.Fiber<void, never>>();
+  /** One delivery per workspace and device. Its fibers are detached from the approval
+   * that starts them (the approval returns first) and leave the map when they end; a
+   * new delivery for the same device interrupts and awaits the previous one. */
+  const deliveries = Effect.runSync(
+    Effect.provideService(FiberMap.make<string, void, never>(), Scope.Scope, Scope.makeUnsafe())
+  );
   // Sessions opened before a later workspace fails are not returned, so the caller
   // cannot release them: release them here on any failure.
   const list = Effect.fnUntraced(function* (
@@ -601,11 +606,8 @@ export function makePortableAccountPairingApprover(input: {
           Effect.gen(function* () {
             const device = toHex(deviceBytes);
             const deliveryKey = `${workspaceId}:${device}`;
-            const previousFiber = activeDeliveries.get(deliveryKey);
-            if (previousFiber) {
-              activeDeliveries.delete(deliveryKey);
-              yield* Fiber.interrupt(previousFiber);
-            }
+            // The replaced delivery has released its session once this returns.
+            yield* FiberMap.remove(deliveries, deliveryKey);
             const delays = input.keyDeliveryRetry?.delays ?? KEY_DELIVERY_RETRY_DELAYS;
             const sleep = input.keyDeliveryRetry?.sleep ?? ((ms: number) => Effect.sleep(ms));
             const report = (state: AccountPairingKeyDeliveryEvent['state'], code?: string) => {
@@ -621,89 +623,82 @@ export function makePortableAccountPairingApprover(input: {
                 /* An observer never affects delivery. */
               }
             };
-            // Each attempt holds its own session only while it runs and releases it
-            // afterwards, so the delivery never keeps a reader open across the backoff.
-            const acquire = () =>
-              Effect.suspend(() => input.session(workspaceId)).pipe(
-                Effect.orElseSucceed(() => null)
-              );
-            const release = (current: AccountPairingApproverSession) =>
-              releaseQuietly(current, 'account-pairing-key-delivery-release');
+            const acquire = Effect.suspend(() => input.session(workspaceId)).pipe(
+              Effect.orElseSucceed(() => null)
+            );
+            const release = (held: AccountPairingApproverSession | null) =>
+              held ? releaseQuietly(held, 'account-pairing-key-delivery-release') : Effect.void;
+            const owner = toHex(session.binding.device.toBytes());
             // The mailbox refuses a sender behind the ledger, so a retry catches up first.
             // The round then resends the saved original or supersedes it from the new ledger;
             // a failed or timed-out catch-up does not skip the round.
-            const attempt = (current: AccountPairingApproverSession, retry: number) =>
+            const attempt = (held: AccountPairingApproverSession | null, retry: number) =>
               Effect.gen(function* () {
+                if (!held) return 'e2ee_key_delivery_closed';
+                if (toHex(held.binding.device.toBytes()) !== owner)
+                  return 'e2ee_key_delivery_owner_changed';
                 if (retry > 0)
                   yield* Effect.result(
-                    current
-                      .refresh()
-                      .pipe(Effect.timeoutOption(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))
+                    held.refresh().pipe(Effect.timeoutOption(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))
                   );
                 // The first attempt only distributes: the admission just committed on this
                 // already-current device, so receive/repair would only delay the envelope.
                 // A retry runs the full round, which first receives a key this device lacks.
                 const round = yield* Effect.result(
-                  current.keyRound(retry === 0 ? 'distribute' : 'full')
+                  held.keyRound(retry === 0 ? 'distribute' : 'full')
                 );
-                const evidence = yield* Effect.result(current.keyDeliveryEvidence(device));
+                const evidence = yield* Effect.result(held.keyDeliveryEvidence(device));
                 if (Result.isSuccess(evidence) && evidence.success === 'delivered')
                   return 'delivered';
                 if (Result.isFailure(round)) return keyDeliveryCode(round.failure);
                 return Result.isSuccess(evidence)
                   ? evidence.success
                   : keyDeliveryCode(evidence.failure);
-              }).pipe(Effect.ensuring(release(current)));
-            const owner = toHex(session.binding.device.toBytes());
+              });
             // The first hold is taken before approval continues, so the workflow may
             // release its own listing session without closing the reader underneath.
-            const first = yield* acquire();
-            let current: AccountPairingApproverSession | null = first;
-            let fiberRef: Fiber.Fiber<void, never> | undefined;
+            let first: AccountPairingApproverSession | null = yield* acquire;
+            const takeFirst = Effect.sync(() => {
+              const held = first;
+              first = null;
+              return held;
+            });
+            // Completes when attempt 0 ends, however it ends, and never after a backoff.
+            const firstPass = yield* Deferred.make<void>();
             const deliver = Effect.gen(function* () {
               for (let retry = 0; ; retry++) {
-                if (!current) {
-                  return report('ended', 'e2ee_key_delivery_closed');
-                }
-                if (toHex(current.binding.device.toBytes()) !== owner) {
-                  const foreign = current;
-                  current = null;
-                  yield* release(foreign);
-                  return report('ended', 'e2ee_key_delivery_owner_changed');
-                }
-                const held = current;
-                current = null;
-                const code = yield* attempt(held, retry);
+                // Each attempt holds its own session only while it runs, so the delivery
+                // never keeps a reader open across the backoff.
+                const code = yield* Effect.acquireUseRelease(
+                  retry === 0 ? takeFirst : acquire,
+                  (held) => attempt(held, retry),
+                  release
+                );
+                if (retry === 0) yield* Deferred.succeed(firstPass, undefined);
                 if (code === 'delivered') return report('delivered');
-                if (TERMINAL_KEY_DELIVERY.has(code) || retry >= delays.length)
+                if (
+                  code === 'e2ee_key_delivery_closed' ||
+                  code === 'e2ee_key_delivery_owner_changed' ||
+                  TERMINAL_KEY_DELIVERY.has(code) ||
+                  retry >= delays.length
+                )
                   return report('ended', code);
                 report('retrying', code);
                 yield* sleep(delays[retry]!);
-                current = yield* acquire();
               }
             }).pipe(
               Effect.catchDefect((defect) =>
                 Effect.sync(() => report('ended', keyDeliveryCode(defect)))
               ),
               Effect.ensuring(
-                Effect.suspend(() => {
-                  if (fiberRef && activeDeliveries.get(deliveryKey) === fiberRef) {
-                    activeDeliveries.delete(deliveryKey);
-                  }
-                  if (current) {
-                    const leftover = current;
-                    current = null;
-                    return release(leftover);
-                  }
-                  return Effect.void;
-                })
+                Effect.suspend(() =>
+                  Deferred.succeed(firstPass, undefined).pipe(Effect.andThen(release(first)))
+                )
               )
             );
             report('running');
-            fiberRef = Effect.runFork(deliver);
-            if (fiberRef.pollUnsafe() === undefined) {
-              activeDeliveries.set(deliveryKey, fiberRef);
-            }
+            yield* FiberMap.run(deliveries, deliveryKey, deliver);
+            return Deferred.await(firstPass);
           }),
       });
     }

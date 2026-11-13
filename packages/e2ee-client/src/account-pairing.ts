@@ -54,6 +54,8 @@ const NO_INVITATION_DIGEST = new Uint8Array(32);
 const NO_INVITATION = new Uint8Array([0]);
 const isHistoryRow = (digest: Uint8Array) => digest.every((byte) => byte === 0);
 const WORKSPACE_CONCURRENCY = 4;
+/** Default bound on waiting for first key delivery attempts before publishing. */
+const FIRST_KEY_DELIVERY_WAIT_MS = 1_500;
 /** Typed refusals the UI explains (`@lody/platform` `E2eeAccountPairingErrorCode`). */
 export type AccountPairingRefusal =
   | 'pairing-tampered'
@@ -138,8 +140,14 @@ export interface AccountPairingApproverWorkspace {
   release?(): Effect.Effect<void, unknown>;
   /** Starts the existing current-epoch key distribution for the device whose admission
    * `append` just confirmed in the verified ledger. It only schedules owned background
-   * work and returns at once: delivery never holds or undoes the approval. */
-  deliverKeys?(signingPublicKey: Uint8Array, requestId: string): Effect.Effect<void, unknown>;
+   * work and returns at once: delivery never holds or undoes the approval. It may return
+   * a handle that completes when the first delivery attempt ends, however it ends (never
+   * after a retry backoff); the approval waits on it, bounded, before publishing, so the
+   * new device's first activation finds its key. Waiting never interrupts the delivery. */
+  deliverKeys?(
+    signingPublicKey: Uint8Array,
+    requestId: string
+  ): Effect.Effect<Effect.Effect<void, never> | void, unknown>;
 }
 
 /** One encrypted workspace of the account on the new device. */
@@ -294,12 +302,15 @@ export function makeAccountPairing(input: {
   random?: (size: number) => Uint8Array;
   /** Local diagnostics for isolated failures; causes never reach the caller. */
   diagnostics?: (tag: string, error: unknown) => void;
+  /** Longest wait for the first key delivery attempts before publishing an approval. */
+  firstKeyDeliveryWaitMs?: number;
 }) {
   const { store, relay } = input;
   const now = input.now ?? Date.now;
   const random =
     input.random ?? ((size: number) => globalThis.crypto.getRandomValues(new Uint8Array(size)));
   const rememberDesktopE2eeFailure = input.diagnostics ?? (() => {});
+  const firstKeyDeliveryWaitMs = input.firstKeyDeliveryWaitMs ?? FIRST_KEY_DELIVERY_WAIT_MS;
   /** Store failures surface as `storage` unless they carry a typed code. */
   const sql = <A>(work: Effect.Effect<A, unknown>): Effect.Effect<A, Error> =>
     Effect.mapError(work, (error) => {
@@ -1006,6 +1017,11 @@ export function makeAccountPairing(input: {
               /** `null`: delivered through full history (Member approver). */
               invitation: Uint8Array | null;
             }[] = [];
+            const committed: {
+              workspace: AccountPairingApproverWorkspace;
+              row: PairingRequestRow;
+              journaled: AdmissionRow;
+            }[] = [];
             for (const { workspace, row, journaled, appended } of appendedByWorkspace) {
               if (Result.isFailure(appended)) {
                 // The host reports `admission-lost` only when the verified ledger holds
@@ -1028,24 +1044,45 @@ export function makeAccountPairing(input: {
                 outcomes.set(workspace.workspaceId, 'not-admitted');
                 continue;
               }
-              // The admission is now in the verified ledger: the new device needs the
-              // current epoch key from an existing device, which the invitation does
-              // not carry. Only this admitted device is named; the port schedules it.
-              if (workspace.deliverKeys) {
-                const scheduled = yield* Effect.result(
-                  workspace.deliverKeys(new Uint8Array(row.signingPublicKey), journaled.request_id)
-                );
-                if (Result.isFailure(scheduled))
-                  rememberDesktopE2eeFailure('account-pairing-key-delivery', scheduled.failure);
-              }
+              committed.push({ workspace, row, journaled });
+            }
+            // The admission is now in the verified ledger: the new device needs the
+            // current epoch key from an existing device, which the invitation does not
+            // carry. Only this admitted device is named; the port schedules it at once,
+            // so its first attempt runs alongside the invitations and accesses below.
+            const firstPasses: Effect.Effect<void, never>[] = [];
+            for (const { workspace, row, journaled } of committed) {
+              if (!workspace.deliverKeys) continue;
+              const scheduled = yield* Effect.result(
+                workspace.deliverKeys(new Uint8Array(row.signingPublicKey), journaled.request_id)
+              );
+              if (Result.isFailure(scheduled))
+                rememberDesktopE2eeFailure('account-pairing-key-delivery', scheduled.failure);
+              else if (Effect.isEffect(scheduled.success)) firstPasses.push(scheduled.success);
+            }
+            // Invitation network calls run concurrently; journaling stays sequential.
+            const issuedByWorkspace = yield* Effect.forEach(
+              committed,
+              (item) =>
+                Effect.map(
+                  item.journaled.invitation
+                    ? Effect.succeed(null)
+                    : Effect.result(
+                        item.workspace.invitation(new Uint8Array(item.journaled.record))
+                      ),
+                  (issued: Result.Result<Uint8Array | null, unknown> | null) => ({
+                    ...item,
+                    issued,
+                  })
+                ),
+              { concurrency: WORKSPACE_CONCURRENCY }
+            );
+            for (const { workspace, journaled, issued } of issuedByWorkspace) {
               let invitation: Uint8Array | null = journaled.invitation
                 ? new Uint8Array(journaled.invitation)
                 : null;
               let history = false;
-              if (!invitation) {
-                const issued = yield* Effect.result(
-                  workspace.invitation(new Uint8Array(journaled.record))
-                );
+              if (issued) {
                 // A successful `null` means this signer cannot endorse a snapshot (a
                 // Member): deliver through history. A failure stays awaiting delivery.
                 invitation = Result.isSuccess(issued) ? issued.success : null;
@@ -1093,13 +1130,29 @@ export function makeAccountPairing(input: {
               // Never publish an approval this device could not itself verify.
               if (Result.isFailure(verifyPairingApprovalTag(keys, approval, tag)))
                 return yield* Effect.fail(fail('corrupt'));
-              const invitations: E2eeAccountPairingRequests['publish']['invitations'] = [];
-              for (const item of deliverable)
-                invitations.push({
-                  ...(yield* item.workspace.access()),
+              // Accesses run concurrently while the first key delivery attempts finish, so
+              // the new device, woken by this publish, finds its key on first activation.
+              // The wait is bounded and only observes: a slow, failed or hung attempt never
+              // blocks, fails or withholds the publish, and is never interrupted by it.
+              const firstDeliveries = Effect.forEach(firstPasses, (pass) => Effect.exit(pass), {
+                concurrency: 'unbounded',
+                discard: true,
+              }).pipe(Effect.timeoutOption(firstKeyDeliveryWaitMs));
+              const [accesses] = yield* Effect.all(
+                [
+                  Effect.forEach(deliverable, (item) => item.workspace.access(), {
+                    concurrency: WORKSPACE_CONCURRENCY,
+                  }),
+                  firstDeliveries,
+                ],
+                { concurrency: 'unbounded' }
+              );
+              const invitations: E2eeAccountPairingRequests['publish']['invitations'] =
+                deliverable.map((item, index) => ({
+                  ...accesses[index]!,
                   genesisHash: item.journaled.genesis,
                   invitationHex: hex(item.invitation ?? NO_INVITATION),
-                });
+                }));
               const published = yield* Effect.result(
                 relay.publish({
                   lookupId,
