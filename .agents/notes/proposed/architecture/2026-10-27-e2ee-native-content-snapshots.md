@@ -4,7 +4,7 @@ Status: proposed
 Translation: current
 
 - Date: 2026-10-27
-- PR: [#1959](https://github.com/LodyAI/Lody/pull/1959)
+- PR: [#1959](https://github.com/LodyAI/Lody/pull/1959), [#2728](https://github.com/LodyAI/Lody/pull/2728)
 - Backend companion: [#3873](https://github.com/loro-dev/lody/pull/3873)
 - Chinese: [中文](2026-10-27-e2ee-native-content-snapshots.zh.md)
 
@@ -14,7 +14,7 @@ M2 disabled encrypted content snapshots, so a new replica had to read every upda
 PR-17 enables native Streams snapshots through the existing host-owned encryption
 and signing binding. Readers require a historically admitted signer, a readable
 epoch, valid signature, authenticated continuation and valid AEAD; rejected
-snapshots request automatic republication and fall back to protected history when available. This MVP trusts the server and uploader
+snapshots fall back to protected history from origin when available. This MVP trusts the server and uploader
 to associate the native snapshot with honest content at its offset; signatures
 provide attribution, not a proof of that association. Production gateway and
 whole-workspace performance remain separate acceptance work.
@@ -36,8 +36,7 @@ workspace/resource/model. After composing merged #1954, a seal keeps its single
 selected `writeEpoch` across header construction, encryption and signing, including
 an already admitted seal that finishes during a transition. Pending/manual key
 rotation may use a retained published epoch no later than the current one; current
-writer permission is still checked before and after signing. Normal and repair
-snapshots use this same transition provider. Reading verifies historical signature before key lookup,
+writer permission is still checked before and after signing. Reading verifies historical signature before key lookup,
 then AEAD and the exact native continuation. The owner's later decision on the same
 date supersedes the initial current-writer read gate: historically admitted devices
 remain acceptable snapshot signers after revocation; never-admitted keys are rejected.
@@ -49,8 +48,7 @@ workspaces to migrate and no old snapshot-format reader is retained.
 
 Only local writers trigger the SDK snapshot scheduler. After 30 seconds without
 another local write, it checks the remote snapshot and requires 1 MiB of additional
-stream bytes. The SDK suppresses a competing writer observed during debounce,
-requires complete persisted progress with no local pending writes, and owns one
+stream bytes (`minBytesSinceRemoteSnapshot`). Ordinarily, the SDK suppresses upload when a competing writer is observed during debounce (`observedForeignWriter`); however, once stream growth since the last remote snapshot reaches the hard ceiling `maxBytesSinceRemoteSnapshot` (4 MiB), foreign-writer observation no longer suppresses upload so alternating human/agent or multi-device writes cannot defer snapshots indefinitely. Upload still requires complete persisted progress with no local pending writes, and owns one
 upload flight across room generations. Multiple devices can still race; this is
 best-effort coordination, not distributed leader election. The core seal remains
 the authority gate even when the scheduling hint says yes.
@@ -58,52 +56,28 @@ the authority gate even when the scheduling hint says yes.
 The SDK captures native state and offset together; export is serialized, while
 compression, signing and upload run outside the edit queue. Upload failure logs
 and remains eligible after a later local write; it does not reject editing or
-incremental sending. Repair uses the same upload owner and complete-state checks,
-but bypasses ordinary byte/debounce and competing-writer suppression and permits
-replacement at the same offset. Permission, complete cursor/state, no pending local
-writes and current room ownership remain mandatory.
+incremental sending.
 
 The pinned streams-crdt 0.19.2 patch marks protected snapshot decode failures and
 rejects an empty/missing snapshot at a non-origin position before CRDT import or
 cursor save. An empty response cannot certify a non-origin cursor. It discards the bootstrap suffix and reads from
-origin through the same protected update decoder and durability barriers, without
-waiting for repair. A rejected snapshot also requests a fixed one-byte hint in
-`<native-stream>:snapshot-repair` (TTL 120 seconds, request coalescing 30 seconds).
-The existing credential-authenticated content-token action relays that hint for
-read-only Guests; its exact-stream write token stays on the backend. A protected-only
-SDK recovery notification reaches the host even when an absent/malformed envelope
-never calls `provider.open`; notification failure cannot change synchronization. Normal Guest
-content tokens remain read-only. Backend writes no business CRDT data.
-
-Each live protected room polls hints every five seconds; a complete current writer
-republishes with at most one successful repair per 30 seconds per device/room.
-Failed repair remains eligible at the next poll and never fails editing or sending.
-If history is trimmed, the original live subscription waits and retries bootstrap
-on that interval until a valid replacement appears. Closing cancels its wait and
-owned requests/timer. The desktop displays the request/retry hint; CLI diagnostics
-use fixed text and validated fields, never raw provider exceptions. Local state and
-cursors survive. No distributed election or new backend infrastructure is added.
-Ordinary workspaces do not create this channel, timer or request traffic.
+origin through the same protected update decoder and durability barriers (`catchupOrGone(this.createInitialCursor(), ...)`). If history is already trimmed (410 Gone), the rejected snapshot fails with the validated recovery cause while preserving local state and cursors. The earlier 5-second `<native-stream>:snapshot-repair` `HEAD` polling and hint channel were removed in [#2728](https://github.com/LodyAI/Lody/pull/2728) to eliminate continuous 404 polling overhead on live rooms.
 
 The root pnpm `patchedDependencies` applies
 `patches/@loro-dev__streams-crdt@0.19.2.patch`; the lockfile pins its hash. Frozen
 installation rejects a missing/inconsistent patch. On SDK upgrade, port the patch
 or prove equivalent native behavior by running the owning transport suite: bad
-signature/tag/offset/key replay cases, automatic repair without another edit, and
-close while waiting. Removing the patch makes those behavioral tests fail. The
+signature/tag/offset/key replay cases and `maxBytesSinceRemoteSnapshot` forced-checkpoint thresholds. Removing the patch makes those behavioral tests fail. The
 private outer workspace must mirror the patch declaration using `lody-oss/patches/`
 and regenerate its own lockfile when adopting the merged public head. This PR does
-not change its gitlink. The separate private backend PR supplies snapshot-write
-permission and Guest relay; both are required for cloud acceptance.
+not change its gitlink.
 
 ## Evidence and limits
 
 Deterministic suites use real Loro, IndexedDB, cryptography and host custody
 fixtures with synthetic keys. They cover snapshot plus suffix, invalid signature,
 AEAD, continuation, unavailable snapshot key and missing non-origin snapshot; full-history fallback; trimmed
-history waiting with unchanged local state; automatic replacement at the same offset;
-and close cancellation. A complete writer responds even after ordinary debounce
-observed a competing writer, under the production 1 MiB gate. Concurrent native
+history failure with unchanged local state and cursor; and forced snapshot upload when alternating writers reach the 4 MiB `maxBytesSinceRemoteSnapshot` threshold. Concurrent native
 plaintext joins retain one owner and close all live work. Core accepts revoked signers before open/during key lookup
 and rejects never-admitted signers plus workspace/document replay.
 Affected checks and reversible ablations are reported in the PR.
@@ -112,7 +86,7 @@ Lab coverage distinguishes successful verified-history fallback from a rejected
 snapshot whose history is already trimmed. The latter retains the SDK's validated
 410 recovery cause rather than misclassifying an earlier provider error as local
 corruption. SQL refusal still preserves both native state and cursor. The Loro/Flock
-three-role plans check automatic retry of the next authentic bootstrap and reopen
+three-role plans check authentic bootstrap and reopen
 its durable result; they do not fabricate host history. The old CLI actor failure
 is fixed by main's approved Claude submodule pin, with its original assertion kept.
 
@@ -124,5 +98,4 @@ The [isolated Electron trial](../../../../apps/electron/scripts/e2ee-ipc-benchma
 records performance and its limits. Docker preflight found no running daemon
 (`~/.orbstack/run/docker.sock` absent), so private local-stack/real gateway,
 production 48-hour trim configuration, OS custody, installers, other platforms and
-whole-workspace startup were not verified. The isolated performance trial predates
-the repair change; no new whole-product timing claim is made.
+whole-workspace startup were not verified. No new whole-product timing claim is made.
