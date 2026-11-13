@@ -44,6 +44,8 @@ import {
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_PROVIDERS_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
+  E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+  E2EE_SESSION_FORK_PROTOCOL_VERSION,
   MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   machineSupportsProtocolCapability,
   type WorkspaceMcpServerMeta,
@@ -1134,13 +1136,43 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionForkResponse;
       }
+      const timeoutMs =
+        options?.timeoutMs ?? (args.targetContext?.kind === 'new-worktree' ? 15_000 : 120_000);
+      // Encrypted content never opens ordinary Machine RPC: the fork is a signed write that
+      // the machine authorizes like a send (owner, or a member it is shared with).
+      if (deps.protectedContent) {
+        if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
+        // An older machine drops an unknown method without replying; refuse before signing.
+        if (
+          ((await deps.getMachineProtocolCapabilities(machineId))?.[
+            MACHINE_PROTOCOL_CAPABILITIES.e2eeSessionFork
+          ] ?? 0) < E2EE_SESSION_FORK_PROTOCOL_VERSION
+        )
+          return sessionForkFailure(
+            args,
+            'FORK_UNAVAILABLE',
+            'Update Lody on this machine to fork conversations in an encrypted workspace.'
+          );
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/fork',
+          params: args,
+          timeoutMs,
+        });
+        if (!response.ok)
+          return sessionForkFailure(
+            args,
+            response.code === 'e2ee_machine_not_shared'
+              ? 'MACHINE_ACCESS_DENIED'
+              : 'INTERNAL_ERROR',
+            response.error
+          );
+        return response.result as SessionForkResponse;
+      }
       return await (
         await getMachineRpcClient(machineId)
-      ).requestSessionFork({
-        ...args,
-        timeoutMs:
-          options?.timeoutMs ?? (args.targetContext?.kind === 'new-worktree' ? 15_000 : 120_000),
-      });
+      ).requestSessionFork({ ...args, timeoutMs });
     } catch (error) {
       return sessionForkFailure(
         args,
@@ -1169,9 +1201,34 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionEditAndResendResponse;
       }
+      const timeoutMs = options?.timeoutMs ?? 120_000;
+      // Encrypted content never opens ordinary Machine RPC: the edit is a signed owned write.
+      if (deps.protectedContent) {
+        if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
+        if (
+          ((await deps.getMachineProtocolCapabilities(machineId))?.[
+            MACHINE_PROTOCOL_CAPABILITIES.e2eeSessionEditAndResend
+          ] ?? 0) < E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION
+        )
+          return sessionEditAndResendFailure(
+            args,
+            'INTERNAL_ERROR',
+            'Update Lody on this machine to edit and resend in an encrypted workspace.'
+          );
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/edit-and-resend',
+          params: args,
+          timeoutMs,
+        });
+        if (!response.ok)
+          return sessionEditAndResendFailure(args, 'INTERNAL_ERROR', response.error);
+        return response.result as SessionEditAndResendResponse;
+      }
       return await (
         await getMachineRpcClient(machineId)
-      ).requestSessionEditAndResend({ ...args, timeoutMs: options?.timeoutMs ?? 120_000 });
+      ).requestSessionEditAndResend({ ...args, timeoutMs });
     } catch (error) {
       return sessionEditAndResendFailure(
         args,

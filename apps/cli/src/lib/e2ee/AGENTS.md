@@ -89,6 +89,11 @@
   drains activation before cloud-port close.
 
 - Never register Fleet PR pollers for encrypted workspaces.
+- `runtime-cloud-port.ts` closes plaintext cloud channels for encrypted runtimes but keeps
+  the attachment relay URL and the preview tunnel, whose ordinary proof verifier rejects.
+  MessageHandler fences plaintext attachment reads.
+- Edit-and-resend replacements carry this machine's `signMachineInput` intent in the same
+  commit; an unsigned one is never written.
 - Encrypted cloud ports omit hosted GitHub tokens. SessionManager uses host git/gh
   credentials; never send decrypted repository names through its credential broker.
 

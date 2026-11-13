@@ -408,6 +408,55 @@ describe('trusted-host encrypted dispatch originals', () => {
     expect(opened.args).toEqual(f.input);
   });
 
+  it("signs another member's fork under the sharing preflight, while other features stay same-member", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const request = (method: 'session/fork' | 'session/edit-and-resend', requestId: string) =>
+      E2eeFeatureInputSchema.parse({
+        requestId: requestId.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method,
+          params:
+            method === 'session/fork'
+              ? {
+                  sourceSessionId: f.input.sessionId,
+                  sourceTurnId: 'assistant-1',
+                  targetSessionId: '00000000-0000-4000-8000-0000000000f4',
+                  requestedByUserId: 'member-account',
+                }
+              : {
+                  sessionId: f.input.sessionId,
+                  expectedUserTurnId: 'user-1',
+                  replacementUserTurnId: 'user-2',
+                  requestedByUserId: 'member-account',
+                  timestamp: '2026-11-13T00:00:00.000Z',
+                  inputConfig: { prompt: 'edited' },
+                },
+        },
+      });
+    const prepare = (
+      input: ReturnType<typeof request>,
+      authorize?: (machineId: string) => Effect.Effect<boolean, unknown>
+    ) => Effect.runPromise(f.native('teammate', 'teammate', authorize).prepareFeature(input));
+    // A verified withdrawal refuses before signing, with nothing retained.
+    await expect(
+      prepare(request('session/fork', 'a1'), () => Effect.succeed(false))
+    ).rejects.toThrow(/^e2ee_machine_not_shared$/);
+    // An unknown policy signs; the receiving machine applies its own policy.
+    const fork = request('session/fork', 'a1');
+    const original = await prepare(fork, () => Effect.fail(new Error('offline')));
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    if (!opened) throw new Error('missing shared fork request');
+    expect(opened.input).toEqual(fork);
+    expect(opened.requesterDevice).not.toBe(Buffer.from(f.ledger.owner.raw).toString('hex'));
+    // Edit and resend still requires the machine owner's own device.
+    await expect(prepare(request('session/edit-and-resend', 'a2'))).rejects.toThrow(
+      /^e2ee_machine_not_owned$/
+    );
+  });
+
   it("signs another member's dispatch on a host with no sharing policy reader", async () => {
     const f = encryptedRpcFixture({ teammate: true });
     fixtures.push(f);

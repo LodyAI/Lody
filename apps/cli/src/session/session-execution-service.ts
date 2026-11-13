@@ -6682,6 +6682,19 @@ export class SessionExecutionService {
    * machine will use. Directories come from this machine's registry by ID; no
    * requested path is accepted. An empty result is a projectless conversation.
    */
+  /** The encrypted sharing scope of an existing session, read from this machine's state. */
+  async encryptedSessionExecutionScope(sessionId: SessionId): Promise<LocalProjectId[]> {
+    const meta = await (
+      await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId)
+    ).getMetaState();
+    return await this.encryptedExecutionScope({
+      projects: [meta ? this.resolveProjectFromMeta(meta) : undefined],
+      projectRuns: [meta?.projectRun],
+      parentSessionId: meta?.parentSessionId,
+      live: this.deps.sessionManager.getSession(sessionId),
+    });
+  }
+
   private async encryptedExecutionScope(input: {
     projects: readonly (ProjectRef | undefined)[];
     projectRuns: readonly (SessionProjectRun | undefined)[];

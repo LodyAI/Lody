@@ -169,6 +169,8 @@ import {
   type LocalProjectControlRequest,
   type LocalProjectControlResponse,
   E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+  E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+  E2EE_SESSION_FORK_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
   SORBET_PROVIDERS_PROTOCOL_VERSION,
@@ -2049,6 +2051,9 @@ export class MessageHandler {
     expectedMimeType: string;
     encryption?: EncryptedAttachment;
   }): Promise<DownloadedSessionImagePromptBlock> {
+    // Encrypted workspaces never read plaintext relay objects with the account token.
+    if (this.encryptedAttachments && !args.encryption)
+      throw new Error('e2ee_attachment_unavailable');
     return await downloadSessionImageForPrompt({
       ...args,
       serverBaseUrl: this.resolveServerBaseUrl(),
@@ -2364,6 +2369,8 @@ export class MessageHandler {
         return { ok: false, reason: 'error', message: formatErrorMessage(error) };
       }
     }
+    if (this.encryptedAttachments)
+      return { ok: false, reason: 'error', message: 'e2ee_attachment_unavailable' };
     const serverBaseUrl = this.resolveServerBaseUrl();
     const fileUrl = buildSessionFileApiUrl(
       serverBaseUrl,
@@ -4351,7 +4358,11 @@ export class MessageHandler {
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
           ...(this.encryptedAttachments
-            ? { e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION }
+            ? {
+                e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+                e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
+                e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+              }
             : {}),
           ...(this.sorbetCredentials
             ? {
@@ -6803,7 +6814,11 @@ export class MessageHandler {
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
           ...(this.encryptedAttachments
-            ? { e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION }
+            ? {
+                e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+                e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
+                e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+              }
             : {}),
           ...(this.sorbetCredentials
             ? {
@@ -8466,6 +8481,42 @@ export class MessageHandler {
   }
 
   /** Synced ownership/containment is the accepted UI trust boundary, not a registry. */
+  /** Every local project this machine would run a session's work in (encrypted sharing). */
+  async resolveSessionExecutionScope(sessionId: SessionId): Promise<readonly string[]> {
+    return await this.executionService.encryptedSessionExecutionScope(sessionId);
+  }
+
+  /**
+   * Verified encrypted fork. `executionRequesterUserId` is the signer's execution identity
+   * (owner account or `e2ee-member:`); `spec.requestedByUserId` stays the display account.
+   */
+  async handleEncryptedSessionFork(
+    spec: SessionForkSpec,
+    executionRequesterUserId: string
+  ): Promise<LocalMachineRpcResponse> {
+    try {
+      const access = await this.verifySessionMachineAccess(
+        spec.sourceSessionId,
+        executionRequesterUserId
+      );
+      if (access.outcome !== 'allowed')
+        return {
+          ok: true,
+          result: sessionForkFailure(
+            spec,
+            'MACHINE_ACCESS_DENIED',
+            `Fork access verification ${access.outcome}.`
+          ),
+        };
+      return {
+        ok: true,
+        result: await this.sessionForkService.fork({ ...spec, executionRequesterUserId }),
+      };
+    } catch (error) {
+      return { ok: false, error: formatErrorMessage(error) };
+    }
+  }
+
   async resolveSessionHistoryAccessTarget(sessionId: SessionId) {
     await this.resolveSessionHistoryOwnerSessionId(sessionId);
     const entry = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));

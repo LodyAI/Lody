@@ -9321,7 +9321,9 @@ describe('SessionExecutionService', () => {
         // An accidental termination must fail at adoption, not hang this test.
         processExited.resolve();
         const editService = new SessionEditAndResendService({
-          workspaceDocument: deps.workspaceDocument,
+          workspaceDocument: Object.assign(deps.workspaceDocument, {
+            isEncryptedWorkspace: () => false,
+          }),
           sessionManager,
           executionService: service,
           userResolver: {} as never,

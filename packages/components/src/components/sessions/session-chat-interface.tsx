@@ -174,6 +174,7 @@ import {
   type ScheduleDocument,
   type SessionPullRequestView,
 } from '@lody/shared';
+import { encryptedRemoteEditAndResendAvailable } from '../../lib/encrypted-machine-controls';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useAppCapability } from '@/lib/app-platform';
@@ -3745,9 +3746,17 @@ export const SessionChatInterface = memo(
       t,
       workspaceId,
     ]);
+    // Encrypted remote machines cannot take ordinary RPC, but their owner reaches edit and
+    // resend through the signed feature channel once the machine supports it.
+    const encryptedRemoteEditAvailable = encryptedRemoteEditAndResendAvailable({
+      contentMode: runtime?.contentMode,
+      accountId: runtime?.accountId,
+      machine: sessionMachine,
+    });
+    const editRpcReason = encryptedRemoteEditAvailable ? undefined : rpcReason;
     const editableLastUserMessageId = useMemo(() => {
       if (
-        rpcReason ||
+        editRpcReason ||
         session.isArchived ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
@@ -3790,7 +3799,7 @@ export const SessionChatInterface = memo(
       return userMessage.id;
     }, [
       capabilityAuthority,
-      rpcReason,
+      editRpcReason,
       isGoalActive,
       session.agentConfigId,
       session.agentType,

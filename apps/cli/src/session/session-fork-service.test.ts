@@ -233,12 +233,13 @@ function createForkHarness(
     cleanupForkWorktree: vi.fn(async () => undefined),
   };
   const logger = { error: vi.fn(), warn: vi.fn() };
+  const userResolver = {
+    resolve: vi.fn(async (_userId: string) => ({ name: 'User', email: 'user@example.com' })),
+  };
   const service = new SessionForkService({
     workspaceDocument: workspaceDocument as never,
     sessionManager: sessionManager as never,
-    userResolver: {
-      resolve: vi.fn(async () => ({ name: 'User', email: 'user@example.com' })),
-    } as never,
+    userResolver,
     logger: logger as never,
     workspaceId: 'workspace-1',
     machineId,
@@ -256,6 +257,7 @@ function createForkHarness(
   return {
     service,
     logger,
+    userResolver,
     persistPendingChanges,
     repo,
     sessionManager,
@@ -602,6 +604,29 @@ describe('SessionForkService durability boundary', () => {
     ]);
     expect(harness.targetDoc.waitUntilSynced).not.toHaveBeenCalled();
     expect(harness.sessionManager.terminateSession).not.toHaveBeenCalled();
+  });
+
+  it('runs an encrypted member fork as the verified signer while the member account owns it', async () => {
+    const harness = createForkHarness();
+
+    const result = await harness.service.fork({
+      ...forkSpec,
+      requestedByUserId: 'member-account',
+      executionRequesterUserId: 'e2ee-member:aa',
+    });
+
+    expect(result.success).toBe(true);
+    expect(harness.repo.upsertDocMeta).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({ userId: 'member-account' })
+    );
+    expect(harness.sessionManager.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ requesterUserId: 'e2ee-member:aa' }),
+      expect.any(Object)
+    );
+    expect(harness.userResolver.resolve).toHaveBeenCalledWith('e2ee-member:aa');
+    expect(harness.userResolver.resolve).not.toHaveBeenCalledWith('member-account');
   });
 
   it('persists a side-panel placement without changing workspace ownership', async () => {

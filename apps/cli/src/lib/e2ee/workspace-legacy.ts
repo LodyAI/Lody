@@ -25,7 +25,7 @@ import { loadIrohNative, proxyUrlFromEnv } from '@lody/iroh-native';
 import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
 import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
 import { getLogger } from '../../utils/logger';
-import { lazyExecutionJournal } from './agent-execution';
+import { encryptedMemberRequester, lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { makeEncryptedRpcListener, type E2eeRpcTiming } from '@lody/loro-streams-rpc/e2ee-streams';
@@ -1661,7 +1661,8 @@ async function openWorkspaceOwned(
       handleFeature?: EncryptedFeatureHandler,
       resolveHistoryTarget?: (
         sessionId: string
-      ) => Promise<{ rootSessionId: string; sessionOwnerUserId?: string; localProjectId?: string }>
+      ) => Promise<{ rootSessionId: string; sessionOwnerUserId?: string; localProjectId?: string }>,
+      resolveSessionExecutionScope?: (sessionId: string) => Promise<readonly string[]>
     ) =>
       run(
         Effect.gen(function* () {
@@ -1670,6 +1671,26 @@ async function openWorkspaceOwned(
             authorization: opened.executionAuthorization,
             executionAuthoritySignal: () => opened.runtime.executionAuthoritySignal(),
             resolveHistoryTarget,
+            resolveSessionExecutionScope,
+            requesterIdentity: (requesterDevice) =>
+              opened.runtime.executionLedger().pipe(
+                Effect.map((view) => {
+                  const state = view.inspectState();
+                  const own = state.devices.get(opened.signingPublicKey);
+                  const signer = state.devices.get(requesterDevice);
+                  if (!own || !signer || signer.kind === 'recovery') return undefined;
+                  // This machine's own membership is its owner: the owner's account.
+                  if (own.membershipId.equals(signer.membershipId))
+                    return { accountId: options.accountId, executionUserId: options.accountId };
+                  const member = state.members.get(hex(signer.membershipId.toBytes()));
+                  const account = member && accountIdFromUserId(member.userId);
+                  if (!member || !account || !Result.isSuccess(account)) return undefined;
+                  return {
+                    accountId: account.success,
+                    executionUserId: encryptedMemberRequester(hex(member.userId.toBytes())),
+                  };
+                })
+              ),
           });
           let attempts = 0;
           rpcFiber = yield* Effect.forkIn(

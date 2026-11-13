@@ -37,6 +37,7 @@ import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sam
 import type { WorkspaceWatchCoordinatorApi } from '@/lib/code-collab/workspace-watch-coordinator';
 import type { CloudPort } from '@lody/platform';
 import { assertRetainedE2eeModeAllowsOpen } from '@/lib/e2ee/retained-binding';
+import { encryptedRuntimeCloudPort } from '@/lib/e2ee/runtime-cloud-port';
 import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
@@ -181,21 +182,7 @@ export class Lody {
           }
         },
       });
-      // Unimplemented channels cannot inherit their ordinary plaintext sinks.
-      options = {
-        ...options,
-        cloudPort: {
-          ...options.cloudPort,
-          streamsTokens: null,
-          notifications: null,
-          attachmentUpload: null,
-          remotePreview: null,
-          remoteAutomation: undefined,
-          sessionSharing: null,
-          prAssociation: null,
-          githubTokens: null,
-        },
-      };
+      options = { ...options, cloudPort: encryptedRuntimeCloudPort(options.cloudPort) };
     }
     let manager: LoroDocumentManager | undefined;
     let encryptedExecution: EncryptedAgentExecution | undefined;
@@ -419,7 +406,8 @@ export class Lody {
       (input) => this.runtime.offerEncryptedRpcTurn(input),
       (event) => this.logger.debug('[e2ee-rpc-timing]', event),
       (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context),
-      (sessionId) => this.runtime.resolveSessionHistoryAccessTarget(sessionId)
+      (sessionId) => this.runtime.resolveSessionHistoryAccessTarget(sessionId),
+      (sessionId) => this.runtime.resolveSessionExecutionScope(sessionId)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }
