@@ -17,6 +17,13 @@ final class InboxChrome {
   var openDebug: (() -> Void)?
   var newSession: (() -> Void)?
   var searchChanged: ((String) -> Void)?
+  /// Regular width: the Home destination this page is, and how to switch to another (`InboxPadBar`).
+  var destination: HomeTab = .chats { didSet { padBar.destination = destination } }
+  var selectDestination: ((HomeTab) -> Void)?
+  /// Regular width can host a page (Schedules) in the detail column, as the desktop main area:
+  /// it keeps search and its view menu under a plain title, without the capsule or bottom bar.
+  private(set) var detailTitle: String?
+  private var lastModel: Model?
   /// Replaces the Chats view menu (the Projects tab has its own choices).
   var compactMenu: (() -> UIMenu)?
   /// Replaces the view menu on every size class for pages with their own choices (Schedules).
@@ -66,6 +73,7 @@ final class InboxChrome {
       default: break
       }
     }
+    padBar.select = { [weak self] tab in self?.selectDestination?(tab) }
     padBar.openSettings = { [weak self] in self?.openSettings?() }
     padBar.openDebug = { [weak self] in self?.openDebug?() }
     padBar.create = { [weak self] in self?.newSession?() }
@@ -81,9 +89,11 @@ final class InboxChrome {
   func update(_ model: Model?) {
     guard let host, let header else { return }
     guard let model else {
+      lastModel = nil
       clear()
       return
     }
+    lastModel = model
     let name = model.selected?.name ?? String(localized: "common.workspace", bundle: .lody)
     workspace.setAccessibilityName(
       "\(String.localizedStringWithFormat(String(localized: "inbox.workspaceSwitch.accessibility", bundle: .lody), String(describing: name))), \(model.devices.summary)"
@@ -106,14 +116,28 @@ final class InboxChrome {
     // Every size class shares the Chats view menu (grouping, scope, row details, archive).
     filter.menu = pageMenu?() ?? compactMenu?() ?? viewMenu()
     if header.search !== search { header.search = search }
-    // Settings and new chat sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
+    // Destinations, Settings and create sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
     // Right items run from the trailing edge: search, then the view menu (design).
-    let right = [filter, host.navigationItem.searchBarPlacementBarButtonItem]
+    // Only iPhone (including iPhone Duo at any width) accepts the search placement item in a
+    // navigation bar; iPadOS 26 throws NSInvalidArgumentException ("only supported in UIToolbar").
+    // This is an API constraint, not a layout choice: on iPad UIKit places the integrated search
+    // in the navigation bar itself.
+    let placesSearch = host.traitCollection.userInterfaceIdiom == .phone
+    let right = placesSearch ? [filter, host.navigationItem.searchBarPlacementBarButtonItem] : [filter]
     (workspaceItem, filterItem) = (left[0], filter)
-    let shownLeft = searching ? [] : left
+    let shownLeft = searching || detailTitle != nil ? [] : left
+    host.navigationItem.title = detailTitle
     if header.leftItems ?? [] != shownLeft { header.leftItems = shownLeft.isEmpty ? nil : shownLeft }
     if header.rightItems != right { header.rightItems = right }
     showToolbar()
+  }
+
+  /// Moves the page between the list column (or a tab) and the regular-width detail column.
+  func setDetailTitle(_ title: String?) {
+    guard detailTitle != title else { return }
+    detailTitle = title
+    if detailTitle != nil, let host { showSync(nil, in: host) }
+    update(lastModel)
   }
 
   func detach() {
@@ -155,7 +179,7 @@ final class InboxChrome {
       return
     }
     let regular = host.traitCollection.horizontalSizeClass == .regular
-    showPadBar(regular)
+    showPadBar(regular && detailTitle == nil)
     // iPhone's search lives in the navigation bar and new chat in the system tab bar, so no bottom toolbar on either layout.
     if !toolbar.isEmpty, host.toolbarItems ?? [] == toolbar { host.setToolbarItems(nil, animated: false) }
     toolbar = []
@@ -213,7 +237,7 @@ final class InboxChrome {
     guard searching != value, let header else { return }
     searching = value
     guard let workspaceItem else { return }
-    header.leftItems = value ? nil : [workspaceItem]
+    header.leftItems = value || detailTitle != nil ? nil : [workspaceItem]
   }
 
   /// Chats view menu: toggles for what each chat row's second line shows. Built when the menu
@@ -304,7 +328,7 @@ final class InboxChrome {
     syncPill.backgroundColor = .clear
     syncPill.isUserInteractionEnabled = false
     syncPill.accessibilityIdentifier = "home-sync-status"
-    let collapsed = shown != nil
+    let collapsed = shown != nil && detailTitle == nil
     let animate = workspaceCollapsed != collapsed && host.viewIfLoaded?.window != nil && !UIAccessibility.isReduceMotionEnabled
     workspaceCollapsed = collapsed
     let bar = host.navigationController?.navigationBar

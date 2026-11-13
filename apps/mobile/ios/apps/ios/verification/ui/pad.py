@@ -27,7 +27,7 @@ def show_list(ui):
 
 
 def panel_chrome(ui):
-    """The split column uses the iPhone header and a bottom glass bar for Settings and New Session."""
+    """The split column uses the iPhone header; a bottom glass bar stands in for the iPhone tab bar."""
     panel = ui.element('ipad-panel')['frame']
 
     def find(match, message):
@@ -38,7 +38,9 @@ def panel_chrome(ui):
         'workspace': find(lambda i: (i.get('AXLabel') or '').startswith('Switch workspace,'), 'Missing workspace switch'),
         'view': find(lambda i: i.get('AXLabel') == catalog.text('inbox.settings.section.view'), 'Missing view menu'),
         'search': find(lambda i: i.get('AXUniqueId') == 'magnifyingglass' or i.get('subrole') == 'AXSearchField', 'Missing search button'),
-        'settings': find(lambda i: i.get('AXUniqueId') == 'home-settings', 'Missing settings'),
+        'chats': find(lambda i: i.get('AXUniqueId') == 'home-tab-chats', 'Missing Chats'),
+        'schedules': find(lambda i: i.get('AXUniqueId') == 'home-tab-schedules', 'Missing Schedules'),
+        'settings': find(lambda i: i.get('AXUniqueId') == 'home-tab-settings', 'Missing settings'),
         'create': find(lambda i: i.get('AXUniqueId') == 'home-create', 'Missing new session'),
     }
     bottom = panel['y'] + panel['height']
@@ -51,10 +53,12 @@ def panel_chrome(ui):
     assert workspace['x'] + workspace['width'] <= search['x'] < view['x'], ('Capsule, search, then the view menu', workspace, search, view)
     assert view['x'] + view['width'] <= panel['x'] + panel['width'] + .5, (view, panel)
     assert workspace['height'] <= 52, ('The capsule is one line: logo and name', workspace)
-    for item in (settings, create):
-        assert item['y'] > bottom - 110, ('Settings and New Session sit at the bottom', item, panel)
+    chats, schedules = chrome['chats']['frame'], chrome['schedules']['frame']
+    for item in (chats, schedules, settings, create):
+        assert item['y'] > bottom - 110, ('Destinations, Settings and New Session sit at the bottom', item, panel)
         assert item['width'] >= 36 and item['height'] >= 36
-    assert settings['x'] < panel['x'] + 40, ('Settings leads the bottom bar', settings, panel)
+    assert chats['x'] < panel['x'] + 40 and chats['x'] < schedules['x'] < settings['x'] < create['x'], \
+        ('Chats, Schedules and Settings lead the bottom bar as on the iPhone tab bar', chats, schedules, settings, create)
     assert create['x'] > panel['x'] + panel['width'] - 100, ('New Session trails the bottom bar', create, panel)
     assert create['x'] + create['width'] <= panel['x'] + panel['width'], ('New Session stays inside the column', create, panel)
     assert not any(i.get('AXLabel') == catalog.system('hideSidebar') and view['x'] - 10 < i['frame']['x'] < panel['x'] + panel['width']
