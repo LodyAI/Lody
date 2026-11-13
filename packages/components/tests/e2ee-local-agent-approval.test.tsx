@@ -8,7 +8,9 @@ import {
   E2eeLocalAgentApproval,
   LOCAL_AGENT_RECHECK_DELAYS_MS,
   LOCAL_AGENT_STEP_DEADLINE_MS,
+  localAgentRunsWorkspace,
 } from '../src/components/e2ee-local-agent-approval';
+import type { ElectronCliState } from '@lody/shared';
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 describe('local encrypted agent approval', () => {
@@ -53,10 +55,15 @@ describe('local encrypted agent approval', () => {
     await act(async () => root.unmount());
     container.remove();
   });
-  const render = (enabled = true) =>
+  const render = (enabled = true, localAgentRunning: boolean | null = false) =>
     act(async () =>
       root.render(
-        <E2eeLocalAgentApproval workspaceId="workspace" runtime={runtime} enabled={enabled} />
+        <E2eeLocalAgentApproval
+          workspaceId="workspace"
+          runtime={runtime}
+          enabled={enabled}
+          localAgentRunning={localAgentRunning}
+        />
       )
     );
   const click = async (label: string) => {
@@ -165,6 +172,65 @@ describe('local encrypted agent approval', () => {
     expect(container.textContent).toBe('');
     expect(prepared).toBe(false);
     expect(admitted).toBe(false);
+  });
+  it('reads a running workspace only from a live local agent', () => {
+    const cli = (phase: ElectronCliState['phase']) =>
+      ({
+        phase,
+        desiredState: 'running',
+        localAgentEnabled: true,
+        updatedAtMs: 0,
+        preventSleepEnabled: false,
+        runtime: { connectedWorkspaces: [{ id: 'workspace' }] },
+      }) as unknown as ElectronCliState;
+    expect(localAgentRunsWorkspace(null, 'workspace')).toBeNull();
+    expect(localAgentRunsWorkspace(cli('running'), 'workspace')).toBe(true);
+    expect(localAgentRunsWorkspace(cli('running'), 'other-workspace')).toBe(false);
+    // A stopped or restarting process may still carry its last runtime snapshot.
+    expect(localAgentRunsWorkspace(cli('stopped'), 'workspace')).toBe(false);
+    expect(localAgentRunsWorkspace(cli('starting'), 'workspace')).toBe(false);
+  });
+  it('does not offer enablement again when this machine already runs the workspace', async () => {
+    // A remount (back to Home, restart, new window) must not forget an earlier enablement.
+    await render(true, true);
+    expect(container.textContent).toBe('');
+    expect(prepared).toBe(false);
+  });
+  it('waits for the local agent state before offering enablement', async () => {
+    await render(true, null);
+    expect(container.textContent).toBe('');
+    await render(true, false);
+    expect(container.textContent).toContain('e2ee.localAgent.enable');
+    expect(prepared).toBe(false);
+  });
+  it('offers enablement again once the local agent stops running the workspace', async () => {
+    await render(true, true);
+    expect(container.textContent).toBe('');
+    await render(true, false);
+    expect(container.textContent).toContain('e2ee.localAgent.enable');
+  });
+  it('settles a waiting approval once the local agent runs the workspace, without preparing again', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      let preparations = 0;
+      const prepareOriginal = runtime.prepareLocalAgent!;
+      runtime.prepareLocalAgent = async (...args) => {
+        preparations++;
+        return prepareOriginal(...args);
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      await click('e2ee.localAgent.allow');
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      await render(true, true);
+      expect(container.textContent).toBe('');
+      for (const delay of LOCAL_AGENT_RECHECK_DELAYS_MS)
+        await act(async () => vi.advanceTimersByTime(delay));
+      expect(preparations).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it('hides approval for an old workspace with no local credential', async () => {
     hasCredential = false;
