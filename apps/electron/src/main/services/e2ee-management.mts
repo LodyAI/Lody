@@ -283,6 +283,10 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     let result = yield* start ? publisher.publish() : publisher.resume()
     if (!result) return null
     yield* refreshIfNeeded
+    // A lost CAS leaves this device's staged envelope group behind. Core deletes it
+    // only once a different commitment occupies the epoch; best effort, never
+    // blocking the acknowledgement.
+    if (result.outcome === 'Conflict') yield* Effect.ignore(publisher.cleanupStaged())
     yield* publisher.acknowledge(result)
     return result.outcome
   })

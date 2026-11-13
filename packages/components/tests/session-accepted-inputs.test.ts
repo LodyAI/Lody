@@ -1190,8 +1190,26 @@ it('only exact or typed access-loss results start terminal workspace cleanup', (
       new Error("Error invoking remote method 'e2ee.refresh': Error: e2ee_member_removed"),
       'e2ee_member_removed',
     ],
+    // Any E2EE IPC method can carry main's credential-confirmed loss.
+    [
+      new Error("Error invoking remote method 'e2ee.prepareDispatch': Error: e2ee_member_removed"),
+      'e2ee_member_removed',
+    ],
+    [
+      new Error("Error invoking remote method 'e2ee:seal': Error: e2ee_device_revoked"),
+      'e2ee_device_revoked',
+    ],
+    [
+      new Error("Error invoking remote method 'e2ee.updateKeys': Error: e2ee_device_revoked"),
+      'e2ee_device_revoked',
+    ],
     [{ _tag: 'PersonalAccessLoss', code: 'e2ee_member_removed' }, 'e2ee_member_removed'],
     [{ _tag: 'PersonalHostError', code: 'revoked' }, 'e2ee_device_revoked'],
+    // Other channels, prefixes and suffixes never match.
+    [new Error("Error invoking remote method 'auth.getSession': Error: e2ee_member_removed"), null],
+    [new Error("Error invoking remote method 'e2ee.': Error: e2ee_member_removed"), null],
+    [new Error("Error invoking remote method 'e2ee.seal': Error: e2ee_member_removed_later"), null],
+    [new Error("Error invoking remote method 'e2ee.seal x': Error: e2ee_device_revoked"), null],
     // Untrusted failures never authorize cleanup, even when they mention the code.
     [new Error('jwt verification failed: e2ee_device_revoked'), null],
     [Object.assign(new Error('network'), { code: 'e2ee_device_revoked' }), null],
