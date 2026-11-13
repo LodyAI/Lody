@@ -459,6 +459,25 @@ revoked R stops any restore. A device retaining the old V discards it at step 5.
 works can restore a device first. With no device, file or passkey, nothing can open the
 vault, and that content is lost.
 
+## Password unlock
+
+**Shared V, multi-wrap.** A recovery password wraps the same 32-byte vault master key V as
+recovery files and passkeys, keeping one recovery identity R per workspace membership. First-time
+vault creation recommends Passkey when supported on the current device and falls back to
+Password otherwise; an offline recovery file can be created immediately or saved later.
+
+**KDF and slot format.** Password normalization uses Unicode NFC, requiring at least 12 code
+points and at most 1024 UTF-8 bytes. Key derivation uses RFC 9106 Argon2id (`m = 65536` KiB,
+`t = 3`, `p = 1`; verifier bounds `m in [19456, 262144]`, `t in [2, 10]`, `p in [1, 4]`)
+with a fresh 32-byte random salt, followed by HKDF-SHA256 (`vaultId` salt, `password-wrap`
+purpose) and XChaCha20-Poly1305 under the immutable `password-wrap` entry and a CAS-referenced
+index `password` descriptor (`entryId`, `salt`, `kdf`).
+
+**Post-passkey hardening.** Because cloud password wraps remain bounded by password entropy if
+account ciphertext is obtained, once a passkey is active alongside a password wrap the UI
+encourages removing the password wrap via index CAS plus `deleteUnreferenced`. Suspected
+password compromise still requires whole-vault replacement.
+
 ## Boundaries and validation
 
 Core defines platform-neutral encrypted storage and local-journal ports and owns

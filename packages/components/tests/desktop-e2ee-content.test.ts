@@ -516,10 +516,43 @@ describe('reading an epoch whose key this device has not received yet', () => {
       expect(await first).toEqual(Uint8Array.of(42));
       expect(await second).toEqual(Uint8Array.of(42));
       expect(refresh).toHaveBeenCalledTimes(1);
+      // Explicit reception: a portable host's bare refresh would skip the key round.
+      expect(refresh).toHaveBeenCalledWith('rotated', { installKeys: true, keyMode: 'receive' });
       expect(opens).toEqual([false, false, true, true]);
     } finally {
       await access.close();
     }
+  });
+
+  it("receives the key for a portable host's typed pending failure, but not for other codes", async () => {
+    const typed = (code: string) =>
+      Object.assign(new Error(''), { _tag: 'PersonalHostError', code });
+    let keyInstalled = false;
+    const refresh = vi.fn(async () => {
+      keyInstalled = true;
+      return { epoch: 3, rotationRequired: false, hasCurrentKey: true };
+    });
+    const pending = setup({
+      openContent: async () => {
+        if (!keyInstalled) throw typed('key-pending');
+        return Uint8Array.of(7);
+      },
+      refresh,
+    } as unknown as Partial<E2eeWorkspaceRuntime>);
+    expect(await pending.open()).toEqual(Uint8Array.of(7));
+    expect(refresh).toHaveBeenCalledWith('rotated', { installKeys: true, keyMode: 'receive' });
+    await pending.access.close();
+
+    const other = vi.fn();
+    const unrelated = setup({
+      openContent: async () => {
+        throw typed('missing-read-key');
+      },
+      refresh: other,
+    } as unknown as Partial<E2eeWorkspaceRuntime>);
+    await expect(unrelated.open()).rejects.toMatchObject({ code: 'missing-read-key' });
+    expect(other).not.toHaveBeenCalled();
+    await unrelated.access.close();
   });
 
   it('fails after the bounded wait, or after one retry, without reading again', async () => {

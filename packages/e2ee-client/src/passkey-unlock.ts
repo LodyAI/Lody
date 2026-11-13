@@ -5,12 +5,14 @@ import { E2EE_PASSKEY_RP_ID, type E2eePasskeyPort } from '@lody/platform/e2ee-pa
 import type { RecoveryVault } from '@lody/e2ee-core';
 import {
   disposePrf,
+  generateRecoveryVaultId,
   passkeyUserHandle,
   vaultIdFromPasskeyUserHandle,
   vaultPrfInput,
   verifiedPasskeyPrf,
   verifiedPasskeyRegistration,
   type VerifiedPasskeyPrf,
+  type VerifiedPasskeyRegistration,
 } from '@lody/e2ee-core/protocol';
 
 export { E2eePasskeyCancelled, type E2eePasskeyPort } from '@lody/platform/e2ee-passkey';
@@ -34,6 +36,50 @@ const verifiedAssertion = (assertion: {
     extension: { results: { first: copied } },
   }).pipe(Effect.ensuring(Effect.sync(() => new Uint8Array(copied).fill(0))));
 };
+
+/**
+ * Create a brand new recovery vault wrapped directly by a passkey PRF ceremony.
+ * Registration must report PRF and a real assertion of that credential must evaluate PRF
+ * before `create` writes anything to the backend.
+ */
+export const createVaultWithPasskey = Effect.fnUntraced(function* <A, E, R>(input: {
+  readonly port: E2eePasskeyPort;
+  readonly label: string;
+  readonly create: (request: {
+    readonly vaultId: string;
+    readonly registration: VerifiedPasskeyRegistration;
+    readonly assertion: VerifiedPasskeyPrf;
+    readonly label: string;
+  }) => Effect.Effect<A, E, R>;
+}) {
+  const vaultId = yield* generateRecoveryVaultId();
+  const prfInput = vaultPrfInput();
+  const created = yield* ceremony(() =>
+    input.port.register({
+      rpId: E2EE_PASSKEY_RP_ID,
+      userHandle: passkeyUserHandle(vaultId),
+      userName: PASSKEY_USER_NAME,
+      prfInput,
+      excludeCredentialIds: [],
+    })
+  );
+  const registration = yield* verifiedPasskeyRegistration({
+    credentialId: created.credentialId,
+    extension: { enabled: created.prfEnabled },
+  });
+  const assertion = yield* ceremony(() =>
+    input.port.authenticate({
+      rpId: E2EE_PASSKEY_RP_ID,
+      prfInput,
+      allowCredentialIds: [created.credentialId],
+    })
+  );
+  return yield* Effect.acquireUseRelease(
+    verifiedAssertion(assertion),
+    (prf) => input.create({ vaultId, registration, assertion: prf, label: input.label }),
+    (prf) => Effect.sync(() => disposePrf(prf))
+  );
+});
 
 /**
  * Enroll a passkey on an open vault. Registration must report PRF, and a real assertion

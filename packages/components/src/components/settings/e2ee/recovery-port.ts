@@ -7,9 +7,9 @@ import { desktopRecoveryPort } from './recovery-desktop-port';
 /**
  * The account recovery operations the encryption console's Recovery section needs.
  * Every host (desktop main process, Web, the mobile webview) implements the same
- * closed set. The host owns the unlock: it asks for the recovery file or runs the
- * passkey ceremony itself, and returns outcomes only. No file bytes, vault handles,
- * keys or secrets ever reach the renderer through this port.
+ * closed set. The host owns the unlock: it asks for the recovery file, runs the
+ * passkey ceremony or derives the Argon2id password wrap itself, and returns
+ * outcomes only. No file bytes, vault handles or raw keys ever reach the renderer.
  *
  * Operations act on the host's current account. A rejected promise carries an
  * `e2ee_recovery_<code>` code in its message (`cancelled` when the user dismissed a
@@ -27,21 +27,62 @@ export type RecoveryPort = {
   readonly create:
     | (() => Promise<RecoveryCancelled | { readonly outcome: 'created'; readonly vaultId: string }>)
     | null;
+  /** Create the account's vault directly with a passkey ceremony when supported. */
+  readonly createWithPasskey?:
+    | ((
+        label?: string
+      ) => Promise<RecoveryCancelled | { readonly outcome: 'created'; readonly vaultId: string }>)
+    | null;
+  /** Create the account's vault directly with an Argon2id password wrap when supported. */
+  readonly createWithPassword?:
+    | ((
+        password: string
+      ) => Promise<RecoveryCancelled | { readonly outcome: 'created'; readonly vaultId: string }>)
+    | null;
+  /** Save and upload an offline recovery file for a vault created with a passkey or password. */
+  readonly saveFile?:
+    | ((
+        method: RecoveryUnlockMethod,
+        options?: RecoveryUnlockOptions
+      ) => Promise<RecoveryCancelled | { readonly outcome: 'saved'; readonly vaultId: string }>)
+    | null;
+  /** Set or rotate the account vault's Argon2id password wrap. */
+  readonly setPassword?:
+    | ((input: {
+        readonly password: string;
+        readonly method: RecoveryUnlockMethod;
+        readonly currentPassword?: string;
+      }) => Promise<RecoveryCancelled | { readonly outcome: 'updated' }>)
+    | null;
+  /** Remove the account vault's password wrap once another unlock method exists. */
+  readonly removePassword?:
+    | ((
+        method: RecoveryUnlockMethod,
+        options?: RecoveryUnlockOptions
+      ) => Promise<
+        | RecoveryCancelled
+        | { readonly outcome: 'removed' | 'incomplete'; readonly pending?: boolean }
+      >)
+    | null;
   /** Restore every workspace the unlock covers onto this host, each reported separately. */
   readonly restore: (
-    method: RecoveryUnlockMethod
+    method: RecoveryUnlockMethod,
+    options?: RecoveryUnlockOptions
   ) => Promise<
     | RecoveryCancelled
     | { readonly outcome: 'restored'; readonly results: readonly RecoveryRestoreResult[] }
   >;
-  /** Set up or continue one workspace's recovery from the recovery file. */
+  /** Set up or continue one workspace's recovery from the account's vault. */
   readonly setupWorkspace: (
-    workspaceId: string
+    workspaceId: string,
+    method?: RecoveryUnlockMethod,
+    options?: RecoveryUnlockOptions
   ) => Promise<RecoveryCancelled | RecoverySetupResult>;
   /** Set up several workspaces after one unlock. One failure never stops the others. */
   readonly setupWorkspaces: (
     workspaceIds: readonly string[],
-    method: RecoveryUnlockMethod
+    method: RecoveryUnlockMethod,
+    options?: RecoveryUnlockOptions
   ) => Promise<
     | RecoveryCancelled
     | {
@@ -51,15 +92,22 @@ export type RecoveryPort = {
   >;
   /** A readable default name for a passkey added on this host. */
   readonly passkeyDefaultLabel: () => Promise<string>;
-  /** Add a passkey; the host unlocks with the recovery file first. */
+  /** Add a passkey, unlocking the vault with an active unlock method first. */
   readonly addPasskey: (
-    label: string
+    label: string,
+    method?: RecoveryUnlockMethod,
+    options?: RecoveryUnlockOptions
   ) => Promise<RecoveryCancelled | { readonly outcome: 'added' }>;
-  /** List the vault's passkeys; the host unlocks with the recovery file first. */
-  readonly listPasskeys: () => Promise<
-    RecoveryCancelled | ({ readonly outcome: 'listed' } & RecoveryPasskeys)
-  >;
-  readonly removePasskey: (entryId: string) => Promise<RecoveryCancelled | RecoveryPasskeyRemoval>;
+  /** List the vault's passkeys, unlocking the vault first. */
+  readonly listPasskeys: (
+    method?: RecoveryUnlockMethod,
+    options?: RecoveryUnlockOptions
+  ) => Promise<RecoveryCancelled | ({ readonly outcome: 'listed' } & RecoveryPasskeys)>;
+  readonly removePasskey: (
+    entryId: string,
+    method?: RecoveryUnlockMethod,
+    options?: RecoveryUnlockOptions
+  ) => Promise<RecoveryCancelled | RecoveryPasskeyRemoval>;
   /** Open a chosen recovery file and authenticate it, without restoring anything.
    * Null when this host cannot check a file: the section then offers no check. */
   readonly checkFile:
@@ -86,7 +134,13 @@ export type RecoveryReplacementPort = {
   readonly abandon: () => Promise<{ readonly outcome: RecoveryCommitOutcome }>;
 };
 
-export type RecoveryUnlockMethod = 'file' | 'passkey';
+export type RecoveryUnlockMethod = 'file' | 'passkey' | 'password';
+export type RecoveryUnlockOptions = { readonly password?: string };
+export type RecoveryMethodsSummary = {
+  readonly hasFile: boolean;
+  readonly hasPassword: boolean;
+  readonly hasPasskey: boolean | null;
+};
 export type RecoveryCancelled = { readonly outcome: 'cancelled' };
 /** `Committed` is the only finished outcome. `Pending` (and, for a restore,
  * `Unconfirmed`) is shown as still waiting; a restore's `not-backed-up` says the file
@@ -137,6 +191,8 @@ export type RecoveryPlan = {
   readonly hasVault: boolean;
   /** A replacement of this account's recovery file is unfinished. */
   readonly replacing: boolean;
+  /** Known active unlock methods on the current account vault, when available. */
+  readonly methods?: RecoveryMethodsSummary;
   /** Workspaces this host can set up or holds recovery for, with their status. */
   readonly covered: readonly {
     readonly id: string;
@@ -157,10 +213,8 @@ export type E2eeRecoveryHost =
 export const E2eeRecoveryHostContext = createContext<E2eeRecoveryHost | null>(null);
 
 /** This host's recovery port: the composed host's, else the desktop main-process
- * vault, else undefined. Undefined while the renderer's recovery switch is off, so
- * no surface offers a section that has nothing to show. The switch only hides or
- * shows the port: desktop main still refuses every vault call unless it started
- * with its own env gate. */
+ * vault, else undefined. Enabled by default; desktop main independently honors
+ * `LODY_E2EE_RECOVERY_VAULT=off` as an emergency kill switch. */
 export function useRecoveryPort(): RecoveryPort | undefined {
   const host = useContext(E2eeRecoveryHostContext);
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);

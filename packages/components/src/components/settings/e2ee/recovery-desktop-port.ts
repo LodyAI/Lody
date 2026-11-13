@@ -6,9 +6,9 @@ const passkeys = (state: RecoveryPasskeys): RecoveryPasskeys => ({
   pending: state.pending,
 });
 
-/** The desktop recovery port: main owns the file dialogs, bytes and passkey ceremony
- * and answers with outcomes or `e2ee_recovery_*` codes. Only the fields the port
- * names are passed on. */
+/** The desktop recovery port: main owns the file dialogs, bytes, passkey ceremony
+ * and Argon2id password derivation, and answers with outcomes or `e2ee_recovery_*`
+ * codes. Only the fields the port names are passed on. */
 export function desktopRecoveryPort(e2ee: IpcServices['e2ee']): RecoveryPort {
   return {
     plan: async () => {
@@ -16,6 +16,7 @@ export function desktopRecoveryPort(e2ee: IpcServices['e2ee']): RecoveryPort {
       return {
         hasVault: plan.hasVault,
         replacing: plan.replacing,
+        ...(plan.methods ? { methods: plan.methods } : {}),
         covered: plan.covered,
         uncovered: plan.uncovered,
       };
@@ -28,8 +29,45 @@ export function desktopRecoveryPort(e2ee: IpcServices['e2ee']): RecoveryPort {
         ? { outcome: 'created', vaultId: created.vaultId }
         : { outcome: 'cancelled' };
     },
-    restore: async (method) => {
-      const restored = await e2ee.restoreFromRecoveryFile(method);
+    createWithPasskey: async (label) => {
+      const created = await e2ee.createRecoveryVault({
+        method: 'passkey',
+        ...(label ? { label } : {}),
+      });
+      return created.outcome === 'created'
+        ? { outcome: 'created', vaultId: created.vaultId }
+        : { outcome: 'cancelled' };
+    },
+    createWithPassword: async (password) => {
+      const created = await e2ee.createRecoveryVault({ method: 'password', password });
+      return created.outcome === 'created'
+        ? { outcome: 'created', vaultId: created.vaultId }
+        : { outcome: 'cancelled' };
+    },
+    saveFile: async (method, options) => {
+      const saved = options
+        ? await e2ee.saveRecoveryVaultFile(method, options)
+        : await e2ee.saveRecoveryVaultFile(method);
+      return saved.outcome === 'saved'
+        ? { outcome: 'saved', vaultId: saved.vaultId }
+        : { outcome: 'cancelled' };
+    },
+    setPassword: async (input) => {
+      const updated = await e2ee.setRecoveryPassword(input);
+      return updated.outcome === 'updated' ? { outcome: 'updated' } : { outcome: 'cancelled' };
+    },
+    removePassword: async (method, options) => {
+      const removed = options
+        ? await e2ee.removeRecoveryPassword(method, options)
+        : await e2ee.removeRecoveryPassword(method);
+      return removed.outcome === 'cancelled'
+        ? { outcome: 'cancelled' }
+        : { outcome: removed.outcome, pending: removed.pending };
+    },
+    restore: async (method, options) => {
+      const restored = options
+        ? await e2ee.restoreFromRecoveryFile(method, options)
+        : await e2ee.restoreFromRecoveryFile(method);
       return restored.outcome === 'restored'
         ? {
             outcome: 'restored',
@@ -41,14 +79,21 @@ export function desktopRecoveryPort(e2ee: IpcServices['e2ee']): RecoveryPort {
           }
         : { outcome: 'cancelled' };
     },
-    setupWorkspace: async (workspaceId) => {
-      const done = await e2ee.setupWorkspaceRecovery(workspaceId);
+    setupWorkspace: async (workspaceId, method, options) => {
+      const done =
+        method === undefined && options === undefined
+          ? await e2ee.setupWorkspaceRecovery(workspaceId)
+          : options === undefined
+            ? await e2ee.setupWorkspaceRecovery(workspaceId, method)
+            : await e2ee.setupWorkspaceRecovery(workspaceId, method ?? 'file', options);
       return 'recoverable' in done
         ? { outcome: done.outcome, recoverable: done.recoverable }
         : { outcome: 'cancelled' };
     },
-    setupWorkspaces: async (workspaceIds, method) => {
-      const settled = await e2ee.setupRecoveryForWorkspaces(workspaceIds, method);
+    setupWorkspaces: async (workspaceIds, method, options) => {
+      const settled = options
+        ? await e2ee.setupRecoveryForWorkspaces(workspaceIds, method, options)
+        : await e2ee.setupRecoveryForWorkspaces(workspaceIds, method);
       return settled.outcome === 'settled'
         ? {
             outcome: 'settled',
@@ -61,18 +106,33 @@ export function desktopRecoveryPort(e2ee: IpcServices['e2ee']): RecoveryPort {
         : { outcome: 'cancelled' };
     },
     passkeyDefaultLabel: () => e2ee.recoveryPasskeyDefaultLabel(),
-    addPasskey: async (label) => {
-      const added = await e2ee.addRecoveryPasskey(label);
+    addPasskey: async (label, method, options) => {
+      const added =
+        method === undefined && options === undefined
+          ? await e2ee.addRecoveryPasskey(label)
+          : options === undefined
+            ? await e2ee.addRecoveryPasskey(label, method)
+            : await e2ee.addRecoveryPasskey(label, method ?? 'file', options);
       return added.outcome === 'added' ? { outcome: 'added' } : { outcome: 'cancelled' };
     },
-    listPasskeys: async () => {
-      const listed = await e2ee.listRecoveryPasskeys();
+    listPasskeys: async (method, options) => {
+      const listed =
+        method === undefined && options === undefined
+          ? await e2ee.listRecoveryPasskeys()
+          : options === undefined
+            ? await e2ee.listRecoveryPasskeys(method)
+            : await e2ee.listRecoveryPasskeys(method ?? 'file', options);
       return listed.outcome === 'listed'
         ? { outcome: 'listed', ...passkeys(listed) }
         : { outcome: 'cancelled' };
     },
-    removePasskey: async (entryId) => {
-      const removed = await e2ee.removeRecoveryPasskey(entryId);
+    removePasskey: async (entryId, method, options) => {
+      const removed =
+        method === undefined && options === undefined
+          ? await e2ee.removeRecoveryPasskey(entryId)
+          : options === undefined
+            ? await e2ee.removeRecoveryPasskey(entryId, method)
+            : await e2ee.removeRecoveryPasskey(entryId, method ?? 'file', options);
       return removed.outcome === 'cancelled'
         ? { outcome: 'cancelled' }
         : { outcome: removed.outcome, ...passkeys(removed) };

@@ -19,6 +19,7 @@ import {
   LedgerFeedSource,
   LedgerSync,
   LedgerLog,
+  LedgerLogError,
   LedgerPinStore,
   SubmissionJournal,
   WorkspaceScope,
@@ -77,6 +78,7 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         log = yield* LedgerLog;
       const readAfter = source.readAfter.bind(source),
         readLog = log.read.bind(log),
+        injectedReadFrom = log.readFrom?.bind(log),
         append = log.appendCas.bind(log);
       let origin: LedgerFeedOrigin, originView: LedgerView;
       if (approval.kind === 'snapshot') {
@@ -120,7 +122,8 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         )
       );
       const feed = Context.get(services, LedgerFeed);
-      const refresh = Effect.fnUntraced(function* () {
+      const advanceFeed = Effect.fnUntraced(function* () {
+        const suffix: Uint8Array[] = [];
         let total = 0,
           count = 0;
         for (let pageIndex = 0; pageIndex < 256; pageIndex++) {
@@ -136,15 +139,40 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
           }
           if (count > 16384 || total > 32 * 1024 * 1024)
             return yield* new LedgerFeedError({ code: 'read-too-large' });
-          const length =
-            state.view.length +
-            page.records.length -
-            (state.bootstrap && page.records.length ? 1 : 0);
+          const added =
+            state.bootstrap && page.records.length ? page.records.slice(1) : page.records;
+          const length = state.view.length + added.length;
           const head = page.records.length ? hashRecordBytes(page.records.at(-1)) : state.view.head;
           const next = yield* feed.accept(page, { head, length });
-          if (page.upToDate) return next;
+          for (const record of added) suffix.push(new Uint8Array(record));
+          if (page.upToDate) return { next, suffix };
         }
         return yield* new LedgerFeedError({ code: 'read-too-large' });
+      });
+      const refresh = Effect.fnUntraced(function* () {
+        return (yield* advanceFeed()).next;
+      });
+      const readSuffix = Effect.fnUntraced(function* (anchor: Bytes.GenesisHash, base: LedgerView) {
+        if (!anchor.equals(genesis)) return yield* new LedgerLogError({});
+        const start = yield* feed
+          .current()
+          .pipe(Effect.mapError((cause) => new LedgerLogError({ cause })));
+        if (start.view.length !== base.length || !start.view.head.equals(base.head)) {
+          const full = yield* readLog(anchor);
+          if (full.records.length < base.length || full.checkpoint.length < base.length)
+            return yield* new LedgerLogError({});
+          return {
+            records: full.records.slice(base.length),
+            checkpoint: full.checkpoint,
+          };
+        }
+        const { next, suffix } = yield* advanceFeed().pipe(
+          Effect.mapError((cause) => new LedgerLogError({ cause }))
+        );
+        return {
+          records: suffix,
+          checkpoint: { head: next.view.head, length: next.view.length },
+        };
       });
       const current = Effect.fnUntraced(function* () {
         const state = yield* feed.current();
@@ -164,7 +192,11 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
       return Context.make(LedgerSync, { current, refresh }).pipe(
         Context.add(LedgerPinStore, pins),
         Context.add(SubmissionJournal, submissions),
-        Context.add(LedgerLog, { read: readLog, appendCas: append })
+        Context.add(LedgerLog, {
+          read: readLog,
+          readFrom: injectedReadFrom ?? readSuffix,
+          appendCas: append,
+        })
       );
     })
   );

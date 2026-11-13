@@ -56,7 +56,10 @@ import {
   listRecoveryPasskeys,
   passkeyLabel,
   removeRecoveryPasskey,
+  removeRecoveryPassword,
   createAccountRecoveryVault,
+  createAccountRecoveryVaultWithPasskey,
+  createAccountRecoveryVaultWithPassword,
   inspectRecoveryFile,
   recentAccountSecurityEvents,
   recoveryReplacementPlan,
@@ -65,13 +68,18 @@ import {
   recoveryVaultEnabled,
   recoveryVaultFailure,
   restoreAccountWorkspaces,
+  saveAccountRecoveryFile,
   saveRecoveryFile,
+  setRecoveryPassword,
   setupWorkspaceRecovery,
   setupWorkspacesRecovery,
   type RecoveryUnlock,
   type RecoveryVaultReplacement,
   type RecoveryWorkspaceTarget
 } from '../../services/e2ee-recovery-vault.mjs'
+
+type RecoveryUnlockMethod = 'file' | 'passkey' | 'password'
+type RecoveryUnlockOptions = { readonly password?: string }
 import { desktopPasskeyPort } from '../../services/e2ee-passkey-macos.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
@@ -1557,8 +1565,10 @@ export class E2eeIpc extends ProductWindowIpcService {
           workspaces: () => holder.hints,
           // The same main-owned delivery as a member approval: distribute-only round,
           // per-device mailbox evidence, backoff retry and `memberKeyDeliveries` status.
+          // The approval waits, bounded, on its first pass before publishing.
           deliverKeys: (workspaceId, requestId, device) => {
             this.trackKeyDelivery(accountId, workspaceId, requestId, device)
+            return this.keyDelivery.firstPass(accountId, workspaceId, requestId)
           }
         })
       })
@@ -2747,8 +2757,8 @@ export class E2eeIpc extends ProductWindowIpcService {
             accountId: owner.accountId,
             credential,
             status: yield* owner.host.status(workspaceId),
-            work: owner.host.manage(workspaceId, command, (signal) => ({
-              log: cloud.client.ledgerLog(workspaceId, signal),
+            work: owner.host.manage(workspaceId, command, (signal, feed) => ({
+              log: cloud.client.ledgerLog(workspaceId, signal, feed),
               staging: (round) => cloud.client.staging({ workspaceId, credential }, signal, round),
               history: (request) => cloud.client.history(request, signal),
               mailbox: () => cloud.client.mailbox({ workspaceId, credential }, signal)
@@ -2887,14 +2897,56 @@ export class E2eeIpc extends ProductWindowIpcService {
     this.recoveryQueue = run.catch(() => undefined)
     return run
   }
-  /** Default-off post-MVP recovery vault: create the account vault, save its file
-   * where the user chooses and prove that file reopens it. The file never reaches the renderer. */
+  /** Create the account recovery vault with a passkey, a password, or a saved recovery file.
+   * Secret material never reaches the renderer beyond a user-typed password input. */
   @IpcMethod()
-  async createRecoveryVault() {
+  async createRecoveryVault(input?: {
+    method?: RecoveryUnlockMethod
+    password?: string
+    label?: string
+  }) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
     if (await this.recoveryOperation(({ exists }) => exists))
       throw new Error('e2ee_recovery_exists')
+    const method = input?.method ?? 'file'
+    const locator = import.meta.env.VITE_CONVEX_DEPLOY_URL ?? ''
+    if (method === 'passkey') {
+      const label = passkeyLabel(
+        input?.label ??
+          defaultPasskeyLabel({
+            platform: process.platform,
+            systemVersion: process.getSystemVersion()
+          })
+      )
+      const port = this.passkeyPort()
+      const created = await this.recoveryOperation(({ store, journalPath, exists }) =>
+        createAccountRecoveryVaultWithPasskey({
+          store,
+          journalPath,
+          exists,
+          locator,
+          port,
+          label
+        })
+      )
+      return { outcome: 'created' as const, vaultId: created.vaultId }
+    }
+    if (method === 'password') {
+      if (typeof input?.password !== 'string') throw new Error('e2ee_recovery_invalid-input')
+      const password = input.password
+      const created = await this.recoveryOperation(({ store, journalPath, exists }) =>
+        createAccountRecoveryVaultWithPassword({
+          store,
+          journalPath,
+          exists,
+          locator,
+          password
+        })
+      )
+      return { outcome: 'created' as const, vaultId: created.vaultId }
+    }
+    if (method !== 'file') throw new Error('e2ee_recovery_invalid-input')
     const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
     const options = {
       defaultPath: 'lody-recovery.lodyrecovery',
@@ -2910,7 +2962,7 @@ export class E2eeIpc extends ProductWindowIpcService {
         store,
         journalPath,
         exists,
-        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+        locator,
         persist: (file) =>
           Effect.tryPromise(async () => {
             await saveRecoveryFile(path, file)
@@ -2920,7 +2972,103 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
     return { outcome: 'created' as const, vaultId: created.vaultId }
   }
-  /** Default-off: recent account security events, for the security settings list. */
+  /** Save and upload an offline recovery file for an existing passkey- or password-unlocked vault. */
+  @IpcMethod()
+  async saveRecoveryVaultFile(
+    method: RecoveryUnlockMethod = 'passkey',
+    unlockOptions?: RecoveryUnlockOptions
+  ) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (method === 'password' && typeof unlockOptions?.password !== 'string')
+      throw new Error('e2ee_recovery_invalid-input')
+    if (method !== 'file' && method !== 'passkey' && method !== 'password')
+      throw new Error('e2ee_recovery_invalid-input')
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const dialogOptions = {
+      defaultPath: 'lody-recovery.lodyrecovery',
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const target = owner
+      ? await dialog.showSaveDialog(owner, dialogOptions)
+      : await dialog.showSaveDialog(dialogOptions)
+    if (target.canceled || !target.filePath) return { outcome: 'cancelled' as const }
+    const path = target.filePath
+    const unlock = await this.recoveryUnlock(method, unlockOptions)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const saved = await this.recoveryOperation(({ store, journalPath, replacement }) =>
+        saveAccountRecoveryFile({
+          store,
+          journalPath,
+          replacement,
+          unlock: this.bindRecoveryUnlock(unlock, replacement),
+          persist: (file) =>
+            Effect.tryPromise(async () => {
+              await saveRecoveryFile(path, file)
+              return new Uint8Array(await readFile(path))
+            })
+        })
+      )
+      return { outcome: 'saved' as const, vaultId: saved.vaultId }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Set or rotate the account vault's Argon2id password wrap. */
+  @IpcMethod()
+  async setRecoveryPassword(input: {
+    password: string
+    method?: RecoveryUnlockMethod
+    currentPassword?: string
+  }) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (typeof input?.password !== 'string') throw new Error('e2ee_recovery_invalid-input')
+    const method = input.method ?? 'file'
+    const unlock = await this.recoveryUnlock(method, { password: input.currentPassword })
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      await this.recoveryOperation(({ store, journalPath, replacement }) =>
+        setRecoveryPassword({
+          store,
+          journalPath,
+          replacement,
+          unlock: this.bindRecoveryUnlock(unlock, replacement),
+          password: input.password
+        })
+      )
+      return { outcome: 'updated' as const }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Remove the account vault's password wrap once another unlock method is configured. */
+  @IpcMethod()
+  async removeRecoveryPassword(
+    method: RecoveryUnlockMethod = 'passkey',
+    options?: RecoveryUnlockOptions
+  ) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const unlock = await this.recoveryUnlock(method, options)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const { removed, pending } = await this.recoveryOperation(
+        ({ store, journalPath, replacement }) =>
+          removeRecoveryPassword({
+            store,
+            journalPath,
+            replacement,
+            unlock: this.bindRecoveryUnlock(unlock, replacement)
+          })
+      )
+      return { outcome: removed ? ('removed' as const) : ('incomplete' as const), pending }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Recent account security events, for the security settings list. */
   @IpcMethod()
   async recentAccountSecurityEvents() {
     sender()
@@ -2932,7 +3080,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       }
     )
   }
-  /** Default-off: what replacing the recovery file would cover from this device. */
+  /** What replacing the recovery vault would cover from this device, plus active methods. */
   @IpcMethod()
   async recoveryReplacementPlan() {
     sender()
@@ -2948,7 +3096,7 @@ export class E2eeIpc extends ProductWindowIpcService {
         })
     )
   }
-  /** Default-off: save a new file and reserve its vault. The current vault keeps working. */
+  /** Save a new file and reserve its vault. The current vault keeps working. */
   @IpcMethod()
   async beginRecoveryReplacement() {
     sender()
@@ -2991,14 +3139,31 @@ export class E2eeIpc extends ProductWindowIpcService {
     })
   }
   /** How the user chose to open the vault, or null when they cancel the file dialog. */
-  private async recoveryUnlock(method: 'file' | 'passkey'): Promise<RecoveryUnlock | null> {
+  private async recoveryUnlock(
+    method: RecoveryUnlockMethod,
+    options?: RecoveryUnlockOptions
+  ): Promise<RecoveryUnlock | null> {
     if (method === 'passkey')
       return {
         passkey: this.passkeyPort(),
         locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? ''
       }
+    if (method === 'password') {
+      if (typeof options?.password !== 'string') throw new Error('e2ee_recovery_invalid-input')
+      return {
+        password: options.password,
+        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? ''
+      }
+    }
+    if (method !== 'file') throw new Error('e2ee_recovery_invalid-input')
     const file = await this.chooseRecoveryFile()
     return file ? { file } : null
+  }
+  private bindRecoveryUnlock(
+    unlock: RecoveryUnlock,
+    replacement: Pick<RecoveryVaultReplacement, 'state'>
+  ): RecoveryUnlock {
+    return 'password' in unlock && !unlock.replacement ? { ...unlock, replacement } : unlock
   }
   /** Ask for a recovery file and read it, or null when the user cancels. */
   private async chooseRecoveryFile() {
@@ -3067,7 +3232,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     }
     return targets
   }
-  /** Default-off: from the new file, prove every workspace, revoke old Rs and retire the
+  /** From the new file, prove every workspace, revoke old Rs and retire the
    * old vault. A suspected leak revokes first. The file never reaches the renderer. */
   @IpcMethod()
   async continueRecoveryReplacement(input: { compromised: boolean }) {
@@ -3098,12 +3263,16 @@ export class E2eeIpc extends ProductWindowIpcService {
       file.fill(0)
     }
   }
-  /** Default-off: set up recovery for one workspace from the account's recovery file. */
+  /** Set up recovery for one workspace from the account's recovery vault. */
   @IpcMethod()
-  async setupWorkspaceRecovery(workspaceId: string, method: 'file' | 'passkey' = 'file') {
+  async setupWorkspaceRecovery(
+    workspaceId: string,
+    method: RecoveryUnlockMethod = 'file',
+    options?: RecoveryUnlockOptions
+  ) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
-    const unlock = await this.recoveryUnlock(method)
+    const unlock = await this.recoveryUnlock(method, options)
     if (!unlock) return { outcome: 'cancelled' as const }
     try {
       return await this.recoveryOperation(
@@ -3119,7 +3288,13 @@ export class E2eeIpc extends ProductWindowIpcService {
               ),
               ([target]) =>
                 target
-                  ? setupWorkspaceRecovery({ store, journalPath, replacement, target, unlock })
+                  ? setupWorkspaceRecovery({
+                      store,
+                      journalPath,
+                      replacement,
+                      target,
+                      unlock: this.bindRecoveryUnlock(unlock, replacement)
+                    })
                   : Effect.fail({ code: 'missing' })
             )
           )
@@ -3128,12 +3303,13 @@ export class E2eeIpc extends ProductWindowIpcService {
       if ('file' in unlock) unlock.file.fill(0)
     }
   }
-  /** Default-off: set up recovery for several workspaces after one file or passkey unlock.
+  /** Set up recovery for several workspaces after one file, passkey or password unlock.
    * Each workspace settles on its own; one that fails is reported and the rest continue. */
   @IpcMethod()
   async setupRecoveryForWorkspaces(
     workspaceIds: readonly string[],
-    method: 'file' | 'passkey' = 'file'
+    method: RecoveryUnlockMethod = 'file',
+    options?: RecoveryUnlockOptions
   ) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
@@ -3145,7 +3321,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
       throw new Error('e2ee_recovery_invalid-input')
     const wanted = new Set(workspaceIds)
-    const unlock = await this.recoveryUnlock(method)
+    const unlock = await this.recoveryUnlock(method, options)
     if (!unlock) return { outcome: 'cancelled' as const }
     try {
       const results = await this.recoveryOperation(
@@ -3169,7 +3345,7 @@ export class E2eeIpc extends ProductWindowIpcService {
                     store,
                     journalPath,
                     replacement,
-                    unlock,
+                    unlock: this.bindRecoveryUnlock(unlock, replacement),
                     targets: built.flatMap((entry) => entry.targets ?? [])
                   }),
                   (settled) => [
@@ -3191,41 +3367,58 @@ export class E2eeIpc extends ProductWindowIpcService {
       if ('file' in unlock) unlock.file.fill(0)
     }
   }
-  /** Default-off: list the vault's passkeys, opening it with the file or a passkey. */
+  /** List the vault's passkeys, opening it with the file, a passkey or a password. */
   @IpcMethod()
-  async listRecoveryPasskeys(method: 'file' | 'passkey' = 'file') {
+  async listRecoveryPasskeys(
+    method: RecoveryUnlockMethod = 'file',
+    options?: RecoveryUnlockOptions
+  ) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
-    const unlock = await this.recoveryUnlock(method)
+    const unlock = await this.recoveryUnlock(method, options)
     if (!unlock) return { outcome: 'cancelled' as const }
     try {
-      const state = await this.recoveryOperation(({ store, journalPath }) =>
-        listRecoveryPasskeys({ store, journalPath, unlock })
+      const state = await this.recoveryOperation(({ store, journalPath, replacement }) =>
+        listRecoveryPasskeys({
+          store,
+          journalPath,
+          unlock: this.bindRecoveryUnlock(unlock, replacement)
+        })
       )
       return { outcome: 'listed' as const, ...state }
     } finally {
       if ('file' in unlock) unlock.file.fill(0)
     }
   }
-  /** Default-off: remove one passkey. Removing changes the index, so V must open again. */
+  /** Remove one passkey. Removing changes the index, so V must open again. */
   @IpcMethod()
-  async removeRecoveryPasskey(entryId: string, method: 'file' | 'passkey' = 'file') {
+  async removeRecoveryPasskey(
+    entryId: string,
+    method: RecoveryUnlockMethod = 'file',
+    options?: RecoveryUnlockOptions
+  ) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
     if (typeof entryId !== 'string' || !/^[0-9a-f]{64}$/.test(entryId))
       throw new Error('e2ee_recovery_invalid-input')
-    const unlock = await this.recoveryUnlock(method)
+    const unlock = await this.recoveryUnlock(method, options)
     if (!unlock) return { outcome: 'cancelled' as const }
     try {
-      const { removed, ...state } = await this.recoveryOperation(({ store, journalPath }) =>
-        removeRecoveryPasskey({ store, journalPath, unlock, entryId })
+      const { removed, ...state } = await this.recoveryOperation(
+        ({ store, journalPath, replacement }) =>
+          removeRecoveryPasskey({
+            store,
+            journalPath,
+            unlock: this.bindRecoveryUnlock(unlock, replacement),
+            entryId
+          })
       )
       return { outcome: removed ? ('removed' as const) : ('incomplete' as const), ...state }
     } finally {
       if ('file' in unlock) unlock.file.fill(0)
     }
   }
-  /** Default-off: a readable default passkey name for this device. */
+  /** A readable default passkey name for this device. */
   @IpcMethod()
   async recoveryPasskeyDefaultLabel() {
     sender()
@@ -3234,40 +3427,53 @@ export class E2eeIpc extends ProductWindowIpcService {
       systemVersion: process.getSystemVersion()
     })
   }
-  /** Default-off: whether this device can attempt a passkey ceremony. */
+  /** Whether this device can attempt a passkey ceremony. */
   @IpcMethod()
   async recoveryPasskeyAvailable() {
     sender()
     return recoveryVaultEnabled() && this.passkeyPort().available()
   }
-  /** Default-off: add a passkey. Adding one needs V, so the user picks the file first. */
+  /** Add a passkey, unlocking V with an existing file, passkey or password. */
   @IpcMethod()
-  async addRecoveryPasskey(label: string) {
+  async addRecoveryPasskey(
+    label: string,
+    method: RecoveryUnlockMethod = 'file',
+    options?: RecoveryUnlockOptions
+  ) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
     const name = passkeyLabel(label)
-    const file = await this.chooseRecoveryFile()
-    if (!file) return { outcome: 'cancelled' as const }
+    const unlock = await this.recoveryUnlock(method, options)
+    if (!unlock) return { outcome: 'cancelled' as const }
     const port = this.passkeyPort()
     try {
-      const added = await this.recoveryOperation(({ store, journalPath }) =>
-        enrollRecoveryPasskey({ store, journalPath, file, port, label: name })
+      const added = await this.recoveryOperation(({ store, journalPath, replacement }) =>
+        enrollRecoveryPasskey({
+          store,
+          journalPath,
+          unlock: this.bindRecoveryUnlock(unlock, replacement),
+          port,
+          label: name
+        })
       )
       return { outcome: 'added' as const, passkeys: added.passkeys }
     } finally {
-      file.fill(0)
+      if ('file' in unlock) unlock.file.fill(0)
     }
   }
-  /** Default-off: restore every workspace a file or passkey covers onto this device. */
+  /** Restore every workspace a file, passkey or password covers onto this device. */
   @IpcMethod()
-  async restoreFromRecoveryFile(method: 'file' | 'passkey' = 'file') {
+  async restoreFromRecoveryFile(
+    method: RecoveryUnlockMethod = 'file',
+    options?: RecoveryUnlockOptions
+  ) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
-    const unlock = await this.recoveryUnlock(method)
+    const unlock = await this.recoveryUnlock(method, options)
     if (!unlock) return { outcome: 'cancelled' as const }
     try {
       const results = await this.recoveryOperation(
-        ({ accountId, client, store, journalPath, accountWorkspaces }) =>
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
           Effect.flatMap(
             Effect.flatMap(accountWorkspaces, (rows) =>
               Effect.forEach(rows, (row) =>
@@ -3287,7 +3493,7 @@ export class E2eeIpc extends ProductWindowIpcService {
               restoreAccountWorkspaces({
                 store,
                 journalPath,
-                unlock,
+                unlock: this.bindRecoveryUnlock(unlock, replacement),
                 workspaces: rows.map((row) =>
                   recoveryRestoreTarget<E2eeWorkspaceHistoryPage>({
                     ...row,
@@ -3328,7 +3534,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       if ('file' in unlock) unlock.file.fill(0)
     }
   }
-  /** Default-off: give up an unfinished replacement. Needs no file: this device's journal
+  /** Give up an unfinished replacement. Needs no file: this device's journal
    * names each new R. */
   @IpcMethod()
   async abandonRecoveryReplacement() {
@@ -3344,7 +3550,7 @@ export class E2eeIpc extends ProductWindowIpcService {
         )
     )
   }
-  /** Default-off: open a vault from a chosen recovery file and authenticate its
+  /** Open a vault from a chosen recovery file and authenticate its
    * index. This checks the file; it neither restores a workspace nor admits a device. */
   @IpcMethod()
   async inspectRecoveryFile() {

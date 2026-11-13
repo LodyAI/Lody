@@ -142,8 +142,18 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     });
     const log = Object.freeze({
       read: rawLog.read.bind(rawLog),
+      readFrom: rawLog.readFrom?.bind(rawLog),
       appendCas: rawLog.appendCas.bind(rawLog),
     });
+    const refreshCheckpoint = (value: { checkpoint: import('@lody/e2ee-core').LedgerCheckpoint }) =>
+      Effect.gen(function* () {
+        const local = yield* sync.current();
+        if (
+          local.view.length !== value.checkpoint.length ||
+          !local.view.head.equals(value.checkpoint.head)
+        )
+          yield* sync.refresh();
+      });
     const controlPorts = Layer.succeedContext(
       Context.pick(
         LedgerSync,
@@ -154,9 +164,20 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         Context.add(LedgerSync, sync),
         Context.add(LedgerLog, {
           appendCas: log.appendCas.bind(log),
+          ...(log.readFrom
+            ? {
+                readFrom: (anchor: Bytes.GenesisHash, base: import('@lody/e2ee-core').LedgerView) =>
+                  log.readFrom!(anchor, base).pipe(
+                    Effect.tap(refreshCheckpoint),
+                    Effect.mapError((cause) =>
+                      cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
+                    )
+                  ),
+              }
+            : {}),
           read: (anchor) =>
             log.read(anchor).pipe(
-              Effect.tap(() => sync.refresh()),
+              Effect.tap(refreshCheckpoint),
               Effect.mapError((cause) =>
                 cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
               )
@@ -172,7 +193,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         ),
     });
     const controlLayer = WorkspaceControl.layer.pipe(
-      Layer.provideMerge(Layer.merge(VerifiedLedger.layer, LedgerSubmission.layer)),
+      Layer.provideMerge(LedgerSubmission.layer.pipe(Layer.provideMerge(VerifiedLedger.layer))),
       Layer.provideMerge(Layer.mergeAll(identity, controlPorts, source))
     );
     const controlServices = yield* Layer.build(controlLayer);
@@ -401,6 +422,27 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           return 'e2ee_key_recipient_ineligible';
         })
       );
+    /** True only when this device's own verified ledger already holds `epoch`, this
+     * device is an active member device there, and its installed key store genuinely
+     * lacks that epoch: a rotation it has not received yet. Unreadable keys, unknown
+     * epochs and access loss are never pending. */
+    const keyPending = (epoch: number) =>
+      withKeys((ctx) =>
+        Effect.gen(function* () {
+          const state = (yield* admitted()).inspectState();
+          const own = state.devices.get(toHex(device.publicKey.toBytes()));
+          if (
+            !Number.isSafeInteger(epoch) ||
+            epoch < 0 ||
+            epoch > state.epoch.number ||
+            !own ||
+            !state.members.has(toHex(own.membershipId.toBytes()))
+          )
+            return false;
+          const checked = yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch));
+          return Result.isFailure(checked) && checked.failure.reason === 'missing-key';
+        })
+      );
     const readKey = (epoch: number) =>
       Effect.gen(function* () {
         const ctx = yield* keys();
@@ -605,6 +647,14 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             );
           })
         );
+        const personalCounts = new Map<string, number>();
+        const recoveryMembers = new Set<string>();
+        for (const device of state.devices.values()) {
+          const membership = toHex(device.membershipId.toBytes());
+          if (device.kind === 'personal')
+            personalCounts.set(membership, (personalCounts.get(membership) ?? 0) + 1);
+          if (device.kind === 'recovery') recoveryMembers.add(membership);
+        }
         return {
           epoch: state.epoch.number,
           rotationRequired: state.epoch.rotationRequired,
@@ -618,17 +668,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             cryptoUserId: toHex(
               state.members.get(toHex(entry.membershipId.toBytes()))!.userId.toBytes()
             ),
-            recoveryDeviceAvailable: [...state.devices.values()].some(
-              (other) => other.kind === 'recovery' && other.membershipId.equals(entry.membershipId)
-            ),
+            recoveryDeviceAvailable: recoveryMembers.has(toHex(entry.membershipId.toBytes())),
             requiresRecoveryConfirmation:
               entry.kind === 'personal' &&
-              ![...state.devices.entries()].some(
-                ([otherKey, other]) =>
-                  otherKey !== key &&
-                  other.kind === 'personal' &&
-                  other.membershipId.equals(entry.membershipId)
-              ),
+              personalCounts.get(toHex(entry.membershipId.toBytes())) === 1,
             machineId: entry.machineId ?? null,
             self: key === toHex(device.publicKey.toBytes()),
             mayRevoke: Result.isSuccess(
@@ -1075,6 +1118,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       },
       keyRound: (mode?: PersonalKeyRoundMode) => run(keyRound(mode)),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
+      keyPending: (epoch: number) => run(keyPending(epoch)),
       status: () => run(status()),
       document: (
         resource: string,
@@ -1135,7 +1179,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           serialRound(
             ownSubmission.pipe(
               Effect.andThen(
-                withKeys((ctx) => Context.get(ctx, EpochPublisher).acknowledge(result))
+                withKeys((ctx) =>
+                  Effect.gen(function* () {
+                    const publisher = Context.get(ctx, EpochPublisher);
+                    // A lost CAS leaves this device's staged envelope group behind. Core
+                    // deletes it only once a different commitment occupies the epoch;
+                    // cleanup is best effort and never blocks the acknowledgement.
+                    if (result.outcome === 'Conflict')
+                      yield* Effect.ignore(publisher.cleanupStaged());
+                    return yield* publisher.acknowledge(result);
+                  })
+                )
               )
             )
           )

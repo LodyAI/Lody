@@ -475,6 +475,38 @@ describe('approving device', () => {
     expect(host.inspected).toHaveLength(2);
   });
 
+  it('in the reverse direction learns of a request from the relay hint before the next poll, and releases the hint when leaving the code', async () => {
+    // Without the hint the approver waits for its poll; the poll stays the fallback.
+    const host = approverHost();
+    host.request = null;
+    const lookupId = 'cd'.repeat(16);
+    const hints = new Map<string, () => void>();
+    const runtime = {
+      ...host.runtime,
+      accountPairingCode: async () => ({
+        pairingString: CODE,
+        expiresAt: NOW + 600_000,
+        lookupId,
+      }),
+      subscribeAccountPairingApproval: (id: string, changed: () => void) => {
+        hints.set(id, changed);
+        return () => hints.delete(id);
+      },
+    };
+    await act(async () => root.render(<E2eeAccountPairingApprove runtime={runtime} />));
+    await click('e2ee.accountPair.approve.showInstead');
+    expect([...hints.keys()]).toEqual([lookupId]);
+    expect(host.inspected).toEqual([]);
+    host.request = preview;
+    await act(async () => {
+      hints.get(lookupId)!();
+      await Promise.resolve();
+    });
+    expect(host.inspected).toEqual([CODE]);
+    expect(text()).toContain('e2ee.accountPair.approve.warning');
+    expect(hints.size).toBe(0);
+  });
+
   it('declines without signing anything', async () => {
     const host = approverHost();
     await act(async () => root.render(<E2eeAccountPairingApprove runtime={host.runtime} />));
@@ -696,6 +728,68 @@ describe('automatic pairing product flow', () => {
     await pressInDialog('e2ee.lostAccess.back');
     expect(back).toBe(1);
     expect(cancelled).toEqual([]);
+  });
+
+  it('falls back to recovery password when passkey is unavailable and validates password restore', async () => {
+    const cancelled: string[] = [];
+    const attempts: Array<{ method: string; password?: string }> = [];
+    let recovered = 0;
+    const runtime = waitingRuntime(cancelled);
+    await renderWaiting(runtime, {
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      recovery: {
+        passkeyAvailable: false,
+        restore: async (method, options) => {
+          attempts.push({ method, password: options?.password });
+          if (options?.password !== 'correct-horse-battery-staple')
+            throw new Error('e2ee_recovery_authentication');
+          return {
+            outcome: 'restored',
+            results: [{ workspaceId: 'w1', name: 'Alpha', outcome: 'Committed' }],
+          };
+        },
+        onRecovered: () => {
+          recovered++;
+        },
+      },
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {},
+    });
+    await click('e2ee.lostAccess.entry');
+    expect(document.body.querySelector('[data-lost-all-method="passkey"]')).toBeNull();
+    expect(
+      document.body.querySelector('[data-lost-all-method="password"]')?.getAttribute('aria-checked')
+    ).toBe('true');
+
+    const typePassword = async (value: string) => {
+      const input = testId('e2ee-lost-all-password') as HTMLInputElement;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+          input,
+          value
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    expect(inDialog('e2ee.lostAll.continue')?.disabled).toBe(true);
+    await typePassword('too-short');
+    expect(inDialog('e2ee.lostAll.continue')?.disabled).toBe(true);
+
+    await typePassword('wrong-password-1234');
+    expect(inDialog('e2ee.lostAll.continue')?.disabled).toBe(false);
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(document.body.textContent).toContain('e2ee.recovery.wrongPassword');
+
+    await typePassword('correct-horse-battery-staple');
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(attempts).toEqual([
+      { method: 'password', password: 'wrong-password-1234' },
+      { method: 'password', password: 'correct-horse-battery-staple' },
+    ]);
+    await pressInDialog('e2ee.lostAll.open');
+    expect(recovered).toBe(1);
+    expect(cancelled).toEqual(['w1']);
   });
 
   it('lets an account owner with no authorized device delete the workspace, reporting background cleanup even when the list refresh fails', async () => {

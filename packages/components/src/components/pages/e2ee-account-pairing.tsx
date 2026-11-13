@@ -400,11 +400,15 @@ export function E2eeAccountPairingKeyRetry(props: { onRetry: () => void }) {
 
 type ApproveRuntime = Pick<
   E2eeWorkspaceRuntime,
-  'accountPairingCode' | 'inspectAccountPairing' | 'approveAccountPairing' | 'declineAccountPairing'
+  | 'accountPairingCode'
+  | 'subscribeAccountPairingApproval'
+  | 'inspectAccountPairing'
+  | 'approveAccountPairing'
+  | 'declineAccountPairing'
 >;
 type ApprovePhase =
   | { kind: 'enter' }
-  | { kind: 'showing'; pairingString: string; expiresAt: number }
+  | { kind: 'showing'; pairingString: string; expiresAt: number; lookupId?: string }
   | { kind: 'confirm'; pairingString: string; preview: E2eeAccountPairingPreview }
   | { kind: 'done'; result: E2eeAccountPairingApproval; preview: E2eeAccountPairingPreview }
   | { kind: 'declined' };
@@ -458,6 +462,15 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
     setInput(scanned);
     check(scanned);
   });
+  const shownLookupId = phase.kind === 'showing' ? phase.lookupId : undefined;
+  const subscribeApproval = useMemo(
+    () =>
+      shownLookupId && runtime.subscribeAccountPairingApproval
+        ? (changed: () => void) =>
+            runtime.subscribeAccountPairingApproval!(shownLookupId, changed)
+        : undefined,
+    [shownLookupId, runtime]
+  );
   usePoll(
     phase.kind === 'showing' && Boolean(runtime.inspectAccountPairing),
     props.pollMs ?? POLL_MS,
@@ -469,7 +482,8 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
       } catch (failure) {
         if (live.current) setError(failureKey(failure));
       }
-    }
+    },
+    subscribeApproval
   );
   if (!runtime.inspectAccountPairing || !runtime.approveAccountPairing) return null;
   const reset = () => {

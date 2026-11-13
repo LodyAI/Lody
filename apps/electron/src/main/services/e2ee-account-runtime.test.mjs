@@ -1,5 +1,6 @@
 import * as identityStorage from '@lody/shared/node/e2ee-identity'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
+import { KEY_DELIVERY_READER } from './e2ee-key-delivery.mts'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
@@ -19,7 +20,19 @@ import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
-import { Context, Effect, Fiber, Layer, Scope, Exit, Result, Clock } from 'effect'
+import {
+  Cause,
+  Context,
+  Data,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Scope,
+  Exit,
+  Result,
+  Clock
+} from 'effect'
 import { TestClock } from 'effect/testing'
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services'
 import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite'
@@ -352,7 +365,10 @@ void test('uncertain admission preserves append and reconciliation failures, the
     bootstrap: { deviceCredential: () => Effect.succeed('synthetic-credential') },
     readers: new Map([['workspace', new Set([sender.id])]]),
     host: {
-      ledgerView: () => Effect.succeed(ledger),
+      ledgerView: () => {
+        if (ledger === null) throw new Error('synthetic ledger export failure')
+        return Effect.succeed(ledger)
+      },
       localPairingContext: () => Effect.succeed({ pairingSessionId: '44'.repeat(16) }),
       approveLocalPairing: () => Effect.succeed(request),
       confirmLocalPairing: () =>
@@ -475,6 +491,10 @@ void test('uncertain admission preserves append and reconciliation failures, the
   assert.equal((await ipc.admitLocalAgent('workspace', session)).ready, true)
   handoffs.push(...activations.slice(-2).map((message) => message.ledgerRecordsHex?.length ?? null))
   assert.deepEqual(handoffs, [null, null, 2, null])
+  // The handoff is optional: a failed ledger export never fails a confirmed admission.
+  ledger = null
+  assert.equal((await ipc.admitLocalAgent('workspace', session)).ready, true)
+  assert.equal(activations.at(-1).ledgerRecordsHex, undefined)
   assert.deepEqual(warnings, [])
 })
 
@@ -3752,7 +3772,7 @@ async function memberIpcFixture(options = {}) {
     }
   }
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
-    effect: { Effect },
+    effect: { Effect, Deferred, Cause, Data, Exit },
     '../product-window-ipc-service': { ProductWindowIpcService: class {} },
     'electron-ipc-decorator': {
       IpcMethod: () => (_t, _n, d) => d,
@@ -4251,6 +4271,54 @@ void test('main retries a personal delivery after an outage and installs the loc
   assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'delivered')
   assert.equal(local.hasCurrentKey, true)
   assert.deepEqual(clock.pending, [])
+})
+for (const outage of [false, true])
+  void test(`an account approval's first key delivery pass ends after the first attempt, before any backoff; outage: ${outage}`, async () => {
+    // The approval publishes once this pass ends, so a new device woken by that publish
+    // finds its key at once; a retryable failure must not hold it for the backoff timer.
+    const local = { hasCurrentKey: !outage }
+    const f = await personalApprovalFixture({
+      local,
+      receive: () => Effect.fail(new Error('e2ee_management_retry')),
+      distribution: () => Effect.void
+    })
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    f.ipc.keyDeliveryNow = () => 1_800_000_000_000
+    await f.ipc.approvePersonalJoin('team', f.session)
+    await Effect.runPromise(f.ipc.keyDelivery.firstPass('A', 'team', personalApprovalRequest))
+    assert.equal(
+      keyDeliveryState(f, personalApprovalRequest).state,
+      outage ? 'failed' : 'delivered'
+    )
+    assert.equal(clock.pending.length, outage ? 1 : 0)
+    // The main-owned reader is released as soon as the attempt ends.
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(f.owner().readers.get('team')?.has(KEY_DELIVERY_READER) ?? false, false)
+  })
+void test("removing a workspace ends its account approval's first key delivery pass mid-round and still releases main's reader", async () => {
+  const f = await personalApprovalFixture()
+  const approval = f.ipc.approvePersonalJoin('team', f.session)
+  let settled = false
+  let delivery
+  try {
+    await f.keyEntered.promise
+    delivery = f.ipc.keyDeliveryIdle('A', 'team')
+    void Effect.runPromise(f.ipc.keyDelivery.firstPass('A', 'team', personalApprovalRequest)).then(
+      () => (settled = true)
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(settled, false)
+    assert.equal(f.owner().readers.get('team')?.get(KEY_DELIVERY_READER), 1)
+    f.ipc.keyDelivery.dropWorkspace('team', 'A')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(settled, true)
+  } finally {
+    f.keyGate.resolve()
+    await approval.catch(() => {})
+    await delivery
+  }
+  assert.equal(f.owner().readers.get('team')?.has(KEY_DELIVERY_READER) ?? false, false)
 })
 void test('personal approval reconciles an unknown append result and retries publication with the same admission original', async () => {
   const f = await personalApprovalFixture({ appendReceiptLost: true, publish: false })

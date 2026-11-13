@@ -1,4 +1,5 @@
 import { decode, encode } from '@ipld/dag-cbor';
+import { argon2idAsync } from '@noble/hashes/argon2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
@@ -22,6 +23,37 @@ export class RecoveryVaultError extends Data.TaggedError('RecoveryVaultError')<{
 }> {}
 export const vaultError = (code: RecoveryVaultError['code']) => new RecoveryVaultError({ code });
 export const MAX_VAULT_BYTES = 256 * 1024;
+/** Minimum length (in Unicode code points, after NFC normalization) for a recovery password. */
+export const MIN_RECOVERY_PASSWORD_LENGTH = 12;
+/** Maximum UTF-8 byte length accepted for a recovery password. */
+export const MAX_RECOVERY_PASSWORD_BYTES = 1024;
+/** Argon2id cost parameters (`m` in KiB, `t` iterations, `p` lanes). */
+export interface PasswordKdfParams {
+  /** Memory size in KiB. */
+  readonly m: number;
+  /** Number of passes (iterations). */
+  readonly t: number;
+  /** Degree of parallelism (lanes). */
+  readonly p: number;
+}
+/** Default RFC 9106 Argon2id parameters for password-wrapped vault master keys (64 MiB, 3 passes, 1 lane). */
+export const DEFAULT_PASSWORD_KDF: PasswordKdfParams = Object.freeze({
+  m: 65536,
+  t: 3,
+  p: 1,
+});
+/** Minimum Argon2id floor accepted before running KDF (OWASP 19 MiB, 2 passes, 1 lane). */
+export const MIN_PASSWORD_KDF: PasswordKdfParams = Object.freeze({
+  m: 19456,
+  t: 2,
+  p: 1,
+});
+/** Maximum Argon2id ceiling accepted from untrusted envelopes (256 MiB, 10 passes, 4 lanes). */
+export const MAX_PASSWORD_KDF: PasswordKdfParams = Object.freeze({
+  m: 262144,
+  t: 10,
+  p: 4,
+});
 export const hex = (bytes: Uint8Array) =>
   Array.from(bytes, (v) => v.toString(16).padStart(2, '0')).join('');
 export const digest = (bytes: Uint8Array) => hex(sha256(bytes));
@@ -80,7 +112,7 @@ export const attempt = <A>(work: () => A) =>
     try: work,
     catch: (error) => (error instanceof RecoveryVaultError ? error : vaultError('invalid-input')),
   });
-export type VaultPurpose = 'file-wrap' | 'prf-wrap' | 'workspace-entry' | 'index';
+export type VaultPurpose = 'file-wrap' | 'prf-wrap' | 'password-wrap' | 'workspace-entry' | 'index';
 /** The service sees only these opaque fields. Purpose and predecessor stay inside
  * an independently authenticated encrypted header, never SQL/DTO columns. */
 export interface VaultCiphertext {
@@ -159,7 +191,7 @@ export function encryptVault(
 }
 const HiddenSchema = Schema.Tuple([
   Schema.NullOr(Schema.String),
-  Schema.Literals(['file-wrap', 'prf-wrap', 'workspace-entry', 'index']),
+  Schema.Literals(['file-wrap', 'prf-wrap', 'password-wrap', 'workspace-entry', 'index']),
   Schema.Uint8Array,
   Schema.Uint8Array,
 ]);
@@ -209,6 +241,139 @@ export function decryptVault(
   }
   return value.plaintext;
 }
+/** Normalize a recovery password with Unicode NFC and enforce length bounds, returning
+ * owned UTF-8 bytes that the caller must wipe after use. */
+export function normalizeRecoveryPassword(password: string): Uint8Array {
+  if (typeof password !== 'string') throw vaultError('invalid-input');
+  const normalized = password.normalize('NFC');
+  if ([...normalized].length < MIN_RECOVERY_PASSWORD_LENGTH) throw vaultError('invalid-input');
+  const encoded = new TextEncoder().encode(normalized);
+  if (encoded.length > MAX_RECOVERY_PASSWORD_BYTES) {
+    encoded.fill(0);
+    throw vaultError('invalid-input');
+  }
+  return encoded;
+}
+const validPasswordKdf = (kdf: PasswordKdfParams) =>
+  Number.isSafeInteger(kdf.m) &&
+  kdf.m >= MIN_PASSWORD_KDF.m &&
+  kdf.m <= MAX_PASSWORD_KDF.m &&
+  Number.isSafeInteger(kdf.t) &&
+  kdf.t >= MIN_PASSWORD_KDF.t &&
+  kdf.t <= MAX_PASSWORD_KDF.t &&
+  Number.isSafeInteger(kdf.p) &&
+  kdf.p >= MIN_PASSWORD_KDF.p &&
+  kdf.p <= MAX_PASSWORD_KDF.p;
+const PasswordEnvelopeSchema = Schema.Tuple([
+  Schema.Literal('password-wrap-v1'),
+  Schema.Literal(1),
+  Schema.Uint8Array,
+  Schema.Number,
+  Schema.Number,
+  Schema.Number,
+  Schema.Uint8Array,
+]);
+const derivePasswordSecret = async (
+  passwordBytes: Uint8Array,
+  vaultId: string,
+  entryId: string,
+  salt: Uint8Array,
+  kdf: PasswordKdfParams
+): Promise<Uint8Array> => {
+  const raw = await argon2idAsync(passwordBytes, salt, {
+    m: kdf.m,
+    t: kdf.t,
+    p: kdf.p,
+    dkLen: 32,
+  });
+  try {
+    return hkdf(
+      sha256,
+      raw,
+      salt,
+      canonical(['vault-v1', 'password-kdf', 1, vaultId, entryId, kdf.m, kdf.t, kdf.p]),
+      32
+    );
+  } finally {
+    raw.fill(0);
+  }
+};
+export const encryptPasswordWrap = (
+  passwordBytes: Uint8Array,
+  vaultId: string,
+  entryId: string,
+  plaintext: Uint8Array,
+  kdf: PasswordKdfParams = DEFAULT_PASSWORD_KDF
+): Effect.Effect<VaultCiphertext, RecoveryVaultError> =>
+  Effect.gen(function* () {
+    yield* attempt(() => {
+      fromHex(vaultId);
+      fromHex(entryId);
+      if (!validPasswordKdf(kdf)) throw vaultError('invalid-input');
+    });
+    const salt = yield* attempt(() => random(32));
+    const secret = yield* Effect.tryPromise({
+      try: () => derivePasswordSecret(passwordBytes, vaultId, entryId, salt, kdf),
+      catch: () => vaultError('invalid-input'),
+    });
+    return yield* Effect.acquireUseRelease(
+      Effect.succeed(secret),
+      (wrapSecret) =>
+        attempt(() => {
+          const inner = encryptVault(
+            wrapSecret,
+            vaultId,
+            { entryId, revision: 0, previous: null, purpose: 'password-wrap' },
+            plaintext
+          );
+          return ownCiphertext({
+            entryId,
+            revision: 0,
+            body: canonical(['password-wrap-v1', 1, salt, kdf.m, kdf.t, kdf.p, inner.body]),
+          });
+        }),
+      (wrapSecret) => Effect.sync(() => wrapSecret.fill(0))
+    );
+  });
+export const decryptPasswordWrap = (
+  passwordBytes: Uint8Array,
+  vaultId: string,
+  input: VaultCiphertext
+): Effect.Effect<Uint8Array, RecoveryVaultError> =>
+  Effect.gen(function* () {
+    const parsed = yield* Effect.try({
+      try: () => {
+        fromHex(vaultId);
+        const outer = ownCiphertext(input);
+        const [, , salt, m, t, p, innerBody] = Result.getOrThrow(
+          Schema.decodeUnknownResult(PasswordEnvelopeSchema)(parseCanonical(outer.body))
+        );
+        const kdf: PasswordKdfParams = { m, t, p };
+        if (salt.length !== 32 || !validPasswordKdf(kdf)) throw vaultError('authentication');
+        const inner = ownCiphertext({
+          entryId: outer.entryId,
+          revision: outer.revision,
+          body: innerBody,
+        });
+        return { salt, kdf, inner };
+      },
+      catch: () => vaultError('authentication'),
+    });
+    const secret = yield* Effect.tryPromise({
+      try: () =>
+        derivePasswordSecret(passwordBytes, vaultId, input.entryId, parsed.salt, parsed.kdf),
+      catch: () => vaultError('authentication'),
+    });
+    return yield* Effect.acquireUseRelease(
+      Effect.succeed(secret),
+      (wrapSecret) =>
+        Effect.try({
+          try: () => decryptVault(wrapSecret, vaultId, parsed.inner, 'password-wrap'),
+          catch: () => vaultError('authentication'),
+        }),
+      (wrapSecret) => Effect.sync(() => wrapSecret.fill(0))
+    );
+  });
 /** The one PRF input every vault ceremony evaluates. It is constant because a new
  * device does not know vaultId before the ceremony; HKDF salted by vaultId separates
  * vaults. */

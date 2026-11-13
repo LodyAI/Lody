@@ -7,7 +7,8 @@ import {
   useLegacyWorkspaceQuery,
 } from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
-import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
+import { E2eeLocalAgentApproval, localAgentRunsWorkspace } from '../e2ee-local-agent-approval';
+import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
@@ -654,6 +655,7 @@ function WorkspaceChatLanding({
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
   const nativeE2ee = usePlatform().e2eeWorkspaces?.runtime;
+  const { state: localCliState } = useElectronCliDaemon();
   const workspaceRuntime = useAtomValue(runtimeAtom);
   const postHog = usePostHog();
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
@@ -6371,6 +6373,7 @@ function WorkspaceChatLanding({
         workspaceId={runtime.workspaceId}
         runtime={nativeE2ee}
         enabled
+        localAgentRunning={localAgentRunsWorkspace(localCliState, runtime.workspaceId)}
       />
     ) : null;
   const composerNoticeNode =

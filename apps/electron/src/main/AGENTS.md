@@ -114,18 +114,18 @@ packaging result; native safeStorage assurance needs an isolated platform run.
 It grants no renderer reader/status/content capability. Preserve existing readers;
 release a cold temporary host before replying. `status` still requires a window reader.
 
-The post-MVP recovery vault (`services/e2ee-recovery-vault.mts`) stays off unless
-main starts with `LODY_E2EE_RECOVERY_VAULT=on`; the renderer switch alone never enables it.
-Main owns the recovery file dialogs and bytes, writes the file only to the user's
-chosen path, and returns outcomes or `e2ee_recovery_*` codes, never file contents.
-Its account journal holds pins and intents only. Proposal: [recovery vault](../../../../specs/e2ee/recovery-vault.md).
+The recovery vault (`services/e2ee-recovery-vault.mts`) is enabled by default unless
+main starts with `LODY_E2EE_RECOVERY_VAULT=off`. Main owns recovery file dialogs/bytes,
+passkey ceremonies and Argon2id password derivation, writing files only to user-chosen
+paths and returning outcomes or `e2ee_recovery_*` codes, never keys or file bytes.
+Its account journal holds pins, summaries and intents only. Spec: [recovery vault](../../../../specs/e2ee/recovery-vault.md).
 
 Team-member joining uses `services/e2ee-member-join.mts`: retain exact KeyPackages
 and every signed admission before I/O. Unknown outcomes cannot replace them;
 verify competing ledger bytes or a terminal server reservation before retirement.
 New accounts replay genuine history from their independently retained genesis;
 server labels never establish native identity. [Decision](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md).
-Approval, including account-pairing approval, never awaits a key round: `services/e2ee-key-delivery.mts`
+Approval never awaits a key round; account pairing alone waits, bounded, on `firstPass`: `services/e2ee-key-delivery.mts`
 owns later delivery and retries it on the shared backoff from a bounded main-owned due timer and due polls ([delivery](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md#key-delivery-after-admission)).
 
 Removal erases `member_joins` and `personal_join_histories`. All three join installs
