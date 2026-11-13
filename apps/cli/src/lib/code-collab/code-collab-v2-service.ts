@@ -71,7 +71,6 @@ import {
   type CodeCollabV2SaveTextRequest,
   type CodeCollabV2SaveTextResponse,
   type CodeCollabV2TextFormat,
-  type SessionDiffStats,
   type SessionId,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -104,6 +103,7 @@ import {
   relativeScanDirectory,
   listGitIgnoredPaths,
   summarizeAllChanges,
+  type WorkspaceDiffSummary,
 } from './file-index-scan-core';
 import { closeDirectoryQuietly } from './directory-handle';
 import { CODE_COLLAB_IGNORED_DIRECTORY_NAMES } from './workspace-watch-path-policy';
@@ -160,8 +160,8 @@ export type CodeCollabV2FileIndexPublication = {
   readonly signal?: AbortSignal;
   readonly ownerSessionId: SessionId;
   readonly fileIndex: CodeCollabV2FileIndexState;
-  readonly allChangesDiffStats: SessionDiffStats | null;
-  readonly memberDiffStats?: Readonly<Record<string, SessionDiffStats | null>>;
+  readonly allChangesDiffStats: WorkspaceDiffSummary | null;
+  readonly memberDiffStats?: Readonly<Record<string, WorkspaceDiffSummary | null>>;
   readonly persistAllChangesDiffStats: boolean;
   readonly updatedAtMs: number;
   readonly reconcileRemote: boolean;
@@ -255,7 +255,7 @@ type ResolvedPath = {
 type OwnerSharedState = {
   fileTree: CodeCollabV2FileTreeState;
   allChanges: CodeCollabV2AllChangesState;
-  memberDiffStats?: Readonly<Record<string, SessionDiffStats | null>>;
+  memberDiffStats?: Readonly<Record<string, WorkspaceDiffSummary | null>>;
   /** Explicitly initialized directories, most recent first; kept first under the FI budget. */
   expandedDirectories: string[];
 };
@@ -456,21 +456,28 @@ export class CodeCollabV2Service {
       const fileIndex: CodeCollabV2FileIndexState = {};
       let add = 0;
       let del = 0;
+      let files = 0;
       let complete = true;
+      let linesComplete = true;
       const memberDiffStats = { ...state.memberDiffStats };
       for (const [id, snapshot] of roots) {
         for (const [relativePath, value] of Object.entries(snapshot.fileIndex))
           fileIndex[encodeSessionFilePath({ rootId: id, relativePath })] = value;
         if (snapshot.allChangesDiffStats) {
-          add += snapshot.allChangesDiffStats.allChange.add;
-          del += snapshot.allChangesDiffStats.allChange.del;
+          files += snapshot.allChangesDiffStats.files;
+          if (snapshot.allChangesDiffStats.allChange) {
+            add += snapshot.allChangesDiffStats.allChange.add;
+            del += snapshot.allChangesDiffStats.allChange.del;
+          } else linesComplete = false;
         } else complete = false;
         if (id.startsWith('member:')) memberDiffStats[id.slice(7)] = snapshot.allChangesDiffStats;
       }
       return publish({
         ...state,
         fileIndex,
-        allChangesDiffStats: complete ? { allChange: { add, del } } : null,
+        allChangesDiffStats: complete
+          ? { files, allChange: linesComplete ? { add, del } : null }
+          : null,
         memberDiffStats,
       });
     });
@@ -3611,7 +3618,7 @@ function cloneAllChangesState(state: CodeCollabV2AllChangesState): CodeCollabV2A
 function summarizeMemberChanges(
   changes: CodeCollabV2AllChangesState,
   run: SessionProjectRun | undefined
-): Readonly<Record<string, SessionDiffStats | null>> | undefined {
+): Readonly<Record<string, WorkspaceDiffSummary | null>> | undefined {
   if (!run) return undefined;
   const members = Object.entries(run.members)
     .filter(([, member]) => member.access !== 'additional' && member.access !== 'link')

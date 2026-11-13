@@ -9,6 +9,7 @@ import {
   type MachineId,
   type LocalProjectId,
   type LocalProjectMeta,
+  type LineChange,
 } from '@lody/shared';
 
 /** One repository of a multi-repository conversation, as the Info Bar lists it. */
@@ -31,7 +32,7 @@ export type SessionProjectMemberRow = {
   repoFullName?: string;
   branch?: string;
   /** Observed line changes for this Member, when the daemon has them. */
-  diff?: { add: number; del: number };
+  diff?: LineChange;
   pr?: { url: string; number: number; status: PrStatus; ciState?: SessionPullRequestCiState };
 };
 

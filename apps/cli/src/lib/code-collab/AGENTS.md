@@ -34,9 +34,9 @@ File-by-file responsibilities: [README.md](README.md).
   and the named Flock bridge in `apps/cli/src/lib/loro/doc.ts` lets Electron
   invalidate and refresh its Machine RPC snapshot. Both streams have 180-day TTL and
   must not enter repo meta. Root activation and terminal turn refresh may mirror only
-  compact aggregate add/del `diffStats` from the complete All Changes set before index
+  compact aggregate file counts and text add/del `diffStats` from the complete All Changes set before index
   trimming, including uncommitted work even with an associated PR. Statistics reconciliation
-  must run when requested even if the index is unchanged; unknown counts preserve prior totals.
+  must run when requested even if the index is unchanged. Unknown line counts preserve prior line totals while complete path counts still update; confirmed binary files contribute no text lines.
   File/diff watcher refreshes stay Flock-only. The injected `observeWorkspaceGit` observer
   runs only on activation/explicit root refresh, never file watcher or terminal diff refresh;
   it must not gate file snapshots.

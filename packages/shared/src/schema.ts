@@ -839,12 +839,20 @@ export function deriveSessionPullRequestReadiness(
 export type LineChange = {
   add: number;
   del: number;
+  /** Changed paths in the complete workspace comparison; absent on older writers. */
+  files?: number;
 };
 
 export type SessionDiffStats = {
   /** Workspace base versus current files, including committed and uncommitted changes. */
   allChange: LineChange;
 };
+
+/** Explicit path counts own presence; old daemons only published text line totals. */
+export function hasWorkspaceChanges(change: LineChange | null | undefined): boolean {
+  if (!change) return false;
+  return change.files === undefined ? change.add + change.del > 0 : change.files > 0;
+}
 
 export type SessionContextWindowUsage = {
   size: number;

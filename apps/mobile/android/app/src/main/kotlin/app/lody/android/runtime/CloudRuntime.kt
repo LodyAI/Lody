@@ -187,6 +187,8 @@ data class CatalogSession(
     /** The agent asked to show an iOS Simulator / Android Emulator preview (live catalog only, never cached). */
     val iosSimulatorPreviewRequestId: String? = null,
     val androidEmulatorPreviewRequestId: String? = null,
+    /** Complete changed-path count, including zero-line changes; null from older daemons. */
+    val diffFiles: Int? = null,
 )
 /** One repository or folder of a Project group conversation, in placement order (iOS `SessionProjectMember`). */
 data class CatalogProjectMember(
@@ -198,6 +200,7 @@ data class CatalogProjectMember(
     val dirty: Boolean = false, val unpushed: Boolean = false,
     /** The member repository's current PR: the last one recorded for it. */
     val pullRequest: CatalogPullRequest? = null,
+    val diffFiles: Int? = null,
 ) {
     /** Web `repoFullName ?? path`. */
     val identity: String get() = repoFullName ?: path

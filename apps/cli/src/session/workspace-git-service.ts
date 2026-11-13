@@ -17,9 +17,25 @@ import { CommandTimedOut, runCommandTextLegacy } from '@lody/shared/node/process
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import type { ISession } from './session-manager';
+import type { WorkspaceDiffSummary } from '@/lib/code-collab/file-index-scan-core';
 import { projectRunMetaPatch } from './project-run-state';
 
 const ownerQueues = new WeakMap<LoroDocumentManager, Map<SessionId, Promise<unknown>>>();
+
+function persistedChange(
+  summary: WorkspaceDiffSummary,
+  previous: SessionDiffStats['allChange'] | undefined
+): SessionDiffStats['allChange'] {
+  const lines = summary.allChange ?? previous ?? { add: 0, del: 0 };
+  return { add: lines.add, del: lines.del, files: summary.files };
+}
+
+function sameChange(
+  previous: SessionDiffStats['allChange'] | undefined,
+  next: SessionDiffStats['allChange']
+): boolean {
+  return previous?.add === next.add && previous.del === next.del && previous.files === next.files;
+}
 
 /** Git checkout facts, without provider API calls or credentials. */
 export class WorkspaceGitService {
@@ -58,8 +74,8 @@ export class WorkspaceGitService {
   /** Only complete Code Collab comparisons author workspace diff totals. */
   async publishDiffStats(input: {
     readonly ownerSessionId: SessionId;
-    readonly allChangesDiffStats: SessionDiffStats | null;
-    readonly memberDiffStats?: Readonly<Record<string, SessionDiffStats | null>>;
+    readonly allChangesDiffStats: WorkspaceDiffSummary | null;
+    readonly memberDiffStats?: Readonly<Record<string, WorkspaceDiffSummary | null>>;
     readonly signal?: AbortSignal;
   }): Promise<void> {
     await this.withOwnerMutation(input.ownerSessionId, async () => {
@@ -75,8 +91,8 @@ export class WorkspaceGitService {
         for (const [id, stats] of Object.entries(input.memberDiffStats ?? {})) {
           const member = run.members[id as keyof typeof run.members];
           if (!member || !stats) continue;
-          const next = stats.allChange;
-          if (member.diff?.add === next.add && member.diff.del === next.del) continue;
+          const next = persistedChange(stats, member.diff);
+          if (sameChange(member.diff, next)) continue;
           member.diff = next;
           changed = true;
         }
@@ -84,16 +100,19 @@ export class WorkspaceGitService {
         const complete = Object.keys(run.members).every(
           (id) => input.memberDiffStats?.[id] != null
         );
-        if (complete && input.allChangesDiffStats) patch.diffStats = input.allChangesDiffStats;
+        if (complete && input.allChangesDiffStats) {
+          patch.diffStats = {
+            allChange: persistedChange(input.allChangesDiffStats, meta.diffStats?.allChange),
+          };
+        }
         const next = patch.diffStats?.allChange;
         const current = meta.diffStats?.allChange;
-        if (!changed && (!next || (next.add === current?.add && next.del === current?.del))) return;
+        if (!changed && (!next || sameChange(current, next))) return;
       } else {
         if (!input.allChangesDiffStats) return;
-        const next = input.allChangesDiffStats.allChange;
-        if (meta.diffStats?.allChange.add === next.add && meta.diffStats.allChange.del === next.del)
-          return;
-        patch = { diffStats: input.allChangesDiffStats };
+        const next = persistedChange(input.allChangesDiffStats, meta.diffStats?.allChange);
+        if (sameChange(meta.diffStats?.allChange, next)) return;
+        patch = { diffStats: { allChange: next } };
       }
       input.signal?.throwIfAborted();
       await this.deps.workspaceDocument.repo.upsertDocMeta(roomId, patch);

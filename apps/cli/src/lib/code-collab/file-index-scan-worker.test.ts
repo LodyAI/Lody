@@ -9,7 +9,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CODE_COLLAB_FILE_INDEX_LIMITS, estimateCodeCollabFileIndexStateBytes } from '@lody/shared';
 
-import { computeAllChanges, createGitIgnoreScanFilter } from './file-index-scan-core';
+import {
+  computeAllChanges,
+  createGitIgnoreScanFilter,
+  summarizeAllChanges,
+} from './file-index-scan-core';
 import fileIndexScanWorker from './file-index-scan-worker';
 
 const execFileAsync = promisify(execFile);
@@ -131,6 +135,31 @@ async function withPlainWorkspace<T>(fn: (workspaceRoot: string) => Promise<T>):
 }
 
 describe('fileIndexScanWorker', () => {
+  it('counts binary, empty and permission changes while summing only text lines', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await writeFile(path.join(workspaceRoot, 'image.bin'), Buffer.from([0, 1, 2]));
+      await git(workspaceRoot, ['add', '.']);
+      await git(workspaceRoot, ['commit', '-m', 'comparison base']);
+      await writeFile(path.join(workspaceRoot, 'image.bin'), Buffer.from([0, 3, 4]));
+      await writeFile(path.join(workspaceRoot, 'new.bin'), Buffer.from([0, 5, 6]));
+      await writeFile(path.join(workspaceRoot, 'empty.txt'), '');
+      await chmod(path.join(workspaceRoot, 'README.md'), 0o755);
+      const zeroLine = await computeAllChanges(workspaceRoot);
+      expect(summarizeAllChanges(zeroLine)).toEqual({ files: 4, allChange: { add: 0, del: 0 } });
+      await writeFile(path.join(workspaceRoot, 'src', 'app.ts'), 'one\ntwo\nthree\n');
+      expect(summarizeAllChanges(await computeAllChanges(workspaceRoot))).toEqual({
+        files: 5,
+        allChange: { add: 1, del: 0 },
+      });
+      await unlink(path.join(workspaceRoot, 'image.bin'));
+      const deleted = await computeAllChanges(workspaceRoot);
+      expect(deleted['image.bin']).toEqual({ diff: [0, 0], del: true });
+      expect(summarizeAllChanges(deleted)).toEqual({ files: 5, allChange: { add: 1, del: 0 } });
+      const bounded = await computeAllChanges(workspaceRoot, { untrackedLineCountBudget: 0 });
+      expect(summarizeAllChanges(bounded)).toEqual({ files: 5, allChange: null });
+    });
+  });
+
   it('uses each project group member Git ignore rules and prefixes independent changes', async () => {
     await withPlainWorkspace(async (workspaceRoot) => {
       for (const name of ['web', 'api']) {

@@ -57,3 +57,5 @@ Read before changing the conversation page: the transcript and its turns, compos
   with overflow edge fades; only opened-by conversations receive hierarchy depth
   and curved connectors. See the conversation
   behavior in [README.md](../../README.md).
+
+- Workspace diff presence uses the complete changed-file count when provided by the catalog; older daemons retain the text-line fallback. Positive text totals remain visible for mixed comparisons; zero-line changes show the localized file count in the capsule, menu and accessibility description. Preserve the count through catalog caching.

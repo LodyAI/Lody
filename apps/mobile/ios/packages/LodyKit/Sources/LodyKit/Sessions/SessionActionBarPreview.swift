@@ -36,6 +36,8 @@ enum SessionActionBarPreview {
     if ["bar-changes", "bar-dirty", "bar-long", "bar-crowded", "bar-running", "bar-local"].contains(scenario) {
       session.diff = ["add": 285, "del": 35]
     }
+    if scenario == "bar-zero-line" { session.diff = ["add": 0, "del": 0, "files": 2] }
+    if scenario == "bar-mixed" { session.diff = ["add": 12, "del": 3, "files": 3] }
     if scenario == "bar-dirty" { session.workspaceDirty = true }
     if scenario == "bar-long" { session.branchName = "feature/refactor-mobile-conversation-action-capsules" }
     if scenario == "bar-diff-only" {
