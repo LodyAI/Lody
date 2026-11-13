@@ -750,6 +750,36 @@ void test('auth changes during native open close the stale owner before any work
   assert.equal(admitted, false)
   assert.equal(released, true)
 })
+void test('a stale cold open closes only the old login, never a workspace the new login already opened', async () => {
+  // With workspaces opening concurrently, a turn that began before a re-login must not
+  // tear down the new login's open workspace (and its window reader) on its way out.
+  const entered = Promise.withResolvers()
+  const finish = Promise.withResolvers()
+  let opens = 0
+  const { api, identity } = await account({
+    custody: () =>
+      Effect.gen(function* () {
+        if (++opens > 1) return {}
+        yield* Effect.promise(() => {
+          entered.resolve()
+          return finish.promise
+        })
+        return {}
+      })
+  })
+  const stale = api.withDesktopE2eeAccount(() => Effect.void, 'ws-1')
+  await entered.promise
+  identity.generation++
+  const current = await api.withDesktopE2eeAccount((owner) => Effect.succeed(owner), 'ws-2')
+  finish.resolve()
+  await assert.rejects(stale, /e2ee_account_unavailable/)
+  assert.equal(
+    await api.withDesktopE2eeAccount((owner) => Effect.succeed(owner === current), 'ws-2'),
+    true
+  )
+  assert.equal(opens, 2)
+  await api.closeDesktopE2eeAccount()
+})
 /** Holds one turn in `workspaceId` until `finish` settles; its owner records its close. */
 function holdWorkspaceTurn(api, workspaceId, events) {
   const entered = Promise.withResolvers()

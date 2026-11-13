@@ -73,6 +73,8 @@ const accountFailure = (code: string) =>
   )
 type Account = {
   accountId: string
+  /** Login generation the owner was opened under. */
+  generation: number
   directory: string
   scope: Scope.Closeable
   bootstrap: Effect.Success<ReturnType<typeof makeDesktopE2eeBootstrap>>
@@ -235,13 +237,15 @@ const closeOwner = Effect.fnUntraced(function* (owner: Account) {
   owners.delete(owner.directory)
   return undefined
 })
-const closeCurrent = Effect.gen(function* () {
-  const results = yield* Effect.forEach([...owners.values()], (owner) =>
-    Effect.exit(closeOwner(owner))
-  )
-  if (results.some(Exit.isFailure)) return yield* Effect.fail(accountFailure('restart-required'))
-  return undefined
-})
+const closeOwners = (stale: (owner: Account) => boolean) =>
+  Effect.gen(function* () {
+    const results = yield* Effect.forEach([...owners.values()].filter(stale), (owner) =>
+      Effect.exit(closeOwner(owner))
+    )
+    if (results.some(Exit.isFailure)) return yield* Effect.fail(accountFailure('restart-required'))
+    return undefined
+  })
+const closeCurrent = closeOwners(() => true)
 
 type IrohPreparation =
   | {
@@ -405,6 +409,7 @@ function runAccountOperation<A>(
                 })
                 const owned: Account = {
                   accountId,
+                  generation: identity.generation,
                   directory,
                   scope,
                   bootstrap,
@@ -440,10 +445,15 @@ function runAccountOperation<A>(
       // Account-wide close runs after this turn released its permit; it drains the rest.
       return accountTransition(
         Effect.suspend(() => {
-          const userId = auth.getCachedSessionIdentity().userId
-          return step.transition === 'unavailable' || !userId || foreignOwner(userId)
-            ? closeCurrent
-            : Effect.void
+          const { userId, generation } = auth.getCachedSessionIdentity()
+          if (!userId) return closeCurrent
+          // A stale turn closes only owners of another account or an older login; a
+          // turn of the current login may already have opened its own workspace.
+          if (step.transition === 'unavailable')
+            return closeOwners(
+              (owner) => owner.accountId !== userId || owner.generation !== generation
+            )
+          return foreignOwner(userId) ? closeCurrent : Effect.void
         })
       ).pipe(
         Effect.andThen(
