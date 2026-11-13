@@ -361,18 +361,27 @@ it.each(['chromium', 'webkit'] as const)(
       expect(iroh.targets).toEqual([iroh.machine]);
       await savesSignedSchedule(page);
       expect((await raw(page, 'rotateRemote')).ok).toBe(true);
+      // Another device's frame at an epoch this device's verified ledger does not hold
+      // yet keeps its original failure; once the ledger holds it, the read is retryable.
+      expect(await good(page, 'sealRemoteRotated')).toEqual({ epoch: 1 });
+      const unknownEpoch = await call(page, 'openRemote');
+      expect(unknownEpoch.ok).toBe(false);
+      expect(unknownEpoch.reason).not.toBe('key-pending');
       expect(await good(page, 'refresh')).toMatchObject({
         epoch: 1,
         hasCurrentKey: false,
         writeEpoch: 0,
       });
+      expect((await call(page, 'openRemote')).reason).toBe('key-pending');
       expect((await raw(page, 'graceLastMillisecond')).ok).toBe(true);
       expect(await good(page, 'sealOldHint')).toEqual({ epoch: 0 });
       expect((await raw(page, 'graceExpired')).ok).toBe(true);
       expect((await call(page, 'seal')).reason).toBe('key-update-required');
       expect(await good(page, 'openBody')).toEqual([72, 105]);
       expect((await raw(page, 'stageCurrent')).ok).toBe(true);
-      expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
+      // The shared reader's reception round installs the key; the pending read succeeds.
+      expect(await good(page, 'receiveOnly')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
+      expect(await good(page, 'openRemote')).toEqual([72, 105]);
       expect(await good(page, 'sealOldHint')).toEqual({ epoch: 1 });
       expect(await good(page, 'openBody')).toEqual([72, 105]);
       // Team management on the portable runtime: invite, list, admit exactly the shown
@@ -607,6 +616,36 @@ it('an owner removes with the key update and an administrator removes plainly, t
 // The approval's first key round ends with the applicant's slot still NeedsEnvelope. The
 // runtime retries on its own after the injected backoff, without the approver pressing
 // retry, and the applicant's envelope is stored.
+// Another device's rotation wins this device's key-update CAS: acknowledging the lost
+// candidate first deletes its staged envelope group, now proven obsolete.
+it('a key update that loses its epoch to another rotation deletes its staged envelope group', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-rotation-conflict-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await openedOwnerRuntime(directory);
+    context = opened.context;
+    const page = opened.page;
+    expect((await raw(page, 'addMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 0, rotationRequired: true });
+    expect((await raw(page, 'raceNextRotation')).ok).toBe(true);
+    // The candidate settles as Conflict; its group goes before the acknowledgement.
+    expect((await call(page, 'updateKeys')).reason).toBe('conflict');
+    const { staged, deleted } = (await raw(page, 'stagingDeletes')).value as {
+      staged: string[];
+      deleted: { recordHash: string; occupiedEpoch: number }[];
+    };
+    expect(staged).toHaveLength(1);
+    expect(deleted).toEqual([{ recordHash: staged[0], occupiedEpoch: 1 }]);
+    // The acknowledged conflict no longer blocks key updates at the winning epoch.
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 1, rotationRequired: false });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 it('a member key delivery that fails its first round is retried and delivered without user action', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-retry-'));
   let context: BrowserContext | undefined;

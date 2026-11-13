@@ -1,5 +1,6 @@
 import { e2eeAccessLoss, type E2eeAccessLoss } from '../lib/e2ee-member-removal';
 import { clientLossEffects } from '../lib/e2ee-client-loss-effects';
+import { personalHostFailureCode } from '../lib/e2ee-control-failure';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { E2eeRuntimeStatus, E2eeWorkspaceRuntime } from '@lody/platform';
 import { createLoroStreamsTokenProviderLegacy, LoroStreamsTokenRequestSchema } from '@lody/shared';
@@ -60,10 +61,12 @@ function untilAborted<A>(
  */
 export const KEY_PENDING_WAIT_MS = 30_000;
 const keyPending = (error: unknown) =>
-  error instanceof Error &&
-  /^(?:Error invoking remote method 'e2ee[.:]openContent': Error: )?e2ee_key-pending$/.test(
-    error.message
-  );
+  // A portable host reports its typed failure; the desktop its exact IPC result.
+  personalHostFailureCode(error) === 'key-pending' ||
+  (error instanceof Error &&
+    /^(?:Error invoking remote method 'e2ee[.:]openContent': Error: )?e2ee_key-pending$/.test(
+      error.message
+    ));
 
 /** Shared purpose-bound providers. Keys and credentials stay inside the injected host runtime. */
 export function createE2eeContent(input: {
@@ -123,10 +126,12 @@ export function createE2eeContent(input: {
         KEY_PENDING_WAIT_MS
       );
       try {
-        await untilAborted(input.runtime.refresh(input.workspaceId), [
-          stopped.signal,
-          deadline.signal,
-        ]);
+        // Both hosts receive and install only this device's key; omitted options would
+        // skip the key round on a portable host.
+        await untilAborted(
+          input.runtime.refresh(input.workspaceId, { installKeys: true, keyMode: 'receive' }),
+          [stopped.signal, deadline.signal]
+        );
       } catch (error) {
         if (observeRemoval(error) || stopped.signal.aborted || deadline.signal.aborted) throw error;
         // A failed round can still have installed the key (e.g. from a staged

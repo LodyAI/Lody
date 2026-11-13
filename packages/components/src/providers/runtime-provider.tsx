@@ -711,7 +711,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       encryptedAccess?.updateStatus(status);
       if (encryptedAccess && workspaceRuntime && encryptedAccess.needsUpdate()) {
         await encryptedAccess.transition({
-          install: () => (status.hasCurrentKey ? native.status(leased) : native.refresh(leased)),
+          // Explicit reception: omitted options skip the key round on a portable host.
+          install: () =>
+            status.hasCurrentKey
+              ? native.status(leased)
+              : native.refresh(leased, { installKeys: true, keyMode: 'receive' }),
         });
         if (disposed || retired) return;
         if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);

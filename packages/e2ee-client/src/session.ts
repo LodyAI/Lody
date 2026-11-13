@@ -422,6 +422,27 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           return 'e2ee_key_recipient_ineligible';
         })
       );
+    /** True only when this device's own verified ledger already holds `epoch`, this
+     * device is an active member device there, and its installed key store genuinely
+     * lacks that epoch: a rotation it has not received yet. Unreadable keys, unknown
+     * epochs and access loss are never pending. */
+    const keyPending = (epoch: number) =>
+      withKeys((ctx) =>
+        Effect.gen(function* () {
+          const state = (yield* admitted()).inspectState();
+          const own = state.devices.get(toHex(device.publicKey.toBytes()));
+          if (
+            !Number.isSafeInteger(epoch) ||
+            epoch < 0 ||
+            epoch > state.epoch.number ||
+            !own ||
+            !state.members.has(toHex(own.membershipId.toBytes()))
+          )
+            return false;
+          const checked = yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch));
+          return Result.isFailure(checked) && checked.failure.reason === 'missing-key';
+        })
+      );
     const readKey = (epoch: number) =>
       Effect.gen(function* () {
         const ctx = yield* keys();
@@ -1097,6 +1118,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       },
       keyRound: (mode?: PersonalKeyRoundMode) => run(keyRound(mode)),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
+      keyPending: (epoch: number) => run(keyPending(epoch)),
       status: () => run(status()),
       document: (
         resource: string,
@@ -1157,7 +1179,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           serialRound(
             ownSubmission.pipe(
               Effect.andThen(
-                withKeys((ctx) => Context.get(ctx, EpochPublisher).acknowledge(result))
+                withKeys((ctx) =>
+                  Effect.gen(function* () {
+                    const publisher = Context.get(ctx, EpochPublisher);
+                    // A lost CAS leaves this device's staged envelope group behind. Core
+                    // deletes it only once a different commitment occupies the epoch;
+                    // cleanup is best effort and never blocks the acknowledgement.
+                    if (result.outcome === 'Conflict')
+                      yield* Effect.ignore(publisher.cleanupStaged());
+                    return yield* publisher.acknowledge(result);
+                  })
+                )
               )
             )
           )

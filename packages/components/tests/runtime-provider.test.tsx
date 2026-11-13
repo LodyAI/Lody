@@ -39,6 +39,7 @@ import {
   type MutableStore,
   type PlatformSessionState,
   type PlatformE2eeWorkspaces,
+  type E2eeRefreshOptions,
   type E2eeWorkspaceRuntime,
   type WorkspacesState,
 } from '@lody/platform';
@@ -722,6 +723,58 @@ describe('RuntimeProvider warm workspace preparation', () => {
     await act(async () => notifyE2eeLedgerChanged('local:user', 'local:workspace'));
     expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([1]));
     expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('installs a rotated epoch key announced by a ledger hint on a host whose bare refresh skips keys', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let epoch = 0,
+      installed = 0;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch,
+      hasCurrentKey: installed === epoch,
+      writeEpoch: installed,
+      rotationRequired: false,
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    // The portable host's contract: without `keyMode`, only `installKeys: true` runs a key round.
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      status: async () => status(),
+      refresh: async (_workspace: string, options?: E2eeRefreshOptions) => {
+        const mode = options?.keyMode ?? (options?.installKeys ? 'full' : 'none');
+        if (mode === 'receive' || mode === 'full') installed = epoch;
+        return status();
+      },
+      close: async () => {},
+      seal: async (_workspace: string, input: { epoch: number }) => ({
+        header: new Uint8Array([3]),
+        sealed: new Uint8Array([input.epoch]),
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    const content = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)![0].content!;
+    if (content.mode !== 'protected') throw new Error('expected encrypted content');
+    const room = content.resolve({ kind: 'doc', docId: 'rotated-room' });
+    if (room?.mode !== 'protected') throw new Error('expected encrypted room');
+    const request = {
+      context: {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch',
+      } as const,
+      plaintext: new Uint8Array([1]),
+      additionalData: () => new Uint8Array([2]),
+    };
+    expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([0]));
+    // Another device rotated: the hint's status shows an epoch whose key is not installed.
+    epoch = 1;
+    await act(async () => notifyE2eeLedgerChanged('local:user', 'local:workspace'));
+    expect(installed).toBe(1);
+    expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([1]));
     expect(prepared.disposed).toBe(false);
   });
 

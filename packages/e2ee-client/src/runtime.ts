@@ -12,8 +12,10 @@ import {
   exportVerifiedState,
   hasVerifiedCheckpoint,
   hashRecordBytes,
+  inspectContentFrame,
   type LedgerView,
 } from '@lody/e2ee-core/protocol';
+import { ContentError } from '@lody/e2ee-core';
 import {
   ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS,
   KEY_DELIVERY_RETRY_DELAYS,
@@ -169,6 +171,34 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     yield* guard(id);
     if (!entry || entry.closing || !entry.readers.size) return yield* fail('closed');
     return entry;
+  });
+  /**
+   * Retryable only when the frame's unverified epoch is one this device's own verified
+   * ledger already holds and the session confirms its installed key is genuinely
+   * missing: a rotation not received yet, as on the desktop. Malformed frames,
+   * unreadable keys, unknown epochs and access loss keep the original failure.
+   */
+  const keyPending = Effect.fnUntraced(function* (
+    session: Session,
+    model: 'loro' | 'flock',
+    input: { readonly sealed: Uint8Array; readonly context?: { readonly kind?: string } },
+    original: ContentError
+  ) {
+    const snapshot = input.context?.kind === 'snapshot';
+    const metadata = inspectContentFrame(
+      input.sealed,
+      model === 'loro'
+        ? snapshot
+          ? 'doc-snapshot'
+          : 'doc-update'
+        : snapshot
+          ? 'flock-snapshot'
+          : 'flock-update'
+    );
+    if (Result.isFailure(metadata)) return yield* original;
+    return (yield* session.keyPending(metadata.success.epoch))
+      ? yield* fail('key-pending')
+      : yield* original;
   });
   /** Exact loss of this device from the session's own verified ledger view. */
   const verifiedLoss = (session: Session) =>
@@ -925,7 +955,13 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
                 Effect.gen(function* () {
                   const descriptor = yield* room(input.room),
                     document = yield* session.document(descriptor.resource, descriptor.model);
-                  return yield* document.open(input);
+                  return yield* document.open(input).pipe(
+                    Effect.catchIf(
+                      (error): error is ContentError =>
+                        error instanceof ContentError && error.code === 'missing-read-key',
+                      (original) => keyPending(session, descriptor.model, input, original)
+                    )
+                  );
                 }),
               (bytes) => bytes.fill(0)
             )
