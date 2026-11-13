@@ -47,8 +47,10 @@ uses it for its list, response identity, and every inline old snapshot.
 Replacing the chip's numbers with panel totals alone was rejected because it
 would hide the incorrect SDK diff. Permanently pinning PR head/base was also
 rejected: All Changes is a live owner-workspace comparison, not an immutable PR
-viewer. Remote refs still require ordinary fetch updates; dirty/untracked files
-can legitimately differ from committed metadata. Deferred later RPCs are new
+viewer. Remote refs still require ordinary fetch updates. Workspace statistics now
+share the complete base-to-current-files scope under the
+[statistics ownership decision](../architecture/2026-11-14-workspace-diff-stat-ownership.md);
+the committed-only metadata described in the incident is historical. Deferred later RPCs are new
 reads, not a transaction over the original batch's disk state.
 
 ## Verification

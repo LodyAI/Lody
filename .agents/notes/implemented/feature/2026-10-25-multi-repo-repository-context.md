@@ -37,9 +37,11 @@ desktop app.
   conversation-scoped because their prompt publishes every changed Member.
 - Action gating reads the session-level `workspaceDirty` / `workspaceUnpushed`
   that `projectRunMetaPatch` already aggregates across every Member, so rows no
-  longer carry dirty/unpushed. The committed-diff fallback moved into
+  longer carry dirty/unpushed. The workspace-diff fallback lives in
   `getSessionGitHubState`: `diffStats` is written only when every Member reports
-  a diff, and a non-Git Member never does. The ablation kept that branch,
+  a known diff. Member statistics now use the complete workspace comparison under
+  [statistics ownership](../architecture/2026-11-14-workspace-diff-stat-ownership.md).
+  The ablation kept the fallback branch,
   removed the two duplicate ORs, and covered the mixed-group case.
 - CI is the PR glyph's tone, not a second dot: the glyph shape keeps the PR
   status (open / draft / merged / closed), while green / red / amber reads the

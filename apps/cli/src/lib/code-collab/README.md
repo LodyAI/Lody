@@ -1,7 +1,7 @@
 # apps/cli/src/lib/code-collab — file responsibilities
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the navigation index.
-Ground truth for the rewrite: specs/code-collab-v2.md. The old v1
+Current behavior and protocol references: [file surfaces](../../../../../.agents/docs/sessions-file-surfaces.md). The old v1
 host/runtime/CRDT capture implementation has been removed from this directory.
 
 Turn completion, error and Stop schedule shared-state refresh without waiting.
@@ -23,7 +23,11 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   each Member merge base for All Changes snapshots. The main directory is not a Git repository.
   Ordinary Git All Changes uses the owner base; non-Git uses local diff evidence only when a
   trustworthy base exists. It owns in-memory file-index state replacement and Flock
-  publish even when the scan itself ran in a worker.
+  publish even when the scan itself ran in a worker. Full comparison totals, before
+  index trimming, feed `WorkspaceGitService.publishDiffStats` for all Sessions and
+  Project Members; identical indexes do not suppress requested statistics reconciliation.
+  [Statistics ownership](../../../../../.agents/notes/implemented/architecture/2026-11-14-workspace-diff-stat-ownership.md)
+  explains the shared workspace meaning and why Git finalization cannot replace it.
 - `file-index-scan-core.ts` — shared scan and Git merge-base resolution. Tracking
   lookup normalizes qualified local owner refs using `git/git-diff-base.ts`, also
   consumed by committed summary stats. An owner without a recorded base (a direct

@@ -36,7 +36,8 @@ PR: [#1177](https://github.com/LodyAI/Lody/pull/1177)
 
 仅把底栏数字替换成面板总数会隐藏错误 SDK diff，因此未采用。
 也不永久锁定 PR head/base：All Changes 是实时归属工作区比较，不是不可变 PR 查看器。
-远端引用仍需正常 fetch；脏文件或未跟踪文件可与已提交元数据不同。
+远端引用仍需正常 fetch。按照[统计归属决策](../architecture/2026-11-14-workspace-diff-stat-ownership.zh.md)，
+工作区统计现在同样描述从基准到当前文件的完整变化；事故记录中的仅已提交元数据属于历史行为。
 延后发起的 RPC 是新的读取，不是对原批次磁盘状态的事务。
 
 ## 验证

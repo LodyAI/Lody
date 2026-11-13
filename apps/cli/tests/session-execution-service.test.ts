@@ -355,7 +355,7 @@ const createBaseDeps = (
     turnFinalization: {
       finalizeACPState: vi.fn(async () => {}),
       flushSessionUsage: vi.fn(async () => {}),
-      updateSessionDiffStats: vi.fn(async () => []),
+      recordGitTurnDiffs: vi.fn(async () => []),
       detectAndAssociatePR: vi.fn(async () => null),
       syncWorkspaceGitState: vi.fn(async () => {}),
       onTurnOutcome: vi.fn(async () => {}),
@@ -4936,7 +4936,7 @@ describe('SessionExecutionService', () => {
           turnFinalization: {
             finalizeACPState: vi.fn(async () => {}),
             flushSessionUsage: vi.fn(async () => {}),
-            updateSessionDiffStats: vi.fn(async () => [{ filePath: 'src/a.ts', add: 1, del: 0 }]),
+            recordGitTurnDiffs: vi.fn(async () => [{ filePath: 'src/a.ts', add: 1, del: 0 }]),
             refreshCodeCollabSharedState,
             detectAndAssociatePR: vi.fn(async () => ({ baseBranch: 'release/v2' })),
             syncWorkspaceGitState: vi.fn(async () => {}),
@@ -4962,7 +4962,7 @@ describe('SessionExecutionService', () => {
         await vi.advanceTimersByTimeAsync(20_000);
         await first;
         releaseRefresh();
-        expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
+        expect(deps.turnFinalization.recordGitTurnDiffs).toHaveBeenCalledWith(
           'session-1',
           activeSession,
           expect.objectContaining({
@@ -6608,7 +6608,7 @@ describe('SessionExecutionService', () => {
       'session-session-local-restore',
       expect.objectContaining({ baseBranch: expect.anything() })
     );
-    expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
+    expect(deps.turnFinalization.recordGitTurnDiffs).toHaveBeenCalledWith(
       'session-local-restore',
       restoredSession,
       expect.objectContaining({ preferredBaseBranch: 'refs/remotes/origin/remote-base' })
@@ -6737,7 +6737,7 @@ describe('SessionExecutionService', () => {
       expect.objectContaining({ baseBranch: expect.anything() })
     );
     expect(persistPendingChanges).not.toHaveBeenCalledWith('session-local-base-ref');
-    expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
+    expect(deps.turnFinalization.recordGitTurnDiffs).toHaveBeenCalledWith(
       'session-local-tracking-restore',
       restoredSession,
       expect.objectContaining({ preferredBaseBranch: 'foo' })
@@ -10473,7 +10473,7 @@ describe('SessionExecutionService', () => {
           expect(result).toEqual({ success: true });
         }),
         flushSessionUsage: vi.fn(async () => {}),
-        updateSessionDiffStats: vi.fn(async () => []),
+        recordGitTurnDiffs: vi.fn(async () => []),
         detectAndAssociatePR: vi.fn(async () => null),
         syncWorkspaceGitState: vi.fn(async () => {}),
         onTurnOutcome: vi.fn(async () => {}),
@@ -10512,7 +10512,7 @@ describe('SessionExecutionService', () => {
       expect.anything(),
       expect.any(AbortSignal)
     );
-    expect(deps.turnFinalization.updateSessionDiffStats).not.toHaveBeenCalled();
+    expect(deps.turnFinalization.recordGitTurnDiffs).not.toHaveBeenCalled();
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-finalizing-cancel', {
       lastHandledUserMsgId: 'turn-finalizing-user',
       processingUserMsgId: undefined,
@@ -15219,7 +15219,7 @@ describe('Operation Inbox execution boundary', () => {
         preferredBaseBranch: 'main',
         prAssociation: null,
       });
-      f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+      f.deps.turnFinalization.recordGitTurnDiffs = post.recordGitTurnDiffs.bind(post);
       f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, turn) => {
         if (turn === 'assistant:human-input') {
           entered.resolve();
@@ -15310,7 +15310,7 @@ describe('Operation Inbox execution boundary', () => {
         if (args[0] === 'rev-list') return dirty ? '1\n' : '0\n';
         return '';
       };
-      f.deps.turnFinalization.updateSessionDiffStats = post.updateSessionDiffStats.bind(post);
+      f.deps.turnFinalization.recordGitTurnDiffs = post.recordGitTurnDiffs.bind(post);
       const message = {
         ...f.message,
         project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' },

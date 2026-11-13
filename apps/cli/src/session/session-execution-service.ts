@@ -293,7 +293,7 @@ type TurnFinalizationEffects = {
     signal?: AbortSignal
   ) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
-  updateSessionDiffStats: (
+  recordGitTurnDiffs: (
     sessionId: SessionId,
     session: ISession,
     options: {
@@ -4720,9 +4720,9 @@ export class SessionExecutionService {
       await this.runTurnFinalizationStage(
         sessionId,
         turnId,
-        'updateSessionDiffStats',
+        'recordGitTurnDiffs',
         async () => {
-          await this.deps.turnFinalization.updateSessionDiffStats(sessionId, session, {
+          await this.deps.turnFinalization.recordGitTurnDiffs(sessionId, session, {
             turnId,
             baseCommitHash: baseCommitHash ?? undefined,
             turnStartWorkingTreeDiff,

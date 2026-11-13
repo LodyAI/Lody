@@ -392,11 +392,6 @@ import {
   applyAcpSessionRunConfig,
   type AcpSessionRunConfig,
 } from '@/session/acp-session-config-applier';
-import {
-  readDiffStatsMetadata,
-  resolveCodeCollabAllChangesDiffStatsPatch,
-  resolveDiffStatsTarget,
-} from '@/session/session-diff-stats-target';
 import type { MachineAccessVerification } from '@/session/session-access-retry';
 import {
   CodeCollabV2Service,
@@ -3341,13 +3336,9 @@ export class MessageHandler {
           bumpDiffPaths: state.bumpDiffPaths,
         });
         state.signal?.throwIfAborted();
-        if (state.persistAllChangesDiffStats && state.allChangesDiffStats) {
+        if (state.persistAllChangesDiffStats) {
           try {
-            await this.persistCodeCollabAllChangesDiffStats(
-              state.ownerSessionId,
-              state.allChangesDiffStats,
-              state.signal
-            );
+            await workspaceGitService.publishDiffStats(state);
           } catch (error) {
             this.logger.debug(
               `[code-collab-v2] Failed to persist All Changes diffStats ownerSessionId=${
@@ -3487,8 +3478,8 @@ export class MessageHandler {
         persistCodeCollabTurnDiffs: async (sessionId, turnId, signal) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId, signal),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-        updateSessionDiffStats: async (sessionId, session, options) =>
-          await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
+        recordGitTurnDiffs: async (sessionId, session, options) =>
+          await this.turnPostProcessingService.recordGitTurnDiffs(sessionId, session, options),
         refreshCodeCollabSharedState: async (sessionId, signal) => {
           await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId, signal });
         },
@@ -7473,27 +7464,6 @@ export class MessageHandler {
       return undefined;
     }
     return metaRecord.meta as SessionMeta;
-  }
-
-  private async persistCodeCollabAllChangesDiffStats(
-    ownerSessionId: SessionId,
-    diffStats: NonNullable<SessionMeta['diffStats']>,
-    signal?: AbortSignal
-  ): Promise<void> {
-    const ownerRoomId = getSessionRoomId(ownerSessionId);
-    const metaRecord = await this.workspaceDocument.repo.getDocMeta(ownerRoomId);
-    if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
-      return;
-    }
-    signal?.throwIfAborted();
-    if ((metaRecord.meta as SessionMeta).projectRun) return;
-    const ownerMeta = readDiffStatsMetadata(metaRecord.meta);
-    const target = resolveDiffStatsTarget({ ownerRoomId, ownerMeta });
-    const patch = resolveCodeCollabAllChangesDiffStatsPatch({ target, ownerMeta, diffStats });
-    if (!patch) {
-      return;
-    }
-    await this.workspaceDocument.repo.upsertDocMeta(ownerRoomId, patch);
   }
 
   private canWriteCodeCollabOwnerSession(args: {

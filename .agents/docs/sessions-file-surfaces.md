@@ -57,6 +57,12 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
   unavailable state
   ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
+- The composer and session sidebar's `diffStats` describe the default workspace
+  comparison, including uncommitted edits, independently of PR association. Code
+  Collab summarizes the complete comparison before trimming the shared index and
+  publishes through `WorkspaceGitService.publishDiffStats`; Git turn attribution
+  and branch probes do not replace those totals. Per-turn cards keep their own
+  history statistics. See [statistics ownership](../notes/implemented/architecture/2026-11-14-workspace-diff-stat-ownership.md).
 - Diffs opened with a precise file focus open only that file by default; the other
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct

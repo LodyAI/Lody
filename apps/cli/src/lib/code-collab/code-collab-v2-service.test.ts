@@ -824,7 +824,37 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         expect(changed?.resetDiffGenerations).toBe(false);
         expect(changed?.bumpDiffPaths).toEqual(['a.txt']);
         await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
-        expect(published.at(-1)).toBe(changed);
+        expect(published.at(-1)?.fileIndex).toEqual(changed?.fileIndex);
+        expect(published.at(-1)?.bumpDiffPaths).toEqual([]);
+        expect(published.at(-1)?.allChangesDiffStats).toEqual({ allChange: { add: 2, del: 2 } });
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('publishes full workspace totals before the shared file index is trimmed', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      const directory = path.join(workspaceRoot, 'a'.repeat(180));
+      await mkdir(directory);
+      const count = 256;
+      const paths = Array.from({ length: count }, (_, index) =>
+        path.join(directory, `${String(index).padStart(3, '0')}-${'b'.repeat(180)}.txt`)
+      );
+      await Promise.all(paths.map((file) => writeFile(file, 'before\n')));
+      await gitCommitAll(workspaceRoot, 'baseline');
+      await Promise.all(paths.map((file) => writeFile(file, 'after\n')));
+      const { published, publishFileIndex } = collectPublishedSharedStates();
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        publishFileIndex,
+      });
+      try {
+        await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
+        const snapshot = published.at(-1);
+        expect(Object.keys(snapshot?.allChanges ?? {}).length).toBeLessThan(count);
+        expect(snapshot?.allChangesDiffStats).toEqual({ allChange: { add: count, del: count } });
       } finally {
         service.dispose();
       }
@@ -1591,7 +1621,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
           const stats = await getGitDiffStats((args) => git(...args), { preferredBaseBranch });
           expect(stats).toMatchObject({
             mergeBase: upstream,
-            baseDiffStats: { allChange: { add: 1, del: 0 } },
           });
         }
         await service.refreshSharedState({ sessionId: SESSION_ID });
@@ -1630,7 +1659,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         expect(published.at(-1)?.allChangesDiffStats).toEqual({ allChange: { add: 0, del: 0 } });
         expect(
           await getGitDiffStats((args) => git(...args), { preferredBaseBranch: 'refs/heads/main' })
-        ).toMatchObject({ mergeBase: head, baseDiffStats: { allChange: { add: 0, del: 0 } } });
+        ).toMatchObject({ mergeBase: head });
         expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
           status: 'ok',
           base: head,
@@ -1700,7 +1729,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         expect(await getGitDiffStats((args) => git(...args))).toMatchObject({
           baseRef: 'origin/HEAD',
           mergeBase: develop,
-          baseDiffStats: { allChange: { add: 0, del: 0 } },
         });
 
         // A recorded base stays authoritative, even when it names the abandoned branch.
@@ -1708,7 +1736,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
           await getGitDiffStats((args) => git(...args), { preferredBaseBranch: 'main' })
         ).toMatchObject({
           mergeBase: abandonedMain,
-          baseDiffStats: { allChange: { add: 1, del: 1 } },
         });
 
         // Without a remote default, the conventional names remain the fallback.
@@ -2116,6 +2143,7 @@ describe('Project group extra-root files', () => {
       dbPath: path.join(base, 'diff.sqlite3'),
     });
     const publications: CodeCollabV2FileIndexState[] = [];
+    const stats: CodeCollabV2FileIndexPublication[] = [];
     const roots = [
       { id: 'main', absolutePath: main },
       { id: rootId, absolutePath: extra },
@@ -2147,6 +2175,7 @@ describe('Project group extra-root files', () => {
       diffStore: store,
       publishFileIndex: async (state) => {
         publications.push(state.fileIndex);
+        stats.push(state);
       },
     });
     try {
@@ -2171,6 +2200,12 @@ describe('Project group extra-root files', () => {
         events: [{ path: path.join(extra, 'a.txt'), oldText: 'old', newText: 'new' }],
       });
       await service.refreshSharedState({ sessionId: SESSION_ID });
+      await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
+      expect(stats.at(-1)).toMatchObject({
+        allChangesDiffStats: { allChange: { add: 1, del: 1 } },
+        memberDiffStats: { docs: { allChange: { add: 1, del: 1 } } },
+        persistAllChangesDiffStats: true,
+      });
       expect(new Set(watchedRoots.values())).toEqual(new Set([main, extra]));
       const index = publications.at(-1)!;
       expect(index).toHaveProperty('a.txt');
