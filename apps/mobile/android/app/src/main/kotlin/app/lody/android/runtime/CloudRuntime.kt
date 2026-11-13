@@ -88,6 +88,16 @@ sealed interface RuntimeCommand {
      * `decideProposal`); the outcome is recorded in history. A write, never retried here.
      */
     data class DecideProposal(val sessionId: String, val entryId: String, val itemId: String, val accept: Boolean) : RuntimeCommand
+    /**
+     * Answers a permission request (a plan approval) in the watched session with one of its
+     * options (upstream `respondPermission`); answers [RuntimeResult.PermissionAnswered]. A write,
+     * never retried here.
+     */
+    data class RespondPermission(
+        val sessionId: String, val entryId: String, val itemId: String, val requestId: String, val optionId: String,
+        /** An ask-user-question's answers by [QuestionMeta.key]: a label or text, or a multi-select's labels. */
+        val answers: Map<String, Any>? = null,
+    ) : RuntimeCommand
     data object Ping : RuntimeCommand
     data object InspectSchema : RuntimeCommand
 }
@@ -113,6 +123,8 @@ sealed interface RuntimeResult {
     data class ScheduleWritten(val scheduleId: String) : RuntimeResult
     /** A proposal's recorded outcome (`saved` / `created` / `dismissed`). */
     data class ProposalDecided(val outcome: String, val scheduleId: String? = null) : RuntimeResult
+    /** A permission answer's state: `accepted`, `stale` (the request is gone) or `conflict` (answered elsewhere). */
+    data class PermissionAnswered(val state: String) : RuntimeResult
     data class Created(val value: CreationReceipt) : RuntimeResult
     data class Plan(val tier: String?) : RuntimeResult
     /** Upstream send state (`sent` / `queued` / `not_sent` / `unknown`); a machine ACK is delivery only. */
@@ -272,9 +284,13 @@ sealed interface TurnItem {
         val awaitingPermission: Boolean = false,
         /** The runtime holds a detail (command, output, diff) to open under the step. */
         val hasDetail: Boolean = false,
+        /** The plan a plan-approval (`switch_mode`) step carries (Claude, Kimi); Codex sends a separate [ProposedPlan]. */
+        val plan: String? = null,
+        /** The step's permission request, when it has one. */
+        val permission: ToolPermission? = null,
     ) : TurnItem
-    /** A proposed plan (Markdown); never folded. */
-    data class ProposedPlan(override val id: String, val markdown: String) : TurnItem
+    /** A proposed plan (Markdown); never folded. [streaming] while the agent still writes it. */
+    data class ProposedPlan(override val id: String, val markdown: String, val streaming: Boolean = false) : TurnItem
     /** The agent's checklist (`plan`); never folded. */
     data class Checklist(override val id: String, val entries: List<Pair<String, String>>) : TurnItem
     /**
@@ -413,7 +429,72 @@ class ShortLivedGrant(val token: String, val gatewayBaseUrl: String, val expires
  * A tool step's detail, after upstream `itemDetail`: its content blocks in order. [truncated] when
  * the runtime cut a long detail; the rest stays on desktop.
  */
-data class StepDetail(val blocks: List<StepBlock>, val truncated: Boolean = false)
+data class StepDetail(
+    val blocks: List<StepBlock>,
+    val truncated: Boolean = false,
+    /** An answered ask-user-question's answers by question key (the outcome's `_meta`), each as its labels or text. */
+    val answers: Map<String, List<String>> = emptyMap(),
+)
+
+/** A tool step's permission request (web `permissionRequest`): [pending] until answered or withdrawn. */
+data class ToolPermission(
+    val requestId: String,
+    val pending: Boolean,
+    val options: List<PermissionOption>,
+    /** An ask-user-question request (runtime `kind`), answered with [questions]. */
+    val question: Boolean = false,
+    /** The questions, or null when absent or malformed: such a question is not answerable here. */
+    val questions: QuestionMeta? = null,
+    /** The option a settled request was answered with (runtime `chosenOptionId`). */
+    val chosenOptionId: String? = null,
+    /** A settled request that was withdrawn (cancelled), not answered. */
+    val withdrawn: Boolean = false,
+) {
+    /**
+     * Desktop `resolveSuggestedOptionId`: a request that leads with a refusal suggests the first
+     * one-time refusal; otherwise the first one-time allow, never an "always"; else the first option.
+     */
+    val suggested: PermissionOption? get() {
+        val first = options.firstOrNull() ?: return null
+        if (first.tone == "reject" || first.tone == "rejectAlways") options.firstOrNull { it.tone == "reject" }?.let { return it }
+        return options.firstOrNull { it.tone == "allow" } ?: first
+    }
+}
+
+/** Ask-user-question metadata as the runtime normalized it (`parseQuestionMeta`). */
+data class QuestionMeta(val questions: List<Question>, val allowCustomAnswer: Boolean) {
+    data class Option(val label: String, val description: String? = null, val preview: String? = null)
+    data class Question(
+        val id: String?, val header: String, val question: String, val options: List<Option>,
+        val multiSelect: Boolean, val allowCustomAnswer: Boolean? = null, val isSecret: Boolean = false,
+    )
+
+    /** Runtime `questionAnswerKey`: the first of id, question, header that is non-blank and unique, else the index. */
+    fun key(index: Int): String {
+        val question = questions[index]
+        for (field in listOf<(Question) -> String?>({ it.id }, { it.question }, { it.header })) {
+            val value = field(question)
+            if (!value.isNullOrBlank() && questions.count { field(it) == value } == 1) return value
+        }
+        return index.toString()
+    }
+
+    /** Runtime `questionAllowsText`. */
+    fun allowsText(index: Int): Boolean = questions[index].let { it.options.isEmpty() || (it.allowCustomAnswer ?: allowCustomAnswer) }
+}
+
+/** One option the provider offers; [kind] is ACP's `allow_once` / `allow_always` / `reject_once` / …. */
+data class PermissionOption(val optionId: String, val name: String, val kind: String?) {
+    val allows: Boolean get() = kind?.startsWith("allow") == true
+    /** Desktop `resolvePermissionOptionTone`: `allow`, `allowAlways`, `reject` (also Lody's `deny`), `rejectAlways` or `other`. */
+    val tone: String get() = when (kind) {
+        "allow_once" -> "allow"
+        "allow_always" -> "allowAlways"
+        "reject_once", "deny" -> "reject"
+        "reject_always" -> "rejectAlways"
+        else -> "other"
+    }
+}
 
 sealed interface StepBlock {
     data class Command(val command: String, val cwd: String? = null) : StepBlock
