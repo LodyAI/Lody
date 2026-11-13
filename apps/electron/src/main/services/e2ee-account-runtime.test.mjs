@@ -682,6 +682,100 @@ void test('auth changes during native open close the stale owner before any work
   assert.equal(admitted, false)
   assert.equal(released, true)
 })
+/** Holds one turn in `workspaceId` until `finish` settles; its owner records its close. */
+function holdWorkspaceTurn(api, workspaceId, events) {
+  const entered = Promise.withResolvers()
+  const finish = Promise.withResolvers()
+  const done = api.withDesktopE2eeAccount(
+    (owner) =>
+      Effect.gen(function* () {
+        yield* Scope.addFinalizer(
+          owner.scope,
+          Effect.sync(() => events.push(`${workspaceId} closed`))
+        )
+        entered.resolve()
+        yield* Effect.promise(() => finish.promise)
+        events.push(`${workspaceId} end`)
+      }),
+    workspaceId
+  )
+  return { entered: entered.promise, finish: () => finish.resolve(), done }
+}
+void test('independent workspace directories run account turns concurrently while one directory stays serialized', async () => {
+  const { api } = await account()
+  const events = []
+  const held = holdWorkspaceTurn(api, 'ws-1', events)
+  await held.entered
+  const same = api.withDesktopE2eeAccount(
+    () => Effect.sync(() => events.push('ws-1 second')),
+    'ws-1'
+  )
+  // A slow turn in ws-1 must not hold an unrelated workspace's E2EE operation.
+  assert.match(
+    await api.withDesktopE2eeAccount((owner) => Effect.succeed(owner.directory), 'ws-2'),
+    /ws-2$/
+  )
+  events.push('ws-2 done')
+  held.finish()
+  await Promise.all([held.done, same])
+  assert.deepEqual([...events], ['ws-2 done', 'ws-1 end', 'ws-1 second'])
+  await api.closeDesktopE2eeAccount()
+})
+void test('account close drains in-flight workspace turns and fences turns started after it', async () => {
+  const { api } = await account()
+  const events = []
+  const held = holdWorkspaceTurn(api, 'ws-1', events)
+  await held.entered
+  const closing = api.closeDesktopE2eeAccount().then(() => events.push('close done'))
+  const later = api.withDesktopE2eeAccount(
+    () => Effect.sync(() => events.push('ws-2 turn')),
+    'ws-2'
+  )
+  held.finish()
+  await Promise.all([held.done, closing, later])
+  assert.deepEqual([...events], ['ws-1 end', 'ws-1 closed', 'close done', 'ws-2 turn'])
+  await api.closeDesktopE2eeAccount()
+})
+void test('an account switch closes the previous account only after its in-flight turns, before admitting new-account turns', async () => {
+  const { api, identity } = await account()
+  const events = []
+  const held = holdWorkspaceTurn(api, 'ws-1', events)
+  await held.entered
+  identity.userId = 'second'
+  identity.generation++
+  const turns = ['ws-2', 'ws-3'].map((workspaceId) =>
+    api.withDesktopE2eeAccount(
+      (owner) => Effect.sync(() => events.push(`${workspaceId} ${owner.accountId}`)),
+      workspaceId
+    )
+  )
+  held.finish()
+  await Promise.all([held.done, ...turns])
+  assert.deepEqual([...events].slice(0, 2), ['ws-1 end', 'ws-1 closed'])
+  assert.deepEqual([...events].slice(2).sort(), ['ws-2 second', 'ws-3 second'])
+  await api.closeDesktopE2eeAccount()
+})
+void test('account-wide reset archives only after in-flight workspace turns drain and fences later turns', async () => {
+  const events = []
+  const { api } = await account({
+    identityStorage: {
+      leaseE2eeIdentity: () => Effect.void,
+      completedE2eeIdentityReset: () => Effect.succeed(undefined),
+      archiveE2eeIdentity: () => Effect.sync(() => events.push('archive'))
+    }
+  })
+  const held = holdWorkspaceTurn(api, 'ws-1', events)
+  await held.entered
+  const reset = api.resetDesktopE2eeIdentity({ resetId: 'reset-1' })
+  const later = api.withDesktopE2eeAccount(
+    () => Effect.sync(() => events.push('ws-2 turn')),
+    'ws-2'
+  )
+  held.finish()
+  await Promise.all([held.done, reset, later])
+  assert.deepEqual([...events], ['ws-1 end', 'ws-1 closed', 'archive', 'ws-2 turn'])
+  await api.closeDesktopE2eeAccount()
+})
 void test('only unavailable custody exposes the availability fallback code', async () => {
   const unavailable = await account({ custody: () => Effect.fail({ code: 'unavailable' }) })
   await assert.rejects(
