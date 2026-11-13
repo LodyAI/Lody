@@ -631,17 +631,24 @@ export function MachineAgentSettings({
     () => (localMachineId ? allItems.filter((item) => item.machine.id === localMachineId) : []),
     [allItems, localMachineId]
   );
+  // Private machines are set apart only when someone else could use a shared one.
+  // In a workspace without other members every machine is private, so all of
+  // them belong in the main list rather than behind a "private machines" group.
+  const separatesPrivateMachines = members.length > 1;
   const filteredModeItems = useMemo(() => {
-    if (mode === 'machines') return tabItems.filter((item) => item.sharedWithTeam);
+    if (mode === 'machines' && separatesPrivateMachines)
+      return tabItems.filter((item) => item.sharedWithTeam);
     return tabItems;
-  }, [mode, tabItems]);
+  }, [mode, separatesPrivateMachines, tabItems]);
   const modeTotalBeforeFilter = useMemo(() => {
-    if (mode === 'machines') return allItems.filter((item) => item.sharedWithTeam).length;
+    if (mode === 'machines' && separatesPrivateMachines)
+      return allItems.filter((item) => item.sharedWithTeam).length;
     return allItems.length;
-  }, [allItems, mode]);
+  }, [allItems, mode, separatesPrivateMachines]);
   const ownPrivateItems = useMemo(
-    () => allItems.filter((item) => item.isOwn && !item.sharedWithTeam),
-    [allItems]
+    () =>
+      separatesPrivateMachines ? allItems.filter((item) => item.isOwn && !item.sharedWithTeam) : [],
+    [allItems, separatesPrivateMachines]
   );
   const getAccordionMeta = useCallback(
     (item: MachineTabItem): WorkspaceMachineAccordionMeta => {
@@ -1726,7 +1733,9 @@ export function MachineAgentSettings({
     </div>
   );
 
-  const sharedAccordionItems = workspaceMachineSelectionPool.filter((item) => item.sharedWithTeam);
+  const sharedAccordionItems = separatesPrivateMachines
+    ? workspaceMachineSelectionPool.filter((item) => item.sharedWithTeam)
+    : workspaceMachineSelectionPool;
 
   const renderDesktopMachineSection = (item: MachineTabItem) => {
     const meta = getAccordionMeta(item);

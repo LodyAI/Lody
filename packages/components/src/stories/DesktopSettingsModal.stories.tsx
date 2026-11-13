@@ -147,18 +147,27 @@ const previewQueries: Record<string, unknown> = {
   'machineCredentials:getMachineCredentialState': { revocableCount: 1 },
   'machinePairing:listPendingMachinePairings': [],
 };
-const previewCloudApi: CloudApi = {
-  useQuery: (operation, args) =>
-    args === 'skip' ? undefined : (previewQueries[operation.name] as never),
+/** A solo workspace shares nothing: every machine is the owner's private machine. */
+const soloPreviewQueries: Record<string, unknown> = {
+  ...previewQueries,
+  'machines:listVisibleMachines': previewAccess.map((access) => ({
+    ...access,
+    sharedWithTeam: false,
+  })),
+};
+const createPreviewCloudApi = (queries: Record<string, unknown>): CloudApi => ({
+  useQuery: (operation, args) => (args === 'skip' ? undefined : (queries[operation.name] as never)),
   useMutation: () => async () => {
     throw new Error('预览不会更改真实机器。');
   },
   useAction: () => async () => {
     throw new Error('预览不会更改真实机器。');
   },
-};
+});
+const previewCloudApi = createPreviewCloudApi(previewQueries);
+const soloPreviewCloudApi = createPreviewCloudApi(soloPreviewQueries);
 
-function MachinesCatalogFixture() {
+function MachinesCatalogFixture({ solo = false }: { solo?: boolean }) {
   useLayoutEffect(() => {
     const originalFetch = window.fetch;
     const previewFetch: typeof fetch = (input, init) => {
@@ -187,8 +196,12 @@ function MachinesCatalogFixture() {
   }, []);
   const parent = usePlatform();
   const platform = useMemo(
-    () => ({ ...parent, kind: 'cloud' as const, cloudApi: previewCloudApi }),
-    [parent]
+    () => ({
+      ...parent,
+      kind: 'cloud' as const,
+      cloudApi: solo ? soloPreviewCloudApi : previewCloudApi,
+    }),
+    [parent, solo]
   );
   const [store] = useState(() => {
     const next = createStore();
@@ -327,20 +340,23 @@ function MachinesCatalogFixture() {
 function SettingsModalStory({
   tab,
   roles = [storyRole],
+  solo = false,
 }: {
   tab: SettingsTabId;
   roles?: readonly AgentRole[];
+  /** The workspace has no other members. */
+  solo?: boolean;
 }) {
   return (
     <SettingsStoryProviders
-      multiMember={tab === 'machines'}
+      multiMember={tab === 'machines' && !solo}
       capabilities={
         tab === 'machines' ? ['cloudAccount', 'remoteMachines', 'teamSharing'] : ['cloudAccount']
       }
     >
       <RoutedStory>
         {tab === 'machines' ? (
-          <MachinesCatalogFixture />
+          <MachinesCatalogFixture solo={solo} />
         ) : (
           <Provider>
             <OpenModalAt tab={tab}>
@@ -408,4 +424,10 @@ export const DarkModePreferencesTab: Story = {
 /** Full production modal with synthetic data; run Storybook with VITE_LODY_PLATFORM=cloud. */
 export const MachinesIdentityRecovery: Story = {
   render: () => <SettingsModalStory tab="machines" />,
+};
+
+/** A workspace without other members: every machine is private, and all of them are
+ * listed on the page rather than set apart as "your private machines". */
+export const MachinesSoloWorkspace: Story = {
+  render: () => <SettingsModalStory tab="machines" solo />,
 };
