@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
@@ -9,7 +9,10 @@ import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import type { SessionMachineInfo } from '../src/components/sessions/session-machine-info';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
+  useTranslation: () => ({
+    t: (_key: string, fallback: string, values?: { count?: number }) =>
+      fallback.replace('{{count}}', String(values?.count ?? '')),
+  }),
 }));
 
 (
@@ -56,6 +59,48 @@ describe('SessionInfoBar ambient information', () => {
     act(() => root.unmount());
     container.remove();
   });
+
+  it.each([false, true])(
+    'opens zero-line changes by file count and keeps mixed text totals (compact=%s)',
+    (compact) => {
+      function Harness({ diff }: { diff: { add: number; del: number; files?: number } }) {
+        const [open, setOpen] = useState(false);
+        return (
+          <>
+            <SessionInfoBar
+              {...CONTEXT_LESS_PROPS}
+              compactMachineInfo={compact}
+              diffStat={diff}
+              onOpenAllChanges={() => setOpen(true)}
+            />
+            {open ? (
+              <div role="region" aria-label="Workspace changes">
+                image.bin
+              </div>
+            ) : null}
+          </>
+        );
+      }
+      act(() => root.render(<Harness diff={{ add: 0, del: 0, files: 2 }} />));
+      const entry = container.querySelector<HTMLButtonElement>('button[aria-label="All Changes"]');
+      expect(entry?.textContent).toBe('2 files');
+      expect(entry?.disabled).toBe(false);
+      act(() => root.render(<Harness diff={{ add: 0, del: 0, files: 3 }} />));
+      expect(container.querySelector('button[aria-label="All Changes"]')?.textContent).toBe(
+        '3 files'
+      );
+      act(() => entry!.click());
+      expect(container.querySelector('[aria-label="Workspace changes"]')?.textContent).toBe(
+        'image.bin'
+      );
+      act(() => root.render(<Harness diff={{ add: 3, del: 1, files: 2 }} />));
+      expect(container.querySelector('button[aria-label="All Changes"]')?.textContent).toBe('+3−1');
+      act(() => root.render(<Harness diff={{ add: 3, del: 1, files: 0 }} />));
+      expect(container.querySelector('button[aria-label="All Changes"]')).toBeNull();
+      act(() => root.render(<Harness diff={{ add: 3, del: 1 }} />));
+      expect(container.querySelector('button[aria-label="All Changes"]')?.textContent).toBe('+3−1');
+    }
+  );
 
   it('says Updating while a cached conversation catches up, and hides for a null status', () => {
     act(() => {

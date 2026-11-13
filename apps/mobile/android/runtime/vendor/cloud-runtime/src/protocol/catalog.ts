@@ -74,7 +74,10 @@ const diffOf = (value: unknown) => {
   const change = object(object(value).allChange);
   const add = stamp(change.add) ?? 0,
     del = stamp(change.del) ?? 0;
-  return add || del ? { add, del } : undefined;
+  const files = stamp(change.files);
+  return files !== undefined || add || del
+    ? { add, del, ...(files === undefined ? {} : { files }) }
+    : undefined;
 };
 export function projectRows(
   rows: Row[],

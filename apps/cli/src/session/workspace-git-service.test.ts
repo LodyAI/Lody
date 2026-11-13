@@ -472,20 +472,28 @@ describe('WorkspaceGitService', () => {
       pullRequests: [{ url: 'https://github.com/example/web/pull/1', status: 'open' }],
       diffStats: { allChange: { add: 0, del: 0 } },
     });
-    const stats = { allChange: { add: 4, del: 2 } };
+    const stats = { files: 2, allChange: { add: 4, del: 2 } };
+    const expected = { allChange: { ...stats.allChange, files: 2 } };
     await service.publishDiffStats({ ownerSessionId: owner, allChangesDiffStats: stats });
-    expect(meta.get(owner)).toMatchObject({ diffStats: stats });
+    expect(meta.get(owner)).toMatchObject({ diffStats: expected });
     await service.publishDiffStats({ ownerSessionId: owner, allChangesDiffStats: null });
-    expect(meta.get(owner)).toMatchObject({ diffStats: stats });
+    expect(meta.get(owner)).toMatchObject({ diffStats: expected });
     const write = vi.spyOn(workspaceDocument.repo, 'upsertDocMeta');
     write.mockRejectedValueOnce(new Error('synthetic metadata failure'));
-    const next = { allChange: { add: 5, del: 3 } };
+    const next = { files: 1, allChange: { add: 5, del: 3 } };
     await expect(
       service.publishDiffStats({ ownerSessionId: owner, allChangesDiffStats: next })
     ).rejects.toThrow('synthetic metadata failure');
-    expect(meta.get(owner)).toMatchObject({ diffStats: stats });
+    expect(meta.get(owner)).toMatchObject({ diffStats: expected });
     await service.publishDiffStats({ ownerSessionId: owner, allChangesDiffStats: next });
-    expect(meta.get(owner)).toMatchObject({ diffStats: next });
+    expect(meta.get(owner)).toMatchObject({
+      diffStats: { allChange: { add: 5, del: 3, files: 1 } },
+    });
+    await service.publishDiffStats({
+      ownerSessionId: owner,
+      allChangesDiffStats: { files: 3, allChange: null },
+    });
+    expect(meta.get(owner)?.diffStats).toEqual({ allChange: { add: 5, del: 3, files: 3 } });
   });
 
   it('reconciles group aggregates and preserves other owner fields', async () => {
@@ -493,8 +501,8 @@ describe('WorkspaceGitService', () => {
     const run = projectRun();
     const [web, api] = Object.values(run.members);
     if (!web || !api) throw new Error('Expected two project members');
-    web.diff = { add: 2, del: 1 };
-    api.diff = { add: 3, del: 0 };
+    web.diff = { add: 2, del: 1, files: 2 };
+    api.diff = { add: 3, del: 0, files: 1 };
     meta.set(owner, {
       projectRun: run,
       branchName: 'feature/keep',
@@ -502,23 +510,27 @@ describe('WorkspaceGitService', () => {
     });
     await service.publishDiffStats({
       ownerSessionId: owner,
-      allChangesDiffStats: { allChange: { add: 5, del: 1 } },
-      memberDiffStats: { web: { allChange: web.diff }, api: { allChange: api.diff } },
+      allChangesDiffStats: { files: 3, allChange: { add: 5, del: 1 } },
+      memberDiffStats: {
+        web: { files: 2, allChange: web.diff },
+        api: { files: 1, allChange: api.diff },
+      },
     });
     expect(meta.get(owner)).toMatchObject({
       branchName: 'feature/keep',
-      diffStats: { allChange: { add: 5, del: 1 } },
+      diffStats: { allChange: { add: 5, del: 1, files: 3 } },
     });
     expect(meta.get(owner)?.projectRun?.members).toEqual(run.members);
     await service.publishDiffStats({
       ownerSessionId: owner,
       allChangesDiffStats: null,
-      memberDiffStats: { web: { allChange: { add: 8, del: 2 } }, api: null },
+      memberDiffStats: { web: { files: 2, allChange: { add: 8, del: 2 } }, api: null },
     });
-    expect(meta.get(owner)?.diffStats).toEqual({ allChange: { add: 5, del: 1 } });
+    expect(meta.get(owner)?.diffStats).toEqual({ allChange: { add: 5, del: 1, files: 3 } });
     expect(Object.values(meta.get(owner)?.projectRun?.members ?? {})[0]?.diff).toEqual({
       add: 8,
       del: 2,
+      files: 2,
     });
   });
 
@@ -536,7 +548,7 @@ describe('WorkspaceGitService', () => {
     const controller = new AbortController();
     const write = service.publishDiffStats({
       ownerSessionId: owner,
-      allChangesDiffStats: { allChange: { add: 1, del: 0 } },
+      allChangesDiffStats: { files: 1, allChange: { add: 1, del: 0 } },
       signal: controller.signal,
     });
     const cancelled = expect(write).rejects.toMatchObject({ name: 'AbortError' });

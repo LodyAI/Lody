@@ -5,6 +5,7 @@ import type {
 } from '@lody/shared';
 import {
   getSessionPullRequestLegacyFields,
+  hasWorkspaceChanges,
   resolveSessionPrimaryPullRequest,
   resolveSessionPullRequestHistory,
   type SessionPullRequestView,
@@ -89,11 +90,11 @@ export const getSessionGitHubState = (
   const workspaceDirty = sourceSession?.workspaceDirty ?? false;
   const workspaceUnpushed = sourceSession?.workspaceUnpushed ?? false;
   const allChange = sourceSession?.diffStats?.allChange;
-  const hasWorkspaceDiff = allChange ? allChange.add + allChange.del > 0 : false;
+  const hasWorkspaceDiff = hasWorkspaceChanges(allChange);
   // A group total can be unknown while some Members have a complete comparison.
   const memberHasWorkspaceDiff = sourceSession?.projectRun
-    ? Object.values(sourceSession.projectRun.members).some(
-        (member) => member.diff && member.diff.add + member.diff.del > 0
+    ? Object.values(sourceSession.projectRun.members).some((member) =>
+        hasWorkspaceChanges(member.diff)
       )
     : false;
 

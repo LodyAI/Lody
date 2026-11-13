@@ -436,7 +436,7 @@ describe('TurnPostProcessingService', () => {
       await writeFile(path.join(root, 'app.txt'), 'edited\n');
       await writeFile(path.join(root, 'new.txt'), 'untracked\n');
       await files.initDirectory({ sessionId, path: '.' });
-      const expected = { allChange: { add: 3, del: 1 } };
+      const expected = { allChange: { add: 3, del: 1, files: 3 } };
       expect(meta.diffStats).toEqual(expected);
       const post = createService({ logger, workspaceDocument });
       const session = {
@@ -477,8 +477,26 @@ describe('TurnPostProcessingService', () => {
       await rm(path.join(root, 'committed.txt'));
       await rm(path.join(root, 'new.txt'));
       await files.refreshSharedStateAfterTurn({ sessionId });
-      expect(meta.diffStats).toEqual({ allChange: { add: 0, del: 0 } });
+      expect(meta.diffStats).toEqual({ allChange: { add: 0, del: 0, files: 0 } });
       expect(await git('diff', '--numstat', baseline)).toBe('');
+      await writeFile(path.join(root, 'image.bin'), Buffer.from([0, 1, 2, 3]));
+      await files.refreshSharedStateAfterTurn({ sessionId });
+      expect(meta.diffStats).toEqual({ allChange: { add: 0, del: 0, files: 1 } });
+      expect(await files.openAllChangesDiff({ sessionId })).toMatchObject({
+        status: 'ok',
+        entries: [{ status: 'ok', path: 'image.bin', newSnapshot: { kind: 'binary' } }],
+      });
+      await writeFile(path.join(root, 'empty.txt'), '');
+      await files.refreshSharedStateAfterTurn({ sessionId });
+      expect(meta.diffStats).toEqual({ allChange: { add: 0, del: 0, files: 2 } });
+      await writeFile(path.join(root, 'app.txt'), 'mixed text\n');
+      await files.refreshSharedStateAfterTurn({ sessionId });
+      expect(meta.diffStats).toEqual({ allChange: { add: 1, del: 1, files: 3 } });
+      await rm(path.join(root, 'image.bin'));
+      await rm(path.join(root, 'empty.txt'));
+      await writeFile(path.join(root, 'app.txt'), 'base\n');
+      await files.refreshSharedStateAfterTurn({ sessionId });
+      expect(meta.diffStats).toEqual({ allChange: { add: 0, del: 0, files: 0 } });
     } finally {
       files.dispose();
       await rm(root, { recursive: true, force: true });

@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2748](https://github.com/LodyAI/Lody/pull/2748)
+PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.com/LodyAI/Lody/pull/2751)
 
 [中文](2026-11-14-workspace-diff-stat-ownership.zh.md)
 
@@ -30,7 +30,13 @@ deepest path prefix, so their edits are not counted again in an ancestor Member.
 Additional file roots retain independent summaries when their indexes are merged.
 
 Statistics are computed before the shared file index is trimmed. Unknown line
-counts preserve the prior total rather than publishing a partial sum as complete.
+counts preserve the prior line total rather than publishing a partial sum as complete.
+The additive `allChange.files` metadata field independently records the complete
+changed-path count, also on Project Member `diff` records. Confirmed binary changes
+contribute zero text lines; unreadable/budget-deferred paths keep unknown line counts.
+The composer uses file presence for its entry, positive text totals for ordinary
+and mixed comparisons, and localized file counts for zero-line changes. Older
+writers without `files` retain their positive-line-count entry behavior.
 Root initialization and terminal refresh reconcile against actual metadata even
 when index content is unchanged. Watcher-only refresh remains Flock-only; no new
 periodic metadata writer, Repo or retry owner is introduced. Cancelled comparisons

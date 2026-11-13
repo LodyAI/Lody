@@ -826,7 +826,10 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
         expect(published.at(-1)?.fileIndex).toEqual(changed?.fileIndex);
         expect(published.at(-1)?.bumpDiffPaths).toEqual([]);
-        expect(published.at(-1)?.allChangesDiffStats).toEqual({ allChange: { add: 2, del: 2 } });
+        expect(published.at(-1)?.allChangesDiffStats).toEqual({
+          files: 2,
+          allChange: { add: 2, del: 2 },
+        });
       } finally {
         service.dispose();
       }
@@ -854,7 +857,10 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
         const snapshot = published.at(-1);
         expect(Object.keys(snapshot?.allChanges ?? {}).length).toBeLessThan(count);
-        expect(snapshot?.allChangesDiffStats).toEqual({ allChange: { add: count, del: count } });
+        expect(snapshot?.allChangesDiffStats).toEqual({
+          files: count,
+          allChange: { add: count, del: count },
+        });
       } finally {
         service.dispose();
       }
@@ -1656,7 +1662,10 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         await git('update-ref', 'refs/remotes/origin/main', head);
         await service.refreshSharedState({ sessionId: SESSION_ID });
         expect(published.at(-1)?.allChanges).toEqual({});
-        expect(published.at(-1)?.allChangesDiffStats).toEqual({ allChange: { add: 0, del: 0 } });
+        expect(published.at(-1)?.allChangesDiffStats).toEqual({
+          files: 0,
+          allChange: { add: 0, del: 0 },
+        });
         expect(
           await getGitDiffStats((args) => git(...args), { preferredBaseBranch: 'refs/heads/main' })
         ).toMatchObject({ mergeBase: head });
@@ -1721,7 +1730,10 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       try {
         await service.refreshSharedState({ sessionId: SESSION_ID });
         expect(published.at(-1)?.allChanges).toEqual({ 'session.txt': { diff: [1, 0] } });
-        expect(published.at(-1)?.allChangesDiffStats).toEqual({ allChange: { add: 1, del: 0 } });
+        expect(published.at(-1)?.allChangesDiffStats).toEqual({
+          files: 1,
+          allChange: { add: 1, del: 0 },
+        });
         expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
           status: 'ok',
           base: develop,
@@ -2202,8 +2214,8 @@ describe('Project group extra-root files', () => {
       await service.refreshSharedState({ sessionId: SESSION_ID });
       await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
       expect(stats.at(-1)).toMatchObject({
-        allChangesDiffStats: { allChange: { add: 1, del: 1 } },
-        memberDiffStats: { docs: { allChange: { add: 1, del: 1 } } },
+        allChangesDiffStats: { files: 1, allChange: { add: 1, del: 1 } },
+        memberDiffStats: { docs: { files: 1, allChange: { add: 1, del: 1 } } },
         persistAllChangesDiffStats: true,
       });
       expect(new Set(watchedRoots.values())).toEqual(new Set([main, extra]));

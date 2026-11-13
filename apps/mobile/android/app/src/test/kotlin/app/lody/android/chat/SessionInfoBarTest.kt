@@ -15,6 +15,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionInfoBarTest {
+    @Test fun zeroLineWorkspaceCountsSurviveCatalogAndCacheAndKeepTheContext() {
+        val raw = JSONObject().put("diff", JSONObject().put("add", 0).put("del", 0).put("files", 2))
+        val parsed = CatalogJson.session(session(), raw)
+        val bar = SessionInfoBar.of(parsed, "", false)
+        assertTrue(bar.hasDiff && bar.hasContext)
+        assertEquals(2, bar.files)
+        assertTrue(!bar.hasTextDiff)
+        val stored = CatalogJson.putSession(JSONObject(), parsed)
+        val restored = CatalogJson.session(session(), stored)
+        assertEquals(2, restored.diffFiles)
+        val mixed = SessionInfoBar.of(restored.copy(diffAdded = 3, diffRemoved = 1), "", false)
+        assertTrue(mixed.hasDiff && mixed.hasTextDiff)
+        assertTrue(!SessionInfoBar.of(restored.copy(diffFiles = 0), "", false).hasDiff)
+        assertTrue(SessionInfoBar.of(restored.copy(diffFiles = null, diffAdded = 1), "", false).hasDiff)
+    }
+
     @Test fun pendingWritesKeepTheCatalogStatusUntilGitHubAcknowledges() {
         val updates = SessionPullRequestUpdates()
         val draft = pr("draft")

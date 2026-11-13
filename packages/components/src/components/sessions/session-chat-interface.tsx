@@ -118,6 +118,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import type {
   LocalProjectId,
+  LineChange,
   MessageContent,
   MessageQueueItemInput,
   MessageQueueItem,
@@ -2347,7 +2348,7 @@ export interface SessionChatInterfaceProps {
    */
   paintSessionMentionOverlay?: boolean;
   /** All-Changes totals for the context strip; null/undefined hides the diffstat. */
-  changesDiffStat?: { add: number; del: number } | null;
+  changesDiffStat?: LineChange | null;
   /** Called when the context strip's diffstat is clicked. */
   onOpenAllChanges?: () => void;
   /** Native ACP fork action for the latest completed assistant turn. */

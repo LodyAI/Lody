@@ -37,6 +37,7 @@ struct SessionProjectMember: Decodable, Equatable, Sendable {
 struct SessionDiff: Decodable, Equatable, Sendable {
   var add: Int
   var del: Int
+  var files: Int?
 }
 
 /// The frozen Project group snapshot of a conversation (session meta `projectRun`).
@@ -128,6 +129,7 @@ extension SessionItem: Decodable {
   private struct Diff: Decodable {
     var add: Int?
     var del: Int?
+    var files: Int?
   }
 
   init(from decoder: any Decoder) throws {
@@ -169,7 +171,10 @@ extension SessionItem: Decodable {
     if let model: Model = value(.lastModel) {
       modelName = [model.name, model.modelId].compactMap { $0 }.first { !$0.isEmpty } ?? ""
     }
-    if let diff: Diff = value(.diff), let add = diff.add, let del = diff.del { self.diff = ["add": add, "del": del] }
+    if let diff: Diff = value(.diff), let add = diff.add, let del = diff.del {
+      self.diff = ["add": add, "del": del]
+      if let files = diff.files { self.diff["files"] = files }
+    }
   }
 }
 

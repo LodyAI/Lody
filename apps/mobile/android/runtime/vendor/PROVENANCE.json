@@ -162,5 +162,14 @@
       "src/runtime/project.ts"
     ],
     "note": "The tool_call summary of a plan-approval card (ACP kind switch_mode) carries its plan text as `plan`, resolved like web resolvePlanExitMarkdown: rawInput.plan first, then the first content text block. Only this hunk is mirrored from the iOS runtime source; the file's earlier unmirrored iOS changes (transcript windowing) stay out of the snapshot. The same hunks project a settled request's decision on its permission summary: `chosenOptionId` (outcome selected) or `withdrawn` (outcome cancelled); question answers stay in itemDetail."
+  },
+  "workspaceDiffFiles": {
+    "commit": "609b1b6226e476042efacb608249128105a4e296",
+    "files": [
+      "src/models/catalog.ts",
+      "src/protocol/catalog.ts",
+      "src/protocol/project-run.ts"
+    ],
+    "note": "Complete changed-file counts accompany text line totals in session and Project Member catalog projections, including zero-line changes. Mirrored verbatim from the reviewed iOS runtime source commit; dependencies and licenses are unchanged."
   }
 }

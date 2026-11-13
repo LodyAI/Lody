@@ -84,6 +84,7 @@ struct ChatActionBarState: Decodable, Equatable {
     let accessibilityLabel: String
     /// Opens the workspace changes; otherwise the counts are display only.
     var tap: Bool?
+    var files: Int?
   }
 
   /// The top repository action; [more] holds the rest in priority order.
@@ -109,6 +110,22 @@ struct ChatActionBarState: Decodable, Equatable {
 /// repository action, pinned trailing. Never scrolls: `ViewThatFits` takes the first stage that
 /// fits on one line — long labels capped, then the diff hidden, then the environment folded
 /// into one icon with a "+n" badge — and only at very large text moves the action to its own row.
+private struct ActionBarDiffSummary: View {
+  let diff: ChatActionBarState.Diff
+
+  var body: some View {
+    if diff.added + diff.removed > 0 {
+      HStack(spacing: 4) {
+        Text("+\(diff.added)").foregroundStyle(LodyColor.diffAddedText)
+        Text("−\(diff.removed)").foregroundStyle(LodyColor.diffRemovedText)
+      }
+    } else {
+      Text(String.localizedStringWithFormat(String(localized: "changes.fileCount", bundle: .lody), diff.files ?? 0))
+        .foregroundStyle(LodyColor.textSecondary)
+    }
+  }
+}
+
 struct ChatActionBarContent: View {
   var state = ChatActionBarState()
   var onAction: (String) -> Void = { _ in }
@@ -275,10 +292,7 @@ struct ChatActionBarContent: View {
       Text(context.label).lineLimit(1).foregroundStyle(LodyColor.textPrimary)
         .frame(maxWidth: 160, alignment: .leading).fixedSize(horizontal: true, vertical: false)
       if let diff = state.diff, !diffDot {
-        HStack(spacing: 4) {
-          Text("+\(diff.added)").foregroundStyle(LodyColor.diffAddedText)
-          Text("−\(diff.removed)").foregroundStyle(LodyColor.diffRemovedText)
-        }
+        ActionBarDiffSummary(diff: diff)
         .font(.subheadline.weight(.medium).monospacedDigit())
         .fixedSize()
       }
@@ -321,10 +335,7 @@ struct ChatActionBarContent: View {
         }
         if let diff = state.diff {
           if !diffDot || context == nil {
-            HStack(spacing: 4) {
-              Text("+\(diff.added)").foregroundStyle(LodyColor.diffAddedText)
-              Text("−\(diff.removed)").foregroundStyle(LodyColor.diffRemovedText)
-            }
+            ActionBarDiffSummary(diff: diff)
             .font(.subheadline.weight(.medium).monospacedDigit())
             .fixedSize()
           }
@@ -587,8 +598,7 @@ private struct ContextActionsPopover<Label: View>: View {
                 HStack(spacing: LodySpacing.xs) {
                   if let value = action.value { Text(verbatim: value) }
                   if action.id == "diff", let diff {
-                    Text("+\(diff.added)").foregroundStyle(LodyColor.diffAddedText)
-                    Text("−\(diff.removed)").foregroundStyle(LodyColor.diffRemovedText)
+                    ActionBarDiffSummary(diff: diff)
                   }
                 }
                 .fixedSize()
@@ -655,8 +665,7 @@ private struct GroupMembersPopover<Label: View>: View {
                 Image(systemName: "plus.forwardslash.minus").frame(width: LodyIconSize.md)
                 Text(String(localized: "bar.group.allChanges", bundle: .lody)).lineLimit(1)
                 Spacer(minLength: 0)
-                Text("+\(diff.added)").foregroundStyle(LodyColor.diffAddedText)
-                Text("−\(diff.removed)").foregroundStyle(LodyColor.diffRemovedText)
+                ActionBarDiffSummary(diff: diff)
               }
               .font(.body.monospacedDigit())
               .frame(minHeight: 44)

@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2748](https://github.com/LodyAI/Lody/pull/2748)
+PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.com/LodyAI/Lody/pull/2751)
 
 [English](2026-11-14-workspace-diff-stat-ownership.md)
 
@@ -16,7 +16,7 @@ PR: [#2748](https://github.com/LodyAI/Lody/pull/2748)
 
 `WorkspaceGitService.publishDiffStats` 沿用归属会话现有的修改队列发布 Code Collab 结果。分支、dirty 和 unpushed 观察保留 Member 统计，Git 每轮修改归属计算不再写累计统计。嵌套 Member 按最长路径前缀归属，子 Member 的编辑不会再累计进父 Member。附加文件根合并索引时保留各自的完整摘要。
 
-统计在共享文件索引裁剪前计算。行数未知时保留原总计，不把部分路径的合计当作完整统计发布。根目录初始化和轮次结束刷新即使遇到相同索引，也会对照实际元数据校正统计。普通文件监听刷新仍只发布 Flock，不增加周期元数据写入、Repo 或重试归属。比较在等待归属队列后已取消时不发布；写入失败后可以再次尝试。
+统计在共享文件索引裁剪前计算。行数未知时保留原文本总计，不把部分路径的合计当作完整统计发布。新增的可选元数据字段 `allChange.files` 独立记录完整变更路径数，Member 的 `diff` 同样携带它。已确认的二进制变更不贡献文本增删行；读取失败或受预算限制的路径仍保持行数未知。底栏按文件变更存在性显示入口；普通文本和混合变更仍显示正的增删行数，零行变更显示本地化文件数量。旧写入端缺少 `files` 时沿用非零行数入口行为。根目录初始化和轮次结束刷新即使遇到相同索引，也会对照实际元数据校正统计。普通文件监听刷新仍只发布 Flock，不增加周期元数据写入、Repo 或重试归属。比较在等待归属队列后已取消时不发布；写入失败后可以再次尝试。
 
 不再让仅已提交的统计写入同一字段，因为用户应当能够先检查已保存的修改，再提交。只强制补刷仍会保留两个含义冲突的写入者。PR 的远端比较保留自己的范围，不覆盖工作区统计。此前的[基准引用决策](../bug-fix/2026-09-30-qualified-all-changes-base.zh.md)继续管理基准选择，[All Changes 范围](../feature/2026-10-19-all-changes-diff-scope.zh.md)保持原义。
 

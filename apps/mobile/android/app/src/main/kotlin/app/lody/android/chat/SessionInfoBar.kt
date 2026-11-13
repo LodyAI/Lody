@@ -101,6 +101,7 @@ data class SessionInfoBar(
      * repository, and the actions apply to the whole group (iOS `SessionInfoBar.group`).
      */
     val group: CatalogProjectRun? = null,
+    val files: Int? = null,
 ) {
     enum class Action {
         CreatePr, CreateDraftPr, CommitAndPush, ResolveConflicts, FixCi, ReadyForReview, Merge;
@@ -109,7 +110,9 @@ data class SessionInfoBar(
         val direct: Boolean get() = this == Merge || this == ReadyForReview
     }
 
-    val hasContext: Boolean get() = group != null || repository.isNotEmpty() || branch.isNotEmpty() || added + removed > 0 || pullRequest != null
+    val hasDiff: Boolean get() = hasChanges(added, removed, files)
+    val hasTextDiff: Boolean get() = added + removed > 0
+    val hasContext: Boolean get() = group != null || repository.isNotEmpty() || branch.isNotEmpty() || hasDiff || pullRequest != null
 
     val pullRequestUrl: String
         get() = pullRequest?.let { it.url ?: "https://github.com/${it.repository}/pull/${it.number}" }.orEmpty()
@@ -142,6 +145,8 @@ data class SessionInfoBar(
     private fun scoped(prompt: String): String = if (group == null) prompt else "$prompt\n\n$PROJECT_GROUP_SCOPE"
 
     companion object {
+        private fun hasChanges(add: Int, del: Int, files: Int?): Boolean = files?.let { it > 0 } ?: (add + del > 0)
+
         /**
          * Web `withProjectGroupPrScope` (`packages/shared/src/pr-prompts.ts`), sent untranslated as web
          * does: it instructs the agent rather than reading back to the user.
@@ -155,7 +160,7 @@ data class SessionInfoBar(
             session.projectRun?.takeIf { it.members.isNotEmpty() }?.let { run ->
                 return SessionInfoBar(
                     "", "", null, session.diffAdded, session.diffRemoved,
-                    if (busy) emptyList() else groupActions(session, run), run,
+                    if (busy) emptyList() else groupActions(session, run), run, files = session.diffFiles,
                 )
             }
             // The machine appends associations; the last one for this repository is the current PR
@@ -164,7 +169,7 @@ data class SessionInfoBar(
                 .takeIf { repository.isNotEmpty() }
             return SessionInfoBar(
                 repository, session.branchName.orEmpty(), pr, session.diffAdded, session.diffRemoved,
-                actions(session, pr, repository, busy),
+                actions(session, pr, repository, busy), files = session.diffFiles,
             )
         }
 
@@ -179,11 +184,11 @@ data class SessionInfoBar(
             val needsPullRequest = if (reported) {
                 run.members.any { member ->
                     val open = member.pullRequest?.status.let { it == "open" || it == "draft" }
-                    val changed = (member.diffAdded ?: 0) + (member.diffRemoved ?: 0) > 0 || member.dirty || member.unpushed
+                    val changed = hasChanges(member.diffAdded ?: 0, member.diffRemoved ?: 0, member.diffFiles) || member.dirty || member.unpushed
                     !member.inPlace && member.repoFullName != null && changed && !open
                 }
             } else {
-                run.pullRequests.isEmpty() && (unpublished || session.diffAdded + session.diffRemoved > 0)
+                run.pullRequests.isEmpty() && (unpublished || hasChanges(session.diffAdded, session.diffRemoved, session.diffFiles))
             }
             val create = if (needsPullRequest) listOf(Action.CreatePr, Action.CreateDraftPr) else emptyList()
             val commit = if (unpublished) listOf(Action.CommitAndPush) else emptyList()
@@ -196,7 +201,7 @@ data class SessionInfoBar(
             val dirty = session.workspaceDirty
             if (pr == null) {
                 // Create PR needs anything to base a PR on, committed or not; Commit & Push needs uncommitted work.
-                val changed = dirty || session.diffAdded + session.diffRemoved > 0
+                val changed = dirty || hasChanges(session.diffAdded, session.diffRemoved, session.diffFiles)
                 return (if (changed) listOf(Action.CreatePr, Action.CreateDraftPr) else emptyList()) +
                     (if (dirty) listOf(Action.CommitAndPush) else emptyList())
             }

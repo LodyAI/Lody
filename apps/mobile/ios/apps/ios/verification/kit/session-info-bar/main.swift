@@ -14,14 +14,14 @@ updates.confirm(draft, merged: true)
 check(bar(updates.apply(session)).pullRequest?.status == "merged", "merge succeeds even before ready sync arrives")
 check(bar(updates.apply(session)).actions.isEmpty, "merged PR cannot offer more writes")
 session.pullRequests = [SessionPullRequest(repository: "another/repo", number: 7, status: "draft")]
-check(bar(updates.apply(session)).pullRequest?.status == "draft", "same PR number in another repository is untouched")
+check(updates.apply(session).pullRequests.first?.status == "draft", "same PR number in another repository is untouched")
 
 updates = SessionPullRequestUpdates()
 updates.confirm(draft, merged: false)
 session.pullRequests = [draft]
 session.pullRequests[0].status = "open"
 session.pullRequests[0].ci = "f"
-check(bar(updates.apply(session)).actions == [.fixCi], "fresh CI survives reconciliation")
+check(bar(updates.apply(session)).actions == [.fixCi, .merge], "fresh CI survives reconciliation")
 session.pullRequests[0].status = "draft"
 check(bar(updates.apply(session)).actions == [.readyForReview], "after convergence, a later re-draft is authoritative")
 print("PASS: confirmed PR transitions and catalog convergence")
@@ -117,3 +117,19 @@ for outcome in ["success", "failure", "retired-scope"] {
   check(warning == (outcome == "failure"), "Only failure in the original active scope warns")
 }
 print("PASS: immediate archive navigation, delayed completion and scoped failure feedback")
+
+
+var zeroLineSession = SessionItem(id: "zero-line")
+zeroLineSession.diff = ["add": 0, "del": 0, "files": 2]
+let zeroLineBar = SessionInfoBar(session: zeroLineSession, repository: "", busy: false)
+check(zeroLineBar.hasDiff && zeroLineBar.hasContext && zeroLineBar.files == 2, "Zero-line changes keep the context and complete file count")
+zeroLineSession.diff = ["add": 3, "del": 1, "files": 2]
+check(bar(zeroLineSession).added == 3 && bar(zeroLineSession).removed == 1, "Mixed text and binary changes retain the text totals")
+zeroLineSession.diff = ["add": 3, "del": 1, "files": 0]
+check(!bar(zeroLineSession).hasDiff, "An explicit empty comparison removes the diff entry")
+zeroLineSession.diff = ["add": 3, "del": 1]
+check(bar(zeroLineSession).hasDiff, "Older daemons keep text-only entries")
+let zeroLineData = Data(#"{"id":"files","diff":{"add":0,"del":0,"files":2}}"#.utf8)
+let decodedZeroLine = try JSONDecoder().decode(SessionItem.self, from: zeroLineData)
+check(decodedZeroLine.diff["files"] == 2 && bar(decodedZeroLine).hasDiff, "Catalog decoding preserves file counts independently of text lines")
+print("PASS: zero-line and mixed workspace summaries retain the review entry")
