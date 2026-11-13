@@ -48,6 +48,7 @@ final class InboxChrome {
   private var syncState: HomeSyncState = .live
   private var syncShown: HomeSyncPill.Shown?
   private var recoveryTask: Task<Void, Never>?
+  private var sizeClassChanges: (any UITraitChangeRegistration)?
 
   init(searchPlaceholder: String = String(localized: "search.field.placeholder", bundle: .lody)) {
     workspace.accessibilityIdentifier = "workspace-menu"
@@ -80,10 +81,15 @@ final class InboxChrome {
   }
 
   func attach(to host: UIViewController, content: UIViewController, scrollView: UIScrollView) {
+    if let sizeClassChanges { self.host?.unregisterForTraitChanges(sizeClassChanges) }
     self.host = host
     self.content = content
     header = LodyNavigationHeader.of(host.navigationItem)
     padBar.attachScrollEdge(to: scrollView)
+    sizeClassChanges = host.registerForTraitChanges([UITraitHorizontalSizeClass.self]) { [weak self] (_: UIViewController, _: UITraitCollection) in
+      guard let self, let model = self.lastModel else { return }
+      self.update(model)
+    }
   }
 
   func update(_ model: Model?) {
@@ -118,11 +124,13 @@ final class InboxChrome {
     if header.search !== search { header.search = search }
     // Destinations, Settings and create sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
     // Right items run from the trailing edge: search, then the view menu (design).
-    // Only iPhone (including iPhone Duo at any width) accepts the search placement item in a
-    // navigation bar; iPadOS 26 throws NSInvalidArgumentException ("only supported in UIToolbar").
-    // This is an API constraint, not a layout choice: on iPad UIKit places the integrated search
-    // in the navigation bar itself.
+    // The search placement item goes into a navigation bar only on a compact iPhone page. iPadOS 26
+    // throws NSInvalidArgumentException ("only supported in UIToolbar"), and iPhone threw from here
+    // too when an idiom-only check let a cold launch's sign-in restore render Home while it still
+    // sat in the split's list column. This is an API constraint, not a layout choice: elsewhere
+    // UIKit places the integrated search itself. A size class change re-runs `update` (`attach`).
     let placesSearch = host.traitCollection.userInterfaceIdiom == .phone
+      && host.traitCollection.horizontalSizeClass == .compact
     let right = placesSearch ? [filter, host.navigationItem.searchBarPlacementBarButtonItem] : [filter]
     (workspaceItem, filterItem) = (left[0], filter)
     let shownLeft = searching || detailTitle != nil ? [] : left
@@ -142,6 +150,8 @@ final class InboxChrome {
 
   func detach() {
     clear()
+    if let sizeClassChanges { host?.unregisterForTraitChanges(sizeClassChanges) }
+    sizeClassChanges = nil
     header = nil
     host = nil
   }
