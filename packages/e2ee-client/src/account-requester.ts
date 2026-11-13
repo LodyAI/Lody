@@ -1,4 +1,4 @@
-import { Effect, Fiber, Result } from 'effect';
+import { Effect, Exit, Fiber, Result } from 'effect';
 import type {
   E2eeAppendRecordRequest,
   E2eeWorkspaceHistoryPage,
@@ -71,12 +71,14 @@ export interface AccountPairingIdentityHost {
     readonly pairingSessionId: string;
   }): Effect.Effect<void, unknown>;
   /** Installs from the complete verified history, for an approval row without an
-   * invitation (a Member approver). */
+   * invitation (a Member approver). `endorser` is the signer of the authenticated
+   * admission record when that record is an ordinary signed record. */
   acceptAccountHistory?(input: {
     readonly genesisRecordHex: string;
     readonly membershipId: string;
     readonly pairingSessionId: string;
     readonly pages: readonly E2eeWorkspaceHistoryPage[];
+    readonly endorser?: string;
   }): Effect.Effect<void, unknown>;
   /** Optional: open, refresh and run one key round right after installing. */
   activate?(): Effect.Effect<void, unknown>;
@@ -144,14 +146,23 @@ export interface AccountPairingWorkspaceHint {
 export function makePortableAccountPairingRequester(input: {
   workspaces: () => readonly AccountPairingWorkspaceHint[];
   /** The workspace's host, or `null` when this device already has an active
-   * personal identity there and needs no pairing. */
-  host: (workspaceId: string) => Effect.Effect<AccountPairingIdentityHost | null, unknown>;
+   * personal identity there and needs no pairing. `hint` is the routing hint being listed. */
+  host: (
+    workspaceId: string,
+    hint: AccountPairingWorkspaceHint
+  ) => Effect.Effect<AccountPairingIdentityHost | null, unknown>;
   history: (
     request: E2eeWorkspaceHistoryRequest
   ) => Effect.Effect<E2eeWorkspaceHistoryPage, unknown>;
   /** The signed-in account; its encoded user ID finds this account's ledger member. */
   accountId: string;
   diagnostics?: (tag: string, error: unknown) => void;
+  /** Verifies the complete history from the trusted genesis pin; defaults to
+   * `verifyPersonalHistory`. A host may map its failures to its own public codes. */
+  verifyHistory?: (
+    pin: { workspaceId: string; genesisHash: string; genesisRecordHex: string },
+    pages: readonly E2eeWorkspaceHistoryPage[]
+  ) => Effect.Effect<LedgerView, unknown>;
 }): (
   hints?: readonly AccountPairingWorkspaceHint[],
   filter?: AccountPairingRequesterFilter
@@ -235,7 +246,7 @@ export function makePortableAccountPairingRequester(input: {
     if (!history) history = yield* pages(hint.workspaceId);
     const genesisRecordHex = history[0]?.recordsHex[0];
     if (!genesisRecordHex) return yield* Effect.fail(fail('invalid-ledger'));
-    const view = yield* verifyPersonalHistory(
+    const view = yield* (input.verifyHistory ?? verifyPersonalHistory)(
       { workspaceId: hint.workspaceId, genesisHash: hint.genesisHash, genesisRecordHex },
       history
     );
@@ -274,16 +285,26 @@ export function makePortableAccountPairingRequester(input: {
     for (const hint of input.workspaces()) byId.set(hint.workspaceId, hint);
     for (const hint of hints ?? [])
       if (!byId.has(hint.workspaceId)) byId.set(hint.workspaceId, hint);
-    for (const hint of byId.values()) {
-      // Never open a workspace host this step cannot use.
-      if (filter?.workspaceId !== undefined && filter.workspaceId !== hint.workspaceId) continue;
-      if (filter?.geneses && !filter.geneses.has(hint.genesisHash)) continue;
-      const host = yield* input.host(hint.workspaceId).pipe(
-        Effect.catch((error) => {
-          remember('account-pairing-host', error);
-          return Effect.succeed(null);
-        })
-      );
+    // Never open a workspace host this step cannot use.
+    const listed = [...byId.values()].filter(
+      (hint) =>
+        (filter?.workspaceId === undefined || filter.workspaceId === hint.workspaceId) &&
+        (!filter?.geneses || filter.geneses.has(hint.genesisHash))
+    );
+    // Bounded parallel lookups; the result keeps the hint order.
+    const hosts = yield* Effect.forEach(
+      listed,
+      (hint) =>
+        input.host(hint.workspaceId, hint).pipe(
+          Effect.catch((error) => {
+            remember('account-pairing-host', error);
+            return Effect.succeed(null);
+          })
+        ),
+      { concurrency: 4 }
+    );
+    for (const [index, hint] of listed.entries()) {
+      const host = hosts[index];
       if (!host || host.genesisHash !== hint.genesisHash) continue;
       result.push({
         workspaceId: hint.workspaceId,
@@ -309,14 +330,15 @@ export function makePortableAccountPairingRequester(input: {
           ? (admissionRecordHash) =>
               Effect.gen(function* () {
                 const checked = yield* verified(hint);
-                const found = checked.history
+                const record = checked.history
                   .flatMap((page) => page.recordsHex)
-                  .some(
-                    (recordHex) =>
-                      toHex(hashRecordBytes(fromHex(recordHex)).toBytes()) ===
-                      toHex(admissionRecordHash)
+                  .map(fromHex)
+                  .find(
+                    (bytes) =>
+                      toHex(hashRecordBytes(bytes).toBytes()) === toHex(admissionRecordHash)
                   );
-                if (!found) return yield* Effect.fail(fail('missing-binding'));
+                if (!record) return yield* Effect.fail(fail('missing-binding'));
+                const decoded = decodeRecord(record);
                 const pairingSessionId = toHex(admissionRecordHash).slice(0, 32);
                 const pending = yield* host.pendingPersonalJoin();
                 if (pending && pending.pairingSessionId !== pairingSessionId)
@@ -326,6 +348,9 @@ export function makePortableAccountPairingRequester(input: {
                   membershipId: yield* membership(checked.view),
                   pairingSessionId,
                   pages: checked.history,
+                  ...(Result.isSuccess(decoded) && decoded.success.body.type === 'ordinary'
+                    ? { endorser: toHex(decoded.success.body.signer.toBytes()) }
+                    : {}),
                 });
                 if (host.activate)
                   yield* host
@@ -498,12 +523,42 @@ export function makePortableAccountPairingApprover(input: {
     filter?: AccountPairingApproverFilter
   ) {
     const result: AccountPairingApproverWorkspace[] = [];
-    for (const hint of input.workspaces()) {
-      if (filter?.workspaceIds && !filter.workspaceIds.has(hint.workspaceId)) continue;
-      if (filter?.geneses && !filter.geneses.has(hint.genesisHash)) continue;
-      const session = yield* input.session(hint.workspaceId);
+    const listed = input
+      .workspaces()
+      .filter(
+        (hint) =>
+          (!filter?.workspaceIds || filter.workspaceIds.has(hint.workspaceId)) &&
+          (!filter?.geneses || filter.geneses.has(hint.genesisHash))
+      );
+    // Bounded parallel lookups in hint order. A failed lookup does not interrupt the
+    // others: lookups already running settle and are recorded as opened, so the caller's
+    // release covers them; lookups not yet started are skipped.
+    let failed = false;
+    const exits = yield* Effect.forEach(
+      listed,
+      (hint) =>
+        Effect.suspend(() =>
+          failed
+            ? Effect.succeed(Exit.succeed(null))
+            : Effect.exit(
+                input.session(hint.workspaceId).pipe(
+                  Effect.onExit((exit) =>
+                    Effect.sync(() => {
+                      if (Exit.isFailure(exit)) failed = true;
+                      else if (exit.value) opened.push(exit.value);
+                    })
+                  )
+                )
+              )
+        ),
+      { concurrency: 4 }
+    );
+    const failure = exits.find(Exit.isFailure);
+    if (failure) return yield* Effect.failCause(failure.cause);
+    for (const [index, hint] of listed.entries()) {
+      const exit = exits[index]!;
+      const session = Exit.isSuccess(exit) ? exit.value : null;
       if (!session) continue;
-      opened.push(session);
       const approval = session.accountApproval;
       const { workspaceId } = hint;
       result.push({

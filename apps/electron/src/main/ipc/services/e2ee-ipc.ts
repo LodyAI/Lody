@@ -5,7 +5,7 @@ import {
   requestId as sharingRequestId,
   sharingChangeSchema
 } from '@lody/e2ee-machine-sharing/schemas'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { open as openFile, readFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
@@ -77,7 +77,6 @@ import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
-import { LocalE2eeRecoveryFailureSchema } from '@lody/shared/e2ee-local-pairing'
 import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import type { E2eeJoinSession, E2eePersonalPairingOffer } from '@lody/cloud-api'
 import type {
@@ -86,6 +85,8 @@ import type {
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
 import { MemberOfferSchema, decodeMemberKeyPackage } from '../../services/e2ee-member-join.mjs'
+import { logMemberKeys, makeDesktopKeyDelivery } from '../../services/e2ee-key-delivery.mjs'
+import { makeDesktopAgentPairing } from '../../services/e2ee-agent-pairing-service.mjs'
 
 const irohTargetSchema = z.object({
   workspaceId: z.string().min(1).max(256),
@@ -267,8 +268,6 @@ function sender() {
   if (!readerLifetimes.has(event.sender)) readerLifetimes.set(event.sender, {})
   return event.sender.id
 }
-/** Main-owned reader for background member key delivery; renderer webContents ids start at 1. */
-const KEY_DELIVERY_READER = 0
 /** Main-owned reader for a joined member's first full round after its key is installed. */
 const MEMBER_SETTLE_READER = -1
 const REFRESH_KEY_MODES: ReadonlySet<unknown> = new Set<E2eeRefreshKeyMode>([
@@ -277,33 +276,6 @@ const REFRESH_KEY_MODES: ReadonlySet<unknown> = new Set<E2eeRefreshKeyMode>([
   'distribute',
   'full'
 ])
-const KEY_DELIVERY_RETRY_MS = 10_000
-const KEY_DELIVERY_RETRY_MAX_MS = 5 * 60_000
-const KEY_DELIVERY_RETAINED = 32
-/** Timer-driven retries per slot after its last new request or explicit retry (about
- * 20 min of backoff). Polls and explicit retries still work after the bound. */
-const KEY_DELIVERY_AUTO_RETRIES = 8
-/** Only permanent causes end delivery from this device: access loss, a missing binding
- * or a restart-required owner. A closed workspace reopens on the next round. */
-const TERMINAL_KEY_DELIVERY = new Set([
-  'e2ee_member_removed',
-  'e2ee_device_revoked',
-  'e2ee_missing-binding',
-  'e2ee_restart-required'
-])
-const TERMINAL_KEY_DELIVERY_CODES = new Set(['missing-binding', 'restart-required'])
-/** The admission is not in this device's verified ledger yet, so no round targets it. */
-const KEY_DELIVERY_NOT_INGESTED = 'e2ee_admission_not_ingested'
-/** The delivery round ended by an unexpected exception before recording an outcome. */
-const KEY_DELIVERY_INTERRUPTED = 'e2ee_key_delivery_interrupted'
-type MemberKeyDelivery = {
-  state: 'pending' | 'delivering' | 'delivered' | 'failed'
-  /** Signing key from the verified KeyPackage; '' if it could not be decoded. */
-  device: string
-  code?: string
-  attempts: number
-  retryAt: number
-}
 /** Public reason code only: never key bytes, tokens, causes or plaintext. */
 const keyDeliveryCode = (cause: unknown) => {
   const loss = accessLoss(cause)
@@ -311,23 +283,6 @@ const keyDeliveryCode = (cause: unknown) => {
   const message = cause instanceof Error ? cause.message : ''
   // Some public messages append guidance after the code (`e2ee_restart-required: …`).
   return /^(e2ee_[a-z0-9_-]{1,64})(?=$|:)/.exec(message)?.[1] ?? 'e2ee_key_delivery_failed'
-}
-/** A key round reports phase failures inside WorkspaceKeyRoundFailure Results, which the
- * account boundary's public projection does not unwrap. Find a terminal cause before it. */
-function terminalKeyRoundCause(error: unknown): Error | null {
-  const pending: unknown[] = [error]
-  for (let visited = 0; pending.length > 0 && visited < 64; visited++) {
-    const node = pending.shift()
-    if (!node || typeof node !== 'object') continue
-    if (node instanceof E2eeMemberRemovedError || node instanceof E2eeDeviceRevokedError)
-      return node
-    const code = (node as { code?: unknown }).code ?? (node as { reason?: unknown }).reason
-    if (typeof code === 'string' && TERMINAL_KEY_DELIVERY_CODES.has(code))
-      return Object.assign(new Error(`e2ee_${code}`), { code })
-    for (const key of ['cause', 'failure', 'receive', 'distribution', 'reportsAfterSend'])
-      pending.push((node as Record<string, unknown>)[key])
-  }
-  return null
 }
 const keyDeliveryDevice = (keyPackageHex: string) => {
   try {
@@ -338,20 +293,6 @@ const keyDeliveryDevice = (keyPackageHex: string) => {
     return ''
   }
 }
-/** Log correlation only: a short hash of the request id, never the id, keys or tokens. */
-const requestTag = (requestId: string) =>
-  createHash('sha256').update(requestId).digest('hex').slice(0, 12)
-/** Allow-listed delivery/claim diagnostics for the desktop daily log. */
-const logMemberKeys = (
-  event: 'key-delivery' | 'member-claim',
-  requestId: string,
-  fields: { state?: string; phase?: string; code?: string }
-) => console.info(`[E2EE] ${event}`, { request: requestTag(requestId), ...fields })
-const keyDeliveryView = (requestId: string, delivery: MemberKeyDelivery) => ({
-  requestId,
-  state: delivery.state,
-  ...(delivery.state === 'failed' && delivery.code ? { code: delivery.code } : {})
-})
 /** Explicit operations only: no arbitrary signing, secret export or unbound identity generation. */
 export class E2eeIpc extends ProductWindowIpcService {
   static override readonly groupName = 'e2ee'
@@ -416,20 +357,6 @@ export class E2eeIpc extends ProductWindowIpcService {
     Map<number, number>,
     WeakMap<Electron.WebContents, object>
   >()
-  // Member and account-pairing key delivery after admission is owned here, not by a
-  // renderer request. One in-flight round per account/workspace; failures keep a public
-  // code and are retried by a main-owned due timer (bounded) and by due polls (email
-  // admission worker or team settings), so no page has to stay open.
-  private keyDeliveryNow = () => Date.now()
-  /** Replaceable by the owning tests; the handle never keeps the process alive. */
-  private keyDeliveryTimers = {
-    set: (run: () => void, ms: number): unknown => {
-      const timer = setTimeout(run, ms)
-      timer.unref?.()
-      return timer
-    },
-    clear: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>)
-  }
   private readonly personalApprovals = new Set<PersonalApproval>()
   private personalApprovalLive(approval: PersonalApproval, owner?: Owner) {
     const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
@@ -444,57 +371,62 @@ export class E2eeIpc extends ProductWindowIpcService {
   private assertPersonalApproval(approval: PersonalApproval) {
     if (!this.personalApprovalLive(approval)) throw new Error('e2ee_account_mismatch')
   }
-  private readonly keyDeliveries = new Map<
-    string,
-    {
-      requests: Map<string, MemberKeyDelivery>
-      generation: number | undefined
-      running?: Promise<void>
-      again: boolean
-      timer?: unknown
-      autoRetries: number
-      /** Set when the slot is dropped: an in-flight round must not open or send. */
-      aborted?: boolean
-    }
-  >()
-  private keyDeliverySlot(accountId: string, workspaceId: string) {
-    const key = `${accountId}\n${workspaceId}`
-    let slot = this.keyDeliveries.get(key)
-    const generation = this.keyDeliveryIdentity()?.generation
-    if (slot && slot.generation !== generation) {
-      this.dropKeyDeliverySlot(accountId, workspaceId)
-      slot = undefined
-    }
-    if (!slot) {
-      slot = { requests: new Map(), generation, again: false, autoRetries: 0 }
-      this.keyDeliveries.set(key, slot)
-    }
-    return slot
+  // Member and account-pairing key delivery after admission is owned by main, not by a
+  // renderer request (`services/e2ee-key-delivery.mts`). The clock and timers stay
+  // replaceable here for the owning tests; the handle never keeps the process alive.
+  private keyDeliveryNow = () => Date.now()
+  private keyDeliveryTimers = {
+    set: (run: () => void, ms: number): unknown => {
+      const timer = setTimeout(run, ms)
+      timer.unref?.()
+      return timer
+    },
+    clear: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>)
   }
-  /** Drops a slot and its pending due timer: terminal delivery or a changed account. */
-  private dropKeyDeliverySlot(accountId: string, workspaceId: string) {
-    const key = `${accountId}\n${workspaceId}`
-    const slot = this.keyDeliveries.get(key)
-    if (!slot) return
-    slot.aborted = true
-    if (slot.timer !== undefined) this.keyDeliveryTimers.clear(slot.timer)
-    slot.timer = undefined
-    this.keyDeliveries.delete(key)
+  private readonly keyDelivery = makeDesktopKeyDelivery({
+    identity: () => getIpcServiceDeps().authService.getCachedSessionIdentity(),
+    now: () => this.keyDeliveryNow(),
+    timers: () => this.keyDeliveryTimers,
+    remember: (cause) => {
+      this.pairingFailure = cause
+    },
+    code: keyDeliveryCode,
+    scope: (workspaceId) => this.memberScope(workspaceId),
+    cloud: desktopE2eeCloudClient,
+    run: runDesktopE2eeOperation
+  })
+  private readonly agentPairing = makeDesktopAgentPairing({
+    withAccount: withDesktopE2eeAccount,
+    cloud: desktopE2eeCloudClient,
+    cli: () => getIpcServiceDeps().cliService,
+    refuseUnopened,
+    remember: (cause) => {
+      this.pairingFailure = cause
+    },
+    latestFailure: () => this.pairingFailure,
+    // Late-bound: the same renderer-facing status and refresh, under this sender.
+    status: (workspaceId) => this.status(workspaceId),
+    refresh: (workspaceId, options) => this.refresh(workspaceId, options),
+    remoteMachineEndpoints: () => ({
+      deploymentUrl: new URL(import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '').origin,
+      ingressUrl: new URL(import.meta.env.VITE_SERVER_URL ?? '').origin
+    })
+  })
+  private trackKeyDelivery(
+    accountId: string,
+    workspaceId: string,
+    requestId: string,
+    device: string
+  ) {
+    return this.keyDelivery.track(accountId, workspaceId, requestId, device)
   }
-  private keyDeliveryIdentity() {
-    try {
-      return getIpcServiceDeps().authService.getCachedSessionIdentity()
-    } catch {
-      return undefined
-    }
+  /** Synchronization point for the owning tests; production callers never await delivery.
+   * Protected, not public: public instance methods are renderer-facing IPC. */
+  protected keyDeliveryIdle(accountId: string, workspaceId: string) {
+    return this.keyDelivery.idle(accountId, workspaceId)
   }
-  /** Old delivery work never borrows a later login, even for the same account. */
-  private keyDeliveryCurrent(accountId: string, slot: { generation: number | undefined }) {
-    const identity = this.keyDeliveryIdentity()
-    return identity?.userId === accountId && identity.generation === slot.generation
-  }
-  /** Drops every slot of a removed or reset workspace (all accounts when `accountId` is
-   * absent, every workspace when `workspaceId` is too): nothing reopens it afterwards. */
+  /** Ends deliveries and in-flight personal approvals of a removed or reset workspace
+   * (all accounts when `accountId` is absent, every workspace when `workspaceId` is too). */
   private dropKeyDeliveryWorkspace(workspaceId?: string, accountId?: string) {
     // Invalidate pending approvals too: reset may arrive before any slot exists.
     for (const approval of this.personalApprovals)
@@ -503,370 +435,7 @@ export class E2eeIpc extends ProductWindowIpcService {
         (accountId === undefined || approval.accountId === accountId)
       )
         approval.cancelled = true
-    for (const key of [...this.keyDeliveries.keys()]) {
-      const [account, workspace] = key.split('\n')
-      if (
-        (accountId === undefined || account === accountId) &&
-        (workspaceId === undefined || workspace === workspaceId)
-      )
-        this.dropKeyDeliverySlot(account!, workspace!)
-    }
-  }
-  /** Schedules the next round at the earliest retryable failure's `retryAt`, or at once for
-   * a request admitted after the last pass began. Bounded per slot; the timer re-checks the
-   * signed-in account and drops the slot if it changed. A delivery may reopen a workspace
-   * no window is reading (main's reader is held only during a round), but never one that
-   * was removed or reset: those drop their slot. */
-  private scheduleKeyDeliveryRetry(accountId: string, workspaceId: string) {
-    const key = `${accountId}\n${workspaceId}`
-    const slot = this.keyDeliveries.get(key)
-    if (!slot || slot.running) return
-    if (slot.timer !== undefined) this.keyDeliveryTimers.clear(slot.timer)
-    slot.timer = undefined
-    if (slot.autoRetries >= KEY_DELIVERY_AUTO_RETRIES) return
-    const due = [...slot.requests.values()]
-      .filter(
-        (delivery) =>
-          delivery.state === 'pending' ||
-          (delivery.state === 'failed' && !TERMINAL_KEY_DELIVERY.has(delivery.code ?? ''))
-      )
-      .map((delivery) => (delivery.state === 'pending' ? 0 : delivery.retryAt))
-    if (due.length === 0) return
-    let now = 0
-    try {
-      now = this.keyDeliveryNow()
-    } catch {
-      /* A broken clock makes the retry due at once rather than never. */
-    }
-    slot.timer = this.keyDeliveryTimers.set(
-      () => {
-        if (this.keyDeliveries.get(key) !== slot) return
-        slot.timer = undefined
-        if (!this.keyDeliveryCurrent(accountId, slot)) {
-          this.dropKeyDeliverySlot(accountId, workspaceId)
-          return
-        }
-        slot.autoRetries += 1
-        void this.runKeyDelivery(accountId, workspaceId)
-      },
-      Math.max(0, Math.min(...due) - now)
-    )
-  }
-  /** Synchronization point for the owning tests; production callers never await delivery.
-   * Protected, not public: public instance methods are renderer-facing IPC. */
-  protected keyDeliveryIdle(accountId: string, workspaceId: string) {
-    return this.keyDeliveries.get(`${accountId}\n${workspaceId}`)?.running ?? Promise.resolve()
-  }
-  private trackKeyDelivery(
-    accountId: string,
-    workspaceId: string,
-    requestId: string,
-    device: string
-  ) {
-    const slot = this.keyDeliverySlot(accountId, workspaceId)
-    slot.autoRetries = 0
-    slot.requests.delete(requestId)
-    slot.requests.set(requestId, { state: 'pending', device, attempts: 0, retryAt: 0 })
-    logMemberKeys('key-delivery', requestId, { state: 'pending' })
-    while (slot.requests.size > KEY_DELIVERY_RETAINED) {
-      const settled = [...slot.requests].find(([, delivery]) => delivery.state === 'delivered')
-      slot.requests.delete(settled?.[0] ?? slot.requests.keys().next().value!)
-    }
-    void this.runKeyDelivery(accountId, workspaceId)
-    return slot.requests.get(requestId)!.state
-  }
-  private retryDueKeyDeliveries(accountId: string, workspaceId: string) {
-    const slot = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
-    if (slot && !this.keyDeliveryCurrent(accountId, slot)) {
-      this.dropKeyDeliverySlot(accountId, workspaceId)
-      return
-    }
-    if (!slot || slot.running) return
-    const now = this.keyDeliveryNow()
-    if (
-      [...slot.requests.values()].some(
-        (delivery) =>
-          delivery.state === 'pending' ||
-          (delivery.state === 'failed' &&
-            delivery.retryAt <= now &&
-            !TERMINAL_KEY_DELIVERY.has(delivery.code ?? ''))
-      )
-    )
-      void this.runKeyDelivery(accountId, workspaceId)
-  }
-  /** Never rejects: every outcome is recorded on the covered requests. */
-  private runKeyDelivery(accountId: string, workspaceId: string): Promise<void> {
-    const slot = this.keyDeliverySlot(accountId, workspaceId)
-    if (slot.running) {
-      slot.again = true
-      return slot.running
-    }
-    const running = (async () => {
-      // A request admitted during a round gets one follow-up pass; later ones wait for a poll.
-      for (let pass = 0; pass < 2; pass++) {
-        // Sign-out or an account change ends this account's delivery at once.
-        if (!slot.aborted && !this.keyDeliveryCurrent(accountId, slot))
-          this.dropKeyDeliverySlot(accountId, workspaceId)
-        if (slot.aborted) return
-        slot.again = false
-        const coveredEntries = [...slot.requests].filter(
-          ([, delivery]) =>
-            delivery.state !== 'delivered' && !TERMINAL_KEY_DELIVERY.has(delivery.code ?? '')
-        )
-        const covered = coveredEntries.map(([, delivery]) => delivery)
-        const idOf = new Map(coveredEntries.map(([requestId, delivery]) => [delivery, requestId]))
-        if (covered.length === 0) return
-        for (const delivery of covered) {
-          delivery.state = 'delivering'
-          delete delivery.code
-          logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'delivering' })
-        }
-        const retry = (delivery: MemberKeyDelivery, code: string) => {
-          delivery.attempts += 1
-          delivery.state = 'failed'
-          delivery.code = code
-          logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'failed', code })
-          delivery.retryAt =
-            this.keyDeliveryNow() +
-            Math.min(
-              KEY_DELIVERY_RETRY_MS * 2 ** (delivery.attempts - 1),
-              KEY_DELIVERY_RETRY_MAX_MS
-            )
-        }
-        let evidence: Map<string, string>
-        try {
-          evidence = await this.deliverMemberKeys(
-            accountId,
-            workspaceId,
-            new Set(covered.map((delivery) => delivery.device)),
-            () => slot.aborted === true || !this.keyDeliveryCurrent(accountId, slot),
-            covered.every((delivery) => delivery.attempts === 0)
-          )
-        } catch (cause) {
-          this.pairingFailure = cause
-          if (
-            !this.keyDeliveryCurrent(accountId, slot) &&
-            this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot
-          )
-            this.dropKeyDeliverySlot(accountId, workspaceId)
-          if (slot.aborted) return
-          const code = keyDeliveryCode(cause)
-          // Terminal: this device can no longer deliver; drop the slot, never retry.
-          if (TERMINAL_KEY_DELIVERY.has(code)) {
-            for (const delivery of covered)
-              logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'ended', code })
-            if (this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot)
-              this.dropKeyDeliverySlot(accountId, workspaceId)
-            return
-          }
-          for (const delivery of covered) retry(delivery, code)
-          return
-        }
-        if (!this.keyDeliveryCurrent(accountId, slot)) {
-          if (this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot)
-            this.dropKeyDeliverySlot(accountId, workspaceId)
-          return
-        }
-        if (slot.aborted) return
-        // Delivered only on positive per-device evidence; every other outcome retries.
-        for (const delivery of covered) {
-          const outcome = evidence.get(delivery.device) ?? KEY_DELIVERY_NOT_INGESTED
-          if (outcome !== 'delivered') {
-            retry(delivery, outcome)
-            continue
-          }
-          delivery.state = 'delivered'
-          delivery.attempts = 0
-          logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'delivered' })
-        }
-        if (!slot.again) return
-      }
-    })()
-      .catch((cause) => {
-        this.pairingFailure = cause
-      })
-      .finally(() => {
-        slot.running = undefined
-        // An unexpected exception must not leave a request shown as sending forever:
-        // anything still delivering becomes retryable on the next due poll.
-        let now = 0
-        try {
-          now = this.keyDeliveryNow()
-        } catch {
-          /* A broken clock makes the retry due at once rather than never. */
-        }
-        for (const [requestId, delivery] of slot.requests) {
-          if (delivery.state !== 'delivering') continue
-          delivery.attempts += 1
-          delivery.state = 'failed'
-          delivery.code = KEY_DELIVERY_INTERRUPTED
-          delivery.retryAt =
-            now +
-            Math.min(
-              KEY_DELIVERY_RETRY_MS * 2 ** (delivery.attempts - 1),
-              KEY_DELIVERY_RETRY_MAX_MS
-            )
-          try {
-            logMemberKeys('key-delivery', requestId, {
-              state: 'failed',
-              code: KEY_DELIVERY_INTERRUPTED
-            })
-          } catch {
-            /* Diagnostics never block the reset. */
-          }
-        }
-        this.scheduleKeyDeliveryRetry(accountId, workspaceId)
-      })
-    slot.running = running
-    return running
-  }
-  /** One key round under a main-owned reader, so closing every window cannot stop it.
-   * Ingests relay history first, runs the round for devices the local verified ledger
-   * targets, then returns per-device evidence: 'delivered' or a retryable code. */
-  private async deliverMemberKeys(
-    accountId: string,
-    workspaceId: string,
-    devices: Set<string>,
-    aborted: () => boolean = () => false,
-    skipIngestIfAdmitted = false
-  ) {
-    const scope = this.memberScope(workspaceId)
-    const cloud = await desktopE2eeCloudClient()
-    if (cloud.accountId !== accountId) throw new Error('e2ee_account_mismatch')
-    // A removed or reset workspace is never reopened by a round that started earlier;
-    // the check runs under the account lock, immediately before the open.
-    await scope((owner) =>
-      owner.accountId !== accountId
-        ? Effect.fail(new Error('e2ee_account_mismatch'))
-        : aborted()
-          ? Effect.fail(new Error('e2ee_key_delivery_aborted'))
-          : Effect.gen(function* () {
-              yield* owner.host.open(workspaceId)
-              const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
-              readers.set(KEY_DELIVERY_READER, (readers.get(KEY_DELIVERY_READER) ?? 0) + 1)
-              owner.readers.set(workspaceId, readers)
-            })
-    )
-    try {
-      // Right after local admission + refresh, every target device is already in the
-      // verified local ledger; skip the redundant history round-trip on the initial pass.
-      // Any retry pass re-ingests first in case epoch/membership advanced in the meantime.
-      let needsIngest = !skipIngestIfAdmitted
-      if (!needsIngest) {
-        for (const device of devices) {
-          if (
-            !device ||
-            !(await scope((owner) => owner.host.keyDeliveryTarget(workspaceId, device)))
-          ) {
-            needsIngest = true
-            break
-          }
-        }
-      }
-      if (needsIngest) {
-        try {
-          await this.ingestForKeyDelivery(accountId, workspaceId, scope, cloud)
-        } catch (cause) {
-          // A lagging relay leaves targets unconfirmed below; only terminal causes stop here.
-          if (TERMINAL_KEY_DELIVERY.has(keyDeliveryCode(cause))) throw cause
-          this.pairingFailure = cause
-        }
-      }
-      const evidence = new Map<string, string>()
-      const targets: string[] = []
-      for (const device of devices)
-        if (device && (await scope((owner) => owner.host.keyDeliveryTarget(workspaceId, device))))
-          targets.push(device)
-        else evidence.set(device, KEY_DELIVERY_NOT_INGESTED)
-      if (targets.length === 0) return evidence
-      if (aborted()) return evidence
-      const credential = await scope((owner) => owner.bootstrap.deviceCredential(workspaceId))
-      const mailbox = (signal: AbortSignal) =>
-        cloud.client.mailbox({ workspaceId, credential }, signal)
-      // #2459: the control-only approver may not hold the current key yet.
-      // Receive on this main-owned reader, without putting it back on the approval wait.
-      if (!(await scope((owner) => owner.host.status(workspaceId))).hasCurrentKey) {
-        if (aborted()) return evidence
-        const receive = await scope((owner) =>
-          Effect.succeed(
-            owner.host
-              .receiveKeys(workspaceId, mailbox, (signal) =>
-                cloud.client.staging({ workspaceId, credential }, signal)
-              )
-              .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
-          )
-        )
-        await runDesktopE2eeOperation(accountId, receive)
-      }
-      if (aborted()) return evidence
-      // Distribution: report flush and repair remain owned by full rounds.
-      const work = await scope((owner) =>
-        Effect.succeed(
-          owner.host
-            .distributeKeys(workspaceId, mailbox)
-            .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
-        )
-      )
-      await runDesktopE2eeOperation(accountId, work)
-      // A successful round is not evidence: an ineligible sender, a blocked target or a
-      // joined round all succeed. Ask the mailbox per device, outside the account lock.
-      for (const device of targets) {
-        const check = await scope((owner) =>
-          Effect.succeed(owner.host.keyDeliveryEvidence(workspaceId, device, mailbox))
-        )
-        evidence.set(device, await runDesktopE2eeOperation(accountId, check))
-      }
-      return evidence
-    } finally {
-      try {
-        const cleanup = await scope((owner) =>
-          Effect.gen(function* () {
-            const readers = owner.readers.get(workspaceId)
-            const count = readers?.get(KEY_DELIVERY_READER) ?? 0
-            if (count > 1) readers!.set(KEY_DELIVERY_READER, count - 1)
-            else readers?.delete(KEY_DELIVERY_READER)
-            if (readers?.size === 0) {
-              const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
-              owner.readers.delete(workspaceId)
-              return drain
-            }
-            return Effect.void
-          })
-        )
-        await runDesktopE2eeOperation(accountId, cleanup)
-      } catch (cause) {
-        this.pairingFailure = cause
-      }
-    }
-  }
-  /** Main-owned ledger ingest: the renderer reader that ran the approval may be gone. */
-  private async ingestForKeyDelivery(
-    accountId: string,
-    workspaceId: string,
-    scope: ReturnType<E2eeIpc['memberScope']>,
-    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>
-  ) {
-    const status = await scope((owner) => owner.host.status(workspaceId))
-    const after = status.position ?? undefined
-    let cursor: string | undefined
-    let checkpoint: import('@lody/cloud-api').E2eeLedgerCheckpoint | undefined
-    for (let index = 0; index < 256; index++) {
-      const page = await Effect.runPromise(
-        cloud.client.history({
-          workspaceId,
-          ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
-        })
-      )
-      checkpoint ??= page.checkpoint
-      const ingest = await scope((owner) =>
-        Effect.succeed(owner.host.ingestLedgerRecords(workspaceId, page))
-      )
-      await runDesktopE2eeOperation(accountId, ingest)
-      if (!page.nextCursor) return
-      cursor = page.nextCursor
-    }
-    // Still paging: this ledger is not confirmed current. Not terminal; a later call resumes.
-    throw new Error('e2ee_history_not_caught_up')
+    this.keyDelivery.dropWorkspace(workspaceId, accountId)
   }
   /** Terminal access loss ends local custody: from a typed cause, or, with `confirm`,
    * through this device's credential after another failure. Returns if access remains. */
@@ -1223,7 +792,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     const scope = this.memberScope(workspaceId)
     const access = await this.memberAccess(workspaceId, id, scope)
     // The admission worker and team settings poll here; that drives due delivery retries.
-    this.retryDueKeyDeliveries(access.accountId, workspaceId)
+    this.keyDelivery.retryDue(access.accountId, workspaceId)
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
     const result = await this.memberResult(access, cloud.client.memberPending(access))
@@ -1305,13 +874,7 @@ export class E2eeIpc extends ProductWindowIpcService {
   @IpcMethod()
   async memberKeyDeliveries(workspaceId: string) {
     const accountId = await this.readerAccount(workspaceId, sender())
-    this.retryDueKeyDeliveries(accountId, workspaceId)
-    const slot = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
-    return {
-      items: [...(slot?.requests ?? [])].map(([requestId, delivery]) =>
-        keyDeliveryView(requestId, delivery)
-      )
-    }
+    return { items: this.keyDelivery.list(accountId, workspaceId) }
   }
   @IpcMethod()
   async retryMemberKeyDelivery(workspaceId: string, requestId: string) {
@@ -1324,19 +887,10 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
       throw new Error('e2ee_invalid-input')
     const accountId = await this.readerAccount(workspaceId, sender())
-    const current = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
-    if (current && !this.keyDeliveryCurrent(accountId, current)) {
-      this.dropKeyDeliverySlot(accountId, workspaceId)
-      throw new Error('e2ee_invalid-input')
-    }
-    const delivery = current?.requests.get(requestId)
-    if (!delivery) throw new Error('e2ee_invalid-input')
     // An explicit retry skips the backoff wait, never the terminal access-loss result.
-    if (delivery.state === 'failed') delivery.retryAt = 0
-    const slot = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
-    if (slot) slot.autoRetries = 0
-    void this.runKeyDelivery(accountId, workspaceId)
-    return keyDeliveryView(requestId, delivery)
+    const delivery = this.keyDelivery.retryNow(accountId, workspaceId, requestId)
+    if (!delivery) throw new Error('e2ee_invalid-input')
+    return delivery
   }
   @IpcMethod()
   async rejectMemberJoin(workspaceId: string, requestId: string) {
@@ -1432,7 +986,7 @@ export class E2eeIpc extends ProductWindowIpcService {
         let access: Awaited<ReturnType<E2eeIpc['memberAccess']>> | undefined
         try {
           access = await this.memberAccess(workspaceId, reader, scope)
-          await this.ingestForKeyDelivery(cloud.accountId, workspaceId, scope, cloud)
+          await this.keyDelivery.ingest(cloud.accountId, workspaceId, scope, cloud)
         } catch (cause) {
           // A refused catch-up may be removal: confirm with this device's credential.
           if (access) await this.endOnAccessLoss(access, cloud, cause, true)
@@ -2308,69 +1862,13 @@ export class E2eeIpc extends ProductWindowIpcService {
   }
   @IpcMethod()
   async beginRemoteMachinePairing(workspaceId: string) {
-    const id = sender()
-    const state = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* refuseUnopened(owner, workspaceId)
-          const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
-          const offer = yield* owner.host.remoteMachineOffer(workspaceId, {
-            accountId: owner.accountId,
-            deploymentUrl: new URL(import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '').origin,
-            ingressUrl: new URL(import.meta.env.VITE_SERVER_URL ?? '').origin
-          })
-          return { credential, offer, accountId: owner.accountId }
-        }),
-      workspaceId,
-      false
-    )
-    const cloud = await desktopE2eeCloudClient()
-    if (cloud.accountId !== state.accountId) throw new Error('e2ee_account_mismatch')
-    const status = await Effect.runPromise(
-      cloud.client.machineBegin({ workspaceId, credential: state.credential, offer: state.offer })
-    )
-    return {
-      ...status,
-      command: `lody machine pair --offer ${Buffer.from(JSON.stringify(state.offer)).toString('base64url')}`
-    }
+    return this.agentPairing.beginRemoteMachine(workspaceId, sender())
   }
   @IpcMethod()
   async inspectRemoteMachinePairing(workspaceId: string, pairingSessionId: string) {
     const id = sender()
     pairingSession(pairingSessionId)
-    const access = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* refuseUnopened(owner, workspaceId)
-          return {
-            credential: yield* owner.bootstrap.deviceCredential(workspaceId),
-            accountId: owner.accountId
-          }
-        }),
-      workspaceId,
-      false
-    )
-    const cloud = await desktopE2eeCloudClient()
-    if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
-    const status = await Effect.runPromise(
-      cloud.client.machineInspect({ workspaceId, pairingSessionId, credential: access.credential })
-    )
-    if (status.pairingSessionId !== pairingSessionId) throw new Error('e2ee_conflict')
-    const material = status.material
-    const summary =
-      material && ['claimed', 'admitting', 'admitted', 'ready'].includes(status.status)
-        ? await withDesktopE2eeAccount(
-            (owner) =>
-              owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-                ? owner.host.stageRemoteMachine(workspaceId, pairingSessionId, material)
-                : Effect.fail(new Error('e2ee_account_mismatch')),
-            workspaceId,
-            false
-          )
-        : null
-    return { ...status, summary }
+    return this.agentPairing.inspectRemoteMachine(workspaceId, pairingSessionId, id)
   }
   @IpcMethod()
   async approveRemoteMachinePairing(
@@ -2382,181 +1880,19 @@ export class E2eeIpc extends ProductWindowIpcService {
     pairingSession(pairingSessionId)
     if (typeof summary !== 'string' || !/^[0-9a-f]{8}( [0-9a-f]{8}){7}$/.test(summary))
       throw new Error('e2ee_invalid-input')
-    const current = await this.inspectRemoteMachinePairing(workspaceId, pairingSessionId)
-    if (
-      current.summary !== summary ||
-      !['claimed', 'admitting', 'admitted', 'ready'].includes(current.status)
-    )
-      throw new Error('e2ee_conflict')
-    const pending = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* refuseUnopened(owner, workspaceId)
-          return {
-            accountId: owner.accountId,
-            request: yield* owner.host.approveRemoteMachine(workspaceId, pairingSessionId, summary)
-          }
-        }),
-      workspaceId,
-      false
-    )
-    const cloud = await desktopE2eeCloudClient()
-    if (cloud.accountId !== pending.accountId) throw new Error('e2ee_account_mismatch')
-    if (pending.request) {
-      try {
-        await Effect.runPromise(cloud.client.appendRecord(pending.request))
-      } catch (error) {
-        this.pairingFailure = error
-      }
-    } else {
-      const credential = await withDesktopE2eeAccount(
-        (owner) =>
-          owner.accountId === pending.accountId && owner.readers.get(workspaceId)?.has(id)
-            ? owner.bootstrap.deviceCredential(workspaceId)
-            : Effect.fail(new Error('e2ee_account_mismatch')),
-        workspaceId,
-        false
-      )
-      await Effect.runPromise(
-        cloud.client.machineAuthorizeExisting({ workspaceId, pairingSessionId, credential })
-      )
-    }
-    // Refresh reads back the original and drives resumable key distribution.
-    await this.refresh(workspaceId)
-    await withDesktopE2eeAccount(
-      (owner) =>
-        owner.accountId === pending.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.confirmRemoteMachine(workspaceId, pairingSessionId)
-          : Effect.fail(new Error('e2ee_account_mismatch')),
-      workspaceId,
-      false
-    )
-    const status = await this.inspectRemoteMachinePairing(workspaceId, pairingSessionId)
-    return {
-      admitted: status.status === 'admitted' || status.status === 'ready',
-      ready: status.status === 'ready'
-    }
+    return this.agentPairing.approveRemoteMachine(workspaceId, pairingSessionId, summary, id)
   }
   @IpcMethod()
   async cancelRemoteMachinePairing(workspaceId: string, pairingSessionId: string) {
     const id = sender()
     pairingSession(pairingSessionId)
-    const access = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* refuseUnopened(owner, workspaceId)
-          return {
-            credential: yield* owner.bootstrap.deviceCredential(workspaceId),
-            accountId: owner.accountId
-          }
-        }),
-      workspaceId,
-      false
-    )
-    const cloud = await desktopE2eeCloudClient()
-    if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
-    const result = await Effect.runPromise(
-      cloud.client.machineCancel({ workspaceId, pairingSessionId, credential: access.credential })
-    )
-    if (!['cancelled', 'expired', 'conflict', 'ready'].includes(result.status))
-      throw new Error('e2ee_conflict')
-    if (!result.noAdmissionReserved) await this.refresh(workspaceId)
-    await withDesktopE2eeAccount(
-      (owner) =>
-        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.retireRemoteMachine(
-              workspaceId,
-              pairingSessionId,
-              result.noAdmissionReserved === true
-            )
-          : Effect.fail(new Error('e2ee_account_mismatch')),
-      workspaceId,
-      false
-    )
-    return result
+    return this.agentPairing.cancelRemoteMachine(workspaceId, pairingSessionId, id)
   }
 
   @IpcMethod()
   async prepareLocalAgent(workspaceId: string) {
     this.pairingFailure = undefined
-    const id = sender()
-    const context = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* refuseUnopened(owner, workspaceId)
-          yield* owner.bootstrap.deviceCredential(workspaceId)
-          return {
-            accountId: owner.accountId,
-            ...(yield* owner.host.localPairingContext(workspaceId))
-          }
-        }),
-      workspaceId,
-      false
-    )
-    const cli = getIpcServiceDeps().cliService
-    const machineId = await cli.getLocalMachineId()
-    if (!machineId) throw new Error('e2ee_local_agent_unavailable')
-    let material
-    try {
-      material = await cli.prepareLocalE2eeDevice({ type: 'prepare', machineId, ...context })
-    } catch (error) {
-      this.pairingFailure = error
-      // Original retained above; attaching it would leak raw causes through the IPC logger.
-      // eslint-disable-next-line preserve-caught-error
-      throw new Error(
-        LocalE2eeRecoveryFailureSchema.safeParse({
-          ok: false,
-          error: error instanceof Error ? error.message : ''
-        }).success
-          ? `e2ee_machine_${(error as Error).message.slice(5)}`
-          : error instanceof Error && error.message === 'e2ee_local_agent_pending'
-            ? 'e2ee_local_agent_pending'
-            : 'e2ee_local_agent_unavailable'
-      )
-    }
-    if (material.machineId !== machineId || material.pairingSessionId !== context.pairingSessionId)
-      throw new Error('e2ee_conflict')
-    if (material.type === 'prepare-superseded') {
-      let retirementFailure: unknown
-      try {
-        await withDesktopE2eeAccount(
-          (owner) =>
-            owner.accountId === context.accountId && owner.readers.get(workspaceId)?.has(id)
-              ? owner.host.retireSupersededLocalPairing(
-                  workspaceId,
-                  context.pairingSessionId,
-                  (error) => {
-                    retirementFailure = error
-                  }
-                )
-              : Effect.fail(new Error('e2ee_account_mismatch')),
-          workspaceId,
-          false
-        )
-      } catch (error) {
-        const superseded = new Error('e2ee_pairing_superseded')
-        this.pairingFailure = new AggregateError(
-          [superseded, ...(retirementFailure === undefined ? [] : [retirementFailure]), error],
-          'e2ee_pairing_retirement_failed',
-          { cause: superseded }
-        )
-        // Original receipt and retirement failure stay in main.
-        // eslint-disable-next-line preserve-caught-error
-        throw new Error('e2ee_local_agent_unavailable')
-      }
-      throw new Error('e2ee_local_agent_pending')
-    }
-    return withDesktopE2eeAccount(
-      (owner) =>
-        owner.accountId === context.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.stageLocalPairing(workspaceId, material)
-          : Effect.fail(new Error('e2ee_account_mismatch')),
-      workspaceId,
-      false
-    )
+    return this.agentPairing.prepareLocalAgent(workspaceId, sender())
   }
   @IpcMethod()
   async admitLocalAgent(workspaceId: string, pairingSessionId: string) {
@@ -2564,91 +1900,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     const id = sender()
     if (typeof pairingSessionId !== 'string' || !/^[0-9a-f]{32}$/.test(pairingSessionId))
       throw new Error('e2ee_invalid-input')
-    const pending = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (!owner.readers.get(workspaceId)?.has(id))
-            return yield* refuseUnopened(owner, workspaceId)
-          return {
-            accountId: owner.accountId,
-            request: yield* owner.host.approveLocalPairing(workspaceId, pairingSessionId)
-          }
-        }),
-      workspaceId,
-      false
-    )
-    let appendFailure: unknown
-    if (pending.request) {
-      const cloud = await desktopE2eeCloudClient()
-      if (cloud.accountId !== pending.accountId) throw new Error('e2ee_account_mismatch')
-      // Even an uncertain append is reconciled through verified readback below.
-      // Its journal retains the same request and signature for the next attempt.
-      try {
-        await Effect.runPromise(cloud.client.appendRecord(pending.request))
-      } catch (error) {
-        appendFailure = error
-      }
-    }
-    let distributed = true
-    try {
-      // The new agent only needs this device's envelope for the current epoch. A device
-      // that already holds that key distributes alone; one without it keeps the full
-      // round, which receives before it distributes. Repair and reports stay with later
-      // full rounds.
-      const holdsKey = await this.status(workspaceId).then(
-        (status) => status.hasCurrentKey,
-        () => false
-      )
-      await this.refresh(workspaceId, { keyMode: holdsKey ? 'distribute' : 'full' })
-    } catch (error) {
-      this.pairingFailure = error
-      distributed = false
-    }
-    let confirmed
-    try {
-      confirmed = await withDesktopE2eeAccount(
-        (owner) =>
-          owner.accountId === pending.accountId && owner.readers.get(workspaceId)?.has(id)
-            ? owner.host.confirmLocalPairing(workspaceId, pairingSessionId)
-            : Effect.fail(new Error('e2ee_account_mismatch')),
-        workspaceId,
-        false
-      )
-    } catch (error) {
-      // Keep both failures in main for diagnosis. Only a stable message crosses
-      // IPC; never log SDK/raw causes or let an old error undo verified success.
-      if (appendFailure !== undefined) {
-        this.pairingFailure = new AggregateError(
-          [
-            appendFailure,
-            ...(this.pairingFailure === undefined ? [] : [this.pairingFailure]),
-            error
-          ],
-          'e2ee_append_unconfirmed',
-          {
-            cause: appendFailure
-          }
-        )
-        // Original retained above; the IPC decorator logs rejected Error causes.
-        // eslint-disable-next-line preserve-caught-error
-        throw new Error('e2ee_append_unconfirmed')
-      }
-      throw error
-    }
-    if (!distributed) return { admitted: true as const, ready: false }
-    try {
-      await getIpcServiceDeps().cliService.activateLocalE2eeDevice({
-        type: 'activate',
-        accountId: pending.accountId,
-        workspaceId,
-        ...confirmed
-      })
-      return { admitted: true as const, ready: true }
-    } catch (error) {
-      this.pairingFailure = error
-      // Approval is already committed. A delayed mailbox or CLI must not undo it.
-      return { admitted: true as const, ready: false }
-    }
+    return this.agentPairing.admitLocalAgent(workspaceId, pairingSessionId, id)
   }
   private async removeLocalWorkspace(
     access: {
@@ -3230,31 +2482,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       !/^[A-Za-z0-9_-]{1,128}$/.test(input.workspaceId)
     )
       throw new Error('e2ee_invalid-input')
-    const accountId = await withDesktopE2eeAccount(
-      (owner) =>
-        owner.readers.get(input.workspaceId)?.has(id)
-          ? Effect.as(owner.bootstrap.deviceCredential(input.workspaceId), owner.accountId)
-          : refuseUnopened(owner, input.workspaceId),
-      input.workspaceId,
-      false
-    )
-    const cli = getIpcServiceDeps().cliService
-    const machineId = await cli.getLocalMachineId()
-    if (!machineId) throw new Error('e2ee_local_agent_unavailable')
-    await cli.resetLocalE2eeIdentity({
-      accountId,
-      machineId,
-      workspaceId: input.workspaceId,
-      resetId: input.resetId
-    })
-    await withDesktopE2eeAccount(
-      (owner) =>
-        owner.accountId === accountId && owner.readers.get(input.workspaceId)?.has(id)
-          ? owner.host.resetLocalPairing(input.workspaceId, input.resetId)
-          : Effect.fail(new Error('e2ee_account_mismatch')),
-      input.workspaceId,
-      false
-    )
+    await this.agentPairing.resetLocalAgentIdentity(input, id)
   }
   @IpcMethod()
   async resetIdentity(input: { workspaceId?: string; resetId: string; confirm: true }) {

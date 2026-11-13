@@ -103,6 +103,9 @@ interface LodyOptions {
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
+  /** A verified encrypted owner promoted in place by local pairing activation. `create`
+   * takes ownership: it closes this handle itself if it fails before returning. */
+  encryptedWorkspace?: CliE2eeWorkspaceLegacy;
 }
 export class Lody {
   private logger: Logger;
@@ -126,6 +129,19 @@ export class Lody {
   private builtinAgentRegistrationStarted = false;
 
   static async create(options: LodyOptions): Promise<Lody> {
+    const handed = options.encryptedWorkspace;
+    if (!handed) return Lody.createOwned(options);
+    try {
+      if (options.contentMode !== 'e2ee') throw new Error('e2ee_workspace_unavailable');
+      return await Lody.createOwned(options);
+    } catch (error) {
+      // Close is idempotent: an owner that already closed it returns the same receipt.
+      await handed.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private static async createOwned(options: LodyOptions): Promise<Lody> {
     // Register the optional local Roost adapter before any session document can
     // resolve its backend. The selector remains metadata-driven, so legacy and
     // new Loro sessions continue to use the built-in backend by default.
@@ -152,17 +168,13 @@ export class Lody {
     if (!workspaceSupports({ mode: encrypted ? 'protected' : 'plaintext' }, 'rpc')) {
       if (!options.genesisHash || !options.cloudPort.e2ee)
         throw new Error('e2ee_workspace_unavailable');
-      const { openCliE2eeWorkspaceLegacy } = await import('./e2ee/workspace-legacy');
-      e2ee = await openCliE2eeWorkspaceLegacy({
-        machineId: options.machineId,
-        accountId: options.userId,
-        workspaceId: options.workspaceId,
-        genesisHash: options.genesisHash,
-        cloud: options.cloudPort.e2ee,
+      const callbacks = {
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
         onAuthorityConfirmed: options.onEncryptedAuthorityConfirmed,
-        onWindowNotice: options.onEncryptedWindowNotice,
-        onRemoved: async (reason, recorded) => {
+        onRemoved: async (
+          reason: 'member-removed' | 'device-revoked',
+          recorded: boolean
+        ): Promise<void> => {
           const owner = await removalOwner;
           if (!owner) return;
           owner.encryptedRevocation =
@@ -181,7 +193,23 @@ export class Lody {
             throw cause;
           }
         },
-      });
+      };
+      if (options.encryptedWorkspace) {
+        // Activation already verified admission and the current key on this owner.
+        e2ee = options.encryptedWorkspace;
+        e2ee.adopt(callbacks);
+      } else {
+        const { openCliE2eeWorkspaceLegacy } = await import('./e2ee/workspace-legacy');
+        e2ee = await openCliE2eeWorkspaceLegacy({
+          machineId: options.machineId,
+          accountId: options.userId,
+          workspaceId: options.workspaceId,
+          genesisHash: options.genesisHash,
+          cloud: options.cloudPort.e2ee,
+          onWindowNotice: options.onEncryptedWindowNotice,
+          ...callbacks,
+        });
+      }
       options = { ...options, cloudPort: encryptedRuntimeCloudPort(options.cloudPort) };
     }
     let manager: LoroDocumentManager | undefined;

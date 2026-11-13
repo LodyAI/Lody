@@ -114,6 +114,7 @@ and [bootstrap](../../../../../.agents/docs/e2ee-workspace-bootstrap.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
 Workspace custody; reset binds account/generation; recheck after lock/drain before archive.
 No network or proxy lookup under locks; drain before release. Bad keys allow ledger open; core repairs.
+Account turns share the account barrier and lock only their identity directory; account switch, close, identity cleanup and account reset hold it exclusively, draining and fencing turns. Work must never re-enter it.
 Recovery keeps completed anchors; unfinished rebinding needs verified same-device admission and archived originals.
 Isolate verification/storage errors; bad input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.

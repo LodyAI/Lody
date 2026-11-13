@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -373,31 +374,73 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const history = Context.get(context, InstalledEpochHistory);
   const initialVerifiedView = yield* verified.current();
   options.onVerifiedLedger?.(initialVerifiedView, executionGeneration);
-  const receiving = options.mailbox
-    ? yield* Layer.buildWithScope(
-        Layer.mergeAll(KeyReceiver.layer, KeyRepair.layer).pipe(
-          Layer.provideMerge(Layer.succeed(KeyMailbox, options.mailbox)),
-          Layer.provideMerge(
-            sqliteReceiveJournal({
-              path: join(options.directory, 'receive.sqlite'),
-              mode: 'create-or-open',
-            })
+  // Key maintenance journals open on first use, in a child scope created here so they
+  // still close after the fence below, as when they were built eagerly.
+  const mailbox = options.mailbox;
+  const keyScope = mailbox ? yield* Scope.fork(scope) : undefined;
+  const keyBuild = yield* Semaphore.make(1);
+  let keyPorts:
+    | Context.Context<KeyMailbox | InstalledEpochKeys | VerifiedLedger | Layer.Success<typeof base>>
+    | undefined;
+  let receiver: KeyReceiver['Service'] | undefined;
+  let repair: KeyRepair['Service'] | undefined;
+  const keyPortsLayer = Effect.fnUntraced(function* (
+    owner: Scope.Scope,
+    source: KeyMailbox['Service']
+  ) {
+    keyPorts ??= yield* Layer.buildWithScope(
+      Layer.mergeAll(
+        Layer.succeed(KeyMailbox, source),
+        Layer.succeed(InstalledEpochKeys, installed),
+        Layer.succeed(VerifiedLedger, verified),
+        base
+      ),
+      owner
+    );
+    return Layer.succeedContext(keyPorts);
+  });
+  const ensureReceiver = (owner: Scope.Scope, source: KeyMailbox['Service']) =>
+    keyBuild.withPermit(
+      Effect.gen(function* () {
+        yield* guard();
+        receiver ??= Context.get(
+          yield* Layer.buildWithScope(
+            KeyReceiver.layer.pipe(
+              Layer.provide(
+                sqliteReceiveJournal({
+                  path: join(options.directory, 'receive.sqlite'),
+                  mode: 'create-or-open',
+                }).pipe(Layer.provideMerge(yield* keyPortsLayer(owner, source)))
+              )
+            ),
+            owner
           ),
-          Layer.provideMerge(
-            sqliteRepairJournal({
-              path: join(options.directory, 'repair.sqlite'),
-              mode: 'create-or-open',
-            })
+          KeyReceiver
+        );
+        return receiver;
+      })
+    );
+  const ensureRepair = (owner: Scope.Scope, source: KeyMailbox['Service']) =>
+    keyBuild.withPermit(
+      Effect.gen(function* () {
+        yield* guard();
+        repair ??= Context.get(
+          yield* Layer.buildWithScope(
+            KeyRepair.layer.pipe(
+              Layer.provide(
+                sqliteRepairJournal({
+                  path: join(options.directory, 'repair.sqlite'),
+                  mode: 'create-or-open',
+                }).pipe(Layer.provideMerge(yield* keyPortsLayer(owner, source)))
+              )
+            ),
+            owner
           ),
-          Layer.provideMerge(Layer.succeed(InstalledEpochKeys, installed)),
-          Layer.provideMerge(Layer.succeed(VerifiedLedger, verified)),
-          Layer.provideMerge(base)
-        ),
-        scope
-      )
-    : undefined;
-  const receiver = receiving ? Context.get(receiving, KeyReceiver) : undefined;
-  const repair = receiving ? Context.get(receiving, KeyRepair) : undefined;
+          KeyRepair
+        );
+        return repair;
+      })
+    );
   const guard = () => (closed ? Effect.fail(failure('closed')) : Effect.void);
   let retainedWriteEpoch: number | undefined;
   const status = Effect.fnUntraced(function* () {
@@ -470,14 +513,19 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
           return { view, records };
         })
       ),
-    /** The caller supplies raw, bounded cloud DTO pages. Every suffix is verified locally. */
-    ingest: (page: {
-      startIndex: number;
-      recordsHex: readonly string[];
-      position: string;
-      nextCursor: string | null;
-      checkpoint: { length: number; headHash: string };
-    }) =>
+    /** The caller supplies raw, bounded cloud DTO pages. Every suffix is verified locally.
+     * `local-handoff` admits one same-user desktop page of at most 2048 untrusted records,
+     * verified identically; verification precedes persistence, so a rejection keeps nothing. */
+    ingest: (
+      page: {
+        startIndex: number;
+        recordsHex: readonly string[];
+        position: string;
+        nextCursor: string | null;
+        checkpoint: { length: number; headHash: string };
+      },
+      source: 'cloud' | 'local-handoff' = 'cloud'
+    ) =>
       serial.withPermit(
         Effect.gen(function* () {
           yield* guard();
@@ -487,7 +535,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             !Number.isSafeInteger(page.startIndex) ||
             page.startIndex < 0 ||
             page.startIndex > start ||
-            page.recordsHex.length > 64 ||
+            page.recordsHex.length > (source === 'local-handoff' ? 2048 : 64) ||
             !page.position.startsWith(
               `p1:${options.workspaceId}:${page.startIndex + page.recordsHex.length}:`
             )
@@ -636,9 +684,10 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       }),
     /** Coalescing belongs to the caller's single background refresh owner. */
     receiveKeys: () =>
-      receiver
+      keyScope && mailbox
         ? Effect.gen(function* () {
             yield* guard();
+            const receiver = yield* ensureReceiver(keyScope, mailbox);
             const view = yield* verified.current();
             const epoch = view.inspectState().epoch.number;
             const checked = yield* Effect.result(installed.check(epoch));
@@ -659,19 +708,25 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
                   yield* receiver.receiveStagedGroup(group);
               } else if (view.verification !== 'endorsed-snapshot') return yield* located.failure;
             }
-            if (repair) yield* repair.flush();
+            // Repairs queued by an earlier run stay pending in repair.sqlite until flushed.
+            if (
+              repair ||
+              (yield* Effect.sync(() => existsSync(join(options.directory, 'repair.sqlite'))))
+            )
+              yield* (yield* ensureRepair(keyScope, mailbox)).flush();
             yield* receiver.resume();
             for (let cursor: string | null = null; ;) {
               const page: { readonly processed: number; readonly next: string | null } =
                 yield* receiver.fetchAndInstall(cursor, 100).pipe(
                   Effect.catchTag('MailboxInstallError', (error) =>
                     Effect.gen(function* () {
-                      if (repair && error.cryptographicRejection) {
-                        yield* repair.enqueue(
+                      if (error.cryptographicRejection) {
+                        const repairs = yield* ensureRepair(keyScope, mailbox);
+                        yield* repairs.enqueue(
                           `rejected:${error.epoch}:${error.frameDigest}`,
                           error.frameDigest
                         );
-                        yield* repair.flush();
+                        yield* repairs.flush();
                       }
                       return yield* Effect.fail(error);
                     })

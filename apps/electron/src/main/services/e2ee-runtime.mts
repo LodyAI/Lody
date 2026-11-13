@@ -929,7 +929,18 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           ),
           scope
         )
-        let maintenance: Context.Context<KeyDistributor | KeyReceiver | KeyRepair> | undefined
+        let maintenancePorts:
+          | Context.Context<
+              | KeyMailbox
+              | VerifiedLedger
+              | InstalledEpochKeys
+              | EpochPublicationSource
+              | Layer.Success<typeof base>
+            >
+          | undefined
+        let receiverContext: Context.Context<KeyReceiver> | undefined
+        let distributorContext: Context.Context<KeyDistributor> | undefined
+        let repairContext: Context.Context<KeyRepair> | undefined
         let maintainKeys: Effect.Success<ReturnType<typeof makeDesktopKeyMaintenance>> | undefined
         let round: Deferred.Deferred<void, unknown> | undefined
         // The running round's mode: `receive` installs this device's key only; `distribute`
@@ -1003,72 +1014,111 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           const result = yield* Effect.exit(
             Effect.uninterruptible(
               Effect.gen(function* () {
-                if (!maintenance) {
-                  const journals = Layer.mergeAll(
-                    sqliteDeliveryOutbox({
-                      path: join(directory, 'outbox.sqlite'),
-                      mode: 'create-or-open'
-                    }),
-                    sqliteDistributionJournal({
-                      path: join(directory, 'distribution.sqlite'),
-                      mode: 'create-or-open'
-                    }),
-                    sqliteReceiveJournal({
-                      path: join(directory, 'receive.sqlite'),
-                      mode: 'create-or-open'
-                    }),
-                    sqliteRepairJournal({
-                      path: join(directory, 'repair.sqlite'),
-                      mode: 'create-or-open'
-                    })
-                  ).pipe(Layer.provideMerge(base))
-                  const ports = Layer.mergeAll(
-                    journals,
-                    Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
-                    Layer.succeed(VerifiedLedger, verified),
-                    Layer.succeed(InstalledEpochKeys, keys),
-                    Layer.succeed(EpochPublicationSource, {
-                      current: (view) =>
-                        sql(() => {
-                          const epoch = view.inspectState().epoch.number
-                          if (epoch === 0) return creation.record
-                          for (const row of rows()
-                            .filter((candidate) => candidate.position < view.length)
-                            .reverse()) {
-                            const parsed = Result.getOrThrow(decodeRecord(row.record)).body
-                            if (
-                              parsed.type === 'ordinary' &&
-                              (parsed.operation.type === 'publishEpoch' ||
-                                parsed.operation.type === 'removeMemberAndPublishEpoch') &&
-                              parsed.operation.epoch === epoch
+                // Ports are bound once per entry, to the first round's mailbox, as before;
+                // each capability then opens only its own journals on first use.
+                const ports = Effect.fnUntraced(function* () {
+                  if (!maintenancePorts)
+                    maintenancePorts = yield* Layer.buildWithScope(
+                      Layer.mergeAll(
+                        Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
+                        Layer.succeed(VerifiedLedger, verified),
+                        Layer.succeed(InstalledEpochKeys, keys),
+                        Layer.succeed(EpochPublicationSource, {
+                          current: (view) =>
+                            sql(() => {
+                              const epoch = view.inspectState().epoch.number
+                              if (epoch === 0) return creation.record
+                              for (const row of rows()
+                                .filter((candidate) => candidate.position < view.length)
+                                .reverse()) {
+                                const parsed = Result.getOrThrow(decodeRecord(row.record)).body
+                                if (
+                                  parsed.type === 'ordinary' &&
+                                  (parsed.operation.type === 'publishEpoch' ||
+                                    parsed.operation.type === 'removeMemberAndPublishEpoch') &&
+                                  parsed.operation.epoch === epoch
+                                )
+                                  return row.record
+                              }
+                              return null
+                            }).pipe(
+                              Effect.mapError(
+                                () =>
+                                  new LocalStoreError({
+                                    store: 'EpochPublicationSource',
+                                    reason: 'corrupt'
+                                  })
+                              )
                             )
-                              return row.record
-                          }
-                          return null
-                        }).pipe(
-                          Effect.mapError(
-                            () =>
-                              new LocalStoreError({
-                                store: 'EpochPublicationSource',
-                                reason: 'corrupt'
-                              })
+                        }),
+                        base
+                      ),
+                      scope
+                    )
+                  return Layer.succeedContext(maintenancePorts)
+                })
+                const ensureReceiver = Effect.fnUntraced(function* () {
+                  if (!receiverContext)
+                    receiverContext = yield* Layer.buildWithScope(
+                      KeyReceiver.layer.pipe(
+                        Layer.provide(
+                          sqliteReceiveJournal({
+                            path: join(directory, 'receive.sqlite'),
+                            mode: 'create-or-open'
+                          }).pipe(Layer.provideMerge(yield* ports()))
+                        )
+                      ),
+                      scope
+                    )
+                  return receiverContext
+                })
+                // KeyDistributor records this device's own publication through KeyReceiver.
+                const ensureDistributor = Effect.fnUntraced(function* () {
+                  if (!distributorContext) {
+                    const receiver = yield* ensureReceiver()
+                    distributorContext = yield* Layer.buildWithScope(
+                      KeyDistributor.layer.pipe(
+                        Layer.provide(
+                          Layer.mergeAll(
+                            sqliteDeliveryOutbox({
+                              path: join(directory, 'outbox.sqlite'),
+                              mode: 'create-or-open'
+                            }),
+                            sqliteDistributionJournal({
+                              path: join(directory, 'distribution.sqlite'),
+                              mode: 'create-or-open'
+                            })
+                          ).pipe(
+                            Layer.provideMerge(
+                              Layer.merge(yield* ports(), Layer.succeedContext(receiver))
+                            )
                           )
                         )
-                    }),
-                    base
-                  )
-                  maintenance = yield* Layer.buildWithScope(
-                    Layer.mergeAll(KeyDistributor.layer, KeyRepair.layer).pipe(
-                      Layer.provideMerge(KeyReceiver.layer),
-                      Layer.provide(ports)
-                    ),
-                    scope
-                  )
-                }
+                      ),
+                      scope
+                    )
+                  }
+                  return distributorContext
+                })
+                const ensureRepair = Effect.fnUntraced(function* () {
+                  if (!repairContext)
+                    repairContext = yield* Layer.buildWithScope(
+                      KeyRepair.layer.pipe(
+                        Layer.provide(
+                          sqliteRepairJournal({
+                            path: join(directory, 'repair.sqlite'),
+                            mode: 'create-or-open'
+                          }).pipe(Layer.provideMerge(yield* ports()))
+                        )
+                      ),
+                      scope
+                    )
+                  return repairContext
+                })
                 const prepareReceive = Effect.fnUntraced(function* () {
                   const view = yield* verified.current()
                   const epoch = view.inspectState().epoch.number
-                  const currentReceiver = Context.get(maintenance!, KeyReceiver)
+                  const currentReceiver = Context.get(yield* ensureReceiver(), KeyReceiver)
                   const beforeReceive = Effect.gen(function* () {
                     const checked = yield* Effect.result(keys.check(epoch))
                     if (staging && epoch > 0 && Result.isFailure(checked)) {
@@ -1095,7 +1145,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 if (mode === 'distribute') {
                   // Only this device's deliveries: reconcile targets, resume pending sends,
                   // acknowledge ended tasks. Receiving and repair stay with a full round.
-                  const distributor = Context.get(maintenance!, KeyDistributor)
+                  const distributor = Context.get(yield* ensureDistributor(), KeyDistributor)
                   yield* distributor.reconcileCurrentEpoch(100, null)
                   yield* distributor.resumePendingDeliveries(100, null)
                   const ended = yield* distributor.results(100, null)
@@ -1116,9 +1166,15 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 do {
                   roundAgain = false
                   const { epoch, beforeReceive } = yield* prepareReceive()
-                  maintainKeys ??= yield* makeDesktopKeyMaintenance().pipe(
-                    Effect.provide(maintenance)
-                  )
+                  if (!maintainKeys) {
+                    const maintenance = Context.merge(
+                      Context.merge(yield* ensureReceiver(), yield* ensureDistributor()),
+                      yield* ensureRepair()
+                    )
+                    maintainKeys = yield* makeDesktopKeyMaintenance().pipe(
+                      Effect.provide(maintenance)
+                    )
+                  }
                   const needsRefresh = yield* maintainKeys(epoch, beforeReceive)
                   if (needsRefresh && refreshLedger && !refreshedUnknown) {
                     refreshedUnknown = true

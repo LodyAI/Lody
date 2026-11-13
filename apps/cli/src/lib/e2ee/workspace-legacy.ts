@@ -523,9 +523,7 @@ export async function validateCliE2eePairingIntentLegacy(options: {
 }
 
 /** @deprecated Promise entry; retain the identity lease through activation publication. */
-export async function activateCliE2eeWorkspaceLegacy(
-  options: Parameters<typeof activateWorkspace>[0]
-) {
+export async function activateCliE2eeWorkspaceLegacy(options: ActivationOptions) {
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -539,40 +537,39 @@ export async function activateCliE2eeWorkspaceLegacy(
   );
 }
 
-/** Verify actual admission and install the current key before allowing Fleet to attach rooms.
- * The marker is only a startup hint: subsequent authorization still comes from core's verified ledger. */
-async function activateWorkspace(
-  options: CliE2eeWorkspaceOptions & {
-    pairingSessionId: string;
-    frontendSigningPublicKey: string;
-    expectedSigningPublicKey: string;
-    /** `false` for same-machine desktop pairing, which has no relay machine-pairing session
-     * to complete. Defaults to `true`. */
-    remotePairing?: boolean;
-  }
-) {
-  const pending = await openWorkspace(options, false, {
-    pairingSessionId: options.pairingSessionId,
-    frontendSigningPublicKey: options.frontendSigningPublicKey,
-    signingPublicKey: options.expectedSigningPublicKey,
+type ActivationOptions = CliE2eeWorkspaceOptions & {
+  pairingSessionId: string;
+  frontendSigningPublicKey: string;
+  expectedSigningPublicKey: string;
+  /** `false` for same-machine desktop pairing, which has no relay machine-pairing session
+   * to complete. Defaults to `true`. */
+  remotePairing?: boolean;
+};
+const pairingIntent = (options: ActivationOptions): PairingIntent => ({
+  pairingSessionId: options.pairingSessionId,
+  frontendSigningPublicKey: options.frontendSigningPublicKey,
+  signingPublicKey: options.expectedSigningPublicKey,
+});
+type PairingOwner = Awaited<ReturnType<typeof openWorkspace>>;
+
+/** Core's verified ledger must show this exact device admitted and its current key installed. */
+async function verifiedActivation(pending: PairingOwner, options: ActivationOptions) {
+  const status = await pending.status();
+  if (
+    options.expectedSigningPublicKey &&
+    options.expectedSigningPublicKey !== status.devicePublicKey
+  )
+    throw new Error('e2ee_binding_conflict');
+  pending.assertPairingConfirmed();
+  if (!status.hasCurrentKey) throw new Error('e2ee_waiting_for_key');
+  return Activation.parse({
+    genesisHash: options.genesisHash,
+    signingPublicKey: status.devicePublicKey,
   });
-  let marker: z.infer<typeof Activation>;
-  try {
-    await pending.refresh();
-    const status = await pending.status();
-    if (
-      options.expectedSigningPublicKey &&
-      options.expectedSigningPublicKey !== status.devicePublicKey
-    )
-      throw new Error('e2ee_binding_conflict');
-    pending.assertPairingConfirmed();
-    if (!status.hasCurrentKey) throw new Error('e2ee_waiting_for_key');
-    marker = { genesisHash: options.genesisHash, signingPublicKey: status.devicePublicKey };
-  } finally {
-    // Publish the Fleet startup hint only after the temporary native owner has
-    // actually released its SQLite/custody resources.
-    await pending.close();
-  }
+}
+
+/** The startup hint. Written under the identity lease and only after verification. */
+async function publishActivation(options: ActivationOptions, marker: z.infer<typeof Activation>) {
   const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   const destination = join(directory, 'activation.json');
   const temporary = join(directory, `activation-${randomBytes(16).toString('hex')}.pending`);
@@ -593,14 +590,73 @@ async function activateWorkspace(
     await handle.close().catch(() => undefined);
     await unlink(temporary).catch(() => undefined);
   }
+}
+
+/** Verify actual admission and install the current key before allowing Fleet to attach rooms.
+ * The marker is only a startup hint: subsequent authorization still comes from core's verified ledger. */
+async function activateWorkspace(options: ActivationOptions) {
+  const pending = await openWorkspace(options, false, pairingIntent(options));
+  let marker: z.infer<typeof Activation>;
+  try {
+    await pending.refresh();
+    marker = await verifiedActivation(pending, options);
+  } finally {
+    // Publish the Fleet startup hint only after the temporary native owner has
+    // actually released its SQLite/custody resources.
+    await pending.close();
+  }
+  await publishActivation(options, marker);
   if (options.remotePairing !== false)
     await pending.completeRemotePairing(options.pairingSessionId);
 }
 
+/** Same-machine desktop activation that keeps its native owner. The owner's own Scope
+ * holds the only identity lease from open through `activation.json` to the returned
+ * active handle; no content replica exists until the caller attaches rooms to it.
+ * `ledgerHandoff` is an untrusted same-user transport hint; see `adoptLocalLedger`.
+ * The caller owns the returned handle and must close it if it does not start a runtime. */
+export async function activateAndPromoteCliE2eeWorkspaceLegacy(
+  options: Omit<ActivationOptions, 'remotePairing'> & { ledgerHandoff?: LocalLedgerHandoff }
+) {
+  const pending = await openWorkspace(
+    options,
+    false,
+    pairingIntent(options),
+    options.ledgerHandoff
+  );
+  try {
+    // Join the open's own read: a verified handoff needs no further history request.
+    await pending.settleRefresh();
+    const first = await pending.status();
+    let confirmed = true;
+    try {
+      pending.assertPairingConfirmed();
+    } catch {
+      confirmed = false;
+    }
+    if (!confirmed || !first.hasCurrentKey) await pending.refresh();
+    await publishActivation(options, await verifiedActivation(pending, options));
+    pending.promote();
+    return pending;
+  } catch (error) {
+    await pending.close();
+    throw error;
+  }
+}
+
+type PairingIntent = {
+  pairingSessionId: string;
+  frontendSigningPublicKey: string;
+  signingPublicKey: string;
+};
+/** Same-user desktop bytes and the desktop's own resume position. Untrusted transport only. */
+type LocalLedgerHandoff = { recordsHex: readonly string[]; position: string };
+
 async function openWorkspace(
   options: CliE2eeWorkspaceOptions,
   requireActivation: boolean,
-  pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
+  pairing?: PairingIntent,
+  localLedger?: LocalLedgerHandoff
 ) {
   if (await eraseRemovedWorkspace(options)) throw new Error('e2ee_member_removed');
   const scope = Effect.runSync(Scope.make());
@@ -610,7 +666,7 @@ async function openWorkspace(
         Scope.provide(scope)
       )
     );
-    return await openWorkspaceOwned(scope, options, requireActivation, pairing);
+    return await openWorkspaceOwned(scope, options, requireActivation, pairing, localLedger);
   } catch (error) {
     await Effect.runPromise(Scope.close(scope, Exit.void));
     throw error;
@@ -620,9 +676,24 @@ async function openWorkspace(
 async function openWorkspaceOwned(
   scope: Scope.Closeable,
   options: CliE2eeWorkspaceOptions,
-  requireActivation: boolean,
-  pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
+  openedActive: boolean,
+  openedPairing?: PairingIntent,
+  handoff?: LocalLedgerHandoff
 ) {
+  // A pairing owner may be promoted in place into the active owner (see `promote`).
+  let requireActivation = openedActive;
+  let pairing = openedPairing;
+  let localLedger = pairing ? handoff : undefined;
+  // The active owner's callbacks; an in-place promotion receives them on `adopt`.
+  const hooks: Pick<
+    CliE2eeWorkspaceOptions,
+    'onUnavailable' | 'onAuthorityConfirmed' | 'onRemoved'
+  > = {
+    onUnavailable: options.onUnavailable,
+    onAuthorityConfirmed: options.onAuthorityConfirmed,
+    onRemoved: options.onRemoved,
+  };
+  let authorityConfirmedAt: AuthorityStamp | undefined;
   let credentialFailureHandler: (cause: unknown) => void = () => {};
   const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   let activation: z.infer<typeof Activation> | undefined;
@@ -1199,7 +1270,7 @@ async function openWorkspaceOwned(
       }
       try {
         // Even a local persistence failure must stop the execution owner.
-        await options.onRemoved?.(reason, recorded);
+        await hooks.onRemoved?.(reason, recorded);
       } catch (cause) {
         if (!failures.includes(cause)) failures.push(cause);
       }
@@ -1218,13 +1289,49 @@ async function openWorkspaceOwned(
     })();
     void removalReceipt.catch(() => {
       try {
-        options.onUnavailable();
+        hooks.onUnavailable();
       } catch {}
     });
   };
   credentialFailureHandler = (cause) => {
     if (isCloudE2eeMemberRemoved(cause)) startMemberRemoval('member-removed');
     else if (isCloudE2eeDeviceRevoked(cause)) startMemberRemoval('device-revoked');
+  };
+  /** Try the desktop's ledger handoff once: one synthetic page through the ordinary
+   * verified ingest from this owner's pinned genesis, then the retained pairing check.
+   * Ingest verifies before it persists, so a rejected page leaves no records, pins or
+   * fence; it is never retried and never reported as a damaged ledger. */
+  const adoptLocalLedger = async () => {
+    const seed = localLedger;
+    localLedger = undefined;
+    const intent = pairing;
+    if (!seed || !intent || closed) return false;
+    try {
+      const { hashRecordBytes } = await import('@lody/e2ee-core/protocol');
+      const last = seed.recordsHex.at(-1);
+      if (!last) return false;
+      const status = await run(
+        opened.runtime.ingest(
+          {
+            startIndex: 0,
+            recordsHex: seed.recordsHex,
+            position: seed.position,
+            nextCursor: null,
+            checkpoint: {
+              length: seed.recordsHex.length,
+              headHash: hex(hashRecordBytes(bytes(last)).toBytes()),
+            },
+          },
+          'local-handoff'
+        )
+      );
+      if (closed) return false;
+      epochTransition.observe(status);
+      await confirmPairing(intent);
+      return true;
+    } catch {
+      return false;
+    }
   };
   const refreshInBackground = (resetRetries = true) => {
     if (closed) return Promise.resolve();
@@ -1240,69 +1347,76 @@ async function openWorkspaceOwned(
     refresh = (async () => {
       while (pending && !isClosed()) {
         pending = false;
-        const startedAt = authorityStamp();
-        const confirmRead = opened.executionAuthorization.beginLatestRead();
-        let status = await run(opened.runtime.status());
-        const trusted = status;
         let movedBack = false;
         let cursor: string | undefined;
-        let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
-        do {
-          const page = await options.cloud
-            .getHistory({
-              workspaceId: options.workspaceId,
-              credential: opened.credential,
-              ...(cursor
-                ? { cursor, checkpoint }
-                : status.position
-                  ? { after: status.position }
-                  : {}),
-            })
-            .catch(async (historyError: unknown) => {
-              try {
-                await options.cloud.getContentToken({
-                  workspaceId: options.workspaceId,
-                  credential: opened.credential,
-                });
-              } catch (cause) {
-                if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) throw cause;
-              }
-              throw historyError;
+        // A verified same-user handoff replaces only this pairing read; it never
+        // confirms live authority. Anything short of confirmed admission reads the network.
+        const local = await adoptLocalLedger();
+        if (!local) {
+          const startedAt = authorityStamp();
+          const confirmRead = opened.executionAuthorization.beginLatestRead();
+          let status = await run(opened.runtime.status());
+          const trusted = status;
+          let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
+          do {
+            const page = await options.cloud
+              .getHistory({
+                workspaceId: options.workspaceId,
+                credential: opened.credential,
+                ...(cursor
+                  ? { cursor, checkpoint }
+                  : status.position
+                    ? { after: status.position }
+                    : {}),
+              })
+              .catch(async (historyError: unknown) => {
+                try {
+                  await options.cloud.getContentToken({
+                    workspaceId: options.workspaceId,
+                    credential: opened.credential,
+                  });
+                } catch (cause) {
+                  if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause))
+                    throw cause;
+                }
+                throw historyError;
+              });
+            if (closed) return;
+            checkpoint ??= { ...page.checkpoint };
+            if (
+              page.checkpoint.length !== checkpoint.length ||
+              page.checkpoint.headHash !== checkpoint.headHash
+            ) {
+              opened.executionAuthorization.endOutageWindow();
+              throw new Error('e2ee_ledger_checkpoint_changed');
+            }
+            // Ingest accepts a known older prefix for overlapping reads; that proves nothing fresh.
+            movedBack ||=
+              page.checkpoint.length < trusted.length ||
+              (page.checkpoint.length === trusted.length &&
+                page.checkpoint.headHash !== trusted.headHash);
+            status = await run(opened.runtime.ingest(page)).catch((error) => {
+              // Unexpected defects are fenced too, without classifying them as
+              // transient storage or weakening the verification boundary.
+              ledgerBlocked = true;
+              throw error;
             });
-          if (closed) return;
-          checkpoint ??= { ...page.checkpoint };
-          if (
-            page.checkpoint.length !== checkpoint.length ||
-            page.checkpoint.headHash !== checkpoint.headHash
-          ) {
-            opened.executionAuthorization.endOutageWindow();
-            throw new Error('e2ee_ledger_checkpoint_changed');
+            ledgerBlocked = false;
+            ledgerRetryAttempts = 0;
+            epochTransition.observe(status);
+            cursor = page.nextCursor ?? undefined;
+          } while (cursor && !isClosed());
+          // Later key work has its own failures; they do not undo this confirmation.
+          if (movedBack) opened.executionAuthorization.endOutageWindow();
+          else if (!cursor && !closed) {
+            confirmRead();
+            authorityConfirmedAt = startedAt;
+            hooks.onAuthorityConfirmed?.(startedAt);
           }
-          // Ingest accepts a known older prefix for overlapping reads; that proves nothing fresh.
-          movedBack ||=
-            page.checkpoint.length < trusted.length ||
-            (page.checkpoint.length === trusted.length &&
-              page.checkpoint.headHash !== trusted.headHash);
-          status = await run(opened.runtime.ingest(page)).catch((error) => {
-            // Unexpected defects are fenced too, without classifying them as
-            // transient storage or weakening the verification boundary.
-            ledgerBlocked = true;
-            throw error;
-          });
-          ledgerBlocked = false;
-          ledgerRetryAttempts = 0;
-          epochTransition.observe(status);
-          cursor = page.nextCursor ?? undefined;
-        } while (cursor && !isClosed());
-        // Later key work has its own failures; they do not undo this confirmation.
-        if (movedBack) opened.executionAuthorization.endOutageWindow();
-        else if (!cursor && !closed) {
-          confirmRead();
-          options.onAuthorityConfirmed?.(startedAt);
         }
         if (!closed) {
           if (pairing) {
-            await confirmPairing(pairing);
+            if (!local) await confirmPairing(pairing);
             pairingConfirmed = true;
           }
           if (epochTransition.needsUpdate()) {
@@ -1336,7 +1450,7 @@ async function openWorkspaceOwned(
         if (pairing) pairingFailure = error;
         credentialFailureHandler(error);
         try {
-          options.onUnavailable();
+          hooks.onUnavailable();
         } catch {
           /* Diagnostic sinks cannot turn a background retry into an unhandled rejection. */
         }
@@ -1372,7 +1486,7 @@ async function openWorkspaceOwned(
       if (closed) return;
       if (unavailable) {
         try {
-          options.onUnavailable();
+          hooks.onUnavailable();
         } catch {
           /* Diagnostic sinks cannot turn a background check into an unhandled rejection. */
         }
@@ -1381,7 +1495,7 @@ async function openWorkspaceOwned(
     })()
       .catch(() => {
         try {
-          options.onUnavailable();
+          hooks.onUnavailable();
         } catch {
           /* Diagnostic sinks cannot turn a background check into an unhandled rejection. */
         }
@@ -1864,6 +1978,28 @@ async function openWorkspaceOwned(
         throw new Error('e2ee_pairing_unconfirmed', { cause: pairingFailure });
     },
     confirmPairing,
+    /** Activation only, after `activation.json` is durable: turn this verified pairing
+     * owner into the active owner in place. Background work waits for `adopt`. */
+    promote: () => {
+      if (closed) throw new Error('e2ee_closed');
+      if (!pairing || !pairingConfirmed) throw new Error('e2ee_pairing_unconfirmed');
+      pairing = undefined;
+      requireActivation = true;
+    },
+    /** The runtime owner of a promoted workspace binds its callbacks and starts the
+     * bounded authority check. A live read already confirmed during activation is
+     * reported once; otherwise (a local handoff) one background read confirms it. */
+    adopt: (
+      next: Pick<CliE2eeWorkspaceOptions, 'onUnavailable' | 'onAuthorityConfirmed' | 'onRemoved'>
+    ) => {
+      if (closed || pairing || !requireActivation) throw new Error('e2ee_closed');
+      Object.assign(hooks, next);
+      if (authorityConfirmedAt) hooks.onAuthorityConfirmed?.(authorityConfirmedAt);
+      else void refreshInBackground();
+      startAuthorityCheck();
+    },
+    /** Join the current refresh without requesting another round. */
+    settleRefresh: () => refresh ?? Promise.resolve(),
     completeRemotePairing: (pairingSessionId: string) =>
       options.cloud.completeMachinePairing?.({
         workspaceId: options.workspaceId,

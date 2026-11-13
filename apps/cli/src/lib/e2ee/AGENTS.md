@@ -85,8 +85,11 @@
   Logs carry only both epochs.
   [M3 selection](../../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
-  receiver: verify current installed key, close temporary owner, THEN write `activation.json`
-  before Fleet attaches rooms. Marker grants no authority; match genesis/device.
+  receiver: verify current installed key, THEN write `activation.json` before Fleet attaches
+  rooms. Remote activation closes its owner; local activation promotes that leased owner into
+  Fleet's start, which closes it unless a runtime adopts it. A desktop ledger handoff is untrusted
+  bytes verified from the pinned genesis; rejection falls back to history, and it never confirms
+  authority. Marker grants no authority; match genesis/device.
   Activated workspaces reopen offline. Join identical per-workspace intents; Fleet shutdown
   drains activation before cloud-port close.
 

@@ -138,6 +138,7 @@ import {
   openCliE2eeWorkspaceLegacy,
   openCliE2eePairingRuntimeLegacy,
   activateCliE2eeWorkspaceLegacy,
+  activateAndPromoteCliE2eeWorkspaceLegacy,
   prepareCliE2eeMachineLegacy,
   retainCliE2eeWorkspaceBinding,
   validateCliE2eePairingIntentLegacy,
@@ -148,6 +149,7 @@ import { KeyMailbox } from '@lody/e2ee-core/services';
 import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite';
 import type { E2eeWorkspaceHistoryPage, E2eeMailboxRequests } from '@lody/cloud-api';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { createTestCloudPort } from './test-cloud-port';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -4106,6 +4108,224 @@ describe('machine E2EE local runtime', () => {
     }
   });
 
+  describe('same-machine ledger handoff and in-place promotion', () => {
+    /** A genuine admitted machine identity, its mailbox envelope and history from `setup`. */
+    const handoffFixture = async (name: string, count: number) => {
+      const directory = await mkdtemp(join(tmpdir(), `cli-e2ee-handoff-${name}-`));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      const accountId = `synthetic-handoff-${name}`;
+      const identity = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update(accountId).digest('hex'),
+        'workspace'
+      );
+      const fixture = await execute(setup(directory, count, join(identity, 'custody')));
+      const genesisHash = hex(fixture.genesis.toBytes());
+      const prepared = await prepareCliE2eeMachineLegacy({
+        accountId,
+        machineId: 'machine',
+        frontendSigningPublicKey: fixture.sender,
+        workspaceId: 'workspace',
+        genesisHash,
+        genesisRecordHex: hex(fixture.genesisRecord),
+        membershipId: '0a'.repeat(16),
+        pairingSessionId: '73'.repeat(16),
+        keyring: noKeyring,
+      });
+      if ('superseded' in prepared) throw new Error('unexpected superseded preparation');
+      const historyReads: Parameters<CloudE2eePort['getHistory']>[0][] = [];
+      let history: (
+        input: Parameters<CloudE2eePort['getHistory']>[0]
+      ) => ReturnType<typeof page> = () => {
+        throw new Error('history_must_not_be_read');
+      };
+      const cloud = {
+        getHistory: async (input: Parameters<CloudE2eePort['getHistory']>[0]) => {
+          historyReads.push(input);
+          return { ...history(input), workspaceId: 'workspace', genesisHash };
+        },
+        getContentToken: async () => {
+          throw new Error('unexpected_content_token');
+        },
+        mailboxCall: async (
+          method: keyof E2eeMailboxRequests,
+          input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+        ) => {
+          if (method === 'fetch')
+            return {
+              items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
+              next: null,
+            };
+          if (method === 'status')
+            return {
+              ...(input as E2eeMailboxRequests['status']).slot,
+              revision: 0,
+              status: 'InstallationReported',
+            };
+          if (method === 'report') return null;
+          throw new Error('unexpected_mailbox_operation');
+        },
+      } as CloudE2eePort;
+      const options = {
+        machineId: 'machine',
+        accountId,
+        workspaceId: 'workspace',
+        genesisHash,
+        pairingSessionId: prepared.pairingSessionId,
+        frontendSigningPublicKey: fixture.sender,
+        expectedSigningPublicKey: prepared.signingPublicKey,
+        cloud,
+        keyring: noKeyring,
+        onUnavailable: () => undefined,
+      };
+      const leaseFree = () =>
+        Effect.runPromise(
+          Effect.scoped(leaseE2eeIdentity(identity, true)).pipe(
+            Effect.as(true),
+            Effect.catch(() => Effect.succeed(false))
+          )
+        );
+      return {
+        directory,
+        identity,
+        fixture,
+        options,
+        historyReads,
+        serve: (next: typeof history) => {
+          history = next;
+        },
+        leaseFree,
+      };
+    };
+
+    it('activates from a verified desktop ledger handoff without reading history, then starts the runtime on the same owner without reopening custody', async () => {
+      const t = await handoffFixture('offline', 67);
+      let promoted:
+        | Awaited<ReturnType<typeof activateAndPromoteCliE2eeWorkspaceLegacy>>
+        | undefined;
+      const original = join(t.identity, 'custody', `${t.options.genesisHash}.machine.device`);
+      const originalOpens = () =>
+        vi.mocked(fs.open).mock.calls.filter(([path]) => path === original).length;
+      try {
+        const before = originalOpens();
+        promoted = await activateAndPromoteCliE2eeWorkspaceLegacy({
+          ...t.options,
+          // More records than one history page: the handoff is one verified page.
+          ledgerHandoff: {
+            recordsHex: t.fixture.records.map(hex),
+            position: page(t.fixture.records).position,
+          },
+        });
+        expect(t.historyReads).toEqual([]);
+        const activationOpens = originalOpens() - before;
+        expect(activationOpens).toBeGreaterThan(0);
+        expect(await promoted.status()).toMatchObject({
+          length: t.fixture.records.length,
+          hasCurrentKey: true,
+          devicePublicKey: t.options.expectedSigningPublicKey,
+        });
+        expect(JSON.parse(await readFile(join(t.identity, 'activation.json'), 'utf8'))).toEqual({
+          genesisHash: t.options.genesisHash,
+          signingPublicKey: t.options.expectedSigningPublicKey,
+        });
+        // The promoted owner holds the identity lease: reset cannot archive under it.
+        expect(await t.leaseFree()).toBe(false);
+        let attached: unknown;
+        const create = vi
+          .spyOn(LoroDocumentManager, 'create')
+          .mockImplementation(async (_workspaceId, _userId, _logger, managerOptions) => {
+            attached = managerOptions?.encryptedWorkspace;
+            throw new Error('synthetic room attach failure');
+          });
+        try {
+          await expect(
+            Lody.create({
+              logger: getLogger('e2ee-handoff-test'),
+              workspaceId: 'workspace' as WorkspaceId,
+              contentMode: 'e2ee',
+              genesisHash: t.options.genesisHash,
+              token: 'token',
+              userId: t.options.accountId,
+              machineId: 'machine',
+              machineName: 'machine',
+              cloudPort: { ...createTestCloudPort(), e2ee: t.options.cloud },
+              encryptedWorkspace: promoted,
+            } as unknown as Parameters<typeof Lody.create>[0])
+          ).rejects.toThrow('synthetic room attach failure');
+        } finally {
+          create.mockRestore();
+        }
+        // Rooms attach to the activated owner; custody and SQLite opened exactly once.
+        expect(attached).toBe(promoted);
+        expect(originalOpens() - before).toBe(activationOpens);
+        // A failed start before Lody owns the workspace releases it for reset or retry.
+        expect(await t.leaseFree()).toBe(true);
+        await expect(promoted.status()).rejects.toThrow('e2ee_closed');
+      } finally {
+        await promoted?.close();
+        vi.unstubAllEnvs();
+        await rm(t.directory, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects a tampered handoff without retaining any of it and activates from genuine history', async () => {
+      const t = await handoffFixture('tampered', 2);
+      let promoted:
+        | Awaited<ReturnType<typeof activateAndPromoteCliE2eeWorkspaceLegacy>>
+        | undefined;
+      try {
+        const forged = t.fixture.records.map((record) => new Uint8Array(record));
+        forged[1]![forged[1]!.length - 1]! ^= 1;
+        t.serve(() => page(t.fixture.records));
+        promoted = await activateAndPromoteCliE2eeWorkspaceLegacy({
+          ...t.options,
+          ledgerHandoff: {
+            recordsHex: forged.map(hex),
+            position: 'p1:workspace:2:forged-offset:0',
+          },
+        });
+        // The network read starts from genesis: no forged record or position was kept.
+        expect(t.historyReads).toEqual([
+          { workspaceId: 'workspace', credential: expect.any(String) },
+        ]);
+        expect(await promoted.status()).toMatchObject({
+          length: 2,
+          position: page(t.fixture.records).position,
+          hasCurrentKey: true,
+        });
+      } finally {
+        await promoted?.close();
+        vi.unstubAllEnvs();
+        await rm(t.directory, { recursive: true, force: true });
+      }
+    });
+
+    it('continues a stale handoff prefix that lacks the admission from history at its position', async () => {
+      const t = await handoffFixture('stale', 2);
+      let promoted:
+        | Awaited<ReturnType<typeof activateAndPromoteCliE2eeWorkspaceLegacy>>
+        | undefined;
+      try {
+        const prefix = page(t.fixture.records, 0, 1).position;
+        t.serve((input) => {
+          if (input.after !== prefix) throw new Error('unexpected_history_request');
+          return page(t.fixture.records, 1);
+        });
+        promoted = await activateAndPromoteCliE2eeWorkspaceLegacy({
+          ...t.options,
+          ledgerHandoff: { recordsHex: [hex(t.fixture.genesisRecord)], position: prefix },
+        });
+        expect(t.historyReads.map((input) => input.after)).toEqual([prefix]);
+        expect(await promoted.status()).toMatchObject({ length: 2, hasCurrentKey: true });
+      } finally {
+        await promoted?.close();
+        vi.unstubAllEnvs();
+        await rm(t.directory, { recursive: true, force: true });
+      }
+    });
+  });
+
   it.each(['not-a-staging-recipient', 'temporary-io'])(
     'installs a late-admitted machine key from the real mailbox despite %s',
     async (reason) => {
@@ -4260,6 +4480,70 @@ describe('machine E2EE local runtime', () => {
       }
     }
   );
+
+  // Opening an encrypted runtime with a mailbox must not create key-maintenance journals:
+  // receive.sqlite appears with the first key reception and repair.sqlite only when a
+  // repair is actually queued.
+  it('creates the receive journal on first key reception and never opens an unused repair journal', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-lazy-journals-'));
+    try {
+      const fixture = await execute(setup(directory));
+      const journals = async () =>
+        (await readdir(join(directory, 'runtime'))).filter((name) =>
+          ['receive.sqlite', 'repair.sqlite'].includes(name)
+        );
+      await execute(
+        Effect.gen(function* () {
+          const view = Result.getOrThrow(
+            verifyLedger({
+              anchor: fixture.genesis,
+              records: fixture.records,
+              checkpoint: {
+                head: hashRecordBytes(fixture.records.at(-1)!),
+                length: fixture.records.length,
+              },
+            })
+          );
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(fixture.genesis);
+          const backend = yield* makeSqliteKeyMailbox({
+            path: join(directory, 'mailbox.sqlite'),
+            mode: 'create',
+            genesis: fixture.genesis,
+            ledger: () => Effect.succeed(view),
+          });
+          const sender = Result.getOrThrow(
+            Bytes.signingPublicKey(Buffer.from(fixture.sender, 'hex'))
+          );
+          yield* Context.get(
+            yield* Layer.build(referenceKeyMailbox(backend, sender)),
+            KeyMailbox
+          ).put('ad'.repeat(16), fixture.frame);
+          const runtime = yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord: fixture.genesisRecord,
+            mailbox: Context.get(
+              yield* Layer.build(referenceKeyMailbox(backend, device.publicKey)),
+              KeyMailbox
+            ),
+          });
+          yield* runtime.ingest(page(fixture.records));
+          expect(yield* Effect.promise(journals)).toEqual([]);
+          yield* runtime.receiveKeys();
+          expect((yield* runtime.status()).hasCurrentKey).toBe(true);
+          expect(yield* Effect.promise(journals)).toEqual(['receive.sqlite']);
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it('does not reject a good mailbox envelope after a temporary installed-key write failure', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-mailbox-io-'));

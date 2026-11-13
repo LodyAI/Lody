@@ -3580,6 +3580,38 @@ void test('native content uses a durable bounded grace and immediately prefers a
     }).pipe(Effect.provideService(Clock.Clock, clock))
   )
 })
+// Each key-round mode opens only the SQLite journals its core capabilities require, so a
+// receive-only or distribute-only open never creates unused maintenance stores. The
+// distributor records this device's own publication through the receiver, so it needs
+// receive.sqlite as well; repair.sqlite belongs to full rounds only.
+void test('key rounds create only the maintenance journals their mode needs', async (t) => {
+  const journals = (directory) =>
+    ['receive', 'outbox', 'distribution', 'repair'].filter((name) =>
+      existsSync(join(directory, 'workspaces', workspaceId, `${name}.sqlite`))
+    )
+  const receiving = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox } = yield* maintenanceFixture(receiving)
+      assert.deepEqual(journals(receiving), [])
+      yield* owner.host.receiveKeys(workspaceId, () => mailbox)
+      assert.deepEqual(journals(receiving), ['receive'])
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.deepEqual(journals(receiving), ['receive', 'outbox', 'distribution', 'repair'])
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+    })
+  )
+  const distributing = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox } = yield* maintenanceFixture(distributing)
+      yield* owner.host.distributeKeys(workspaceId, () => mailbox)
+      assert.deepEqual(journals(distributing), ['receive', 'outbox', 'distribution'])
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.deepEqual(journals(distributing), ['receive', 'outbox', 'distribution', 'repair'])
+    })
+  )
+})
 void test('an unreadable installed blob keeps ledger open and is replaced only by a verified mailbox key', async (t) => {
   const directory = await fixture(t)
   await execute(
