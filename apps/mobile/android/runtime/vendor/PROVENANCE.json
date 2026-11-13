@@ -139,5 +139,11 @@
       "src/runtime/handlers/mentions.ts"
     ],
     "note": "A Role on several machines labels each @ mention target by its alias or the computer's catalog name instead of the raw machine id. Mirrored verbatim from the iOS runtime source in the same change."
+  },
+  "roleMentionAfterText": {
+    "files": [
+      "src/runtime/mention-expansion.ts"
+    ],
+    "note": "An @session:/@role: chip written straight after non-ASCII text (`让@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
   }
 }
