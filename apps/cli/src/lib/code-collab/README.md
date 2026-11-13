@@ -4,7 +4,8 @@ Binding rules live in [AGENTS.md](AGENTS.md); this file is the navigation index.
 Current behavior and protocol references: [file surfaces](../../../../../.agents/docs/sessions-file-surfaces.md). The old v1
 host/runtime/CRDT capture implementation has been removed from this directory.
 
-Turn completion, error and Stop schedule shared-state refresh without waiting.
+Turn completion, error and Stop await shared-state refresh before Turn release,
+within the execution owner's statistics budget.
 The service owns cancellation and per-attempt deadlines: `taskTimeoutMs` for embedded
 callers, or `LODY_CODE_COLLAB_TASK_TIMEOUT_MS` (default 30,000 ms; invalid/nonpositive
 values use the default). Refreshes coalesce by owner and settle waiters per batch.
@@ -21,6 +22,9 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   publishes file tree/current All Changes, and opens current or turn-scoped diffs.
   Project groups scan each Member with Git, prefix paths by Member placement, and pin
   each Member merge base for All Changes snapshots. The main directory is not a Git repository.
+  Current diff readers verify equal-content candidates against that same Git base
+  so binary replacements and mode-only changes remain visible. Failed comparisons
+  stay retryable per file; turn evidence never queries current Git state.
   Ordinary Git All Changes uses the owner base; non-Git uses local diff evidence only when a
   trustworthy base exists. It owns in-memory file-index state replacement and Flock
   publish even when the scan itself ran in a worker. Full comparison totals, before

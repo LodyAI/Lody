@@ -277,6 +277,14 @@ type DiffManifestBase = {
   readonly unavailableReason?: 'not_a_git_worktree' | 'no_commits';
 };
 
+type GitDiffComparison = {
+  readonly repository: string;
+  readonly base: string;
+  readonly path: string;
+};
+
+type FileComparisonResult = 'changed' | 'unchanged' | 'unavailable';
+
 type OwnerPublishedSharedState = {
   readonly diffBaseVersion: string;
   readonly diffFileVersions: Readonly<Record<string, string>>;
@@ -1578,6 +1586,7 @@ export class CodeCollabV2Service {
       digest?: string;
       bytes?: Buffer;
     };
+    let gitComparison: GitDiffComparison | undefined;
     const describe = async (side: 'old' | 'new'): Promise<Side> => {
       let source: DiffBlobSource;
       if (request.turnId !== undefined || (side === 'old' && page.base === 'diff-store')) {
@@ -1637,6 +1646,7 @@ export class CodeCollabV2Service {
           filePath = match.relativePath;
           base = page.memberBases?.[member.path] ?? 'HEAD';
         }
+        gitComparison = { repository, base, path: filePath };
         const tree = await runGit(repository, [
           '--literal-pathspecs',
           'ls-tree',
@@ -1709,7 +1719,7 @@ export class CodeCollabV2Service {
     };
     const base = await describe('old');
     const head = await describe('new');
-    const status =
+    let status: CodeCollabDiffManifestEntry['status'] =
       base.status === 'too_large' || head.status === 'too_large'
         ? 'too_large'
         : base.status === 'binary' || head.status === 'binary'
@@ -1719,6 +1729,20 @@ export class CodeCollabV2Service {
             : base.digest === head.digest
               ? 'not_changed'
               : 'ok';
+    if (status === 'not_changed' && gitComparison) {
+      const comparison = await compareGitFile(gitComparison);
+      if (comparison === 'unavailable') {
+        throw new CodeCollabV2ServiceError(
+          'transient_io',
+          'Git file comparison could not be read.',
+          {
+            path: resolved.workspacePath,
+            retryable: true,
+          }
+        );
+      }
+      if (comparison === 'changed') status = 'ok';
+    }
     const entry: CodeCollabDiffManifestEntry = {
       path: resolved.workspacePath,
       status,
@@ -1970,7 +1994,16 @@ export class CodeCollabV2Service {
         message: newSnapshot.message,
       };
     }
-    if (areDiffSnapshotsEqual(oldSnapshot.snapshot, newSnapshot.snapshot)) {
+    const comparison = await compareCurrentDiffSnapshots(oldSnapshot, newSnapshot.snapshot);
+    if (comparison === 'unavailable') {
+      return {
+        status: 'unavailable',
+        path: resolved.workspacePath,
+        reason: 'transient_io',
+        message: 'Git file comparison could not be read.',
+      };
+    }
+    if (comparison === 'unchanged') {
       return {
         status: 'unavailable',
         path: resolved.workspacePath,
@@ -2099,9 +2132,14 @@ export class CodeCollabV2Service {
         truncated = true;
         continue;
       }
-      if (areDiffSnapshotsEqual(oldSnapshot.snapshot, newSnapshot.snapshot)) {
-        // Listed as changed but base snapshot equals disk (also covers binary↔binary).
-        // Matches open-current-diff's not_changed.
+      const comparison = await compareCurrentDiffSnapshots(oldSnapshot, newSnapshot.snapshot);
+      if (comparison === 'unavailable') {
+        entries.push({ status: 'deferred', path: workspacePath, ...stats });
+        truncated = true;
+        continue;
+      }
+      if (comparison === 'unchanged') {
+        // Recheck the same pinned Git comparison, including metadata-only changes.
         entries.push({
           status: 'unavailable',
           path: workspacePath,
@@ -3089,7 +3127,11 @@ export class CodeCollabV2Service {
     pinnedMemberBases?: Readonly<Record<string, string>>,
     options: { readonly allowDiffStoreFallback?: boolean } = {}
   ): Promise<
-    | { readonly status: 'ready'; readonly snapshot: InternalDiffSnapshot }
+    | {
+        readonly status: 'ready';
+        readonly snapshot: InternalDiffSnapshot;
+        readonly gitComparison?: GitDiffComparison;
+      }
     | { readonly status: 'unavailable' }
   > {
     if (resolved.projectRun) {
@@ -4394,38 +4436,79 @@ async function readGitBaseDiffSnapshot(
   workspacePath: string,
   maxBytes: number
 ): Promise<
-  | { readonly status: 'ready'; readonly snapshot: InternalDiffSnapshot }
+  | {
+      readonly status: 'ready';
+      readonly snapshot: InternalDiffSnapshot;
+      readonly gitComparison: GitDiffComparison;
+    }
   | { readonly status: 'unavailable' }
 > {
+  const ready = (snapshot: InternalDiffSnapshot) => ({
+    status: 'ready' as const,
+    snapshot,
+    gitComparison: { repository: workspaceRoot, base: baseCommit, path: workspacePath },
+  });
   const objectSpec = `${baseCommit}:${workspacePath}`;
   const exists = await runGit(workspaceRoot, ['cat-file', '-e', objectSpec]);
   if (!exists.ok) {
-    return { status: 'ready', snapshot: { kind: 'missing' } };
+    return ready({ kind: 'missing' });
   }
   const objectType = await runGit(workspaceRoot, ['cat-file', '-t', objectSpec]);
   if (!objectType.ok || objectType.stdout.trim() !== 'blob') {
-    return { status: 'ready', snapshot: { kind: 'binary' } };
+    return ready({ kind: 'binary' });
   }
   const objectSize = await runGit(workspaceRoot, ['cat-file', '-s', objectSpec]);
   const size = Number(objectSize.ok ? objectSize.stdout.trim() : NaN);
   if (Number.isFinite(size) && size > maxBytes) {
-    return { status: 'ready', snapshot: { kind: 'too_large' } };
+    return ready({ kind: 'too_large' });
   }
   const blob = await runGitBuffer(workspaceRoot, ['show', objectSpec], maxBytes + 1);
   if (!blob.ok) {
     return { status: 'unavailable' };
   }
   if (blob.stdout.byteLength > maxBytes) {
-    return { status: 'ready', snapshot: { kind: 'too_large' } };
+    return ready({ kind: 'too_large' });
   }
   if (hasBinaryNul(blob.stdout)) {
-    return { status: 'ready', snapshot: { kind: 'binary' } };
+    return ready({ kind: 'binary' });
   }
   try {
-    return { status: 'ready', snapshot: { kind: 'text', text: decodeUtf8(blob.stdout) } };
+    return ready({ kind: 'text', text: decodeUtf8(blob.stdout) });
   } catch {
-    return { status: 'ready', snapshot: { kind: 'binary' } };
+    return ready({ kind: 'binary' });
   }
+}
+
+async function compareGitFile(comparison: GitDiffComparison): Promise<FileComparisonResult> {
+  const result = await runGit(comparison.repository, [
+    '--literal-pathspecs',
+    'diff',
+    '--raw',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--no-renames',
+    comparison.base,
+    '--',
+    comparison.path,
+  ]);
+  if (!result.ok) return 'unavailable';
+  return result.stdout.length === 0 ? 'unchanged' : 'changed';
+}
+
+async function compareCurrentDiffSnapshots(
+  base: { readonly snapshot: InternalDiffSnapshot; readonly gitComparison?: GitDiffComparison },
+  current: InternalDiffSnapshot
+): Promise<FileComparisonResult> {
+  const sameContent = areDiffSnapshotsEqual(base.snapshot, current);
+  if (
+    base.gitComparison &&
+    base.snapshot.kind === current.kind &&
+    (base.snapshot.kind === 'binary' || sameContent)
+  ) {
+    // Equal text can still have mode changes; binary markers carry no content identity.
+    return compareGitFile(base.gitComparison);
+  }
+  return sameContent ? 'unchanged' : 'changed';
 }
 
 async function diffSnapshotLineStats(
@@ -4448,8 +4531,8 @@ function areDiffSnapshotsEqual(left: InternalDiffSnapshot, right: InternalDiffSn
   if (left.kind !== right.kind) {
     return false;
   }
-  // A too-large marker carries no content identity, so it cannot prove equality.
-  if (left.kind === 'too_large') {
+  // Placeholder kinds carry no content identity, so they cannot prove equality.
+  if (left.kind === 'too_large' || left.kind === 'binary') {
     return false;
   }
   return left.kind !== 'text' || left.text === (right as { readonly text: string }).text;

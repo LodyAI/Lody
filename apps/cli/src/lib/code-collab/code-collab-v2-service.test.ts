@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
+import * as processCommands from '@lody/shared/node/process';
 
 import {
   codeCollabFileIndexToSharedState,
@@ -16,6 +17,7 @@ import {
   type CodeCollabV2AllChangesState,
   type CodeCollabV2FileIndexState,
   type CodeCollabV2FileTreeState,
+  type ProjectId,
   type SessionId,
 } from '@lody/shared';
 import {
@@ -1998,6 +2000,221 @@ const plainSnapshotText = (snapshot: { kind: string }): string | undefined => {
 };
 
 describe('CodeCollabV2Service openAllChangesDiff', () => {
+  it('compares metadata and binary changes in the owning Project Member repository', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const memberRoot = path.join(workspaceRoot, 'repo');
+      await mkdir(memberRoot);
+      const git = (...args: string[]) => execFileAsync('git', args, { cwd: memberRoot });
+      await initGitRepoWithCommit(memberRoot);
+      await git('config', 'core.filemode', 'true');
+      await writeFile(path.join(memberRoot, 'image.bin'), Buffer.from([0, 1, 2]));
+      const modePath = path.join(memberRoot, 'mode.txt');
+      await writeFile(modePath, 'same\n');
+      await chmod(modePath, 0o644);
+      await gitCommitAll(memberRoot, 'base');
+      await git('checkout', '-b', 'feature');
+      await chmod(modePath, 0o755);
+      await writeFile(path.join(memberRoot, 'image.bin'), Buffer.from([0, 1, 3]));
+      await gitCommitAll(memberRoot, 'member changes');
+      const service = new CodeCollabV2Service({
+        readOnly: true,
+        resolveWorkspace: async () => ({
+          ok: true,
+          ownerSessionId: SESSION_ID,
+          workspaceRoot,
+          projectRun: {
+            id: 'synthetic-project' as ProjectId,
+            name: 'Synthetic project',
+            root: workspaceRoot,
+            members: {
+              repo: {
+                o: 0,
+                src: { kind: 'github', repoFullName: 'example/synthetic' },
+                placement: { kind: 'root', dir: 'repo' },
+                path: 'repo',
+                base: 'main',
+              },
+            },
+          },
+        }),
+      });
+      try {
+        const batch = await service.openAllChangesDiff({ sessionId: SESSION_ID });
+        if (batch.status !== 'ok') throw new Error('Expected a Project diff batch.');
+        expect(batch.entries.map((entry) => [entry.path, entry.status]).sort()).toEqual([
+          ['repo/image.bin', 'ok'],
+          ['repo/mode.txt', 'ok'],
+        ]);
+        for (const filePath of ['repo/image.bin', 'repo/mode.txt']) {
+          expect(
+            await service.openCurrentDiff({ sessionId: SESSION_ID, path: filePath })
+          ).toMatchObject({ status: 'ok' });
+        }
+        const manifest = await service.openDiffManifest({ sessionId: SESSION_ID });
+        if (manifest.status !== 'ok') throw new Error('Expected a Project manifest.');
+        expect(manifest.entries.map((entry) => [entry.path, entry.status]).sort()).toEqual([
+          ['repo/image.bin', 'binary'],
+          ['repo/mode.txt', 'ok'],
+        ]);
+      } finally {
+        await service.dispose();
+      }
+    });
+  });
+
+  it('retains binary replacements and mode-only changes against the selected Git base', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const git = (...args: string[]) => execFileAsync('git', args, { cwd: workspaceRoot });
+      await initGitRepoWithCommit(workspaceRoot);
+      await git('config', 'core.filemode', 'true');
+      await writeFile(path.join(workspaceRoot, 'image.bin'), Buffer.from([0, 1, 2]));
+      const modePath = path.join(workspaceRoot, 'mode[1].txt');
+      await writeFile(modePath, 'same\n');
+      await chmod(modePath, 0o644);
+      await gitCommitAll(workspaceRoot, 'base');
+      await git('checkout', '-b', 'feature');
+      await writeFile(path.join(workspaceRoot, 'image.bin'), Buffer.from([0, 1, 3]));
+      await chmod(modePath, 0o755);
+      await git('add', '--', 'mode[1].txt');
+
+      const service = new CodeCollabV2Service({
+        readOnly: true,
+        resolveWorkspace: makeResolver(workspaceRoot),
+      });
+      const expectChanges = async (scope: 'branch' | 'uncommitted') => {
+        const batch = await service.openAllChangesDiff({ sessionId: SESSION_ID, scope });
+        expect(batch).toMatchObject({ status: 'ok', truncated: false });
+        if (batch.status !== 'ok') throw new Error('Expected a Git diff batch.');
+        expect(batch.entries.map((entry) => entry.path).sort()).toEqual([
+          'image.bin',
+          'mode[1].txt',
+        ]);
+        expect(batch.entries.find((entry) => entry.path === 'image.bin')).toMatchObject({
+          status: 'ok',
+          oldSnapshot: { kind: 'binary' },
+          newSnapshot: { kind: 'binary' },
+        });
+        expect(batch.entries.find((entry) => entry.path === 'mode[1].txt')).toMatchObject({
+          status: 'ok',
+          add: 0,
+          del: 0,
+        });
+        expect(
+          await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'image.bin', scope })
+        ).toMatchObject({ status: 'ok', oldSnapshot: { kind: 'binary' } });
+        const mode = await service.openCurrentDiff({
+          sessionId: SESSION_ID,
+          path: 'mode[1].txt',
+          scope,
+        });
+        expect(mode).toMatchObject({ status: 'ok', add: 0, del: 0 });
+        if (mode.status !== 'ok') throw new Error('Expected a mode-only diff.');
+        expect(plainSnapshotText(mode.oldSnapshot)).toBe('same\n');
+        expect(plainSnapshotText(mode.newSnapshot)).toBe('same\n');
+        const manifest = await service.openDiffManifest({ sessionId: SESSION_ID, scope });
+        if (manifest.status !== 'ok') throw new Error('Expected a Git manifest.');
+        expect(manifest.entries.find((entry) => entry.path === 'image.bin')?.status).toBe('binary');
+        expect(manifest.entries.find((entry) => entry.path === 'mode[1].txt')).toMatchObject({
+          status: 'ok',
+          add: 0,
+          del: 0,
+        });
+      };
+      try {
+        await expectChanges('branch');
+        await expectChanges('uncommitted');
+        await gitCommitAll(workspaceRoot, 'commit binary and mode changes');
+        await expectChanges('branch');
+        expect(
+          await service.openAllChangesDiff({ sessionId: SESSION_ID, scope: 'uncommitted' })
+        ).toMatchObject({ status: 'ok', entries: [] });
+        for (const filePath of ['image.bin', 'mode[1].txt']) {
+          expect(
+            await service.openCurrentDiff({
+              sessionId: SESSION_ID,
+              path: filePath,
+              scope: 'uncommitted',
+            })
+          ).toMatchObject({ status: 'unavailable', reason: 'not_changed' });
+        }
+
+        await git('restore', '--source=main', '--worktree', '--', 'image.bin', 'mode[1].txt');
+        expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
+          status: 'ok',
+          entries: [],
+        });
+        expect(await service.openDiffManifest({ sessionId: SESSION_ID })).toMatchObject({
+          status: 'ok',
+          entries: [],
+        });
+        expect(
+          await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'image.bin' })
+        ).toMatchObject({ status: 'unavailable', reason: 'not_changed' });
+        await expectChanges('uncommitted');
+      } finally {
+        await service.dispose();
+      }
+    });
+  });
+
+  it('isolates a failed Git comparison to its file and recovers on the next read', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      await execFileAsync('git', ['config', 'core.filemode', 'true'], { cwd: workspaceRoot });
+      const modePath = path.join(workspaceRoot, 'mode.txt');
+      await writeFile(modePath, 'same\n');
+      await chmod(modePath, 0o644);
+      await writeFile(path.join(workspaceRoot, 'healthy.txt'), 'before\n');
+      await gitCommitAll(workspaceRoot, 'base');
+      await chmod(modePath, 0o755);
+      await writeFile(path.join(workspaceRoot, 'healthy.txt'), 'after\n');
+      const run = processCommands.runCommandTextLegacy;
+      const failure = vi
+        .spyOn(processCommands, 'runCommandTextLegacy')
+        .mockImplementation((request, options) =>
+          request.command === 'git' && request.args?.includes('--raw')
+            ? Promise.reject(new Error('Synthetic Git comparison failure'))
+            : run(request, options)
+        );
+      const service = new CodeCollabV2Service({
+        readOnly: true,
+        resolveWorkspace: makeResolver(workspaceRoot),
+      });
+      try {
+        const batch = await service.openAllChangesDiff({ sessionId: SESSION_ID });
+        expect(batch).toMatchObject({ status: 'ok', truncated: true });
+        if (batch.status !== 'ok') throw new Error('Expected a partial Git batch.');
+        expect(batch.entries.find((entry) => entry.path === 'mode.txt')?.status).toBe('deferred');
+        expect(batch.entries.find((entry) => entry.path === 'healthy.txt')?.status).toBe('ok');
+        expect(
+          await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'mode.txt' })
+        ).toMatchObject({ status: 'unavailable', reason: 'transient_io' });
+        const manifest = await service.openDiffManifest({ sessionId: SESSION_ID });
+        if (manifest.status !== 'ok') throw new Error('Expected a partial Git manifest.');
+        expect(manifest.entries.find((entry) => entry.path === 'mode.txt')).toMatchObject({
+          status: 'unavailable',
+          error: { code: 'transient_io' },
+        });
+        expect(manifest.entries.find((entry) => entry.path === 'healthy.txt')?.status).toBe('ok');
+
+        failure.mockRestore();
+        const recovered = await service.openAllChangesDiff({ sessionId: SESSION_ID });
+        expect(recovered).toMatchObject({ status: 'ok', truncated: false });
+        if (recovered.status !== 'ok') throw new Error('Expected a recovered Git batch.');
+        expect(recovered.entries.map((entry) => entry.status)).toEqual(['ok', 'ok']);
+        expect(
+          await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'mode.txt' })
+        ).toMatchObject({ status: 'ok' });
+        const recoveredManifest = await service.openDiffManifest({ sessionId: SESSION_ID });
+        if (recoveredManifest.status !== 'ok') throw new Error('Expected a recovered manifest.');
+        expect(recoveredManifest.entries.map((entry) => entry.status)).toEqual(['ok', 'ok']);
+      } finally {
+        failure.mockRestore();
+        await service.dispose();
+      }
+    });
+  });
+
   it('prioritizes the focused non-Git diff and defers other files when the snapshot budget is exhausted', async () => {
     await withWorkspace(async (workspaceRoot) => {
       const paths = ['focus.txt', 'later-b.txt', 'later-c.txt'];

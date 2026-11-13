@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753)
 
 [English](2026-10-31-remote-diff-transport.md)
 
@@ -37,6 +37,14 @@ blob 分页使用原始字节偏移，允许切在 UTF-8 字符中间，正文�
 另外检查完整结果与密封 frame 上限。
 
 ### 来源与权限
+
+当前 Git 比较区分正文身份与文件是否变化。二进制或超限占位符不能证明正文相同，文本相同
+也不能排除执行权限变化。当前读取器将相同文本或旧接口的两个 binary 占位符判为
+`not_changed` 前，会在实际所属仓库内，针对同一个固定基线检查 Git 文件状态，按字面匹配
+路径，并禁用外部 diff 与文本转换。相同正文仍可复用 blob 键，但不能因此隐藏变更文件。
+这些信息只保留在 daemon 内，不增加协议字段。检查失败时旧批量接口返回 `deferred`
+（单文件返回 `transient_io`），清单返回逐文件 `unavailable`，后续读取仍可恢复，不能变成
+`not_changed`。历史 turn 比较仍只使用保留的证据。
 
 只有通过权限校验的清单才能签发 handle。handle 按请求会话和内容键索引，绑定实际 owner、
 工作区和来源。每页重新校验会话权限与绑定。每个请求会话最多 8,192 个 handle，全局最多
@@ -165,7 +173,8 @@ loader 不进入跨工作区的不可变 turn 缓存；已经完整读取的 tur
 
 - `apps/cli/src/lib/code-collab/code-collab-v2-service.test.ts`：真实 SHA-1/SHA-256 Git
   和磁盘字节、BOM/CRLF/Unicode、会话绑定、路径逃逸、过期、分页预算、基线移动、历史与非 Git
-  worker 读取、本地/远程 hunk 策略、等统计失效、不同文件根的基线、文件删除、捕获时编辑及补丁预算回退。
+  worker 读取、本地/远程 hunk 策略、等统计失效、不同文件根的基线、文件删除、捕获时编辑及补丁预算回退，
+  两种 scope 与 Project Member 的二进制替换、仅权限变化，以及 Git 比较失败后的单文件隔离与恢复。
 - `packages/turn-diff-store/tests/sqlite-store.test.ts`：只读描述与字节选择、owner 隔离、
   保留期、完整重组与 worker 消息。CLI 打包产物 `turn-diff-store-worker.js` 的独立探针也只读打开已有数据库，按描述精确还原 BOM、CRLF 和 Unicode 字节。早期未修改 store 的探针还精确还原了四个 chunk 中的
   400,020 UTF-8 字节，检查完整哈希、缺失/空文件与 GC；这是复用 store 而不新增快照表示的依据。

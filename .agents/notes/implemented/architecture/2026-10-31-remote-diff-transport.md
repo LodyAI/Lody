@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753)
 
 [中文](2026-10-31-remote-diff-transport.zh.md)
 
@@ -48,6 +48,17 @@ this also conservatively bounds the encrypted feature result, whose codec enforc
 its own complete-result and sealed-frame limits.
 
 ### Sources and authority
+
+Current Git comparisons distinguish content identity from file-change identity.
+Binary/oversize placeholders do not establish equal contents, and equal text does
+not exclude an executable-mode change. Before current readers report equal text
+or legacy binary pairs as `not_changed`, they check Git file state in the resolved
+repository against the same pinned base, with literal path matching and external
+diff/text conversion disabled. Reusing blob keys remains valid for equal text;
+it must not hide the changed file. This stays private to the daemon and adds no
+wire fields. A failed check returns legacy `deferred` (single-file `transient_io`)
+or a manifest per-file `unavailable`, allowing later reads to recover. It never
+becomes `not_changed`. Historical turn comparisons use retained evidence only.
 
 A handle is issued only by an authorized manifest and keyed by requested session
 and content key, with resolved owner, workspace and source. Every page reauthorizes
@@ -228,7 +239,8 @@ Behavioral evidence lives in:
   Git and disk bytes, BOM/CRLF/Unicode, session binding, path escape, expiry, page
   clamping, moved-base cursors, historical/non-Git worker reads, local/remote hunk
   policy and unchanged-stats invalidation, deleted files, capture-time edits and
-  hunk-budget fallback.
+  hunk-budget fallback, binary replacements and mode-only changes across both
+  scopes and Project Members, and per-file Git comparison failure/recovery.
 - `packages/turn-diff-store/tests/sqlite-store.test.ts`: read-only descriptor/byte
   selection, owner separation, retention, full reconstruction and worker messages. A separate smoke of the emitted CLI `turn-diff-store-worker.js` opens an existing database read-only and verifies descriptor-addressed BOM/CRLF/Unicode bytes.
   The earlier unchanged-store probe restored 400,020 UTF-8 bytes across four chunks
