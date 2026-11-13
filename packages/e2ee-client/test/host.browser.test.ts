@@ -21,6 +21,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { KEY_DELIVERY_RETRY_DELAYS } from '../src/account-requester';
 const call = (p: Page, a: string) =>
   p.evaluate((action) => (globalThis as HostGlobal).HostFixture.invoke(action), a);
 const record = (result: Awaited<ReturnType<typeof call>>) => {
@@ -93,7 +94,7 @@ it.each(['chromium', 'webkit'] as const)(
         // The refused first store is retried on the due schedule without any other call,
         // and only mailbox evidence counts as delivered.
         deliveries: ['running:true', 'retrying:true:e2ee_key_not_sent', 'delivered:true'],
-        sleeps: [10_000],
+        sleeps: [KEY_DELIVERY_RETRY_DELAYS[0]],
         refused: true,
         retriedExactly: true,
         length: 3,

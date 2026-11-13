@@ -14,6 +14,7 @@ import {
 import type {
   AccountPairingApproverFilter,
   AccountPairingApproverWorkspace,
+  AccountPairingRequesterFilter,
   AccountPairingRequesterWorkspace,
 } from './account-pairing';
 import { verifyPersonalHistory } from './admission';
@@ -152,7 +153,8 @@ export function makePortableAccountPairingRequester(input: {
   accountId: string;
   diagnostics?: (tag: string, error: unknown) => void;
 }): (
-  hints?: readonly AccountPairingWorkspaceHint[]
+  hints?: readonly AccountPairingWorkspaceHint[],
+  filter?: AccountPairingRequesterFilter
 ) => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown> {
   const remember = input.diagnostics ?? (() => {});
   const cachedByWorkspace = new Map<
@@ -263,13 +265,19 @@ export function makePortableAccountPairingRequester(input: {
     return mine[0]![0];
   });
 
-  return Effect.fnUntraced(function* (hints?: readonly AccountPairingWorkspaceHint[]) {
+  return Effect.fnUntraced(function* (
+    hints?: readonly AccountPairingWorkspaceHint[],
+    filter?: AccountPairingRequesterFilter
+  ) {
     const result: AccountPairingRequesterWorkspace[] = [];
     const byId = new Map<string, AccountPairingWorkspaceHint>();
     for (const hint of input.workspaces()) byId.set(hint.workspaceId, hint);
     for (const hint of hints ?? [])
       if (!byId.has(hint.workspaceId)) byId.set(hint.workspaceId, hint);
     for (const hint of byId.values()) {
+      // Never open a workspace host this step cannot use.
+      if (filter?.workspaceId !== undefined && filter.workspaceId !== hint.workspaceId) continue;
+      if (filter?.geneses && !filter.geneses.has(hint.genesisHash)) continue;
       const host = yield* input.host(hint.workspaceId).pipe(
         Effect.catch((error) => {
           remember('account-pairing-host', error);
@@ -400,8 +408,9 @@ export interface AccountPairingApproverSession {
   refresh(): Effect.Effect<unknown, unknown>;
   /** This session's existing key round (receive, reports, distribution, repair). Its
    * distributor targets only devices of the verified ledger and journals each envelope,
-   * so a later round retries the same id and bytes. */
-  keyRound(): Effect.Effect<unknown, unknown>;
+   * so a later round retries the same id and bytes. `distribute` only reconciles and
+   * sends this device's deliveries; an implementation without modes runs a full round. */
+  keyRound(mode?: 'full' | 'distribute'): Effect.Effect<unknown, unknown>;
   /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
    * public retryable `e2ee_*` code. */
   keyDeliveryEvidence(device: string): Effect.Effect<string, unknown>;
@@ -424,9 +433,11 @@ export interface AccountPairingKeyDeliveryEvent {
 }
 /** One ledger catch-up. Timing out cancels it and the round still runs. */
 export const ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS = 30_000;
-/** The desktop's member delivery backoff: 10 s doubling to a 5 min cap, eight retries. */
+/** Member key delivery backoff: eight retries over about 14 minutes. The first ones are
+ * short, so a requester waiting for its key is not held back by a transient refusal right
+ * after approval; the tail keeps the desktop's 5 min cap. */
 export const KEY_DELIVERY_RETRY_DELAYS = [
-  10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000,
+  500, 1_500, 4_000, 10_000, 40_000, 160_000, 300_000, 300_000,
 ] as const;
 /** Causes after which this device can never deliver; retrying would only repeat them. */
 const TERMINAL_KEY_DELIVERY = new Set([
@@ -574,7 +585,12 @@ export function makePortableAccountPairingApprover(input: {
                       .refresh()
                       .pipe(Effect.timeoutOption(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))
                   );
-                const round = yield* Effect.result(current.keyRound());
+                // The first attempt only distributes: the admission just committed on this
+                // already-current device, so receive/repair would only delay the envelope.
+                // A retry runs the full round, which first receives a key this device lacks.
+                const round = yield* Effect.result(
+                  current.keyRound(retry === 0 ? 'distribute' : 'full')
+                );
                 const evidence = yield* Effect.result(current.keyDeliveryEvidence(device));
                 if (Result.isSuccess(evidence) && evidence.success === 'delivered')
                   return 'delivered';

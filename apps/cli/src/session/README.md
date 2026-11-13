@@ -226,7 +226,7 @@ that follows another one in the chain yields one macrotask first
 Turn-scoped history LIST writes (assistant entry, ACP flushes, finalization, failure notices)
 wait until the user turn entry has synced into the CLI-local doc, because concurrent Loro list
 inserts can otherwise permanently order the reply before the user message. Status and meta map
-writes are never gated; some sit on the prompt critical path. The original 20-second gate deadline
+writes are never gated; some sit on the prompt critical path. The original one-minute gate deadline
 also bounds its pre-open assistant-entry callback. Disposal releases existing waiters immediately.
 The deadline keeps the live callback eligible to add author/model metadata. Only disposal aborts
 later callback steps, even if timeout already opened the gate; already-issued writes remain

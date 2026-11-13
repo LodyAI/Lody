@@ -58,7 +58,7 @@ import {
   createWorkspaceEpochTransitionLegacy,
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
-import { makeCliE2eeCustody, type MachineKeyring } from './custody';
+import { clearCachedCliE2eeKeyring, makeCliE2eeCustody, type MachineKeyring } from './custody';
 import { cliE2eeIdentityDirectory } from './retained-binding';
 export { cliE2eeIdentityDirectory };
 import { authorityStamp, type AuthorityStamp } from './authority-clock';
@@ -236,6 +236,7 @@ async function eraseRemovedWorkspace(
           yield* Effect.promise(async () => {
             for (const name of ['custody', 'runtime', 'binding.json', 'activation.json'])
               await rm(join(directory, name), { recursive: true, force: true });
+            clearCachedCliE2eeKeyring(join(directory, 'custody'));
             await rm(
               repositoryDirectory(directory, removal.genesisHash, removal.signingPublicKey),
               {
@@ -545,6 +546,9 @@ async function activateWorkspace(
     pairingSessionId: string;
     frontendSigningPublicKey: string;
     expectedSigningPublicKey: string;
+    /** `false` for same-machine desktop pairing, which has no relay machine-pairing session
+     * to complete. Defaults to `true`. */
+    remotePairing?: boolean;
   }
 ) {
   const pending = await openWorkspace(options, false, {
@@ -589,7 +593,8 @@ async function activateWorkspace(
     await handle.close().catch(() => undefined);
     await unlink(temporary).catch(() => undefined);
   }
-  await pending.completeRemotePairing(options.pairingSessionId);
+  if (options.remotePairing !== false)
+    await pending.completeRemotePairing(options.pairingSessionId);
 }
 
 async function openWorkspace(

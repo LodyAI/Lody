@@ -6510,7 +6510,6 @@
   "sessions.androidEmulator.quality.saver": "省流",
   "sessions.androidEmulator.quality.balanced": "均衡",
   "sessions.androidEmulator.quality.clear": "清晰",
-  "e2ee.create.mobileDescription": "密钥保存在本机受保护的存储中。创建后不能切换模式。",
   "e2ee.create.savedRequest": "正在继续上次的创建",
   "e2ee.failure.identity.title": "这台设备需要重新授权",
   "e2ee.failure.identity.body": "这台设备上保存的加密钥匙找不到了，可能是重装了系统或换了钥匙串。你的数据还在，用另一台已授权的设备再授权一次就行。",

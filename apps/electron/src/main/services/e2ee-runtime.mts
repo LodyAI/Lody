@@ -2056,7 +2056,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         workspaceId: string,
         mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
         staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
-        refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
+        refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history'],
+        mode: KeyRoundMode = 'full'
       ) =>
         Effect.flatMap(
           run(
@@ -2066,7 +2067,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 : Effect.fail(fail('closed'))
             )
           ),
-          (entry) => entry.keyRound(mailbox, staging, refreshLedger)
+          (entry) => entry.keyRound(mailbox, staging, refreshLedger, mode)
         ),
       /** Fetch and install this device's current key only (no report flush, distribution or
        * repair), under the same single-flight as keyRound. A joining member uses it to reach

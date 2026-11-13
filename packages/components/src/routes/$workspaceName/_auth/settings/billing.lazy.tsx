@@ -1,8 +1,8 @@
-import { createFileRoute, Navigate } from '@tanstack/react-router';
+import { createLazyFileRoute, Navigate } from '@tanstack/react-router';
 import { BillingSettingsComponent } from '@/components/settings/billing-setting';
 import { isNativeAppShell } from '@/lib/native-platform';
 
-export const Route = createFileRoute('/$workspaceName/_auth/settings/billing')({
+export const Route = createLazyFileRoute('/$workspaceName/_auth/settings/billing')({
   component: BillingSettingsRoute,
 });
 

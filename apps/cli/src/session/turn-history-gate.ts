@@ -58,12 +58,13 @@ export type TurnHistoryGateArgs = {
 };
 
 /**
- * Bounded wait for the user turn entry to sync. Doc sync and Machine RPC both
- * ride Loro Streams, so "RPC delivered but the entry never syncs" implies a
- * degraded transport; 20s covers slow room join + catch-up without making a
- * genuinely broken uplink freeze turn output forever.
+ * Bounded wait for the user turn entry to sync. Opening early lets a concurrent
+ * Loro insert order the reply before the user message permanently (#1753); a
+ * longer wait holds the turn's visible output and finalization. One minute
+ * covers reconnect-length sync stalls while keeping a stuck turn short.
+ * Roost sessions are unaffected: the owner appends the user turn itself.
  */
-export const DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS = 20_000;
+export const DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS = 60_000;
 
 export class TurnHistoryGate {
   private readonly beforeOpenAbort = new AbortController();

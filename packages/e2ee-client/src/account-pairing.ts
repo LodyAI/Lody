@@ -101,6 +101,14 @@ export interface AccountPairingApproverFilter {
   readonly workspaceIds?: ReadonlySet<string>;
 }
 
+/** Narrows the requester's listing to the workspaces one step can use, so a single
+ * workspace request or a retained request does not open the account's other ones. An
+ * implementation may ignore it: the workflow still selects by request rows. Lowercase hex. */
+export interface AccountPairingRequesterFilter {
+  readonly workspaceId?: string;
+  readonly geneses?: ReadonlySet<string>;
+}
+
 /** One workspace where this device is an active personal device. */
 export interface AccountPairingApproverWorkspace {
   readonly workspaceId: string;
@@ -279,7 +287,8 @@ export function makeAccountPairing(input: {
     filter?: AccountPairingApproverFilter
   ) => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>;
   requesterWorkspaces: (
-    hints?: readonly { workspaceId: string; name: string; genesisHash: string }[]
+    hints?: readonly { workspaceId: string; name: string; genesisHash: string }[],
+    filter?: AccountPairingRequesterFilter
   ) => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown>;
   now?: () => number;
   random?: (size: number) => Uint8Array;
@@ -332,9 +341,10 @@ export function makeAccountPairing(input: {
    * request still names it. */
   const listedByGenesis = new Map<string, { workspaceId: string; name: string }>();
   const requesterWorkspaces = (
-    hints?: readonly { workspaceId: string; name: string; genesisHash: string }[]
+    hints?: readonly { workspaceId: string; name: string; genesisHash: string }[],
+    filter?: AccountPairingRequesterFilter
   ) =>
-    Effect.tap(input.requesterWorkspaces(hints), (workspaces) =>
+    Effect.tap(input.requesterWorkspaces(hints, filter), (workspaces) =>
       Effect.sync(() => {
         for (const workspace of workspaces)
           listedByGenesis.set(hex(workspace.genesis), {
@@ -368,6 +378,11 @@ export function makeAccountPairing(input: {
     );
   const parseCode = (code: string) => fromResult(parsePairingString(code), 'invalid-input');
 
+  /** Only the workspaces a request names; listing others would open them for nothing. */
+  const requestedGeneses = (request: PairingRequest): AccountPairingRequesterFilter => ({
+    geneses: new Set(request.rows.map((item) => hex(item.genesis))),
+  });
+
   // ----- New device -----
 
   const latestRequest = () =>
@@ -378,7 +393,8 @@ export function makeAccountPairing(input: {
     knownWorkspaces?: readonly AccountPairingRequesterWorkspace[]
   ) {
     const request = yield* fromResult(decodePairingRequest(row.request), 'corrupt');
-    const workspaces = knownWorkspaces ?? (yield* requesterWorkspaces());
+    const workspaces =
+      knownWorkspaces ?? (yield* requesterWorkspaces(undefined, requestedGeneses(request)));
     const joined = yield* sql(joinedSet(row.lookup_id));
     const settled = (yield* terminal(row.lookup_id))?.state;
     const secret = secrets.get(row.lookup_id);
@@ -429,7 +445,8 @@ export function makeAccountPairing(input: {
     knownWorkspaces?: readonly AccountPairingRequesterWorkspace[]
   ) =>
     Effect.gen(function* () {
-      const workspaces = knownWorkspaces ?? (yield* requesterWorkspaces());
+      const workspaces =
+        knownWorkspaces ?? (yield* requesterWorkspaces(undefined, requestedGeneses(request)));
       yield* relay.submit({
         lookupId: row.lookup_id,
         requestHex: hex(row.request),
@@ -486,7 +503,7 @@ export function makeAccountPairing(input: {
         return yield* Effect.fail(fail('pairing-tampered'));
       // Retry the exact original; a retry never extends the request.
       const request = yield* fromResult(decodePairingRequest(current.request), 'corrupt');
-      const workspaces = yield* requesterWorkspaces(hints);
+      const workspaces = yield* requesterWorkspaces(hints, requestedGeneses(request));
       yield* submitExact(current, request, workspaces);
       return yield* stateOf(current, workspaces);
     }
@@ -501,7 +518,10 @@ export function makeAccountPairing(input: {
           const lookupId = hex(keys.lookupId);
           const used = yield* sql(store.hasRequest(lookupId));
           if (used || (yield* terminal(lookupId))) return yield* Effect.fail(fail('pairing-used'));
-          const available = yield* requesterWorkspaces(hints);
+          const available = yield* requesterWorkspaces(
+            hints,
+            targetWorkspaceId ? { workspaceId: targetWorkspaceId } : undefined
+          );
           const workspaces = targetWorkspaceId
             ? available.filter((workspace) => workspace.workspaceId === targetWorkspaceId)
             : available;
@@ -578,7 +598,7 @@ export function makeAccountPairing(input: {
       yield* settle(row.lookup_id, 'requester', 'declined');
       return yield* stateOf(row);
     }
-    const workspaces = yield* requesterWorkspaces();
+    const workspaces = yield* requesterWorkspaces(undefined, requestedGeneses(request));
     const digest = yield* fromResult(pairingRequestDigest(request), 'corrupt');
     yield* withKeys(secret, (keys) =>
       Effect.gen(function* () {

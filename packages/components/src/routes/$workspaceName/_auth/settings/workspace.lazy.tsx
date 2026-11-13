@@ -1,7 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createLazyFileRoute } from '@tanstack/react-router';
 import { WorkspaceSettings } from '@/components/settings/e2ee/workspace-security';
 
-export const Route = createFileRoute('/$workspaceName/_auth/settings/workspace')({
+export const Route = createLazyFileRoute('/$workspaceName/_auth/settings/workspace')({
   component: WorkspaceGeneralSettingsRoute,
 });
 

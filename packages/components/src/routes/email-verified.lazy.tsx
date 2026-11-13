@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createLazyFileRoute } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
 import { EmailVerifiedPage } from '@/components/pages/email-verified-page';
@@ -41,7 +41,7 @@ function buildLoginUrl(source: URLSearchParams, errorCode: string | null): strin
   return `${normalizeBasePath()}/login${query ? `?${query}` : ''}`;
 }
 
-export const Route = createFileRoute('/email-verified')({
+export const Route = createLazyFileRoute('/email-verified')({
   component: EmailVerifiedRoute,
 });
 

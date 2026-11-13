@@ -250,6 +250,54 @@ void test('a new device is approved per workspace, verifying each approval befor
   )
 })
 
+void test("a single-workspace request and its later polls never list the account's other workspaces", async () => {
+  // Listing a workspace opens its local store; a request for Alpha has no use for Beta.
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const requester = requesterHosts()
+  const listed = []
+  const pairing = makeDesktopAccountPairing({
+    db: new DatabaseSync(':memory:'),
+    account: 'synthetic-account',
+    deviceName: 'Synthetic laptop',
+    relay,
+    requesterWorkspaces: (_hints, filter) =>
+      Effect.sync(() => {
+        const hosts = requester.hosts.filter(
+          (host) =>
+            (filter?.workspaceId === undefined || filter.workspaceId === host.workspaceId) &&
+            (!filter?.geneses || filter.geneses.has(hex(host.genesis)))
+        )
+        listed.push(hosts.map((host) => host.workspaceId))
+        return hosts
+      }),
+    approverWorkspaces: () => Effect.succeed([]),
+    now: () => clock.now,
+    random: (size) => fill(1, size)
+  })
+  const state = await run(pairing.requestAccountPairing({ workspaceId: 'w1' }))
+  assert.deepEqual(
+    state.workspaces.map((item) => item.workspaceId),
+    ['w1']
+  )
+  const approver = device({ relay, approver: approverHosts(['w1']), clock, seed: 50 })
+  const preview = await run(approver.pairing.inspectAccountPairing(state.pairingString))
+  await run(
+    approver.pairing.approveAccountPairing({
+      pairingString: state.pairingString,
+      requestId: preview.requestId,
+      workspaceIds: ['w1']
+    })
+  )
+  assert.equal((await run(pairing.accountPairingRequest())).status, 'joined')
+  assert.deepEqual(
+    requester.installed.map((item) => item.workspaceId),
+    ['w1']
+  )
+  assert.ok(listed.length > 1)
+  assert.ok(listed.every((ids) => ids.length === 1 && ids[0] === 'w1'))
+})
+
 // The new device opens a workspace as soon as that workspace joined, even while
 // another requested workspace is still pending.
 void test('a joined workspace is reported under its own ID after this device no longer needs pairing there', async () => {

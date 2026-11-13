@@ -19,6 +19,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { KEY_DELIVERY_RETRY_DELAYS } from '../src/account-requester';
 
 type Fixture = typeof import('./browser/host-fixture');
 type Surface = typeof globalThis & { HostFixture: Fixture };
@@ -618,8 +619,8 @@ it('a member key delivery that fails its first round is retried and delivered wi
       })
       .toEqual([{ requestId: opened.requestId, state: 'delivered' }]);
     const settled = (await good(opened.page, 'memberDeliveries')) as Deliveries;
-    // One bounded backoff, the first step of the desktop schedule, then the stored envelope.
-    expect(settled.sleeps).toEqual([10_000]);
+    // One bounded backoff, the schedule's short first step, then the stored envelope.
+    expect(settled.sleeps).toEqual([KEY_DELIVERY_RETRY_DELAYS[0]]);
     expect(settled.envelopes[0]).toBe(false);
     expect(settled.envelopes.at(-1)).toBe(true);
   } finally {
@@ -1733,7 +1734,7 @@ it('one key round sends every envelope waiting at the current epoch', async () =
       .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).sleeps, {
         timeout: 30_000,
       })
-      .toEqual([10_000, 10_000]);
+      .toEqual([KEY_DELIVERY_RETRY_DELAYS[0], KEY_DELIVERY_RETRY_DELAYS[0]]);
     await good(page, 'memberAcceptKeys');
     await good(page, 'receive');
     expect(((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept).toBe(2);

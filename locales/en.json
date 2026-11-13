@@ -6521,7 +6521,6 @@
   "sessions.androidEmulator.quality.saver": "Data saver",
   "sessions.androidEmulator.quality.balanced": "Balanced",
   "sessions.androidEmulator.quality.clear": "Clear",
-  "e2ee.create.mobileDescription": "Keys stay in this device’s protected storage. This mode cannot be changed later.",
   "e2ee.create.savedRequest": "Continuing your last creation",
   "e2ee.failure.identity.title": "This device needs to be authorized again",
   "e2ee.failure.identity.body": "The encryption keys saved on this device can no longer be found, perhaps after reinstalling the system or changing the keychain. Your data is intact; authorize this device again from another authorized device.",

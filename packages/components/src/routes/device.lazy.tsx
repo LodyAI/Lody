@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createLazyFileRoute } from '@tanstack/react-router';
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
@@ -11,7 +11,7 @@ import { capturePostHogEvent, capturePostHogOutcome } from '@/lib/posthog-analyt
 import { useAppCapability } from '@/lib/app-platform';
 import { requireCloudAuthBaseUrl } from '@/lib/cloud-http-port';
 
-export const Route = createFileRoute('/device')({
+export const Route = createLazyFileRoute('/device')({
   component: DeviceAuthRoute,
 });
 

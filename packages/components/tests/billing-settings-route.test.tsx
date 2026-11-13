@@ -13,7 +13,7 @@ const originalUserAgent = window.navigator.userAgent;
 const originalInnerWidth = window.innerWidth;
 
 vi.mock('@tanstack/react-router', () => ({
-  createFileRoute: () => (options: { component: () => ReactNode }) => ({
+  createLazyFileRoute: () => (options: { component: () => ReactNode }) => ({
     ...options,
     useParams: () => routerState,
   }),
@@ -27,7 +27,7 @@ vi.mock('../src/components/settings/billing-setting', () => ({
   BillingSettingsComponent: () => createElement('p', null, 'billing-settings'),
 }));
 
-import { BillingSettingsRoute } from '../src/routes/$workspaceName/_auth/settings/billing';
+import { BillingSettingsRoute } from '../src/routes/$workspaceName/_auth/settings/billing.lazy';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

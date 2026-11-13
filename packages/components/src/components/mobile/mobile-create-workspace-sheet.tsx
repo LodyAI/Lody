@@ -28,12 +28,12 @@ import {
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
 import { E2eeCreationRequestList } from '@/components/pages/e2ee-creation-request-list';
+import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { Switch } from '@lody/ui/switch';
 import { Alert } from '@lody/ui/alert';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
@@ -283,7 +283,10 @@ export function MobileCreateWorkspaceSheet({
      `creating` is true bridges that window cleanly — the canSubmit
      check above already rules out re-submitting from this state, so
      hiding the message has no functional risk. */
-  const showError = !creating && !resumable && error;
+  // An untouched form has nothing to correct yet: "required" only appears once
+  // a typed name produced no usable slug (or the slug was cleared).
+  const showError =
+    !creating && !resumable && error && (error !== 'required' || name.trim().length > 0);
   const showCheckingHint = !creating && !resumable && slug && isChecking;
   const showAvailableHint = !creating && !resumable && slug && isAvailable && !error;
 
@@ -506,34 +509,18 @@ export function MobileCreateWorkspaceSheet({
                 </div>
 
                 {creationEnabled ? (
-                  <div className="flex items-start justify-between gap-4 rounded-xl border border-border/60 p-3">
-                    <div className="min-w-0 space-y-1">
-                      <label
-                        htmlFor="mobile-create-workspace-encrypted"
-                        className="text-[0.78rem] font-medium"
-                      >
-                        {t('e2ee.create.label', 'Encrypted workspace (developer preview)')}
-                      </label>
-                      <p className="text-[0.72rem] leading-snug text-muted-foreground">
-                        {encryptionSupported
-                          ? t(
-                              'e2ee.create.mobileDescription',
-                              'Keys stay in this device’s protected storage. This mode cannot be changed later.'
-                            )
-                          : t(
-                              'e2ee.create.unsupported',
-                              'This platform has no protected device key storage yet.'
-                            )}
-                      </p>
-                    </div>
-                    <Switch
-                      id="mobile-create-workspace-encrypted"
-                      data-testid="mobile-create-workspace-encrypted"
-                      checked={encrypted}
-                      disabled={fieldsDisabled || !encryptionSupported || !accountId}
-                      onCheckedChange={setEncrypted}
-                    />
-                  </div>
+                  /* Same choice and cost disclosure as the desktop create page.
+                     Saved requests and the resume notice are rendered above, so
+                     the option shows neither; a resumed request locks the choice. */
+                  <E2eeWorkspaceCreationOption
+                    selected={encrypted}
+                    supported={encryptionSupported}
+                    pending={false}
+                    disabled={fieldsDisabled || !accountId}
+                    paidRequired={false}
+                    onChange={setEncrypted}
+                    encryptedChoiceTestId="mobile-create-workspace-encrypted"
+                  />
                 ) : null}
               </div>
             </div>

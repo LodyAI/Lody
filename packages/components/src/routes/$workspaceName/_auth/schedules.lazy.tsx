@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
+import { createLazyFileRoute, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { SchedulesWorkspace } from '@/components/schedules/schedules-workspace';
@@ -9,7 +9,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 // only changes the param, so the side panel can animate in and out instead of
 // the whole page remounting. On a phone the bare list is the home schedules
 // tab, so this route only keeps the pushed editor.
-export const Route = createFileRoute('/$workspaceName/_auth/schedules')({
+export const Route = createLazyFileRoute('/$workspaceName/_auth/schedules')({
   component: SchedulesLayout,
 });
 
