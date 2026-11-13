@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756)
 
 [中文](2026-10-31-remote-diff-transport.zh.md)
 
@@ -59,6 +59,14 @@ it must not hide the changed file. This stays private to the daemon and adds no
 wire fields. A failed check returns legacy `deferred` (single-file `transient_io`)
 or a manifest per-file `unavailable`, allowing later reads to recover. It never
 becomes `not_changed`. Historical turn comparisons use retained evidence only.
+
+Historical reads retain that scope on Web, Electron, and native iOS/Android, even
+when the requested evidence is unavailable. Native runtimes preserve the returned
+reason/message for their existing notice UI. Automatically requesting the current
+workspace diff was rejected because its readable contents can include later edits
+and do not reconstruct the requested turn. Explicit current/All Changes reads
+remain independent. This establishes failure behavior, not the cause of missing
+historical evidence or a new capture/retention policy.
 
 A handle is issued only by an authorized manifest and keyed by requested session
 and content key, with resolved owner, workspace and source. Every page reauthorizes
@@ -235,6 +243,10 @@ owners. A read-worker shutdown error is reported after the writer, tunnels and d
 
 Behavioral evidence lives in:
 
+- `apps/mobile/ios/apps/ios/tests/native/files-rpc.test.mjs` and
+  `apps/mobile/android/runtime/test/contract-bridge.test.mjs`: unavailable turns
+  remain unavailable while current workspace contents are readable; retained turn
+  bodies and explicit current reads preserve their distinct comparison scopes.
 - `apps/cli/src/lib/code-collab/code-collab-v2-service.test.ts`: real SHA-1/SHA-256
   Git and disk bytes, BOM/CRLF/Unicode, session binding, path escape, expiry, page
   clamping, moved-base cursors, historical/non-Git worker reads, local/remote hunk

@@ -171,5 +171,12 @@
       "src/protocol/project-run.ts"
     ],
     "note": "Complete changed-file counts accompany text line totals in session and Project Member catalog projections, including zero-line changes. Mirrored verbatim from the reviewed iOS runtime source commit; dependencies and licenses are unchanged."
+  },
+  "historicalDiffUnavailable": {
+    "commit": "28d742a5320b922b101bc4ab8f236d0e809fd0bf",
+    "files": [
+      "src/runtime/files.ts"
+    ],
+    "note": "Historical diff reads retain unavailable results and never substitute the current workspace diff, matching Web. Mirrored verbatim from the reviewed iOS source commit; dependencies, protocol and licenses are unchanged."
   }
 }

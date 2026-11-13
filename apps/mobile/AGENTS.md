@@ -15,6 +15,8 @@ both platform indexes link them.
   implementation, credentials, or captured user transcripts.
 - Nested iOS GitHub workflows are retained as upstream references, not active CI.
   Root checks do not replace native build and platform verification.
+- Historical turn diff requests preserve unavailable results, matching Web. Never
+  silently substitute the current workspace diff for a requested turn.
 
 - Backend origins come from `backend-config.mjs`: optional ignored `.env.local`,
   process environment overrides, production defaults. Both platforms must use

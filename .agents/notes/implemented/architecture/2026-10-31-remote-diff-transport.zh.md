@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756)
 
 [English](2026-10-31-remote-diff-transport.md)
 
@@ -45,6 +45,11 @@ blob 分页使用原始字节偏移，允许切在 UTF-8 字符中间，正文�
 这些信息只保留在 daemon 内，不增加协议字段。检查失败时旧批量接口返回 `deferred`
 （单文件返回 `transient_io`），清单返回逐文件 `unavailable`，后续读取仍可恢复，不能变成
 `not_changed`。历史 turn 比较仍只使用保留的证据。
+
+Web、Electron 和原生 iOS/Android 在历史证据不可用时仍保留请求轮次的范围。原生运行时
+把原因和提示传给已有的不可用界面。取消自动请求当前工作区 diff，是因为它即使可读，
+也可能包含后续修改，无法还原所请求的轮次。显式的当前/全部改动读取仍独立存在。
+这里规定的是失败后的行为，不认定历史证据缺失的原因，也不改变捕获与保留策略。
 
 只有通过权限校验的清单才能签发 handle。handle 按请求会话和内容键索引，绑定实际 owner、
 工作区和来源。每页重新校验会话权限与绑定。每个请求会话最多 8,192 个 handle，全局最多
@@ -171,6 +176,9 @@ loader 不进入跨工作区的不可变 turn 缓存；已经完整读取的 tur
 
 行为证据由以下测试维护：
 
+- `apps/mobile/ios/apps/ios/tests/native/files-rpc.test.mjs` 和
+  `apps/mobile/android/runtime/test/contract-bridge.test.mjs`：当前工作区内容可读时，
+  不可用的历史轮次仍保持不可用；已保留的轮次正文和显式的当前读取维持各自的比较范围。
 - `apps/cli/src/lib/code-collab/code-collab-v2-service.test.ts`：真实 SHA-1/SHA-256 Git
   和磁盘字节、BOM/CRLF/Unicode、会话绑定、路径逃逸、过期、分页预算、基线移动、历史与非 Git
   worker 读取、本地/远程 hunk 策略、等统计失效、不同文件根的基线、文件删除、捕获时编辑及补丁预算回退，

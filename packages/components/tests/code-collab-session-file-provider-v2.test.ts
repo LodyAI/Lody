@@ -170,6 +170,40 @@ function createRuntime(
 }
 
 describe('Content-addressed diff transport', () => {
+  it.each([false, true])(
+    'keeps an unavailable historical turn unavailable with blob transport %s',
+    async (supported) => {
+      const message = 'Historical contents are unavailable';
+      const provider = new CodeCollabSessionFileProvider({
+        runtime: createRuntime({
+          diffBlobTransportOptions: async () => ({ supported, scope: 'synthetic', persist: false }),
+          openTurnDiff: async (path, turnId) => ({
+            status: 'unavailable',
+            path,
+            turnId,
+            reason: 'turn_unavailable',
+            message,
+          }),
+          openDiffManifest: async (args) => {
+            expect(args.turnId).toBe('turn-2');
+            return { status: 'unavailable', reason: 'turn_unavailable', message };
+          },
+          readDiffBlob: async () => {
+            throw new Error('An unavailable turn has no readable body.');
+          },
+        }),
+      });
+      // The runtime's current comparison is readable and includes later edits.
+      // Returning it here would change this result into a ready diff.
+      expect(await provider.getDiff('src/app.ts', 'turn-2')).toEqual({
+        status: 'unavailable',
+        path: 'src/app.ts',
+        reason: 'metadata-only',
+        message,
+      });
+    }
+  );
+
   it('retains permission refusals for both single-file and All Changes blob reads', async () => {
     const provider = new CodeCollabSessionFileProvider({
       runtime: createRuntime({
