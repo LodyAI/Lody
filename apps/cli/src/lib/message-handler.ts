@@ -2049,6 +2049,9 @@ export class MessageHandler {
     expectedMimeType: string;
     encryption?: EncryptedAttachment;
   }): Promise<DownloadedSessionImagePromptBlock> {
+    // Encrypted workspaces never read plaintext relay objects with the account token.
+    if (this.encryptedAttachments && !args.encryption)
+      throw new Error('e2ee_attachment_unavailable');
     return await downloadSessionImageForPrompt({
       ...args,
       serverBaseUrl: this.resolveServerBaseUrl(),
@@ -2364,6 +2367,8 @@ export class MessageHandler {
         return { ok: false, reason: 'error', message: formatErrorMessage(error) };
       }
     }
+    if (this.encryptedAttachments)
+      return { ok: false, reason: 'error', message: 'e2ee_attachment_unavailable' };
     const serverBaseUrl = this.resolveServerBaseUrl();
     const fileUrl = buildSessionFileApiUrl(
       serverBaseUrl,

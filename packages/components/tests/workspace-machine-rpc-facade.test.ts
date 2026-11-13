@@ -8,6 +8,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc';
+import { isE2eeFeatureMethod } from '@lody/shared/e2ee-rpc';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
 import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
@@ -1381,6 +1382,69 @@ describe('encrypted file and preview routing', () => {
       await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner')
     ).toMatchObject({ success: true, connection: { status: 'closed', closedReason: 'revoked' } });
     expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
+  it('forks an encrypted session through the protected feature channel, never ordinary RPC', async () => {
+    const spec = {
+      sourceSessionId: sessionId,
+      sourceTurnId: 'turn-1',
+      targetSessionId: '00000000-0000-4000-8000-0000000000f2' as SessionId,
+      requestedByUserId: 'owner',
+      targetContext: { kind: 'shared' as const },
+    };
+    const requests: unknown[] = [];
+    const facade = (requestEncryptedFeature?: (request: never) => Promise<never>) =>
+      createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('e2ee_rpc_unavailable');
+        },
+        ...(requestEncryptedFeature ? { requestEncryptedFeature } : {}),
+      });
+    const forked = await facade(async (request) => {
+      requests.push(request);
+      return {
+        ok: true,
+        result: {
+          type: 'session/fork_response',
+          sourceSessionId: spec.sourceSessionId,
+          targetSessionId: spec.targetSessionId,
+          success: true,
+          disposition: 'completed',
+          partial: false,
+          warnings: [],
+        },
+      } as never;
+    }).requestSessionFork(remoteMachineId, spec);
+    expect(forked).toMatchObject({ success: true, targetSessionId: spec.targetSessionId });
+    expect(requests).toEqual([
+      {
+        machineId: remoteMachineId,
+        workspaceId,
+        method: 'session/fork',
+        params: spec,
+        timeoutMs: 120_000,
+      },
+    ]);
+    expect(isE2eeFeatureMethod('session/fork')).toBe(true);
+
+    const rejected = await facade(
+      async () => ({ ok: false, error: 'Fork access verification denied.' }) as never
+    ).requestSessionFork(remoteMachineId, spec);
+    expect(rejected).toMatchObject({
+      success: false,
+      error: { message: 'Fork access verification denied.' },
+    });
+    expect(await facade().requestSessionFork(remoteMachineId, spec)).toMatchObject({
+      success: false,
+      error: { message: 'e2ee_feature_unavailable' },
+    });
   });
 
   it.each(['create', 'status', 'revoke'] as const)(

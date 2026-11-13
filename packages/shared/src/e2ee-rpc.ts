@@ -41,6 +41,7 @@ export const isE2eeFeatureMethod = (method: string): boolean =>
   method === 'sorbet/providers-create' ||
   method === 'sorbet/providers-delete' ||
   method === 'file/preview' ||
+  method === 'session/fork' ||
   method === 'session/preview-create' ||
   method === 'session/preview-revoke' ||
   method === 'session/preview-status';

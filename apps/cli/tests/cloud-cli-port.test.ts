@@ -15,6 +15,7 @@ import {
 } from '@lody/shared';
 import { SessionAttachmentTransfer } from '../src/lib/session-attachment-transfer';
 import { downloadSessionImageForPrompt } from '../src/lib/session-image-download';
+import { encryptedRuntimeCloudPort } from '../src/lib/e2ee/runtime-cloud-port';
 import {
   createCommandAttachmentTransfer,
   mintCliSessionHistoryReadProof,
@@ -650,6 +651,10 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     ] as const)
       expect(port[name]).toBeNull();
     expect(port.attachmentUpload).toEqual({ serverBaseUrl: relayBase });
+    // The encrypted workspace runtime keeps only the relay URL its encrypted attachments need.
+    const runtimePort = encryptedRuntimeCloudPort(port);
+    expect(runtimePort.attachmentUpload).toEqual({ serverBaseUrl: relayBase });
+    expect(runtimePort.githubTokens).toBeNull();
     const authorized = {
       status: 'authorized',
       userId: account,
@@ -728,7 +733,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     };
     const transfer = new SessionAttachmentTransfer(
       credential,
-      port.attachmentUpload!.serverBaseUrl,
+      runtimePort.attachmentUpload!.serverBaseUrl,
       { token }
     );
     const scope = {
@@ -753,7 +758,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
               encryptedAttachmentPath(
                 getSessionFileDownloadApiPath(scope.workspaceId, scope.sessionId, id)
               ),
-              port.attachmentUpload!.serverBaseUrl
+              runtimePort.attachmentUpload!.serverBaseUrl
             ),
             { headers: { Authorization: `Bearer ${await token()}` } }
           ),
@@ -776,7 +781,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
           imageId: image.imageId,
           encryption: image.encryption,
           expectedMimeType: image.mimeType,
-          serverBaseUrl: port.attachmentUpload!.serverBaseUrl,
+          serverBaseUrl: runtimePort.attachmentUpload!.serverBaseUrl,
           token: credential,
           attachmentToken: token,
         });

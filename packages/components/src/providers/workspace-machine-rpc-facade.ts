@@ -1134,13 +1134,24 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionForkResponse;
       }
+      const timeoutMs =
+        options?.timeoutMs ?? (args.targetContext?.kind === 'new-worktree' ? 15_000 : 120_000);
+      // Encrypted content never opens ordinary Machine RPC: the fork is a signed owned write.
+      if (deps.protectedContent) {
+        if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/fork',
+          params: args,
+          timeoutMs,
+        });
+        if (!response.ok) return sessionForkFailure(args, 'INTERNAL_ERROR', response.error);
+        return response.result as SessionForkResponse;
+      }
       return await (
         await getMachineRpcClient(machineId)
-      ).requestSessionFork({
-        ...args,
-        timeoutMs:
-          options?.timeoutMs ?? (args.targetContext?.kind === 'new-worktree' ? 15_000 : 120_000),
-      });
+      ).requestSessionFork({ ...args, timeoutMs });
     } catch (error) {
       return sessionForkFailure(
         args,
