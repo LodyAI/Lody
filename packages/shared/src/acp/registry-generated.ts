@@ -88,39 +88,39 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
   {
     id: 'antigravity-acp',
     name: 'Google Antigravity',
-    version: '1.4.5',
+    version: '1.5.0',
     description: 'Google’s AI coding agent',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/antigravity-acp.svg',
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.5-darwin-arm64.zip',
+          archive: 'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-arm64.zip',
           cmd: './agy_acp_server.par'
         },
         'darwin-x86_64': {
-          archive: 'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.5-darwin-x86_64.zip',
+          archive: 'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-x86_64.zip',
           cmd: './agy_acp_server.par'
         },
         'linux-x86_64': {
-          archive: 'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.4.5-linux-x86_64.zip',
+          archive: 'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.5.0-linux-x86_64.zip',
           cmd: './agy_acp_server.par',
           args: [
             '--uid='
           ]
         },
         'linux-aarch64': {
-          archive: 'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.4.5-linux-arm64.zip',
+          archive: 'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.5.0-linux-arm64.zip',
           cmd: './agy_acp_server.par',
           args: [
             '--uid='
           ]
         },
         'windows-x86_64': {
-          archive: 'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.4.5-windows-x86_64.zip',
+          archive: 'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.5.0-windows-x86_64.zip',
           cmd: './agy_acp_server.exe'
         },
         'windows-aarch64': {
-          archive: 'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.4.5-windows-arm64.zip',
+          archive: 'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.5.0-windows-arm64.zip',
           cmd: './agy_acp_server.exe'
         }
       }
