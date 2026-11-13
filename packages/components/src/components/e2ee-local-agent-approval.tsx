@@ -24,10 +24,7 @@ export const LOCAL_AGENT_RECHECK_DELAYS_MS = [3_000, 6_000, 12_000, 24_000, 30_0
 const PENDING = 'e2ee_local_agent_pending';
 const withinDeadline = <T,>(work: Promise<T>) =>
   new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(
-      () => reject(new Error(PENDING)),
-      LOCAL_AGENT_STEP_DEADLINE_MS
-    );
+    const timer = window.setTimeout(() => reject(new Error(PENDING)), LOCAL_AGENT_STEP_DEADLINE_MS);
     work.then(
       (value) => {
         window.clearTimeout(timer);
@@ -80,6 +77,7 @@ function LocalAgentApproval({
   const [recoveryMachine, setRecoveryMachine] = useState(true);
   const [admitted, setAdmitted] = useState(false);
   const [pairing, setPairing] = useState<Pairing | null>(null);
+  const pairingRef = useRef<Pairing | null>(null);
   const approved = useRef(false);
   const [available, setAvailable] = useState<boolean | null>(null);
   useEffect(() => {
@@ -161,9 +159,7 @@ function LocalAgentApproval({
     approved.current = true;
     setPhase('admitting');
     try {
-      const result = await withinDeadline(
-        admitLocalAgent(workspaceId, material.pairingSessionId)
-      );
+      const result = await withinDeadline(admitLocalAgent(workspaceId, material.pairingSessionId));
       if (!current(owner)) return;
       setAdmitted(true);
       setPhase(result.ready ? 'ready' : 'waiting');
@@ -187,10 +183,14 @@ function LocalAgentApproval({
       }
       const material = await withinDeadline(prepareLocalAgent(workspaceId));
       if (!current(owner)) return;
+      const previousSession = pairingRef.current?.pairingSessionId;
+      pairingRef.current = material;
       setPairing(material);
       setAdmitted(material.admitted);
-      // Only the session the user already approved continues without asking again.
-      if (approved.current && pairing?.pairingSessionId === material.pairingSessionId)
+      // Only the session the user already approved, or the same already-admitted machine
+      // after main rotated the settled session while activation was still finishing,
+      // continues without asking again. A lost CLI identity (`admitted: false`) asks again.
+      if (approved.current && (previousSession === material.pairingSessionId || material.admitted))
         await admit(material, owner);
       else {
         approved.current = false;
@@ -242,6 +242,7 @@ function LocalAgentApproval({
           machine={recoveryMachine}
           onReset={() => {
             approved.current = false;
+            pairingRef.current = null;
             setPairing(null);
             setRecoveryError('');
             setPhase('idle');
@@ -252,6 +253,7 @@ function LocalAgentApproval({
         open={phase === 'confirm'}
         onOpenChange={(open) => {
           if (!open && phase === 'confirm' && !approved.current) {
+            pairingRef.current = null;
             setPairing(null);
             setPhase('idle');
           }

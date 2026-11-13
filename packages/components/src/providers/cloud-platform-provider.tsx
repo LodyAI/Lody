@@ -450,6 +450,7 @@ export function CloudPlatformProvider({
       // A visible but unfocused window (another app in front, a second screen) still
       // answers; only a hidden window falls back to the system notification.
       canPresent: () => document.visibilityState === 'visible',
+      includePreparingReviews: Boolean(electron && runtime.accountPairingCode),
       notifyPending: (id) => {
         if (!electron) return;
         void getIpcServices()

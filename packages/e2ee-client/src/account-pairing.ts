@@ -53,6 +53,7 @@ const NO_INVITATION_DIGEST = new Uint8Array(32);
 /** Placeholder relay body for such a row; the new device never reads it. */
 const NO_INVITATION = new Uint8Array([0]);
 const isHistoryRow = (digest: Uint8Array) => digest.every((byte) => byte === 0);
+const WORKSPACE_CONCURRENCY = 4;
 /** Typed refusals the UI explains (`@lody/platform` `E2eeAccountPairingErrorCode`). */
 export type AccountPairingRefusal =
   | 'pairing-tampered'
@@ -92,6 +93,12 @@ export interface AccountPairingRelay {
   decline(requestId: string): Effect.Effect<unknown, unknown>;
   publish(input: E2eeAccountPairingRequests['publish']): Effect.Effect<unknown, unknown>;
   claim(lookupId: string): Effect.Effect<E2eeAccountPairingReplies['claim'], unknown>;
+}
+
+/** Narrowing hints so an approver only opens workspaces the authenticated request names. */
+export interface AccountPairingApproverFilter {
+  readonly geneses?: ReadonlySet<string>;
+  readonly workspaceIds?: ReadonlySet<string>;
 }
 
 /** One workspace where this device is an active personal device. */
@@ -268,7 +275,9 @@ export function makeAccountPairing(input: {
   account: string;
   deviceName: string;
   relay: AccountPairingRelay;
-  approverWorkspaces: () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>;
+  approverWorkspaces: (
+    filter?: AccountPairingApproverFilter
+  ) => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>;
   requesterWorkspaces: () => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown>;
   now?: () => number;
   random?: (size: number) => Uint8Array;
@@ -360,9 +369,12 @@ export function makeAccountPairing(input: {
   const latestRequest = () =>
     Effect.map(store.latestRequest(), (record) => (record ? toRequestRow(record) : undefined));
   const joinedSet = (lookupId: string) => store.joined(lookupId);
-  const stateOf = Effect.fnUntraced(function* (row: RequestRow) {
+  const stateOf = Effect.fnUntraced(function* (
+    row: RequestRow,
+    knownWorkspaces?: readonly AccountPairingRequesterWorkspace[]
+  ) {
     const request = yield* fromResult(decodePairingRequest(row.request), 'corrupt');
-    const workspaces = yield* requesterWorkspaces();
+    const workspaces = knownWorkspaces ?? (yield* requesterWorkspaces());
     const joined = yield* sql(joinedSet(row.lookup_id));
     const settled = (yield* terminal(row.lookup_id))?.state;
     const secret = secrets.get(row.lookup_id);
@@ -407,9 +419,13 @@ export function makeAccountPairing(input: {
       }),
     } satisfies AccountPairingState;
   });
-  const submitExact = (row: RequestRow, request: PairingRequest) =>
+  const submitExact = (
+    row: RequestRow,
+    request: PairingRequest,
+    knownWorkspaces?: readonly AccountPairingRequesterWorkspace[]
+  ) =>
     Effect.gen(function* () {
-      const workspaces = yield* requesterWorkspaces();
+      const workspaces = knownWorkspaces ?? (yield* requesterWorkspaces());
       yield* relay.submit({
         lookupId: row.lookup_id,
         requestHex: hex(row.request),
@@ -463,8 +479,9 @@ export function makeAccountPairing(input: {
         return yield* Effect.fail(fail('pairing-tampered'));
       // Retry the exact original; a retry never extends the request.
       const request = yield* fromResult(decodePairingRequest(current.request), 'corrupt');
-      yield* submitExact(current, request);
-      return yield* stateOf(current);
+      const workspaces = yield* requesterWorkspaces();
+      yield* submitExact(current, request, workspaces);
+      return yield* stateOf(current, workspaces);
     }
     if (current && open && options.preserveExisting)
       return yield* Effect.fail(fail('pairing-elsewhere'));
@@ -482,11 +499,19 @@ export function makeAccountPairing(input: {
             ? available.filter((workspace) => workspace.workspaceId === options.workspaceId)
             : available;
           if (workspaces.length === 0) return yield* Effect.fail(fail('invalid-input'));
-          const rows: PairingRequestRow[] = [];
           // Each workspace stands alone: one that cannot prepare an identity now
           // (for example a stale list entry) is left out, not the whole request.
-          for (const workspace of workspaces) {
-            const identity = yield* Effect.result(workspace.identity());
+          const preparedIdentities = yield* Effect.forEach(
+            workspaces,
+            (workspace) =>
+              Effect.map(Effect.result(workspace.identity()), (identity) => ({
+                workspace,
+                identity,
+              })),
+            { concurrency: WORKSPACE_CONCURRENCY }
+          );
+          const rows: PairingRequestRow[] = [];
+          for (const { workspace, identity } of preparedIdentities) {
             if (Result.isSuccess(identity))
               rows.push({ genesis: workspace.genesis, ...identity.success });
             else rememberDesktopE2eeFailure('account-pairing-identity', identity.failure);
@@ -521,7 +546,7 @@ export function makeAccountPairing(input: {
               expiresAt: row.expires_at,
             })
           );
-          return { row, request };
+          return { row, request, available };
         })
       ),
       (exit) =>
@@ -531,8 +556,8 @@ export function makeAccountPairing(input: {
           else secret.fill(0);
         })
     );
-    yield* submitExact(prepared.row, prepared.request);
-    return yield* stateOf(prepared.row);
+    yield* submitExact(prepared.row, prepared.request, prepared.available);
+    return yield* stateOf(prepared.row, prepared.available);
   });
 
   const accountPairingRequest = Effect.fnUntraced(function* () {
@@ -569,16 +594,23 @@ export function makeAccountPairing(input: {
             if (request.rows.some((item) => hex(item.genesis) === hex(approved.genesis)))
               covers.approved.add(hex(approved.genesis));
           coverage.set(row.lookup_id, covers);
+          const alreadyJoined = yield* sql(joinedSet(row.lookup_id));
+          const tasks: {
+            workspace: AccountPairingRequesterWorkspace;
+            install: Effect.Effect<void, unknown>;
+          }[] = [];
+          const seenWorkspaces = new Set<string>();
           for (const approved of approval.success.rows) {
             const workspace = workspaces.find(
               (item) => hex(item.genesis) === hex(approved.genesis)
             );
             if (
               !workspace ||
+              seenWorkspaces.has(workspace.workspaceId) ||
+              alreadyJoined.has(workspace.workspaceId) ||
               !request.rows.some((item) => hex(item.genesis) === hex(approved.genesis))
             )
               continue;
-            if ((yield* sql(joinedSet(row.lookup_id))).has(workspace.workspaceId)) continue;
             let install: Effect.Effect<void, unknown>;
             if (isHistoryRow(approved.invitationDigest)) {
               if (!workspace.acceptHistory) continue;
@@ -592,8 +624,17 @@ export function makeAccountPairing(input: {
               if (hex(sha256(bytes)) !== hex(approved.invitationDigest)) continue;
               install = workspace.accept(bytes, approved.admissionRecordHash);
             }
-            // A failure here affects only this workspace; the next poll retries it.
-            const accepted = yield* Effect.result(install);
+            seenWorkspaces.add(workspace.workspaceId);
+            tasks.push({ workspace, install });
+          }
+          // A failure here affects only that workspace; the next poll retries it.
+          const installed = yield* Effect.forEach(
+            tasks,
+            ({ workspace, install }) =>
+              Effect.map(Effect.result(install), (accepted) => ({ workspace, accepted })),
+            { concurrency: WORKSPACE_CONCURRENCY }
+          );
+          for (const { workspace, accepted } of installed) {
             if (Result.isFailure(accepted)) {
               rememberDesktopE2eeFailure('account-pairing-accept', accepted.failure);
               const code =
@@ -625,7 +666,7 @@ export function makeAccountPairing(input: {
     if (requested.length > 0 && requested.every((id) => joined.has(id)))
       yield* settle(row.lookup_id, 'requester', 'approved');
     else if (now() >= row.expires_at) yield* settle(row.lookup_id, 'requester', 'expired');
-    return yield* stateOf(row);
+    return yield* stateOf(row, workspaces);
   });
 
   const cancelAccountPairing = Effect.fnUntraced(function* (options?: {
@@ -726,13 +767,17 @@ export function makeAccountPairing(input: {
   /** Releases every listed approver workspace when the operation ends, however it ends. */
   const releasing = <A, E, R>(
     work: (
-      list: () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>
+      list: (
+        filter?: AccountPairingApproverFilter
+      ) => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>
     ) => Effect.Effect<A, E, R>
   ) =>
     Effect.suspend(() => {
       const listed: AccountPairingApproverWorkspace[] = [];
-      const list = () =>
-        Effect.tap(input.approverWorkspaces(), (all) => Effect.sync(() => listed.push(...all)));
+      const list = (filter?: AccountPairingApproverFilter) =>
+        Effect.tap(input.approverWorkspaces(filter), (all) =>
+          Effect.sync(() => listed.push(...all))
+        );
       return Effect.andThen(
         retryFailedReleases,
         work(list).pipe(
@@ -751,7 +796,8 @@ export function makeAccountPairing(input: {
           Effect.gen(function* () {
             const found = yield* authenticate(keys);
             if (!found) return null;
-            const workspaces = yield* list();
+            const geneses = new Set(found.request.rows.map((item) => hex(item.genesis)));
+            const workspaces = yield* list({ geneses });
             const preview: AccountPairingPreview = {
               requestId: found.relayed?.requestId ?? found.lookupId,
               deviceName: found.request.deviceName,
@@ -817,7 +863,9 @@ export function makeAccountPairing(input: {
             if (found.relayed && found.relayed.requestId !== options.requestId)
               return yield* Effect.fail(fail('invalid-input'));
             const { lookupId, request } = found;
-            const all = yield* list();
+            const geneses = new Set(request.rows.map((item) => hex(item.genesis)));
+            const workspaceIds = new Set(options.workspaceIds);
+            const all = yield* list({ geneses, workspaceIds });
             const selected = options.workspaceIds.map((id) => {
               const workspace = all.find((item) => item.workspaceId === id);
               const row =
@@ -833,7 +881,11 @@ export function makeAccountPairing(input: {
               AccountPairingApproval['workspaces'][number]['outcome']
             >();
             // Sign each workspace and identity once; the original is durable before any
-            // network step. The caller's permit makes check, sign and journal atomic.
+            // network step. Refresh network calls run concurrently across selected
+            // workspaces, then tag/expiry rechecks, signing and SQLite journaling stay
+            // sequential under the caller's permit.
+            const toSign: { workspace: AccountPairingApproverWorkspace; row: PairingRequestRow }[] =
+              [];
             for (const item of selected) {
               const { workspace, row } = item!;
               const existing = yield* sql(admission(workspace.workspaceId, row.signingPublicKey));
@@ -842,16 +894,27 @@ export function makeAccountPairing(input: {
                   return yield* Effect.fail(fail('corrupt'));
                 continue;
               }
+              toSign.push({ workspace, row });
+            }
+            const refreshedByWorkspace = yield* Effect.forEach(
+              toSign,
+              ({ workspace, row }) =>
+                Effect.map(
+                  workspace.refresh
+                    ? Effect.result(workspace.refresh())
+                    : Effect.succeed(Result.succeed(undefined)),
+                  (refreshed) => ({ workspace, row, refreshed })
+                ),
+              { concurrency: WORKSPACE_CONCURRENCY }
+            );
+            for (const { workspace, row, refreshed } of refreshedByWorkspace) {
               // A failed refresh or signature affects only this workspace.
-              if (workspace.refresh) {
-                const refreshed = yield* Effect.result(workspace.refresh());
-                if (Result.isFailure(refreshed)) {
-                  if (refusesApproval(refreshed.failure))
-                    return yield* Effect.fail(refreshed.failure);
-                  rememberDesktopE2eeFailure('account-pairing-refresh', refreshed.failure);
-                  outcomes.set(workspace.workspaceId, 'not-admitted');
-                  continue;
-                }
+              if (Result.isFailure(refreshed)) {
+                if (refusesApproval(refreshed.failure))
+                  return yield* Effect.fail(refreshed.failure);
+                rememberDesktopE2eeFailure('account-pairing-refresh', refreshed.failure);
+                outcomes.set(workspace.workspaceId, 'not-admitted');
+                continue;
               }
               // Checked again after the network step, immediately before signing.
               if (Result.isFailure(verifyPairingRequestTag(keys, request, raw(found.tag))))
@@ -883,24 +946,40 @@ export function makeAccountPairing(input: {
                 })
               );
             }
-            const deliverable: {
+            const toAppend: {
               workspace: AccountPairingApproverWorkspace;
+              row: PairingRequestRow;
               journaled: AdmissionRow;
-              /** `null`: delivered through full history (Member approver). */
-              invitation: Uint8Array | null;
             }[] = [];
             for (const item of selected) {
               const { workspace, row } = item!;
               const journaled = yield* sql(admission(workspace.workspaceId, row.signingPublicKey));
               // Not signed in this pass; its outcome is already recorded.
               if (!journaled) continue;
-              const appended = yield* Effect.result(
-                workspace.append(
-                  journaled.request_id,
-                  new Uint8Array(journaled.record),
-                  row.credentialHash
-                )
-              );
+              toAppend.push({ workspace, row, journaled });
+            }
+            const appendedByWorkspace = yield* Effect.forEach(
+              toAppend,
+              ({ workspace, row, journaled }) =>
+                Effect.map(
+                  Effect.result(
+                    workspace.append(
+                      journaled.request_id,
+                      new Uint8Array(journaled.record),
+                      row.credentialHash
+                    )
+                  ),
+                  (appended) => ({ workspace, row, journaled, appended })
+                ),
+              { concurrency: WORKSPACE_CONCURRENCY }
+            );
+            const deliverable: {
+              workspace: AccountPairingApproverWorkspace;
+              journaled: AdmissionRow;
+              /** `null`: delivered through full history (Member approver). */
+              invitation: Uint8Array | null;
+            }[] = [];
+            for (const { workspace, row, journaled, appended } of appendedByWorkspace) {
               if (Result.isFailure(appended)) {
                 // The host reports `admission-lost` only when the verified ledger holds
                 // a different record in this original's slot: it can never commit, so

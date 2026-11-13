@@ -232,7 +232,8 @@ export function E2eeAutomaticPairingPage({
   useEffect(() => {
     if (!canStart) return undefined;
     let alive = true,
-      running = false;
+      running = false,
+      queued = false;
     setBusy(false);
     setError(null);
     blockedRef.current = null;
@@ -254,12 +255,19 @@ export function E2eeAutomaticPairingPage({
       }
     };
     const tick = async () => {
-      if (!alive || running || qrPaused.current) return;
+      if (!alive || qrPaused.current) return;
+      if (running) {
+        queued = true;
+        return;
+      }
       running = true;
       try {
-        const retained = await runtime.automaticPairingState!(workspaceId);
-        if (!alive) return;
-        accept(retained ?? (await runtime.startAutomaticPairing!(workspaceId)));
+        do {
+          queued = false;
+          const retained = await runtime.automaticPairingState!(workspaceId);
+          if (!alive) return;
+          accept(retained ?? (await runtime.startAutomaticPairing!(workspaceId)));
+        } while (queued && alive && !qrPaused.current && !completed.current);
       } catch (cause) {
         if (alive) {
           const code = accountPairingErrorCode(cause);
@@ -406,8 +414,7 @@ export function E2eeAutomaticPairingPage({
     const timer = setInterval(() => {
       if (running) return;
       running = true;
-      void runtime
-        .accountPairingRequest!()
+      void runtime.accountPairingRequest!()
         .then((next) => {
           if (!alive || qrSubmitted.current === null) return;
           if (next?.lookupId && next.lookupId !== qrSubmitted.current) return;
@@ -929,7 +936,8 @@ export function E2eeAutomaticPairingInbox({
   requestsRef.current = requests;
   useEffect(() => {
     let alive = true,
-      running = false;
+      running = false,
+      queued = false;
     qrForRef.current = null;
     setQrFor(null);
     setRequests([]);
@@ -945,40 +953,53 @@ export function E2eeAutomaticPairingInbox({
     deferred.current.clear();
     if (!runtime?.pendingAutomaticPairing) return;
     const tick = async () => {
-      if (!alive || running) return;
+      if (!alive) return;
+      if (running) {
+        queued = true;
+        return;
+      }
       running = true;
       setRequests((previous) => previous.filter((row) => row.expiresAt > Date.now()));
       try {
-        const rows = await runtime.pendingAutomaticPairing!();
-        if (!alive) return;
-        setRequests(rows);
-        const ids = new Set(rows.map((row) => row.id));
-        for (const id of deferred.current) if (!ids.has(id)) deferred.current.delete(id);
-        if (selectedRef.current && !ids.has(selectedRef.current)) {
-          selectedRef.current = null;
-          setSelected(null);
-        }
-        // A link scanned with the system camera may name a request fetched only now; claim it
-        // before the default first-waiting popup chooses a different row.
-        requestsRef.current = rows;
-        retryE2eePairLink();
-        // A visible window presents even without keyboard focus (another app or a
-        // second screen); a hidden one leaves the request to the system notification.
-        // It opens over Settings or the encryption console, but never over another
-        // pairing surface.
-        if (
-          !selectedRef.current &&
-          !inboxRef.current &&
-          !qrForRef.current &&
-          document.visibilityState === 'visible' &&
-          !hasVisiblePairingSurface()
-        ) {
-          const next = rows.find((row) => row.phase === 'waiting' && !deferred.current.has(row.id));
-          if (next) {
-            selectedRef.current = next.id;
-            setSelected(next.id);
+        do {
+          queued = false;
+          const rows = await runtime.pendingAutomaticPairing!();
+          if (!alive) return;
+          setRequests(rows);
+          const ids = new Set(rows.map((row) => row.id));
+          for (const id of deferred.current) if (!ids.has(id)) deferred.current.delete(id);
+          if (selectedRef.current && !ids.has(selectedRef.current)) {
+            selectedRef.current = null;
+            setSelected(null);
           }
-        }
+          // A link scanned with the system camera may name a request fetched only now; claim it
+          // before the default first-waiting popup chooses a different row.
+          requestsRef.current = rows;
+          retryE2eePairLink();
+          // A visible window presents even without keyboard focus (another app or a
+          // second screen); a hidden one leaves the request to the system notification.
+          // It opens over Settings or the encryption console, but never over another
+          // pairing surface. On a computer with Instant QR, show the one-time QR as
+          // soon as local identity verifies while the 6-digit fallback finishes.
+          if (
+            !selectedRef.current &&
+            !inboxRef.current &&
+            !qrForRef.current &&
+            document.visibilityState === 'visible' &&
+            !hasVisiblePairingSurface()
+          ) {
+            const canPresentPreparing = !handheld && supportsInstantQr(runtime);
+            const next = rows.find(
+              (row) =>
+                (row.phase === 'waiting' || (canPresentPreparing && row.phase === 'preparing')) &&
+                !deferred.current.has(row.id)
+            );
+            if (next) {
+              selectedRef.current = next.id;
+              setSelected(next.id);
+            }
+          }
+        } while (queued && alive);
       } catch {
         /* An inbox outage never gates an existing workspace or clears known requests. */
       } finally {
@@ -1068,7 +1089,7 @@ export function E2eeAutomaticPairingInbox({
   const act = async (approve: boolean, entered = code) => {
     const target = current;
     if (!target || busy || !runtime) return;
-    if (approve && !/^\d{6}$/.test(entered)) return;
+    if (approve && (target.phase !== 'waiting' || !/^\d{6}$/.test(entered))) return;
     const owner = actionOwner.current;
     setBusy(target.id);
     setError(null);
@@ -1103,11 +1124,7 @@ export function E2eeAutomaticPairingInbox({
   const qrSlot = qrSupported && runtime && (shownQr || current) && (
     <div className="my-5 rounded-xl border p-4" data-testid="e2ee-approval-qr">
       {shownQr ? (
-        <E2eeInstantQrApprove
-          key={shownQr}
-          runtime={runtime}
-          onJoined={() => qrJoined(shownQr)}
-        />
+        <E2eeInstantQrApprove key={shownQr} runtime={runtime} onJoined={() => qrJoined(shownQr)} />
       ) : (
         <div className="flex flex-col items-center gap-2 text-center">
           <Button
@@ -1171,18 +1188,21 @@ export function E2eeAutomaticPairingInbox({
       count: requestCount,
       open: () => setInbox(true),
       review: () => {
-        const waiting = requestsRef.current.filter((row) => row.phase === 'waiting');
-        if (waiting.length === 1) setSelected(waiting[0]!.id);
+        const ready = requestsRef.current.filter(
+          (row) =>
+            row.phase === 'waiting' || (!handheld && qrSupported && row.phase === 'preparing')
+        );
+        if (ready.length === 1) setSelected(ready[0]!.id);
         else setInbox(true);
       },
       joinedByCode: () => {
         // The device that just scanned also has an automatic request; closing Settings
         // or the console must not pop it up again.
         for (const row of requestsRef.current)
-          if (row.phase === 'waiting') deferred.current.add(row.id);
+          if (row.phase === 'waiting' || row.phase === 'preparing') deferred.current.add(row.id);
       },
     }),
-    [requestCount]
+    [requestCount, handheld, qrSupported]
   );
   return (
     <E2eeDeviceRequestsContext.Provider value={requestsUi}>
@@ -1200,7 +1220,10 @@ export function E2eeAutomaticPairingInbox({
                   <Button
                     className="mt-4 w-full"
                     variant="secondary"
-                    disabled={row.phase !== 'waiting'}
+                    disabled={
+                      row.phase !== 'waiting' &&
+                      !(!handheld && qrSupported && row.phase === 'preparing')
+                    }
                     onClick={() => {
                       clearTimeout(dismissTimer.current);
                       qrForRef.current = null;
@@ -1349,7 +1372,7 @@ export function E2eeAutomaticPairingInbox({
                     placeholder="000000"
                     aria-invalid={error?.kind === 'mismatch' || undefined}
                     aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
-                    disabled={Boolean(busy)}
+                    disabled={Boolean(busy) || current.phase !== 'waiting'}
                     onChange={(event) => {
                       // Full-width IME digits (１２３) become ASCII before filtering.
                       setCode(event.target.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6));
@@ -1389,7 +1412,10 @@ export function E2eeAutomaticPairingInbox({
                     className="flex-1"
                     data-testid="e2ee-approval-authorize"
                     disabled={
-                      Boolean(busy) || !/^\d{6}$/.test(code) || current.expiresAt <= Date.now()
+                      Boolean(busy) ||
+                      current.phase !== 'waiting' ||
+                      !/^\d{6}$/.test(code) ||
+                      current.expiresAt <= Date.now()
                     }
                     onClick={() => void act(true)}
                   >

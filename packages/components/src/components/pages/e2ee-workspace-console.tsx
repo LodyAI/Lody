@@ -70,7 +70,13 @@ const retiredReaders = createWorkspaceRuntimeRetirements();
 // Account-pairing joins by account and workspace, across control-page remounts, so a
 // remount neither forgets the join nor asks the host for keys again. A failed key
 // request waits for the user's retry. Cleared when the account changes.
-type AccountPairingJoin = { request?: Promise<boolean>; failed?: boolean; automatic?: boolean };
+type AccountPairingJoin = {
+  request?: Promise<boolean>;
+  failed?: boolean;
+  automatic?: boolean;
+  cancel?: () => void;
+};
+const ACCOUNT_PAIRING_KEY_RETRY_MS = [300, 600, 1200, 2000, 3000, 4000] as const;
 const accountPairingJoins = new Map<string, AccountPairingJoin>();
 let accountPairingAccount: string | null | undefined;
 
@@ -287,6 +293,20 @@ export function E2eeWorkspaceConsole({
             )
               throw error;
             nativeFailure = classifyE2eeControlFailure(error);
+            // Render automatic pairing / QR scan immediately instead of blocking on
+            // public describe + history; those still finish below to verify continuity.
+            if (
+              !disposed &&
+              nativeFailure.kind === 'approval-required' &&
+              runtime.startAutomaticPairing &&
+              (!pin || nativeFailure.code === 'device-revoked')
+            ) {
+              setState((previous) =>
+                previous.scope === scope
+                  ? { ...previous, loading: false, failure: nativeFailure }
+                  : previous
+              );
+            }
           }
           if (status) {
             if (disposed) {
@@ -677,16 +697,48 @@ export function E2eeWorkspaceConsole({
   const requestAccountPairingKey = (join: AccountPairingJoin) => {
     const runtime = port?.runtime;
     if (!runtime) return;
+    join.cancel?.();
+    let cancelled = false;
+    let stopSleep: (() => void) | undefined;
+    join.cancel = () => {
+      cancelled = true;
+      stopSleep?.();
+    };
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          stopSleep = undefined;
+          resolve();
+        }, ms);
+        stopSleep = () => {
+          clearTimeout(timer);
+          stopSleep = undefined;
+          resolve();
+        };
+      });
     join.failed = false;
-    join.request = runtime.refresh(workspaceId, { installKeys: true }).then(
-      () => true,
-      (error: unknown) => {
+    join.request = (async () => {
+      try {
+        const first = await runtime.refresh(workspaceId, { installKeys: true });
+        if (!first || first.hasCurrentKey) return true;
+        // Instant QR approval delivers mailbox keys asynchronously right after
+        // publishing the admission. Poll briefly while the mailbox catches up.
+        for (const delay of ACCOUNT_PAIRING_KEY_RETRY_MS) {
+          await wait(delay);
+          if (cancelled || accountPairingJoins.get(identity) !== join) return false;
+          const next = await runtime.refresh(workspaceId, { installKeys: true });
+          if (!next || next.hasCurrentKey) return true;
+        }
+        join.failed = true;
+        return false;
+      } catch (error: unknown) {
+        if (cancelled) return false;
         const failure = classifyE2eeControlFailure(error);
         console.error('E2EE account pairing key request failed', failure.kind, failure.code);
         join.failed = true;
         return false;
       }
-    );
+    })();
     observeKeyRequest(join.request);
   };
   const onAccountPairingJoined = (automatic = false) => {
@@ -707,12 +759,14 @@ export function E2eeWorkspaceConsole({
   useEffect(() => {
     if (accountPairingAccount === accountId) return;
     accountPairingAccount = accountId;
+    for (const join of accountPairingJoins.values()) join.cancel?.();
     accountPairingJoins.clear();
   }, [accountId]);
   useEffect(() => {
     const join = accountPairingJoins.get(identity);
     if (!join || !joinedCredential || !workspaceSlug) return;
     if (joinedKey) {
+      join.cancel?.();
       accountPairingJoins.delete(identity);
       void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
       return;

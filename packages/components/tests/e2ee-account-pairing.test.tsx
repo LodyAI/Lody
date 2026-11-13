@@ -179,7 +179,9 @@ describe('new device request', () => {
       host.runtime.requestAccountPairing = () =>
         withAccountPairingCode(
           Promise.reject(
-            new Error(`Error invoking remote method 'e2ee.requestAccountPairing': Error: e2ee_${code}`)
+            new Error(
+              `Error invoking remote method 'e2ee.requestAccountPairing': Error: e2ee_${code}`
+            )
           )
         );
       await act(async () =>
@@ -1243,7 +1245,9 @@ describe('instant QR join and form-factor pairing', () => {
       await import('../src/components/pages/e2ee-automatic-pairing');
     const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
     let visibility: DocumentVisibilityState = 'hidden';
-    const visible = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const visible = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockImplementation(() => visibility);
     const runtime = {
       pendingAutomaticPairing: async () => [review],
       approveAutomaticPairing: async () => {},
@@ -1373,7 +1377,9 @@ describe('instant QR join and form-factor pairing', () => {
     const request = (): E2eeAccountPairingRequestState => ({
       expiresAt: NOW + 600_000,
       status,
-      workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: status === 'joined' ? 'joined' : 'pending' }],
+      workspaces: [
+        { workspaceId: 'w1', name: 'Alpha', state: status === 'joined' ? 'joined' : 'pending' },
+      ],
     });
     const runtime = {
       automaticPairingState: async () => {
@@ -1544,7 +1550,10 @@ describe('pairing hardening', () => {
         entered.push([id, code]);
       },
       declineAutomaticPairing: async () => {},
-      requestAccountPairing: async (input: { pairingString: string; preserveExisting?: boolean }) => {
+      requestAccountPairing: async (input: {
+        pairingString: string;
+        preserveExisting?: boolean;
+      }) => {
         joined.push(input);
         return {
           lookupId: 'a'.repeat(32),
@@ -1599,7 +1608,9 @@ describe('pairing hardening', () => {
         ?.value
     ).toBe('246810');
     await act(async () =>
-      (document.querySelector('[data-testid="e2ee-approval-authorize"]') as HTMLButtonElement).click()
+      (
+        document.querySelector('[data-testid="e2ee-approval-authorize"]') as HTMLButtonElement
+      ).click()
     );
     await flush();
     expect(entered).toEqual([['request', '246810']]);
@@ -1687,7 +1698,8 @@ describe('pairing hardening', () => {
       status: 'waiting',
       workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'pending', approval: 'waiting' }],
     };
-    (window as { __LODY_PENDING_E2EE_PAIR_URL__?: string }).__LODY_PENDING_E2EE_PAIR_URL__ = pairUrl;
+    (window as { __LODY_PENDING_E2EE_PAIR_URL__?: string }).__LODY_PENDING_E2EE_PAIR_URL__ =
+      pairUrl;
     await act(async () =>
       root.render(<E2eeAutomaticPairingInbox key="signed-out" runtime={runtime} />)
     );
@@ -1716,7 +1728,9 @@ describe('pairing hardening', () => {
 
     // 2. Leaving/unmounting while the confirmed link request is still waiting cancels its lookupId.
     await act(async () =>
-      (document.querySelector('[data-testid="e2ee-link-join-confirm"]') as HTMLButtonElement).click()
+      (
+        document.querySelector('[data-testid="e2ee-link-join-confirm"]') as HTMLButtonElement
+      ).click()
     );
     await flush();
     expect(requested).toEqual([{ pairingString: pairUrl }]);
@@ -1762,7 +1776,9 @@ describe('pairing hardening', () => {
     );
     await flush();
     await act(async () =>
-      (document.querySelector('[data-testid="e2ee-link-join-confirm"]') as HTMLButtonElement).click()
+      (
+        document.querySelector('[data-testid="e2ee-link-join-confirm"]') as HTMLButtonElement
+      ).click()
     );
     await flush();
     expect(requested).toEqual([{ pairingString: secondPairUrl }]);
@@ -1983,5 +1999,73 @@ describe('pairing hardening', () => {
     await flush();
     await click('e2ee.auto.offline');
     expect(manual).toBe(1);
+  });
+
+  it('opens the Instant QR dialog immediately on a preparing review and coalesces in-flight subscription wakeups', async () => {
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    let listener: (() => void) | undefined;
+    let calls = 0;
+    let firstGate!: (rows: typeof waitingRows) => void;
+    const waitingRows = [
+      {
+        id: 'request-live',
+        requestId: 'native-live',
+        workspaceId: 'w1',
+        workspaceName: 'Alpha',
+        deviceName: 'Phone',
+        expiresAt: NOW + 600_000,
+        phase: 'preparing' as const,
+      },
+    ];
+    let currentPhase: 'preparing' | 'waiting' = 'preparing';
+    const runtime = {
+      accountPairingCode: async () => ({ pairingString: CODE, expiresAt: NOW + 600_000 }),
+      inspectAccountPairing: async () => null,
+      approveAccountPairing: async () => ({ workspaces: [] }),
+      subscribeAutomaticPairing: (cb: () => void) => {
+        listener = cb;
+        return () => {
+          listener = undefined;
+        };
+      },
+      pendingAutomaticPairing: () => {
+        calls += 1;
+        if (calls === 1) {
+          return new Promise<typeof waitingRows>((resolve) => {
+            firstGate = resolve;
+          });
+        }
+        return Promise.resolve([{ ...waitingRows[0]!, phase: currentPhase }]);
+      },
+      approveAutomaticPairing: async () => {},
+      declineAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    try {
+      await act(async () =>
+        root.render(
+          <E2eeAutomaticPairingInbox runtime={runtime}>
+            <div />
+          </E2eeAutomaticPairingInbox>
+        )
+      );
+      expect(calls).toBe(1);
+      // A WebSocket wakeup arrives while the initial read is still in flight.
+      listener!();
+      await act(async () => firstGate([]));
+      await flush();
+      // Coalesced immediately without waiting for the 2s interval, and Instant QR is already visible on preparing!
+      expect(calls).toBe(2);
+      expect(document.querySelector('[data-testid="e2ee-instant-qr"]')).not.toBeNull();
+      // Promote to waiting via another wakeup.
+      currentPhase = 'waiting';
+      await act(async () => listener!());
+      await flush();
+      expect(calls).toBe(3);
+      expect(document.querySelector('[data-testid="e2ee-instant-qr"]')).not.toBeNull();
+    } finally {
+      focus.mockRestore();
+    }
   });
 });

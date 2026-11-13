@@ -369,6 +369,35 @@ describe('local encrypted agent approval', () => {
     expect(admittedOther).toBe(false);
     expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
   });
+
+  it('does not re-open the confirmation dialog when a settled session rotates during slow activation', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      const admittedSessions: string[] = [];
+      runtime.admitLocalAgent = async (_workspace: string, approvedSession: string) => {
+        if (approvedSession !== session) throw new Error('wrong session');
+        admitted = true;
+        admittedSessions.push(approvedSession);
+        return { admitted: true, ready };
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+      await click('e2ee.localAgent.allow');
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      // Main rotates pairingSessionId after settling admission while machine activation finishes.
+      session = 'rotated-settled-session';
+      ready = true;
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_RECHECK_DELAYS_MS[0]!));
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(admittedSessions).toEqual(['synthetic-session', 'rotated-settled-session']);
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('remote encrypted machine approval', () => {
