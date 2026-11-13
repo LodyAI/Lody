@@ -593,53 +593,48 @@ effectIt.effect(
         ok: true,
       });
 
-      // One unshared project the session reaches refuses the fork before any work.
-      for (const [requestId, setup] of [
-        ['67', () => (projectAllowed = (project) => project !== 'shared-b')],
-        // A signer without a ledger account is never attributed from the request.
-        [
-          '68',
-          () => {
-            projectAllowed = () => true;
-            identity = undefined;
-          },
-        ],
-      ] as const) {
-        setup();
-        const refused = yield* f.sender.prepareFeature({
-          ...input,
-          requestId: requestId.repeat(16),
-        });
-        const before = streams.writes.length;
-        const checked = yield* Deferred.make<void>();
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const receive = yield* makeEncryptedFeatureReceiver({
-              ...receiveOptions,
-              requesterIdentity: () =>
-                Deferred.succeed(checked, undefined).pipe(Effect.as(identity)),
-              authorizeSessionExecution: (
-                ...args: Parameters<typeof authorization.authorizeSessionExecution>
-              ) =>
-                authorization
-                  .authorizeSessionExecution(...args)
-                  .pipe(
-                    Effect.tap((result) =>
-                      result._tag === 'Authorized'
-                        ? Effect.void
-                        : Deferred.succeed(checked, undefined)
-                    )
-                  ),
-            });
-            yield* receive({ id: refused.requestId, frame: refused.frameHex });
-            yield* Deferred.await(checked);
-          })
-        );
-        expect(handled).toHaveLength(1);
-        expect(
-          streams.writes.slice(before).filter((write) => write.stream.includes(':res:'))
-        ).toEqual([]);
-      }
+      // One unshared project the session reaches refuses the fork before any work, and the
+      // sender gets that definite answer instead of waiting out its deadline.
+      projectAllowed = (project) => project !== 'shared-b';
+      const unshared = { ...input, requestId: '67'.repeat(16) };
+      const unsharedOriginal = yield* f.sender.prepareFeature(unshared);
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+          yield* receive({ id: unsharedOriginal.requestId, frame: unsharedOriginal.frameHex });
+          yield* streams.waitResponse(unsharedOriginal.requestId, 1);
+        })
+      );
+      expect(handled).toHaveLength(1);
+      const refusal = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
+        ?.value as { id: string; frame: string };
+      expect(refusal.id).toBe(unsharedOriginal.requestId);
+      expect(yield* f.sender.acceptFeatureResponse(unshared, refusal.frame)).toMatchObject({
+        ok: false,
+        code: 'e2ee_machine_not_shared',
+      });
+
+      // A signer without a ledger account is never attributed from the request, and it
+      // gets no answer at all.
+      projectAllowed = () => true;
+      identity = undefined;
+      const anonymous = yield* f.sender.prepareFeature({ ...input, requestId: '68'.repeat(16) });
+      const before = streams.writes.length;
+      const checked = yield* Deferred.make<void>();
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver({
+            ...receiveOptions,
+            requesterIdentity: () => Deferred.succeed(checked, undefined).pipe(Effect.as(identity)),
+          });
+          yield* receive({ id: anonymous.requestId, frame: anonymous.frameHex });
+          yield* Deferred.await(checked);
+        })
+      );
+      expect(handled).toHaveLength(1);
+      expect(
+        streams.writes.slice(before).filter((write) => write.stream.includes(':res:'))
+      ).toEqual([]);
     })
 );
 

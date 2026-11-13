@@ -253,6 +253,47 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       const authority = yield* authorize(options.workspaceId, opened.requesterDevice);
       const authoritySignal = options.authoritySignal?.();
       if (
+        forkRequest &&
+        authority._tag === 'Denied' &&
+        authority.reason === 'e2ee_machine_not_shared' &&
+        options.isOpen() &&
+        (yield* Clock.currentTimeMillis) < opened.expiresAt
+      ) {
+        // A verified member refused by the sharing policy (machine or project) gets a
+        // definite answer instead of waiting out its deadline. It reveals only what that
+        // member's sharing view shows, and runs nothing.
+        yield* options.native.retainFeatureRequest(options.machineId, opened);
+        const refusal = yield* options.native.sealFeatureResult(options.machineId, opened, {
+          ok: false,
+          code: 'e2ee_machine_not_shared',
+          error: 'This machine or one of its projects is not shared with you.',
+        });
+        yield* options.native.verifyFeatureRequest(opened);
+        const client = options.client;
+        if (!sink && !client) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
+        const stream = options.native.responseStream(opened.requesterDevice);
+        if (!sink)
+          yield* Effect.tryPromise({
+            try: () => client!.ensureJsonStream(stream, 86400),
+            catch: (cause) => cause,
+          });
+        for (const frame of refusal) {
+          if (!options.isOpen() || (yield* Clock.currentTimeMillis) >= opened.expiresAt)
+            return yield* Effect.void;
+          yield* Effect.tryPromise({
+            try: async () => {
+              if (sink) return await sink.deliver(opened.requestId, frame);
+              await client!.appendJson(
+                stream,
+                e2eeRpcEnvelope({ id: opened.requestId, frame: Buffer.from(frame).toString('hex') })
+              );
+            },
+            catch: (cause) => cause,
+          });
+        }
+        return yield* Effect.void;
+      }
+      if (
         authority._tag !== 'Authorized' ||
         ((opened.input.request.method === 'machine/acp-interaction' ||
           opened.input.request.method === 'session/history-read') &&

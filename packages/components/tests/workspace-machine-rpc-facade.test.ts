@@ -9,6 +9,7 @@ import {
 } from '@lody/shared';
 import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc';
 import { isE2eeFeatureMethod } from '@lody/shared/e2ee-rpc';
+import { encryptedRemoteEditAndResendAvailable } from '../src/lib/encrypted-machine-controls';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
 import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
@@ -1440,6 +1441,23 @@ describe('encrypted file and preview routing', () => {
     ]);
     expect(isE2eeFeatureMethod('session/fork')).toBe(true);
 
+    // The machine's sharing refusal is an access answer, not a transport error to retry.
+    expect(
+      await facade(
+        async () =>
+          ({
+            ok: false,
+            code: 'e2ee_machine_not_shared',
+            error: 'This machine or one of its projects is not shared with you.',
+          }) as never
+      ).requestSessionFork(remoteMachineId, spec)
+    ).toMatchObject({
+      success: false,
+      error: {
+        code: 'MACHINE_ACCESS_DENIED',
+        message: 'This machine or one of its projects is not shared with you.',
+      },
+    });
     const rejected = await facade(
       async () => ({ ok: false, error: 'Fork access verification denied.' }) as never
     ).requestSessionFork(remoteMachineId, spec);
@@ -1460,6 +1478,38 @@ describe('encrypted file and preview routing', () => {
       }, CURRENT_MACHINE_PROTOCOL_CAPABILITIES).requestSessionFork(remoteMachineId, spec)
     ).toMatchObject({ success: false, error: { code: 'FORK_UNAVAILABLE' } });
     expect(unsigned).toEqual([]);
+  });
+
+  it('offers remote encrypted edit and resend only to an updated machine owner', () => {
+    const machine = {
+      ownerUserId: 'owner-account',
+      protocolCapabilities: {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionEditAndResend: 1,
+      },
+    };
+    const available = (
+      overrides: Partial<Parameters<typeof encryptedRemoteEditAndResendAvailable>[0]>
+    ) =>
+      encryptedRemoteEditAndResendAvailable({
+        contentMode: 'e2ee',
+        accountId: 'owner-account',
+        machine,
+        ...overrides,
+      });
+    expect(available({})).toBe(true);
+    // A member's edit would be signed by the machine and could run only as its owner.
+    expect(available({ accountId: 'member-account' })).toBe(false);
+    // An older machine drops the method without answering.
+    expect(
+      available({
+        machine: { ...machine, protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+      })
+    ).toBe(false);
+    expect(available({ machine: undefined })).toBe(false);
+    expect(available({ accountId: null })).toBe(false);
+    // Ordinary workspaces keep their existing RPC gate.
+    expect(available({ contentMode: 'plaintext' })).toBe(false);
   });
 
   it('edits and resends an encrypted message through the protected feature channel, never ordinary RPC', async () => {

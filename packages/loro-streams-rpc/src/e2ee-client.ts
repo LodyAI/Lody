@@ -346,7 +346,22 @@ export function makeE2eeRpcClient(options: {
         }
       })
     );
-  const features = makeE2eeFeatureRpcClient({ ...options, targetSigner, authorizeRequest });
+  const features = makeE2eeFeatureRpcClient({
+    ...options,
+    targetSigner,
+    authorizeRequest,
+    // Same preflight as dispatch: only a verified denial on another member's machine
+    // withholds the request; an unknown policy signs and the machine decides.
+    authorizeSharedExecution: Effect.fnUntraced(function* (machineId: string) {
+      const state = (yield* options.ledger()).inspectState();
+      const own = state.devices.get(options.requesterDevice);
+      const target = [...state.devices.values()].find(
+        (device) => device.kind === 'machine' && device.machineId === machineId
+      );
+      if (own && target && own.membershipId.equals(target.membershipId)) return true;
+      return yield* options.authorizeTarget?.(machineId) ?? Effect.succeed(true);
+    }),
+  });
   return {
     ...features,
     /** Terminal native store cleanup; failed owners remain available for another close attempt. */

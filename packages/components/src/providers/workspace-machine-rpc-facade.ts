@@ -1144,9 +1144,9 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
         // An older machine drops an unknown method without replying; refuse before signing.
         if (
-          (await deps.getMachineProtocolCapabilities(machineId))?.[
+          ((await deps.getMachineProtocolCapabilities(machineId))?.[
             MACHINE_PROTOCOL_CAPABILITIES.e2eeSessionFork
-          ] !== E2EE_SESSION_FORK_PROTOCOL_VERSION
+          ] ?? 0) < E2EE_SESSION_FORK_PROTOCOL_VERSION
         )
           return sessionForkFailure(
             args,
@@ -1160,7 +1160,14 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           params: args,
           timeoutMs,
         });
-        if (!response.ok) return sessionForkFailure(args, 'INTERNAL_ERROR', response.error);
+        if (!response.ok)
+          return sessionForkFailure(
+            args,
+            response.code === 'e2ee_machine_not_shared'
+              ? 'MACHINE_ACCESS_DENIED'
+              : 'INTERNAL_ERROR',
+            response.error
+          );
         return response.result as SessionForkResponse;
       }
       return await (
@@ -1199,9 +1206,9 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       if (deps.protectedContent) {
         if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
         if (
-          (await deps.getMachineProtocolCapabilities(machineId))?.[
+          ((await deps.getMachineProtocolCapabilities(machineId))?.[
             MACHINE_PROTOCOL_CAPABILITIES.e2eeSessionEditAndResend
-          ] !== E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION
+          ] ?? 0) < E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION
         )
           return sessionEditAndResendFailure(
             args,
