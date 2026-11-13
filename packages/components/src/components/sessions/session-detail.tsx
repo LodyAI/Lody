@@ -20,7 +20,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  Copy,
   Ellipsis,
   FileText,
   Folder,
@@ -35,6 +34,7 @@ import {
   Search,
   Trash2,
   Users,
+  SquareArrowOutUpRight,
 } from 'lucide-react';
 import { CuidaSidebarExpandOutline } from '@lody/ui';
 import { Spinner } from '@lody/ui/spinner';
@@ -6305,7 +6305,7 @@ const SessionDetail = ({
     mobileMenuActions.push(
       {
         id: 'copy-path',
-        icon: <Copy {...stylex.props(detailStyles.icon14)} />,
+        icon: <Folder {...stylex.props(detailStyles.icon14)} />,
         label: t('sessions.copyPath', 'Copy path'),
         onClick: () =>
           handleCopyText(
@@ -6333,7 +6333,7 @@ const SessionDetail = ({
     });
     mobileMenuActions.push({
       id: 'copy-deeplink',
-      icon: <Link {...stylex.props(detailStyles.icon14)} />,
+      icon: <SquareArrowOutUpRight {...stylex.props(detailStyles.icon14)} />,
       label: t('sessions.copyDeepLink', 'Copy deeplink'),
       onClick: () => {
         void handleCopyUrl(undefined, undefined, 'deeplink');
