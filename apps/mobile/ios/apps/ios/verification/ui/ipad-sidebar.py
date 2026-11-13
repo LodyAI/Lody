@@ -29,7 +29,7 @@ workspace = workspace_item['frame']
 fab = chrome['create']['frame']
 ui.capture('sidebar-glass-fab')
 
-# Record the landscape sidebar hiding and returning; the bottom search must travel with its column.
+# Record the landscape column hiding and returning; the bottom Settings / New Session bar travels with it.
 rotation.rotate(ui, 'landscape')
 try:
     pad.show_list(ui)
@@ -37,7 +37,7 @@ try:
     ui.capture('landscape-sidebar')
     home = ui.element('ipad-home')['frame']
     screen = (round(home['width']), round(home['height']))
-    band = (0, wide['search']['frame']['y'], wide['panel']['width'] + 10, wide['search']['frame']['height'])
+    band = (0, wide['settings']['frame']['y'], wide['panel']['width'] + 10, wide['settings']['frame']['height'])
     pad.record_tap(ui, catalog.system('hideSidebar'), 'landscape-hide', screen, band)
     labeled(catalog.system('showSidebar'))
     ui.capture('landscape-sidebar-hidden')
@@ -84,4 +84,4 @@ ui.capture('new-session')
 tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('create.title')))
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'create-session-input' for item in items), 'New Session did not close')
 pad.show_list(ui)
-print('PASS: Workspace at the top; view/settings at the bottom; workspace, view, settings and new-session actions remain usable.')
+print('PASS: Workspace, search and view menu on top; Settings and New Session at the bottom; all remain usable.')

@@ -9,7 +9,6 @@ final class InboxChrome {
     var workspaces: [AuthWorkspace]
     var selected: AuthWorkspace?
     var devices: InboxDevices
-    var running = 0
     var connection: HomeSyncState = .live
   }
 
@@ -26,14 +25,11 @@ final class InboxChrome {
   private weak var host: UIViewController?
   private var header: LodyNavigationHeader?
   private let workspace = LodyMenuButton(frame: .zero)
-  private let settings = LodySymbolButton(frame: .zero)
   private let search = LodyNavigationSearch()
   private let padBar = InboxPadBar()
   private weak var content: UIViewController?
   private lazy var workspaceSlot = InboxBarSlot(workspace)
-  private lazy var settingsSlot = InboxBarSlot(settings)
   private var workspaceItem: UIBarButtonItem?
-  private var settingsItem: UIBarButtonItem?
   private var filterItem: UIBarButtonItem?
   private var toolbar: [UIBarButtonItem] = []
   private var naturalWidth: CGFloat = 44
@@ -53,12 +49,7 @@ final class InboxChrome {
       self?.naturalWidth = width
       self?.layout()
     }
-    settings.setSymbol("gearshape")
-    settings.setAccessibilityName(String(localized: "tabs.settings", bundle: .lody))
-    settings.setLongPress(true)
-    settings.pressed = { [weak self] in self?.openSettings?() }
-    settings.held = { [weak self] in self?.openDebug?() }
-    // iPhone: a search button that expands into the field (iOS 26 integratedButton); iPad uses padBar.
+    // Every width: a search button that expands into the field (iOS 26 integratedButton).
     // No toolbar integration: with a toolbar-less page UIKit otherwise drops the button to the
     // bottom edge, under the system tab bar. `update` places it in the trailing nav items instead.
     search.configure(LodyNavigationSearch.Config(
@@ -75,7 +66,8 @@ final class InboxChrome {
       default: break
       }
     }
-    padBar.searchChanged = { [weak self] text in self?.searchChanged?(text) }
+    padBar.openSettings = { [weak self] in self?.openSettings?() }
+    padBar.openDebug = { [weak self] in self?.openDebug?() }
     padBar.create = { [weak self] in self?.newSession?() }
   }
 
@@ -101,33 +93,24 @@ final class InboxChrome {
     avatar.image = model.selected?.image ?? ""
     workspace.setAvatar(avatar)
     workspace.setLabel(name)
-    let running = model.running > 0
-      ? String.localizedStringWithFormat(String(localized: "inbox.header.running", bundle: .lody), model.running)
-      : ""
-    // iPhone keeps the capsule to logo + name; connection state floats in the centre pill instead.
-    let compactLayout = host.traitCollection.horizontalSizeClass != .regular
-    workspace.setDetail(compactLayout ? "" : [model.devices.summary, running].filter { !$0.isEmpty }.joined(separator: " · "))
-    updateSync(model.connection, compact: compactLayout)
+    // The capsule keeps to logo + name; connection state floats in the centre pill instead.
+    updateSync(model.connection)
     workspace.setAccountEmail(model.accountEmail)
     workspace.setItems(menuItems(model))
     padBar.canCreate = model.selected?.resolvedMode == .plaintext
     layout()
-    let regular = host.traitCollection.horizontalSizeClass == .regular
     let left = [workspaceItem ?? UIBarButtonItem(customView: workspaceSlot)]
     let filter = filterItem ?? UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal.decrease"), menu: nil)
     filter.tintColor = .label
     filter.accessibilityLabel = String(localized: "inbox.settings.section.view", bundle: .lody)
     // Every size class shares the Chats view menu (grouping, scope, row details, archive).
     filter.menu = pageMenu?() ?? compactMenu?() ?? viewMenu()
-    let settingsItem = self.settingsItem ?? UIBarButtonItem(customView: settingsSlot)
-    // iPad keeps integrated search in the navigation bar, so the sidebar hosts its own bottom field.
-    if regular, header.search === search { header.search = nil }
-    if !regular, header.search !== search { header.search = search }
-    // iPhone reaches Settings from the bottom tabs; iPad keeps the gear beside the view menu.
-    // Right items run from the trailing edge: iPhone shows search, then the view menu (design).
-    var right = regular ? [settingsItem, filter] : [filter, host.navigationItem.searchBarPlacementBarButtonItem]
-    (workspaceItem, self.settingsItem, filterItem) = (left[0], settingsItem, filter)
-    let shownLeft = searching && !regular ? [] : left
+    if header.search !== search { header.search = search }
+    // Settings and new chat sit in the iPhone tab bar, or in `InboxPadBar` at regular width.
+    // Right items run from the trailing edge: search, then the view menu (design).
+    let right = [filter, host.navigationItem.searchBarPlacementBarButtonItem]
+    (workspaceItem, filterItem) = (left[0], filter)
+    let shownLeft = searching ? [] : left
     if header.leftItems ?? [] != shownLeft { header.leftItems = shownLeft.isEmpty ? nil : shownLeft }
     if header.rightItems != right { header.rightItems = right }
     showToolbar()
@@ -227,9 +210,9 @@ final class InboxChrome {
   }
 
   private func setSearching(_ value: Bool) {
-    guard searching != value, let host, let header else { return }
+    guard searching != value, let header else { return }
     searching = value
-    guard host.traitCollection.horizontalSizeClass != .regular, let workspaceItem else { return }
+    guard let workspaceItem else { return }
     header.leftItems = value ? nil : [workspaceItem]
   }
 
@@ -292,17 +275,17 @@ final class InboxChrome {
   }
 
   /// Centre pill, as on the web mobile header: syncing / connecting, plus a brief "connected" flash on recovery.
-  private func updateSync(_ next: HomeSyncState, compact: Bool) {
+  private func updateSync(_ next: HomeSyncState) {
     guard let host else { return }
     let previous = syncState
     syncState = next
     if next == .live, previous != .live {
       recoveryTask?.cancel()
-      showSync(.recovered, in: host, compact: compact)
+      showSync(.recovered, in: host)
       recoveryTask = Task { [weak self] in
         try? await Task.sleep(for: .milliseconds(1200))
         guard let self, !Task.isCancelled, self.syncState == .live, let host = self.host else { return }
-        self.showSync(nil, in: host, compact: host.traitCollection.horizontalSizeClass != .regular)
+        self.showSync(nil, in: host)
       }
       return
     }
@@ -312,16 +295,16 @@ final class InboxChrome {
     case .syncing: .syncing
     case .connecting: .connecting
     }
-    showSync(shown, in: host, compact: compact)
+    showSync(shown, in: host)
   }
 
-  private func showSync(_ shown: HomeSyncPill.Shown?, in host: UIViewController, compact: Bool) {
+  private func showSync(_ shown: HomeSyncPill.Shown?, in host: UIViewController) {
     syncShown = shown
-    syncPill.configuration = UIHostingConfiguration { HomeSyncPill(state: compact ? shown : nil) }.margins(.all, 0)
+    syncPill.configuration = UIHostingConfiguration { HomeSyncPill(state: shown) }.margins(.all, 0)
     syncPill.backgroundColor = .clear
     syncPill.isUserInteractionEnabled = false
     syncPill.accessibilityIdentifier = "home-sync-status"
-    let collapsed = compact && shown != nil
+    let collapsed = shown != nil
     let animate = workspaceCollapsed != collapsed && host.viewIfLoaded?.window != nil && !UIAccessibility.isReduceMotionEnabled
     workspaceCollapsed = collapsed
     let bar = host.navigationController?.navigationBar

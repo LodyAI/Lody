@@ -71,11 +71,7 @@ assert(alpha(of: squareAvatar, at: CGPoint(x: 4, y: 4)) < 60, "The monogram is a
 assert(alpha(of: squareAvatar, at: CGPoint(x: 16, y: 1.5)) > 200 && alpha(of: squareAvatar, at: CGPoint(x: 1.5, y: 16)) > 200,
        "The circle fills the avatar side")
 let headerMenu = UIButton(type: .system)
-LodyMenuButtonStyle.apply(label: "Innei", detail: "3 machines · 2 running", avatar: squareAvatar, to: headerMenu)
-let headerDetail = NSAttributedString(headerMenu.configuration!.attributedSubtitle!)
-assert(headerDetail.string == "3 machines · 2 running", "The status line sits under the workspace name")
-let headerDetailFont = headerDetail.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
-assert(headerDetailFont.fontDescriptor.symbolicTraits.contains(.traitMonoSpace), "The status line is monospaced")
+LodyMenuButtonStyle.apply(label: "Innei", avatar: squareAvatar, to: headerMenu)
 let headerTitle = NSAttributedString(headerMenu.configuration!.attributedTitle!)
 assert(headerTitle.string.hasPrefix("Innei"))
 let headerTitleFont = headerTitle.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
@@ -87,12 +83,8 @@ headerTitle.enumerateAttribute(.attachment, in: NSRange(location: 0, length: hea
   headerChevron = headerChevron ?? (value as? NSTextAttachment)?.image
 }
 assert(ink(headerChevron!) > ink(boldChevron), "The header chevron is heavier than a bold 10 pt chevron beside the semibold name")
-LodyMenuButtonStyle.apply(label: "Design states", detail: "2 online / 2 devices · 3 running", avatar: squareAvatar, to: headerMenu)
-let narrowHeader = headerMenu.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude))
-assert(narrowHeader.height <= LodyMenuButtonStyle.height, "A long status line truncates instead of wrapping: \(narrowHeader.height)")
-LodyMenuButtonStyle.apply(label: "Innei", avatar: squareAvatar, to: headerMenu)
-assert(headerMenu.configuration?.attributedSubtitle == nil, "No status leaves a single-line button")
-print("PASS: the workspace header draws a square monogram, a semibold name with chevron and a mono status line")
+assert(headerMenu.configuration?.attributedSubtitle == nil, "The capsule is a single line: logo and name")
+print("PASS: the workspace header draws a circular monogram and a semibold name with chevron on one line")
 
 var swipedState = UICellConfigurationState(traitCollection: UITraitCollection())
 swipedState.isSwiped = true

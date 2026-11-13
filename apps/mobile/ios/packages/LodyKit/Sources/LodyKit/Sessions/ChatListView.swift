@@ -383,20 +383,28 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   private func configure(_ cell: UICollectionViewListCell, _ item: Item) {
     guard let entry = entries[item] else { return }
     let muted = archivedStyle
+    let current = entry.kind == .session && entry.row.id == selectedRowId
     let emit: (String) -> Void = { [weak self] action in
       self?.forwarded?("rowAction", ["id": entry.row.id, "actionId": action])
     }
     cell.contentConfiguration = UIHostingConfiguration {
+      // UI Verify and VoiceOver tooling address rows by their stable row id.
       switch entry.kind {
-      case .header: GroupHeader(row: entry.row, expanded: entry.expanded, canToggle: entry.canToggle, onAction: emit)
-      case .link: GroupHeader(row: entry.row, expanded: nil, canToggle: false, onAction: emit)
+      case .header:
+        GroupHeader(row: entry.row, expanded: entry.expanded, canToggle: entry.canToggle, onAction: emit)
+          .accessibilityIdentifier(entry.row.id)
+      case .link:
+        GroupHeader(row: entry.row, expanded: nil, canToggle: false, onAction: emit)
+          .accessibilityIdentifier(entry.row.id)
       case .session:
         ChatRowContent(
           row: entry.row, details: details, owner: owners[entry.row.id], muted: muted,
           expanded: entry.canToggle ? entry.expanded : nil,
           onToggle: { [weak self] in self?.toggleOpener(entry.row.id) }
         )
-      case .more: MoreRowContent(title: entry.row.title)
+        .accessibilityAddTraits(current ? .isSelected : [])
+        .accessibilityIdentifier(entry.row.id)
+      case .more: MoreRowContent(title: entry.row.title).accessibilityIdentifier(entry.row.id)
       }
     }
     .margins(.all, 0)
@@ -405,7 +413,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     // iOS highlights rows on press; Android uses ripple.
     // The archived page is already as grey as fill.pressed, so it highlights with a translucent fill.
     let pressed = archivedStyle ? LodyUIColor.fillSelected : LodyUIColor.fillPressed
-    let current = entry.kind == .session && entry.row.id == selectedRowId
+    cell.accessibilityIdentifier = entry.row.id
     cell.accessibilityTraits = current ? [.button, .selected] : .button
     cell.configurationUpdateHandler = { cell, state in
       var background = UIBackgroundConfiguration.clear()
@@ -853,10 +861,12 @@ private struct SectionTitle: View {
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(.isHeader)
       .accessibilityValue(String(localized: String.LocalizationValue(collapsed ? "native.list.collapsed" : "native.list.expanded"), bundle: .lody))
+      .accessibilityIdentifier("label:" + groupId)
     } else {
       label(chevron: nil)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("label:" + groupId)
     }
   }
 
