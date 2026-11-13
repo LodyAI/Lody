@@ -129,3 +129,9 @@ Metadata idle/Presence loss is not completion; sequence is local.
 - `agent-config-output.ts` owns the allowlisted inspection DTO; never spread a stored
   config into output. Default show emits only `envKeys`; raw values require show-only
   `--show-secrets`. Mutations emit receipts. Assignment errors never echo input.
+
+## Command loading
+
+Keep root command summaries in `register.ts` aligned with the real commands. Registration
+must not import command implementations eagerly. Forward arguments unchanged to the selected
+implementation, which owns nested parsing and help.
