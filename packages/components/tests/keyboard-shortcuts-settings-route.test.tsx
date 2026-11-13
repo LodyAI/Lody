@@ -13,7 +13,7 @@ const originalUserAgent = window.navigator.userAgent;
 const originalInnerWidth = window.innerWidth;
 
 vi.mock('@tanstack/react-router', () => ({
-  createFileRoute: () => (options: { component: () => ReactNode }) => ({
+  createLazyFileRoute: () => (options: { component: () => ReactNode }) => ({
     ...options,
     useParams: () => routerState,
   }),
@@ -27,7 +27,7 @@ vi.mock('../src/components/settings/keyboard-shortcuts-setting', () => ({
   KeyboardShortcutsSetting: () => createElement('p', null, 'keyboard-shortcuts-setting'),
 }));
 
-import { KeyboardShortcutsSettingsRoute } from '../src/routes/$workspaceName/_auth/settings/keyboard-shortcuts';
+import { KeyboardShortcutsSettingsRoute } from '../src/routes/$workspaceName/_auth/settings/keyboard-shortcuts.lazy';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

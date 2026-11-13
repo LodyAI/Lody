@@ -1,9 +1,13 @@
+import { SETTINGS_DEFAULT_TAB } from './settings/settings-tabs';
+import { loadSettingsModal, preloadSettings } from './settings/settings-code';
+import { scheduleIdleTask } from '@/lib/idle-task';
+import { useAppCapability } from '@/lib/app-platform';
 import { MagpieImportDialogContainer } from './settings/magpie-import-dialog-container';
 import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
 import { useAgentRoleSchemaReconciliation } from '@/hooks/use-agent-role-schema-reconciliation';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { useWorkspaceWindowOwner, WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
-import { type ReactNode, useLayoutEffect } from 'react';
+import { type ReactNode, lazy, Suspense, useEffect, useState, useLayoutEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useScheduleRegistrySync } from '@/hooks/use-schedules';
 import { useIsCompactDesktop, useIsMobile } from '../hooks/use-mobile';
@@ -13,9 +17,33 @@ import { WebWorkspaceLayout } from './web-workspace-layout';
 import { BugReportDialogContainer } from './bug-report/bug-report-dialog-container';
 import { JoinCommunityDialogContainer } from './settings/join-community-dialog-container';
 import { StuckConnectionBannerContainer } from './stuck-connection-banner';
-import { DesktopSettingsModal } from './settings/desktop-settings-modal';
+import { settingsDialogOpenAtom } from '@/atoms';
 import { ProjectEditorHost } from './settings/project-editor-host';
 import { PromptShortcutProvider } from '../providers/prompt-shortcut-provider';
+
+const DesktopSettingsModal = lazy(loadSettingsModal);
+
+function DeferredDesktopSettingsModal() {
+  const open = useAtomValue(settingsDialogOpenAtom);
+  const cloud = useAppCapability('cloudAccount');
+  const mobile = useIsMobile();
+  useEffect(
+    () =>
+      scheduleIdleTask(() => {
+        void preloadSettings(cloud ? SETTINGS_DEFAULT_TAB : 'preferences', mobile).catch(() => {});
+      }),
+    [cloud, mobile]
+  );
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (open) setOpened(true);
+  }, [open]);
+  return open || opened ? (
+    <Suspense fallback={null}>
+      <DesktopSettingsModal />
+    </Suspense>
+  ) : null;
+}
 export {
   getMobileMainLayoutContentClassName,
   getMobileMainLayoutRootClassName,
@@ -94,7 +122,7 @@ export function MainLayout({
           {workspaceReady ? <BugReportDialogContainer /> : null}
           <JoinCommunityDialogContainer />
           <StuckConnectionBannerContainer />
-          {workspaceReady ? <DesktopSettingsModal /> : null}
+          {workspaceReady ? <DeferredDesktopSettingsModal /> : null}
           {workspaceReady ? <MagpieImportDialogContainer /> : null}
           {workspaceReady ? <ProjectEditorHost /> : null}
         </WorkspaceRuntimeShell>

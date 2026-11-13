@@ -1,6 +1,6 @@
-import { createFileRoute, Navigate } from '@tanstack/react-router';
+import { createLazyFileRoute, Navigate } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/$workspaceName/_auth/settings/general')({
+export const Route = createLazyFileRoute('/$workspaceName/_auth/settings/general')({
   component: LegacyGeneralSettingsRoute,
 });
 
