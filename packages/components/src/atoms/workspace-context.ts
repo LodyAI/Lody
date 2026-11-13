@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 import { Brand } from 'effect';
 import type { WorkspaceId } from '@lody/shared';
+import { workspaceRuntimeInitFailureAtom } from './runtime';
 
 export type WorkspaceContext = {
   slug: string | null;
@@ -14,24 +15,24 @@ export type WorkspaceContext = {
  */
 export type AdmittedWorkspaceTicket = {
   readonly accountId: string;
+  readonly slug: string;
   readonly workspaceId: WorkspaceId;
-  readonly workspaceSlug: string;
 } & Brand.Brand<'AdmittedWorkspaceTicket'>;
 
 export const AdmittedWorkspaceTicket = Brand.nominal<AdmittedWorkspaceTicket>();
 
 export function mintAdmittedWorkspaceTicket(input: {
   accountId: string;
+  slug: string;
   workspaceId: WorkspaceId;
-  workspaceSlug: string;
   hasDeviceCredential: boolean;
   hasCurrentKey: boolean;
 }): AdmittedWorkspaceTicket | null {
   if (!input.hasDeviceCredential || !input.hasCurrentKey) return null;
   return AdmittedWorkspaceTicket({
     accountId: input.accountId,
+    slug: input.slug,
     workspaceId: input.workspaceId,
-    workspaceSlug: input.workspaceSlug,
   });
 }
 
@@ -47,25 +48,37 @@ const workspaceContextAtom = atom<VersionedWorkspaceContext>({
 export const workspaceContextSnapshotAtom = atom((get) => get(workspaceContextAtom));
 
 /** Publish a route target and its resolved id as one observable state change. */
-export const setWorkspaceContextAtom = atom(null, (get, set, context: WorkspaceContext) => {
-  const current = get(workspaceContextAtom);
-  // Preserve an already-staged workspaceId for the same slug when a route mount
-  // optimism pass publishes `{ slug, workspaceId: null }` before `access` resolves.
-  const preservedWorkspaceId =
-    context.workspaceId === null &&
-    context.slug !== null &&
-    current.slug === context.slug &&
-    current.workspaceId !== null
-      ? current.workspaceId
-      : context.workspaceId;
-  const revision = current.revision + 1;
-  set(workspaceContextAtom, {
-    slug: context.slug,
-    workspaceId: preservedWorkspaceId,
-    revision,
-  });
-  return revision;
-});
+export const setWorkspaceContextAtom = atom(
+  null,
+  (get, set, context: WorkspaceContext | AdmittedWorkspaceTicket) => {
+    const current = get(workspaceContextAtom);
+    if ('accountId' in context && workspaceRuntimeInitFailureAtom && typeof workspaceRuntimeInitFailureAtom === 'object') {
+      const failure = get(workspaceRuntimeInitFailureAtom);
+      if (
+        failure &&
+        (failure.workspaceSlug === context.slug || failure.workspaceId === context.workspaceId)
+      ) {
+        set(workspaceRuntimeInitFailureAtom, null);
+      }
+    }
+    // Preserve an already-staged workspaceId for the same slug when a route mount
+    // optimism pass publishes `{ slug, workspaceId: null }` before `access` resolves.
+    const preservedWorkspaceId =
+      context.workspaceId === null &&
+      context.slug !== null &&
+      current.slug === context.slug &&
+      current.workspaceId !== null
+        ? current.workspaceId
+        : context.workspaceId;
+    const revision = current.revision + 1;
+    set(workspaceContextAtom, {
+      slug: context.slug,
+      workspaceId: preservedWorkspaceId,
+      revision,
+    });
+    return revision;
+  }
+);
 
 /** Publish only if no newer route, logout, or mutation has replaced the transition. */
 export const setWorkspaceContextAtRevisionAtom = atom(

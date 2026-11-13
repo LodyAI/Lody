@@ -820,8 +820,10 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                 page.startIndex !== records.length ||
                 page.checkpoint.length !== fixed.length ||
                 page.checkpoint.headHash !== fixed.headHash
-              )
+              ) {
+                ledgerCaches.delete(workspaceId)
                 return yield* unavailable()
+              }
               for (const record of page.recordsHex) {
                 const original = raw(record)
                 bytes += original.length

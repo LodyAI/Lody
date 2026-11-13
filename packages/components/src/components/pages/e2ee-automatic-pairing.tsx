@@ -970,7 +970,6 @@ export function E2eeAutomaticPairingInbox({
           const rows = rawRows.filter((row) => !settled.current.has(row.id));
           setRequests(rows);
           const ids = new Set(rows.map((row) => row.id));
-          for (const id of deferred.current) if (!ids.has(id)) deferred.current.delete(id);
           if (selectedRef.current && !ids.has(selectedRef.current)) {
             selectedRef.current = null;
             setSelected(null);
@@ -1102,11 +1101,13 @@ export function E2eeAutomaticPairingInbox({
       if (approve) await runtime.approveAutomaticPairing!(target.id, entered);
       else await runtime.declineAutomaticPairing!(target.id);
       if (owner !== actionOwner.current) return;
-      settled.current.add(target.id);
       deferred.current.add(target.id);
       setSelected(null);
       setQrFor(null);
-      setRequests((rows) => rows.filter((row) => row.id !== target.id));
+      if (!approve) {
+        settled.current.add(target.id);
+        setRequests((rows) => rows.filter((row) => row.id !== target.id));
+      }
     } catch (cause) {
       if (owner !== actionOwner.current) return;
       const refusal = accountPairingErrorCode(cause);
@@ -1207,7 +1208,6 @@ export function E2eeAutomaticPairingInbox({
         // or the console must not pop it up again.
         for (const row of requestsRef.current)
           if (row.phase === 'waiting' || row.phase === 'preparing') {
-            settled.current.add(row.id);
             deferred.current.add(row.id);
           }
       },

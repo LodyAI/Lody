@@ -1586,14 +1586,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           command: DesktopE2eeManagementCommand,
           remote: (signal: AbortSignal) => DesktopE2eeManagementRemote
         ) {
-          if (closing) return yield* fail('closed')
-          if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
-          const done = Deferred.makeUnsafe<void, unknown>()
-          managing = done
-          currentManagementRemote = remote(networkAbort.signal)
-          const result = yield* Effect.exit(
-            Effect.uninterruptibleMask((restore) =>
-              Effect.gen(function* () {
+          return yield* Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              if (closing) return yield* fail('closed')
+              if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
+              const done = Deferred.makeUnsafe<void, unknown>()
+              managing = done
+              currentManagementRemote = remote(networkAbort.signal)
+              return yield* Effect.gen(function* () {
                 if (!manager)
                   manager = yield* makeDesktopE2eeManagement({
                     directory,
@@ -1641,16 +1641,23 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     }
                   }).pipe(Scope.provide(scope))
                 return yield* restore(manager(command))
-              })
-            )
+              }).pipe(
+                Effect.onExit((exit) =>
+                  Effect.sync(() => {
+                    currentManagementRemote = undefined
+                    managing = undefined
+                  }).pipe(
+                    Effect.andThen(
+                      Deferred.done(
+                        done,
+                        Exit.isSuccess(exit) ? Exit.succeed(undefined) : Exit.failCause(exit.cause)
+                      )
+                    )
+                  )
+                )
+              )
+            })
           )
-          currentManagementRemote = undefined
-          managing = undefined
-          yield* Deferred.done(
-            done,
-            Exit.isSuccess(result) ? Exit.succeed(undefined) : Exit.failCause(result.cause)
-          )
-          return yield* result
         })
         /** Bind recovery to this workspace's verified ledger, signer and installed keys.
          * The trust checkpoint comes from the ledger this device has verified. */

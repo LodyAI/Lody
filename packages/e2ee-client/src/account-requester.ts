@@ -611,8 +611,8 @@ export function makePortableAccountPairingApprover(input: {
                 current = yield* acquire();
               }
             }).pipe(
-              Effect.catchCause((cause) =>
-                Effect.sync(() => report('ended', keyDeliveryCode(cause)))
+              Effect.catchDefect((defect) =>
+                Effect.sync(() => report('ended', keyDeliveryCode(defect)))
               ),
               Effect.ensuring(
                 Effect.suspend(() => {
@@ -630,7 +630,9 @@ export function makePortableAccountPairingApprover(input: {
             );
             report('running');
             fiberRef = Effect.runFork(deliver);
-            activeDeliveries.set(deliveryKey, fiberRef);
+            if (fiberRef.pollUnsafe() === undefined) {
+              activeDeliveries.set(deliveryKey, fiberRef);
+            }
           }),
       });
     }

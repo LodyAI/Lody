@@ -59,19 +59,23 @@ type ApproverPhaseRank = {
   readonly Terminal: 4;
 };
 
+type AllowedSourceRanksForTarget = {
+  readonly 0: 0;
+  readonly 1: 0 | 1;
+  readonly 2: 0 | 1 | 2;
+  readonly 3: 0 | 1 | 2 | 3;
+  readonly 4: 0 | 1 | 2 | 3 | 4;
+};
+
 type AllowedRequesterNext<From extends RequesterState['_tag']> = Extract<
   RequesterState,
   {
     readonly _tag: {
-      [K in RequesterState['_tag']]: RequesterPhaseRank[K] extends RequesterPhaseRank[From]
+      [K in RequesterState['_tag']]: [RequesterPhaseRank[From]] extends [
+        AllowedSourceRanksForTarget[RequesterPhaseRank[K]],
+      ]
         ? K
-        : [RequesterPhaseRank[From], RequesterPhaseRank[K]] extends
-              | [0, 1 | 2 | 3 | 4]
-              | [1, 2 | 3 | 4]
-              | [2, 3 | 4]
-              | [3, 4]
-          ? K
-          : never;
+        : never;
     }[RequesterState['_tag']];
   }
 >;
@@ -80,15 +84,11 @@ type AllowedApproverNext<From extends ApproverState['_tag']> = Extract<
   ApproverState,
   {
     readonly _tag: {
-      [K in ApproverState['_tag']]: ApproverPhaseRank[K] extends ApproverPhaseRank[From]
+      [K in ApproverState['_tag']]: [ApproverPhaseRank[From]] extends [
+        AllowedSourceRanksForTarget[ApproverPhaseRank[K]],
+      ]
         ? K
-        : [ApproverPhaseRank[From], ApproverPhaseRank[K]] extends
-              | [0, 1 | 2 | 3 | 4]
-              | [1, 2 | 3 | 4]
-              | [2, 3 | 4]
-              | [3, 4]
-          ? K
-          : never;
+        : never;
     }[ApproverState['_tag']];
   }
 >;
@@ -746,8 +746,8 @@ export function makeAutomaticPairingRuntime(options: {
       (w) => w.workspaceId === value.context.workspaceId
     )?.outcome;
     if (outcome === 'admitted') {
-      settleApproverTerminal(value, 'joined');
       yield* relay.exchange({ id: value.context.id, terminal: 'approved' });
+      settleApproverTerminal(value, 'joined');
     } else if (value.state._tag === 'Authorizing') {
       advanceApprover(value, 'Authorizing', {
         ...value.state,

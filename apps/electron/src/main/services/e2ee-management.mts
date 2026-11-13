@@ -227,7 +227,12 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
       const currentEpoch = currentView.inspectState().epoch.number
       if (Result.isFailure(yield* Effect.result(input.installed.check(currentEpoch)))) {
         yield* invalidateTurnSync
-        yield* Effect.result(input.ports.receive())
+        const received = yield* Effect.result(input.ports.receive())
+        if (
+          Result.isFailure(received) &&
+          Result.isFailure(yield* Effect.result(input.installed.check(currentEpoch)))
+        )
+          return yield* Effect.fail(received.failure)
       }
     } else {
       yield* invalidateTurnSync

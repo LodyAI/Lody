@@ -779,17 +779,21 @@ export function E2eeWorkspaceConsole({
     if (joinedKey) {
       join.cancel?.();
       accountPairingJoins.delete(identity);
+      if (presentation === 'modal') {
+        onClose?.();
+        return;
+      }
       const ticket =
         accountId &&
         mintAdmittedWorkspaceTicket({
           accountId,
+          slug: workspaceSlug,
           workspaceId: workspaceId as WorkspaceId,
-          workspaceSlug,
           hasDeviceCredential: true,
           hasCurrentKey: true,
         });
-      if (ticket && presentation === 'page') {
-        clearWorkspace({ slug: ticket.workspaceSlug, workspaceId: ticket.workspaceId });
+      if (ticket) {
+        clearWorkspace(ticket);
       }
       setRuntimeInitializing(true);
       void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
@@ -805,6 +809,7 @@ export function E2eeWorkspaceConsole({
     joinedKey,
     workspaceSlug,
     navigate,
+    onClose,
     port,
     presentation,
     setRuntimeInitializing,
@@ -1048,13 +1053,13 @@ export function E2eeWorkspaceConsole({
                     accountId &&
                     mintAdmittedWorkspaceTicket({
                       accountId,
+                      slug: workspaceSlug,
                       workspaceId: workspaceId as WorkspaceId,
-                      workspaceSlug,
                       hasDeviceCredential: Boolean(current?.nativeStatus?.hasDeviceCredential),
                       hasCurrentKey: Boolean(current?.nativeStatus?.hasCurrentKey),
                     });
                   if (ticket) {
-                    clearWorkspace({ slug: ticket.workspaceSlug, workspaceId: ticket.workspaceId });
+                    clearWorkspace(ticket);
                   }
                   setRuntimeInitializing(true);
                   void navigate({
