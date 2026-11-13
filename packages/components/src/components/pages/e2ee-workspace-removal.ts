@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useOrganization } from '@/hooks/useOrganization';
 import { isLocalAppPlatform } from '@/lib/app-platform';
-import { useAuthClient } from '@/providers/convex-provider';
+import { useAuthClient } from '../../providers/convex-provider';
 
 /** The ordinary account workspace removals the lost-access page may start. Neither
  * needs this device's encryption keys; the server checks ownership and billing on
