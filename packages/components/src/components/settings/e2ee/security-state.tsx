@@ -12,8 +12,11 @@ import { collectE2eeDeviceProfile } from '@/lib/e2ee-device-profile';
 import { LODY_APP_INFO_UPDATED_EVENT } from '@/lib/native-app-info';
 import { recordClientError } from '@/lib/client-log';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
-const refreshAtom = atom(0);
-let localOnlyRevision = -1;
+type SecurityRefreshState = {
+  readonly revision: number;
+  readonly localOnly: boolean;
+};
+const refreshAtom = atom<SecurityRefreshState>({ revision: 0, localOnly: false });
 const styles = stylex.create({
   icon: { position: 'relative', display: 'inline-flex', width: '100%', height: '100%' },
   dot: {
@@ -33,7 +36,7 @@ export function useSecurityState() {
   const session = usePlatformSession();
   const port = usePlatform().e2eeWorkspaces;
   const native = port?.runtime;
-  const revision = useAtomValue(refreshAtom),
+  const { revision, localOnly } = useAtomValue(refreshAtom),
     bump = useSetAtom(refreshAtom);
   const encrypted =
     !!mode?.descriptor &&
@@ -53,23 +56,39 @@ export function useSecurityState() {
   useEffect(() => {
     if (!workspaceId || !mode?.accountId || !native?.managementState) return undefined;
     let active = true,
-      pending = false;
+      pending = false,
+      queued = false,
+      queuedForceRefresh = false;
     const load = async (forceRefresh = false) => {
-      if (pending) return;
+      if (pending) {
+        queued = true;
+        queuedForceRefresh = queuedForceRefresh || forceRefresh;
+        return;
+      }
       pending = true;
+      let nextForceRefresh = forceRefresh;
       try {
-        // Offline refresh cannot erase verified local facts or pause the workspace.
-        if (forceRefresh || revision !== localOnlyRevision) {
-          try {
-            await native.refresh(workspaceId, { installKeys: false });
-          } catch {
-            /* Retry on the next probe. */
+        do {
+          queued = false;
+          const shouldRefresh = nextForceRefresh || !localOnly;
+          nextForceRefresh = false;
+          // Offline refresh cannot erase verified local facts or pause the workspace.
+          if (shouldRefresh) {
+            try {
+              await native.refresh(workspaceId, { installKeys: false });
+            } catch {
+              /* Retry on the next probe. */
+            }
           }
-        }
-        if (!active) return;
-        const data = await native.managementState!(workspaceId);
-        if (active && mode.accountId) notifyE2eeLedgerChanged(mode.accountId, workspaceId);
-        if (active) setSnapshot({ key, data, isError: false });
+          if (!active) return;
+          const data = await native.managementState!(workspaceId);
+          if (active && mode.accountId) notifyE2eeLedgerChanged(mode.accountId, workspaceId);
+          if (active) setSnapshot({ key, data, isError: false });
+          if (queued) {
+            nextForceRefresh = queuedForceRefresh;
+            queuedForceRefresh = false;
+          }
+        } while (queued && active);
       } catch {
         if (active)
           setSnapshot((previous) => ({
@@ -89,15 +108,15 @@ export function useSecurityState() {
       active = false;
       clearInterval(timer);
     };
-  }, [key, mode?.accountId, workspaceId, native, revision]);
+  }, [key, mode?.accountId, workspaceId, native, revision, localOnly]);
   const state = {
     data: encrypted && snapshot?.key === key ? snapshot.data : undefined,
     isError: encrypted && snapshot?.key === key ? snapshot.isError : false,
     refetch: async () => {
-      bump((value) => {
-        localOnlyRevision = value + 1;
-        return value + 1;
-      });
+      bump((previous) => ({
+        revision: previous.revision + 1,
+        localOnly: true,
+      }));
     },
   };
   const localProfile = useLocalDeviceProfile();

@@ -1,10 +1,39 @@
 import { atom } from 'jotai';
+import { Brand } from 'effect';
 import type { WorkspaceId } from '@lody/shared';
 
 export type WorkspaceContext = {
   slug: string | null;
   workspaceId: WorkspaceId | null;
 };
+
+/**
+ * Nominal proof minted only when a device has verified both its credential and
+ * the current epoch key for an encrypted workspace, allowing it to hand off to
+ * the workspace route without losing `workspaceId` on initial mount.
+ */
+export type AdmittedWorkspaceTicket = {
+  readonly accountId: string;
+  readonly workspaceId: WorkspaceId;
+  readonly workspaceSlug: string;
+} & Brand.Brand<'AdmittedWorkspaceTicket'>;
+
+export const AdmittedWorkspaceTicket = Brand.nominal<AdmittedWorkspaceTicket>();
+
+export function mintAdmittedWorkspaceTicket(input: {
+  accountId: string;
+  workspaceId: WorkspaceId;
+  workspaceSlug: string;
+  hasDeviceCredential: boolean;
+  hasCurrentKey: boolean;
+}): AdmittedWorkspaceTicket | null {
+  if (!input.hasDeviceCredential || !input.hasCurrentKey) return null;
+  return AdmittedWorkspaceTicket({
+    accountId: input.accountId,
+    workspaceId: input.workspaceId,
+    workspaceSlug: input.workspaceSlug,
+  });
+}
 
 type VersionedWorkspaceContext = WorkspaceContext & { revision: number };
 
@@ -19,8 +48,22 @@ export const workspaceContextSnapshotAtom = atom((get) => get(workspaceContextAt
 
 /** Publish a route target and its resolved id as one observable state change. */
 export const setWorkspaceContextAtom = atom(null, (get, set, context: WorkspaceContext) => {
-  const revision = get(workspaceContextAtom).revision + 1;
-  set(workspaceContextAtom, { ...context, revision });
+  const current = get(workspaceContextAtom);
+  // Preserve an already-staged workspaceId for the same slug when a route mount
+  // optimism pass publishes `{ slug, workspaceId: null }` before `access` resolves.
+  const preservedWorkspaceId =
+    context.workspaceId === null &&
+    context.slug !== null &&
+    current.slug === context.slug &&
+    current.workspaceId !== null
+      ? current.workspaceId
+      : context.workspaceId;
+  const revision = current.revision + 1;
+  set(workspaceContextAtom, {
+    slug: context.slug,
+    workspaceId: preservedWorkspaceId,
+    revision,
+  });
   return revision;
 });
 

@@ -811,12 +811,36 @@ export class EpochPublisher extends Context.Service<
         )
           return yield* fail('corrupt');
         if (row.consumed) return undefined;
-        const settled = yield* settle(row);
-        if (settled.outcome !== expected.outcome || settled.binding !== expected.binding)
-          return yield* fail('corrupt');
         const entry = yield* submit(submission.pending());
-        if (entry.record) {
-          if (!bytesEqual(entry.record, original) || entry.outcome !== expected.outcome)
+        if (entry.record && !bytesEqual(entry.record, original)) return yield* fail('busy');
+        // Fast path when `row` is already settled (`row.outcome !== null` and the submission
+        // journal either has no pending record or already recorded the matching outcome):
+        // verify ledger binding and installed key directly without re-opening the candidate
+        // protector or re-writing the installed key store. Fall back to `settle(row)` only
+        // when the submission is still unconfirmed or the installed key needs repair.
+        let verifiedAlreadySettled = false;
+        if (!entry.record || entry.outcome === row.outcome) {
+          const view = yield* current();
+          const bound = yield* bindingOf(view, row);
+          if (row.outcome === 'Committed') {
+            if (!bound) return yield* fail('context-changed');
+            const installedCheck = yield* Effect.result(installed.check(row.epoch));
+            if (Result.isSuccess(installedCheck)) verifiedAlreadySettled = true;
+            else if (installedCheck.failure.reason !== 'missing-key')
+              return yield* installedCheck.failure;
+          } else {
+            if (bound || view.length <= row.parentCount) return yield* fail('context-changed');
+            verifiedAlreadySettled = true;
+          }
+        }
+        if (!verifiedAlreadySettled) {
+          const settled = yield* settle(row);
+          if (settled.outcome !== expected.outcome || settled.binding !== expected.binding)
+            return yield* fail('corrupt');
+        }
+        const afterEntry = verifiedAlreadySettled ? entry : yield* submit(submission.pending());
+        if (afterEntry.record) {
+          if (!bytesEqual(afterEntry.record, original) || afterEntry.outcome !== expected.outcome)
             return yield* fail('busy');
           yield* submit(submission.acknowledge({ outcome: expected.outcome, record: original }));
         }

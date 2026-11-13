@@ -946,6 +946,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return managementStores
         })
         let manager: Effect.Success<ReturnType<typeof makeDesktopE2eeManagement>> | undefined
+        let currentManagementRemote: DesktopE2eeManagementRemote | undefined
         let roundAgain = false
         let closing = false
         const networkAbort = new AbortController()
@@ -1589,8 +1590,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
           const done = Deferred.makeUnsafe<void, unknown>()
           managing = done
+          currentManagementRemote = remote(networkAbort.signal)
           const result = yield* Effect.exit(
-            Effect.uninterruptible(
+            Effect.uninterruptibleMask((restore) =>
               Effect.gen(function* () {
                 if (!manager)
                   manager = yield* makeDesktopE2eeManagement({
@@ -1603,34 +1605,46 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     verified,
                     installed: keys,
                     current: () => feed.current(),
-                    ports: (() => {
-                      const upstream = remote(networkAbort.signal)
-                      return {
-                        ...upstream,
-                        // Admitted work never re-enters the account lock. Local ingest
-                        // failures retain this owner instead of awaiting its own close.
-                        refresh: () =>
-                          refreshManagementHistory((request) => upstream.history(request)),
-                        receive: () =>
-                          Effect.gen(function* () {
-                            const latest = (yield* verified.current()).inspectState().epoch.number
-                            const installedCurrent = yield* Effect.result(keys.check(latest))
-                            if (Result.isFailure(installedCurrent))
-                              yield* keyRound(
-                                () => upstream.mailbox(),
-                                () => upstream.staging(),
-                                () => upstream.history
-                              )
-                            // A later installed epoch can restore an older pending publication key.
-                            yield* Context.get(historyContext, InstalledEpochHistory).recover()
-                          }).pipe(Effect.asVoid)
-                      }
-                    })()
+                    ports: {
+                      log: {
+                        read: (anchor) => currentManagementRemote!.log.read(anchor),
+                        appendCas: (anchor, point, source) =>
+                          currentManagementRemote!.log.appendCas(anchor, point, source)
+                      },
+                      staging: (roundId) => ({
+                        stageGroup: (group) =>
+                          currentManagementRemote!.staging(roundId).stageGroup(group),
+                        readGroup: (key) =>
+                          currentManagementRemote!.staging(roundId).readGroup(key),
+                        deleteGroup: (key, occupied) =>
+                          currentManagementRemote!.staging(roundId).deleteGroup(key, occupied)
+                      }),
+                      // Admitted work never re-enters the account lock. Local ingest
+                      // failures retain this owner instead of awaiting its own close.
+                      refresh: () =>
+                        refreshManagementHistory((request) =>
+                          currentManagementRemote!.history(request)
+                        ),
+                      receive: () =>
+                        Effect.gen(function* () {
+                          const latest = (yield* verified.current()).inspectState().epoch.number
+                          const installedCurrent = yield* Effect.result(keys.check(latest))
+                          if (Result.isFailure(installedCurrent))
+                            yield* keyRound(
+                              () => currentManagementRemote!.mailbox(),
+                              () => currentManagementRemote!.staging(),
+                              () => currentManagementRemote!.history
+                            )
+                          // A later installed epoch can restore an older pending publication key.
+                          yield* Context.get(historyContext, InstalledEpochHistory).recover()
+                        }).pipe(Effect.asVoid)
+                    }
                   }).pipe(Scope.provide(scope))
-                return yield* manager(command)
+                return yield* restore(manager(command))
               })
             )
           )
+          currentManagementRemote = undefined
           managing = undefined
           yield* Deferred.done(
             done,
