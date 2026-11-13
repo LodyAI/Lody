@@ -4261,6 +4261,70 @@ describe('machine E2EE local runtime', () => {
     }
   );
 
+  // Opening an encrypted runtime with a mailbox must not create key-maintenance journals:
+  // receive.sqlite appears with the first key reception and repair.sqlite only when a
+  // repair is actually queued.
+  it('creates the receive journal on first key reception and never opens an unused repair journal', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-lazy-journals-'));
+    try {
+      const fixture = await execute(setup(directory));
+      const journals = async () =>
+        (await readdir(join(directory, 'runtime'))).filter((name) =>
+          ['receive.sqlite', 'repair.sqlite'].includes(name)
+        );
+      await execute(
+        Effect.gen(function* () {
+          const view = Result.getOrThrow(
+            verifyLedger({
+              anchor: fixture.genesis,
+              records: fixture.records,
+              checkpoint: {
+                head: hashRecordBytes(fixture.records.at(-1)!),
+                length: fixture.records.length,
+              },
+            })
+          );
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(fixture.genesis);
+          const backend = yield* makeSqliteKeyMailbox({
+            path: join(directory, 'mailbox.sqlite'),
+            mode: 'create',
+            genesis: fixture.genesis,
+            ledger: () => Effect.succeed(view),
+          });
+          const sender = Result.getOrThrow(
+            Bytes.signingPublicKey(Buffer.from(fixture.sender, 'hex'))
+          );
+          yield* Context.get(
+            yield* Layer.build(referenceKeyMailbox(backend, sender)),
+            KeyMailbox
+          ).put('ad'.repeat(16), fixture.frame);
+          const runtime = yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord: fixture.genesisRecord,
+            mailbox: Context.get(
+              yield* Layer.build(referenceKeyMailbox(backend, device.publicKey)),
+              KeyMailbox
+            ),
+          });
+          yield* runtime.ingest(page(fixture.records));
+          expect(yield* Effect.promise(journals)).toEqual([]);
+          yield* runtime.receiveKeys();
+          expect((yield* runtime.status()).hasCurrentKey).toBe(true);
+          expect(yield* Effect.promise(journals)).toEqual(['receive.sqlite']);
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('does not reject a good mailbox envelope after a temporary installed-key write failure', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-mailbox-io-'));
     try {
