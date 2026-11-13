@@ -17,8 +17,6 @@ import { Dialog } from '@lody/ui/dialog';
 import { CompactSection, CompactRow } from '../compact-layout';
 import { E2eeWaitingRequestsCallout } from '@/components/pages/e2ee-instant-qr';
 
-const MONO = 'var(--font-mono, ui-monospace, monospace)';
-
 const styles = stylex.create({
   deviceAvatar: {
     display: 'flex',
@@ -73,7 +71,6 @@ const styles = stylex.create({
   },
   key: {
     color: colors.secondaryLabel,
-    fontFamily: MONO,
     fontSize: text.footnoteSize,
     overflowWrap: 'anywhere',
   },
@@ -445,8 +442,7 @@ export function E2eeDevicesPanel({
                         }
                       >
                         <span {...stylex.props(styles.identifierTrigger)}>
-                          {t('e2ee.deviceIdentity.identifier')} ·{' '}
-                          <span {...stylex.props(styles.key)}>{device.key.slice(0, 12)}</span>
+                          {t('e2ee.deviceIdentity.identifier')} · {device.key.slice(0, 12)}
                         </span>
                       </Collapsible.Trigger>
                       <Collapsible.Panel>

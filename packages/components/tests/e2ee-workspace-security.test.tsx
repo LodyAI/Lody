@@ -1384,12 +1384,10 @@ describe('authorized device identities', () => {
       const detail = container.querySelector(
         '[data-testid="e2ee-device-details"]'
       ) as HTMLButtonElement;
-      const keySpan = detail.querySelector('span > span');
       expect(detail.textContent).toBe(
         `e2ee.deviceIdentity.identifier · ${device.key.slice(0, 12)}`
       );
-      expect(keySpan?.textContent).toBe(device.key.slice(0, 12));
-      expect(detail.firstElementChild?.className).not.toBe(keySpan?.className);
+      expect(detail.querySelector('span > span')).toBeNull();
       await act(async () => detail.click());
       expect(container.textContent).toContain(device.key);
     } finally {

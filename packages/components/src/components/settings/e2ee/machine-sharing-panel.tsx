@@ -12,8 +12,6 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { ChevronDown } from 'lucide-react';
 import { CompactSection, CompactRow } from '../compact-layout';
 
-const MONO = 'var(--font-mono, ui-monospace, monospace)';
-
 export type SharingProject = { id: string; name: string; rootPath?: string };
 export type SharingIssue =
   | 'pending'
@@ -54,7 +52,6 @@ const styles = stylex.create({
   },
   actions: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
   key: {
-    fontFamily: MONO,
     color: colors.secondaryLabel,
     overflowWrap: 'anywhere',
     fontSize: text.footnoteSize,
