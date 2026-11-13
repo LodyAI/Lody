@@ -282,8 +282,18 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   // One unexpired Convex JWT serves later calls of this owner. The owner belongs to one
   // account and closes on account change and sign-out, which drops the token with it.
   let reusable: { token: string; renewAt: number } | undefined
+  const ledgerCaches = new Map<
+    string,
+    {
+      anchorHex: string
+      position: string
+      records: Uint8Array[]
+      bytes: number
+    }
+  >()
   const close = Effect.sync(() => {
     reusable = undefined
+    ledgerCaches.clear()
     owner.abort()
   })
   yield* Effect.addFinalizer(() => close)
@@ -770,18 +780,11 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       ),
     ledgerLog: (workspaceId: string, signal?: AbortSignal): LedgerLog['Service'] => {
       let observed: { head: string; length: number } | undefined
-      let cached:
-        | {
-            anchorHex: string
-            position: string
-            records: Uint8Array[]
-            bytes: number
-          }
-        | undefined
       return LedgerLog.of({
         read: (anchor) =>
           Effect.gen(function* () {
             const anchorHex = hex(anchor.toBytes())
+            const cached = ledgerCaches.get(workspaceId)
             const records: Uint8Array[] = []
             let cursor: string | undefined,
               fixed: { length: number; headHash: string } | undefined,
@@ -817,8 +820,10 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                 page.startIndex !== records.length ||
                 page.checkpoint.length !== fixed.length ||
                 page.checkpoint.headHash !== fixed.headHash
-              )
+              ) {
+                ledgerCaches.delete(workspaceId)
                 return yield* unavailable()
+              }
               for (const record of page.recordsHex) {
                 const original = raw(record)
                 bytes += original.length
@@ -826,12 +831,12 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                 records.push(original)
               }
               if (!page.nextCursor) {
-                cached = {
+                ledgerCaches.set(workspaceId, {
                   anchorHex,
                   position: page.position,
                   records: records.slice(),
                   bytes
-                }
+                })
                 return {
                   records,
                   checkpoint: {

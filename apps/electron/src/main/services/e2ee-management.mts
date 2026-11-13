@@ -2,7 +2,7 @@ import type { E2eeWorkspaceHistoryPage, E2eeWorkspaceHistoryRequest } from '@lod
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { Context, Effect, Layer, Result } from 'effect'
+import { Brand, Context, Effect, Layer, Ref, Result } from 'effect'
 import {
   EpochPublisher,
   InstalledEpochKeys,
@@ -56,6 +56,13 @@ export type DesktopE2eeManagementPorts = {
   refresh: () => Effect.Effect<void, unknown>
   receive: () => Effect.Effect<void, unknown>
 }
+
+export type PersistedCheckpointProof = {
+  readonly syncedLength: number
+  readonly syncedHead: string
+} & Brand.Brand<'PersistedCheckpointProof'>
+
+const makePersistedCheckpointProof = Brand.nominal<PersistedCheckpointProof>()
 
 /** Accounting only. An uncertain request always keeps its original round and bytes. */
 export const makeRoundStaging = (
@@ -146,6 +153,27 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
   const identity = desktopE2eePorts(input.custody, input.device).pipe(
     Layer.provideMerge(Layer.succeed(WorkspaceScope, { genesis: input.genesis }))
   )
+  const turnSync = yield* Ref.make<PersistedCheckpointProof | null>(null)
+  const invalidateTurnSync = Ref.set(turnSync, null)
+  const refreshIfNeeded = Effect.gen(function* () {
+    const synced = yield* Ref.get(turnSync)
+    if (synced !== null) {
+      const local = yield* input.verified.current()
+      if (
+        local.length === synced.syncedLength &&
+        Buffer.from(local.head.toBytes()).toString('hex') === synced.syncedHead
+      )
+        return synced
+    }
+    yield* input.ports.refresh()
+    const local = yield* input.verified.current()
+    const proof = makePersistedCheckpointProof({
+      syncedLength: local.length,
+      syncedHead: Buffer.from(local.head.toBytes()).toString('hex')
+    })
+    yield* Ref.set(turnSync, proof)
+    return proof
+  })
   const ports = Layer.mergeAll(
     identity,
     Layer.succeed(VerifiedLedger, input.verified),
@@ -154,22 +182,12 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     Layer.succeed(EpochStagingStore, makeRoundStaging(input.db, input.ports.staging)),
     Layer.succeed(LedgerSync, {
       current: input.current,
-      refresh: () => input.ports.refresh().pipe(Effect.andThen(input.current()))
+      refresh: () =>
+        invalidateTurnSync.pipe(Effect.andThen(refreshIfNeeded), Effect.andThen(input.current()))
     }),
     Layer.succeed(EpochCandidateStore, Context.get(input.stores, EpochCandidateStore)),
     Layer.succeed(SubmissionJournal, Context.get(input.stores, SubmissionJournal))
   ).pipe(Layer.provideMerge(identity))
-  let refreshedInTurn = false
-  const refreshIfNeeded = Effect.suspend(() => {
-    if (refreshedInTurn) return Effect.void
-    return input.ports.refresh().pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          refreshedInTurn = true
-        })
-      )
-    )
-  })
   const syncedLog = Layer.succeed(LedgerLog, {
     ...input.ports.log,
     read: (anchor) =>
@@ -181,7 +199,7 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
               local.length !== value.checkpoint.length ||
               !local.head.equals(value.checkpoint.head)
             )
-              refreshedInTurn = false
+              yield* invalidateTurnSync
             yield* refreshIfNeeded
           })
         ),
@@ -190,9 +208,7 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
         )
       ),
     appendCas: (anchor, point, source) =>
-      Effect.sync(() => {
-        refreshedInTurn = false
-      }).pipe(Effect.andThen(input.ports.log.appendCas(anchor, point, source)))
+      invalidateTurnSync.pipe(Effect.andThen(input.ports.log.appendCas(anchor, point, source)))
   })
   const submission = LedgerSubmission.layer.pipe(Layer.provideMerge(Layer.merge(ports, syncedLog)))
   const services = yield* Layer.build(
@@ -210,11 +226,16 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
       const currentView = yield* input.verified.current()
       const currentEpoch = currentView.inspectState().epoch.number
       if (Result.isFailure(yield* Effect.result(input.installed.check(currentEpoch)))) {
-        refreshedInTurn = false
-        yield* Effect.result(input.ports.receive())
+        yield* invalidateTurnSync
+        const received = yield* Effect.result(input.ports.receive())
+        if (
+          Result.isFailure(received) &&
+          Result.isFailure(yield* Effect.result(input.installed.check(currentEpoch)))
+        )
+          return yield* Effect.fail(received.failure)
       }
     } else {
-      refreshedInTurn = false
+      yield* invalidateTurnSync
       yield* Effect.result(input.ports.receive())
     }
     let result = yield* start ? publisher.publish() : publisher.resume()
@@ -224,7 +245,7 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     return result.outcome
   })
   return Effect.fnUntraced(function* (command: DesktopE2eeManagementCommand) {
-    refreshedInTurn = false
+    yield* invalidateTurnSync
     yield* refreshIfNeeded
     const entry = yield* journal.pending()
     if (entry.record) {

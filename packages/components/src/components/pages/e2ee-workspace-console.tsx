@@ -25,9 +25,11 @@ import type { E2eeWorkspaceRemoval } from './e2ee-workspace-removal';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeRuntimeStatus } from '@lody/platform';
+import type { WorkspaceId } from '@lody/shared';
 import { getPreferredOrdinaryWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
+import { mintAdmittedWorkspaceTicket } from '@/atoms/workspace-context';
 import { runtimeInitializingAtom } from '@/atoms/control-connection';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
@@ -781,13 +783,42 @@ export function E2eeWorkspaceConsole({
     if (joinedKey) {
       join.cancel?.();
       accountPairingJoins.delete(identity);
+      if (presentation === 'modal') {
+        onClose?.();
+        return;
+      }
+      const ticket =
+        accountId &&
+        mintAdmittedWorkspaceTicket({
+          accountId,
+          slug: workspaceSlug,
+          workspaceId: workspaceId as WorkspaceId,
+          hasDeviceCredential: true,
+          hasCurrentKey: true,
+        });
+      if (ticket) {
+        clearWorkspace(ticket);
+      }
       setRuntimeInitializing(true);
       void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
       return;
     }
     if (!join.request) requestAccountPairingKey(join);
     else observeKeyRequest(join.request);
-  }, [identity, joinedCredential, joinedKey, workspaceSlug, navigate, port, workspaceId]);
+  }, [
+    accountId,
+    clearWorkspace,
+    identity,
+    joinedCredential,
+    joinedKey,
+    workspaceSlug,
+    navigate,
+    onClose,
+    port,
+    presentation,
+    setRuntimeInitializing,
+    workspaceId,
+  ]);
   const manageMember = async (work?: () => Promise<void>) => {
     const owner = readOwner.current;
     if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
@@ -1022,6 +1053,18 @@ export function E2eeWorkspaceConsole({
                 // Navigation is only an entry point. RuntimeProvider reopens this
                 // approved identity and acquires purpose-bound grants before content.
                 if (scopeRef.current === scope && readOwner.current && workspaceSlug) {
+                  const ticket =
+                    accountId &&
+                    mintAdmittedWorkspaceTicket({
+                      accountId,
+                      slug: workspaceSlug,
+                      workspaceId: workspaceId as WorkspaceId,
+                      hasDeviceCredential: Boolean(current?.nativeStatus?.hasDeviceCredential),
+                      hasCurrentKey: Boolean(current?.nativeStatus?.hasCurrentKey),
+                    });
+                  if (ticket) {
+                    clearWorkspace(ticket);
+                  }
                   setRuntimeInitializing(true);
                   void navigate({
                     to: '/$workspaceName/chat',

@@ -33,6 +33,20 @@ export const useRecoveryPort = () => null;
 export const isElectronRenderer = () => false;
 export const isNativeAppShell = () => false;
 export const setWorkspaceContextAtom = {};
+export const mintAdmittedWorkspaceTicket = (input: {
+  accountId: string;
+  slug: string;
+  workspaceId: string;
+  hasDeviceCredential: boolean;
+  hasCurrentKey: boolean;
+}) =>
+  input.hasDeviceCredential && input.hasCurrentKey
+    ? {
+        accountId: input.accountId,
+        slug: input.slug,
+        workspaceId: input.workspaceId,
+      }
+    : null;
 export const runtimeInitializingAtom = {};
 export const useE2eeAccountId = () => fixture.accountId;
 export const usePlatform = () => ({ e2eeWorkspaces: fixture.port });
