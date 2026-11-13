@@ -766,15 +766,20 @@ export function makeAccountPairing(input: {
     return { lookupId, request, bytes, tag, relayed };
   });
 
+  /** `lookupId` is the code's public relay lookup key, for a live request hint. */
   const accountPairingCode = () =>
     Effect.sync(() => {
       const secret = random(16);
+      let keys: PairingKeys | undefined;
       try {
+        keys = Result.getOrThrow(derivePairingKeys(secret));
         return {
           pairingString: formatPairingString(Result.getOrThrow(encodePairingSecret(secret))),
           expiresAt: now() + PAIRING_REQUEST_MAX_LIFETIME_MS,
+          lookupId: hex(keys.lookupId),
         };
       } finally {
+        if (keys) disposePairingKeys(keys);
         secret.fill(0);
       }
     });

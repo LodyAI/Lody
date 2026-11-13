@@ -475,6 +475,38 @@ describe('approving device', () => {
     expect(host.inspected).toHaveLength(2);
   });
 
+  it('in the reverse direction learns of a request from the relay hint before the next poll, and releases the hint when leaving the code', async () => {
+    // Without the hint the approver waits for its poll; the poll stays the fallback.
+    const host = approverHost();
+    host.request = null;
+    const lookupId = 'cd'.repeat(16);
+    const hints = new Map<string, () => void>();
+    const runtime = {
+      ...host.runtime,
+      accountPairingCode: async () => ({
+        pairingString: CODE,
+        expiresAt: NOW + 600_000,
+        lookupId,
+      }),
+      subscribeAccountPairingApproval: (id: string, changed: () => void) => {
+        hints.set(id, changed);
+        return () => hints.delete(id);
+      },
+    };
+    await act(async () => root.render(<E2eeAccountPairingApprove runtime={runtime} />));
+    await click('e2ee.accountPair.approve.showInstead');
+    expect([...hints.keys()]).toEqual([lookupId]);
+    expect(host.inspected).toEqual([]);
+    host.request = preview;
+    await act(async () => {
+      hints.get(lookupId)!();
+      await Promise.resolve();
+    });
+    expect(host.inspected).toEqual([CODE]);
+    expect(text()).toContain('e2ee.accountPair.approve.warning');
+    expect(hints.size).toBe(0);
+  });
+
   it('declines without signing anything', async () => {
     const host = approverHost();
     await act(async () => root.render(<E2eeAccountPairingApprove runtime={host.runtime} />));

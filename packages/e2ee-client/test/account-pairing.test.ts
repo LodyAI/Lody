@@ -1294,4 +1294,14 @@ describe('approval coverage across workspaces', () => {
       '12'.repeat(32),
     ]);
   });
+
+  it("names the shown code's relay lookup key, so the approver can watch for the request the new device submits under it", async () => {
+    const harness = setup({ approverHas: ['w1'] });
+    const code = await Effect.runPromise(harness.approver.accountPairingCode());
+    expect(code.lookupId).toMatch(/^[0-9a-f]{32}$/);
+    const state = await Effect.runPromise(
+      harness.requester.requestAccountPairing({ pairingString: code.pairingString })
+    );
+    expect(state.lookupId).toBe(code.lookupId);
+  });
 });
