@@ -41,6 +41,11 @@ final class InboxController: UIViewController {
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.accessibilityIdentifier = "ipad-inbox-list"
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
+    list.shareOnboarding = { [weak self] items, source in
+      let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
+      sheet.popoverPresentationController?.sourceView = source
+      self?.present(sheet, animated: true)
+    }
     view.addSubview(list)
     wireChrome()
     observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged, .lodyProjectGroupsDidChange]).map { name in
@@ -94,6 +99,11 @@ final class InboxController: UIViewController {
       if term.isEmpty { list.setPlaceholder(listPlaceholder(state)) }
       let unknown = source === SessionSource.live && state.workspace?.resolvedMode == .unknown
       list.setRetry(unknown && term.isEmpty ? { Task { await AuthSession.shared.refreshWorkspaceModes() } } : nil)
+    }
+    // The guide follows loading / connection too, so it is set before the content-only guard.
+    if list.setOnboarding(term.isEmpty && showsOnboarding(state)) {
+      LodyScrollEdges.bind(list.scrollView, to: self)
+      chrome.attachScrollEdge(list.scrollView)
     }
     // Presence and connection updates still refresh chrome, but cannot change rows.
     // Explicit renders bypass this guard for search results, identities and watermarks.
@@ -214,6 +224,15 @@ final class InboxController: UIViewController {
   private func syncState(_ state: SessionListState) -> HomeSyncState {
     if !state.connected { return .connecting }
     return state.loading ? .syncing : .live
+  }
+
+  /// Web mobile Home's first-run guide: only where the empty placeholder would read
+  /// "no sessions yet" (signed in, plaintext, loaded, connected, not archived) and the
+  /// workspace has neither a computer nor a conversation. Search is excluded by the caller.
+  private func showsOnboarding(_ state: SessionListState) -> Bool {
+    guard !state.userId.isEmpty, !HomeArchive.shown, !state.loading, state.connected,
+      state.workspace?.resolvedMode == .plaintext else { return false }
+    return state.catalog.machineIds.isEmpty && state.catalog.sessions.isEmpty
   }
 
   private func listPlaceholder(_ state: SessionListState) -> String {
