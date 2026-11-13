@@ -1447,6 +1447,59 @@ describe('encrypted file and preview routing', () => {
     });
   });
 
+  it('edits and resends an encrypted message through the protected feature channel, never ordinary RPC', async () => {
+    const spec = {
+      sessionId,
+      expectedUserTurnId: 'user-2',
+      replacementUserTurnId: 'user-3',
+      requestedByUserId: 'owner',
+      timestamp: '2026-11-13T00:00:00.000Z',
+      inputConfig: { prompt: 'edited' },
+    };
+    const requests: unknown[] = [];
+    const facade = (requestEncryptedFeature?: (request: never) => Promise<never>) =>
+      createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('e2ee_rpc_unavailable');
+        },
+        ...(requestEncryptedFeature ? { requestEncryptedFeature } : {}),
+      });
+    const resent = await facade(async (request) => {
+      requests.push(request);
+      return {
+        ok: true,
+        result: {
+          type: 'session/edit-and-resend_response',
+          sessionId,
+          replacementUserTurnId: spec.replacementUserTurnId,
+          success: true,
+        },
+      } as never;
+    }).requestSessionEditAndResend(remoteMachineId, spec);
+    expect(resent).toMatchObject({ success: true });
+    expect(requests).toEqual([
+      {
+        machineId: remoteMachineId,
+        workspaceId,
+        method: 'session/edit-and-resend',
+        params: spec,
+        timeoutMs: 120_000,
+      },
+    ]);
+    expect(isE2eeFeatureMethod('session/edit-and-resend')).toBe(true);
+    expect(await facade().requestSessionEditAndResend(remoteMachineId, spec)).toMatchObject({
+      success: false,
+      error: { message: 'e2ee_feature_unavailable' },
+    });
+  });
+
   it.each(['create', 'status', 'revoke'] as const)(
     'never falls back to ordinary preview proof without a protected host: %s',
     async (operation) => {

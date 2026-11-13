@@ -1180,9 +1180,24 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionEditAndResendResponse;
       }
+      const timeoutMs = options?.timeoutMs ?? 120_000;
+      // Encrypted content never opens ordinary Machine RPC: the edit is a signed owned write.
+      if (deps.protectedContent) {
+        if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/edit-and-resend',
+          params: args,
+          timeoutMs,
+        });
+        if (!response.ok)
+          return sessionEditAndResendFailure(args, 'INTERNAL_ERROR', response.error);
+        return response.result as SessionEditAndResendResponse;
+      }
       return await (
         await getMachineRpcClient(machineId)
-      ).requestSessionEditAndResend({ ...args, timeoutMs: options?.timeoutMs ?? 120_000 });
+      ).requestSessionEditAndResend({ ...args, timeoutMs });
     } catch (error) {
       return sessionEditAndResendFailure(
         args,
