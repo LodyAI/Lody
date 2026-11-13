@@ -11,7 +11,7 @@ The desktop modal loads on its first open and remains mounted afterward so closi
 preserves its existing behavior. Each selected panel loads through its own React
 Suspense boundary.
 
-Run `node apps/electron/scripts/check-settings-route-chunks.mjs` from the repository
+Run `NODE_OPTIONS=--max-old-space-size=12288 node apps/electron/scripts/check-settings-route-chunks.mjs` from the repository
 root to build the actual OSS renderer and verify that the modal, usage statistics,
 MCP and Lody Agent settings are outside the main entry's static chunk closure.
 The check uses the application's renderer configuration and dependencies, skips
