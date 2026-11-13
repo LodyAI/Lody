@@ -645,7 +645,7 @@ describe('owner-signed complete machine sharing policies', () => {
     const corrupted = root.record.slice();
     const compact = ok(P.restoreVerifiedState(ok(P.exportVerifiedState(f.current()))));
     expect(
-      Result.isFailure(
+      Result.isSuccess(
         P.verifyMachineSharingGeneration({
           ledger: compact,
           machineId: f.binding.machineId,

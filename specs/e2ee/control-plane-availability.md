@@ -24,8 +24,8 @@ What these share: one non-Owner member, using records the ledger accepts, can st
 Add capability 2 and operation tag 11 `[11, nextEpoch, commitment, baseEpoch, baseKeyPacket]`:
 
 - Only an active personal device of the Owner may sign it. Admins, machines and recovery devices are rejected.
-- `baseEpoch` is lower than the current epoch and is the latest epoch whose key the signer actually holds; `nextEpoch` is the current epoch plus one. Epochs after `baseEpoch` and before `nextEpoch` are marked **abandoned**.
-- `baseKeyPacket` encrypts the `baseEpoch` key under the new epoch key, authenticated against genesis, `nextEpoch` and `baseEpoch`. The history key chain therefore connects the new epoch directly back to `baseEpoch`, skipping abandoned epochs.
+- `baseEpoch` is lower than the current epoch and is the latest non-abandoned epoch whose key the signer actually holds; `nextEpoch` is the current epoch plus one. Epochs after `baseEpoch` and before `nextEpoch` are marked **abandoned**.
+- `baseKeyPacket` encrypts the `baseEpoch` key under the new epoch key, authenticated against genesis, `nextEpoch` and `baseEpoch`. Its AAD is `lody-e2ee/epoch-abandon-history/v1\0 || genesis32 || u32be(nextEpoch) || u32be(baseEpoch)`. The history key chain therefore connects the new epoch directly back to `baseEpoch`, skipping abandoned epochs.
 - Publication follows [stage first, commit once](atomic-removal.md#stage-first-commit-once): persist the candidate key, the original record and the envelopes for all active devices, stage and read them back, and only then commit.
 - The record clears the rotation reminder. Commitments must not repeat and the epoch must not overflow.
 
@@ -36,6 +36,12 @@ The ledger cannot verify that nobody holds a given epoch key; the Owner decides.
 The host rate-limits each membership instance's self-service records (admitting or revoking its own devices, registering a recovery device), with 10 per hour and 30 per day as initial values. Over the limit it returns a recognisable error and the client shows when to retry. Owner/Admin management records (removal, role changes, rotation, abandoning epochs, capability declarations) do not count. Rate limits depend on time and cannot be expressed as ledger rules, so they are a host responsibility; the host is already trusted for availability.
 
 The client's ledger length budget is computed over the suffix after its verified starting point, not over the total length since genesis. A long-lived workspace does not stop as a whole because of its cumulative record count.
+
+Capability 2 selects option A ([S-04] / [A-05]): each membership instance may have at most 32 active devices and 128 lifetime device admissions, including the founding/joining device and every device kind. Atomic machine replacement consumes a lifetime slot but no additional active slot. Over-limit admission fails with `device-quota-exceeded`; revocation, removal, role and key operations remain available. Guests may admit only personal devices; the existing recovery-device path for restoring a personal device remains. Earlier records replay under their earlier rules. Declaration preserves existing devices, while an already over-limit instance cannot admit more. Rejoining requires a new membership instance and fresh identity/device keys.
+
+Revoked devices are retained. These limits bound one membership instance's device growth, not workspace-wide lifetime capacity. Repeated re-admissions, multiple members and epoch/history growth still require host capacity management. Current snapshots encode devices as fixed-width byte tables: a table is not limited to 4096 CBOR container elements. The total snapshot budget remains 2 MiB; another protocol's 4096-element limit is not a snapshot device limit.
+
+The host uses rolling one-hour/24-hour windows, initially 10/30. After validating candidate permissions, signature and parent, it durably reserves quota before dispatching CAS. Unknown outcomes retain the reservation, while retries of the exact original are charged once. All devices of a membership instance share the quota, which survives host restart. The reference host returns HTTP 429 with `self-service-rate-limited` and an absolute millisecond `retryAt`.
 
 ### 3. Reject low-order encryption public keys at admission
 
@@ -57,21 +63,35 @@ Ledger rules reject low-order or non-canonically encoded X25519 public keys when
 
 ## Trade-offs considered
 
-The owner agreed to the following directions in the review conversation on 2026-11-11; this Spec remains a draft until this revision's PR is approved.
+This revision selects the following options. This task relays another agent's conclusion and provides no link to human approval of this revision, so approval status remains draft; implementation and approval are recorded separately.
 
 1. **The old-epoch write window is not extended while an epoch is stranded.** Extending it would avoid an outage while the Owner is offline, but if the withheld rotation was meant to follow a member removal, the removed member could read that much more new content. It stays at 15 minutes.
 2. **Admins can still rotate.** Restricting rotation to the Owner would remove the stranded-epoch case at its source, but then nobody could rotate after a removal while the Owner is offline. Admin rotation stays, with the abandon operation as the backstop.
 3. **The initial quota is 10 per hour and 30 per day.** A web client that clears site data must pair again, creating a new device each time; the values are host configuration, adjustable from real usage, and not ledger rules.
 4. **No bridging of abandoned epochs in the first version.** Letting a device that holds an abandoned key connect it back into the history chain later would add another record type and verification path.
 
+## Implementation and limits
+
+```text
+Owner holds baseEpoch key
+  → generate nextEpoch key and history link
+  → persist candidate/original/all active-device envelopes
+  → stage and compare exact readback
+  → commit tag 11
+  → new history chain returns to baseEpoch, skipping abandoned epochs
+```
+
+`EpochPublisher.publishAbandoning(baseEpoch)`, workspace and personal-device session `abandonEpoch` share the existing candidate journal, staging and exact-original retries. Callers own the evidence display and explicit confirmation described above; this revision adds no product action button. Snapshot, retained-state and digest formats advance together to current-only v5 with a fixed-width abandonment-link table. Old caches rebuild from original v1 history; ledger-v1 bytes stay unchanged.
+
+The public reference host implements durable rate limits. This repository does not contain the private Cloud ledger API, so this revision cannot establish Cloud enforcement or deployment. Client quota messaging also depends on that backend error contract.
+
 ## Evidence
 
-- Rotation rules check only epoch plus one and a non-repeating commitment: the `publishEpoch` branch in `packages/e2ee-core/src/internal/ledger/policy.ts`.
-- An honest rotation reads the current epoch key first: `packages/e2ee-core/src/internal/keys/publisher.ts`.
-- History packet encryption and binding: `packages/e2ee-core/src/internal/keys/history.ts`.
-- Unlimited self-service device admission and revocation: the `admitDevice` and `revokeDevice` branches in `policy.ts`.
-- Ledger length budget: `packages/e2ee-client/src/ledger.ts` (`maxRecords: 16384`) and `packages/e2ee-core/src/internal/ledger/ledger-feed.ts`.
-- X25519 public keys reject only all-zero: `packages/e2ee-core/src/internal/foundation/bytes.ts`.
-- Capability declarations and extension rules: [permission ledger §4.5](permission-ledger.zh.md).
+- Operations, authority and device limits: `packages/e2ee-core/src/internal/ledger/{records,policy,replay}.ts`.
+- Staged publication and history packets: `packages/e2ee-core/src/internal/keys/{publisher,history,staging}.ts`.
+- Canonical X25519 and low-order checks: `packages/e2ee-core/src/internal/foundation/bytes.ts`.
+- Suffix budgets: `packages/e2ee-core/src/internal/ledger/ledger-feed.ts`; the personal-device client retains a 16384-record suffix budget.
+- Durable rate limiting and HTTP errors: `packages/e2ee-lab/src/platform/{control-gateway,host}.ts`.
+- Executable evidence: core `test/ledger/{replay,retained-feed}.test.ts`, `test/keys/epoch-rotation.test.ts`, and Lab `test/gateway.test.ts`.
 
-These are conclusions from reading code; no tests were run, and whether the host already rate-limits was not verified.
+An explicit pre-CAS self-service quota refusal must not occupy the governance slot. Only a newly created original with no possible prior/concurrent dispatch may be released; uncertain originals remain for reconciliation and a later refusal cannot override an earlier unknown result. Writable-epoch status excludes abandoned epochs, including cached hints, while historical keys remain readable. The host clamps wall-clock rollback to the latest persisted issue time instead of treating a small correction as a storage or permission failure.

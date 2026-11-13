@@ -54,6 +54,7 @@ final class AuthSession {
   private var verificationSent = false
   private var current: Task<Void, Never>?
   private var attempt = 0
+  private var modeRefresh: Task<Void, Never>?
   private var started = false
   private let providers = NativeAuthProviders()
 
@@ -77,11 +78,34 @@ final class AuthSession {
   }
 
   func cancel() {
+    modeRefresh?.cancel(); modeRefresh = nil
     current?.cancel()
     attempt += 1
     providers.cancel()
     busy = false
     publish()
+  }
+
+  func refreshWorkspaceModes() async {
+    if let modeRefresh { await modeRefresh.value; return }
+    guard let account, let credential else { return }
+    let identity = attempt, generation = LocalStore.shared.generation
+    let task = Task { [self] in
+      guard let rows = try? await api.workspaceModes(token: credential, workspaces: account.workspaces),
+        active(identity), self.credential == credential, var current = self.account, current.user.id == account.user.id else { return }
+      let modes = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+      current.workspaces = current.workspaces.map { row in
+        guard let mode = modes[row.id] else { return row }
+        var next = row; next.contentMode = mode.contentMode; next.genesisHash = mode.genesisHash
+        return next
+      }
+      self.account = current
+      publish()
+      await save(current, generation: generation)
+    }
+    modeRefresh = task
+    await task.value
+    if attempt == identity { modeRefresh = nil }
   }
 
   func logout() async {
@@ -106,6 +130,7 @@ final class AuthSession {
   }
 
   private func begin(_ work: @escaping @MainActor (Int) async -> Void) async {
+    modeRefresh?.cancel(); modeRefresh = nil
     let previous = current
     previous?.cancel()
     providers.cancel()

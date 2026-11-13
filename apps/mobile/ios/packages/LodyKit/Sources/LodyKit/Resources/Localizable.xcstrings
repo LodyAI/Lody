@@ -3053,187 +3053,6 @@
         }
       }
     },
-    "inbox.project.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有会话"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No sessions"
-          }
-        }
-      }
-    },
-    "inbox.project.live": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个进行中"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个进行中"
-                }
-              }
-            }
-          }
-        },
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld running"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld running"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "inbox.project.attention": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个等你确认"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个等你确认"
-                }
-              }
-            }
-          }
-        },
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld needs you"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld need you"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "inbox.project.failed": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个失败"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个失败"
-                }
-              }
-            }
-          }
-        },
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld failed"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld failed"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "inbox.project.more": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "还有 %lld 个会话"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "还有 %lld 个会话"
-                }
-              }
-            }
-          }
-        },
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld more session"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld more sessions"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "inbox.workspaceSwitch.accessibility": {
       "extractionState": "manual",
       "localizations": {
@@ -3286,23 +3105,6 @@
         }
       }
     },
-    "inbox.settings.view.projects": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "项目"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Projects"
-          }
-        }
-      }
-    },
     "inbox.settings.view.activity": {
       "extractionState": "manual",
       "localizations": {
@@ -3316,74 +3118,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Activity"
-          }
-        }
-      }
-    },
-    "inbox.settings.view.chat": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "对话"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chat"
-          }
-        }
-      }
-    },
-    "inbox.settings.sort.name": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "名称"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Name"
-          }
-        }
-      }
-    },
-    "inbox.settings.sort.activity": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "最近活跃"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recent Activity"
-          }
-        }
-      }
-    },
-    "inbox.settings.sort.urgency": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "紧急优先"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Needs Attention First"
           }
         }
       }
@@ -4907,23 +4641,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Steer"
-          }
-        }
-      }
-    },
-    "settings.betaFeatures": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Beta Features"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "测试功能"
           }
         }
       }
@@ -8101,125 +7818,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Collapse composer"
-          }
-        }
-      }
-    },
-    "native.chat.composer.format.heading": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "标题"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Heading"
-          }
-        }
-      }
-    },
-    "native.chat.composer.format.bold": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "粗体"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bold"
-          }
-        }
-      }
-    },
-    "native.chat.composer.format.italic": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "斜体"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Italic"
-          }
-        }
-      }
-    },
-    "native.chat.composer.format.strikethrough": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "删除线"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Strikethrough"
-          }
-        }
-      }
-    },
-    "native.chat.composer.format.code": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "代码"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Code"
-          }
-        }
-      }
-    },
-    "native.chat.composer.format.bulletList": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "项目符号列表"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bulleted list"
-          }
-        }
-      }
-    },
-    "native.chat.composer.format.quote": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "引用"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quote"
           }
         }
       }
@@ -20292,23 +19890,6 @@
         }
       }
     },
-    "inbox.header.running": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 个运行中"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld running"
-          }
-        }
-      }
-    },
     "inbox.review": {
       "extractionState": "manual",
       "localizations": {
@@ -31424,6 +31005,88 @@
           "stringUnit": {
             "state": "translated",
             "value": "请检查时间规则和时区。"
+          }
+        }
+      }
+    },
+    "workspace.e2ee.unsupported": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mobile does not yet support end-to-end encrypted workspaces. Please open this workspace in Lody Desktop."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移动端暂不支持端到端加密工作区，请使用 Lody 桌面端打开。"
+          }
+        }
+      }
+    },
+    "workspace.mode.unknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to confirm workspace encryption. Please retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认工作区加密状态，请重试。"
+          }
+        }
+      }
+    },
+    "workspace.mode.retry": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
+    },
+    "schedules.view.showFinished": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show finished"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示已结束"
+          }
+        }
+      }
+    },
+    "schedules.finishedHidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finished schedules are hidden"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已结束的定时项已隐藏"
           }
         }
       }

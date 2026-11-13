@@ -1,6 +1,6 @@
 # E2EE foundation boundary
 
-Status: approved
+Status: draft
 Translation: current
 
 Approved revision: [`122dfeaf`](https://github.com/LodyAI/Lody/blob/122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1/specs/e2ee-foundations.md)
@@ -328,14 +328,16 @@ product enablement remains separate. See the [proposed sharing decision](../.age
 work that a shared member's turn derives through the machine (child Sessions, chat,
 Roles, continuations, agent control) by reusing the signed-original chain. The machine
 writes such an input with `derivedFrom: { sessionId, userTurnId }` inside the signed
-row, only while that origin turn is active and only for this machine. At start, the
+row, only while its driving turn is active and only for this machine. At start, the
 machine verifies the origin as the member's own signed, non-derived Turn and authorizes
 the member's rights ∩ the owner's sharing policy ∩ every reached project. Per the owner
 decision of 2026-11-10 (approved), no start deadline applies; only the active-turn and
-per-origin bounds do. Derivation is one level deep,
-with at most 20 inputs per origin. Owner work is unchanged. Cross-machine derivation is
-not implemented and fails closed; a future version would use a user-approved signature
-from the originating member's personal device. See [derived work](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
+per-origin bounds do. Member hops inherit the same human-signed root and share
+at most 20 durable starts across restarts. Owner same-machine delegation retains
+and rechecks its root, has no such quota and may steer. Owner cross-machine delegation
+rechecks the root before sending, then retains the existing machine-signed path
+without local-only provenance. Member cross-machine derivation remains unsupported; a future version would use a user-approved signature
+from the originating member's personal device. See [derived work](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md).
 
 ### Permission freshness and the separate durable expiry clock
 
@@ -358,7 +360,8 @@ it. When a read gets no answer, the machine's own member keeps the longer window
 counted from the same start. Intersect with request/upstream deadlines and reserve clock/stop margin;
 never wait on network under a global account lock. Restart discards this grant
 and requires online authenticated revalidation before new remote execution.
-Rollback or uncertain suspend/resume elapsed time invalidates the live cache.
+Use the greater wall/monotonic elapsed time, as specified in the outage decision;
+suspend or a wall-clock correction alone does not invalidate the live cache.
 Retained checkpoints and journal timestamps cannot restore execution freshness.
 Offline documents/editing and retained results remain available; expired freshness
 blocks new remote execution, not unrelated local work. Revalidation never restarts
@@ -367,11 +370,13 @@ an uncertain operation.
 The journal's **persistent expiry clock is a different mechanism**, not an
 execution grant. Per the owner decision of 2026-11-10 (approved), it applies only to
 feature requests: execution records carry no deadline, so no clock, skew check or floor
-applies to them. Current schema 3 retains a nondecreasing floor per
-`(genesis, workspaceId)` across reopen. With an independently authenticated current
-reference, claim rejects local time or the retained floor more than 600,000 ms
+applies to them. Current schema 3 retains an observation per `(genesis, workspaceId)` across
+reopen. With an independently authenticated current reference, claim rejects local time or the retained floor more than 600,000 ms
 ahead; accepted claims use `max(reference, retainedFloor)`. Without a reference,
-use `max(localNow, retainedFloor)` in that workspace. Never use frame timestamps
+use `localNow` and replace the observation, so an untrusted local peak cannot
+lock new requests after clock correction. A corrected clock may admit a previously
+unclaimed frame again within its original deadline; durable IDs still prevent
+any already-started request from executing twice. Never use frame timestamps
 as trusted time. Explicit evidence-preserving reset can clear a poisoned floor
 while retaining retired request IDs; it neither renews original deadlines nor
 restores freshness or replay authority. Follow the public
@@ -516,7 +521,7 @@ Only one device may currently bind a machineId within one workspace. Replacing i
 requires the existing same-member personal-device authority and revokes the exact
 old key while admitting the new one in the same record. Historical keys stay
 non-reusable; rotationRequired advises administrators to update keys without blocking
-new seals or workspace use. Snapshot, retained and digest version 4 preserve the binding
+new seals or workspace use. Snapshot, retained and digest version 5 preserve the binding
 and historical device kind.
 Old developer machine records require workspace recreation, without a legacy reader
 or migration. The independent v1 vector is regenerated under this explicit pre-freeze
@@ -687,7 +692,7 @@ Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 r
 - **One state encoding.** Retained state, endorsed snapshots and the comparison digest share one authorization-state encoding, so all three sources (full replay, qualified snapshot import, retained restore) agree on the state, its digest and every author at the same position. The retained envelope adds only the verification source, which survives a round trip and is never upgraded; verified hashes before the restore point are not kept. Layout and acceptance: [compact state note](../.agents/notes/proposed/architecture/2026-10-20-e2ee-compact-ledger-state.md).
 - **Digest use.** `stateDigest` identifies a state for cross-party comparison (comparison notes) and for background audits. Restore checks it only when the caller supplies it, which costs one hash and no re-verification.
 - **Background audit (deferred).** A full replay from genesis compared with the retained digest can catch bugs or storage corruption. It is optional, not part of this change, and may run outside the host's request runtime (for example a separate worker that reads the stored ledger and the retained digest). If added, a mismatch is an incident that stops writes for that ledger until resolved.
-- **Format.** The retained encoding is current-format only and versioned: retained envelope version 4, snapshot body version 4 and the `snapshot-digest/v4` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
+- **Format.** The retained encoding is current-format only and versioned: retained envelope version 5, snapshot body version 5 and the `snapshot-digest/v5` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
 - **Reads.** A host serving history pages needs no verification on the read path; clients verify what they receive. Host verification belongs to write admission.
 - **Local stores.** If adopted, clients may restore their local retained state on open instead of revalidating all stored records, which supersedes the full revalidation described below.
 
@@ -757,6 +762,8 @@ bodies rather than archived identities.
 ## Automatic current-workspace pairing (draft increment, 2026-11-10)
 
 The approved UI removes manual code transfer: a native device opening a workspace automatically requests access; on an existing personal device the person enters the six-digit code the new device shows and approves once; that device signs only when the entered code equals its own, and three wrong entries end the request (owner decision, 2026-11-11). Approval grants only that workspace. A committed ephemeral key exchange derives the secret for the existing authenticated pairing protocol; the relay receives public messages only. Both clients bind account, workspace, genesis and the original ten-minute expiry, and retain exact originals on retry. The comparison cannot be skipped: six decimal digits provide approximately 20 bits of substitution detection, rather than the manual protocol’s 128-bit out-of-band authentication. This protocol increment is draft and has no independent cryptographic approval. The existing approved manual protocol remains unchanged. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10) records ordering, lifetime and validation limits.
+
+**Instant QR join (draft revision, owner decision 2026-11-12).** In the reverse direction an existing personal device shows a fresh one-time pairing code as a QR code. A computer shows it in the approval window as soon as a new device's request arrives, with no click; a phone shows it when the person asks, and the console's Add device action shows it at once. Scanning it is the approval: once a request submitted under that code verifies, the device that showed it signs every workspace it can approve, without the warning and workspace selection of the manual confirmation, and names the requested workspaces it cannot approve. Session recording stays paused while the code is visible. A new computer also shows its automatic comparison code as a QR code for a phone to scan; scanning only replaces typing, and the approver still compares the code and counts wrong entries. Residual risk, accepted by the owner over a click-to-reveal alternative: anyone who sees the shown code within its ten-minute lifetime, for example through screen sharing or a camera, can admit their own device to every listed workspace and its history, and with the account password they can make the code appear by sending a request. The new-device notice and revocation remain the remedy. This revision changes the approved manual confirmation and stays draft until the increment is approved. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#instant-qr-join-2026-11-12) records the decision and its limits.
 
 ## Whitepaper technical appendix
 

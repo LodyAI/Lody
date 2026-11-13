@@ -35,17 +35,25 @@ final class LodyShell {
       headerVariant: "transparent"
     )
     let page = LodyPageController(spec: spec, inSheet: target !== navigation, content: content)
-    push(page, on: target)
+    if target !== base {
+      // Leaving a tab for the outer Home stack: the page carries its own bar (`LodyPageStackHost`).
+      let host = LodyPageController(spec: spec, inSheet: target !== navigation, content: LodyPageStackHost(root: page))
+      push(host, on: target)
+    } else {
+      push(page, on: target)
+    }
     return page
   }
 
   @discardableResult
-  func presentNative(_ content: UIViewController, title: String, detents: [Double] = [1], grabber: Bool = false, dismissible: Bool = true, style: String = "formSheet", headerShown: Bool = true) -> LodyPageController {
+  func presentNative(_ content: UIViewController, title: String, detents: [Double] = [1], grabber: Bool = false, dismissible: Bool = true, style: String = "formSheet", headerShown: Bool = true, size: CGSize? = nil) -> LodyPageController {
     let spec = ShellPageSpec(
       title: title, style: style, animation: "slide", dismissible: dismissible, headerShown: headerShown,
       headerVariant: "transparent", detents: detents, grabber: grabber
     )
     let page = LodyPageController(spec: spec, inSheet: true, content: content)
+    // A regular-width form sheet takes this size (UIKit ignores it where sheets fill the width).
+    if let size { page.preferredContentSize = size }
     presentModal(page)
     return page
   }
@@ -139,7 +147,9 @@ final class LodyShell {
     guard let page = Self.page(of: controller) else { return }
     if HomeController.current?.closePanel(from: page) == true { return }
     guard let navigation = page.navigationController else { return }
-    if navigation.viewControllers.first === page { navigation.presentingViewController?.dismiss(animated: true) }
+    if navigation.viewControllers.first === page, let host = navigation.parent as? LodyPageStackHost {
+      close(from: host, crossfade: crossfade)
+    } else if navigation.viewControllers.first === page { navigation.presentingViewController?.dismiss(animated: true) }
     else if crossfade {
       let fade = CATransition()
       fade.type = .fade
@@ -206,6 +216,7 @@ final class LodyShell {
     configureNavigation(container)
     container.setNavigationBarHidden(!spec.headerShown, animated: false)
     container.modalPresentationStyle = Self.modalStyle(spec.style)
+    if page.preferredContentSize != .zero { container.preferredContentSize = page.preferredContentSize }
     if spec.style == "overFullScreen" { container.view.backgroundColor = .clear }
     if spec.animation == "fade" { container.modalTransitionStyle = .crossDissolve }
     container.isModalInPresentation = !spec.dismissible

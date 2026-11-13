@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
 import * as Bytes from '../foundation/bytes';
+import { keyId } from '../foundation/identifiers';
 import { prepareLedgerCommand, type LedgerCommand } from '../ledger/admission';
 import { signLedgerRecord } from '../ledger/signing';
 import { decodeRecord, hasVerifiedCheckpoint } from '../ledger';
@@ -17,13 +18,23 @@ import { DeviceIdentity } from '../../services/workspace';
  *   the submission observed, so acknowledging could lose the result.
  * - `invalid-command`: the command or original record is malformed or not
  *   signed by this device.
+ * - `owner-personal-device-required`: the successor must initialize a personal device.
+ * - `recovery-only-confirmation-required`: removing the last personal device needs
+ *   explicit acknowledgement of recovery-credential dependence.
  *
  * @category Errors
  */
 export class WorkspaceControlError extends Schema.TaggedError<WorkspaceControlError>()(
   'WorkspaceControlError',
   {
-    reason: Schema.Literals(['pending', 'closed', 'feed-not-persisted', 'invalid-command']),
+    reason: Schema.Literals([
+      'pending',
+      'closed',
+      'feed-not-persisted',
+      'invalid-command',
+      'owner-personal-device-required',
+      'recovery-only-confirmation-required',
+    ]),
   }
 ) {}
 const fail = (reason: WorkspaceControlError['reason']) => new WorkspaceControlError({ reason });
@@ -85,6 +96,7 @@ function captureCommand(command: LedgerCommand) {
         return Object.freeze({
           _tag: command._tag,
           target: yield* Bytes.signingPublicKey(command.target.toBytes()),
+          confirmedRecoveryOnly: command.confirmedRecoveryOnly === true,
         });
       case 'TransferOwner':
         return Object.freeze({
@@ -170,9 +182,33 @@ export class WorkspaceControl extends Context.Service<
               // A retained pending or unacknowledged result forbids all new signing.
               yield* noPending();
               const current = yield* refresh();
+              const state = current.view.inspectState();
+              if (
+                owned._tag === 'TransferOwner' &&
+                ![...state.devices.values()].some(
+                  (device) =>
+                    device.kind === 'personal' &&
+                    device.membershipId.equals(owned.successorMembershipId)
+                )
+              )
+                return yield* fail('owner-personal-device-required');
               const proposal = yield* Effect.fromResult(
                 prepareLedgerCommand(current.view, signer.publicKey, owned)
               );
+              if (owned._tag === 'RevokeDevice') {
+                const target = state.devices.get(keyId(owned.target.toBytes()));
+                if (
+                  target?.kind === 'personal' &&
+                  !owned.confirmedRecoveryOnly &&
+                  ![...state.devices.entries()].some(
+                    ([key, device]) =>
+                      device.kind === 'personal' &&
+                      device.membershipId.equals(target.membershipId) &&
+                      key !== keyId(owned.target.toBytes())
+                  )
+                )
+                  return yield* fail('recovery-only-confirmation-required');
+              }
               const record = yield* signLedgerRecord(proposal, signer);
               yield* gate.guard;
               const result = yield* submission.submit(record);

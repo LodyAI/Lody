@@ -3,6 +3,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync } fro
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
+import { MAX_DERIVED_TURNS_PER_ORIGIN } from './derivation-limits';
 
 const timestamp = z.number().int().nonnegative().safe();
 const isExists = (cause: unknown) =>
@@ -207,7 +208,16 @@ export class RealtimeJournal {
           CREATE TABLE pending_reset (id INTEGER PRIMARY KEY CHECK(id = 1),
             archive_path TEXT NOT NULL, replacement_id TEXT NOT NULL, reason TEXT NOT NULL);
           PRAGMA user_version = 1;`);
-      } else if (version !== 1) throw new Error('Unsupported realtime journal control store');
+      } else if (version !== 1 && version !== 2)
+        throw new Error('Unsupported realtime journal control store');
+      if (version === 0 || version === 1) {
+        database.exec(`CREATE TABLE derived_claims (
+          genesis TEXT NOT NULL, workspace_id TEXT NOT NULL,
+          origin_session_id TEXT NOT NULL, origin_turn_id TEXT NOT NULL,
+          request_identity TEXT NOT NULL,
+          PRIMARY KEY (genesis, workspace_id, origin_session_id, origin_turn_id, request_identity)
+        ) WITHOUT ROWID; PRAGMA user_version = 2;`);
+      }
       const result = body(database);
       // A confirmed main commit stays successful even if its handle cannot close.
       // Retain the mutex with it so another owner cannot rename an open database.
@@ -524,6 +534,38 @@ export class RealtimeJournal {
     });
   }
 
+  /** Reserve before the start commit. A crash or failed start may spend a slot,
+   * but can never restore one. Exact retries reuse their receipt; reset preserves it. */
+  reserveDerivation(
+    input: RealtimeJournalRequest,
+    origin: { sessionId: string; userTurnId: string }
+  ): boolean {
+    const request = copyRequest(input);
+    const ref = z
+      .object({ sessionId: z.string().min(1), userTurnId: z.string().min(1) })
+      .parse(origin);
+    return this.withControl((db) => {
+      const scope = [request.genesis, request.workspaceId, ref.sessionId, ref.userTurnId];
+      const identity = digest(Buffer.from(JSON.stringify(keyValues(request))));
+      const where =
+        'genesis = ? AND workspace_id = ? AND origin_session_id = ? AND origin_turn_id = ?';
+      if (
+        db
+          .prepare(`SELECT 1 FROM derived_claims WHERE ${where} AND request_identity = ?`)
+          .get(...scope, identity)
+      )
+        return true;
+      const { count } = z
+        .object({ count: z.number().int().nonnegative().safe() })
+        .parse(
+          db.prepare(`SELECT COUNT(*) AS count FROM derived_claims WHERE ${where}`).get(...scope)
+        );
+      if (count >= MAX_DERIVED_TURNS_PER_ORIGIN) return false;
+      db.prepare('INSERT INTO derived_claims VALUES (?, ?, ?, ?, ?)').run(...scope, identity);
+      return true;
+    });
+  }
+
   /** Caller must recheck verified permissions immediately before this local claim. */
   claim(
     input: RealtimeJournalRequest
@@ -558,7 +600,9 @@ export class RealtimeJournal {
               : 0;
             if (reference !== undefined && previous - reference > 600_000)
               throw new RealtimeJournalError('clock_skew');
-            const now = Math.max(reference ?? current, previous);
+            // Unauthenticated local peaks must not survive a clock correction.
+            // Durable request IDs, rather than wall time, prevent repeat execution.
+            const now = reference === undefined ? current : Math.max(reference, previous);
             db.prepare(`INSERT INTO realtime_clock (genesis, workspace_id, observed_at) VALUES (?, ?, ?)
               ON CONFLICT(genesis, workspace_id) DO UPDATE SET observed_at = excluded.observed_at`).run(
               request.genesis,

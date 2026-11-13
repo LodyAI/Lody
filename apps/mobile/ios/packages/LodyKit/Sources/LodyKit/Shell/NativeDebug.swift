@@ -310,9 +310,7 @@ enum NativeHomeFixture {
         syncPreview = false; publish()
       }
     }
-    for key in ["inboxView", "inboxProjectSort", "inboxExpansion", "inboxPinOrder.ui-home.ui-home"] {
-      UserDefaults.standard.removeObject(forKey: key)
-    }
+    UserDefaults.standard.removeObject(forKey: "inboxProjectSort")
     let catalogJSON = SessionController.json(["catalog": catalog, "syncedAt": 0])
     try LocalStore.queue.sync {
       let store = LocalStore.shared

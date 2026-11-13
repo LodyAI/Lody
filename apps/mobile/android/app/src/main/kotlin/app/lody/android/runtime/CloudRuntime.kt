@@ -166,6 +166,12 @@ data class CatalogSession(
     val workspaceUnpushed: Boolean = false,
     /** Present for Project group conversations. */
     val projectRun: CatalogProjectRun? = null,
+    /**
+     * Latest user turn the machine finished, and the latest one that ended in failure (session
+     * meta `lastHandledUserMsgId` / `lastFailedUserMsgId`); see [ChatListModel.latestTurnFailed].
+     */
+    val lastHandledUserMsgId: String? = null,
+    val lastFailedUserMsgId: String? = null,
     /** The agent asked to show an iOS Simulator / Android Emulator preview (live catalog only, never cached). */
     val iosSimulatorPreviewRequestId: String? = null,
     val androidEmulatorPreviewRequestId: String? = null,

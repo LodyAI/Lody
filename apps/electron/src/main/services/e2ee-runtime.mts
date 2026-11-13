@@ -37,6 +37,7 @@ import {
   type WorkspaceRecoveryInput
 } from '@lody/e2ee-core'
 import {
+  epochHistoryPacket,
   Bytes,
   ContentError,
   LedgerError,
@@ -1322,6 +1323,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               candidate >= 0;
               candidate -= 1
             ) {
+              const packet = epochHistoryPacket(state.view, candidate)
+              if (Result.isFailure(packet) || packet.success.abandoned) continue
               const older = yield* Effect.result(keys.check(candidate))
               if (Result.isSuccess(older)) {
                 writeEpoch = candidate
@@ -1480,14 +1483,25 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             minimumPin = { head: view.head, length: view.length }
           }
           if (!pending((yield* feed.current()).view) && length - compactedAt >= 64) {
-            const origin = yield* feed
-              .rebase()
-              .pipe(Effect.provideService(VerifiedLedger, verified))
-            yield* sql(() =>
-              db
-                .prepare('UPDATE cache SET origin=? WHERE id=1')
-                .run(JSON.stringify(savedOrigin(origin.state, origin.offset)))
+            const compacted = yield* Effect.result(
+              Effect.gen(function* () {
+                const origin = yield* feed
+                  .rebase()
+                  .pipe(Effect.provideService(VerifiedLedger, verified))
+                yield* sql(() =>
+                  db
+                    .prepare('UPDATE cache SET origin=? WHERE id=1')
+                    .run(JSON.stringify(savedOrigin(origin.state, origin.offset)))
+                )
+              })
             )
+            if (Result.isFailure(compacted)) {
+              yield* Effect.sync(() =>
+                console.warn('[E2EE] Ledger compaction pending', {
+                  code: 'e2ee_ledger_compaction_pending'
+                })
+              ).pipe(Effect.ignoreCause)
+            }
             compactedAt = length
           }
           return yield* status()
@@ -1521,6 +1535,21 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             devices: [...state.devices].map(([key, entry]) => ({
               key,
               kind: entry.kind,
+              cryptoUserId: hex(
+                state.members.get(hex(entry.membershipId.toBytes()))!.userId.toBytes()
+              ),
+              recoveryDeviceAvailable: [...state.devices.values()].some(
+                (other) =>
+                  other.kind === 'recovery' && other.membershipId.equals(entry.membershipId)
+              ),
+              requiresRecoveryConfirmation:
+                entry.kind === 'personal' &&
+                ![...state.devices.entries()].some(
+                  ([otherKey, other]) =>
+                    otherKey !== key &&
+                    other.kind === 'personal' &&
+                    other.membershipId.equals(entry.membershipId)
+                ),
               machineId: entry.machineId ?? null,
               self: key === ownKey,
               mayRevoke: Result.isSuccess(
@@ -2194,6 +2223,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
        * Resolves the machine's iroh route under the host lock without any network
        * wait. Callers run the route's `ready`/`call` after releasing every lock.
        */
+      irohPeek: (workspaceId: string, targetMachineId: string) =>
+        run(
+          Effect.gen(function* () {
+            const entry = entries.get(workspaceId)
+            return entry?.iroh ? yield* entry.iroh.peek(targetMachineId) : undefined
+          })
+        ),
       irohPrepare: (workspaceId: string, targetMachineId: string) =>
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>

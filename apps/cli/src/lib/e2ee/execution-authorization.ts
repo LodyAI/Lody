@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Bytes, contentPermissions, accountIdFromUserId } from '@lody/e2ee-core/protocol';
 import type { CloudE2eePort, E2eeMachineSharingView } from '@lody/platform';
 import { CloudE2eeLedgerOutage } from '../cloud-e2ee-errors';
-import { authorityClocksAgree, withinAuthorityLimit, type AuthorityStamp } from './authority-clock';
+import { withinAuthorityLimit, type AuthorityStamp } from './authority-clock';
 import type { makeCliE2eeRuntime } from './runtime';
 
 export type ExecutionAuthorization =
@@ -76,11 +76,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
     const stamp = Effect.gen(function* () {
       return { wall: yield* clock.currentTimeMillis, monotonic: yield* clock.monotonicTimeNanos };
     });
-    const fresh = (start: Stamp, now: Stamp) =>
-      now.wall >= start.wall &&
-      now.wall - start.wall < ttl &&
-      now.monotonic >= start.monotonic &&
-      now.monotonic - start.monotonic < BigInt(ttl) * 1_000_000n;
+    const fresh = (start: Stamp, now: Stamp) => withinAuthorityLimit(start, now, ttl);
     const grants = new Map<string, Stamp>();
     let lastRead: Stamp | undefined;
     let outage: { at: Stamp } | undefined;
@@ -258,18 +254,13 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
             : ('member' as const);
         const windowMs =
           principal === 'member'
-            ? 0
-            : access === 'read'
+            ? ttl
+            : access === 'read' || access === 'session-read'
               ? OUTAGE_READ_WINDOW_MS
               : OUTAGE_EXECUTION_WINDOW_MS;
         const current = (at: Stamp) => {
           if (!relaxed) return fresh(grantedFrom, at);
           if (windowGeneration !== grantedInWindow) return false;
-          if (!authorityClocksAgree(grantedFrom, at)) {
-            // Only a successful read reopens this: realigned clocks prove nothing.
-            endWindow();
-            return false;
-          }
           return withinAuthorityLimit(grantedFrom, at, windowMs);
         };
         if (relaxed && !current(yield* stamp)) return denied('unavailable');
@@ -353,7 +344,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         // Bounded cache; eviction can only require an earlier authenticated reread.
         if (grants.size >= 1024) grants.clear();
         if (relaxed) {
-          if (!noticed) {
+          if (principal === 'owner' && !noticed) {
             noticed = true;
             // The window runs from the last successful latest read, never from now.
             options.onWindowNotice?.(true, {

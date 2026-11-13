@@ -26,6 +26,8 @@
 
 Loro / Durable Streams 直接提供这些能力：`@lody/e2ee-core/adapters/loro-streams` 中的适配器使用带 offset CAS 的控制流和 u32be 分帧记录。
 
+应用层账本宿主必须先验证签名、权限与父节点，并按成员实例持久限制自助设备操作（每滚动小时 10 条、每 24 小时 30 条）。首次 CAS 派发前预留，未知结果保留预留，相同原始记录不重复扣额；管理操作不计入。返回 `self-service-rate-limited` 与绝对毫秒时间 `retryAt`。公开参考实现是 Lab `control-gateway.ts` 的 SQLite 配额；私有 Cloud 的实现与部署须独立验证。见[控制面可用性](../../../specs/e2ee/control-plane-availability.zh.md)。
+
 ## 2. 密钥邮箱
 
 服务器按（工作区、纪元、接收者）保存：已存信封、**修复版本号**、安装报告、被拒帧摘要和修复请求 ID。判断资格需要该工作区当前的已验证账本视图，例如在服务器上运行 `LedgerFeed`。
@@ -35,7 +37,7 @@ Loro / Durable Streams 直接提供这些能力：`@lody/e2ee-core/adapters/loro
 1. `envelopeRouting(frame)` 必须得到 `sender = 主体` 且属于本工作区。
 2. 在当前视图下：发送者是有资格的当前设备（恢复设备不能发送），接收者是当前设备，纪元是当前纪元。可选层：`authenticateEpochEnvelope(view, context, frame)` 另外验证信封签名。
 3. `id` 是 16 字节投递 ID（十六进制）。已存在且摘要不同的 `(epoch, sender, id)` 拒绝（`replay`）；完全相同的字节为空操作。
-4. 每个发送者、接收者、纪元最多保留 16 个有效（未被拒绝）信封，拒绝第 17 个不同的帧。
+4. 每个发送者、接收者、纪元的当前修复 revision 最多允许 16 个未被拒绝的信封，第 17 个不同的帧会被拒绝。新信封在检查配额的同一事务中记录槽位 revision。历史信封继续可读，保留投递 ID 和摘要黑名单，但不占新 revision 的配额；原件重试不改变其 revision。SQLite 参考宿主为已有库补加 revision 列；旧信封无法确定投递轮次，统一保留在 revision 0。
 
 **`read(id)`**：返回主体在当前纪元以 `id` 存入的帧，或空。
 
@@ -116,3 +118,5 @@ pending 请求必须因当前账本代次不符而冲突，不能重新激活旧
 服务端持续隐瞒新版本仍可无限隐藏未知撤回；签名和本地链没有全局最新证明，是否信任
 完整最新投递仍待 owner 确认。这里不启用网络或执行接入，见
 [待批准 Spec 增量](../../../specs/e2ee-foundations.zh.md#机器共享策略待批准增量)。
+
+限流宿主的 `self-service-rate-limited` 必须表示该尝试尚未进入 CAS，不能把上游结果未知的错误转为此码。客户端只在新建日志槽的首次尝试上使用此承诺释放槽位，旧 pending 仍按原件核实。参考宿主对时钟回拨以该成员最新持久时间夹紧；存储、关闭与传输失败分别返回 500、503、502。

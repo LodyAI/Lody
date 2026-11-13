@@ -137,6 +137,20 @@ impl IrohEndpoint {
         Ok(self.inner.has_connection(&target.endpoint_id).await)
     }
 
+    /// Selected path of an existing connection; never dials.
+    #[napi]
+    pub async fn connection_path(&self, endpoint_id: String) -> Result<String> {
+        let target = parse_target(CallTarget {
+            endpoint_id,
+            direct_addrs: None,
+        })?;
+        Ok(self
+            .inner
+            .connection_path(&target.endpoint_id)
+            .await
+            .to_owned())
+    }
+
     /// Prepares a connection without sending anything. Rejects with an
     /// `iroh_*` code when it cannot connect within `timeoutMs`.
     #[napi]
@@ -271,7 +285,9 @@ impl IrohRequest {
     #[napi]
     pub async fn reply(&self, message: Buffer) -> Result<()> {
         let mut guard = self.inner.lock().await;
-        let request = guard.as_mut().ok_or_else(|| js_error(EndpointError::Closed))?;
+        let request = guard
+            .as_mut()
+            .ok_or_else(|| js_error(EndpointError::Closed))?;
         request.reply(&message).await.map_err(js_error)
     }
 

@@ -6,6 +6,7 @@ import { Alert } from '@lody/ui/alert';
 import { Badge, type BadgeTone } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
+import { Spinner } from '@lody/ui/spinner';
 import { AlertDialog } from '@/ui/dialog';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
@@ -87,7 +88,10 @@ type Result =
         | 'e2ee.recovery.passkeyRemoved'
         | 'e2ee.recovery.passkeyRemoveIncomplete';
     }
-  | { kind: 'restored'; results: readonly { name: string; outcome: string }[] }
+  | {
+      kind: 'restored';
+      results: readonly { name: string; outcome: string; partialEpochKey?: boolean }[];
+    }
   | { kind: 'setupAll'; done: number; failed: readonly string[] }
   | { kind: 'created'; vaultId: string }
   | { kind: 'opened'; vaultId: string; count: number }
@@ -155,7 +159,9 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>();
   const [plan, setPlan] = useState<RecoveryPlan>();
-  const [planFailed, setPlanFailed] = useState(false);
+  // `disabled`: the host refused because recovery is off there (desktop main started
+  // without its env gate), which no retry changes; `failed`: anything else.
+  const [planFailed, setPlanFailed] = useState<false | 'failed' | 'disabled'>(false);
   const [reload, setReload] = useState(0);
   const [dialog, setDialog] = useState<'begin' | 'continue'>();
   const [passkey, setPasskey] = useState(false);
@@ -173,10 +179,14 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
         setPlan(next);
         setPlanFailed(false);
       },
-      () => {
+      (error: unknown) => {
         if (!live) return;
         setPlan(undefined);
-        setPlanFailed(true);
+        setPlanFailed(
+          error instanceof Error && error.message.includes('e2ee_recovery_disabled')
+            ? 'disabled'
+            : 'failed'
+        );
       }
     );
     void port.securityEvents().then(
@@ -203,8 +213,8 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
   // creating stays too because main and the service refuse a second vault.
   const mode = !plan
     ? planFailed
-      ? 'failed'
-      : 'unknown'
+      ? planFailed
+      : 'loading'
     : plan.replacing
       ? 'replacing'
       : plan.hasVault
@@ -314,6 +324,26 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       {t(method === 'file' ? 'e2ee.recovery.restore' : 'e2ee.recovery.restorePasskey')}
     </Button>
   );
+  // Until the first plan answers, nothing below would be accurate: say it is loading.
+  if (mode === 'loading')
+    return (
+      <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery" aria-busy>
+        <CompactSection title={t('e2ee.recovery.methods')} boxed>
+          <CompactRow label={t('e2ee.recovery.loading')}>
+            <Spinner size="small" />
+          </CompactRow>
+        </CompactSection>
+      </div>
+    );
+  // The host has recovery turned off: no action here can work, so offer none.
+  if (mode === 'disabled')
+    return (
+      <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery">
+        <Alert.Root data-testid="e2ee-recovery-disabled">
+          <Alert.Description>{t('e2ee.recovery.disabled')}</Alert.Description>
+        </Alert.Root>
+      </div>
+    );
   return (
     <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery">
       {mode === 'failed' && (
@@ -565,7 +595,9 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
               <li key={row.name}>
                 {t(
                   row.outcome === 'Committed'
-                    ? 'e2ee.recovery.restoreDone'
+                    ? row.partialEpochKey
+                      ? 'e2ee.recovery.restorePartial'
+                      : 'e2ee.recovery.restoreDone'
                     : row.outcome === 'Pending' || row.outcome === 'Unconfirmed'
                       ? 'e2ee.recovery.restoreWaiting'
                       : row.outcome === 'not-backed-up'

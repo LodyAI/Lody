@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
+import { Collapsible } from '@lody/ui/collapsible';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { Check, Copy, Server } from 'lucide-react';
+import { Check, ChevronDown, Copy, Server } from 'lucide-react';
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
   | 'beginRemoteMachinePairing'
@@ -17,6 +18,7 @@ type Runtime = Pick<
 type Preview = Awaited<ReturnType<NonNullable<Runtime['inspectRemoteMachinePairing']>>>;
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 const styles = stylex.create({
+  disclosure: { display: 'flex', flexDirection: 'column', gap: space[2] },
   body: { display: 'flex', flexDirection: 'column', gap: space[3] },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
   // One command line on dark ground, as it will look in the machine's terminal.
@@ -253,5 +255,26 @@ export function E2eeRemoteMachinePairing({
         </div>
       </div>
     </Card.Root>
+  );
+}
+
+/** Remote machines are a rarer task than adding a phone: closed until asked for. The
+ * panel stays mounted, so a pairing in progress survives closing it. */
+export function E2eeRemoteMachineDisclosure(props: { children: ReactNode }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible.Root open={open} onOpenChange={setOpen}>
+      <div {...stylex.props(styles.disclosure)}>
+        <Collapsible.Trigger
+          render={<Button variant="ghost" size="small" data-testid="e2ee-remote-machine-toggle" />}
+        >
+          <Server size={14} aria-hidden="true" />
+          {t('e2ee.remoteMachine.disclosure')}
+          <ChevronDown size={14} aria-hidden="true" />
+        </Collapsible.Trigger>
+        <Collapsible.Panel keepMounted>{props.children}</Collapsible.Panel>
+      </div>
+    </Collapsible.Root>
   );
 }

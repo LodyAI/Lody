@@ -482,6 +482,13 @@ describe('portable account pairing workflow', () => {
     ['an old host ignoring the original deadline', null, 'history:w1', true, 'old-host'],
     ['an automatic decline', null, 'history:w1', true, 'decline'],
     ['an automatic cancellation', null, 'history:w1', true, 'cancel'],
+    [
+      'a cancellation whose relay notice never settles, then a fresh request',
+      null,
+      'history:w1',
+      true,
+      'offline-cancel',
+    ],
     ['an expired automatic approval', null, 'history:w1', true, 'expire'],
     [
       'an automatic request ended after three wrong codes on the approver',
@@ -754,6 +761,30 @@ describe('portable account pairing workflow', () => {
             await phone.cancelAutomaticPairing('w1');
             expect(await desktop.pendingAutomaticPairing()).toEqual([]);
             expect(installed).toEqual([]);
+            // Returning to automatic pairing starts over instead of showing the ended one.
+            expect(await phone.automaticPairingState('w1')).toBeNull();
+            const fresh = await phone.startAutomaticPairing('w1');
+            expect(fresh.phase).toBe('preparing');
+            expect(fresh.id).not.toBe(waiting!.id);
+            return;
+          }
+          if (action === 'offline-cancel') {
+            // Offline: the hosted client queues the `cancelled` write and never settles it.
+            terminalHold = new Promise((resolve) => (releaseTerminal = resolve));
+            let cancelled = false;
+            const cancelling = phone.cancelAutomaticPairing('w1').then(() => {
+              cancelled = true;
+            });
+            // The local cancellation is done; nothing waits on the relay for this request.
+            expect(await phone.automaticPairingState('w1')).toBeNull();
+            const fresh = await phone.startAutomaticPairing('w1');
+            expect(fresh.phase).toBe('preparing');
+            expect(fresh.id).not.toBe(waiting!.id);
+            expect(cancelled).toBe(false);
+            terminalHold = undefined;
+            releaseTerminal!();
+            await cancelling;
+            expect(installed).toEqual([]);
             return;
           }
           if (action === 'expire') {
@@ -880,5 +911,182 @@ describe('automatic device verification before account admission', () => {
       a.dispose();
       replacement.dispose();
     }
+  });
+});
+
+describe('approval coverage across workspaces', () => {
+  const fill = (byte: number, size = 32) => new Uint8Array(size).fill(byte);
+  const setup = (options: { approverHas: string[]; invitationFails?: Set<string> }) => {
+    const requests = new Map<string, Record<string, unknown>>();
+    const approvals = new Map<string, unknown[]>();
+    let publishes = 0;
+    const relay = {
+      submit: (args: { lookupId: string; expiresAt: number; deviceName: string }) =>
+        Effect.sync(() => {
+          requests.set(args.lookupId, { ...args, requestId: 'request-1' });
+          return {
+            requestId: 'request-1',
+            status: 'pending' as const,
+            deviceName: args.deviceName,
+            approximateLocation: null,
+            requestedAt: 0,
+            expiresAt: args.expiresAt,
+          };
+        }),
+      read: (lookupId: string) =>
+        Effect.sync(() => {
+          const row = requests.get(lookupId);
+          return row
+            ? { ...row, status: 'pending', approximateLocation: null, requestedAt: 0 }
+            : null;
+        }) as never,
+      decline: () => Effect.void,
+      publish: (args: { lookupId: string }) =>
+        Effect.sync(() => {
+          publishes += 1;
+          approvals.set(args.lookupId, [...(approvals.get(args.lookupId) ?? []), args]);
+        }),
+      claim: (lookupId: string) =>
+        Effect.sync(() => ({
+          status: 'pending' as const,
+          approvals: (approvals.get(lookupId) ?? []) as never,
+        })),
+    };
+    const genesis = { w1: fill(0x11), w2: fill(0x12) } as const;
+    const failingInstalls = new Map<string, number>();
+    const installed: string[] = [];
+    const requester = makeAccountPairing({
+      store: memoryStore(),
+      now: () => 0,
+      account: 'synthetic-account',
+      deviceName: 'Synthetic phone',
+      relay: relay as never,
+      approverWorkspaces: () => Effect.succeed([]),
+      requesterWorkspaces: () =>
+        Effect.succeed(
+          (['w1', 'w2'] as const).map((workspaceId, index) => ({
+            workspaceId,
+            name: workspaceId,
+            genesis: genesis[workspaceId],
+            identity: () =>
+              Effect.succeed({
+                signingPublicKey: fill(0x30 + index),
+                encryptionPublicKey: fill(0x40 + index),
+                possessionProof: fill(0x50 + index, 64),
+                credentialHash: fill(0x60 + index),
+              }),
+            accept: () =>
+              Effect.suspend(() => {
+                const left = failingInstalls.get(workspaceId) ?? 0;
+                if (left > 0) {
+                  failingInstalls.set(workspaceId, left - 1);
+                  return Effect.fail(new Error('synthetic transient install failure'));
+                }
+                installed.push(workspaceId);
+                return Effect.void;
+              }),
+            acceptHistory: () => Effect.void,
+          }))
+        ),
+    });
+    const invitationFails = options.invitationFails ?? new Set<string>();
+    const approver = makeAccountPairing({
+      store: memoryStore(),
+      now: () => 0,
+      account: 'synthetic-account',
+      deviceName: 'Synthetic desktop',
+      relay: relay as never,
+      requesterWorkspaces: () => Effect.succeed([]),
+      approverWorkspaces: () =>
+        Effect.succeed(
+          options.approverHas.map((workspaceId) => ({
+            workspaceId,
+            name: workspaceId,
+            genesis: genesis[workspaceId as 'w1' | 'w2'],
+            signingPublicKey: fill(0x70),
+            sign: () =>
+              Effect.succeed({ requestId: `admit-${workspaceId}`, record: new Uint8Array([9]) }),
+            append: () => Effect.void,
+            invitation: () =>
+              invitationFails.has(workspaceId)
+                ? Effect.fail(new Error('synthetic invitation outage'))
+                : Effect.succeed(new Uint8Array([7])),
+            access: () => Effect.succeed({ workspaceId, credential: '99'.repeat(32) }),
+          }))
+        ),
+    });
+    return {
+      requester,
+      approver,
+      installed,
+      failingInstalls,
+      invitationFails,
+      publishes: () => publishes,
+    };
+  };
+  const coverageOf = (
+    state: { workspaces: { workspaceId: string; state: string; approval?: string }[] } | null
+  ) =>
+    Object.fromEntries(
+      (state?.workspaces ?? []).map((item) => [item.workspaceId, `${item.state}/${item.approval}`])
+    );
+
+  it('keeps an approved workspace installing through transient failures, and names one left out', async () => {
+    const harness = setup({ approverHas: ['w1'] });
+    harness.failingInstalls.set('w1', 7);
+    const state = await Effect.runPromise(harness.requester.requestAccountPairing({}));
+    expect(coverageOf(state)).toEqual({ w1: 'pending/waiting', w2: 'pending/waiting' });
+    const preview = await Effect.runPromise(
+      harness.approver.inspectAccountPairing(state.pairingString!)
+    );
+    expect(preview?.unavailable.map((item) => item.workspaceId)).toEqual(['w2']);
+    await Effect.runPromise(
+      harness.approver.approveAccountPairing({
+        pairingString: state.pairingString!,
+        requestId: 'request-1',
+        workspaceIds: ['w1'],
+      })
+    );
+    // Seven failed installs: still approved, never read as left out.
+    for (let poll = 0; poll < 7; poll++)
+      expect(
+        coverageOf(await Effect.runPromise(harness.requester.accountPairingRequest()))
+      ).toEqual({ w1: 'pending/approved', w2: 'pending/omitted' });
+    expect(coverageOf(await Effect.runPromise(harness.requester.accountPairingRequest()))).toEqual({
+      w1: 'joined/approved',
+      w2: 'pending/omitted',
+    });
+    expect(harness.installed).toEqual(['w1']);
+  });
+
+  it('publishes nothing while one admitted workspace still lacks its invitation', async () => {
+    const harness = setup({ approverHas: ['w1', 'w2'], invitationFails: new Set(['w2']) });
+    const state = await Effect.runPromise(harness.requester.requestAccountPairing({}));
+    const approve = () =>
+      Effect.runPromise(
+        harness.approver.approveAccountPairing({
+          pairingString: state.pairingString!,
+          requestId: 'request-1',
+          workspaceIds: ['w1', 'w2'],
+        })
+      );
+    expect((await approve()).workspaces.map((item) => item.outcome)).toEqual([
+      'awaiting-delivery',
+      'awaiting-delivery',
+    ]);
+    expect(harness.publishes()).toBe(0);
+    expect(coverageOf(await Effect.runPromise(harness.requester.accountPairingRequest()))).toEqual({
+      w1: 'pending/waiting',
+      w2: 'pending/waiting',
+    });
+    harness.invitationFails.clear();
+    expect((await approve()).workspaces.map((item) => item.outcome)).toEqual([
+      'admitted',
+      'admitted',
+    ]);
+    expect(coverageOf(await Effect.runPromise(harness.requester.accountPairingRequest()))).toEqual({
+      w1: 'joined/approved',
+      w2: 'joined/approved',
+    });
   });
 });

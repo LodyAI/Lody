@@ -18,6 +18,8 @@ struct ChatPendingSend: Decodable {
   let attachments: [Attachment]
   let status: String
   var displayText: String? = nil
+  /// The composer's chips as ranges of `displayText`.
+  var references: [ChatTextReference]? = nil
   var startedAt: Double? = nil
   var failed: Bool? = nil
   var reconnect: Bool? = nil

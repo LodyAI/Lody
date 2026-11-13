@@ -102,6 +102,39 @@ encrypted workspaces once all platforms can use a device-to-device route.
   it. Capacitor serializes the argument, so one unwipeable JavaScript string of the
   seed lives until garbage collection; the owner accepted that cost (2026-11-10).
 
+- **Daily device diagnostics (owner 2026-11-12).** Only completed encrypted-workspace
+  RPC routes count; ordinary-workspace RPC never enters this sender. A device with
+  no completed E2EE RPC has an explicit inactive marker and starts no startup,
+  foreground, online or hourly report checks. The first completed route activates
+  checks, including across windows/restarts. Unfinished cancellation before Streams
+  send excludes the entire request (owner clarification), rather than inventing a
+  Streams attempt. Each completed route commits attempts and results atomically so
+  a daily window cannot split its numerator and denominator. Caller-owned durable
+  dispatch after a failed Streams RPC is outside these counters.
+  The event's primary integer totals are `iroh_attempts`, `iroh_ready`,
+  `iroh_success`, `streams_attempts`, `streams_success`,
+  `fallback_streams_attempts`, `fallback_streams_success`. Each also has
+  `dispatch_` / `feature_` distributions. Attempts count eligible single-frame
+  iroh routes; ready counts actual iroh calls; success requires a verified reply
+  (including a verified application-error response). Streams counts entry into its sending flow, including token/client/channel setup
+  failure (owner clarification) and null/timeout/failure results; only verified replies succeed.
+  `iroh_success <= iroh_ready <= iroh_attempts`; fallback counters are subsets of
+  Streams counters, and `fallback_streams_attempts = iroh_attempts - iroh_success`.
+  Auxiliary kind-prefixed fields retain `iroh_ok` (success alias), not-ready
+  known/never, call-failed/unverified, unavailable/chunked, latency buckets
+  `lt200` / `lt800` / `ge800` and `direct` / `relay` / `unknown` paths.
+  `connectionPath` reads existing `Connection::paths()` without dialing; core,
+  napi/uniffi return `direct | relay | none`, never addresses.
+  Web Locks serialize device-local `lody:iroh-daily:v2`; salted target digests stay
+  local. Each kind admits at most one million completed routes per window,
+  dropping whole excess observations to preserve paired-counter invariants.
+  Total fields sum both kinds (maximum two million). After 24 hours one
+  `e2ee/iroh_daily` is SDK-enqueued and counters reset; offline days share one
+  window. Immutable pending windows and stable SDK UUIDs preserve retry identity.
+  The final SDK allowlist removes groups, URLs, IP and user-property envelopes.
+  OSS local composition and machine CLI never run these counters. SDK enqueue
+  does not establish production ingestion.
+
 ## Evidence
 
 Inspected iroh source at v1.4.1:

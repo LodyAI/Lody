@@ -17,7 +17,8 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
 - Encrypted machine RPC uses one feature DTO/chunk codec and shared complete-response assembler.
   The closed pure-read list uses fresh read authority, never execution journals; other admitted
   Code Collab/preview actions require write authority and execution claims. Keep same-member
-  machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.
+  machine binding except for `session/history-read`, exact originals and explicit size errors;
+  never fall back to ordinary RPC.
 - Encrypted dispatch fails with `e2ee_machine_not_shared` only when `authorizeTarget`
   returns a verified `false`. An unknown policy signs, because senders withhold input
   only for a known withdrawal and the receiving machine decides.

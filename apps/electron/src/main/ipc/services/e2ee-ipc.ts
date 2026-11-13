@@ -61,6 +61,7 @@ import {
   recentAccountSecurityEvents,
   recoveryReplacementPlan,
   recoveryRestoreTarget,
+  adoptRecoveredWorkspace,
   recoveryVaultEnabled,
   recoveryVaultFailure,
   restoreAccountWorkspaces,
@@ -226,13 +227,16 @@ const IROH_ROUTE_BUDGET_MS = 250
 async function irohRoute(
   id: ReturnType<typeof sender>,
   workspaceId: string,
-  targetMachineId: string
+  targetMachineId: string,
+  passive = false
 ) {
   const target = irohTargetSchema.parse({ workspaceId, targetMachineId })
   return withDesktopE2eeAccount(
     (owner) =>
       owner.readers.get(target.workspaceId)?.has(id)
-        ? owner.host.irohPrepare(target.workspaceId, target.targetMachineId)
+        ? passive
+          ? owner.host.irohPeek(target.workspaceId, target.targetMachineId)
+          : owner.host.irohPrepare(target.workspaceId, target.targetMachineId)
         : refuseUnopened(owner, target.workspaceId),
     target.workspaceId,
     false
@@ -2010,7 +2014,12 @@ export class E2eeIpc extends ProductWindowIpcService {
   }
   @IpcMethod()
   async requestAccountPairing(
-    input: { pairingString?: string; expiresAt?: number; preserveExisting?: true },
+    input: {
+      pairingString?: string
+      expiresAt?: number
+      preserveExisting?: true
+      workspaceId?: string
+    },
     workspaces: unknown
   ) {
     sender()
@@ -2019,9 +2028,12 @@ export class E2eeIpc extends ProductWindowIpcService {
       throw new Error('e2ee_invalid-input')
     if (input?.expiresAt !== undefined && !Number.isSafeInteger(input.expiresAt))
       throw new Error('e2ee_invalid-input')
+    if (input?.preserveExisting !== undefined && input.preserveExisting !== true)
+      throw new Error('e2ee_invalid-input')
     if (
-      input?.preserveExisting !== undefined &&
-      (input.preserveExisting !== true || hints.length !== 1)
+      input?.workspaceId !== undefined &&
+      (typeof input.workspaceId !== 'string' ||
+        !hints.some((hint) => hint.workspaceId === input.workspaceId))
     )
       throw new Error('e2ee_invalid-input')
     const pairing = await this.accountPairing(hints)
@@ -2030,9 +2042,8 @@ export class E2eeIpc extends ProductWindowIpcService {
         pairing.requestAccountPairing({
           ...(input?.pairingString === undefined ? {} : { pairingString: input.pairingString }),
           ...(input?.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
-          ...(input?.preserveExisting
-            ? { preserveExisting: true as const, workspaceId: hints[0]!.workspaceId }
-            : {})
+          ...(input?.preserveExisting ? { preserveExisting: true as const } : {}),
+          ...(input?.workspaceId === undefined ? {} : { workspaceId: input.workspaceId })
         })
       )
     )
@@ -2926,6 +2937,12 @@ export class E2eeIpc extends ProductWindowIpcService {
     const route = await irohRoute(sender(), workspaceId, targetMachineId)
     return route ? route.ready() : false
   }
+  /** Selected path only; route resolution retains the caller's reader checks. */
+  @IpcMethod()
+  async irohPath(workspaceId: string, targetMachineId: string) {
+    const route = await irohRoute(sender(), workspaceId, targetMachineId, true)
+    return route ? route.path() : ('none' as const)
+  }
   /** Carries one prepared `{id, frame}` envelope; returns reply frames for the
    * renderer to verify with the existing accept methods. Never prepares or signs.
    * The network wait runs after the account lock is released. */
@@ -3505,10 +3522,18 @@ export class E2eeIpc extends ProductWindowIpcService {
     await this.manage(workspaceId, { type: 'rotate' })
   }
   @IpcMethod()
-  async revokeDevice(workspaceId: string, signingPublicKey: string) {
+  async revokeDevice(
+    workspaceId: string,
+    signingPublicKey: string,
+    confirmation?: { confirmedRecoveryOnly: true }
+  ) {
     if (typeof signingPublicKey !== 'string' || !/^[0-9a-f]{64}$/.test(signingPublicKey))
       throw new Error('e2ee_invalid-input')
-    await this.manage(workspaceId, { type: 'revoke', target: signingPublicKey })
+    await this.manage(workspaceId, {
+      type: 'revoke',
+      target: signingPublicKey,
+      confirmedRecoveryOnly: confirmation?.confirmedRecoveryOnly === true
+    })
   }
   @IpcMethod()
   async status(workspaceId: string) {
@@ -4018,19 +4043,12 @@ export class E2eeIpc extends ProductWindowIpcService {
                       Effect.tryPromise(() =>
                         withDesktopE2eeAccount(
                           (owner) =>
-                            Effect.gen(function* () {
-                              yield* owner.bootstrap.preparePersonalJoin({
-                                version: 1,
-                                workspaceId: row.id,
-                                genesisHash: row.genesisHash,
-                                genesisRecordHex: join.genesisRecordHex,
-                                endorser: join.endorser,
-                                membershipId: join.membershipId,
-                                pairingSessionId: join.pairingSessionId
-                              })
-                              yield* owner.bootstrap.acceptPersonalHistory(row.id, join.pages)
-                              yield* owner.host.open(row.id)
-                              yield* owner.host.installRecoveredKeys(row.id, join.recovered)
+                            adoptRecoveredWorkspace({
+                              workspaceId: row.id,
+                              genesisHash: row.genesisHash,
+                              join,
+                              bootstrap: owner.bootstrap,
+                              host: owner.host
                             }),
                           row.id
                         )

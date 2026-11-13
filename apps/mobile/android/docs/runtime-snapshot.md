@@ -97,6 +97,18 @@ for 30 s, grants, bodies; forgotten when the account or workspace changes): Sett
 `fresh`, while the composer's `shortcutBody` may use the recent directory. The unused
 `publishedShares` call is gone.
 
+## Catalog read recovery
+
+Catalog transport, authorization and rate-limit failures retry from the last
+successfully imported offset and cursor, retaining the verified in-memory Flock.
+The watcher reports failure and stays unhealthy until an `upToDate` response;
+partial catch-up cannot publish a synchronized catalog. An explicit Android
+`runtime_suspended` abort retains the grant; actual transport/auth failures
+invalidate it before retrying. Malformed responses, invalid cursors and corrupt
+imports still take the bootstrap recovery path. The cumulative input budget
+survives read retries, and `catalog_limit` remains terminal. Owner cancellation
+ends retries without publishing late results. Writes are never replayed.
+
 ## Android text creation
 
 `create-commands.mjs` exposes creation options and create-and-send using native scope identity. Presence is read through the grant origin; the UI only offers currently online agents. The adapter calls upstream creation, session bootstrap and text send in order, retaining IDs and never retrying writes. Before the write, a selection the live options or Roles refuse, or a failed read of them, reports `rejected`; after it, only a channel refusal made before the handler runs (`invalid_params`, `unsupported_method`) is `rejected`, and every other failure is `unknown`. Like iOS `WorkspaceBilling`, `ReadOnlyCloudRuntime` reads the workspace plan projection (`billing:getWorkspaceBillingEntitlement` → `{effectivePlanTier, checkoutPending}`, cached for a minute after a successful read) through its `BillingProvider` before `createAndSend`, `sendText` and an edit's send, and the adapter passes it as `billingEntitlement` to upstream `createSession`, `sendTurn` and `editSession`, which apply the free-plan 200-session and 30-turn quotas. A failed read sends `null`, the runtime's fail-open policy. A create refusal's `reason` is returned with `rejected`. `createTab` carries the same entitlement (a Tab is a session, so the 200-session quota applies as on Web); its refusal reason reaches the conversation's snackbar. It deliberately uses plain text (no shortcut, attachment or mention expansion). The snapshot's creation carries the public local-project `useWorktree` field. Native and JavaScript network gates permit only the exact workspace stream kinds needed for persistence and dispatch. An accepted Machine RPC is not task completion. GitHub branches are entered by name in this first integration.
@@ -131,7 +143,7 @@ fields reach native UI, never launch environments or credentials.
 
 ## Schedules
 
-`schedule-commands.mjs` bridges the shared `schedules`, `scheduleDetail` and `scheduleCommand` calls with the native workspace identity. The dispatcher reduces thrown errors to one code, so schedule failures return in-band as `{error}`: the runtime's schedule codes pass through for localized copy, and any other write failure is `schedule_write_unknown`, because the write may have landed. Writes carry the caller's idempotency `requestId` and are never retried. Both network gates allow `<workspace>:sr` (the Flock registry) and `<workspace>:schedule:<id>` (one schedule's Loro document) to be created, read and appended; deletes stay denied. The handler depends on `loro-mirror` 2.3.2, which shares the asynchronous Loro wrapper. It ships no license text, only `"license": "MIT"` in its package.json, so `build.mjs` accepts that declaration for this one reviewed package and records it in the license inventory.
+`schedule-commands.mjs` bridges the shared `schedules`, `scheduleDetail` and `scheduleCommand` calls with the native workspace identity. The dispatcher reduces thrown errors to one code, so schedule failures return in-band as `{error}`: the runtime's schedule codes pass through for localized copy, and any other write failure is `schedule_write_unknown`, because the write may have landed. Writes carry the caller's idempotency `requestId` and are never retried. Native waits up to 50 s for `schedules` and `scheduleDetail`, longer than the runtime's 40 s read budget, so the runtime's own outcome always arrives first. Both network gates allow `<workspace>:sr` (the Flock registry) and `<workspace>:schedule:<id>` (one schedule's Loro document) to be created, read and appended; deletes stay denied. The handler depends on `loro-mirror` 2.3.2, which shares the asynchronous Loro wrapper. It ships no license text, only `"license": "MIT"` in its package.json, so `build.mjs` accepts that declaration for this one reviewed package and records it in the license inventory.
 
 ## Operation receipts
 

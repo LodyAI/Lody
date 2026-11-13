@@ -1,7 +1,8 @@
-import { Clock, Effect, Result, Schema, Semaphore } from 'effect';
+import { Clock, Data, Effect, Result, Schema, Semaphore } from 'effect';
 import * as Bytes from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
 import { copyEpochKeyBytes, disposeEpochKey } from '../foundation/epoch-key';
+import { ContentError } from '../foundation/errors';
 import {
   epochHistoryPacket,
   hasVerifiedCheckpoint,
@@ -15,8 +16,12 @@ import { decodeRecord } from '../ledger/records';
 import { signLedgerRecord } from '../ledger/signing';
 import type { DeviceSigner } from '../foundation/signing';
 import { openEpochEnvelope, authenticateEpochEnvelopeSignature } from '../keys/envelope';
-import { authenticateEpochStagedGroup, type EpochStagedGroup } from '../keys/staging';
-import { openEpochKeyHpke } from '../crypto/hpke';
+import {
+  authenticateEpochStagedGroup,
+  EpochStagingError,
+  type EpochStagedGroup,
+} from '../keys/staging';
+import { openEpochKeyHpke, HpkePrimitiveError } from '../crypto/hpke';
 import { commitEpochKey, recoverLedgerHistory } from '../keys/history';
 import {
   canonical,
@@ -45,11 +50,11 @@ export type RecoverySubmitResult = {
 };
 /** SHA-256 of R's derived service access credential, registered with R's admission append. */
 export type RecoveryCredentialRegistration = { readonly recoveryCredentialHash: Uint8Array };
-/** The current epoch-key envelope addressed to a recovery device, as fetched during restore. */
+/** A requested committed epoch-key envelope addressed to a recovery device. */
 export type RecoveryEnvelope =
   | { readonly sender: Bytes.SigningPublicKey; readonly frame: Uint8Array }
   | { readonly staged: EpochStagedGroup }
-  /** Not delivered yet. Nothing failed: the caller reports Pending and retries. */
+  /** Not delivered yet. Setup retries; restore may try an older committed epoch. */
   | { readonly pending: true };
 /** Everything the recovery workflow of one workspace needs: the vault session, local journal, identity, ledger, submission and envelope fetch. */
 export interface WorkspaceRecoveryInput {
@@ -95,8 +100,9 @@ const RefSchema = Schema.Struct({
 const ProgressSchema = Schema.Struct({
   entryId: Schema.String,
   reference: Schema.NullOr(RefSchema),
+  recoveryDevice: Schema.optionalKey(Schema.String),
   record: Schema.NullOr(Schema.Uint8Array),
-  recordPosition: Schema.NullOr(Schema.Number),
+  recordPosition: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   stage: Schema.Literals([
     'candidate',
     'indexed',
@@ -118,6 +124,7 @@ const RestoreSchema = Schema.Struct({
 });
 const isPending = (error: unknown) =>
   error instanceof RecoveryVaultError && error.code === 'pending';
+class RecoveryEpochUnavailable extends Data.TaggedError('RecoveryEpochUnavailable') {}
 /** A resumable four-step owner. Only encrypted vault entries, original signed
  * records and non-secret progress reach local storage. Genuine ledger facts and
  * actual HPKE/commitment checks establish paired/enveloped/recoverable separately. */
@@ -198,6 +205,20 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
       state.members.has(hex(membership.toBytes()))
     );
   };
+  // Older setup journals omitted the position. Locate the signed predecessor only
+  // in retained verified history. Compaction may have removed that predecessor;
+  // then only an already active R can finish reconciliation without its position.
+  const setupPosition = Effect.fnUntraced(function* (view: LedgerView, record: Uint8Array) {
+    const body = (yield* Effect.fromResult(decodeRecord(record))).body;
+    if (body.type !== 'ordinary') return yield* vaultError('authentication');
+    for (let length = Math.max(1, view.historyStart + 1); length <= view.length; length++) {
+      if (
+        yield* Effect.fromResult(hasVerifiedCheckpoint(view, { head: body.previousHash, length }))
+      )
+        return length + 1;
+    }
+    return null;
+  });
   const credentials = new WeakMap<RecoveryIdentity, Uint8Array>();
   const useIdentity = <A, E, R>(
     ref: RecoveryEntryReference,
@@ -224,70 +245,115 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
     );
   const openCurrent = Effect.fnUntraced(function* (
     identity: RecoveryIdentity,
-    onEnvelope?: (epoch: number) => Effect.Effect<void, unknown>
+    onEnvelope?: (epoch: number) => Effect.Effect<void, unknown>,
+    requestedEpoch?: number
   ) {
     const before = yield* current();
     if (!active(before, identity)) return yield* vaultError('unauthorized');
-    const epoch = before.inspectState().epoch.number,
-      remote = yield* fetch(
+    const epoch = requestedEpoch ?? before.inspectState().epoch.number;
+    const keyValue = yield* Effect.gen(function* () {
+      const remote = yield* fetch(
         identity.publicKey,
         epoch,
         identity,
         new Uint8Array(credentials.get(identity)!)
       );
-    if ('pending' in remote) return yield* vaultError('pending');
-    let keyValue: Bytes.EpochKey;
-    if ('staged' in remote) {
-      const qualified = yield* Effect.fromResult(
-        authenticateEpochStagedGroup(before, remote.staged)
-      );
-      if (qualified.group.epoch !== epoch) return yield* vaultError('authentication');
-      const row = qualified.group.envelopes.find(
-        (item) => item.recipient === hex(identity.publicKey.toBytes())
-      );
-      if (!row) return yield* vaultError('missing');
-      const context = {
-        genesis,
-        epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
-        sender: qualified.sender,
-        recipient: identity.publicKey,
-      };
-      const payload = yield* Effect.fromResult(
-        authenticateEpochEnvelopeSignature(context, row.frame)
-      );
-      keyValue = yield* openEpochKeyHpke(
-        identity.encryption,
-        identity.encryptionPublicKey,
-        context,
-        payload
-      );
-    } else {
-      keyValue = yield* openEpochEnvelope({
-        context: {
+      if ('pending' in remote) return yield* vaultError('pending');
+      let keyValue: Bytes.EpochKey;
+      if ('staged' in remote) {
+        const qualified = yield* Effect.fromResult(
+          authenticateEpochStagedGroup(before, remote.staged)
+        );
+        if (qualified.group.epoch !== epoch) return yield* vaultError('authentication');
+        const row = qualified.group.envelopes.find(
+          (item) => item.recipient === hex(identity.publicKey.toBytes())
+        );
+        if (!row) return yield* vaultError('missing');
+        const context = {
+          genesis,
+          epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
+          sender: qualified.sender,
+          recipient: identity.publicKey,
+        };
+        const payload = yield* Effect.fromResult(
+          authenticateEpochEnvelopeSignature(context, row.frame)
+        );
+        keyValue = yield* openEpochKeyHpke(
+          identity.encryption,
+          identity.encryptionPublicKey,
+          context,
+          payload
+        );
+      } else if (epoch !== before.inspectState().epoch.number) {
+        // Historical key possession grants no sender authority. Its signature binds
+        // routing; the genuine committed epoch's preimage authenticates the key below.
+        const context = {
           genesis,
           epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
           sender: remote.sender,
           recipient: identity.publicKey,
-        },
-        pair: identity.encryption,
-        frame: remote.frame,
-        ledger: current,
-      });
-    }
+        };
+        const payload = yield* Effect.fromResult(
+          authenticateEpochEnvelopeSignature(context, remote.frame)
+        );
+        keyValue = yield* openEpochKeyHpke(
+          identity.encryption,
+          identity.encryptionPublicKey,
+          context,
+          payload
+        );
+      } else {
+        keyValue = yield* openEpochEnvelope({
+          context: {
+            genesis,
+            epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
+            sender: remote.sender,
+            recipient: identity.publicKey,
+          },
+          pair: identity.encryption,
+          frame: remote.frame,
+          ledger: current,
+        });
+      }
+      return keyValue;
+    }).pipe(
+      Effect.catchIf(
+        (error) =>
+          requestedEpoch !== undefined &&
+          ((error instanceof RecoveryVaultError &&
+            (['missing', 'authentication'].includes(error.code) ||
+              (error.code === 'pending' && epoch !== 0))) ||
+            error instanceof ContentError ||
+            error instanceof EpochStagingError ||
+            (error instanceof HpkePrimitiveError &&
+              ['open-failed', 'invalid-input', 'recipient-mismatch'].includes(error.code))),
+        () => Effect.fail(new RecoveryEpochUnavailable())
+      )
+    );
     return yield* Effect.acquireUseRelease(
       Effect.succeed(keyValue),
       (latest) =>
         Effect.gen(function* () {
           const after = yield* current();
-          if (!active(after, identity) || after.inspectState().epoch.number !== epoch)
+          if (
+            !active(after, identity) ||
+            after.inspectState().epoch.number !== before.inspectState().epoch.number
+          )
             return yield* vaultError('unauthorized');
           const fact = yield* Effect.fromResult(epochHistoryPacket(after, epoch)),
             commitment = yield* Effect.fromResult(commitEpochKey(genesis, epoch, latest));
-          if (!fact.commitment.equals(commitment)) return yield* vaultError('authentication');
+          if (!fact.commitment.equals(commitment))
+            return yield* requestedEpoch !== undefined
+              ? new RecoveryEpochUnavailable()
+              : vaultError('authentication');
           if (onEnvelope) yield* onEnvelope(epoch);
           // Validate the complete signed history before the first durable save.
           return yield* Effect.acquireUseRelease(
-            Effect.fromResult(recoverLedgerHistory(after, latest)),
+            Effect.fromResult(recoverLedgerHistory(after, latest, epoch)).pipe(
+              Effect.mapError((error) =>
+                requestedEpoch !== undefined ? new RecoveryEpochUnavailable() : error
+              )
+            ),
             (keys) =>
               Effect.gen(function* () {
                 yield* installed.saveAndReload(epoch, latest);
@@ -440,6 +506,17 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         // The record may have committed before this process died, while its P09
         // result still awaits acknowledgement. Reconcile that original before
         // advancing local stage even when the registered R is already visible.
+        if (
+          progress.record &&
+          progress.stage === 'registration' &&
+          progress.recordPosition == null
+        ) {
+          state = yield* save(state.raw, {
+            ...progress,
+            recordPosition: yield* setupPosition(view, progress.record),
+          });
+          progress = state.value!;
+        }
         if (progress.record && progress.stage === 'registration' && active(view, identity)) {
           const resumed = yield* submit(new Uint8Array(progress.record), registration);
           if (!bytesEqual(resumed.record, progress.record))
@@ -447,20 +524,26 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           if (resumed.outcome !== 'Committed')
             return { outcome: resumed.outcome, status: yield* checkedStatus() };
           view = yield* current();
-          if (
+          if (!active(view, identity)) return yield* vaultError('authentication');
+          if (progress.recordPosition == null) {
+            if (view.historyStart === 0) return yield* vaultError('authentication');
+          } else if (
+            view.historyStart < progress.recordPosition &&
             !(yield* Effect.fromResult(
               hasVerifiedCheckpoint(view, {
                 head: hashRecordBytes(progress.record),
-                length: progress.recordPosition!,
+                length: progress.recordPosition,
               })
             ))
           )
             return yield* vaultError('authentication');
         }
         if (!active(view, identity)) {
+          if (progress.record && progress.recordPosition == null)
+            return yield* vaultError('pending');
           const previousDevice = view.inspectState().devices.get(hex(identity.publicKey.toBytes()));
           if (previousDevice) return yield* vaultError('unauthorized');
-          if (!progress.record) {
+          const signAdmission = Effect.fnUntraced(function* (view: LedgerView) {
             const command = yield* prepareDeviceAdmission({
               genesis,
               membershipId: membership,
@@ -479,12 +562,36 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
               stage: 'registration',
             });
             progress = state.value!;
-          }
+          });
+          if (!progress.record) yield* signAdmission(view);
           const result = yield* submit(new Uint8Array(progress.record!), registration);
           if (!bytesEqual(result.record, progress.record!))
             return yield* vaultError('authentication');
-          if (result.outcome !== 'Committed')
+          if (result.outcome !== 'Committed') {
+            if (result.outcome === 'Conflict') {
+              const after = yield* current();
+              const landed = yield* Effect.fromResult(
+                hasVerifiedCheckpoint(after, {
+                  head: hashRecordBytes(progress.record!),
+                  length: progress.recordPosition!,
+                })
+              );
+              // Only verified facts make the original impossible. After retention,
+              // complete device history still proves this R was never admitted.
+              if (
+                !landed &&
+                after.length >= progress.recordPosition! &&
+                (after.historyStart < progress.recordPosition! ||
+                  after.classifyDevice?.(hex(identity.publicKey.toBytes())) === 'unknown') &&
+                !active(after, identity)
+              ) {
+                if (after.inspectState().devices.has(hex(identity.publicKey.toBytes())))
+                  return yield* vaultError('unauthorized');
+                yield* signAdmission(after);
+              }
+            }
             return { outcome: result.outcome, status: yield* checkedStatus() };
+          }
           view = yield* current();
           if (
             !active(view, identity) ||
@@ -497,7 +604,13 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           )
             return yield* vaultError('authentication');
         }
-        state = yield* save(state.raw, { ...progress, stage: 'registered' });
+        state = yield* save(state.raw, {
+          ...progress,
+          stage: 'registered',
+          record: null,
+          recordPosition: null,
+          recoveryDevice: hex(identity.publicKey.toBytes()),
+        });
         return yield* runTest().pipe(
           Effect.map((status) => ({ outcome: 'Committed' as const, status })),
           Effect.catchIf(isPending, () =>
@@ -537,19 +650,44 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         if (!(yield* Effect.fromResult(hasVerifiedCheckpoint(view, checkpoint))))
           return yield* vaultError('authentication');
         const personal = request.personal;
-        const opened = yield* openCurrent(identity).pipe(
-          Effect.catchIf(isPending, () => Effect.succeed(null))
-        );
-        if (opened === null)
-          return { outcome: 'Pending' as const, epoch: view.inspectState().epoch.number };
-        const epoch = opened;
+        // Try committed epochs newest first. Only missing or invalid envelope/key
+        // evidence permits fallback; ledger, network and storage failures propagate.
+        let epoch: number | null = null;
+        for (let candidate = view.inspectState().epoch.number; candidate >= 0; candidate--) {
+          const opened = yield* openCurrent(identity, undefined, candidate).pipe(
+            Effect.catchIf(isPending, () => Effect.succeed('pending' as const)),
+            Effect.catchIf(
+              (error) => error instanceof RecoveryEpochUnavailable,
+              () => Effect.succeed(null)
+            )
+          );
+          if (opened === 'pending')
+            return {
+              outcome: 'Pending' as const,
+              epoch: view.inspectState().epoch.number,
+              partialEpochKey: true,
+            };
+          if (opened !== null) {
+            epoch = opened;
+            break;
+          }
+        }
+        // At epoch zero the authenticated vault identity and active R suffice to
+        // regain governance for invalid key evidence. In-flight delivery above stays Pending.
+        if (epoch === null && view.inspectState().epoch.number !== 0)
+          return {
+            outcome: 'Pending' as const,
+            epoch: view.inspectState().epoch.number,
+            partialEpochKey: true,
+          };
+        const partialEpochKey = epoch !== view.inspectState().epoch.number;
         if (
           personal.publicKey.equals(identity.publicKey) ||
           personal.encryptionPublicKey.equals(identity.encryptionPublicKey)
         )
           return yield* vaultError('invalid-input');
         // A retained, currently admitted personal identity may have lost its local
-        // installed key. R has authenticated the current epoch above; restore the
+        // installed key. R has authenticated available committed keys above; restore the
         // key without a duplicate admission. Retired/foreign/mismatched identities
         // still follow the normal rejection path and can never be revived here.
         const retained = view.inspectState().devices.get(hex(personal.publicKey.toBytes()));
@@ -563,20 +701,16 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           return {
             outcome: 'Committed' as const,
             epoch,
+            partialEpochKey,
             personal: personal.publicKey,
             role: view.inspectState().members.get(hex(membership.toBytes()))!.role,
           };
         }
         const restoreKey = `${key}/restore`,
           before = yield* local.read(restoreKey);
+        let raw = before;
         let intent: typeof RestoreSchema.Type;
-        if (before) {
-          intent = yield* attempt(() =>
-            Result.getOrThrow(Schema.decodeUnknownResult(RestoreSchema)(parseCanonical(before)))
-          );
-          if (intent.personal !== hex(personal.publicKey.toBytes()))
-            return yield* vaultError('conflict');
-        } else {
+        const signAdmission = Effect.fnUntraced(function* (view: LedgerView) {
           const command = yield* prepareDeviceAdmission({
             genesis,
             membershipId: membership,
@@ -588,15 +722,21 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             prepareLedgerCommand(view, identity.publicKey, command)
           );
           const record = yield* signLedgerRecord(proposal, identity);
-          intent = {
-            personal: hex(personal.publicKey.toBytes()),
-            record,
-            position: view.length + 1,
-          };
-          if ((yield* local.compareAndSwap(restoreKey, null, canonical(intent))) !== 'Committed')
+          return { personal: hex(personal.publicKey.toBytes()), record, position: view.length + 1 };
+        });
+        if (before) {
+          intent = yield* attempt(() =>
+            Result.getOrThrow(Schema.decodeUnknownResult(RestoreSchema)(parseCanonical(before)))
+          );
+          if (intent.personal !== hex(personal.publicKey.toBytes()))
+            return yield* vaultError('conflict');
+        } else {
+          intent = yield* signAdmission(view);
+          raw = canonical(intent);
+          if ((yield* local.compareAndSwap(restoreKey, null, raw)) !== 'Committed')
             return yield* vaultError('conflict');
           const read = yield* local.read(restoreKey);
-          if (!read || !bytesEqual(read, canonical(intent))) return yield* vaultError('storage');
+          if (!read || !bytesEqual(read, raw)) return yield* vaultError('storage');
         }
         const result = yield* request.submitOriginalAsRecovery(
           new Uint8Array(intent.record),
@@ -604,7 +744,32 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           new Uint8Array(credentials.get(identity)!)
         );
         if (!bytesEqual(result.record, intent.record)) return yield* vaultError('authentication');
-        if (result.outcome !== 'Committed') return { outcome: result.outcome, epoch };
+        if (result.outcome !== 'Committed') {
+          if (result.outcome === 'Conflict') {
+            const after = yield* current();
+            const landed = yield* Effect.fromResult(
+              hasVerifiedCheckpoint(after, {
+                head: hashRecordBytes(intent.record),
+                length: intent.position,
+              })
+            );
+            if (
+              !landed &&
+              after.length >= intent.position &&
+              (after.historyStart < intent.position ||
+                after.classifyDevice?.(hex(personal.publicKey.toBytes())) === 'unknown') &&
+              !after.inspectState().devices.has(hex(personal.publicKey.toBytes()))
+            ) {
+              intent = yield* signAdmission(after);
+              const next = canonical(intent);
+              if ((yield* local.compareAndSwap(restoreKey, raw, next)) !== 'Committed')
+                return yield* vaultError('conflict');
+              const read = yield* local.read(restoreKey);
+              if (!read || !bytesEqual(read, next)) return yield* vaultError('storage');
+            }
+          }
+          return { outcome: result.outcome, epoch, partialEpochKey };
+        }
         const after = yield* current(),
           device = after.inspectState().devices.get(hex(personal.publicKey.toBytes()));
         if (
@@ -623,6 +788,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         return {
           outcome: 'Committed' as const,
           epoch,
+          partialEpochKey,
           personal: personal.publicKey,
           role: after.inspectState().members.get(hex(membership.toBytes()))!.role,
         };
@@ -657,12 +823,16 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
    * admitted it. Its journaled admission names the R, so this needs no V. The older R
    * is untouched. */
   const revokeOwnRecoveryDevice = Effect.fnUntraced(function* () {
-    const record = (yield* load()).value?.record;
-    if (!record) return { outcome: 'Committed' as const };
-    const body = (yield* Effect.fromResult(decodeRecord(record))).body;
-    if (body.type !== 'ordinary' || body.operation.type !== 'admitDevice')
-      return yield* vaultError('authentication');
-    const target = hex(body.operation.signingPublicKey.toBytes());
+    const progress = (yield* load()).value;
+    let target = progress?.recoveryDevice;
+    if (!target) {
+      const record = progress?.record;
+      if (!record) return { outcome: 'Committed' as const };
+      const body = (yield* Effect.fromResult(decodeRecord(record))).body;
+      if (body.type !== 'ordinary' || body.operation.type !== 'admitDevice')
+        return yield* vaultError('authentication');
+      target = hex(body.operation.signingPublicKey.toBytes());
+    }
     return yield* revokeRecoveryDevices((id) => id === target, 'revoke-own');
   });
   const revokeRecoveryDevices = (select: (id: string) => boolean, purpose: string) =>
@@ -805,7 +975,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             }
             return 'Committed' as const;
           }
-          if (!intent.revoke) {
+          const signRevocation = Effect.fnUntraced(function* (view: LedgerView) {
             const proposal = yield* Effect.fromResult(
               prepareLedgerCommand(view, personalSigner.publicKey, {
                 _tag: 'RevokeDevice',
@@ -818,11 +988,25 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
               revokePosition: view.length + 1,
             };
             yield* persistIntent();
-          }
+          });
+          if (!intent.revoke) yield* signRevocation(view);
           const outcome = yield* submit(new Uint8Array(intent.revoke!), null);
           if (!bytesEqual(outcome.record, intent.revoke!))
             return yield* vaultError('authentication');
-          if (outcome.outcome !== 'Committed') return outcome.outcome;
+          if (outcome.outcome !== 'Committed') {
+            if (outcome.outcome === 'Conflict') {
+              const after = yield* current();
+              const landed = yield* Effect.fromResult(
+                hasVerifiedCheckpoint(after, {
+                  head: hashRecordBytes(intent.revoke!),
+                  length: intent.revokePosition!,
+                })
+              );
+              if (!landed && after.length >= intent.revokePosition! && active(after, oldIdentity))
+                yield* signRevocation(after);
+            }
+            return outcome.outcome;
+          }
           const after = yield* current();
           if (
             active(after, oldIdentity) ||

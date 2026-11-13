@@ -11,6 +11,6 @@ let package = Package(
   targets: [
     .target(name: "LodyCore"),
     .target(name: "LodyRuntime", dependencies: ["LodyCore"]),
-    .testTarget(name: "LodyCoreTests", dependencies: ["LodyCore"]),
+    .testTarget(name: "LodyCoreTests", dependencies: ["LodyCore", "LodyRuntime"]),
   ]
 )

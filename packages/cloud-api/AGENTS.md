@@ -14,6 +14,10 @@ configuration, or business-rule implementations.
 - Local OSS startup must not construct this client unless the selected platform
   provider explicitly enables the matching cloud capability.
 
+- `./seat-invite-preview` owns the seat quote runtime schema and inferred type.
+  Cloud adapters reuse it so optional payment actions survive parsing. These hints
+  inform UI only; backend admission and billing checks remain authoritative.
+
 - Machine identity restoration requires server-verified ownership of both registrations
   and an exact retained request. An installation ID is neither an encrypted device
   identity nor permission to transfer encrypted custody.

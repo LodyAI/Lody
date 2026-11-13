@@ -76,6 +76,7 @@ describe('Session buildShellEnv', () => {
 
     expect(env).toMatchObject({
       LODY_SESSION_ID: 'child-session-2',
+      LODY_AGENT_SESSION_ID: 'child-session-2',
       LODY_WORKSPACE_SESSION_ID: 'parent-session-1',
       LODY_AGENT_ROLE_ID: 'role-1',
       LODY_PARENT_SESSION_ID: 'parent-session-1',
@@ -87,6 +88,7 @@ describe('Session buildShellEnv', () => {
     'keeps independent identity separate from inherited values with opener %s',
     (openedBySessionId) => {
       const inherited = {
+        LODY_AGENT_SESSION_ID: 'stale-agent',
         LODY_AGENT_ROLE_ID: 'stale-role',
         LODY_PARENT_SESSION_ID: 'stale-parent',
         LODY_OPENED_BY_SESSION_ID: 'stale-opener',
@@ -100,6 +102,7 @@ describe('Session buildShellEnv', () => {
       const env = (session as unknown as { buildShellEnv(): NodeJS.ProcessEnv }).buildShellEnv();
       expect(env).toMatchObject({
         LODY_SESSION_ID: 'session-1',
+        LODY_AGENT_SESSION_ID: 'session-1',
         LODY_WORKSPACE_SESSION_ID: 'session-1',
         LODY_AGENT_ROLE_ID: undefined,
         LODY_PARENT_SESSION_ID: undefined,

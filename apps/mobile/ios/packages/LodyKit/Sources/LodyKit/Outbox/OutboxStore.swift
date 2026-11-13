@@ -24,14 +24,16 @@ final class OutboxStore {
   private(set) var revision = 0
   var onChange: (() -> Void)?
   private let persistence: OutboxPersistence
+  private let admit: () throws -> Void
   private var durable: [OutboxRecord] = []
   private var touched = Set<String>()
   private var writes: Task<Void, Never>
 
-  init(key: String, generation: Int, persistence: OutboxPersistence, awaitingConfirmation: String) {
+  init(key: String, generation: Int, persistence: OutboxPersistence, awaitingConfirmation: String, admit: @escaping () throws -> Void = {}) {
     self.key = key
     self.generation = generation
     self.persistence = persistence
+    self.admit = admit
     writes = Task {}
     writes = Task { @MainActor [weak self] in
       let saved = await persistence.read(key)
@@ -49,7 +51,8 @@ final class OutboxStore {
 
   @discardableResult
   func put(_ record: OutboxRecord) -> Task<Void, Error> {
-    change(record.sessionId, record)
+    do { try admit() } catch { return Task { throw error } }
+    return change(record.sessionId, record)
   }
 
   @discardableResult
@@ -67,6 +70,7 @@ final class OutboxStore {
     let write = Task { @MainActor [weak self] in
       await previous.value
       guard let self, self.current else { throw OutboxError.scopeExpired }
+      if record != nil { try self.admit() }
       let next = Self.replace(self.durable, sessionId, record)
       try await persistence.write(key, OutboxRecord.encode(next), generation)
       guard self.current else { throw OutboxError.scopeExpired }
@@ -93,14 +97,16 @@ final class OutboxStore {
 final class OutboxStores {
   private let persistence: OutboxPersistence
   private let awaitingConfirmation: () -> String
+  private let admit: (String) throws -> Void
   private var stores: [String: OutboxStore] = [:]
   private var generation: Int
   var onChange: ((OutboxStore) -> Void)?
   var onReset: (() -> Void)?
 
-  init(persistence: OutboxPersistence, awaitingConfirmation: @escaping () -> String) {
+  init(persistence: OutboxPersistence, admit: @escaping (String) throws -> Void = { _ in }, awaitingConfirmation: @escaping () -> String) {
     self.persistence = persistence
     self.awaitingConfirmation = awaitingConfirmation
+    self.admit = admit
     generation = persistence.generation()
   }
 
@@ -118,7 +124,8 @@ final class OutboxStores {
     let key = Self.key(user: user, workspace: workspace)
     guard !key.isEmpty else { return nil }
     if let store = stores[key] { return store }
-    let store = OutboxStore(key: key, generation: current, persistence: persistence, awaitingConfirmation: awaitingConfirmation())
+    let admit = self.admit
+    let store = OutboxStore(key: key, generation: current, persistence: persistence, awaitingConfirmation: awaitingConfirmation(), admit: { try admit(workspace) })
     store.onChange = { [weak self, unowned store] in self?.onChange?(store) }
     stores[key] = store
     return store

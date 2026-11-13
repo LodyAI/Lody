@@ -258,6 +258,7 @@ export const makeLabScenarioFixture = Effect.fn('Lab.prepareExistingFixture')(fu
     genesis.record
   );
   const control = yield* makeLabControlGateway({
+    quotaPath: join(directory, 'ledger-quota.sqlite'),
     genesis: genesis.genesis,
     budget: { maxRecords: 100, maxBytes: 1024 * 1024 },
     checkpoint: () => Effect.sync(() => point()),
@@ -396,7 +397,8 @@ export const makeLabScenarioFixture = Effect.fn('Lab.prepareExistingFixture')(fu
               if (
                 (epoch === 0 && decoded.body.type === 'genesis') ||
                 (decoded.body.type === 'ordinary' &&
-                  (decoded.body.operation.type === 'publishEpoch' ||
+                  (decoded.body.operation.type === 'abandonEpoch' ||
+                    decoded.body.operation.type === 'publishEpoch' ||
                     decoded.body.operation.type === 'removeMemberAndPublishEpoch') &&
                   decoded.body.operation.epoch === epoch)
               )

@@ -1,3 +1,4 @@
+import { getLocalIpcServerCredentials } from '@lody/shared/node/local-ipc-auth';
 /**
  * Regression test for finding F6 of the 2026-07-04 adversarial review of the
  * local Loro data plane.
@@ -141,6 +142,29 @@ function joinLine(requestId: string, docId: string): string {
 }
 
 describe('local Loro data-plane socket server — F6 regression', () => {
+  it.each([undefined, 'b'.repeat(64)])(
+    'rejects an unauthenticated data-plane connection (%s)',
+    async (token) => {
+      const socket = net.createConnection(
+        getLocalLoroDataPlaneSocketPath(undefined, getLocalIpcServerCredentials().pipeSuffix)
+      );
+      const client = new SocketClient(socket);
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', resolve);
+        socket.once('error', reject);
+      });
+      await client.writeLine(
+        JSON.stringify(
+          token
+            ? { type: 'authenticate', token }
+            : { type: 'ping', protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION }
+        )
+      );
+      await client.closed;
+      expect(client.messages).toEqual([]);
+    }
+  );
+
   beforeAll(async () => {
     originalHome = process.env.HOME;
     originalPlatform = process.env.LODY_PLATFORM;
@@ -153,7 +177,12 @@ describe('local Loro data-plane socket server — F6 regression', () => {
     process.env.HOME = tempHome;
     process.env.LODY_PLATFORM = 'local';
     delete process.env.LODY_DATA_DIR;
-    fs.mkdirSync(path.dirname(getLocalLoroDataPlaneSocketPath()), { recursive: true });
+    fs.mkdirSync(
+      path.dirname(
+        getLocalLoroDataPlaneSocketPath(undefined, getLocalIpcServerCredentials().pipeSuffix)
+      ),
+      { recursive: true }
+    );
 
     const docs = new Map<string, LoroDoc>();
     const engine = new LocalLoroDataPlaneServerLegacy({
@@ -191,13 +220,19 @@ describe('local Loro data-plane socket server — F6 regression', () => {
     'F6: an oversized frame must produce a room-scoped terminal error, not kill the whole connection',
     { timeout: 30_000 },
     async () => {
-      const socketPath = getLocalLoroDataPlaneSocketPath();
+      const socketPath = getLocalLoroDataPlaneSocketPath(
+        undefined,
+        getLocalIpcServerCredentials().pipeSuffix
+      );
       const socket = net.createConnection(socketPath);
       await new Promise<void>((resolve, reject) => {
         socket.once('connect', () => resolve());
         socket.once('error', reject);
       });
       const client = new SocketClient(socket);
+      await client.writeLine(
+        JSON.stringify({ type: 'authenticate', token: getLocalIpcServerCredentials().token })
+      );
 
       // Healthy baseline: a normal join round-trips on this connection.
       await client.writeLine(joinLine('join-1', 'doc-1'));

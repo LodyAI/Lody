@@ -187,7 +187,11 @@ class WebViewCloudRuntime internal constructor(
             "ready" -> Unit
             else -> {
                 val event = RuntimeProtocol.event(message) ?: return
-                if (!ready || !active) return
+                if (!ready) return
+                // A catalog already posted by JS may arrive after native suspension. Keep
+                // its revision pair: unchanged recovery can emit only `synced` later.
+                // Host requests and session events still require a foreground consumer.
+                if (!active && event !is RuntimeEvent.CatalogUpdated && event !is RuntimeEvent.Synced && event !is RuntimeEvent.SyncFailed) return
                 eventListeners.toList().forEach { it(RuntimeEmission(status.generation, event)) }
             }
         }
@@ -251,7 +255,7 @@ class WebViewCloudRuntime internal constructor(
         if (!started) return
         if (!active) { dispose("runtime_replaced"); return }
         if (!health.allowRestart(SystemClock.elapsedRealtime())) { fail("restart_limit_$reason"); return }
-        publish(status.copy(automaticRestarts = status.automaticRestarts + 1))
+        publish(status.copy(automaticRestarts = status.automaticRestarts + 1, recoveryReason = reason))
         create()
     }
     private fun fail(reason: String) {

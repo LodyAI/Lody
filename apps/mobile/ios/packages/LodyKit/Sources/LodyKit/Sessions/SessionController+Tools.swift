@@ -38,19 +38,6 @@ extension SessionController {
     String.LocalizationValue((platform == .android ? "emulator." : "simulator.") + suffix)
   }
 
-  /// One entry per platform the computer offers, so a machine with both lets the person choose.
-  func devicePreviewMenu() -> [UIMenuElement] {
-    guard let session = source.state.catalog.session(sessionId) else { return [] }
-    return DevicePlatform.allCases.compactMap { platform -> UIMenuElement? in
-      guard let availability = deviceAvailability(platform, source.state.catalog, session) else { return nil }
-      let action = UIAction(title: String(localized: Self.deviceKey(platform, "menu"), bundle: .lody),
-        image: UIImage(systemName: platform == .android ? "smartphone" : "iphone")) { [weak self] _ in self?.openSimulator(platform) }
-      if availability == "upgrade-required" { action.subtitle = String(localized: "simulator.upgradeRequired", bundle: .lody) }
-      else if let store = devicePreviews[platform], store.running { action.subtitle = store.phaseText + " · " + store.name }
-      return action
-    }
-  }
-
   func openSimulator(_ platform: DevicePlatform) {
     guard !openingSimulator, let session = source.state.catalog.session(sessionId), let simulator = devicePreviews[platform] else { return }
     if deviceAvailability(platform, source.state.catalog, session) == "upgrade-required" {
@@ -139,7 +126,10 @@ extension SessionController {
   func deviceItem(_ platform: DevicePlatform) -> [String: Any]? {
     guard let session = source.state.catalog.session(sessionId),
       deviceAvailability(platform, source.state.catalog, session) == "available", let simulator = devicePreviews[platform] else { return nil }
-    let requested = platform == .android ? session.androidEmulatorPreviewRequestId : session.iosSimulatorPreviewRequestId
+    // The CLI records an agent start on the conversation that owns the device, so a Tab reads
+    // its main conversation's request id.
+    let owner = session.parentSessionId.flatMap { source.state.catalog.session($0) } ?? session
+    let requested = platform == .android ? owner.androidEmulatorPreviewRequestId : owner.iosSimulatorPreviewRequestId
     guard requested != nil || simulator.running else { return nil }
     let name = simulator.running ? simulator.name : String(localized: Self.deviceKey(platform, "menu"), bundle: .lody)
     var item: [String: Any] = ["id": Self.deviceItemId(platform), "symbol": platform == .android ? "smartphone" : "iphone",

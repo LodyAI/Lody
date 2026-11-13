@@ -1,3 +1,7 @@
+import {
+  getLocalIpcServerCredentials,
+  matchesLocalIpcToken,
+} from '@lody/shared/node/local-ipc-auth';
 import { makeNodeLocalLoroWriterConnection } from '@lody/shared/node/local-loro-writer';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -57,10 +61,15 @@ export async function startLocalLoroDataPlaneServer(
 }
 
 async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise<void> {
-  const socketPath = getLocalLoroDataPlaneSocketPath();
+  const { token, pipeSuffix } = getLocalIpcServerCredentials();
+  const socketPath = getLocalLoroDataPlaneSocketPath(undefined, pipeSuffix);
   await removeStaleUnixSocket(socketPath, 'local_loro_data_plane_socket_in_use');
 
   const server = net.createServer((socket) => {
+    let authenticated = false;
+    let handshakeBytes = 0;
+    const authenticationDeadline = setTimeout(() => socket.destroy(), 5_000);
+    authenticationDeadline.unref();
     const connectionId = `dp:${process.pid}:${++connectionSeq}`;
     // Track engines this socket touched so we can drop its subscriptions on close.
     const touchedEngines = new Set<LocalLoroDataPlaneServerLegacy>();
@@ -74,6 +83,31 @@ async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise
 
     const splitLines = createJsonLineSplitter({
       onLine: (line) => {
+        if (!authenticated) {
+          let hello: unknown;
+          try {
+            hello = JSON.parse(line);
+          } catch {
+            socket.destroy();
+            return;
+          }
+          if (
+            !hello ||
+            typeof hello !== 'object' ||
+            !('type' in hello) ||
+            hello.type !== 'authenticate' ||
+            !('token' in hello) ||
+            !matchesLocalIpcToken(token, hello.token)
+          ) {
+            socket.destroy();
+            return;
+          }
+          authenticated = true;
+          clearTimeout(authenticationDeadline);
+          socket.setTimeout(CONNECTION_IDLE_TIMEOUT_MS);
+          socket.write(`${JSON.stringify({ type: 'authenticated' })}\n`);
+          return;
+        }
         const message = parseLine(connection, line);
         if (!message) {
           return;
@@ -92,6 +126,10 @@ async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise
       // connection alive — destroying the socket would take down every room of
       // every window multiplexed over it.
       onOverflow: () => {
+        if (!authenticated) {
+          socket.destroy();
+          return;
+        }
         connection.send({
           type: 'error',
           protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
@@ -102,7 +140,17 @@ async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise
     });
     // Hand the splitter raw bytes: it owns the stateful UTF-8 decode, so a
     // multi-byte character straddling a socket chunk boundary survives.
-    socket.on('data', (chunk) => splitLines(chunk));
+    socket.on('data', (chunk: Buffer) => {
+      if (!authenticated) {
+        const newline = chunk.indexOf(0x0a);
+        handshakeBytes += newline < 0 ? chunk.length : newline;
+        if (handshakeBytes > 1024) {
+          socket.destroy();
+          return;
+        }
+      }
+      splitLines(chunk);
+    });
 
     // Dead-peer cleanup half of the idle watchdog (the relay pings often enough
     // that a healthy connection never trips this).
@@ -112,6 +160,7 @@ async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise
     });
 
     socket.on('close', () => {
+      clearTimeout(authenticationDeadline);
       activeClientSockets.delete(socket);
       for (const engine of touchedEngines) {
         const release = () => engine.handleDisconnectLegacy(connectionId);

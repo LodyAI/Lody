@@ -621,6 +621,7 @@ describe('LodyFleet remote authentication boundary', () => {
         remoteBridge: unknown;
         confirmEncryptedAuthority: (workspaceId: string, startedAt: AuthorityStamp) => void;
         authorityClock: () => AuthorityStamp;
+        enforceEncryptedAuthorityLimit: () => Promise<void>;
       };
       // Tests move the wall clock alone through this source; fake timers drive both.
       const clocks = { wallOffset: 0 };
@@ -665,6 +666,7 @@ describe('LodyFleet remote authentication boundary', () => {
         revoked,
         fail,
         clocks,
+        check: () => fleet.enforceEncryptedAuthorityLimit(),
         confirm: () => fleet.confirmEncryptedAuthority('encrypted', fleet.authorityClock()),
         listRecovered: () => push({ status: 'authorized', userId: 'user-1', workspaces: [] }),
       };
@@ -708,6 +710,27 @@ describe('LodyFleet remote authentication boundary', () => {
         await vi.advanceTimersByTimeAsync(10 * MINUTE);
         confirm();
         await vi.advanceTimersByTimeAsync(LIMIT - 1);
+        expect(detached).toEqual(['plain']);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(detached).toEqual(['plain', 'encrypted']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the bridge after suspend and NTP rollback until the 24-hour wall limit', async () => {
+      try {
+        const { detached, fail, clocks, check } = await offlineHarness();
+        fail(new Error('[Server Error] e2ee_projection_corrupt'));
+        await vi.advanceTimersByTimeAsync(20_000);
+        clocks.wallOffset += 30 * MINUTE - 5_000;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await check();
+        expect(detached).toEqual(['plain']);
+        clocks.wallOffset -= 3 * MINUTE;
+        await check();
+        expect(detached).toEqual(['plain']);
+        await vi.advanceTimersByTimeAsync(LIMIT - 20_000 - 30 * MINUTE + 3 * MINUTE - 1);
         expect(detached).toEqual(['plain']);
         await vi.advanceTimersByTimeAsync(1);
         expect(detached).toEqual(['plain', 'encrypted']);

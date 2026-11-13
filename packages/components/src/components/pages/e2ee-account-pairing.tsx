@@ -44,11 +44,11 @@ const POLL_MS = 3000;
 const time = (value: number) =>
   new Date(value).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 /** QR payload of a host-supplied, possibly grouped pairing string. */
-const qrPayload = (pairingString: string) =>
+export const qrPayload = (pairingString: string) =>
   PAIRING_URL_PREFIX + pairingString.replace(/[\s-]/g, '');
 /** Checks a typed or scanned code locally, before any network request; the host
  * parses it again and owns the secret. The decoded bytes are wiped at once. */
-function localCodeError(input: string): string | null {
+export function localCodeError(input: string): string | null {
   const parsed = parsePairingString(input);
   if (Result.isSuccess(parsed)) {
     parsed.success.fill(0);
@@ -57,7 +57,7 @@ function localCodeError(input: string): string | null {
   return `e2ee.accountPair.code.${parsed.failure.code}`;
 }
 /** Host refusals become specific messages; anything else keeps the custody wording. */
-function failureKey(error: unknown) {
+export function failureKey(error: unknown) {
   const code = accountPairingErrorCode(error);
   if (code) return `e2ee.accountPair.error.${code}`;
   return (
@@ -205,7 +205,7 @@ export function E2eeAccountPairingRequest(props: {
   if (!runtime.requestAccountPairing) return null;
   const terminal = state && state.status !== 'waiting' && state.status !== 'joined';
   return (
-    <Card.Root data-testid="e2ee-account-pairing-request">
+    <Card.Root data-testid="e2ee-account-pairing-request" data-e2ee-pairing-surface="">
       <Card.Title>{t('e2ee.accountPair.request.title')}</Card.Title>
       {phase === 'idle' && !state && (
         <>
@@ -433,7 +433,7 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
     setError(null);
   };
   return (
-    <Card.Root data-testid="e2ee-account-pairing-approve">
+    <Card.Root data-testid="e2ee-account-pairing-approve" data-e2ee-pairing-surface="">
       <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>
       {phase.kind === 'enter' && (
         <>

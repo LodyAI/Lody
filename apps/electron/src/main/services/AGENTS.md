@@ -108,20 +108,20 @@ quit/retry dialog. See the
 
 Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md),
 [M2](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
-[join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
-and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+[join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md),
+[machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md)
+and [bootstrap](../../../../../.agents/docs/e2ee-workspace-bootstrap.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
 Workspace custody; reset binds account/generation; recheck after lock/drain before archive.
-No network under locks; drain before release.
-Bad keys allow ledger open; core repairs.
-Isolate verification/storage errors; malformed input keeps readers.
+No network or proxy lookup under locks; drain before release. Bad keys allow ledger open; core repairs.
+Recovery keeps completed anchors; unfinished rebinding needs verified same-device admission and archived originals.
+Isolate verification/storage errors; bad input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
+Compaction failures warn only; retry after 64 records, keeping originals/pins.
 Conflicts refuse fallback. Failed close retains its fence; report restart-required.
-Opens join a still-closing workspace's drain once, outside the lock; never `closed`.
-Fixed cloud refs; auth/bound/abort; fence late disposed calls.
-Keep uncertain bytes; raw/SDK causes never leave main.
-Verified reads beat lost ACKs; cleanup retains admission.
-`e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
+Opens join a closing workspace's drain once, outside the lock; never `closed`.
+Fixed cloud refs; auth/bound/abort; fence late disposed calls. Keep uncertain bytes; raw/SDK causes stay in main.
+Verified reads beat lost ACKs; cleanup keeps admission. `e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 
 Consent pins exact verified proofs/session/record/requestId/keys/credentials/pins.
 Missing credentials block approval; never export them. Failed begin stays discoverable.
@@ -129,16 +129,16 @@ Archive terminal/foreign attempts, including pin-only+relay; fence same-request
 unknown/admitting. Retain installed origins, other sessions and primary/cleanup causes.
 Retirement needs exact superseded socket receipt and atomic all-null local match;
 fresh sessions need consent. Unsigned staged material stays pending across windows/retries
-until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
-denial/I/O failure cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
+until verified admission/history settlement (including revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
+denial/I/O cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
 
 Only rotate resumes candidates. Keep errors transport-free.
 
 The iroh client (`e2ee-iroh.mts`) lives with its workspace entry and follows [these rules](../../../../../packages/iroh-native/AGENTS.md).
 
-Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
-Passive cache inspection uses existing entries only; never call openWorkspace or
-readMachineSharing from that path. Counts are diagnostic, not execution authority.
+Machine sharing uses `packages/e2ee-machine-sharing`.
+Passive inspection uses existing entries only; never call openWorkspace or
+readMachineSharing there. Counts are diagnostic, not authority.
 Policy errors affect dependent execution only. Invalidate sharing before exposing changed
-verified ledger heads/counts; unchanged ingest preserves cache freshness. Narrow read/update methods keep keys
-and device credentials in main. See the [policy decision](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+verified heads/counts; unchanged ingest keeps cache freshness. Narrow read/update methods keep keys
+and credentials in main; see [policy](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

@@ -356,3 +356,5 @@ unobserved route. `test/canary.test.ts` runs real protected Loro/Flock peers ove
 local HTTP, captures request bodies, scans native Riverrun entries, and proves
 that an injected plaintext regression fails. Full product acceptance still needs
 all Convex/Worker/Streams requests captured while using the actual application.
+
+The control gateway reserves per-membership self-service quota (rolling 10/hour, 30/day) in a separate SQLite file at `quotaPath`. Unknown CAS outcomes retain reservations; exact-original retries are charged once and management records are exempt. HTTP limits return 429, `self-service-rate-limited` and `retryAt`. This does not establish private Cloud deployment.

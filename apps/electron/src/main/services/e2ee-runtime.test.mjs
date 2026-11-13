@@ -52,6 +52,7 @@ import { accountUserId, inspectContentFrame } from '@lody/e2ee-core/protocol'
 import { desktopE2eePorts, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
+import { makeDesktopLocalPairing } from './e2ee-local-pairing.mts'
 import { decodeMemberKeyPackage } from './e2ee-member-join.mts'
 import { createDesktopQuitBarrier, drainMainProcessQuitResources } from './desktop-shutdown.ts'
 // Authenticated synthetic OS storage; this suite does not exercise a user's keychain.
@@ -867,6 +868,63 @@ for (const installation of ['member', 'personal-history', 'personal-snapshot']) 
     )
   })
 }
+for (const fault of ['feed', 'origin']) {
+  void test(`accepted ledger progress survives auxiliary ${fault} compaction failure`, async (t) => {
+    const directory = await fixture(t),
+      warnings = []
+    t.mock.method(console, 'warn', (...args) => {
+      warnings.push(args)
+    })
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory),
+          prepared = yield* bind(owner)
+        const records = yield* makeRecords(owner.custody, prepared, 71)
+        yield* owner.host.open(workspaceId)
+        const workspace = join(directory, 'workspaces', workspaceId)
+        const history = new DatabaseSync(join(workspace, 'history.sqlite'))
+        const feed = new DatabaseSync(
+          join(workspace, history.prepare('SELECT name FROM cache WHERE id=1').get().name)
+        )
+        const db = fault === 'feed' ? feed : history
+        db.exec(
+          `CREATE TRIGGER fail_compaction BEFORE UPDATE OF origin ON ${fault === 'feed' ? 'feed_meta' : 'cache'} BEGIN SELECT RAISE(ABORT,'synthetic auxiliary failure'); END`
+        )
+        try {
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 0, 64)
+          )
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 64, 70)
+          )
+          assert.equal((yield* owner.host.status(workspaceId)).length, 70)
+          assert.equal(history.prepare('SELECT COUNT(*) AS n FROM records').get().n, 70)
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 70)
+          )
+          assert.equal((yield* owner.host.status(workspaceId)).length, 71)
+          assert.deepEqual(warnings, [
+            ['[E2EE] Ledger compaction pending', { code: 'e2ee_ledger_compaction_pending' }]
+          ])
+        } finally {
+          db.exec('DROP TRIGGER fail_compaction')
+          feed.close()
+          history.close()
+        }
+      })
+    )
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        assert.equal((yield* owner.host.open(workspaceId)).length, 71)
+      })
+    )
+  })
+}
+
 void test('binding is immutable, retained reopen asks only for a suffix, and corrupted cache recovers locally', async (t) => {
   const directory = await fixture(t)
   let saved
@@ -1420,6 +1478,85 @@ void test('workspace close fences and drains a held key round without blocking a
     })
   )
 })
+
+for (const first of ['local', 'remote']) {
+  void test(`pairing reset isolates journals and reset receipts with ${first} reset first`, async (t) => {
+    const db = new DatabaseSync(':memory:')
+    t.after(() => db.close())
+    const journals = {
+      local: makeDesktopLocalPairing({ db, current: () => Effect.void }),
+      remote: makeDesktopLocalPairing({ db, journal: 'remote', current: () => Effect.void })
+    }
+    const tables = { local: 'local_pairing', remote: 'remote_local_pairing' }
+    const archives = {
+      local: 'archived_local_pairings',
+      remote: 'remote_archived_local_pairings'
+    }
+    const read = (table) => db.prepare(`SELECT * FROM ${table} WHERE id=1`).get()
+    const originals = {}
+    for (const mode of ['local', 'remote']) {
+      db.prepare(`INSERT INTO ${tables[mode]} VALUES(1,?,?,?,?)`).run(
+        `${mode}-session`,
+        `${mode}-material`,
+        `${mode}-request`,
+        Buffer.from(`${mode}-record`)
+      )
+      originals[mode] = read(tables[mode])
+    }
+    // Preserve the existing local archive schema and historical receipts.
+    db.exec(
+      'CREATE TABLE archived_local_pairings(reset_id TEXT PRIMARY KEY, session TEXT, material TEXT, request_id TEXT, record BLOB)'
+    )
+    db.prepare('INSERT INTO archived_local_pairings VALUES(?,?,?,?,?)').run(
+      'previous-reset',
+      'previous-session',
+      'previous-material',
+      'previous-request',
+      Buffer.from('previous-record')
+    )
+    const previous = db.prepare('SELECT * FROM archived_local_pairings').get()
+    const second = first === 'local' ? 'remote' : 'local'
+    for (const mode of [first, second]) {
+      const other = mode === 'local' ? 'remote' : 'local'
+      const otherBefore = read(tables[other])
+      await execute(journals[mode].reset('shared-reset-id'))
+      const reset = read(tables[mode])
+      assert.notEqual(reset.session, originals[mode].session)
+      assert.deepEqual(
+        { ...reset },
+        {
+          ...originals[mode],
+          session: reset.session,
+          material: null,
+          request_id: null,
+          record: null
+        }
+      )
+      assert.deepEqual(read(tables[other]), otherBefore)
+      assert.deepEqual(
+        {
+          ...db.prepare(`SELECT * FROM ${archives[mode]} WHERE reset_id=?`).get('shared-reset-id')
+        },
+        {
+          reset_id: 'shared-reset-id',
+          ...Object.fromEntries(Object.entries(originals[mode]).filter(([key]) => key !== 'id'))
+        }
+      )
+      const reopened = makeDesktopLocalPairing({
+        db,
+        ...(mode === 'remote' ? { journal: 'remote' } : {}),
+        current: () => Effect.void
+      })
+      await execute(reopened.reset('shared-reset-id'))
+      assert.deepEqual(read(tables[mode]), reset)
+      assert.deepEqual(read(tables[other]), otherBefore)
+    }
+    assert.deepEqual(
+      db.prepare('SELECT * FROM archived_local_pairings WHERE reset_id=?').get('previous-reset'),
+      previous
+    )
+  })
+}
 
 void test('local machine approval retains its exact signed original across restart and verifies the intended session', async (t) => {
   const directory = await fixture(t)
@@ -4614,4 +4751,115 @@ void test('an iroh call that outlives its budget is cancelled and rejects for St
   await new Promise((resolve) => setImmediate(resolve))
   t.mock.timers.tick(800)
   await assert.rejects(pending, /iroh_timeout/)
+})
+
+void test('desktop status skips an abandoned retained write hint with only K1 installed', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory),
+        prepared = yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const genesis = Result.getOrThrow(
+        Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+      )
+      const signer = yield* owner.custody.openDevice(genesis),
+        records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+      let view = Result.getOrThrow(
+        verifyLedger({
+          anchor: genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records[0]), length: 1 }
+        })
+      )
+      const append = Effect.fnUntraced(function* (op) {
+        const body = Result.getOrThrow(
+          encodeCbor([view.head.toBytes(), signer.publicKey.toBytes(), op])
+        )
+        const record = yield* signLedgerRecord(
+          Result.getOrThrow(prepareLedgerRecord(view, body)),
+          signer
+        )
+        records.push(record)
+        view = Result.getOrThrow(
+          extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+        )
+      })
+      const ports = Layer.mergeAll(
+        desktopE2eePorts(owner.custody, signer),
+        Layer.succeed(WorkspaceScope, { genesis }),
+        Layer.succeed(LedgerViewSource, { current: () => Effect.succeed(view) }),
+        Layer.succeed(LedgerPinStore, {
+          read: () => Effect.succeed(null),
+          write: () => Effect.void
+        })
+      )
+      const path = join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+      const keys = Context.get(
+        yield* Layer.build(
+          InstalledEpochKeys.layer.pipe(
+            Layer.provideMerge(sqliteInstalledKeyStore({ path, mode: 'open' })),
+            Layer.provideMerge(VerifiedLedger.layer),
+            Layer.provideMerge(ports)
+          )
+        ),
+        InstalledEpochKeys
+      )
+      const key1 = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(71))),
+        key2 = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(72)))
+      try {
+        const base = yield* keys.read(0)
+        try {
+          yield* append([
+            7,
+            1,
+            Result.getOrThrow(commitEpochKey(genesis, 1, key1)).toBytes(),
+            Result.getOrThrow(
+              sealHistoryPacket({ genesis, epoch: 1, currentKey: key1, previousKey: base })
+            )
+          ])
+          yield* keys.saveAndReload(1, key1)
+          const db = new DatabaseSync(path)
+          try {
+            db.exec('DELETE FROM installed_epoch_keys WHERE epoch = 0')
+          } finally {
+            db.close()
+          }
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 0)
+          )
+          assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, 1)
+          yield* append([9, [2]])
+          yield* append([
+            11,
+            2,
+            Result.getOrThrow(commitEpochKey(genesis, 2, key2)).toBytes(),
+            0,
+            Result.getOrThrow(
+              sealHistoryPacket({
+                genesis,
+                epoch: 2,
+                baseEpoch: 0,
+                currentKey: key2,
+                previousKey: base
+              })
+            )
+          ])
+          yield* owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 0)
+          )
+          assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, null)
+          assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, null)
+          yield* keys.check(1) // Historical key installation remains intact.
+        } finally {
+          disposeEpochKey(base)
+        }
+      } finally {
+        disposeEpochKey(key1)
+        disposeEpochKey(key2)
+      }
+    })
+  )
 })

@@ -7,6 +7,8 @@ struct LodyMenuItem: Equatable {
   var selected = false
   var photo: String = ""
   var monogram: String = ""
+  var encrypted = false
+  var retrySelection = false
 }
 
 struct LodyMenuAvatar {
@@ -28,7 +30,6 @@ final class LodyMenuButton: UIView {
   private var accountEmail = ""
   private var label = ""
   private var labelHidden = false
-  private var detail = ""
   private var items: [LodyMenuItem] = []
   private weak var panel: WorkspaceSwitcherPanel?
 
@@ -87,11 +88,6 @@ final class LodyMenuButton: UIView {
     apply()
   }
 
-  func setDetail(_ value: String) {
-    detail = value
-    apply()
-  }
-
   func setAccountEmail(_ value: String) {
     let email = value.trimmingCharacters(in: .whitespacesAndNewlines)
     guard accountEmail != email else { return }
@@ -140,7 +136,6 @@ final class LodyMenuButton: UIView {
     let tint = lodyTint(avatar.color)
     LodyMenuButtonStyle.apply(
       label: label,
-      detail: detail,
       avatar: LodyMenuButtonStyle.avatarImage(
         text: avatar.text,
         fill: tint ?? .lodyAccent,

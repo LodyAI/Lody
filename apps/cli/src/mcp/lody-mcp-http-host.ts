@@ -4,7 +4,6 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { NodeStreamableHTTPServerTransport, toNodeHandler } from '@modelcontextprotocol/node';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { SessionIdSchema } from '@lody/shared';
-import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { createFileLogger, type Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -236,7 +235,7 @@ const parseSessionContextHeaders = (req: http.IncomingMessage): McpSessionContex
     workspaceId,
     machineId,
     workdir,
-    localControlSocketPath: getLocalControlSocketPath(),
+    localControlSocketPath: process.env.LODY_MCP_SOCKET_PATH?.trim() || undefined,
   };
 };
 

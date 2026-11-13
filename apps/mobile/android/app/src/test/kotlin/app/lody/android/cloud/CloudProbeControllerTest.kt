@@ -29,7 +29,7 @@ class CatalogConnectionTest {
  @Test fun disconnectWhileGrantPendingCannotStartAnOldWorkspace()=runTest {
   val instances=mutableListOf<Fake>();val grant=CompletableDeferred<ShortLivedGrant>()
   val api=object:CloudAuthApi {
-   override suspend fun account(credential:Credential)=Account("u","User",listOf(Workspace("w","Work")))
+   override suspend fun account(credential:Credential)=Account("u","User",listOf(Workspace("w","Work", contentMode = WorkspaceContentMode.PLAINTEXT)))
    override suspend fun grant(credential:Credential,workspaceId:String)=withContext(NonCancellable){grant.await()}
    override suspend fun signOut(credential:Credential)=Unit
   }
@@ -41,7 +41,7 @@ class CatalogConnectionTest {
   val account=AccountController(api,store,backgroundScope);account.restore().join()
   val owner=RuntimeOwner({Fake(it).also(instances::add)},StandardTestDispatcher(testScheduler))
   val probe=CatalogRepository(account,owner,backgroundScope,Cache()){_,_->}
-  probe.select(Workspace("w","Work"));runCurrent()
+  probe.select(Workspace("w","Work", contentMode = WorkspaceContentMode.PLAINTEXT));runCurrent()
   val disconnected=launch{probe.disconnect()};runCurrent()
   grant.complete(ShortLivedGrant("short","https://streams.example.org",60));disconnected.join()
   assertTrue(instances.isEmpty());assertEquals(ConnectionPhase.DISCONNECTED,probe.state.value.phase)
@@ -49,7 +49,7 @@ class CatalogConnectionTest {
  @Test fun changedGrantOriginReplacesPermissionAndRejectsOldCatalogEvents()=runTest {
   val instances=mutableListOf<Fake>();val origins=mutableListOf<String>();var grants=0
   val api=object:CloudAuthApi {
-   override suspend fun account(credential:Credential)=Account("u","User",listOf(Workspace("w","Work")))
+   override suspend fun account(credential:Credential)=Account("u","User",listOf(Workspace("w","Work", contentMode = WorkspaceContentMode.PLAINTEXT)))
    override suspend fun grant(credential:Credential,workspaceId:String)=ShortLivedGrant("fixture","https://gateway${++grants}.example.org",60)
    override suspend fun signOut(credential:Credential)=Unit
   }
@@ -61,7 +61,7 @@ class CatalogConnectionTest {
   val account=AccountController(api,store,backgroundScope);account.restore().join()
   val owner=RuntimeOwner({Fake(it).also(instances::add)},StandardTestDispatcher(testScheduler))
   val probe=CatalogRepository(account,owner,backgroundScope,Cache()){_,grant->origins.add(grant.gatewayBaseUrl)}
-  probe.select(Workspace("w","Work")).join();runCurrent()
+  probe.select(Workspace("w","Work", contentMode = WorkspaceContentMode.PLAINTEXT)).join();runCurrent()
   val old=instances.single();old.emitted.emit(RuntimeEvent.SyncFailed("grant_endpoint_changed"));runCurrent()
   assertEquals(listOf("https://gateway1.example.org","https://gateway2.example.org"),origins)
   assertEquals(2,instances.size);assertEquals(RuntimePhase.STOPPED,old.state.value.phase)

@@ -14,6 +14,10 @@ PR: https://github.com/LodyAI/Lody/pull/2012, https://github.com/LodyAI/Lody/pul
 
 只有加密写入会向 Loro 列表 `scheduleAuthorizations` 追加 map。定义声明包含 `kind: definition` 和 `definitionFingerprint`；手动运行声明使用 `kind: manual`，并包含稳定的 `manualRunKey`。记录中的身份字段不能授予权限。自 owner 2026-11-10 决定起，每个声明都在同一次提交里带有设定人对定义指纹的签名执行意图（[签名的执行意图](../architecture/2026-11-10-e2ee-signed-execution-intent.zh.md)）；启动时从当前文档重新计算指纹并验证这份签名，不涉及更新帧、重建或 `forkAt`。用户明确保存时会创建新声明；单纯追加 timeline 活动不会使其失效，同值改写也不改变要执行的内容。
 
+本机人类 CLI 使用已准入的机器设备签发定义和手动运行声明，目标必须等于该设备在已验证账本中的 machine ID。跨机器创建和修改仍通过桌面个人设备完成。命令客户端仅从 Agent／脚本子进程的 `LODY_AGENT_SESSION_ID` 标记或显式 requester 解析身份，将命令限制为 list、show、pause 和 propose。桌面人类终端保留用于导航的 `LODY_SESSION_ID`，但在环境合并后清除 Agent 标记。服务端只验证显式 requester，绝不从 daemon 环境补身份；云端 requester 检查先等待已有的有界工作区元数据同步，再读取 Session 所有者。同步未确认时不写入，仍可重试。这约束公开的 Agent 调用入口，不能阻止任意 shell 访问。
+
+暂停关闭文档和注册表的 enabled 并轮换 activation，不签名、不替换已有声明，幂等重试也是如此。恢复后的旧暂停请求重试不覆盖新状态。新的 activation 撤销旧队列中的运行，关闭的文档始终拒绝自动执行。之后人类主动发起 Run now 仍可运行一次，但不会开启自动调度：当前定义指纹没有匹配声明时，requestRun 先取得当前定义与本次手动请求的签名，再追加声明和发布请求。实际启动必须同时验证两份声明。恢复会再次修改 enabled 和 activation，并且必须签发新指纹；未签名恢复仍被拒绝。
+
 每次调用都根据当前已验证 signer 执行现有的认证机器访问策略，并检查等待授权期间文档是否变化。手动运行同时要求定义和请求的 signer 获得授权。注册表行仍只负责发现和发布门控，不授予权限。
 
 A3 装配中，定义与手动请求的签发者都经过普通执行使用的机器／项目共享门。交付前检查已签名定义的本地项目；实际开始使用宿主解析的 Session 目标，包括明确的纯聊天无项目状态。所有来源授权检查与生成 turn 的检查取交集，保留到同步 journal claim 前。后一个签发者的认证刷新即使没有权限变化，也可能使较早的账本快照失效；因此来源检查最多通过已填充的 requester 缓存再检查一次，随后复查 turn 签发者。不稳定或已撤回的结果仍拒绝 claim，合法多设备 schedule 则保持可用。

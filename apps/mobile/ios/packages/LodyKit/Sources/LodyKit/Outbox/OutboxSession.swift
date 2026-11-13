@@ -49,7 +49,7 @@ final class OutboxSession {
 
   var presenter: (() -> UIViewController?)?
   private weak var runtime: DataRuntime?
-  private let stores = OutboxStores(persistence: .local) { String(localized: "send.reason.awaitingConfirmation", bundle: .lody) }
+  private let stores = OutboxStores(persistence: .local, admit: { try WorkspaceModePins.shared.requirePlaintext($0) }) { String(localized: "send.reason.awaitingConfirmation", bundle: .lody) }
   private lazy var dispatcher = OutboxDispatcher(services: services, inflight: Self.published.inflight) { String(localized: String.LocalizationValue($0), bundle: .lody) }
   private var scope = (user: "", workspace: "")
   private var inputs = OutboxDispatcher.Inputs()
@@ -111,6 +111,7 @@ final class OutboxSession {
   }
 
   func put(user: String, workspace: String, json: String) -> Task<Void, Error> {
+    guard WorkspaceModePins.shared.mode(workspace) == .plaintext else { return Task { throw WorkspaceContentError.blocked } }
     guard let store = store(user: user, workspace: workspace) else { return Task { throw OutboxError.scopeExpired } }
     guard let record = OutboxRecord.decode(json), !record.sessionId.isEmpty else { return Task { throw OutboxError.invalidRecord } }
     return store.put(record)

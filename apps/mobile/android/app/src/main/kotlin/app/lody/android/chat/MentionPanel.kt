@@ -363,6 +363,15 @@ class MentionState {
         MentionPresentation(catalogs.values.flatMap { it.items }, color, background, labels.keys)
 
     /**
+     * [text] as this composer shows it (each reference as its label, e.g. an Agent Role's emoji
+     * and name) with the chips' ranges, so the sent bubble reads exactly like the prompt did.
+     */
+    internal fun shown(text: String): Pair<String, List<app.lody.android.runtime.MessageReference>> {
+        val shown = presentation(androidx.compose.ui.graphics.Color.Unspecified).filter(androidx.compose.ui.text.AnnotatedString(text)).text
+        return shown.text to shown.spanStyles.map { app.lody.android.runtime.MessageReference(it.start, it.end) }
+    }
+
+    /**
      * Reads every category in parallel; a category that fails stays empty. Agent Roles and prompt
      * shortcuts are workspace-wide, so the last accepted lists for [workspace] show at once
      * (display only) until this composer's own read replaces them (iOS `MentionWorkspaceCache`).

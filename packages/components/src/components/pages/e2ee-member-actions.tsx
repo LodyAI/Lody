@@ -141,7 +141,13 @@ export function E2eeMemberActions(props: {
         >
           <Dialog.Header>
             <Dialog.Title>{t('e2ee.members.transferTitle', { name: props.name })}</Dialog.Title>
-            <Dialog.Description>{t('e2ee.members.transferLead')}</Dialog.Description>
+            <Dialog.Description>
+              {t(
+                member.devices.some((device) => device.kind === 'personal')
+                  ? 'e2ee.members.transferLead'
+                  : 'e2ee.members.transferNeedsPersonal'
+              )}
+            </Dialog.Description>
           </Dialog.Header>
           <ul {...stylex.props(styles.effects)}>
             <li>{t('e2ee.members.transferEffectOwner', { name: props.name })}</li>
@@ -159,7 +165,7 @@ export function E2eeMemberActions(props: {
             </Button>
             <Button
               data-testid="e2ee-member-transfer-confirm"
-              disabled={pending}
+              disabled={pending || !member.devices.some((device) => device.kind === 'personal')}
               onClick={() => {
                 void run(async () => {
                   await management.transfer!(member.membershipId);

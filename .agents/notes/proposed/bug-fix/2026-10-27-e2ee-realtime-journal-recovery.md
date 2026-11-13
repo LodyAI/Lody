@@ -37,11 +37,14 @@ the ahead local value. A retained floor more than ten minutes ahead of the refer
 also refuses advancement; explicit reset clears that workspace's poisoned floor.
 No network, server-time cache, timer or new authorization source is introduced.
 
-Floors are keyed by `(genesis, workspaceId)`. Without a reference, retain the
-conservative local maximum within that workspace. A forward error can still reject
-new work in that workspace until explicit reset; it cannot poison another workspace.
-This fallback does not silently renew deadlines or guess how far to move time back.
-Completed results and retained response frames stay readable despite clock errors.
+Observations are keyed by `(genesis, workspaceId)`. Without a reference, use the
+current local time and replace the observation. The owner chose recovery after NTP
+correction over retaining an unauthenticated maximum that can block new requests.
+This keeps original deadlines but may admit a never-claimed frame again after
+rollback; started IDs still cannot execute twice. Referenced calls retain the floor
+checks above. Completed results and retained response frames stay readable despite
+clock errors. See the [elapsed-time policy](../../../../specs/e2ee/execution-freshness-outage.md)
+for the separate in-memory authorization windows.
 
 ## Reset, archive and ownership
 

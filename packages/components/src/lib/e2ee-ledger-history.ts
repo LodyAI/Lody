@@ -210,6 +210,13 @@ export function ledgerRecordFields(
       return { ...base, target: bytesToHex(op.target.toBytes()) };
     case 'transferOwner':
       return { ...base, successorMembershipId: bytesToHex(op.successorMembershipId.toBytes()) };
+    case 'abandonEpoch':
+      return {
+        ...base,
+        epoch: op.epoch,
+        baseEpoch: op.baseEpoch,
+        commitment: bytesToHex(op.commitment.toBytes()),
+      };
     case 'publishEpoch':
       return { ...base, epoch: op.epoch, commitment: bytesToHex(op.commitment.toBytes()) };
     case 'removeMember':

@@ -41,7 +41,24 @@ function device(n: number) {
         )
       )
     ),
-    encryptionPublicKey: ok(Bytes.encryptionPublicKey(bytes(n + 100))),
+    encryptionPublicKey: ok(
+      Bytes.encryptionPublicKey(
+        new Uint8Array(
+          createPublicKey(
+            createPrivateKey({
+              key: Buffer.concat([
+                Buffer.from('302e020100300506032b656e04220420', 'hex'),
+                Buffer.alloc(32, n),
+              ]),
+              format: 'der',
+              type: 'pkcs8',
+            })
+          )
+            .export({ format: 'der', type: 'spki' })
+            .subarray(-32)
+        )
+      )
+    ),
     signBytes: (message: Uint8Array) => new Uint8Array(sign(null, message, secret)),
   };
 }

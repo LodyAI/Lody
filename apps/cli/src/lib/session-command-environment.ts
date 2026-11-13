@@ -97,14 +97,16 @@ export interface DaemonWorkspace {
   readAccess?(): DaemonWorkspaceAccess;
   /**
    * Encrypted only: classify an Agent-delegated input by its verified driving Turn.
-   * `owner` keeps today's behavior; `member` must be written with `derivedFrom` and
-   * may target only this machine. Rejects when the origin cannot be verified, is
-   * itself derived, has exhausted its derivations or targets another machine.
+   * Same-machine delegation returns the verified principal and human root. Machine-owned
+   * inputs and cross-machine Owner delegation return `owner` without local provenance.
+   * Members require a live driving turn; accepted writes reserve once per target input ID.
    */
   classifyEncryptedDerivation?(
     origin: { sessionId: string; userTurnId: string },
-    target: { machineId: string }
-  ): Promise<'owner' | 'member'>;
+    target: { machineId: string; userTurnId: string }
+  ): Promise<
+    'owner' | { principal: 'owner' | 'member'; origin: { sessionId: string; userTurnId: string } }
+  >;
   /** Encrypted only: machine access decided locally, without the workspace service. */
   checkEncryptedMachineAccess?(target: {
     machineId: string;

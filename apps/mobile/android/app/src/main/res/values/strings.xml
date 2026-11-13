@@ -57,6 +57,8 @@
     <string name="home_group_running">Running</string>
     <string name="home_group_pull_request">Open pull requests</string>
     <string name="home_group_idle">Idle</string>
+    <string name="home_group_expand">Expand group</string>
+    <string name="home_group_collapse">Collapse group</string>
     <string name="home_group_show_less">Show less</string>
     <string name="home_ci_pass">CI passed</string>
     <string name="home_ci_fail">CI failed</string>
@@ -624,17 +626,16 @@
     <string name="chat_operation_reply_truncated">This saved reply was truncated before delivery.</string>
     <string name="chat_relation_waiting">Needs input</string>
     <string name="chat_relation_unread">Unread</string>
-    <string name="schedules_overview_active">Active</string>
-    <string name="schedules_overview_attention">Attention</string>
-    <string name="schedules_overview_paused">Paused</string>
-    <string name="schedules_overview_ended">Ended</string>
     <string name="schedules_section_task">Task</string>
     <string name="schedules_section_when">When</string>
     <string name="schedules_section_run_with">Run with</string>
+    <string name="schedules_section_tasks">Scheduled tasks</string>
+    <string name="schedules_section_messages">Scheduled messages</string>
+    <string name="schedules_view_show_finished">Show finished</string>
+    <string name="schedules_finished_hidden">Finished schedules are hidden</string>
     <string name="settings_personal">Personal</string>
     <string name="settings_preferences">Preferences</string>
     <string name="settings_preferences_hint">Language, notifications, and chat behavior</string>
-    <string name="settings_developer">Developer</string>
     <string name="settings_developer_mode">Developer mode</string>
     <string name="settings_roost_history">Roost history (beta)</string>
     <string name="settings_roost_history_hint">New conversations use Roost when the selected computer supports it. Existing conversations keep their current history.</string>
@@ -870,10 +871,8 @@
     <string name="preview_unauthorized">You don\'t have permission to preview on this computer.</string>
     <string name="preview_generic">The computer couldn\'t start the preview.</string>
     <string name="preview_timeout">The device took too long to start.</string>
-    <string name="preview_device">Device preview</string>
     <string name="preview_ios">iOS Simulator</string>
     <string name="preview_android">Android Emulator</string>
-    <string name="preview_choose_title">Choose a device preview</string>
     <string name="preview_ios_upgrade">Update Lody on %1$s to preview the iOS Simulator.</string>
     <string name="preview_ok">OK</string>
     <string name="preview_cancel">Cancel</string>
@@ -920,10 +919,6 @@
     <string name="preview_quality_saver">Data saver</string>
     <string name="preview_quality_balanced">Balanced</string>
     <string name="preview_quality_clear">Clear</string>
-    <string name="preview_requested_ios">The agent wants to show the iOS Simulator</string>
-    <string name="preview_requested_android">The agent wants to show the Android Emulator</string>
-    <string name="preview_show">Show</string>
-    <string name="preview_dismiss">Dismiss</string>
     <string name="chat_proposal_role_create">Create Agent Role?</string>
     <string name="chat_proposal_role_update">Update Agent Role?</string>
     <string name="chat_proposal_role_saved">Agent Role saved</string>
@@ -960,4 +955,7 @@
     <string name="github_settings_authorization_required">Personal GitHub authorization required</string>
     <string name="github_settings_authorization_hint">Sign in to Lody web with the same Lody account and authorize or renew your personal GitHub access. Then return here and retry connecting the GitHub App. Your “Act as you” preference does not need to be enabled.</string>
     <string name="github_settings_authorize_in_web">Open Lody web</string>
+    <string name="workspace_e2ee_unsupported">Mobile does not yet support end-to-end encrypted workspaces. Please open this workspace in Lody Desktop.</string>
+    <string name="workspace_mode_unconfirmed">Unable to confirm workspace encryption. Please retry.</string>
+    <string name="workspace_mode_retry">Retry</string>
 </resources>

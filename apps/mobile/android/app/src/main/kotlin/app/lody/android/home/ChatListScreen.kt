@@ -70,6 +70,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
@@ -121,6 +122,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -271,6 +273,8 @@ fun ChatListScreen(
     } }
     // The view menu's Archived switch (iOS `HomeArchive`): in memory, so every launch opens on open chats.
     var archived by remember { mutableStateOf(false) }
+    // The Schedules view menu's Show finished switch: in memory, so ended schedules start hidden.
+    var showFinished by remember { mutableStateOf(false) }
     val sections = remember(state.snapshot, grouping, owner, archived) { state.snapshot?.let { ChatListModel.home(it, grouping, owner, archived = archived) }.orEmpty() }
     val archivedTimeline = remember(state.snapshot, archived) { if (archived) state.snapshot?.let { ChatListModel.timeline(it, archived = true) }.orEmpty() else emptyList() }
 
@@ -327,9 +331,11 @@ fun ChatListScreen(
                     }
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
-                // Schedules keeps the Chats header (workspace, sync, search) without a title or view menu.
+                // Schedules keeps the Chats header (workspace, sync, search) with its own view menu.
                 tab == HomeTab.Schedules -> Box {
-                    HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {}
+                    HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {
+                        ScheduleViewMenu(showFinished) { showFinished = it }
+                    }
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
                 else -> TitleTopBar(stringResource(tab.label), onBack = null)
@@ -349,14 +355,23 @@ fun ChatListScreen(
                         } else tab = next
                     },
                     adds = adds,
-                    onCreate = { if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
+                    onCreate = { if (state.workspaces.firstOrNull { it.id == state.workspaceId }?.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT) notice(state.placeholder) else if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
                 )
             }
         },
     ) { padding ->
+        val selectedWorkspace = state.workspaces.firstOrNull { it.id == state.workspaceId }
         when {
+            tab != HomeTab.Settings && selectedWorkspace?.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT -> {
+                Column(Modifier.fillMaxSize().padding(padding), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Text(state.placeholder, style = LodyTheme.typography.body, modifier = Modifier.padding(horizontal = app.lody.android.designsystem.LodySpacing.lg))
+                    if (selectedWorkspace?.contentMode == app.lody.android.auth.WorkspaceContentMode.UNKNOWN) {
+                        TextButton(onClick = { onSelectWorkspace(selectedWorkspace) }) { Text(stringResource(R.string.workspace_mode_retry)) }
+                    }
+                }
+            }
             tab == HomeTab.Schedules -> app.lody.android.schedules.SchedulesList(
-                scheduleList, if (searching) query else "", padding,
+                scheduleList, if (searching) query else "", showFinished, { showFinished = true }, padding,
                 onOpen = { scheduleEditor = it.scheduleId },
                 onNew = { scheduleEditor = NEW_SCHEDULE },
                 onOpenSession = onOpenSession,
@@ -478,8 +493,11 @@ private fun WorkspaceCapsule(state: ChatListUiState, onSelect: (Workspace) -> Un
                 DropdownMenuItem(
                     text = { app.lody.android.designsystem.LodyFadingText(workspace.name, LodyTheme.typography.body, colors.textPrimary, Modifier.fillMaxWidth()) },
                     leadingIcon = { Avatar(workspace.image, workspace.name, LodyIconSize.lg) },
-                    trailingIcon = { if (workspace.id == state.workspaceId) Glyph(LodyIcons.Check, colors.accentFg, LodyIconSize.sm) },
-                    onClick = { open = false; if (workspace.id != state.workspaceId) onSelect(workspace) },
+                    trailingIcon = { Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+                        if (workspace.contentMode == app.lody.android.auth.WorkspaceContentMode.E2EE) Icon(LodyIcons.Lock, contentDescription = "E2EE", tint = colors.textSecondary, modifier = Modifier.size(LodyIconSize.sm))
+                        if (workspace.id == state.workspaceId) Glyph(LodyIcons.Check, colors.accentFg, LodyIconSize.sm)
+                    } },
+                    onClick = { open = false; if (workspace.id != state.workspaceId || workspace.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT) onSelect(workspace) },
                 )
             }
         }
@@ -560,6 +578,43 @@ private fun ViewMenu(
                 Switch(checked = archived, onCheckedChange = null)
             }
             Spacer(Modifier.height(LodySpacing.xs))
+        }
+    }
+}
+
+/** The Schedules view menu: one Show finished switch; off hides schedules that will not run again. */
+@Composable
+private fun ScheduleViewMenu(showFinished: Boolean, onShowFinished: (Boolean) -> Unit) {
+    val colors = LodyTheme.colors
+    var open by remember { mutableStateOf(false) }
+    val label = stringResource(R.string.home_view)
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.semantics { contentDescription = label }) {
+            Glyph(LodyIcons.Filter, colors.iconPrimary)
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(LodyRadius.lg),
+            containerColor = colors.bgOverlay,
+            tonalElevation = 0.dp,
+            shadowElevation = LodyElevations.md.blur / 2,
+            border = BorderStroke(0.5.dp, colors.borderSubtle),
+            modifier = Modifier.width(MenuWidth),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = LodySize.controlMd)
+                    .toggleable(value = showFinished, role = Role.Switch) { onShowFinished(it) }
+                    .padding(horizontal = LodySpacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
+            ) {
+                Glyph(LodyIcons.Check, colors.iconSecondary, LodyIconSize.sm)
+                Text(stringResource(R.string.schedules_view_show_finished), style = LodyTheme.typography.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                Switch(checked = showFinished, onCheckedChange = null)
+            }
         }
     }
 }
@@ -797,7 +852,17 @@ internal fun HomeList(
         folded = if (id in folded) folded - id else folded + id
         FoldedOpeners.save(context, folded)
     }
-    val shown = remember(sections, folded) { sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded)) } }
+    // Home labels collapse their group; search labels never do. Archived buckets reuse activity ids.
+    var collapsedGroups by remember { mutableStateOf(CollapsedGroups.load(context)) }
+    val groupKey = { id: String -> if (archivedList) "archived:$id" else id }
+    val toggleGroup = { id: String ->
+        val key = groupKey(id)
+        collapsedGroups = if (key in collapsedGroups) collapsedGroups - key else collapsedGroups + key
+        CollapsedGroups.save(context, collapsedGroups)
+    }
+    val shown = remember(sections, folded, collapsedGroups, pinsLabels, archivedList) {
+        sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded), collapsed = pinsLabels && groupKey(it.id) in collapsedGroups) }
+    }
     val direction = LocalLayoutDirection.current
     // Keep the sticky slot below the app bar; content padding alone scrolls away.
     ProjectIndexList(shown, titles, listState, projectIndex, padding.calculateBottomPadding(),
@@ -815,11 +880,14 @@ internal fun HomeList(
                 // Project groups lead their label with the project's logo.
                 val logo = section.repository.takeIf { section.header is HomeSection.Header.Project }
                 if (pinsLabels) {
-                    stickyHeader(key = section.id) { SectionTitle(titles.getValue(section.id), logo) }
+                    stickyHeader(key = section.id) {
+                        SectionTitle(titles.getValue(section.id), logo, collapsed = section.collapsed, onToggle = { toggleGroup(section.id) })
+                    }
                 } else {
                     item(key = section.id) { SectionTitle(titles.getValue(section.id), logo) }
                 }
                 items(section.visibleChats(idleExpanded), key = { "${section.id}/${it.id}" }) { chat ->
+                    // Rows fade and slide as their group collapses or expands.
                     ChatRow(
                         chat, if (section.header is HomeSection.Header.Project && chat.nestedUnder == null) details - ChatRowDetail.Project else details, now,
                         owner = owners?.let { it[chat.ownerId] ?: WorkspaceMember(chat.ownerId.orEmpty(), "") },
@@ -827,6 +895,7 @@ internal fun HomeList(
                         onToggle = { toggleOpener(chat.id) },
                         archived = archivedList,
                         onSetArchived = onSetArchived?.let { action -> { action(chat, !archivedList) } },
+                        modifier = Modifier.animateItem(),
                     ) { onOpenChat(chat) }
                 }
                 if (section.folds) {
@@ -834,6 +903,7 @@ internal fun HomeList(
                         MoreRow(
                             if (idleExpanded) showLess else pluralStringResource(R.plurals.home_group_show_all, section.rootCount, section.rootCount),
                             onToggleIdle,
+                            Modifier.animateItem(),
                         )
                     }
                 }
@@ -860,12 +930,12 @@ private fun HomeSection.Header.title(): String = when (this) {
 }
 
 @Composable
-private fun MoreRow(title: String, onClick: () -> Unit) {
+private fun MoreRow(title: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Text(
         title,
         style = LodyTheme.typography.body,
         color = LodyTheme.colors.textTertiary,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .heightIn(min = LodySize.listRow)
             .clickable(role = Role.Button, onClick = onClick)
@@ -1032,12 +1102,20 @@ private val ProjectSource.label: Int
 // MARK: - Rows
 
 @Composable
-private fun SectionTitle(text: String, repository: String? = null) {
+private fun SectionTitle(text: String, repository: String? = null, collapsed: Boolean? = null, onToggle: () -> Unit = {}) {
+    // `collapsed` is null where the group cannot fold (search). The chevron points down while open.
+    val angle by animateFloatAsState(if (collapsed == true) 0f else 90f, LodySpring.snappy(), label = "group")
+    val action = stringResource(if (collapsed == true) R.string.home_group_expand else R.string.home_group_collapse)
+    val state = stringResource(if (collapsed == true) R.string.home_tree_collapsed else R.string.home_tree_expanded)
     Row(
         Modifier
             .fillMaxWidth()
             .background(homePageColor())
-            .semantics(mergeDescendants = true) { heading() }
+            .then(if (collapsed != null) Modifier.clickable(role = Role.Button, onClickLabel = action, onClick = onToggle) else Modifier)
+            .semantics(mergeDescendants = true) {
+                heading()
+                if (collapsed != null) stateDescription = state
+            }
             .padding(start = LodyLayout.screenPaddingX, end = LodyLayout.screenPaddingX, top = LodySpacing.lg, bottom = LodySpacing.xs),
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),
         verticalAlignment = Alignment.CenterVertically,
@@ -1045,6 +1123,7 @@ private fun SectionTitle(text: String, repository: String? = null) {
         // The project's logo in its original colours, unlike the muted row marks.
         if (!repository.isNullOrBlank()) RepositoryIcon(repository, muted = false)
         Text(text, style = LodyTheme.typography.subhead, color = LodyTheme.colors.textSecondary)
+        if (collapsed != null) Glyph(LodyIcons.Forward, LodyTheme.colors.textSecondary, FamilyChevron, Modifier.rotate(angle))
     }
 }
 
@@ -1067,6 +1146,7 @@ private fun ChatRow(
     /** Whether the row is in the archived list: its long-press action is then Unarchive. */
     archived: Boolean = false,
     onSetArchived: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val colors = LodyTheme.colors
@@ -1081,7 +1161,7 @@ private fun ChatRow(
     val rail = colors.borderDefault
     var titleHeight by remember { mutableFloatStateOf(0f) }
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
             .drawBehind { if (nested) drawRail(rail, chat.lastChild, if (twoLine) LodySpacing.sm.toPx() + titleHeight / 2 else size.height / 2) },
     ) {

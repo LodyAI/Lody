@@ -1,6 +1,7 @@
 import UniformTypeIdentifiers
 import UIKit
 import WebKit
+import LodyRuntime
 
 private final class HTMLPreviewHandler: NSObject, WKURLSchemeHandler, WKScriptMessageHandler {
   weak var owner: LodyHTMLPreviewView?
@@ -23,6 +24,7 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
   private var webView: WKWebView?
   private var content: StoredContent?
   private var documentURL: URL?
+  private var initialNavigation = true
   private var requests: [String: WKURLSchemeTask] = [:]
   private var issues: [String: [String: String]] = [:]
   private var resourceCount = 0
@@ -64,6 +66,7 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
     webView = web
     let url = HTMLPreviewResource.url(path: stored.path, host: UUID().uuidString.lowercased())
     documentURL = url
+    initialNavigation = true
     // WebKit content filters accept a regex subset; use separate host rules.
     let rules = #"[{"trigger":{"url-filter":"^https?://localhost[:/]"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https?://[^/]*\\.localhost[:/]"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https?://127\\.[0-9.]+[:/]"},"action":{"type":"block"}},{"trigger":{"url-filter":"^https?://\\[::1\\][:/]"},"action":{"type":"block"}}]"#
     WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "lody-preview-localhost", encodedContentRuleList: rules) { [weak self, weak web] ruleList, _ in
@@ -83,7 +86,10 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
       task.didFailWithError(NSError(domain: "LodyKit.HTMLPreview", code: 1)); return
     }
     if url.path == root.path {
-      finish(task, data: content.data, mime: "text/html")
+      guard let protected = HTMLPreviewDocumentPolicy.protect(content.data) else {
+        fail(task, code: "resource_failed"); return
+      }
+      finish(task, data: protected, mime: "text/html")
       return
     }
     guard url.path.hasPrefix(HTMLPreviewResource.filePrefix) else {
@@ -213,22 +219,20 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
   }
 
   func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
-    guard let url = action.request.url else { decisionHandler(.cancel); return }
-    if action.navigationType == .linkActivated || action.targetFrame == nil, ["https", "http"].contains(url.scheme ?? ""), HTMLPreviewResource.code(url) != "local_service_unavailable" {
-      UIApplication.shared.open(url)
-      decisionHandler(.cancel)
-    } else if url.scheme == HTMLPreviewResource.scheme || url.absoluteString == "about:blank" {
-      decisionHandler(.allow)
-    } else if action.targetFrame?.isMainFrame == true || action.targetFrame == nil {
-      record(url: url, reference: url.absoluteString, kind: "navigation", code: HTMLPreviewResource.code(url))
-      decisionHandler(.cancel)
-    } else {
-      decisionHandler(.allow)
+    guard webView === self.webView, let url = action.request.url, let root = documentURL else {
+      decisionHandler(.cancel); return
     }
+    let allowed = HTMLPreviewDocumentPolicy.allowsNavigation(
+      url: url, documentURL: root, isMainFrame: action.targetFrame?.isMainFrame == true,
+      isInitialLoad: initialNavigation, method: action.request.httpMethod ?? "GET", navigationType: action.navigationType
+    )
+    if allowed { initialNavigation = false }
+    else { record(url: url, reference: url.absoluteString, kind: "navigation", code: "navigation_blocked") }
+    decisionHandler(allowed ? .allow : .cancel)
   }
 
   func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-    if action.targetFrame == nil { webView.load(action.request) }
+    // A script-created window must never escape through UIApplication.open.
     return nil
   }
 

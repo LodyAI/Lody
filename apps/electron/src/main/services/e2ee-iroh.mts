@@ -46,11 +46,13 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
 }) {
   const scope = yield* Effect.scope
   let opening: Deferred.Deferred<IrohEndpoint, unknown> | undefined
+  let liveEndpoint: IrohEndpoint | undefined
   let closed = false
   const warming = new Set<string>()
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       closed = true
+      liveEndpoint = undefined
       if (!opening) return
       const opened = yield* Effect.exit(Deferred.await(opening))
       if (Exit.isSuccess(opened)) yield* Effect.promise(() => opened.value.close())
@@ -75,6 +77,7 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
     if (Exit.isFailure(opened) && opening === deferred) opening = undefined
     if (Exit.isSuccess(opened)) {
       const live = opened.value
+      liveEndpoint = live
       // Observation only: whether a home relay connected within 15 seconds.
       yield* Effect.forkIn(
         Effect.promise(() => live.online(15_000).catch(() => false)).pipe(
@@ -94,6 +97,13 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
     return key
   })
   return {
+    peek: (machineId: string) =>
+      Effect.gen(function* () {
+        if (closed || !liveEndpoint) return undefined
+        const live = liveEndpoint
+        const key = yield* target(machineId)
+        return makeIrohRoute(live, key, warming)
+      }),
     /**
      * Runs under the host's serial lock: resolves the target from the verified
      * ledger and opens the endpoint (no network wait). The returned route does all
@@ -112,11 +122,12 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
 export type IrohRoute = ReturnType<typeof makeIrohRoute>
 
 export function makeIrohRoute(
-  live: Pick<IrohEndpoint, 'hasConnection' | 'warm' | 'call'>,
+  live: Pick<IrohEndpoint, 'hasConnection' | 'warm' | 'call' | 'connectionPath'>,
   key: string,
   warming: Set<string>
 ) {
   return {
+    path: async () => live.connectionPath?.(key).catch(() => 'none' as const) ?? ('none' as const),
     /**
      * Whether a live connection exists; never waits for a dial in progress.
      * Without one, starts a bounded background dial (at most one per machine) and

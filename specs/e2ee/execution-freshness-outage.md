@@ -1,6 +1,6 @@
 # Execution freshness during a backend outage
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#execution-freshness-during-a-backend-outage)
+Status: draft · [prior approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#execution-freshness-during-a-backend-outage)
 Translation: current
 
 [中文](execution-freshness-outage.zh.md)
@@ -19,11 +19,11 @@ The 15-minute refresh is relaxed in this one case: the machine tried to read the
 latest ledger and could not get an answer. The machine then keeps deciding from its
 local verified ledger for a longer window:
 
-| Request | Window after the last successful latest read |
-| --- | --- |
-| Read (file preview, live status) by the machine's own member | 24 hours |
-| Execution by the machine's own member | 4 hours |
-| Any request from another member, including execution through machine sharing | 15 minutes, unchanged |
+| Request                                                                      | Window after the last successful latest read |
+| ---------------------------------------------------------------------------- | -------------------------------------------- |
+| Read (file preview, live status) by the machine's own member                 | 24 hours                                     |
+| Execution by the machine's own member                                        | 4 hours                                      |
+| Any request from another member, including execution through machine sharing | 15 minutes, unchanged                        |
 
 ## Guarantees
 
@@ -36,8 +36,12 @@ local verified ledger for a longer window:
   immediately, whatever remains of the window.
 - **A failed read renews nothing.** The window runs from the start of the last
   successful latest read. Only another successful read starts a new one.
-- **The clock rules stay.** The monotonic and wall clock checks apply to the longer
-  window. Rollback or uncertain suspend/resume ends it.
+- **Count elapsed time without requiring clock agreement.** For the 15-minute,
+  4-hour and 24-hour windows, compare `max(wallElapsed, monotonicElapsed)` with
+  the limit (strictly less). A paused monotonic clock during suspend and a small
+  backward wall-clock correction do not invalidate the window. Monotonic rollback
+  still refuses the grant. Offline, simultaneous suspend and wall-clock correction
+  cannot be distinguished from less elapsed time; this policy accepts that limit.
 - **Restart still needs the network.** The window lives in memory, so a restarted
   machine revalidates online before new remote execution.
 - **Machine sharing is unchanged.** Another member's execution keeps both the
@@ -59,11 +63,11 @@ reads for up to 24 hours.
 
 The rule is whether the reply carries an explicit refusal, not its HTTP status.
 
-| Result of the latest read | Effect |
-| --- | --- |
-| No reply, timeout, 5xx, 429, a server error with no business error code | Outage: the window applies |
-| Failure partway through a paged read | Outage: the read failed |
-| Explicit refusal: removed, revoked, unauthorized, including an expired sign-in | The window ends at once |
+| Result of the latest read                                                                           | Effect                                   |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| No reply, timeout, 5xx, 429, a server error with no business error code                             | Outage: the window applies               |
+| Failure partway through a paged read                                                                | Outage: the read failed                  |
+| Explicit refusal: removed, revoked, unauthorized, including an expired sign-in                      | The window ends at once                  |
 | A reply the client cannot understand, a reply that fails verification or moves the ledger backwards | Treated as a refusal: nothing is relaxed |
 
 ## Existing Specs
@@ -93,8 +97,9 @@ allowed while the bridge it needs has already detached.
 
 - Implementation: `apps/cli/src/lib/e2ee/execution-authorization.ts`, with the outage rule
   in `ledgerReadFailure` (`apps/cli/src/lib/cloud-e2ee-errors.ts`).
-- "Rollback or uncertain suspend/resume ends it" compares the change in wall clock with
-  the change in monotonic clock, because a long suspend no longer always outlasts the grant.
+- `authority-clock.ts` uses the greater wall/monotonic elapsed time, with no
+  one-minute disagreement cutoff. Synthetic coverage includes 30-minute suspend,
+  three-minute NTP rollback and exact execution/read expiry boundaries.
 - The notice is a runtime issue shown by `lody daemon status`. Other client surfaces do not
   show it yet.
 - Executed validation: `apps/cli/tests/e2ee-runtime.test.ts` ("backend outage windows")

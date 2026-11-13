@@ -8,12 +8,15 @@
  * same rail.
  */
 import { useEffect, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import type { Meta, StoryObj } from '@storybook/react';
-import type { SessionHistory, SessionId } from '@lody/shared';
+import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import type { SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import type { SessionChatStreamHandle } from '@/components/ai-gui/view';
+import { ForceDesktopLayoutProvider, ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import {
   createConversationSession,
@@ -486,6 +489,75 @@ export const WorkedGroupExpandJump: Story = {
     <WindowedStream history={buildWorkedGroupJumpHistory()} streamSessionId={JUMP_SESSION_ID} />
   ),
 };
+
+const disclosureStyles = stylex.create({
+  stage: { height: '100dvh', backgroundColor: colors.background },
+});
+const disclosureSessionId = 'synthetic-command-disclosure' as SessionId;
+const disclosureMessages: SessionHistoryParsed[] = [
+  ...Array.from({ length: 12 }, (_, index) => ({
+    id: `synthetic-disclosure-context-${index}`,
+    role: 'assistant' as const,
+    timestamp: at(index),
+    read: true,
+    finished: true,
+    items: [{ type: 'text' as const, text: paragraphs(2, index) }],
+  })),
+  {
+    id: 'synthetic-disclosure-turn',
+    role: 'assistant',
+    timestamp: at(12),
+    read: true,
+    finished: false,
+    items: [
+      { type: 'text', text: 'Inspect the completed command without losing the reading position.' },
+      {
+        type: 'tool_call',
+        toolCallId: 'synthetic-long-command',
+        kind: 'execute',
+        status: 'completed',
+        title: 'Run synthetic long command',
+        content: [
+          { type: 'terminal_command', command: 'printf synthetic-output' },
+          {
+            type: 'terminal_output',
+            output: Array.from({ length: 100 }, (_, i) => `Synthetic output line ${i + 1}`).join(
+              '\n'
+            ),
+            stream: 'combined',
+          },
+        ],
+      },
+      { type: 'text', text: 'The command completed. Its details remain available for inspection.' },
+    ],
+  },
+];
+const disclosureItems: SessionChatStreamViewProps['items'] = disclosureMessages.map(
+  (message, turnIndex) => ({ type: 'message', sessionId: disclosureSessionId, message, turnIndex })
+);
+
+function CommandDisclosurePreview({ mobile = false }: { mobile?: boolean }) {
+  const stream = (
+    <div {...stylex.props(disclosureStyles.stage)}>
+      <SessionChatStreamView
+        sessionId={disclosureSessionId}
+        items={disclosureItems}
+        lastAssistantMessageId="synthetic-disclosure-turn"
+        renderMessageRow={({ message, sessionId: id }) => (
+          <MessageRowView message={message} sessionId={id} />
+        )}
+      />
+    </div>
+  );
+  return mobile ? (
+    <ForceMobileLayoutProvider force>{stream}</ForceMobileLayoutProvider>
+  ) : (
+    <ForceDesktopLayoutProvider>{stream}</ForceDesktopLayoutProvider>
+  );
+}
+
+export const CommandDisclosureDesktop: Story = { render: () => <CommandDisclosurePreview /> };
+export const CommandDisclosureMobile: Story = { render: () => <CommandDisclosurePreview mobile /> };
 
 const SELECTION_SESSION_ID = 'native-text-selection-story' as SessionId;
 const selectionHistory = Array.from({ length: 120 }, (_, index) => ({

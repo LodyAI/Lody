@@ -794,7 +794,11 @@ void test('a restore sends both credentials and names the R as endorser', async 
     stagedGroup: () => Effect.succeed(null),
     identity: (pin) =>
       Effect.succeed({
-        device: { enc: 'encryption', pin },
+        device: {
+          enc: 'encryption',
+          pin,
+          publicKey: { toBytes: () => new Uint8Array(32).fill(6) }
+        },
         credentialHash: 'c'.repeat(64)
       }),
     adopt: (join) =>
@@ -821,7 +825,10 @@ void test('a restore sends both credentials and names the R as endorser', async 
   assert.deepEqual(credential, new Uint8Array(32))
   await Effect.runPromise(ports.adopt([]))
   assert.equal(adopted[0].endorser, '02'.repeat(32))
-  assert.equal(adopted[0].pairingSessionId, appended[0].requestId.slice(0, 32))
+  assert.match(adopted[0].pairingSessionId, /^[0-9a-f]{32}$/)
+  const retry = await Effect.runPromise(Effect.scoped(target.connect(anchor)))
+  await Effect.runPromise(retry.adopt([]))
+  assert.equal(adopted[1].pairingSessionId, adopted[0].pairingSessionId)
 })
 
 void test('a file covering nothing here restores nothing', async () => {
@@ -1185,6 +1192,54 @@ void test('an unfinished removal is reported as such and finishes on retry', asy
     const second = await remove()
     assert.equal(second.removed, true)
     assert.deepEqual(second.pending, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a partially restored workspace stays uncovered until current-key recovery finishes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const journalPath = join(dir, 'recovery-vault.sqlite')
+    for (const [before, state, covered] of [
+      [null, 'partial', false],
+      ['partial', 'done', true]
+    ]) {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const local = yield* sqliteRecoveryVaultLocalStore({
+              path: journalPath,
+              mode: 'create-or-open'
+            })
+            yield* local.compareAndSwap(
+              'restore-progress/here',
+              before === null ? null : new TextEncoder().encode(before),
+              new TextEncoder().encode(state)
+            )
+          })
+        )
+      )
+      const plan = await Effect.runPromise(
+        recoveryReplacementPlan({
+          journalPath,
+          store: {},
+          replacement: {
+            state: () => Effect.succeed({ current: 'a'.repeat(64), replacing: null })
+          },
+          accountWorkspaces: Effect.succeed([{ id: 'here', name: 'Here' }]),
+          hasIdentity: () => Effect.succeed(true)
+        })
+      )
+      assert.equal(
+        plan.covered.some((row) => row.id === 'here'),
+        covered
+      )
+      assert.equal(
+        plan.uncovered.some((row) => row.id === 'here'),
+        !covered
+      )
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

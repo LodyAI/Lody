@@ -1108,7 +1108,8 @@ extension ChatPendingSend {
       }
       let body = displayText ?? text
       if !body.isEmpty {
-        result.append(ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body))
+        result.append(ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body,
+          references: displayText == nil ? [] : references ?? []))
       }
       // A local send in flight is the signed-in user's own turn; its first row carries the header.
       if !result.isEmpty {

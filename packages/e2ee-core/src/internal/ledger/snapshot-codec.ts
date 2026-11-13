@@ -15,7 +15,7 @@ import { retainedSigningPublicKey } from '../foundation/owned-bytes';
 import { verifySignature } from '../foundation/signature';
 import { LedgerError } from './errors';
 import { decodeMachineId, encodeMachineId } from './machine-id';
-import { fail, type DeviceKind, type Role } from './records';
+import { hashRecordBytes, fail, type DeviceKind, type Role } from './records';
 import {
   SUPPORTED_CAPABILITIES,
   hashAt,
@@ -32,22 +32,15 @@ const lift = <A>(r: Result.Result<A, { readonly code: LedgerError['code'] }>) =>
   Result.mapError(r, (e) => new LedgerError({ code: e.code }));
 /**
  * Format versions of the compact authorization-state encoding `S`. Current-only:
- * decoders reject every other version as `unknown-version`. Version 4 also preserves declared capabilities; older layouts
+ * decoders reject every other version as `unknown-version`. Version 5 also preserves declared capabilities; older layouts
  * cannot restore those facts and are rejected without migration.
  */
-const SNAPSHOT_BODY_VERSION = 4;
-/** Retained envelope version; the digest body shares it so the digest is derivable from retained bytes. */
-const RETAINED_VERSION = 4;
-const DIGEST_DOMAIN = 'snapshot-digest/v4';
+const SNAPSHOT_BODY_VERSION = 5;
+/** Local-only 9-element retained envelope version; snapshot bodies and digests also use v5. */
+const RETAINED_VERSION = 5;
+const DIGEST_DOMAIN = 'snapshot-digest/v5';
 const digestOfBody = (body: Uint8Array) =>
   lift(Bytes.recordHash(sha256(concat([domain(DIGEST_DOMAIN), body]))));
-/**
- * Deterministic CBOR: the digest body `[4, genesis, length, head, S]` is the
- * retained array `[4, genesis, length, head, S, verification]` with a 5-element
- * head and without its last one-byte element, so the digest needs no second encoding.
- */
-const retainedDigest = (bytes: Uint8Array) =>
-  digestOfBody(concat([Uint8Array.of(0x85), bytes.subarray(1, bytes.length - 1)]));
 const array = (v: CborValue | undefined): Result.Result<readonly CborValue[], LedgerError> =>
   Array.isArray(v) ? Result.succeed(v) : fail('canonical');
 const uint = (v: CborValue | undefined): Result.Result<number, LedgerError> =>
@@ -239,6 +232,17 @@ function authState(s: InternalState): CborValue {
     s.epoch.rotationRequired,
     concat(machineRows),
     [...s.capabilities].sort((a, b) => a - b),
+    concat(
+      [...s.historyPackets]
+        .filter(([, row]) => row.baseEpoch !== undefined)
+        .sort(([a], [b]) => a - b)
+        .map(([epoch, row]) => {
+          const bytes = new Uint8Array(8);
+          writeIndex(bytes, 0, epoch);
+          writeIndex(bytes, 4, row.baseEpoch!);
+          return bytes;
+        })
+    ),
   ];
 }
 function eligible(s: InternalState, signer: Bytes.SigningPublicKey) {
@@ -276,7 +280,7 @@ export function stateDigestOf(s: InternalState): Result.Result<Bytes.RecordHash,
     const head = hashAt(s, s.hashes.length - 1)!;
     const body = yield* lift(
       encodeSnapshotCbor([
-        RETAINED_VERSION,
+        SNAPSHOT_BODY_VERSION,
         s.genesis.toBytes(),
         s.hashesOffset + s.hashes.length,
         head.toBytes(),
@@ -331,9 +335,23 @@ export function encodeRetainedState(
         head.toBytes(),
         authState(s),
         verifications.indexOf(s.verification),
+        s.hashesOffset,
+        concat(Array.from(s.hashes, (hash) => hash.toBytes())),
+        concat(
+          Array.from(s.epochPublications ?? HashMap.empty<number, Uint8Array>())
+            .sort(([a], [b]) => a - b)
+            .map(([epoch, record]) => {
+              const row = new Uint8Array(6 + record.length);
+              const fields = new DataView(row.buffer);
+              fields.setUint32(0, epoch);
+              fields.setUint16(4, record.length);
+              row.set(record, 6);
+              return row;
+            })
+        ),
       ])
     );
-    return { bytes, stateDigest: yield* retainedDigest(bytes) };
+    return { bytes, stateDigest: yield* stateDigestOf(s) };
   });
 }
 /**
@@ -357,8 +375,9 @@ export function decodeRetainedState(
       const length = expected.length;
       if (!Number.isSafeInteger(length) || length < 1) return yield* fail('checkpoint-mismatch');
       const root = yield* array(yield* lift(decodeRetainedCbor(bytes)));
-      if (root.length !== 6) return yield* fail('canonical');
-      if ((yield* uint(root[0])) !== RETAINED_VERSION) return yield* fail('unknown-version');
+      const version = yield* uint(root[0]);
+      if (version !== RETAINED_VERSION) return yield* fail('unknown-version');
+      if (root.length !== 9) return yield* fail('canonical');
       if (!bytesEqual(yield* exact(root[1], 32), genesis.toBytes()))
         return yield* fail('wrong-anchor');
       if (
@@ -375,9 +394,59 @@ export function decodeRetainedState(
         verification,
         retained: true,
       });
+      const offset = yield* uint(root[6]);
+      const hashes = root[7];
+      if (
+        !(hashes instanceof Uint8Array) ||
+        hashes.length === 0 ||
+        hashes.length % 32 !== 0 ||
+        offset + hashes.length / 32 !== length
+      )
+        return yield* fail('canonical');
+      const restored: Bytes.RecordHash[] = [];
+      for (let index = 0; index < hashes.length; index += 32)
+        restored.push(yield* lift(Bytes.recordHash(hashes.subarray(index, index + 32))));
+      if (
+        !restored.at(-1)!.equals(head) ||
+        (offset === 0 && !bytesEqual(restored[0]!.toBytes(), genesis.toBytes()))
+      )
+        return yield* fail('checkpoint-mismatch');
+      const knownHashes = new Set(restored.map(id));
+      state.hashesOffset = offset;
+      state.hashes = Chunk.fromIterable(restored);
+      const publications = root[8];
+      if (!(publications instanceof Uint8Array)) return yield* fail('canonical');
+      const fields = new DataView(
+        publications.buffer,
+        publications.byteOffset,
+        publications.byteLength
+      );
+      let previous = 0;
+      let records = HashMap.empty<number, Uint8Array>();
+      for (let at = 0; at < publications.length;) {
+        if (publications.length - at < 6) return yield* fail('canonical');
+        const epoch = fields.getUint32(at),
+          size = fields.getUint16(at + 4);
+        at += 6;
+        if (
+          epoch <= previous ||
+          epoch > state.epoch.number ||
+          size < 1 ||
+          size > 8192 ||
+          size > publications.length - at
+        )
+          return yield* fail('canonical');
+        const record = publications.slice(at, at + size);
+        if (!knownHashes.has(id(hashRecordBytes(record))))
+          return yield* fail('checkpoint-mismatch');
+        previous = epoch;
+        records = HashMap.set(records, epoch, record);
+        at += size;
+      }
+      state.epochPublications = records;
       if (expected.stateDigest) {
         const stored = yield* lift(Bytes.recordHash(expected.stateDigest.toBytes()));
-        if (!stored.equals(yield* retainedDigest(bytes)))
+        if (!stored.equals(yield* stateDigestOf(state)))
           return yield* fail('state-digest-mismatch');
       }
       return state;
@@ -404,7 +473,7 @@ function decodeAuthState(
     v instanceof Uint8Array && v.length % row === 0 ? Result.succeed(v) : fail('canonical');
   return Result.gen(function* () {
     const fields = yield* array(value);
-    if (fields.length !== 8) return yield* fail('canonical');
+    if (fields.length !== 9) return yield* fail('canonical');
     const capabilities = yield* array(fields[7]);
     if (capabilities.length > 16) return yield* fail('canonical');
     let previousCapability = 0;
@@ -565,6 +634,24 @@ function decodeAuthState(
           ? new Uint8Array()
           : packetBytes.slice((epoch - 1) * PACKET_ROW, epoch * PACKET_ROW);
       historyPackets.set(epoch, Object.freeze({ epoch, commitment, packet }));
+    }
+    const abandonmentLinks = yield* table(fields[8], 8);
+    if (abandonmentLinks.length > 0 && !declared.includes(2)) return yield* fail('canonical');
+    let lastAbandonment = 0;
+    for (let index = 0; index < abandonmentLinks.length; index += 8) {
+      const epoch = readIndex(abandonmentLinks, index),
+        baseEpoch = readIndex(abandonmentLinks, index + 4);
+      if (
+        epoch <= lastAbandonment ||
+        epoch > number ||
+        baseEpoch >= epoch - 1 ||
+        [...historyPackets.values()].some(
+          (row) => row.baseEpoch !== undefined && baseEpoch > row.baseEpoch && baseEpoch < row.epoch
+        )
+      )
+        return yield* fail('canonical');
+      historyPackets.set(epoch, Object.freeze({ ...historyPackets.get(epoch)!, baseEpoch }));
+      lastAbandonment = epoch;
     }
     const keyCommitment = historyPackets.get(number)!.commitment;
 

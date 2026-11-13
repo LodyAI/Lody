@@ -70,7 +70,8 @@ export function ownEpochStagedGroup(input: EpochStagedGroup) {
     if (
       keyId(hashRecordBytes(record).toBytes()) !== key.recordHash ||
       parsed.body.type !== 'ordinary' ||
-      (parsed.body.operation.type !== 'publishEpoch' &&
+      (parsed.body.operation.type !== 'abandonEpoch' &&
+        parsed.body.operation.type !== 'publishEpoch' &&
         parsed.body.operation.type !== 'removeMemberAndPublishEpoch') ||
       parsed.body.operation.epoch !== key.epoch ||
       keyId(parsed.body.operation.commitment.toBytes()) !== key.commitment

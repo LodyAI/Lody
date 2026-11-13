@@ -100,7 +100,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onComposerOptionChange: ([String: Any]) -> Void = { _ in }
   var onMentionBrowse: ([String: Any]) -> Void = { _ in }
   let titleButton = ChatNavigationTitleButton()
-  var pageOwnsHeader = false
+  var pageOwnsHeader = false { didSet { composer.fullScreenTopInset = pageHeaderHeight } }
   var pageHeaderHeight: CGFloat { pageOwnsHeader ? 56 : 0 }
   var tabsAnchorView: UIView { titleButton }
   private var navigationTitle = ""
@@ -893,7 +893,10 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
 
   func setPendingSend(_ pending: ChatPendingSend) {
     var value = pending
-    if value.displayText == nil, pendingSend?.id == value.id { value.displayText = pendingSend?.displayText }
+    if value.displayText == nil, pendingSend?.id == value.id {
+      value.displayText = pendingSend?.displayText
+      value.references = pendingSend?.references
+    }
     var start = turnStartedAt[value.id]
     if start == nil, let supplied = value.startedAt, supplied.isFinite {
       start = supplied
@@ -1023,6 +1026,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     incoming.onComposerOptionChange = old.onComposerOptionChange
     incoming.onDraftChange = old.onDraftChange
     incoming.allowsFullScreen = old.allowsFullScreen
+    incoming.fullScreenTopInset = old.fullScreenTopInset
     // The conversation's run config, not the creation page's, answers the chip from here on.
     incoming.onRunConfig = old.onRunConfig
     incoming.cardStyle = old.cardStyle

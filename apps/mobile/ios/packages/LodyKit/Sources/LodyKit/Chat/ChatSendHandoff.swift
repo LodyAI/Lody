@@ -4,6 +4,8 @@ import UIKit
 /// The flying copy and collection content keep independent layer lifecycles.
 final class ChatMessageContent: UIView {
   let label = CKTextView()
+  /// Rounded chips behind the label's references (`.lodyReferenceChip`), as in the composer.
+  private let chips = ChatReferenceChipsView()
   let numericText = ChatNumericTextHost()
   static let maximumCollapsedHeight: CGFloat = 140
   static let collapsedLineCount = 6
@@ -37,6 +39,7 @@ final class ChatMessageContent: UIView {
     bubble.backgroundColor = .lodyUserBubble
     Self.applyBubbleCorners(to: bubble.layer, size: .zero)
     addSubview(bubble)
+    addSubview(chips)
     addSubview(label)
     numericText.isHidden = true
     addSubview(numericText)
@@ -51,6 +54,7 @@ final class ChatMessageContent: UIView {
     bubble.frame = bounds
     bubble.backgroundColor = .lodyUserBubble
     Self.applyBubbleCorners(to: bubble.layer, size: bounds.size)
+    chips.isHidden = bubble.isHidden
     // Process rows own the label frame so the chevron keeps its 8pt gap.
     // Bubble insets are only for the user send handoff.
     guard !bubble.isHidden else { return }
@@ -66,6 +70,45 @@ final class ChatMessageContent: UIView {
       label.layer.mask = nil
       label.linkHitHeight = label.bounds.height
       label.layer.displayIfNeeded()
+      chips.frame = bounds
+      chips.update(label: label)
+    }
+  }
+}
+
+/// Draws a rounded chip behind each line's run of a reference in a user bubble, matching
+/// `ChatReferenceNode.registerChipDrawing` in the composer.
+final class ChatReferenceChipsView: UIView {
+  private var runs: [(rect: CGRect, fill: UIColor)] = []
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    isOpaque = false
+    isUserInteractionEnabled = false
+    contentMode = .redraw
+    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: ChatReferenceChipsView, _: UITraitCollection) in view.setNeedsDisplay() }
+  }
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  func update(label: CKTextView) {
+    var next: [(rect: CGRect, fill: UIColor)] = []
+    let text = label.attributedTextValue
+    let visible = label.bounds.height
+    text.enumerateAttribute(.lodyReferenceChip, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+      guard let fill = value as? UIColor, range.length > 0 else { return }
+      for rect in label.rectangles(for: range) where rect.width > 0 && rect.minY < visible {
+        next.append((rect.offsetBy(dx: label.frame.minX, dy: label.frame.minY).insetBy(dx: -3, dy: 2), fill))
+      }
+    }
+    guard next.count != runs.count || zip(next, runs).contains(where: { $0.rect != $1.rect || $0.fill != $1.fill }) else { return }
+    runs = next
+    setNeedsDisplay()
+  }
+
+  override func draw(_ rect: CGRect) {
+    for run in runs {
+      run.fill.setFill()
+      UIBezierPath(roundedRect: run.rect, cornerRadius: min(6, run.rect.height / 2)).fill()
     }
   }
 }

@@ -63,6 +63,8 @@ export interface E2eeDeviceApprovalGuideProps {
   /** Opens the full ledger and diagnostics view. */
   onShowDetails: () => void;
   onBack: () => void;
+  /** Returns to the automatic request after the person chose code pairing. */
+  onAutomatic?: () => void;
   refreshing?: boolean;
   /** The existing explicit pairing exchange, kept during the transition. */
   children?: ReactNode;
@@ -109,6 +111,11 @@ export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
           <Button variant="ghost" onClick={props.onShowDetails}>
             {t('e2ee.approvalGuide.details')}
           </Button>
+          {props.onAutomatic && (
+            <Button variant="ghost" onClick={props.onAutomatic}>
+              {t('e2ee.approvalGuide.automatic')}
+            </Button>
+          )}
         </div>
         {props.children}
       </div>

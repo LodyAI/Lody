@@ -1,3 +1,4 @@
+import { sanitizeIrohDailyProperties } from '@/lib/iroh-daily';
 import type posthog from 'posthog-js';
 import { isConvexAuthErrorData } from '@lody/shared';
 import { isElectronRenderer } from '@/lib/electron';
@@ -192,6 +193,16 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
     if (!safeEvent) return null;
     event = safeEvent as typeof event;
 
+    if (event.event === 'e2ee/iroh_daily') {
+      // The SDK can attach initial-person metadata outside `properties`. Keep
+      // only the event envelope, never its automatic $set/$set_once payloads.
+      return {
+        event: event.event,
+        uuid: event.uuid,
+        timestamp: event.timestamp,
+        properties: sanitizeIrohDailyProperties(event.properties ?? {}),
+      };
+    }
     const libraryVersion = readPostHogLibraryVersion();
     const mobileLibrary = readMobilePostHogLibrary();
     if (mobileLibrary) {

@@ -102,9 +102,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Controls for a machine resolved as local use Electron local session control,
   independent of cloud-token or sync state. A failed local bridge is an error; never
   fall back to a remote RPC path.
-- Cloud Electron waits for the first **Run local agent** setting snapshot before creating
-  its workspace runtime. Enabled uses dual sync; disabled uses cloud-only sync and must
-  not attach the local data plane or surface its reconnect state.
+- Cloud Electron dual runtimes await the first **Run local agent** snapshot; encrypted
+  runtimes always sync through cloud and ignore the setting. Enabled uses dual sync;
+  disabled uses cloud-only sync without the local data plane or reconnect state.
 - Meta-room attachment is single-flight per runtime. Token, network, and visibility edges may
   force one immediate recovery attempt, but they must preserve the current outage's retry history;
   only a sustained healthy dwell resets backoff. Every attempt after the first is a `recovery`

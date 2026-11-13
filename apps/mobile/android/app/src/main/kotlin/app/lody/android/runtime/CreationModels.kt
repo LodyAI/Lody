@@ -58,6 +58,10 @@ data class CreateRequest(
     /** Option values the Role pins beyond model / mode / effort (strings or booleans). */
     val configOptionValues: Map<String, Any> = emptyMap(),
     val attachments: List<org.json.JSONObject> = emptyList(),
+    /** The prompt as the composer showed it (references as their chips' labels); display only. */
+    val displayText: String? = null,
+    /** The chips' ranges in [displayText]. */
+    val displayReferences: List<MessageReference> = emptyList(),
 )
 
 /** What one machine target of an Agent Role pins (runtime listing; secrets never cross). */

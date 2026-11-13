@@ -195,6 +195,36 @@ let failControl = false;
 let stagedGroup: EpochStagedGroup | null = null;
 let failStaging = false;
 let oldSession: typeof session;
+/** The runtime's retained offer after this device starts re-pairing with a new offer. */
+let runtimeRetained: PersonalPairingOffer | undefined;
+/** The installation binding before a replacement, to read its preserved originals. */
+let preservedBinding: import('@lody/e2ee-core/services').ClientCustodyBinding | undefined;
+let genuineCandidateHistory: string | null = null;
+/** Remote deadlines elapse only when a test expires them, never by wall-clock time. */
+const deadlineWaiters = new Set<() => void>();
+let deadlinesExpired = false;
+const deadlineSleep = () =>
+  Effect.callback<void>((resume) => {
+    const finish = () => resume(Effect.void);
+    if (deadlinesExpired) return finish();
+    deadlineWaiters.add(finish);
+    return Effect.sync(() => {
+      deadlineWaiters.delete(finish);
+    });
+  });
+/** A remote call that never answers until the network returns. `landed` appends first. */
+let hang: 'feed' | 'append' | 'append-landed' | 'exchange' | null = null;
+const signal = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => (resolve = done));
+  return { promise, resolve };
+};
+let hangEntered = signal();
+const hung = <A>(): Effect.Effect<A> =>
+  Effect.suspend(() => {
+    hangEntered.resolve();
+    return Effect.never;
+  });
 let otherSession: typeof session;
 let trackNextReader = false;
 /** The synthetic member relay: one waiting applicant at a time, plus a call log. */
@@ -588,6 +618,7 @@ export async function boot(
               const source = Layer.succeed(LedgerFeedSource, {
                 readAfter: (offset: string) =>
                   Effect.gen(function* () {
+                    if (hang === 'feed') return yield* hung<never>();
                     if (localStorage.getItem('synthetic-offline'))
                       return yield* new LedgerFeedError({ code: 'native-unavailable' });
                     const start = offset === '-1' ? 0 : Number(offset.split('/')[1]);
@@ -607,10 +638,19 @@ export async function boot(
                   }),
                 appendCas: (_anchor, expected, record) =>
                   Effect.gen(function* () {
+                    if (localStorage.getItem('quota-once') === '1') {
+                      localStorage.removeItem('quota-once');
+                      return yield* new LedgerLogError({
+                        reason: 'self-service-rate-limited',
+                        retryAt: 3600000,
+                      });
+                    }
+                    if (hang === 'append') return yield* hung<never>();
                     if (expected.length !== records.length || !expected.head.equals(view().head))
                       return yield* new LedgerLogError({});
                     records.push(new Uint8Array(record));
                     retain();
+                    if (hang === 'append-landed') return yield* hung<never>();
                     if (loseNextAppendReply) {
                       // The record landed; only its reply is lost on the way back.
                       loseNextAppendReply = false;
@@ -668,7 +708,11 @@ export async function boot(
                   events.push('fetch');
                   const current = view(),
                     target = current.inspectState().devices.get(toHex(binding.device.toBytes()));
-                  if (!target || epoch > 0) return { items: [], next: null };
+                  if (
+                    !target ||
+                    (epoch > 0 && !(epoch === 1 && localStorage.getItem('current-mailbox') === '1'))
+                  )
+                    return { items: [], next: null };
                   const prepared = yield* prepareEpochEnvelope({
                     context: {
                       genesis: binding.genesis,
@@ -676,7 +720,10 @@ export async function boot(
                       sender: owner.publicKey,
                       recipient: binding.device,
                     },
-                    key,
+                    key:
+                      epoch === 1
+                        ? Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72)))
+                        : key,
                     signer: owner,
                     ledger: () => Effect.succeed(current),
                   });
@@ -786,6 +833,7 @@ export async function boot(
             );
             irohFixture.handedSeed = seed;
             return {
+              connectionPath: async () => (irohFixture.connected ? 'direct' : 'none'),
               hasConnection: async (id) => {
                 irohFixture.targets.push(id);
                 return irohFixture.connected;
@@ -813,6 +861,7 @@ export async function boot(
           },
         },
         drainOld: () => (session ? session.close() : Effect.void),
+        deadlines: { sleep: deadlineSleep },
       });
       const remote = PersonalHostRemote.of({
         accountId: recoveryAccount ?? 'account',
@@ -844,6 +893,7 @@ export async function boot(
           : {}),
         exchange: (request: PersonalExchange) =>
           Effect.gen(function* () {
+            if (hang === 'exchange') return yield* hung<never>();
             const prior = localStorage.getItem('request:' + request.pairingSessionId);
             if (prior && prior !== request.requestHex) throw new Error('changed request');
             localStorage.setItem('request:' + request.pairingSessionId, request.requestHex);
@@ -1297,6 +1347,159 @@ export async function invoke(action: string) {
               access: access.workspaceId === offer.workspaceId && access.credential.length === 64,
             };
           }
+          // The owner revokes the device this host currently opened.
+          case 'revokeOpened': {
+            const command = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: session!.binding.device,
+              })
+            );
+            records.push(yield* signLedgerRecord(command, owner));
+            retain();
+            return true;
+          }
+          case 'hangFeed':
+          case 'hangAppend':
+          case 'hangAppendLanded':
+          case 'hangExchange':
+            hangEntered = signal();
+            hang = (
+              {
+                hangFeed: 'feed',
+                hangAppend: 'append',
+                hangAppendLanded: 'append-landed',
+                hangExchange: 'exchange',
+              } as const
+            )[action as 'hangFeed' | 'hangAppend' | 'hangAppendLanded' | 'hangExchange'];
+            return true;
+          // Once the hung call is entered, its deadline elapses (now or when it registers).
+          case 'expireDeadlines':
+            yield* Effect.promise(() => hangEntered.promise);
+            deadlinesExpired = true;
+            for (const finish of deadlineWaiters) finish();
+            deadlineWaiters.clear();
+            return true;
+          case 'networkBack':
+            hang = null;
+            deadlinesExpired = false;
+            return true;
+          // How many signed records revoke the owner's device: one, never a second signature.
+          case 'ownerRevocations':
+            return records.filter((bytes) => {
+              const decoded = decodeRecord(bytes);
+              return (
+                Result.isSuccess(decoded) &&
+                decoded.success.body.type === 'ordinary' &&
+                decoded.success.body.operation.type === 'revokeDevice' &&
+                decoded.success.body.operation.target.equals(owner.publicKey)
+              );
+            }).length;
+          case 'rememberBinding': {
+            const current = yield* Context.get(baseContext, ClientInstallationStore).read();
+            preservedBinding = current!.binding;
+            return toHex(current!.binding.device.toBytes());
+          }
+          // The replaced identity's original request stays retained under its own binding.
+          case 'preservedOriginal': {
+            const row = yield* Context.get(baseContext, ClientPairingOriginalStore).load({
+              ...preservedBinding!,
+              pairingSessionId: offer.pairingSessionId,
+              purpose: 'request',
+            });
+            return row
+              ? (JSON.parse(new TextDecoder().decode(row.original)).requestHex as string)
+              : null;
+          }
+          case 'currentDevice': {
+            const current = yield* Context.get(baseContext, ClientInstallationStore).read();
+            return toHex(current!.binding.device.toBytes());
+          }
+          // A relay altering one byte of the admitting record in the candidate's history.
+          case 'forgeCandidateHistory': {
+            genuineCandidateHistory = localStorage.getItem('candidate-history');
+            const pages = JSON.parse(genuineCandidateHistory!);
+            const last: string = pages[0].recordsHex.at(-1);
+            pages[0].recordsHex[pages[0].recordsHex.length - 1] =
+              last.slice(0, -2) + (last.endsWith('00') ? '01' : '00');
+            localStorage.setItem('candidate-history', JSON.stringify(pages));
+            return true;
+          }
+          case 'restoreCandidateHistory':
+            localStorage.setItem('candidate-history', genuineCandidateHistory!);
+            return true;
+          // Account pairing again after revocation: the history decides a replacement.
+          case 'accountPrepareWithHistory':
+          case 'accountPrepareWithStaleHistory':
+          case 'accountPrepareWithForgedHistory': {
+            const shown =
+              action === 'accountPrepareWithStaleHistory' ? records.slice(0, -1) : [...records];
+            const recordsHex = shown.map(toHex);
+            if (action === 'accountPrepareWithForgedHistory')
+              recordsHex[recordsHex.length - 1] = recordsHex.at(-1)!.slice(0, -2) + 'ff';
+            return yield* host.prepareAccount({
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+              history: [
+                {
+                  workspaceId: offer.workspaceId,
+                  genesisHash: offer.genesisHash,
+                  checkpoint: {
+                    length: shown.length,
+                    headHash: toHex(hashRecordBytes(shown.at(-1)!).toBytes()),
+                  },
+                  startIndex: 0,
+                  recordsHex,
+                  position: 'opaque/' + shown.length,
+                  nextCursor: null,
+                },
+              ],
+            });
+          }
+          // The owner admits the prepared account replacement; this device installs it
+          // from the complete signed history.
+          case 'accountAdmitReplacement': {
+            const pin = {
+              genesisRecordHex: offer.genesisRecordHex,
+              membershipId: offer.membershipId,
+            };
+            const prepared = yield* host.prepareAccount(pin),
+              request = decodePersonalRequest(prepared.requestHex);
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'personal',
+                signingPublicKey: Result.getOrThrow(
+                  Bytes.signingPublicKey(fromHex(request.signingPublicKey))
+                ),
+                encryptionPublicKey: Result.getOrThrow(
+                  Bytes.encryptionPublicKey(fromHex(request.encryptionPublicKey))
+                ),
+                possessionSignature: Result.getOrThrow(
+                  Bytes.signature(fromHex(request.possessionSignature))
+                ),
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            yield* host.acceptAccountHistory({
+              ...pin,
+              pages: [
+                {
+                  workspaceId: offer.workspaceId,
+                  genesisHash: offer.genesisHash,
+                  checkpoint: { length: records.length, headHash: toHex(view().head.toBytes()) },
+                  startIndex: 0,
+                  recordsHex: records.map(toHex),
+                  position: 'opaque/' + records.length,
+                  nextCursor: null,
+                },
+              ],
+            });
+            return request.signingPublicKey;
+          }
+          case 'openedDevice':
+            return toHex(session!.binding.device.toBytes());
           case 'currentRequestForToken': {
             const p = yield* host.prepare(offer);
             localStorage.setItem('last-request', p.requestHex);
@@ -1463,6 +1666,62 @@ export async function invoke(action: string) {
             records.push(
               yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner)
             );
+            retain();
+            return true;
+          }
+          case 'quotaThenGovern': {
+            localStorage.setItem('quota-once', '1');
+            const refused = yield* Effect.result(
+              session!.execute({ _tag: 'RevokeDevice', target: session!.binding.device })
+            );
+            const result = yield* session!.execute({
+              _tag: 'DeclareCapabilities',
+              capabilities: [1],
+            });
+            yield* session!.acknowledge(result);
+            return {
+              refusal: Result.isFailure(refused)
+                ? (refused.failure as { reason?: string }).reason
+                : null,
+              outcome: result.outcome,
+            };
+          }
+          case 'currentMailbox':
+            localStorage.setItem('current-mailbox', '1');
+            return true;
+          case 'abandonRemote': {
+            const genesis = Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash)));
+            const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x73)));
+            const operations = [
+              [9, [2]],
+              [
+                11,
+                2,
+                Result.getOrThrow(commitEpochKey(genesis, 2, next)).toBytes(),
+                0,
+                Result.getOrThrow(
+                  sealHistoryPacket({
+                    genesis,
+                    epoch: 2,
+                    baseEpoch: 0,
+                    currentKey: next,
+                    previousKey: key,
+                  })
+                ),
+              ],
+            ];
+            for (const operation of operations) {
+              const body = Result.getOrThrow(
+                encodeCbor([
+                  view().head.toBytes(),
+                  owner.publicKey.toBytes(),
+                  operation as import('@lody/e2ee-core/protocol').CborValue,
+                ])
+              );
+              records.push(
+                yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner)
+              );
+            }
             retain();
             return true;
           }
@@ -1712,7 +1971,7 @@ export async function bootRuntime(withSharing = false) {
             })
           )
         : runtimePorts,
-      retainedOffer: () => Effect.succeed(offer),
+      retainedOffer: () => Effect.sync(() => runtimeRetained ?? offer),
       account: () =>
         accountFailure
           ? Effect.failCause(accountFailure)
@@ -1957,6 +2216,22 @@ export async function runtimeInvoke(action: string) {
       case 'prepare':
         value = await runtime.preparePersonalJoin!(offer);
         break;
+      // Re-pairing this device from a new personal pairing offer.
+      case 'repairPrepare':
+        runtimeRetained = { ...offer, pairingSessionId: '22'.repeat(16) };
+        value = await runtime.preparePersonalJoin!(runtimeRetained);
+        break;
+      case 'repairForgedGenesis':
+        value = await runtime.preparePersonalJoin!({
+          ...offer,
+          genesisHash: 'ab'.repeat(32),
+          pairingSessionId: '44'.repeat(16),
+        });
+        break;
+      case 'repairClaim':
+        value = await runtime.claimPersonalJoin!(offer.workspaceId, '22'.repeat(16));
+        break;
+
       case 'claim':
         value = await runtime.claimPersonalJoin!(offer.workspaceId, offer.pairingSessionId);
         break;
@@ -2029,6 +2304,9 @@ export async function runtimeInvoke(action: string) {
         break;
       case 'ledger':
         value = await runtime.ledgerView(offer.workspaceId);
+        break;
+      case 'irohPath':
+        value = await runtime.irohPath!(offer.workspaceId, 'fixture-machine');
         break;
       case 'irohReady':
         value = await runtime.irohReady!(offer.workspaceId, 'fixture-machine');
@@ -2397,6 +2675,24 @@ export async function runtimeInvoke(action: string) {
           other: runtimeOtherOpen ? await runtimeOtherOpen : undefined,
         };
         break;
+      case 'startRefresh':
+      case 'startRepairPrepare':
+      case 'startRevokeOwner':
+        runtimeWork = (
+          action === 'startRefresh'
+            ? runtime.refresh(offer.workspaceId)
+            : action === 'startRepairPrepare'
+              ? runtime.preparePersonalJoin!({ ...offer, pairingSessionId: '22'.repeat(16) })
+              : runtime.revokeDevice!(offer.workspaceId, toHex(owner.publicKey.toBytes()))
+        ).then(
+          (v) => ({ ok: true, value: v }),
+          (error) => ({ ok: false, reason: error.code ?? error.reason })
+        );
+        value = true;
+        break;
+      case 'revokeOwner':
+        value = await runtime.revokeDevice!(offer.workspaceId, toHex(owner.publicKey.toBytes()));
+        break;
       case 'startReceive':
         runtimeWork = runtime.refresh(offer.workspaceId, { installKeys: true }).then(
           (v) => ({ ok: true, value: v }),
@@ -2618,6 +2914,8 @@ export const runtimeReader = {
  * Remote maps are synthetic; custody/installation are actual browser IndexedDB. */
 export async function recoverBrowser(
   options: {
+    blockedEpoch?: 'missing' | 'corrupt';
+    governance?: boolean;
     wrongAccount?: boolean;
     failInstall?: boolean;
     resume?: boolean;
@@ -2626,6 +2924,7 @@ export async function recoverBrowser(
     repair?: boolean;
     revokePersonal?: boolean;
     setup?: boolean;
+    slowRecoveryIo?: boolean;
     runtime?: boolean;
   } = {}
 ) {
@@ -2635,21 +2934,24 @@ export async function recoverBrowser(
     { readonly entryId: string; readonly revision: number; readonly body: Uint8Array }
   >();
   const journal = new Map<string, Uint8Array>();
-  let index: {
-    readonly entryId: string;
-    readonly revision: number;
-    readonly body: Uint8Array;
-  } | null = null;
+  const indices = new Map<
+    string,
+    {
+      readonly entryId: string;
+      readonly revision: number;
+      readonly body: Uint8Array;
+    }
+  >();
   const store: RecoveryVaultStore['Service'] = {
     putImmutable: (_id, entry) =>
       Effect.sync(() => {
         entries.set(entry.entryId, entry);
       }),
     readEntry: (_id, id) => Effect.succeed(entries.get(id) ?? null),
-    readIndex: () => Effect.sync(() => index),
-    compareAndSwapIndex: (_id, _expected, next) =>
+    readIndex: (id) => Effect.sync(() => indices.get(id) ?? null),
+    compareAndSwapIndex: (id, _expected, next) =>
       Effect.sync(() => {
-        index = next;
+        indices.set(id, next);
         return 'Committed' as const;
       }),
     deleteUnreferenced: () => Effect.void,
@@ -2689,13 +2991,23 @@ export async function recoverBrowser(
         const sourceKeys = memoryRecoveryEpochKeys();
         yield* Effect.addFinalizer(() => Effect.sync(() => sourceKeys.dispose()));
         yield* sourceKeys.saveAndReload(0, key);
+        let retainedEnvelope: { sender: Bytes.SigningPublicKey; frame: Uint8Array } | undefined;
         const envelope: import('@lody/e2ee-core').WorkspaceRecoveryInput['fetchCurrentEnvelope'] = (
           recipient,
           _epoch,
           identity,
           credential
-        ) =>
-          prepareEpochEnvelope({
+        ) => {
+          if (options.blockedEpoch && view().inspectState().epoch.number > 0) {
+            credential.fill(0);
+            if (_epoch === 0) return Effect.succeed(retainedEnvelope!);
+            return Effect.succeed(
+              options.blockedEpoch === 'missing'
+                ? { pending: true as const }
+                : { sender: owner.publicKey, frame: new Uint8Array([1, 2, 3]) }
+            );
+          }
+          return prepareEpochEnvelope({
             context: {
               genesis: view().genesis,
               epoch: Result.getOrThrow(Bytes.epochNumber(0)),
@@ -2706,9 +3018,10 @@ export async function recoverBrowser(
             signer: owner,
             ledger: () => Effect.succeed(view()),
           }).pipe(
-            Effect.map((frame) => ({ sender: owner.publicKey, frame })),
+            Effect.map((frame) => (retainedEnvelope = { sender: owner.publicKey, frame })),
             Effect.ensuring(Effect.sync(() => credential.fill(0)))
           );
+        };
         const setup = yield* makeWorkspaceRecovery({
           vault,
           local,
@@ -2732,6 +3045,28 @@ export async function recoverBrowser(
             }),
         });
         yield* setup.setup();
+        if (options.blockedEpoch) {
+          const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72)));
+          const genesis = view().genesis;
+          const body = Result.getOrThrow(
+            encodeCbor([
+              view().head.toBytes(),
+              owner.publicKey.toBytes(),
+              [
+                7,
+                1,
+                Result.getOrThrow(commitEpochKey(genesis, 1, next)).toBytes(),
+                Result.getOrThrow(
+                  sealHistoryPacket({ genesis, epoch: 1, currentKey: next, previousKey: key })
+                ),
+              ],
+            ])
+          );
+          records.push(
+            yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner)
+          );
+          retain();
+        }
         const reference = (yield* vault.readIndex()).value.entries[0];
         if (options.revokedRecovery) {
           const recovery = [...view().inspectState().devices].find(
@@ -2747,18 +3082,29 @@ export async function recoverBrowser(
           retain();
         }
         if (options.tamperedPackage) entries.get(reference.entryId)!.body[25] ^= 1;
+        const expireDeadlines = () =>
+          Effect.gen(function* () {
+            deadlinesExpired = true;
+            const waiters = [...deadlineWaiters];
+            deadlineWaiters.clear();
+            for (const finish of waiters) finish();
+            yield* Effect.yieldNow;
+          });
         const pages = () =>
-          Effect.succeed([
-            {
-              workspaceId: offer.workspaceId,
-              genesisHash: offer.genesisHash,
-              checkpoint: { length: view().length, headHash: toHex(view().head.toBytes()) },
-              startIndex: 0,
-              recordsHex: records.map(toHex),
-              position: 'recovery/full',
-              nextCursor: null,
-            },
-          ]);
+          Effect.gen(function* () {
+            if (options.slowRecoveryIo) yield* expireDeadlines();
+            return [
+              {
+                workspaceId: offer.workspaceId,
+                genesisHash: offer.genesisHash,
+                checkpoint: { length: view().length, headHash: toHex(view().head.toBytes()) },
+                startIndex: 0,
+                recordsHex: records.map(toHex),
+                position: 'recovery/full',
+                nextCursor: null,
+              },
+            ];
+          });
         failKeys = options.failInstall ?? false;
         let recoveryRuntime: E2eeWorkspaceRuntime | undefined;
         if (options.runtime) {
@@ -2815,6 +3161,25 @@ export async function recoverBrowser(
             runtime.open(offer.workspaceId, undefined, 'abc', 'recovery-reader')
           );
           const before = yield* Effect.tryPromise(() => runtime.status(offer.workspaceId));
+          if (options.governance) {
+            yield* Effect.tryPromise(() =>
+              runtime.revokeDevice!(offer.workspaceId, toHex(owner.publicKey.toBytes()))
+            );
+            const selfKey = before.signingPublicKey!;
+            const denied = yield* Effect.result(
+              Effect.tryPromise(() => runtime.revokeDevice!(offer.workspaceId, selfKey))
+            );
+            const stillAdmitted = view().inspectState().devices.has(selfKey);
+            yield* Effect.tryPromise(() =>
+              runtime.revokeDevice!(offer.workspaceId, selfKey, { confirmedRecoveryOnly: true })
+            );
+            return {
+              ok: true,
+              guarded: Result.isFailure(denied) && stillAdmitted,
+              removed: !view().inspectState().devices.has(selfKey),
+            };
+          }
+
           const backedUp = yield* personalRuntimeRecovery(runtime)!.setup({
             vault,
             local,
@@ -2853,13 +3218,24 @@ export async function recoverBrowser(
         }
         session = yield* host.open(offer, false, true);
         let recoveryVerified = false;
+        let refreshedDuringSetup = false;
         if (options.setup) {
+          deadlinesExpired = false;
+          const setupVault = options.slowRecoveryIo
+            ? (yield* (yield* RecoveryVaults).create({ locator: 'abc-rotated' })).vault
+            : vault;
           const setupResult = yield* session.setupRecovery({
-            vault,
+            vault: setupVault,
             local,
             fetchCurrentEnvelope: envelope,
             submitOriginal: (record) =>
-              Effect.sync(() => {
+              Effect.gen(function* () {
+                if (options.slowRecoveryIo) {
+                  yield* expireDeadlines();
+                  deadlinesExpired = false;
+                  yield* session!.refresh();
+                  refreshedDuringSetup = true;
+                }
                 if (!records.some((old) => toHex(old) === toHex(record)))
                   records.push(record.slice());
                 retain();
@@ -2948,10 +3324,12 @@ export async function recoverBrowser(
         return {
           ok: true,
           outcome: result.success.outcome,
+          partialEpochKey: result.success.partialEpochKey,
           length: current.view.length,
           sealed: frame.sealed.length > 64,
           noDuplicateAdmission: records.length === admittedCount,
           recoveryVerified,
+          refreshedDuringSetup,
         };
       }).pipe(Effect.provide(layers))
     )

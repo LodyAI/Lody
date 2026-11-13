@@ -97,3 +97,33 @@ test('the device approval guide scrolls inside the phone shell', async ({ page, 
   await expectWholePageReachable(page, '[data-testid="e2ee-device-approval-guide"]');
   await expectHittable(page, /Check again/);
 });
+
+for (const size of [
+  { width: 1090, height: 688 },
+  { width: 390, height: 600 },
+]) {
+  test(`workspace creation keeps its back and resume actions reachable at ${size.width}px`, async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'safe-area emulation is Chromium-only');
+    await openInPhoneShell(page, 'pages-encryptedworkspacecreation--pending-requests', size);
+    const root = page.getByTestId('create-workspace-page');
+    await expect(root).toBeVisible({ timeout: 30_000 });
+    await expectHittable(page, /Back to previous workspace/);
+    expect(await root.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+
+    // Use actual wheel input: auto-scrolling a locator can move a clipped shell.
+    await page.mouse.move(size.width / 2, size.height / 2);
+    await page.mouse.wheel(0, 10000);
+    await expect.poll(() => root.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await expect
+      .poll(() => root.evaluate((el) => Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop)))
+      .toBeLessThanOrEqual(1);
+    await expectHittable(page, /Continue saved creation/);
+
+    await page.mouse.wheel(0, -10000);
+    await expect.poll(() => root.evaluate((el) => el.scrollTop)).toBe(0);
+    await expectHittable(page, /Back to previous workspace/);
+  });
+}

@@ -167,6 +167,8 @@ export type SessionListRow = {
   hasUnreadMessages: boolean;
   isOffline: boolean;
   isWaitingPermission: boolean;
+  /** The latest turn ended in failure (`hasFailedLatestTurn`), child Tabs rolled in. */
+  hasFailedTurn?: boolean;
   isPinned?: boolean;
   isWorktree?: boolean;
   externalHistoryProvider?: LocalProjectHistoryProvider | null;

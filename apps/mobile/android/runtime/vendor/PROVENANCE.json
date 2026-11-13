@@ -120,6 +120,32 @@
     ],
     "note": "The meta watcher keeps the replica object while its Flock is unchanged, so in-flight writes (Agent Role saves) no longer read a routine poll as a workspace change. Mirrored verbatim from the iOS runtime source in the same change."
   },
+  "catalogReadRecovery": {
+    "files": [
+      "src/runtime/index.ts"
+    ],
+    "note": "Catalog transport/auth failures and Android read suspension retry from the last imported offset and cursor while retaining the verified replica. Protocol, cursor and import failures keep bootstrap recovery. Mirrored verbatim from the iOS runtime source in the same change. Explicit Android host suspension keeps an otherwise valid grant; real transport failures still invalidate it."
+  },
+  "failedLatestTurn": {
+    "files": [
+      "src/models/catalog.ts",
+      "src/protocol/catalog.ts"
+    ],
+    "note": "The catalog projection carries session meta lastHandledUserMsgId and lastFailedUserMsgId, so native lists show a conversation whose latest turn failed. Mirrored verbatim from the iOS runtime source in the same change."
+  },
+  "roleMachineNames": {
+    "files": [
+      "src/runtime/agent-roles.ts",
+      "src/runtime/handlers/mentions.ts"
+    ],
+    "note": "A Role on several machines labels each @ mention target by its alias or the computer's catalog name instead of the raw machine id. Mirrored verbatim from the iOS runtime source in the same change."
+  },
+  "roleMentionAfterText": {
+    "files": [
+      "src/runtime/mention-expansion.ts"
+    ],
+    "note": "An @session:/@role: chip written straight after non-ASCII text (`让@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
+  },
   "perModelConfigOptions": {
     "files": [
       "contract/runtime-contract.json",

@@ -451,7 +451,7 @@ describe('v1 snapshot byte cache with separate independent trust', () => {
                 membershipId: f.membership,
                 kind: 'personal',
                 signer: other.owner,
-                encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(182))),
+                encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(82))),
               });
               const record = yield* signLedgerRecord(
                 ok(prepareLedgerCommand(f.view, f.owner.publicKey, command)),
@@ -621,7 +621,7 @@ describe('explicit snapshot-origin ledger consumer', () => {
             membershipId: f.membership,
             kind: 'personal',
             signer: device.owner,
-            encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(184))),
+            encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(84))),
           });
           return yield* signLedgerRecord(
             ok(prepareLedgerCommand(f.view, f.owner.publicKey, command)),

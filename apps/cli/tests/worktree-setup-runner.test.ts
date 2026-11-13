@@ -97,8 +97,8 @@ describe('worktree setup runner', () => {
     const shell = resolveWorktreeSetupShell();
     const script =
       shell === 'powershell'
-        ? "$env:LODY_TEST_VALUE = 'hello'\nWrite-Output $env:LODY_TEST_VALUE\n[Console]::Error.WriteLine('err')"
-        : 'export LODY_TEST_VALUE=hello\nprintf "$LODY_TEST_VALUE\\n"\nprintf \'err\\n\' >&2';
+        ? "$env:LODY_TEST_VALUE = 'hello'\nWrite-Output \"$($env:LODY_TEST_VALUE):$($env:LODY_AGENT_SESSION_ID)\"\n[Console]::Error.WriteLine('err')"
+        : 'export LODY_TEST_VALUE=hello\nprintf "%s:%s\\n" "$LODY_TEST_VALUE" "$LODY_AGENT_SESSION_ID"\nprintf \'err\\n\' >&2';
     const config: WorktreeSetupScriptConfig = {
       scripts: {
         [shell]: script,
@@ -147,7 +147,7 @@ describe('worktree setup runner', () => {
         .filter((event) => event.stepIndex === 1)
         .map((event) => event.chunk)
         .join('')
-    ).toContain('hello');
+    ).toContain('hello:session-1');
     expect(
       outputs
         .filter((event) => event.stepIndex === 2)

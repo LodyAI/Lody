@@ -20,6 +20,7 @@ const Row = Schema.Struct({
   outcome: Schema.NullOr(Schema.Literals(['Committed', 'Conflict'])),
   head: Schema.NullOr(Schema.Uint8Array),
   length: Schema.Int,
+  revision: Schema.Int,
 });
 const fail = (reason: LocalStoreError['reason']) =>
   new LocalStoreError({ store: 'SubmissionJournal', reason });
@@ -64,6 +65,29 @@ export const sqliteSubmissionJournal = (options: { readonly path: string }) =>
       );`);
         },
       });
+      // Add only concurrency metadata; never rebuild or erase a pending v1 original.
+      yield* Effect.try({
+        try: () => {
+          if (
+            !(db.prepare('PRAGMA table_info(submission_journal)').all() as { name: string }[]).some(
+              (row) => row.name === 'revision'
+            )
+          )
+            db.exec(
+              'ALTER TABLE submission_journal ADD COLUMN revision INTEGER NOT NULL DEFAULT 0'
+            );
+        },
+        catch: () => fail('storage'),
+      });
+      const revision = (anchor: GenesisHash): number => {
+        const row = db
+          .prepare('SELECT revision FROM submission_journal WHERE anchor = ?')
+          .get(keyId(anchor.toBytes())) as { revision: number } | undefined;
+        const value = row?.revision ?? 0;
+        if (!Number.isSafeInteger(value) || value < 0 || value >= Number.MAX_SAFE_INTEGER)
+          throw corrupt();
+        return value;
+      };
       const sqlEffect = <A>(body: () => A) =>
         Effect.try({
           try: body,
@@ -73,7 +97,7 @@ export const sqliteSubmissionJournal = (options: { readonly path: string }) =>
       const load = (anchor: GenesisHash): SubmissionEntry => {
         const raw = db
           .prepare(
-            'SELECT pending, result_record, outcome, head, length FROM submission_journal WHERE anchor = ?'
+            'SELECT pending, result_record, outcome, head, length, revision FROM submission_journal WHERE anchor = ?'
           )
           .get(keyId(anchor.toBytes()));
         if (!raw) return { record: null, outcome: null, checkpoint: null };
@@ -125,7 +149,7 @@ export const sqliteSubmissionJournal = (options: { readonly path: string }) =>
             )
               throw busy();
             db.prepare(
-              'UPDATE submission_journal SET pending = ?, result_record = ?, outcome = ?, head = ?, length = ? WHERE anchor = ?'
+              'UPDATE submission_journal SET pending = ?, result_record = ?, outcome = ?, head = ?, length = ?, revision = revision + 1 WHERE anchor = ?'
             ).run(
               outcome ? null : record,
               outcome ? record : null,
@@ -134,6 +158,7 @@ export const sqliteSubmissionJournal = (options: { readonly path: string }) =>
               after.length,
               keyId(anchor.toBytes())
             );
+            return revision(anchor);
           })
           .immediate();
       return SubmissionJournal.of({
@@ -148,18 +173,44 @@ export const sqliteSubmissionJournal = (options: { readonly path: string }) =>
                 const current = load(anchor);
                 if (current.record) {
                   if (!bytesEqual(current.record, record)) throw busy();
-                  return;
+                  return null;
                 }
                 db.prepare(
-                  'INSERT INTO submission_journal(anchor, pending) VALUES(?, ?) ON CONFLICT(anchor) DO UPDATE SET pending = excluded.pending'
+                  'INSERT INTO submission_journal(anchor, pending, revision) VALUES(?, ?, 1) ON CONFLICT(anchor) DO UPDATE SET pending = excluded.pending, revision = revision + 1'
                 ).run(keyId(anchor.toBytes()), record);
+                return revision(anchor);
               })
               .immediate()
           ),
         observe: (anchor, record, before, after) =>
           sqlEffect(() => transition(anchor, record, before, after, null)),
         finish: (anchor, record, outcome, before, after) =>
-          sqlEffect(() => transition(anchor, record, before, after, outcome)),
+          sqlEffect(() => {
+            transition(anchor, record, before, after, outcome);
+          }),
+        rejectUnsent: (anchor, record, checkpoint, expectedRevision) =>
+          sqlEffect(() =>
+            db
+              .transaction(() => {
+                const current = load(anchor);
+                if (
+                  !current.record ||
+                  current.outcome ||
+                  !bytesEqual(current.record, record) ||
+                  !sameCheckpoint(current.checkpoint, checkpoint) ||
+                  revision(anchor) !== expectedRevision
+                )
+                  return false;
+                db.prepare(
+                  'UPDATE submission_journal SET pending = NULL, revision = revision + 1 WHERE anchor = ?'
+                ).run(keyId(anchor.toBytes()));
+                const saved = load(anchor);
+                if (saved.record || saved.outcome || !sameCheckpoint(saved.checkpoint, checkpoint))
+                  throw corrupt();
+                return true;
+              })
+              .immediate()
+          ),
         acknowledge: (anchor, result: SubmissionResult) =>
           sqlEffect(() =>
             db
@@ -173,7 +224,7 @@ export const sqliteSubmissionJournal = (options: { readonly path: string }) =>
                 )
                   throw busy();
                 db.prepare(
-                  'UPDATE submission_journal SET result_record = NULL, outcome = NULL WHERE anchor = ?'
+                  'UPDATE submission_journal SET result_record = NULL, outcome = NULL, revision = revision + 1 WHERE anchor = ?'
                 ).run(keyId(anchor.toBytes()));
               })
               .immediate()

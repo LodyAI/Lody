@@ -2106,6 +2106,7 @@ export class SessionDispatchWatcher {
 
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(getSessionRoomId(sessionId), {
       lastHandledUserMsgId: userTurnId,
+      lastFailedUserMsgId: userTurnId,
       processingUserMsgId: undefined,
     } satisfies Partial<SessionMeta>);
     await this.deps.executionService.acknowledgeSteerTurn(sessionId, userTurnId);
@@ -3255,6 +3256,7 @@ export class SessionDispatchWatcher {
         [
           meta.latestUserMsgId,
           meta.processingUserMsgId,
+          meta.lastHandledUserMsgId,
           getPendingUserTurnActivationId(meta),
           preferred,
           queued ? queued.userTurnId?.trim() || `queued-${queued.$cid}` : undefined,
@@ -3270,6 +3272,46 @@ export class SessionDispatchWatcher {
       };
       let selection = await backend.readDispatchSelection(requestedIds(), select);
       let history = selection.history;
+      if (!isActive()) return { turn: null, history };
+      if (
+        this.deps.encryptedWorkspace &&
+        this.deps.executionService.recoverUncertainEncryptedTurn
+      ) {
+        let recovered = false;
+        for (const entry of selection.history) {
+          if (!isActive()) return { turn: null, history };
+          if (entry.role !== 'user' || repairedTurnIds.has(entry.id)) continue;
+          if (
+            ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(entry.status ?? '') &&
+            meta.processingUserMsgId !== entry.id
+          )
+            continue;
+          try {
+            if (
+              await this.deps.executionService.recoverUncertainEncryptedTurn(
+                meta.id,
+                sessionDoc,
+                entry.id
+              )
+            ) {
+              repairedTurnIds.add(entry.id);
+              recovered = true;
+            }
+          } catch (error) {
+            // Unknown evidence for the selected input still fences that
+            // input. An unrelated historical failure cannot block new work.
+            if (entry.id === selection.turnId) throw error;
+            this.deps.logger.debug(
+              `[${meta.id}] Could not recover historical encrypted turn ${entry.id}: ${formatErrorMessage(error)}`
+            );
+          }
+        }
+        if (recovered) {
+          selection = await backend.readDispatchSelection(requestedIds(), select);
+          history = selection.history;
+        }
+      }
+
       if (!isActive()) {
         return { turn: null, history };
       }
@@ -3388,8 +3430,8 @@ export class SessionDispatchWatcher {
    * that case, repair the entry to its recorded terminal status (also fixing
    * the sender's delivery indicator), and skip dispatch.
    *
-   * `processingUserMsgId === turn.id` always wins: that is crash-mid-turn
-   * recovery, which must re-dispatch and reuses the same assistant entry.
+   * Ordinary crash-mid-turn recovery re-dispatches processingUserMsgId and
+   * reuses the same assistant entry. Encrypted uncertain starts settle before selection.
    */
   private async maybeRepairAlreadyHandledTurn(
     sessionDoc: SessionDocumentHandle,
@@ -3428,9 +3470,9 @@ export class SessionDispatchWatcher {
         // with no completed assistant entry it did NOT finish successfully
         // (denied access, cancel, or pre-prompt failure whose exact kind was
         // lost on restart). Repair to 'failed' — a safe non-success terminal
-        // that prevents re-dispatch without falsely reporting success. A
-        // chat_failed notice was already surfaced when the terminal write
-        // happened, so the user still sees the real outcome.
+        // that prevents re-dispatch without falsely reporting success.
+        // Encrypted uncertain starts are reconciled before selection, including
+        // their durable interruption notice.
         terminalStatus = 'failed';
       }
     }

@@ -378,6 +378,7 @@ export interface LoroDocumentManagerOptions {
     | 'repositoryDirectory'
     | 'attachmentToken'
     | 'signMachineInput'
+    | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
   >;
@@ -463,6 +464,7 @@ export class LoroDocumentManager {
     | 'repositoryDirectory'
     | 'attachmentToken'
     | 'signMachineInput'
+    | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
   >;
@@ -490,6 +492,15 @@ export class LoroDocumentManager {
     const e2ee = this.encryptedWorkspace;
     if (!e2ee) throw new Error('e2ee_access_unavailable');
     return await Effect.runPromise(e2ee.authorizeMachineTarget(machineId, localProjectId));
+  }
+
+  /** Sign only a Schedule addressed to this machine, using its encrypted runtime. */
+  async signScheduleDeclaration(
+    document: Parameters<CliE2eeWorkspaceLegacy['signScheduleDeclaration']>[0],
+    manualRunKey?: string
+  ): Promise<string> {
+    if (!this.encryptedWorkspace) throw new Error('e2ee_signature_unavailable');
+    return this.encryptedWorkspace.signScheduleDeclaration(document, manualRunKey);
   }
 
   /** Encrypted workspaces: the signed intent for an input this machine writes itself, to
@@ -553,6 +564,7 @@ export class LoroDocumentManager {
         | 'repositoryDirectory'
         | 'attachmentToken'
         | 'signMachineInput'
+        | 'signScheduleDeclaration'
         | 'authorizeMachineTarget'
         | 'authorizeSessionTarget'
       >;

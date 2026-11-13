@@ -56,3 +56,12 @@ See the [owner tradeoff](../../.agents/notes/implemented/architecture/2026-10-27
 Immutable recovery-package reads borrow independent short-lived master-key copies;
 never hold the index mutex across their network waits. Vault close stops new reads
 and drains admitted reads before returning; index mutations retain their mutex and CAS.
+
+The reference mailbox limits each sender to 16 non-rejected envelopes per current
+slot revision; repairs retain historical originals and rejected-digest entries.
+
+Recovery admission may use the highest authenticated committed epoch and its history,
+or the authenticated recovery identity at epoch zero. Report partial key recovery;
+never equate restored governance with current-key readiness. New owner transfers
+require a successor personal device, and last-personal revocation requires explicit
+recovery-loss confirmation in the workflow. Preserve v1 replay rules.

@@ -281,7 +281,9 @@ Lab.
 
 `LedgerFeedStore.rebase` CAS-checks the entire expected tail, replaces the origin
 and its count, removes covered records, and writes/read-checks the new tail in
-one transaction. A stale tail returns conflict without mutation.
+one transaction. A stale tail returns conflict without mutation. Optional `rebuild`
+uses the same atomic replacement after the workflow has independently replayed the
+highest retained checkpoint; it never modifies pins or other journals.
 
 ## Browser ledger and original stores
 
@@ -433,3 +435,5 @@ These ports contain no private credentials, authorization decision, network
 operation or crypto/network await inside IndexedDB transactions. The opt-in
 [`@lody/e2ee-client`](../../e2ee-client/README.md) host owns proof verification,
 actual custody readback, approval, current membership and confirmation/ACK.
+
+`SubmissionJournal.prepare` returns a new slot’s unique revision, or null for an identical occupied original. `observe` advances the revision even at an unchanged checkpoint. `rejectUnsent` clears only an unfinished matching original/checkpoint/revision, retaining the pin; only P09’s fresh first-attempt pre-CAS quota refusal uses it.

@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { TerminalExitEvent } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
+import { scheduleRequesterSessionId } from './schedules/schedule-command-client';
 import { makeTerminalPtyService } from './terminal-pty-service';
 
 const logger = {
@@ -26,6 +27,39 @@ describe.skipIf(process.platform === 'win32')('terminal PTY termination', () => 
   afterEach(async () => {
     vi.unstubAllEnvs();
     await rm(root, { recursive: true, force: true });
+  });
+
+  it('keeps human terminal Session context without inheriting Agent restrictions', async () => {
+    const shell = path.join(root, 'human-shell');
+    await writeFile(
+      shell,
+      '#!/bin/sh\nprintf \'LODY_ENV={"LODY_SESSION_ID":"%s","LODY_AGENT_SESSION_ID":"%s"}\\n\' "$LODY_SESSION_ID" "$LODY_AGENT_SESSION_ID"\n',
+      { mode: 0o700 }
+    );
+    vi.stubEnv('SHELL', shell);
+    vi.stubEnv('LODY_AGENT_SESSION_ID', 'daemon-agent-session');
+    const service = makeTerminalPtyService({ logger, resolveSessionWorkdir: async () => root });
+    const observed = Promise.withResolvers<NodeJS.ProcessEnv>();
+    const exited = Promise.withResolvers<void>();
+    let output = '';
+    service.onEvent((event) => {
+      if (event.type === 'exit') exited.resolve();
+      if (event.type !== 'data') return;
+      output += event.data;
+      const line = output
+        .split(/\r?\n/)
+        .find((line) => line.startsWith('LODY_ENV=') && line.endsWith('}'));
+      if (line) observed.resolve(JSON.parse(line.slice('LODY_ENV='.length)));
+    });
+    try {
+      await service.open({ sessionId: 'human-session', cols: 80, rows: 24 });
+      const env = await observed.promise;
+      await exited.promise;
+      expect(env).toEqual({ LODY_SESSION_ID: 'human-session', LODY_AGENT_SESSION_ID: '' });
+      expect(scheduleRequesterSessionId(undefined, env)).toBeUndefined();
+    } finally {
+      service.closeAll();
+    }
   });
 
   it('ends a shell that ignores the hangup instead of leaking it', async () => {

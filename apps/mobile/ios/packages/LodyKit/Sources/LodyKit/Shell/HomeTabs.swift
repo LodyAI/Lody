@@ -28,6 +28,7 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   var onSelect: (HomeTab) -> Void = { _ in }
   var onCreate: () -> Void = {}
   var onDebug: () -> Void = {}
+  var canCreate = false { didSet { tab(forIdentifier: Self.createID)?.isEnabled = canCreate } }
   private static let createID = "home-new-session"
 
   override func viewDidLoad() {
@@ -67,7 +68,7 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   }
 
   func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-    if tab.identifier == Self.createID { onCreate(); return false }
+    if tab.identifier == Self.createID { if canCreate { onCreate() }; return false }
     return true
   }
 

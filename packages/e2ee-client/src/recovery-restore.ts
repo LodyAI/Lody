@@ -1,6 +1,6 @@
 /** Authenticated recovery helpers for personal-device hosts. Explicit recovery
  * preserves admission and custody checks; product rollout belongs to the host. */
-import { Effect, Exit, Result, type Scope } from 'effect';
+import { Effect, Exit, Result, Schema, type Scope } from 'effect';
 import {
   Bytes,
   makeWorkspaceRecovery,
@@ -11,7 +11,7 @@ import {
   type WorkspaceRecoveryInput,
   type WorkspaceRestorePlan,
 } from '@lody/e2ee-core';
-import { hashRecordBytes, verifyLedger, wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
+import { verifyLedger, wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
 import { fromHex } from './bytes';
 
 /** Workspaces this vault can restore: the live entries of its authenticated index. */
@@ -51,7 +51,7 @@ export interface VaultRestoreInput {
 /**
  * Build a restore plan whose genesis comes only from the authenticated package.
  * Core then verifies the ledger from it, the package checkpoint and the current
- * epoch commitment before R admits the new device. Private keys are wiped here.
+ * available committed epoch before R admits the new device. Private keys are wiped here.
  */
 export const prepareVaultRestore = Effect.fnUntraced(function* (input: VaultRestoreInput) {
   const { anchor, trust } = yield* Effect.acquireUseRelease(
@@ -117,6 +117,8 @@ export const readRecoveryHistory = Effect.fnUntraced(function* <P extends Recove
   return pages;
 });
 
+const RecoveryCheckpointSchema = Schema.Struct({ headHash: Schema.String, length: Schema.Number });
+
 /** Replay the complete served history from the package's genesis. Each call rereads it,
  * because a restore must see its own admission. */
 export const recoveryLedger =
@@ -127,30 +129,61 @@ export const recoveryLedger =
   () =>
     Effect.gen(function* () {
       const pages = yield* input.pages();
-      if (pages[0]?.startIndex !== 0)
-        return yield* Effect.fail(new RecoveryVaultError({ code: 'authentication' }));
-      const records = pages.flatMap((page) => page.recordsHex).map(fromHex);
-      return yield* Effect.fromResult(
-        verifyLedger({
-          anchor: input.genesis,
-          records,
-          checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
-        })
-      );
+      const { records, checkpoint } = yield* Effect.try({
+        try: () => {
+          const first = pages[0];
+          const point = Result.getOrThrow(
+            Schema.decodeUnknownResult(RecoveryCheckpointSchema)(first?.checkpoint)
+          );
+          if (
+            !Number.isSafeInteger(point.length) ||
+            point.length < 1 ||
+            pages.at(-1)?.nextCursor !== null
+          )
+            throw new Error('invalid recovery checkpoint');
+          const records: Uint8Array[] = [];
+          for (const page of pages) {
+            const boundary = Result.getOrThrow(
+              Schema.decodeUnknownResult(RecoveryCheckpointSchema)(page.checkpoint)
+            );
+            if (
+              page.startIndex !== records.length ||
+              boundary.headHash !== point.headHash ||
+              boundary.length !== point.length
+            )
+              throw new Error('inconsistent recovery page');
+            records.push(...page.recordsHex.map(fromHex));
+          }
+          if (records.length !== point.length) throw new Error('incomplete recovery history');
+          return {
+            records,
+            checkpoint: {
+              head: Result.getOrThrow(Bytes.recordHash(fromHex(point.headHash))),
+              length: point.length,
+            },
+          };
+        },
+        catch: () => new RecoveryVaultError({ code: 'authentication' }),
+      });
+      return yield* Effect.fromResult(verifyLedger({ anchor: input.genesis, records, checkpoint }));
     }) as Effect.Effect<LedgerView, unknown>;
 
 const restoreProgressKey = (workspaceId: string) => `restore-progress/${workspaceId}`;
 const RESTORE_OPEN = new TextEncoder().encode('open');
+const RESTORE_PARTIAL = new TextEncoder().encode('partial');
 const RESTORE_DONE = new TextEncoder().encode('done');
 const isOpen = (value: Uint8Array | null) =>
   value !== null && new TextDecoder().decode(value) === 'open';
 
-/** True while a restore has begun but its keys are not installed. Such a workspace has an
- * identity yet cannot decrypt, so it stays restorable and does not count as set up. */
+const isIncomplete = (value: Uint8Array | null) =>
+  value !== null && ['open', 'partial'].includes(new TextDecoder().decode(value));
+
+/** True until admission, adoption and current-epoch key recovery have completed.
+ * Partial recovery stays retryable through R without another device admission. */
 export const recoveryRestoreIncomplete = (
   local: WorkspaceRecoveryInput['local'],
   workspaceId: string
-) => Effect.map(local.read(restoreProgressKey(workspaceId)), isOpen);
+) => Effect.map(local.read(restoreProgressKey(workspaceId)), isIncomplete);
 
 /** One workspace a vault can restore onto this device. */
 export interface RecoveryRestoreTarget {
@@ -161,7 +194,7 @@ export interface RecoveryRestoreTarget {
    * Whether this device already holds an identity for the workspace. `'unknown'` means the
    * check itself failed (for example a busy lease): nothing is restored over it, and the
    * workspace is reported `Failed` so the caller can retry, unless an earlier restore of
-   * it is still open, which resumes as usual.
+   * it is open or partial, which resumes as usual.
    */
   readonly hasIdentity: () => boolean | 'unknown';
   /** Connect only once the authenticated package names the workspace. */
@@ -196,6 +229,7 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
     readonly workspaceId: string;
     readonly name: string;
     readonly outcome: string;
+    readonly partialEpochKey?: boolean;
   }[] = [];
   for (const reference of yield* listVaultWorkspaces(input.vault)) {
     const target = input.targets.find((row) => row.genesisHash === reference.genesis);
@@ -203,11 +237,11 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
     const key = restoreProgressKey(target.id);
     const progress = yield* input.local.read(key);
     const identity = target.hasIdentity();
-    if (identity === 'unknown' && !isOpen(progress)) {
+    if (identity === 'unknown' && !isIncomplete(progress)) {
       results.push({ workspaceId: target.id, name: target.name, outcome: 'Failed' });
       continue;
     }
-    if (identity === true && !isOpen(progress)) continue;
+    if (identity === true && !isIncomplete(progress)) continue;
     const attempt = Effect.scoped(
       Effect.gen(function* () {
         // A finished marker from an earlier vault must not hide this attempt's failure.
@@ -235,16 +269,21 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
         });
         if (result.outcome === 'Committed') {
           yield* connected!.adopt(connected!.recovered());
-          yield* input.local.compareAndSwap(key, RESTORE_OPEN, RESTORE_DONE);
+          yield* input.local.compareAndSwap(
+            key,
+            RESTORE_OPEN,
+            result.partialEpochKey === true ? RESTORE_PARTIAL : RESTORE_DONE
+          );
         }
-        return result.outcome as string;
+        return { outcome: result.outcome as string, partialEpochKey: result.partialEpochKey };
       })
     );
     const exit = yield* Effect.exit(attempt);
     results.push({
       workspaceId: target.id,
       name: target.name,
-      outcome: Exit.isSuccess(exit) ? exit.value : 'Failed',
+      outcome: Exit.isSuccess(exit) ? exit.value.outcome : 'Failed',
+      ...(Exit.isSuccess(exit) ? { partialEpochKey: exit.value.partialEpochKey } : {}),
     });
   }
   return results;

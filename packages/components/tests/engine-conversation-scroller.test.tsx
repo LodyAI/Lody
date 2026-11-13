@@ -14,6 +14,7 @@ import type {
 import { clearSavedScrollStates } from '../src/lib/conversation-scroll/saved-state';
 import type { EngineRow } from '../src/lib/conversation-scroll/types';
 import { createFrameHarness, type FrameHarness } from './support/scroll-frame-harness';
+import { ForceDesktopLayoutProvider, ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 
 class RecoveryBoundary extends Component<
   { children: ReactElement },
@@ -74,6 +75,7 @@ type Ctx = {
   /** Every offset the list reported through `onScroll`. */
   scrolls: number[];
   setKeys: (keys: string[]) => void;
+  publishDisclosure: () => void;
   viewport: () => HTMLElement;
   settle: () => Promise<void>;
 };
@@ -113,6 +115,9 @@ function mount(
     feedback = false,
     tickOnScroll = false,
     oscillatingFeedback,
+    disclosure,
+    mobile = false,
+    deferDisclosure = false,
   }: {
     strict?: boolean;
     suppress?: { current: boolean };
@@ -126,6 +131,9 @@ function mount(
     /** A view that setStates on every onScroll, like the top-fade flag. */
     tickOnScroll?: boolean;
     oscillatingFeedback?: { current: boolean };
+    disclosure?: { key: string; headerOffset: number; headerHeight: number };
+    mobile?: boolean;
+    deferDisclosure?: boolean;
   } = {}
 ): Ctx {
   let keys = initialKeys;
@@ -168,6 +176,21 @@ function mount(
           }
         }
         if (isHidden()) return { top: 0, height: 0 };
+        if (
+          (el.hasAttribute('data-conversation-disclosure') ||
+            el.hasAttribute('data-disclosure-detail')) &&
+          disclosure
+        ) {
+          const row = el.closest<HTMLElement>('[data-virtual-index]')!;
+          return {
+            top:
+              px(row.style.top) -
+              scrollTop +
+              disclosure.headerOffset +
+              (el.hasAttribute('data-disclosure-detail') ? disclosure.headerHeight : 0),
+            height: el.hasAttribute('data-disclosure-detail') ? 800 : disclosure.headerHeight,
+          };
+        }
         if (el.hasAttribute('data-message-selection-scroll')) return { top: 0, height: VIEWPORT };
         if (
           el.parentElement?.hasAttribute('data-message-selection-scroll') &&
@@ -199,18 +222,40 @@ function mount(
     }
   };
   const scrolls: number[] = [];
+  let publishDisclosure = () => {};
   function List({ listKeys }: { listKeys: string[] }) {
     // Stands in for the view's position-derived state (hydration window,
     // outline): at offset 0 it changes the rows, which commits the list again.
     const [flipped, setFlipped] = useState(false);
     const [, setTick] = useState(0);
+    const [expanded, setExpanded] = useState(false);
+    publishDisclosure = () => {
+      if (!disclosure) return;
+      rowHeights.set(disclosure.key, expanded ? ROW : 900);
+      setExpanded(!expanded);
+    };
     const shown = flipped ? ['flipped', ...listKeys] : listKeys;
     return (
       <EngineConversationScroller
         sessionId={sessionId}
         rows={shown.map((key): ReactElement => (
           <div key={key} data-row-key={key}>
-            {key}
+            {disclosure?.key === key ? (
+              <>
+                <button
+                  data-conversation-disclosure="inline"
+                  aria-expanded={expanded}
+                  onClick={() => {
+                    if (!deferDisclosure) publishDisclosure();
+                  }}
+                >
+                  Synthetic command
+                </button>
+                {expanded ? <div data-disclosure-detail="">Synthetic detail</div> : null}
+              </>
+            ) : (
+              key
+            )}
           </div>
         ))}
         rowMeta={shown.map((key, index) => meta(key, index))}
@@ -232,7 +277,12 @@ function mount(
     );
   }
   const render = () => {
-    const list = <List listKeys={keys} />;
+    const contents = <List listKeys={keys} />;
+    const list = mobile ? (
+      <ForceMobileLayoutProvider force>{contents}</ForceMobileLayoutProvider>
+    ) : (
+      <ForceDesktopLayoutProvider>{contents}</ForceDesktopLayoutProvider>
+    );
     root.render(
       oscillatingFeedback ? (
         <RecoveryBoundary>{list}</RecoveryBoundary>
@@ -255,6 +305,9 @@ function mount(
     setKeys(next) {
       keys = next;
       act(render);
+    },
+    publishDisclosure() {
+      act(publishDisclosure);
     },
     async settle() {
       for (let i = 0; i < 30; i++) {
@@ -298,6 +351,73 @@ function keysOnScreen(keys: string[], scrollTop: number): string[] {
   const last = Math.ceil((scrollTop + VIEWPORT) / ROW) - 1;
   return keys.slice(first, last + 1);
 }
+
+it.each([
+  { mobile: false, headerOffset: 80, shift: 0 },
+  { mobile: true, headerOffset: 79, shift: 0 },
+  { mobile: true, headerOffset: 80, shift: 96 },
+])(
+  'holds a toggled command header (mobile=$mobile, offset=$headerOffset)',
+  async ({ mobile, headerOffset, shift }) => {
+    const ctx = mount(`disclosure-${mobile}-${headerOffset}` as SessionId, rowKeys(60), undefined, {
+      mobile,
+      disclosure: { key: 'r59', headerOffset, headerHeight: 20 },
+    });
+    try {
+      await ctx.settle();
+      const button = ctx
+        .viewport()
+        .querySelector<HTMLButtonElement>('[data-conversation-disclosure]')!;
+      const before = button.getBoundingClientRect().top;
+      act(() => {
+        button.focus();
+        button.click();
+      });
+      await ctx.settle();
+      expect(button.getAttribute('aria-expanded')).toBe('true');
+      expect(button.getBoundingClientRect().top).toBe(before - shift);
+      expect(ctx.state.current?.isSticky).toBe(false);
+      expect(document.activeElement).toBe(button);
+      act(() => button.click());
+      await ctx.settle();
+      expect(button.getAttribute('aria-expanded')).toBe('false');
+      expect(button.getBoundingClientRect().top).toBe(before - shift);
+      act(() => ctx.handle.current?.scrollToBottom());
+      await ctx.settle();
+      expect(ctx.state.current?.isSticky).toBe(true);
+      expect(
+        ctx.viewport().querySelector<HTMLElement>('[data-conversation-reply-room]')?.style.height
+      ).toBe('0px');
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
+it('reveals mobile details that commit after the list captured the click', async () => {
+  const ctx = mount('deferred-mobile-disclosure' as SessionId, rowKeys(60), undefined, {
+    mobile: true,
+    deferDisclosure: true,
+    disclosure: { key: 'r59', headerOffset: 80, headerHeight: 20 },
+  });
+  try {
+    await ctx.settle();
+    const button = ctx
+      .viewport()
+      .querySelector<HTMLButtonElement>('[data-conversation-disclosure]')!;
+    const before = button.getBoundingClientRect().top;
+    act(() => button.click());
+    await ctx.settle();
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.getBoundingClientRect().top).toBe(before);
+    ctx.publishDisclosure();
+    await ctx.settle();
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.getBoundingClientRect().top).toBe(before - 96);
+  } finally {
+    unmount(ctx);
+  }
+});
 
 it('opens at the real bottom and never hides the viewport', async () => {
   const keys = rowKeys(60);

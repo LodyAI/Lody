@@ -47,6 +47,7 @@ function boundAuthority(
       epochHistoryPacket(view, scope.epoch),
       () => new ContentError({ code: 'unauthorized' })
     );
+    if (mode === 'seal' && epoch.abandoned) return yield* fail('unauthorized');
     if (keyId(view.genesis.toBytes()) !== scope.genesis)
       return yield* fail('content-context-mismatch');
     if (!isDocumentPurpose(scope.purpose)) return yield* fail('invalid-document-purpose');
