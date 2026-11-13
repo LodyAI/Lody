@@ -576,6 +576,44 @@ describe('local E2EE pairing authority', () => {
       preflight.mockRestore();
     }
   });
+  it('answers a verified local activation without waiting for the workspace runtime to start', async () => {
+    // Same-machine pairing has no relay machine-pairing session to complete, and the
+    // desktop's pairing deadline must not include Loro room joins or agent startup.
+    const preflight = vi
+      .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
+      .mockResolvedValue();
+    const activations: unknown[] = [];
+    const activation = vi
+      .spyOn(encryptedWorkspace, 'activateCliE2eeWorkspaceLegacy')
+      .mockImplementation(async (options) => {
+        activations.push(options.remotePairing);
+      });
+    let started = false;
+    const waitingForPairing = new Set(['workspace']);
+    const instance = target({
+      logger: { debug: () => {} },
+      waitingForPairing,
+      runtimes: new Map(),
+      // A start that never settles: the pairing answer must not depend on it.
+      startWorkspace: () => {
+        started = true;
+        return new Promise<void>(() => {});
+      },
+      resolveWorkspaceRuntime: () => new Promise(() => {}),
+    });
+    try {
+      expect(await instance.dispatchLocalE2eePairing(request)).toEqual({
+        ok: true,
+        type: 'activate',
+      });
+      expect(started).toBe(true);
+      expect(waitingForPairing.has('workspace')).toBe(false);
+      expect(activations).toEqual([false]);
+    } finally {
+      activation.mockRestore();
+      preflight.mockRestore();
+    }
+  });
   it('retries retained cleanup before replacing a device after a transient release failure', async () => {
     const events: string[] = [];
     const preflight = vi

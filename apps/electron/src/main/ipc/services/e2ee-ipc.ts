@@ -19,7 +19,7 @@ import {
 import { Effect, Exit } from 'effect'
 import { z } from 'zod'
 import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
-import type { E2eeWorkspaceRuntime } from '@lody/platform'
+import type { E2eeRefreshKeyMode, E2eeRefreshOptions, E2eeWorkspaceRuntime } from '@lody/platform'
 import type { RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { isLocalPlatform } from '../../platform'
 import {
@@ -271,6 +271,12 @@ function sender() {
 const KEY_DELIVERY_READER = 0
 /** Main-owned reader for a joined member's first full round after its key is installed. */
 const MEMBER_SETTLE_READER = -1
+const REFRESH_KEY_MODES: ReadonlySet<unknown> = new Set<E2eeRefreshKeyMode>([
+  'none',
+  'receive',
+  'distribute',
+  'full'
+])
 const KEY_DELIVERY_RETRY_MS = 10_000
 const KEY_DELIVERY_RETRY_MAX_MS = 5 * 60_000
 const KEY_DELIVERY_RETAINED = 32
@@ -2212,19 +2218,22 @@ export class E2eeIpc extends ProductWindowIpcService {
     return { ...result, cleanupPending }
   }
   @IpcMethod()
-  async refresh(workspaceId: string, options?: { installKeys?: boolean }) {
+  async refresh(workspaceId: string, options?: E2eeRefreshOptions) {
     return observeClientLossOperation('refresh', workspaceId, sender(), () =>
       this.refreshLedger(workspaceId, options)
     )
   }
-  private async refreshLedger(workspaceId: string, options?: { installKeys?: boolean }) {
+  private async refreshLedger(workspaceId: string, options?: E2eeRefreshOptions) {
     if (
       options !== undefined &&
       (typeof options !== 'object' ||
         options === null ||
-        (options.installKeys !== undefined && typeof options.installKeys !== 'boolean'))
+        (options.installKeys !== undefined && typeof options.installKeys !== 'boolean') ||
+        (options.keyMode !== undefined && !REFRESH_KEY_MODES.has(options.keyMode)))
     )
       throw new Error('e2ee_invalid-input')
+    // Without `keyMode`, only `installKeys: false` skips the key round, as before.
+    const keyMode = options?.keyMode ?? (options?.installKeys === false ? 'none' : 'full')
     const id = sender()
     const access = await withDesktopE2eeAccount(
       (owner) =>
@@ -2275,7 +2284,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       await runDesktopE2eeOperation(access.accountId, ingest)
       cursor = page.nextCursor ?? undefined
     } while (cursor)
-    if (options?.installKeys === false) return this.status(workspaceId)
+    if (keyMode === 'none') return this.status(workspaceId)
     const work = await withDesktopE2eeAccount(
       (owner) =>
         owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
@@ -2286,7 +2295,8 @@ export class E2eeIpc extends ProductWindowIpcService {
                   cloud.client.mailbox({ workspaceId, credential: access.credential }, signal),
                 (signal) =>
                   cloud.client.staging({ workspaceId, credential: access.credential }, signal),
-                (signal) => (request) => cloud.client.history(request, signal)
+                (signal) => (request) => cloud.client.history(request, signal),
+                keyMode
               )
             )
           : Effect.fail(new Error('e2ee_not_open')),
@@ -2581,7 +2591,15 @@ export class E2eeIpc extends ProductWindowIpcService {
     }
     let distributed = true
     try {
-      await this.refresh(workspaceId)
+      // The new agent only needs this device's envelope for the current epoch. A device
+      // that already holds that key distributes alone; one without it keeps the full
+      // round, which receives before it distributes. Repair and reports stay with later
+      // full rounds.
+      const holdsKey = await this.status(workspaceId).then(
+        (status) => status.hasCurrentKey,
+        () => false
+      )
+      await this.refresh(workspaceId, { keyMode: holdsKey ? 'distribute' : 'full' })
     } catch (error) {
       this.pairingFailure = error
       distributed = false

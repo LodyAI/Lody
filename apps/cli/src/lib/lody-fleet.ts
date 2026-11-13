@@ -2536,10 +2536,14 @@ export class LodyFleet {
           frontendSigningPublicKey: captured.frontendSigningPublicKey,
           cloud: e2eeCloud,
           onUnavailable: () => this.logger.debug('e2ee_background_unavailable'),
+          remotePairing: false,
         });
         this.waitingForPairing.delete(workspace.id);
-        await this.startWorkspace(workspace);
-        await this.resolveWorkspaceRuntime(workspace.id as WorkspaceId);
+        // Activation verified admission and installed the current key; the runtime start
+        // (Loro rooms, machine runtime) is not part of the pairing answer. startWorkspace
+        // registers its startInFlight synchronously, so session requests still await it,
+        // and it owns its own failure reporting and retry.
+        void this.startWorkspace(workspace);
       })().finally(() => {
         this.e2eeActivationInFlight.delete(workspace.id);
       });

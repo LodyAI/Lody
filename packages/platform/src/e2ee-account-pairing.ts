@@ -106,6 +106,10 @@ export interface E2eeAccountPairingRuntime {
   }): Promise<E2eeAccountPairingRequestState>;
   /** The retained request and its latest verified progress; never creates one. */
   accountPairingRequest?(): Promise<E2eeAccountPairingRequestState | null>;
+  /** Optional push hint that the relay's approvals for one request changed. It grants
+   * nothing: callers still read `accountPairingRequest`, keep their poll as a fallback,
+   * and release the subscription when the request ends or the page unmounts. */
+  subscribeAccountPairingRequest?(lookupId: string, changed: () => void): () => void;
   /** Abandons and destroys the secret; a later request starts fresh. */
   cancelAccountPairing?(input?: { expectedLookupId: string }): Promise<void>;
   /** Reverse direction: this approved device shows a code for a new device to scan. */

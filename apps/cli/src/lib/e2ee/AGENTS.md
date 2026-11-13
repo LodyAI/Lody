@@ -13,6 +13,7 @@
 - Disclose file protection pre-approval.
 
 - Keyring: 10s timeout, stdin secrets; confirm termination before fallback, retain failed owners.
+  A read KEK is remembered per process, never absence; opens still check disk.
 - Batch Windows ACL checks; bound async SQLite BUSY retries. No blocking busy_timeout in keyring work.
 
 - Resume first Windows ACL setup only with empty custody; otherwise validate.
@@ -59,6 +60,7 @@
   IDs stay outside possession and ledger records; old developer formats need recreation.
   Local prepare/activate: OS-user socket; remote: signed offer/scoped port. Fleet checks account/workspace/genesis first.
   Activation refreshes verified ledger/mailbox; ACK only an installed current key. Failure keeps pairing retryable.
+  Local activation answers after `activation.json`; Fleet's start owner finishes startup.
   The local catalog never refuses that check: a workspace it lacks or binds to another
   genesis waits for the first authoritative list outcome (list, rejection, subscription
   error or shutdown), then fails closed; a cached match proceeds offline

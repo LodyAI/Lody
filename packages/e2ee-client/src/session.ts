@@ -1,4 +1,4 @@
-import { makePersonalKeyMaintenance } from './maintenance';
+import { makePersonalKeyMaintenance, type PersonalKeyRoundMode } from './maintenance';
 import {
   Cause,
   Clock,
@@ -312,12 +312,23 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         yield* admitted();
         return value;
       });
-    const keyRound = () =>
+    const keyRound = (mode: PersonalKeyRoundMode = 'full') =>
       serialRound(
         withKeys((ctx) =>
           Effect.gen(function* () {
             const view = yield* admitted(),
               epoch = view.inspectState().epoch.number;
+            if (mode === 'distribute') {
+              // Only this device's deliveries, as on the desktop: reconcile targets,
+              // resume pending sends, acknowledge ended tasks. Receive and repair stay
+              // with a full round; every task remains in the core distribution journal.
+              const distributor = Context.get(ctx, KeyDistributor);
+              yield* distributor.reconcileCurrentEpoch(100, null);
+              yield* distributor.resumePendingDeliveries(100, null);
+              const ended = yield* distributor.results(100, null);
+              for (const item of ended.items) yield* distributor.acknowledge(item.id);
+              return { refreshRequired: false };
+            }
             const beforeReceive = Effect.gen(function* () {
               if (epoch === 0) return undefined;
               const checked = yield* Effect.result(
@@ -340,6 +351,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                 yield* Context.get(ctx, KeyReceiver).receiveStagedGroup(group);
               return undefined;
             });
+            if (mode === 'receive') {
+              // Only this device's own key, from a staged group or the mailbox. Reports,
+              // distribution and repair stay with a full round.
+              const receiver = Context.get(ctx, KeyReceiver);
+              yield* beforeReceive;
+              yield* receiver.resume(100, null);
+              const received = yield* receiver.fetchAndInstall(null, 100);
+              return { refreshRequired: received.refreshRequired ?? false };
+            }
             return { refreshRequired: yield* maintenance!(epoch, beforeReceive) };
           })
         )
@@ -1053,7 +1073,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         const refresh = serialRound(control.refresh().pipe(Effect.andThen(ledger())));
         return run(timeoutMs === undefined ? refresh : refresh.pipe(Effect.timeout(timeoutMs)));
       },
-      keyRound: () => run(keyRound()),
+      keyRound: (mode?: PersonalKeyRoundMode) => run(keyRound(mode)),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
       status: () => run(status()),
       document: (

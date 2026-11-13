@@ -15,6 +15,7 @@ import {
   makeDesktopAccountPairing,
   type AccountPairingApproverFilter,
   type AccountPairingApproverWorkspace,
+  type AccountPairingRequesterFilter,
   type AccountPairingRequesterWorkspace
 } from './e2ee-account-pairing.mjs'
 import { verifyMemberHistory } from './e2ee-member-join.mjs'
@@ -94,7 +95,8 @@ export interface AccountPairingOwner {
       workspaceId: string,
       mailbox: KeyRoundServices['mailbox'],
       staging: KeyRoundServices['staging'],
-      history: KeyRoundServices['history']
+      history: KeyRoundServices['history'],
+      mode?: 'full' | 'receive' | 'distribute'
     ): Effect.Effect<unknown, unknown>
   }
   readonly bootstrap: {
@@ -196,29 +198,83 @@ export function makeDesktopAccountPairingHost(input: {
       owner(workspaceId, (current) => current.host.status(workspaceId))
     ).pipe(Effect.orElseSucceed(() => null))
 
-  /** The complete signed history, read with the account session. */
-  const history = Effect.fnUntraced(function* (workspaceId: string) {
-    const pages: E2eeWorkspaceHistoryPage[] = []
-    let cursor: string | undefined
-    for (let index = 0; index < 256; index++) {
-      const page = yield* cloud.history({
-        workspaceId,
-        ...(cursor ? { cursor } : {}),
-        ...(pages[0] ? { checkpoint: pages[0].checkpoint } : {})
-      })
+  /** The remaining pages after `first`, read under its checkpoint. */
+  const pagesFrom = Effect.fnUntraced(function* (
+    workspaceId: string,
+    first: E2eeWorkspaceHistoryPage
+  ) {
+    const pages: E2eeWorkspaceHistoryPage[] = [first]
+    let cursor = first.nextCursor ?? undefined
+    for (let index = 1; cursor && index < 256; index++) {
+      const page = yield* cloud.history({ workspaceId, cursor, checkpoint: first.checkpoint })
       pages.push(page)
       if (page.nextCursor === null) return pages
       cursor = page.nextCursor
     }
-    return yield* Effect.fail(fail('ledger_budget_exceeded'))
+    if (cursor) return yield* Effect.fail(fail('ledger_budget_exceeded'))
+    return pages
   })
+  /** The complete signed history, read with the account session. */
+  const history = Effect.fnUntraced(function* (workspaceId: string) {
+    return yield* pagesFrom(workspaceId, yield* cloud.history({ workspaceId }))
+  })
+  /** The last fully verified history per workspace, as in the portable requester. A later
+   * call asks only for records after its position; the combined history is verified again
+   * from genesis, so the cache saves downloads, never a verification. A suffix that does
+   * not continue at the cached length falls back to a complete read. */
+  const verifiedCache = new Map<
+    string,
+    {
+      genesisHash: string
+      pin: { workspaceId: string; genesisHash: string; genesisRecordHex: string }
+      pages: E2eeWorkspaceHistoryPage[]
+      view: import('@lody/e2ee-core/protocol').LedgerView
+      length: number
+      headHash: string
+      position: string
+    }
+  >()
   /** Verifies the whole ledger from the genesis the caller already trusts. */
   const verified = Effect.fnUntraced(function* (hint: AccountPairingWorkspaceHint) {
-    const pages = yield* history(hint.workspaceId)
+    const cached = verifiedCache.get(hint.workspaceId)
+    let pages: E2eeWorkspaceHistoryPage[] | undefined
+    if (cached && cached.genesisHash === hint.genesisHash) {
+      const first = yield* cloud.history({ workspaceId: hint.workspaceId, after: cached.position })
+      if (first.startIndex === cached.length) {
+        const suffix = yield* pagesFrom(hint.workspaceId, first)
+        if (
+          suffix.every((page) => page.recordsHex.length === 0) &&
+          first.checkpoint.length === cached.length &&
+          first.checkpoint.headHash === cached.headHash
+        )
+          return { pin: cached.pin, pages: cached.pages, view: cached.view }
+        const combined = [...cached.pages, ...suffix.filter((page) => page.recordsHex.length > 0)]
+        const finalPosition = suffix.at(-1)?.position
+        if (combined.length <= 256 && suffix.at(-1)?.nextCursor === null)
+          pages = combined.map((page, index) => ({
+            ...page,
+            checkpoint: first.checkpoint,
+            nextCursor: index < combined.length - 1 ? (page.nextCursor ?? page.position) : null,
+            ...(index === combined.length - 1 && finalPosition ? { position: finalPosition } : {})
+          }))
+      } else if (first.startIndex === 0) pages = yield* pagesFrom(hint.workspaceId, first)
+    }
+    pages ??= yield* history(hint.workspaceId)
     const genesisRecordHex = pages[0]?.recordsHex[0]
     if (!genesisRecordHex) return yield* Effect.fail(fail('invalid-ledger'))
     const pin = { workspaceId: hint.workspaceId, genesisHash: hint.genesisHash, genesisRecordHex }
     const view = yield* verifyMemberHistory(pin, pages)
+    const last = pages.at(-1)
+    if (last?.position)
+      verifiedCache.set(hint.workspaceId, {
+        genesisHash: hint.genesisHash,
+        pin,
+        pages,
+        view,
+        length: last.checkpoint.length,
+        headHash: last.checkpoint.headHash,
+        position: last.position
+      })
     return { pin, pages, view }
   })
   /** This account's single active membership in a verified view. */
@@ -276,8 +332,9 @@ export function makeDesktopAccountPairingHost(input: {
     return displaced ? ('lost' as const) : ('unknown' as const)
   })
 
-  /** Opens the newly installed workspace, pulls its ledger forward and runs one key
-   * round with this device's own credential, all outside any owner turn. */
+  /** Opens the newly installed workspace, pulls its ledger forward and receives this
+   * device's own current key with its own credential, all outside any owner turn. The
+   * remaining report, distribution and repair work stays with the next full round. */
   const activate = (workspaceId: string) =>
     transient(
       workspaceId,
@@ -290,7 +347,13 @@ export function makeDesktopAccountPairingHost(input: {
         const services = yield* cloud.keyServices({ workspaceId, credential })
         const round = yield* owner(workspaceId, (current) =>
           Effect.succeed(
-            current.host.keyRound(workspaceId, services.mailbox, services.staging, services.history)
+            current.host.keyRound(
+              workspaceId,
+              services.mailbox,
+              services.staging,
+              services.history,
+              'receive'
+            )
           )
         )
         yield* promise(() => input.run(round))
@@ -371,9 +434,15 @@ export function makeDesktopAccountPairingHost(input: {
     )
   })
 
-  const requesterWorkspaces = Effect.fnUntraced(function* () {
+  const requesterWorkspaces = Effect.fnUntraced(function* (
+    _hints?: unknown,
+    filter?: AccountPairingRequesterFilter
+  ) {
     const result: AccountPairingRequesterWorkspace[] = []
     for (const hint of input.workspaces()) {
+      // Never open a workspace the step cannot use: each status read opens its store.
+      if (filter?.workspaceId !== undefined && filter.workspaceId !== hint.workspaceId) continue
+      if (filter?.geneses && !filter.geneses.has(hint.genesisHash)) continue
       // Workspaces where this device already holds an active personal identity
       // need no pairing.
       const status = yield* statusOf(hint.workspaceId)
