@@ -169,6 +169,7 @@ import {
   ScheduleRepository,
   type McpServerId,
   type ScheduleDocument,
+  type SessionPullRequestView,
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
@@ -2960,6 +2961,7 @@ export const SessionChatInterface = memo(
       repoFullName,
       latestPr,
       latestPrState,
+      pullRequestHistory,
       canShowGitHubActions,
       hasExistingPr,
       workspaceDirty,
@@ -2988,6 +2990,10 @@ export const SessionChatInterface = memo(
       void openExternalUrl(latestPr.url);
     });
     const prLinkHandler = latestPr ? openLatestPr : undefined;
+    // The PR tab follows the current PR, so an earlier PR opens on GitHub.
+    const openHistoryPr = useStableCallback((view: SessionPullRequestView) => {
+      void openExternalUrl(view.url);
+    });
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
       sessionId: prSessionId,
@@ -7663,6 +7669,8 @@ export const SessionChatInterface = memo(
                         workspaceLocation={infoBarWorkspaceLocation}
                         pr={canShowGitHubActions ? latestPr : null}
                         onOpenPr={prLinkHandler}
+                        prHistory={canShowGitHubActions ? pullRequestHistory : undefined}
+                        onOpenHistoryPr={openHistoryPr}
                         contextActions={infoBarContextActions}
                         onOpenAllChanges={onOpenAllChanges}
                         // Opener + every Session/Tab created here: the in-stream

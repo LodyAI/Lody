@@ -114,6 +114,7 @@ function StoryHarness({
   branch = 'feat/presence-machine-online-session-status',
   workspaceLocation = null,
   pr = openPr,
+  prHistory,
   diffStat = { add: 128, del: 42 },
   width = 760,
   initialStage,
@@ -139,6 +140,7 @@ function StoryHarness({
     path?: string | null;
   } | null;
   pr?: SessionPullRequestMeta | null;
+  prHistory?: SessionInfoBarProps['prHistory'];
   diffStat?: { add: number; del: number } | null;
   width?: number;
   initialStage?: 'status' | 'goal' | 'schedule' | 'context';
@@ -196,6 +198,8 @@ function StoryHarness({
         workspaceLocation={workspaceLocation}
         pr={pr}
         onOpenPr={fn()}
+        prHistory={prHistory}
+        onOpenHistoryPr={fn()}
         contextActions={contextActions}
         onOpenAllChanges={fn()}
         onOpenBrowser={withPreview ? fn() : undefined}
@@ -345,6 +349,21 @@ export const ContextWithMachineRemoved: Story = {
 };
 
 export const NoPr: Story = { args: { pr: null } };
+
+/** A conversation that created several PRs: the marker shows the current one and lists all. */
+const prHistoryMeta = {
+  pullRequests: [
+    { url: 'https://github.com/loro-dev/lody/pull/2850', status: 'closed' },
+    { url: 'https://github.com/loro-dev/lody/pull/2871', status: 'merged' },
+    { url: 'https://github.com/loro-dev/lody/pull/2894', status: 'open' },
+  ],
+} as SessionMeta;
+export const PrHistory: Story = {
+  args: {
+    pr: prHistoryMeta.pullRequests![2],
+    prHistory: getSessionGitHubState(prHistoryMeta).pullRequestHistory,
+  },
+};
 
 function ObservationHarness({ ownerMeta }: { ownerMeta: SessionMeta }) {
   const { t } = useTranslation();
