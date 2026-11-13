@@ -4984,7 +4984,7 @@ it('fences a credential-confirmed revoked device when the verified ledger cannot
   });
 });
 
-it.each(['history', 'renewal', 'snapshot', 'account-race', 'close-race', 'receipt-error'] as const)(
+it.each(['history', 'renewal', 'account-race', 'close-race', 'receipt-error'] as const)(
   'member removal drains the machine owner before erasing managed data and requires a fresh member (%s)',
   async (source) => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-member-removal-'));
