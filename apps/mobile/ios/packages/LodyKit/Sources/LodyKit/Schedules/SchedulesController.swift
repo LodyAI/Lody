@@ -21,6 +21,14 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private let source: SessionSource
   private let service: ScheduleService
   private let chrome = InboxChrome(searchPlaceholder: String(localized: "schedules.search", bundle: .lody))
+  /// Regular width shows Schedules in the detail column, as the desktop main area: a titled page
+  /// whose schedules open in a sheet (the desktop's 720 px dialog) instead of pushing.
+  var inDetailColumn = false {
+    didSet {
+      guard inDetailColumn != oldValue else { return }
+      chrome.setDetailTitle(inDetailColumn ? String(localized: "schedules.title", bundle: .lody) : nil)
+    }
+  }
   private var list: UICollectionView!
   private var data: UICollectionViewDiffableDataSource<Section, String>!
   private let refresh = UIRefreshControl()
@@ -378,7 +386,8 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
 
   // MARK: Actions
 
-  /// The tab bar's "+": a new schedule's editor, pushed over the list.
+  /// The tab bar's (or iPad bottom bar's) create action: a new schedule's editor, pushed over the
+  /// list, or in a sheet over it when Schedules fills the regular-width detail column.
   func newSchedule() {
     let state = source.state
     guard state.workspace != nil, !state.workspaceId.isEmpty else {
@@ -400,8 +409,19 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       self.render(reconfigure: true)
       self.reload()
     }
-    editor.openChat = { [weak self] item in self?.openChat(item) }
-    LodyShell.shared.pushNative(editor, title: item?.title ?? ScheduleFormat.text("new"), from: self)
+    let title = item?.title ?? ScheduleFormat.text("new")
+    guard inDetailColumn else {
+      editor.openChat = { [weak self] item in self?.openChat(item) }
+      LodyShell.shared.pushNative(editor, title: title, from: self)
+      return
+    }
+    // The chat replaces Schedules in the detail column, so the sheet closes first.
+    editor.openChat = { [weak self, weak editor] item in
+      LodyShell.shared.close(from: editor)
+      self?.openChat(item)
+    }
+    let height = min(860, (view.window?.bounds.height ?? 900) - 80)
+    LodyShell.shared.presentNative(editor, title: title, size: CGSize(width: 720, height: height))
   }
 
   /// Owner-only commands; resume and run also need a computer whose CLI runs schedules.

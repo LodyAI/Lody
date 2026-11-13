@@ -46,12 +46,14 @@ final class LodyShell {
   }
 
   @discardableResult
-  func presentNative(_ content: UIViewController, title: String, detents: [Double] = [1], grabber: Bool = false, dismissible: Bool = true, style: String = "formSheet", headerShown: Bool = true) -> LodyPageController {
+  func presentNative(_ content: UIViewController, title: String, detents: [Double] = [1], grabber: Bool = false, dismissible: Bool = true, style: String = "formSheet", headerShown: Bool = true, size: CGSize? = nil) -> LodyPageController {
     let spec = ShellPageSpec(
       title: title, style: style, animation: "slide", dismissible: dismissible, headerShown: headerShown,
       headerVariant: "transparent", detents: detents, grabber: grabber
     )
     let page = LodyPageController(spec: spec, inSheet: true, content: content)
+    // A regular-width form sheet takes this size (UIKit ignores it where sheets fill the width).
+    if let size { page.preferredContentSize = size }
     presentModal(page)
     return page
   }
@@ -214,6 +216,7 @@ final class LodyShell {
     configureNavigation(container)
     container.setNavigationBarHidden(!spec.headerShown, animated: false)
     container.modalPresentationStyle = Self.modalStyle(spec.style)
+    if page.preferredContentSize != .zero { container.preferredContentSize = page.preferredContentSize }
     if spec.style == "overFullScreen" { container.view.backgroundColor = .clear }
     if spec.animation == "fade" { container.modalTransitionStyle = .crossDissolve }
     container.isModalInPresentation = !spec.dismissible

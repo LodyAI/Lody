@@ -155,7 +155,11 @@ final class InboxController: UIViewController {
       LodyShell.shared.openPage("settings", options: ["present": true], from: self?.parent)
     }
     chrome.openDebug = { [weak self] in LodyShell.shared.openPage("debug", from: self?.parent) }
-    chrome.newSession = { [weak self] in self?.newSession() }
+    // While Schedules fills the regular-width detail column, the list's create action adds a schedule.
+    chrome.newSession = { [weak self] in
+      guard let self else { return }
+      if self.chrome.destination == .schedules { HomeController.current?.newSchedule() } else { self.newSession() }
+    }
     chrome.selectDestination = { HomeController.current?.selectTab($0) }
     chrome.searchChanged = { [weak self] text in
       guard let self, text != self.query else { return }
@@ -271,6 +275,9 @@ final class InboxController: UIViewController {
     }
     Task { try? await NativeHomeFixture.request("selectWorkspace", ["workspaceId": id]) }
   }
+
+  /// Regular width: which Home destination the detail column shows (the bottom bar's selection).
+  func setDestination(_ tab: HomeTab) { chrome.destination = tab }
 
   func newSession() {
     let state = source.state

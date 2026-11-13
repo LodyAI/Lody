@@ -58,16 +58,38 @@ ui.capture('sidebar-view-menu')
 tap_label(catalog.text('home.grouping.time'))
 ui.element('ui-design')
 
-# The bottom bar switches the column between Chats and Schedules, as the iPhone tabs do.
-ui.axe('tap', '--id', 'home-tab-schedules', '--tap-style', 'physical', '--post-delay', '.8')
-ui.element('home-schedules-list')
-assert not any(i.get('AXUniqueId') == 'home-chat-list' for i in ui.state()), 'Schedules replaces the Chats list'
-create = ui.element('home-create')
-assert create.get('AXLabel') == catalog.text('schedules.new'), create
-ui.capture('sidebar-schedules')
-ui.axe('tap', '--id', 'home-tab-chats', '--tap-style', 'physical', '--post-delay', '.8')
-ui.element('home-chat-list')
-assert ui.element('home-create').get('AXLabel') == catalog.text('tabs.newSession')
+# As on desktop, the list column keeps Chats (the sidebar) and Schedules fills the detail column
+# (the main area); a schedule opens in a centred sheet over it. Checked in the wide layout.
+rotation.rotate(ui, 'landscape')
+try:
+    pad.show_list(ui)
+    ui.axe('tap', '--id', 'home-tab-schedules', '--tap-style', 'physical', '--post-delay', '.8')
+    schedules_list = ui.element('home-schedules-list')['frame']
+    panel_frame = ui.element('ipad-panel')['frame']
+    assert schedules_list['x'] >= panel_frame['x'] + panel_frame['width'] - 1, ('Schedules fills the detail column', schedules_list, panel_frame)
+    ui.element('home-chat-list')
+    labeled(catalog.text('schedules.title'))
+    create = ui.element('home-create')
+    assert create.get('AXLabel') == catalog.text('schedules.new'), create
+    ui.capture('schedules-detail')
+    ui.axe('tap', '--id', 'home-create', '--tap-style', 'physical', '--post-delay', '1')
+    editor = ui.element('schedule-time')['frame']
+    screen_frame = ui.state()[0]['frame']
+    assert screen_frame['x'] + 40 < editor['x'] and editor['x'] + editor['width'] < screen_frame['x'] + screen_frame['width'] - 40, \
+        ('The schedule editor is a centred sheet, not a column page', editor, screen_frame)
+    ui.capture('schedule-editor-sheet')
+    tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('schedules.new')))
+    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'schedule-time' for i in items) or None, 'The schedule sheet did not close')
+    ui.element('home-schedules-list')
+    # Opening a conversation from the list replaces Schedules, and the bar returns to Chats.
+    ui.axe('tap', '--id', 'ui-design', '--tap-style', 'physical', '--post-delay', '.8')
+    ui.element('session-input')
+    assert not any(i.get('AXUniqueId') == 'home-schedules-list' for i in ui.state()), 'A conversation replaces Schedules'
+    assert ui.element('home-create').get('AXLabel') == catalog.text('tabs.newSession')
+    ui.capture('schedules-to-chat')
+finally:
+    rotation.restore_portrait(ui)
+pad.show_list(ui)
 tap_label(catalog.text('tabs.settings'))
 close_settings = catalog.text('accessibility.closeSheet', title=catalog.text('tabs.settings'))
 labeled(close_settings)
