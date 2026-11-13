@@ -1,9 +1,11 @@
 package app.lody.android.home
 
+import app.lody.android.runtime.CatalogJson
 import app.lody.android.runtime.CatalogProject
 import app.lody.android.runtime.CatalogPullRequest
 import app.lody.android.runtime.CatalogSession
 import app.lody.android.runtime.CatalogSnapshot
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -354,6 +356,25 @@ class ChatListModelTest {
         assertEquals(StatusGroup.PullRequest, group(base.copy(pullRequests = pr("open", "p"))))
         // A merged or closed PR is done, so the chat is idle.
         assertEquals(StatusGroup.Idle, group(base.copy(pullRequests = pr("merged", "f"))))
+    }
+
+    @Test
+    fun failedLatestTurnNeedsYouUntilALaterTurnFinishes() {
+        val base = session("a", "p-zed", at = "2026-10-01T00:00:00Z")
+        val failed = base.copy(lastHandledUserMsgId = "turn-2", lastFailedUserMsgId = "turn-2")
+        assertEquals(ChatAttention.Failed, ChatListModel.attention(failed))
+        assertEquals(StatusGroup.Attention, ChatListModel.statusGroup(failed))
+        // Working again after the failure: the agent may be fixing it.
+        val retrying = failed.copy(status = "running")
+        assertEquals(ChatAttention.Running, ChatListModel.attention(retrying))
+        assertEquals(StatusGroup.Running, ChatListModel.statusGroup(retrying))
+        // A later handled or canceled turn moves the handled pointer and retires the marker.
+        val recovered = failed.copy(lastHandledUserMsgId = "turn-3")
+        assertNull(ChatListModel.attention(recovered))
+        assertEquals(StatusGroup.Idle, ChatListModel.statusGroup(recovered))
+        // The cached catalog keeps the failure across a restart.
+        val restored = CatalogJson.session(base, JSONObject(CatalogJson.putSession(JSONObject(), failed).toString()))
+        assertEquals(ChatAttention.Failed, ChatListModel.attention(restored))
     }
 
     @Test
