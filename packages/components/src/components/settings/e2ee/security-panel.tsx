@@ -59,9 +59,18 @@ const styles = stylex.create({
     paddingBlock: space[2],
   },
   detail: { display: 'block', overflowWrap: 'anywhere' },
+  identifierTrigger: {
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    fontWeight: 400,
+    letterSpacing: 'normal',
+    lineHeight: settingsType.leading,
+    textAlign: 'start',
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
+  },
   key: {
     color: colors.secondaryLabel,
-    fontFamily: 'monospace',
     fontSize: text.footnoteSize,
     overflowWrap: 'anywhere',
   },
@@ -432,7 +441,7 @@ export function E2eeDevicesPanel({
                           />
                         }
                       >
-                        <span {...stylex.props(styles.key)}>
+                        <span {...stylex.props(styles.identifierTrigger)}>
                           {t('e2ee.deviceIdentity.identifier')} · {device.key.slice(0, 12)}
                         </span>
                       </Collapsible.Trigger>
