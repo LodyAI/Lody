@@ -583,6 +583,11 @@ export function projectSession(
   steerReceipts?: ReadonlyMap<string, SteerReceipt>,
   historyOverride?: readonly unknown[],
   historyMetadata?: readonly Record<string, unknown>[],
+  /**
+   * First history index sent to the host. Earlier entries still feed usage,
+   * billing, execution and the composer; only the transcript is windowed.
+   */
+  historyStart = 0,
 ): Envelope {
   const history = historyOverride
     ? undefined
@@ -627,15 +632,29 @@ export function projectSession(
   const effort = [options.reasoning_effort, options.effort].find(
     (value) => typeof value === 'string',
   );
-  const summarized = raw.map((entry, index) =>
-    summarizeEntry(projectionFor(doc), history, entry, index, pendingOutcomes),
-  );
+  const start = Math.min(Math.max(0, historyStart), raw.length);
+  const summarized = raw
+    .slice(start)
+    .map((entry, offset) =>
+      summarizeEntry(
+        projectionFor(doc),
+        history,
+        entry,
+        start + offset,
+        pendingOutcomes,
+      ),
+    );
 
   // A daemon history-sync timeout can place a concurrent reply before its input.
   // Use its explicit causal link; never sort streamed turns by arrival time.
   const userIds = new Set(
     summarized.filter((e) => e.role === 'user').map((e) => e.id),
   );
+  // Inputs before the window are still landed: they must not reappear as queued.
+  const landedUserIds = new Set(userIds);
+  for (const entry of raw.slice(0, start))
+    if (entry?.role === 'user' && typeof entry.id === 'string')
+      landedUserIds.add(entry.id);
   const replies = new Map<string, typeof summarized>();
   for (const entry of summarized)
     if (entry.role === 'assistant' && userIds.has(entry.userTurnId!)) {
@@ -660,7 +679,7 @@ export function projectSession(
     [
       ...raw,
       ...queued
-        .filter((item) => !userIds.has(item.userTurnId))
+        .filter((item) => !landedUserIds.has(item.userTurnId))
         .map((item) => ({
           id: item.userTurnId,
           role: 'user',
@@ -714,7 +733,7 @@ export function projectSession(
         .filter(
           (item) =>
             typeof item.userTurnId === 'string' &&
-            !userIds.has(item.userTurnId),
+            !landedUserIds.has(item.userTurnId),
         )
         .map((item) => ({
           id: item.userTurnId,

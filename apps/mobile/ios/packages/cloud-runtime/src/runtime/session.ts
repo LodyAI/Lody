@@ -97,6 +97,13 @@ type SessionState = {
   roostMetadata?: Record<string, unknown>[];
   roostTail?: Promise<void>;
   roostLoading?: boolean;
+  /**
+   * Loro transcript window: the id of its first user entry, `null` for the
+   * whole history, unset until the first ready projection fixes it.
+   */
+  historyAnchor?: string | null;
+  /** The last projection dropped window turns to fit the host envelope budget. */
+  historyClipped?: boolean;
   client: StreamsClient;
   controller: AbortController;
   ready: boolean;
@@ -484,9 +491,59 @@ export async function actOnPendingInput(
   else if (input.error) owner.retry(inputId);
 }
 
+/** User turns in a Loro transcript's first window and in each older page. */
+const HISTORY_PAGE_TURNS = 20;
+/** UTF-8 budget per envelope; the iOS host replaces envelopes above 12 MiB with an overflow marker. */
+const ENVELOPE_BUDGET_BYTES = 8 * 1024 * 1024;
+const entryField = (entry: unknown, key: string) =>
+  entry instanceof LoroMap ? entry.get(key) : (entry as any)?.[key];
+/** Index of the `turns`-th user entry before `end`, or 0 when fewer exist. */
+function pageStart(history: LoroList, end: number, turns: number) {
+  let seen = 0;
+  for (let i = end - 1; i > 0; i--)
+    if (entryField(history.get(i), 'role') === 'user' && ++seen === turns)
+      return i;
+  return 0;
+}
+function userTurnsFrom(history: LoroList, start: number) {
+  let count = 0;
+  for (let i = start; i < history.length; i++)
+    if (entryField(history.get(i), 'role') === 'user') count += 1;
+  return count;
+}
+/**
+ * Loro sessions keep the whole document locally, but only a window of the
+ * transcript crosses to the host. The window starts at a user entry, follows
+ * new entries and grows backwards only on an explicit older-history request.
+ */
+function loroWindowStart(state: SessionState, history: LoroList) {
+  if (state.historyAnchor === null) return 0;
+  if (state.historyAnchor !== undefined)
+    for (let i = history.length - 1; i >= 0; i--)
+      if (entryField(history.get(i), 'id') === state.historyAnchor) return i;
+  const start = pageStart(history, history.length, HISTORY_PAGE_TURNS);
+  const anchor = entryField(history.get(start), 'id');
+  // An empty or still-bootstrapping replica must not fix the window at 0.
+  if (state.ready && history.length)
+    state.historyAnchor =
+      start === 0 ? null : typeof anchor === 'string' ? anchor : undefined;
+  return start;
+}
+
 export async function loadOlderSession(sessionId: string) {
   const state = sessions.get(sessionId);
   if (!state || !targetIsCurrent(state)) throw new Error('session_not_ready');
+  if (state.target?.backend !== 'roost') {
+    const history = state.doc.getList('history');
+    const start = loroWindowStart(state, history);
+    if (start === 0 || state.historyClipped) return;
+    const next = pageStart(history, start, HISTORY_PAGE_TURNS);
+    const anchor = entryField(history.get(next), 'id');
+    state.historyAnchor =
+      next === 0 ? null : typeof anchor === 'string' ? anchor : null;
+    scheduleEmit(state, state.status);
+    return;
+  }
   if (!state.roostReader || !state.roostWindow?.cursor || state.roostLoading)
     return;
   state.roostLoading = true;
@@ -639,18 +696,33 @@ function flush(state: SessionState) {
   state.pending = undefined;
   state.firstQueuedAt = 0;
   if (sessions.get(state.id) !== state || !targetIsCurrent(state)) return;
-  const snapshot = projectSession(
-    state.doc,
-    state.status,
-    state.reason,
-    new Map([...state.unsent].map(([key, pending]) => [key, pending.outcome])),
-    state.steerReceipts,
-    state.roostWindow?.turns,
-    state.roostMetadata,
-  );
+  const loro = state.target?.backend !== 'roost';
+  const history = state.doc.getList('history');
+  let start = loro ? loroWindowStart(state, history) : 0;
+  const project = () =>
+    projectSession(
+      state.doc,
+      state.status,
+      state.reason,
+      new Map(
+        [...state.unsent].map(([key, pending]) => [key, pending.outcome]),
+      ),
+      state.steerReceipts,
+      state.roostWindow?.turns,
+      state.roostMetadata,
+      start,
+    );
+  state.historyClipped = false;
+  let snapshot = project();
+  // The composer comes from the whole history, so every window shares this quota.
   const quota = readUsage(state.id, snapshot.composer?.modelId);
   state.lastUsage = JSON.stringify(quota);
-  if (snapshot.usage) snapshot.usage = { ...snapshot.usage, ...quota };
+  const finish = (next: typeof snapshot) => {
+    if (next.usage) next.usage = { ...next.usage, ...quota };
+    if (loro) next.historyHasMore = start > 0 && !state.historyClipped;
+    return next;
+  };
+  snapshot = finish(snapshot);
   if (state.target?.backend === 'roost') {
     snapshot.historyHasMore = !!state.roostWindow?.cursor;
     snapshot.historyLoading = state.roostLoading === true;
@@ -674,14 +746,32 @@ function flush(state: SessionState) {
       });
     else delete snapshot.billableTurnCount;
   }
+  let session = JSON.stringify(snapshot);
+  // A window of long turns can still exceed the host limit: keep the newest
+  // half of its turns until it fits or one turn remains. Older history then
+  // stays unavailable, because loading it would exceed the limit again.
+  while (loro && envelopeBytes(session) > ENVELOPE_BUDGET_BYTES) {
+    const turns = userTurnsFrom(history, start);
+    if (turns <= 1) break;
+    start = pageStart(history, history.length, Math.ceil(turns / 2));
+    state.historyClipped = true;
+    snapshot = finish(project());
+    session = JSON.stringify(snapshot);
+  }
   state.emit({
     type: active === state ? 'session' : 'sessionCache',
     sessionId: state.id,
     synced: state.status === 'live',
     backgroundWork: backgroundProgress(state),
-    session: JSON.stringify(snapshot),
+    session,
   });
 }
+const encoder = new TextEncoder();
+/** A UTF-16 code unit encodes to at most three UTF-8 bytes. */
+const envelopeBytes = (json: string) =>
+  json.length * 3 <= ENVELOPE_BUDGET_BYTES
+    ? json.length
+    : encoder.encode(json).length;
 function isWorking(state: SessionState) {
   if (state.doc.getMovableList('mq').length) return true;
   const history = historyList(state);
