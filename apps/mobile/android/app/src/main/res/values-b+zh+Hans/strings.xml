@@ -31,8 +31,8 @@
     <string name="home_onboarding_download_url">https://lody.ai/zh/download</string>
     <string name="home_onboarding_next_heading">机器上线之后</string>
     <string name="home_onboarding_next_machine">它会自动出现在当前 workspace。</string>
-    <string name="home_onboarding_next_project">在「项目」里选择这台机器，添加一个文件夹。</string>
-    <string name="home_onboarding_next_agent">在「设置 → Agents」中配置 Agent，即可下发第一个任务。</string>
+    <string name="home_onboarding_next_chat">点 + 新建对话，选这台机器和项目（也可以不选项目），下发第一个任务。</string>
+    <string name="home_onboarding_next_agent">在「设置 → Agent」里为它配置 Agent。</string>
     <string name="home_archive">归档</string>
     <string name="home_archived_done">已归档</string>
     <string name="home_archive_failed">暂时无法归档，请重试。</string>

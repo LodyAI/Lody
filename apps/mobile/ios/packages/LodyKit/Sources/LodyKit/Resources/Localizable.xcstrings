@@ -31329,19 +31329,19 @@
         }
       }
     },
-    "home.onboarding.nextStep.project": {
+    "home.onboarding.nextStep.chat": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Add a project folder on it from Projects → +."
+            "value": "Tap + to start your first task: pick this computer and a project, or no project."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在「项目」里选择这台机器，添加一个文件夹。"
+            "value": "点 + 新建对话，选这台机器和项目（也可以不选项目），下发第一个任务。"
           }
         }
       }
@@ -31352,13 +31352,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pick an agent in Settings → Agents, then send your first task."
+            "value": "Pick an agent for it in Settings → Agents."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在「设置 → Agents」中配置 Agent，即可下发第一个任务。"
+            "value": "在「设置 → Agent」里为它配置 Agent。"
           }
         }
       }

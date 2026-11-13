@@ -145,7 +145,7 @@ internal fun HomeOnboarding(padding: PaddingValues) {
                     stringResource(R.string.home_onboarding_next_heading), style = type.caption, color = colors.textTertiary,
                     modifier = Modifier.semantics { heading() },
                 )
-                listOf(R.string.home_onboarding_next_machine, R.string.home_onboarding_next_project, R.string.home_onboarding_next_agent)
+                listOf(R.string.home_onboarding_next_machine, R.string.home_onboarding_next_agent, R.string.home_onboarding_next_chat)
                     .forEachIndexed { index, step ->
                         Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
                             Box(

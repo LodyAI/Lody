@@ -31,8 +31,8 @@
     <string name="home_onboarding_download_url">https://lody.ai/download</string>
     <string name="home_onboarding_next_heading">Once a machine is online</string>
     <string name="home_onboarding_next_machine">It shows up in this workspace automatically.</string>
-    <string name="home_onboarding_next_project">Add a project folder on it from Projects → +.</string>
-    <string name="home_onboarding_next_agent">Pick an agent in Settings → Agents, then send your first task.</string>
+    <string name="home_onboarding_next_chat">Tap + to start your first task: pick this computer and a project, or no project.</string>
+    <string name="home_onboarding_next_agent">Pick an agent for it in Settings → Agents.</string>
     <string name="home_archive">Archive</string>
     <string name="home_archived_done">Archived</string>
     <string name="home_archive_failed">Could not archive. Try again.</string>

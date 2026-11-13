@@ -143,7 +143,7 @@ final class HomeOnboardingView: UIView {
     column.spacing = LodySpacing.sm
     column.isLayoutMarginsRelativeArrangement = true
     column.directionalLayoutMargins = NSDirectionalEdgeInsets(top: LodySpacing.xs, leading: LodySpacing.xs, bottom: 0, trailing: LodySpacing.xs)
-    for (index, key) in ["home.onboarding.nextStep.machine", "home.onboarding.nextStep.project", "home.onboarding.nextStep.agent"].enumerated() {
+    for (index, key) in ["home.onboarding.nextStep.machine", "home.onboarding.nextStep.agent", "home.onboarding.nextStep.chat"].enumerated() {
       let number = Self.label("\(index + 1)", style: .micro, color: LodyUIColor.textSecondary)
       number.textAlignment = .center
       number.backgroundColor = LodyUIColor.fillTertiary
