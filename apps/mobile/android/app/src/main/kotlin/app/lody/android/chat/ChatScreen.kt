@@ -816,8 +816,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                         meId = context.me?.id,
                         decideProposal = { card, accept -> repository.decideProposal(scope, id, card.entryId, card.itemId, accept) },
                         // Only a live, open conversation takes an answer; otherwise the approval just waits.
-                        respondPermission = if (status == "live" && context.session?.isTabClosed != true) ({ entryId, itemId, requestId, optionId ->
-                            repository.respondPermission(scope, id, entryId, itemId, requestId, optionId)
+                        respondPermission = if (status == "live" && context.session?.isTabClosed != true) ({ entryId, itemId, requestId, optionId, answers ->
+                            repository.respondPermission(scope, id, entryId, itemId, requestId, optionId, answers)
                         }) else null,
                     ) }
                 }

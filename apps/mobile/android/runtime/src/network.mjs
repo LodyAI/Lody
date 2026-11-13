@@ -51,11 +51,12 @@ const detail={
  androidEmulatorControl:(sessionId,command)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.androidEmulatorControl({workspaceId:scope.workspaceId,sessionId,userId:scope.userId,command});},
  // Stops the watched session's running turn; a write, never retried.
  controlTurn:async(sessionId,machineId,turnId)=>{const result=await controlTurn({action:'stop',sessionId,machineId,turnId});return {state:result?.state??'unknown'};},
- // Answers a permission request (a plan approval) in the watched session; a write, never retried.
+ // Answers a permission request in the watched session; a write, never retried. An ask-user-question
+ // also carries its answers, keyed per question (`questionAnswerKey`); native sends null otherwise.
  // `{state}` is accepted / stale / conflict; failures travel in-band as `{error: code}`.
- respondPermission:async(sessionId,entryId,itemId,requestId,optionId)=>{
-  try{const result=await respondPermission({sessionId,entryId,itemId,requestId,optionId});return {state:result.state};}
-  catch(error){const code=String(error?.message??'');return {error:['session_not_ready','workspace_changed','invalid_option','upload_failed'].includes(code)?code:'permission_write_failed'};}
+ respondPermission:async(sessionId,entryId,itemId,requestId,optionId,answers)=>{
+  try{const result=await respondPermission({sessionId,entryId,itemId,requestId,optionId,...(answers&&typeof answers==='object'&&!Array.isArray(answers)?{answers}:{})});return {state:result.state};}
+  catch(error){const code=String(error?.message??'');return {error:['session_not_ready','workspace_changed','invalid_option','invalid_answers','upload_failed'].includes(code)?code:'permission_write_failed'};}
  }};
 const sendWithReferences = args => sendTurn(args, async text => {
  const items = [];

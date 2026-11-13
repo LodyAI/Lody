@@ -225,6 +225,7 @@ internal object RuntimeProtocol {
             blocks, json.optBoolean("truncated"),
             chosenOption = outcome?.takeIf { it.optString("outcome") == "selected" }?.optString("optionId")?.ifEmpty { null },
             withdrawn = outcome?.optString("outcome") == "cancelled",
+            answers = answers(outcome),
         )
     }
 
@@ -316,7 +317,55 @@ internal object RuntimeProtocol {
                 PermissionOption(optionId, name, (option.opt("kind") as? String)?.takeIf { it.isNotBlank() })
             }
         }.orEmpty()
-        return ToolPermission(requestId, json.optBoolean("pending"), options)
+        val question = json.optString("kind") == "ask_user_question"
+        return ToolPermission(requestId, json.optBoolean("pending"), options, question, if (question) questions(json.opt("questionMeta")) else null)
+    }
+
+    /**
+     * The runtime's normalized `questionMeta`, strictly: anything malformed (no questions, a
+     * question without header or text, an option without a label) is null, so the request fails
+     * closed as not answerable here rather than guessed at.
+     */
+    internal fun questions(value: Any?): QuestionMeta? {
+        val json = value as? JSONObject ?: return null
+        val array = json.opt("questions") as? JSONArray ?: return null
+        if (array.length() == 0) return null
+        val questions = (0 until array.length()).map { index ->
+            val question = array.opt(index) as? JSONObject ?: return null
+            val header = question.opt("header") as? String ?: return null
+            val text = question.opt("question") as? String ?: return null
+            val rawOptions = question.opt("options") as? JSONArray ?: return null
+            val options = (0 until rawOptions.length()).map { at ->
+                val option = rawOptions.opt(at) as? JSONObject ?: return null
+                QuestionMeta.Option(
+                    option.opt("label") as? String ?: return null,
+                    option.opt("description") as? String, option.opt("preview") as? String,
+                )
+            }
+            QuestionMeta.Question(
+                id = question.opt("id") as? String, header = header, question = text, options = options,
+                multiSelect = question.opt("multiSelect") == true,
+                allowCustomAnswer = question.opt("allowCustomAnswer") as? Boolean,
+                isSecret = question.opt("isSecret") == true,
+            )
+        }
+        return QuestionMeta(questions, json.opt("allowCustomAnswer") == true)
+    }
+
+    /** An answered question's answers from its outcome `_meta` (Lody, Claude or Codex shape), as lists. */
+    private fun answers(outcome: JSONObject?): Map<String, List<String>> {
+        val meta = outcome?.optJSONObject("_meta") ?: return emptyMap()
+        val raw = meta.optJSONObject("lody")?.optJSONObject("elicitation")?.optJSONObject("answers")
+            ?: meta.optJSONObject("claudeCode")?.optJSONObject("askUserQuestion")?.optJSONObject("answers")
+            ?: meta.optJSONObject("codex")?.optJSONObject("requestUserInput")?.optJSONObject("answers")
+            ?: return emptyMap()
+        fun strings(value: Any?): List<String>? = when (value) {
+            is String -> listOf(value)
+            is JSONArray -> (0 until value.length()).mapNotNull { value.opt(it) as? String }
+            is JSONObject -> strings(value.opt("answers"))
+            else -> null
+        }
+        return raw.keys().asSequence().mapNotNull { key -> strings(raw.opt(key))?.takeIf { it.isNotEmpty() }?.let { key to it } }.toMap()
     }
 
     private fun attachments(items: List<JSONObject>) = items.flatMap { item ->

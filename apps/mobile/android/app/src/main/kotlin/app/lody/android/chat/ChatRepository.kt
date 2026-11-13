@@ -156,11 +156,16 @@ class ChatRepository(
     }
 
     /**
-     * Answers a permission request (a plan approval) with one of its options: `accepted`, `stale` or
-     * `conflict`. A write, never retried (failures throw their code).
+     * Answers a permission request (a tool permission, a plan approval, or an ask-user-question with
+     * its [answers]) with one of its options: `accepted`, `stale` or `conflict`. A write, never
+     * retried (failures throw their code).
      */
-    suspend fun respondPermission(scope: RuntimeScope, sessionId: String, entryId: String, itemId: String, requestId: String, optionId: String): String =
-        owner.use(scope) { (it.execute(RuntimeCommand.RespondPermission(sessionId, entryId, itemId, requestId, optionId)) as RuntimeResult.PermissionAnswered).state }
+    suspend fun respondPermission(
+        scope: RuntimeScope, sessionId: String, entryId: String, itemId: String, requestId: String, optionId: String,
+        answers: Map<String, Any>? = null,
+    ): String = owner.use(scope) {
+        (it.execute(RuntimeCommand.RespondPermission(sessionId, entryId, itemId, requestId, optionId, answers)) as RuntimeResult.PermissionAnswered).state
+    }
 
     /** Sends one text turn on the scope's lease. Never retried: an uncertain write is `unknown`. */
     suspend fun send(scope: RuntimeScope, request: SendTextRequest): RuntimeResult.Sent =

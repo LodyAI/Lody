@@ -105,6 +105,17 @@ class TurnLayoutTest {
         assertFalse(claude.separatePlan)
     }
 
+    @Test fun aGroupWaitingOnAnAnswerNeverFolds() {
+        val asking = TurnItem.Tool("2", "execute", "rm -rf build", "pending",
+            permission = app.lody.android.runtime.ToolPermission("r", pending = true, options = emptyList()))
+        val layout = TurnLayout.build("t", listOf(tool("1"), asking, text("3")), finished = true, showThoughts = false)
+        val group = layout.blocks.first() as TurnLayout.Activity
+        assertTrue(group.attention)
+        assertTrue("The waiting group stays visible", group in layout.visible)
+        val settled = TurnLayout.build("t", listOf(tool("1"), asking.copy(permission = asking.permission!!.copy(pending = false)), text("3")), finished = true, showThoughts = false)
+        assertTrue("Once answered it folds like any work", settled.folded && settled.visible.none { it is TurnLayout.Activity })
+    }
+
     @Test fun tasksLeaveTheTurnBlocksForTheirOwnPanel() {
         val task = TurnItem.Task("9", "Explore", "map the repo", "running")
         val layout = TurnLayout.build("t", listOf(tool("1"), text("2"), task), finished = true, showThoughts = false)

@@ -93,7 +93,11 @@ sealed interface RuntimeCommand {
      * options (upstream `respondPermission`); answers [RuntimeResult.PermissionAnswered]. A write,
      * never retried here.
      */
-    data class RespondPermission(val sessionId: String, val entryId: String, val itemId: String, val requestId: String, val optionId: String) : RuntimeCommand
+    data class RespondPermission(
+        val sessionId: String, val entryId: String, val itemId: String, val requestId: String, val optionId: String,
+        /** An ask-user-question's answers by [QuestionMeta.key]: a label or text, or a multi-select's labels. */
+        val answers: Map<String, Any>? = null,
+    ) : RuntimeCommand
     data object Ping : RuntimeCommand
     data object InspectSchema : RuntimeCommand
 }
@@ -433,15 +437,65 @@ data class StepDetail(
     val blocks: List<StepBlock>,
     val truncated: Boolean = false,
     val chosenOption: String? = null,
+    /** An answered ask-user-question's answers by question key (the outcome's `_meta`), each as its labels or text. */
+    val answers: Map<String, List<String>> = emptyMap(),
     val withdrawn: Boolean = false,
 )
 
 /** A tool step's permission request (web `permissionRequest`): [pending] until answered or withdrawn. */
-data class ToolPermission(val requestId: String, val pending: Boolean, val options: List<PermissionOption>)
+data class ToolPermission(
+    val requestId: String,
+    val pending: Boolean,
+    val options: List<PermissionOption>,
+    /** An ask-user-question request (runtime `kind`), answered with [questions]. */
+    val question: Boolean = false,
+    /** The questions, or null when absent or malformed: such a question is not answerable here. */
+    val questions: QuestionMeta? = null,
+) {
+    /**
+     * Desktop `resolveSuggestedOptionId`: a request that leads with a refusal suggests the first
+     * one-time refusal; otherwise the first one-time allow, never an "always"; else the first option.
+     */
+    val suggested: PermissionOption? get() {
+        val first = options.firstOrNull() ?: return null
+        if (first.tone == "reject" || first.tone == "rejectAlways") options.firstOrNull { it.tone == "reject" }?.let { return it }
+        return options.firstOrNull { it.tone == "allow" } ?: first
+    }
+}
+
+/** Ask-user-question metadata as the runtime normalized it (`parseQuestionMeta`). */
+data class QuestionMeta(val questions: List<Question>, val allowCustomAnswer: Boolean) {
+    data class Option(val label: String, val description: String? = null, val preview: String? = null)
+    data class Question(
+        val id: String?, val header: String, val question: String, val options: List<Option>,
+        val multiSelect: Boolean, val allowCustomAnswer: Boolean? = null, val isSecret: Boolean = false,
+    )
+
+    /** Runtime `questionAnswerKey`: the first of id, question, header that is non-blank and unique, else the index. */
+    fun key(index: Int): String {
+        val question = questions[index]
+        for (field in listOf<(Question) -> String?>({ it.id }, { it.question }, { it.header })) {
+            val value = field(question)
+            if (!value.isNullOrBlank() && questions.count { field(it) == value } == 1) return value
+        }
+        return index.toString()
+    }
+
+    /** Runtime `questionAllowsText`. */
+    fun allowsText(index: Int): Boolean = questions[index].let { it.options.isEmpty() || (it.allowCustomAnswer ?: allowCustomAnswer) }
+}
 
 /** One option the provider offers; [kind] is ACP's `allow_once` / `allow_always` / `reject_once` / …. */
 data class PermissionOption(val optionId: String, val name: String, val kind: String?) {
     val allows: Boolean get() = kind?.startsWith("allow") == true
+    /** Desktop `resolvePermissionOptionTone`: `allow`, `allowAlways`, `reject` (also Lody's `deny`), `rejectAlways` or `other`. */
+    val tone: String get() = when (kind) {
+        "allow_once" -> "allow"
+        "allow_always" -> "allowAlways"
+        "reject_once", "deny" -> "reject"
+        "reject_always" -> "rejectAlways"
+        else -> "other"
+    }
 }
 
 sealed interface StepBlock {

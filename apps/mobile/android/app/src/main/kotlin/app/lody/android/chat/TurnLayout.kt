@@ -22,7 +22,8 @@ object TurnLayout {
 
     data class Content(override val key: String, val item: TurnItem) : Block
 
-    data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary) : Block
+    /** [attention]: a step waits on the reader's answer, so the group stays open and never folds (web). */
+    data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary, val attention: Boolean = false) : Block
 
     data class Summary(
         val thought: Boolean = false,
@@ -78,7 +79,7 @@ object TurnLayout {
         var stack: Int? = null
         fun flush() {
             val first = pending.firstOrNull() ?: return
-            blocks += Activity("$turnId:activity:${first.id}", pending, summarize(pending))
+            blocks += Activity("$turnId:activity:${first.id}", pending, summarize(pending), pending.any(::awaitsAnswer))
             pending = mutableListOf()
         }
         for (item in shown) {
@@ -113,7 +114,7 @@ object TurnLayout {
             shown.size > 1 && index < shown.size - 1 && !(item is TurnItem.Text && index >= answerStart) && !neverFolded(item)
         }.map { it.value.id }.toSet()
         val work = blocks.filter { block ->
-            block is Activity || (block is Content && block.item.id in collapsible)
+            (block is Activity && !block.attention) || (block is Content && block.item.id in collapsible)
         }.map { it.key }.toSet()
         // Fold only when something stays visible below: otherwise nothing would answer the turn.
         val folded = work.isNotEmpty() && blocks.any { it.key !in work }
@@ -134,6 +135,9 @@ object TurnLayout {
         val ordered = if (exit < 0) rest + plans else rest.take(exit) + plans + rest.drop(exit)
         return ordered + attachments
     }
+
+    /** A step whose permission request still waits on the reader. */
+    internal fun awaitsAnswer(item: TurnItem): Boolean = item is TurnItem.Tool && item.permission?.pending == true
 
     /** Thought and tool steps fold into groups; a plan-approval (`switch_mode`) step stays content. */
     private fun isActivity(item: TurnItem): Boolean =

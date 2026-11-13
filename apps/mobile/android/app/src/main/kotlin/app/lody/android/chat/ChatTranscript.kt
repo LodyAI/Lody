@@ -160,7 +160,7 @@ fun ChatTranscript(
     meId: String? = null,
     /** Decides an Agent's proposal; null where there is no runtime. */
     decideProposal: ProposalDecider? = null,
-    /** Answers a plan approval; null where there is no runtime or the session cannot take an answer. */
+    /** Answers a permission request; null where there is no runtime or the session cannot take an answer. */
     respondPermission: PermissionResponder? = null,
 ) {
     // Only an actual drag leaves follow mode. Programmatic positioning and IME layout
@@ -236,6 +236,23 @@ fun ChatTranscript(
             state.scrollBy(-target.offset.toFloat())
         }
     }
+    // A permission request that newly waits on the reader is brought into view once, when it is
+    // not already fully on screen, and the list then stops following so it stays there.
+    val announced = remember { HashSet<Any>() }
+    LaunchedEffect(entries) {
+        withFrameNanos { }
+        val fresh = keys.pending.firstOrNull { it !in announced } ?: return@LaunchedEffect
+        announced += keys.pending
+        val index = keys.indexOf(fresh)
+        if (index < 0) return@LaunchedEffect
+        val layout = state.layoutInfo
+        val row = layout.visibleItemsInfo.firstOrNull { it.key == fresh }
+        val shown = row != null && row.offset >= 0 && row.offset + row.size <= layout.viewportEndOffset - layout.afterContentPadding
+        if (!shown) {
+            following = false
+            state.animateScrollToItem(index)
+        }
+    }
     val details = remember(loadDetail != null) { StepDetails(loadDetail) }
     // The turn whose tasks / files a sheet shows, by id, so running tasks keep updating inside it.
     var shownTasks by remember { mutableStateOf<String?>(null) }
@@ -294,7 +311,9 @@ private data class Anchor(val key: Any, val offset: Int, val serial: Int)
 private class KeyOrder {
     private val keys = ArrayList<Any>()
     private var index = HashMap<Any, Int>()
-    fun reset() { keys.clear(); index = HashMap() }
+    /** Rows whose permission request waits on the reader, in list order. */
+    val pending = ArrayList<Any>()
+    fun reset() { keys.clear(); index = HashMap(); pending.clear() }
     fun add(key: Any?) { if (key != null) { index[key] = keys.size }; keys += key ?: Unit }
     fun indexOf(key: Any): Int = index[key] ?: -1
 }
@@ -303,6 +322,7 @@ private class KeyOrder {
 private class KeyRecorder(private val scope: LazyListScope, private val keys: KeyOrder) : LazyListScope by scope {
     override fun item(key: Any?, contentType: Any?, content: @Composable LazyItemScope.() -> Unit) {
         keys.add(key)
+        if (contentType == PendingPermissionRow && key != null) keys.pending += key
         scope.item(key, contentType, content)
     }
 

@@ -100,6 +100,30 @@ class RuntimeProtocolTest {
   assertFalse(chosen.withdrawn)
   assertTrue(RuntimeProtocol.detail(JSONObject().put("outcome",JSONObject().put("outcome","cancelled"))).withdrawn)
  }
+ @Test fun askUserQuestionParsesItsQuestionsAndFailsClosedWhenMalformed() {
+  fun permission(meta: String) = JSONObject().put("type","tool_call").put("itemId","q").put("kind","other").put("title","Ask").put("status","pending")
+   .put("permission",JSONObject("{\"requestId\":\"r\",\"pending\":true,\"kind\":\"ask_user_question\",\"options\":[{\"optionId\":\"ok\",\"name\":\"Submit\",\"kind\":\"allow_once\"}]$meta}"))
+  fun parse(meta: String): ToolPermission {
+   val entry=JSONObject().put("id","a").put("role","assistant").put("finished",false).put("items",org.json.JSONArray().put(permission(meta)))
+   val body=JSONObject().put("v",1).put("status","live").put("entries",org.json.JSONArray().put(entry))
+   val event=JSONObject().put("type","session").put("sessionId","s").put("session",body.toString())
+   return ((RuntimeProtocol.event(event) as RuntimeEvent.SessionUpdated).snapshot.messages.single().items.single() as TurnItem.Tool).permission!!
+  }
+  val good=parse(",\"questionMeta\":{\"source\":\"codex\",\"allowCustomAnswer\":false,\"questions\":[{\"id\":\"db\",\"header\":\"Database\",\"question\":\"Which one?\",\"options\":[{\"label\":\"Postgres\",\"description\":\"SQL\"}],\"multiSelect\":false,\"allowCustomAnswer\":true,\"isSecret\":true},{\"header\":\"Database\",\"question\":\"Extras?\",\"options\":[],\"multiSelect\":true}]}")
+  assertTrue(good.question)
+  val meta=good.questions!!
+  assertEquals(QuestionMeta.Question("db","Database","Which one?",listOf(QuestionMeta.Option("Postgres","SQL")),false,true,true),meta.questions[0])
+  assertEquals("Answers are keyed by id, else the unique question text",listOf("db","Extras?"),meta.questions.indices.map(meta::key))
+  assertTrue("A question without options takes text",meta.allowsText(1))
+  assertEquals("Missing metadata is not answerable",null,parse("").questions)
+  assertEquals("An option without a label fails closed",null,parse(",\"questionMeta\":{\"questions\":[{\"header\":\"H\",\"question\":\"Q\",\"options\":[{\"description\":\"no label\"}],\"multiSelect\":false}]}").questions)
+  assertEquals("No questions fails closed",null,parse(",\"questionMeta\":{\"questions\":[]}").questions)
+  val answered=RuntimeProtocol.detail(JSONObject("{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"ok\",\"_meta\":{\"codex\":{\"requestUserInput\":{\"answers\":{\"db\":{\"answers\":[\"Postgres\"]}}}}}}}"))
+  assertEquals(mapOf("db" to listOf("Postgres")),answered.answers)
+  val suggested=ToolPermission("r",true,listOf(PermissionOption("always","Always","allow_always"),PermissionOption("once","Once","allow_once"),PermissionOption("no","No","reject_once")))
+  assertEquals("Never suggests an always",  "once",suggested.suggested?.optionId)
+  assertEquals("A refusal-first request suggests refusing","no",suggested.copy(options=suggested.options.reversed()).suggested?.optionId)
+ }
  @Test fun recoveredInputsStayUnconfirmedAndDoNotDuplicateOwnerHistory() {
   val body = """{"v":1,"status":"live","entries":[{"id":"owner","role":"user","finished":true,"items":[{"type":"text","text":"confirmed"}]}],"pendingRoostInputs":[{"id":"owner","items":[{"type":"text","text":"duplicate"}]},{"id":"pending","timestamp":"2026-01-01","userId":"u","inputState":"unknown","items":[{"type":"text","text":"kept"},{"type":"file","file":{"fileName":"proof.txt"}}]}]}"""
   val frame = JSONObject().put("type", "session").put("sessionId", "s").put("session", body)
