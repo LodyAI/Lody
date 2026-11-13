@@ -20,7 +20,19 @@ import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
-import { Cause, Context, Deferred, Effect, Fiber, Layer, Scope, Exit, Result, Clock } from 'effect'
+import {
+  Cause,
+  Context,
+  Data,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Scope,
+  Exit,
+  Result,
+  Clock
+} from 'effect'
 import { TestClock } from 'effect/testing'
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services'
 import { makeSqliteKeyMailbox, referenceKeyMailbox } from '@lody/e2ee-core/adapters/node-sqlite'
@@ -3753,7 +3765,7 @@ async function memberIpcFixture(options = {}) {
     }
   }
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
-    effect: { Effect, Deferred, Cause },
+    effect: { Effect, Deferred, Cause, Data, Exit },
     '../product-window-ipc-service': { ProductWindowIpcService: class {} },
     'electron-ipc-decorator': {
       IpcMethod: () => (_t, _n, d) => d,
