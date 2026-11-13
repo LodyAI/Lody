@@ -50,7 +50,6 @@
     "@lody/cli-supervisor": "workspace:*",
     "@lody/platform": "workspace:*",
     "@lody/shared": "workspace:*",
-    "@tanstack/react-router": "catalog:",
     "better-auth": "catalog:",
     "better-sqlite3": "catalog:",
     "conf": "^15.1.0",
@@ -61,7 +60,6 @@
     "electron-sparkle-updater": "0.5.1",
     "electron-updater": "^6.3.9",
     "image-dimensions": "^2.5.1",
-    "jotai": "catalog:",
     "posthog-node": "^5.38.8",
     "react": "catalog:",
     "react-dom": "catalog:",
@@ -96,6 +94,8 @@
     "vite-plugin-wasm": "^3.6.0",
     "tsx": "4.23.7",
     "@lody/e2ee-machine-sharing": "workspace:*",
-    "@lody/e2ee-client": "workspace:*"
+    "@lody/e2ee-client": "workspace:*",
+    "@tanstack/react-router": "catalog:",
+    "jotai": "catalog:"
   }
 }
