@@ -18,12 +18,13 @@ final class ConversationTreeRow: UIView {
   var continues = false
   var ancestorRails: [Int] = []
   var showsAgent = true
+  /// Horizontal room inside the row so the current-target capsule clears its content.
+  var padding: CGFloat = 0
 
   override init(frame: CGRect) {
     super.init(frame: frame)
     isUserInteractionEnabled = false
     selectionBackground.backgroundColor = .tertiarySystemFill
-    selectionBackground.layer.cornerRadius = 6
     selectionBackground.isHidden = true
     addSubview(selectionBackground)
     layer.addSublayer(branch)
@@ -62,9 +63,12 @@ final class ConversationTreeRow: UIView {
     detailLabel.font = LodyDesign.font(.footnote, size: 12, compatibleWith: traitCollection)
     statusLabel.font = detailLabel.font
     let step: CGFloat = 24
-    let indent = CGFloat(depth) * step
+    let indent = CGFloat(depth) * step + padding
     selectionBackground.isHidden = !isCurrent
-    selectionBackground.frame = CGRect(x: indent - 4, y: 2, width: max(0, bounds.width - indent + 8), height: max(0, bounds.height - 4))
+    // Padded rows (the relations sheet) get a full capsule; flush receipt rows keep the small radius.
+    selectionBackground.cornerConfiguration = padding > 0 ? .capsule() : .corners(radius: .fixed(6))
+    selectionBackground.frame = CGRect(x: indent - padding, y: 2, width: max(0, bounds.width - indent + padding), height: max(0, bounds.height - 4))
+    let trailing = bounds.width - padding
     let textX = indent + (showsAgent ? LodyIconSize.sm + LodySpacing.sm : 0)
     let titleHeight = ceil(titleLabel.font.lineHeight)
     let hasDetail = detailLabel.text?.isEmpty == false
@@ -72,7 +76,7 @@ final class ConversationTreeRow: UIView {
     let top = max(LodySpacing.sm, (bounds.height - contentHeight) / 2)
     let mid = top + titleHeight / 2
     let glyphWidth: CGFloat = glyph.kind == .none ? 0 : LodyIconSize.sm
-    glyph.frame = CGRect(x: bounds.width - glyphWidth, y: mid - 8, width: glyphWidth, height: 16)
+    glyph.frame = CGRect(x: trailing - glyphWidth, y: mid - 8, width: glyphWidth, height: 16)
     glyph.isHidden = glyph.kind == .live
     if glyph.kind == .live {
       if working == nil {
@@ -91,17 +95,17 @@ final class ConversationTreeRow: UIView {
     titleLabel.frame = CGRect(x: textX, y: top, width: max(0, statusLabel.frame.minX - LodySpacing.sm - textX), height: titleHeight)
     agentView.isHidden = !showsAgent
     agentView.frame = CGRect(x: indent, y: mid - 8, width: 16, height: 16)
-    detailLabel.frame = CGRect(x: textX, y: top + titleHeight + LodySpacing.xs, width: max(0, bounds.width - textX), height: hasDetail ? ceil(detailLabel.font.lineHeight) : 0)
+    detailLabel.frame = CGRect(x: textX, y: top + titleHeight + LodySpacing.xs, width: max(0, trailing - textX), height: hasDetail ? ceil(detailLabel.font.lineHeight) : 0)
     let path = UIBezierPath()
     for level in ancestorRails {
       let x = CGFloat(level) * step + 6
       path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: bounds.height))
     }
     if depth > 0 {
-      let x = indent - step + 6
+      let x = indent - padding - step + 6
       let fork = max(0, mid - LodySpacing.md)
       path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: fork))
-      path.addCurve(to: CGPoint(x: indent - LodySpacing.xs, y: mid), controlPoint1: CGPoint(x: x, y: mid - LodyRadius.sm), controlPoint2: CGPoint(x: x + LodySpacing.xs, y: mid))
+      path.addCurve(to: CGPoint(x: indent - padding - LodySpacing.xs, y: mid), controlPoint1: CGPoint(x: x, y: mid - LodyRadius.sm), controlPoint2: CGPoint(x: x + LodySpacing.xs, y: mid))
       if continues { path.move(to: CGPoint(x: x, y: fork)); path.addLine(to: CGPoint(x: x, y: bounds.height)) }
     }
     branch.path = path.cgPath

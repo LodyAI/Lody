@@ -26,6 +26,8 @@ final class ConversationTabStrip: UIView, UIScrollViewDelegate {
   private var previousIDs: [String] = []
   private(set) var fadesLeading = false
   private(set) var fadesTrailing = false
+  /// Inner room on each side of a row; hosts widen the strip by this much so content stays put.
+  var rowPadding: CGFloat = 0
   var onSelect: ((String) -> Void)?
   var onOpen: ((String) -> Void)?
 
@@ -89,14 +91,15 @@ final class ConversationTabStrip: UIView, UIScrollViewDelegate {
     var x: CGFloat = 0
     for index in items.indices {
       let item = items[index]
+      contents[index].padding = rowPadding
       let width = items.count == 1 ? bounds.width : max(220, min(300, bounds.width * 0.88))
       let openWidth: CGFloat = item.separateOpen ? 44 : 0
       buttons[index].frame = CGRect(x: x, y: 0, width: max(0, width - openWidth), height: bounds.height)
       contents[index].frame = buttons[index].frame
       openButtons[index].frame = CGRect(x: x + width - openWidth, y: 0, width: openWidth, height: bounds.height)
-      x += width + LodySpacing.lg
+      x += width + max(0, LodySpacing.lg - 2 * rowPadding)
     }
-    scroll.contentSize = CGSize(width: max(bounds.width, x - LodySpacing.lg), height: bounds.height)
+    scroll.contentSize = CGSize(width: max(bounds.width, x - max(0, LodySpacing.lg - 2 * rowPadding)), height: bounds.height)
     let offset = min(max(0, scroll.contentOffset.x), max(0, scroll.contentSize.width - bounds.width))
     if offset != scroll.contentOffset.x && !scroll.isDragging { scroll.contentOffset.x = offset }
     updateFades()
