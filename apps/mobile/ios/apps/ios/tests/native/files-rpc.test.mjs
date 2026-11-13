@@ -469,43 +469,26 @@ test(
   },
 );
 
-test('turnDiff decodes gzip snapshots and falls back to the current diff', async () => {
+test('turnDiff decodes the requested historical gzip snapshots', async () => {
   const gz = (text) => ({
     encoding: 'gzip-base64',
     data: gzipSync(Buffer.from(text)).toString('base64'),
     rawBytes: text.length,
   });
   const calls = machine(async (method, params) => {
-    if (method === 'code-collab/open-turn-diff')
-      return params.path === 'a.ts'
-        ? {
-            result: {
-              status: 'ok',
-              path: 'a.ts',
-              turnId: params.turnId,
-              oldSnapshot: { kind: 'text', text: gz('old\n') },
-              newSnapshot: {
-                kind: 'text',
-                text: { encoding: 'plain', text: 'new\n', rawBytes: 4 },
-              },
-              add: 1,
-              del: 1,
-            },
-          }
-        : {
-            result: {
-              status: 'unavailable',
-              path: params.path,
-              turnId: params.turnId,
-              reason: 'turn_unavailable',
-            },
-          };
+    assert.equal(method, 'code-collab/open-turn-diff');
     return {
       result: {
         status: 'ok',
         path: params.path,
-        oldSnapshot: { kind: 'missing' },
-        newSnapshot: { kind: 'too_large' },
+        turnId: params.turnId,
+        oldSnapshot: { kind: 'text', text: gz('old\n') },
+        newSnapshot: {
+          kind: 'text',
+          text: { encoding: 'plain', text: 'new\n', rawBytes: 4 },
+        },
+        add: 1,
+        del: 1,
       },
     };
   });
@@ -525,19 +508,72 @@ test('turnDiff decodes gzip snapshots and falls back to the current diff', async
   });
   assert.equal(calls[0].params.turnId, 'e1');
   assert.equal(calls[0].params.sessionId, 's1');
+});
 
-  const current = await runtime.turnDiff(ctx(), {
+test('unavailable turns stay historical even when the current diff is readable', async () => {
+  const snapshot = (text) => ({
+    kind: 'text',
+    text: { encoding: 'plain', text, rawBytes: text.length },
+  });
+  for (const reason of ['turn_unavailable', 'not_changed', 'transient_io']) {
+    machine(async (method, params) => ({
+      result:
+        method === 'code-collab/open-turn-diff'
+          ? {
+              status: 'unavailable',
+              path: params.path,
+              reason,
+              message: 'Historical contents are unavailable',
+            }
+          : {
+              status: 'ok',
+              path: params.path,
+              oldSnapshot: snapshot('value = 0\n'),
+              newSnapshot: snapshot('value = 2\n'),
+            },
+    }));
+    for (const entryId of ['e1', 'e2']) {
+      assert.deepEqual(
+        await runtime.turnDiff(ctx(), {
+          sessionId: 's1',
+          entryId,
+          path: 'a.ts',
+        }),
+        {
+          status: 'unavailable',
+          base: 'turn',
+          path: 'a.ts',
+          reason,
+          message: 'Historical contents are unavailable',
+        },
+      );
+    }
+    const current = await runtime.fileDiff(ctx(), {
+      sessionId: 's1',
+      path: 'a.ts',
+    });
+    assert.equal(current.base, 'current');
+    assert.deepEqual(current.old, { kind: 'text', text: 'value = 0\n' });
+    assert.deepEqual(current.new, { kind: 'text', text: 'value = 2\n' });
+  }
+});
+
+test('explicit current diffs retain missing and oversize sides', async () => {
+  machine(async () => ({
+    result: {
+      status: 'ok',
+      path: 'b.ts',
+      oldSnapshot: { kind: 'missing' },
+      newSnapshot: { kind: 'too_large' },
+    },
+  }));
+  const current = await runtime.fileDiff(ctx(), {
     sessionId: 's1',
-    entryId: 'e1',
     path: 'b.ts',
   });
   assert.equal(current.base, 'current');
   assert.deepEqual(current.old, { kind: 'missing', text: '' });
   assert.deepEqual(current.new, { kind: 'too_large' });
-  assert.deepEqual(
-    calls.slice(1).map((c) => c.method),
-    ['code-collab/open-turn-diff', 'code-collab/open-current-diff'],
-  );
 });
 
 test('sealed RPC errors surface the machine code and message', async () => {
@@ -824,21 +860,25 @@ test('child file and diff requests use the workspace owner envelope but keep the
       .new.text,
     'changed',
   );
-  assert.equal(
-    (
-      await runtime.turnDiff(context, {
-        sessionId: 'child',
-        entryId: 'turn',
-        path: 'README.md',
-      })
-    ).base,
-    'current',
+  assert.deepEqual(
+    await runtime.turnDiff(context, {
+      sessionId: 'child',
+      entryId: 'turn',
+      path: 'README.md',
+    }),
+    {
+      status: 'unavailable',
+      base: 'turn',
+      path: 'README.md',
+      reason: 'turn_unavailable',
+      message: undefined,
+    },
   );
-  assert.equal(
-    calls.length,
-    4,
-    'The current-diff fallback must preserve the parent envelope too',
-  );
+  assert.deepEqual(calls.at(-1).params, {
+    sessionId: 'child',
+    turnId: 'turn',
+    path: 'README.md',
+  });
 });
 
 test('workspace changes use the session worktree and owner key, retaining deferred and binary files without projecting file bodies into UI state', async () => {
