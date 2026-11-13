@@ -1048,23 +1048,20 @@ precondition(ChatComposerView.grabberRelease(fromFullScreen: false, progress: 0.
 precondition(ChatComposerView.grabberRelease(fromFullScreen: false, progress: 0.6, translation: -100, velocity: 0) == .fullScreen,
   "Releasing past halfway opens full screen")
 precondition(!descendants(glassComposer).contains { $0.accessibilityIdentifier == "session-expand" }, "The grabber replaces the expand button")
-let glassFormat = descendants(glassComposer).compactMap { $0 as? ChatComposerFormatBar }.first!
-precondition(glassFormat.bounds.height < 0.5, "The default sheet has no format bar")
 _ = grabber!.accessibilityActivate()
 RunLoop.current.run(until: Date().addingTimeInterval(0.6))
 glassComposer.layoutIfNeeded()
-precondition(abs(glassFormat.bounds.height - 44) < 0.5 && !glassFormat.isHidden
-  && grabber!.accessibilityLabel == String(localized: "native.chat.composer.collapse", bundle: .lody),
-  "Activating the grabber must open full screen with the format bar")
+precondition(grabber!.accessibilityLabel == String(localized: "native.chat.composer.collapse", bundle: .lody),
+  "Activating the grabber must open full screen")
 _ = grabber!.accessibilityActivate()
 RunLoop.current.run(until: Date().addingTimeInterval(0.6))
 glassComposer.layoutIfNeeded()
-precondition(glassFormat.bounds.height < 0.5 && grabber!.accessibilityLabel == String(localized: "native.chat.composer.expand", bundle: .lody),
+precondition(grabber!.accessibilityLabel == String(localized: "native.chat.composer.expand", bundle: .lody),
   "Activating the grabber again must return to the default sheet")
 glassComposer.allowsFullScreen = false
 glassComposer.layoutIfNeeded()
 precondition(grabber!.isHidden, "Hosts without full screen have no grabber")
-print("Composer grabber: toggles full screen with the format bar and replaces the expand button")
+print("Composer grabber: toggles full screen and replaces the expand button")
 glassInput.resignFirstResponder()
 RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 glassComposer.layoutIfNeeded()

@@ -161,7 +161,6 @@ targets:
           - Chat/ChatCameraCapture.swift
           - Chat/ChatAttachmentCamera.swift
           - Chat/ChatComposerView.swift
-          - Chat/ChatComposerFormatBar.swift
           - Chat/ChatReferenceNode.swift
           - Chat/ChatComposerModelPanel.swift
           - Chat/ChatComposerSurfaceLayout.swift
