@@ -2,12 +2,18 @@
 
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider as JotaiProvider } from 'jotai';
+import { createStore, Provider as JotaiProvider } from 'jotai';
 
-import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
+import {
+  getSessionRoomId,
+  type SessionHistory,
+  type SessionHistoryParsed,
+  type SessionId,
+} from '@lody/shared';
 
+import { setDocMetaByRoomIdAtom } from '../src/atoms/doc-meta';
 import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
 
@@ -131,6 +137,9 @@ describe('user message sender identity', () => {
     expect(
       container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
     ).toContain('Reviewer');
+    expect(
+      container?.querySelector('[data-testid="user-message-source-session-link"]')
+    ).toBeNull();
     expect(container?.textContent).toContain('🔎');
     expect(container?.querySelector('button[aria-label="View profile for Maya Chen"]')).toBeNull();
     const trigger = container?.querySelector('button[aria-label="View sender: Reviewer"]');
@@ -139,6 +148,66 @@ describe('user message sender identity', () => {
     expect(document.body.textContent).toContain('Model: model-a');
     expect(document.body.textContent).not.toContain('maya.chen@example.com');
     expect(document.body.textContent).not.toContain('Model: model-b');
+  });
+
+  it('renders an inline source conversation link in the metadata row and navigates back to the source session', async () => {
+    const onNavigateSession = vi.fn();
+    const store = createStore();
+    const author = {
+      v: 1 as const,
+      kind: 'agent' as const,
+      sessionId: 'source-session',
+      turnId: 'source-turn',
+      name: 'Agent A',
+      role: { id: 'reviewer', revision: 1, name: 'Reviewer', emoji: '🔎' },
+    };
+    const delegatedMessage = { ...message, author } as unknown as SessionHistoryParsed;
+
+    await act(async () =>
+      root?.render(
+        createElement(
+          JotaiProvider,
+          { store },
+          createElement(
+            ForceDesktopLayoutProvider,
+            null,
+            createElement(MessageRowView, {
+              message: delegatedMessage,
+              sessionId,
+              user,
+              showSenderIdentity: false,
+              onNavigateSession,
+            })
+          )
+        )
+      )
+    );
+
+    const sourceButton = container?.querySelector<HTMLButtonElement>(
+      '[data-testid="user-message-source-session-link"]'
+    );
+    expect(sourceButton).toBeTruthy();
+    expect(sourceButton?.textContent).toBe('Open source conversation');
+    expect(sourceButton?.getAttribute('aria-label')).toBe('Open source conversation');
+
+    await click(sourceButton!);
+    expect(onNavigateSession).toHaveBeenCalledTimes(1);
+    expect(onNavigateSession).toHaveBeenCalledWith({ sessionId: 'source-session' });
+
+    await act(async () => {
+      store.set(setDocMetaByRoomIdAtom, getSessionRoomId('source-session' as SessionId), {
+        id: 'source-session',
+        title: 'Coordinate PR #789 fix',
+      });
+    });
+
+    const updatedButton = container?.querySelector<HTMLButtonElement>(
+      '[data-testid="user-message-source-session-link"]'
+    );
+    expect(updatedButton?.textContent).toBe('Coordinate PR #789 fix');
+    expect(updatedButton?.getAttribute('aria-label')).toBe(
+      'Open source conversation: Coordinate PR #789 fix'
+    );
   });
 
   it('keeps sender identity hidden when the workspace has one member', async () => {

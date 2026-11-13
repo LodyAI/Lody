@@ -440,7 +440,7 @@ records lifecycle, alternatives, and platform verification limits.
 ## Message authors
 
 `message-author-identity.tsx` renders frozen Agent/Role identity in input avatars.
-Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. Human profiles remain
+Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. When session navigation is available, `view.tsx` also renders an inline source-conversation return link in the user message metadata row using the cached session title (or the generic source label). Human profiles remain
 in `view.tsx`; execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.

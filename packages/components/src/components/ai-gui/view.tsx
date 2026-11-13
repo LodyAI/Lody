@@ -9,6 +9,7 @@ import type { SessionLocalAttachment } from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
+import { useSessionLinkNavigator } from './session-link-context';
 import * as stylex from '@stylexjs/stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -142,6 +143,7 @@ import {
   Circle,
   Clock3,
   Copy,
+  CornerLeftUp,
   FileText,
   Globe,
   Info,
@@ -2817,6 +2819,7 @@ export const MessageRowView = memo(function MessageRowView({
         timestampLabel={timestampLabel}
         hasWideContent={hasWideContent}
         conversationFontSize={conversationFontSize}
+        onNavigateSession={onNavigateSession}
         onEdit={onEdit}
         onResendUndelivered={onResendUndelivered}
         editMentionContext={editMentionContext}
@@ -3860,6 +3863,58 @@ function getDefaultOpenWorktreeScriptStepIndexes(
   return [];
 }
 
+const selectSourceSessionTitle = (session: SessionMeta | null | undefined): string | null =>
+  session?.title?.trim() || null;
+
+const MessageAuthorSourceLink = memo(function MessageAuthorSourceLink({
+  sourceSessionId,
+  isMobile,
+  onNavigate,
+}: {
+  sourceSessionId: SessionId;
+  isMobile: boolean;
+  onNavigate: (target: SessionNavigationTarget) => void;
+}) {
+  const { t } = useTranslation();
+  const titleAtom = useMemo(
+    () => selectAtom(sessionMetaAtomFamily(getSessionRoomId(sourceSessionId)), selectSourceSessionTitle),
+    [sourceSessionId]
+  );
+  const sourceTitle = useAtomValue(titleAtom);
+  const openSourceLabel = t('sessions.messageAuthor.source', 'Open source conversation');
+  const displayLabel = sourceTitle ?? openSourceLabel;
+  const accessibleLabel = sourceTitle ? `${openSourceLabel}: ${sourceTitle}` : openSourceLabel;
+
+  return (
+    <>
+      <span {...stylex.props(conversationSurface.metadataSeparator)} aria-hidden="true">
+        ·
+      </span>
+      <button
+        type="button"
+        {...stylex.props(
+          conversationSurface.metadataSourceLink,
+          isMobile && conversationSurface.mobileMetadataSourceLink
+        )}
+        onClick={(event) => {
+          event.stopPropagation();
+          onNavigate({ sessionId: sourceSessionId });
+        }}
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
+        data-testid="user-message-source-session-link"
+      >
+        <CornerLeftUp
+          {...stylex.props(conversationSurface.metadataSourceIcon)}
+          strokeWidth={2}
+          aria-hidden="true"
+        />
+        <span {...stylex.props(conversationSurface.metadataSourceTitle)}>{displayLabel}</span>
+      </button>
+    </>
+  );
+});
+
 const UserMessageRowView = ({
   message,
   sessionId,
@@ -3868,6 +3923,7 @@ const UserMessageRowView = ({
   timestampLabel,
   hasWideContent,
   conversationFontSize,
+  onNavigateSession,
   onEdit,
   onResendUndelivered,
   editMentionContext,
@@ -3879,6 +3935,7 @@ const UserMessageRowView = ({
   timestampLabel: string;
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEdit?: (message: SessionHistoryParsed, edit: UserMessageEditSubmission) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   /** Composer-equivalent mention wiring for the inline editor; absent on
@@ -3889,6 +3946,14 @@ const UserMessageRowView = ({
   const { copyContext } = useContext(SessionChatActionContext);
   const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
+  const sessionLinkNavigate = useSessionLinkNavigator();
+  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
+  const sourceSessionId =
+    message.author?.kind === 'agent' &&
+    message.author.sessionId &&
+    message.author.sessionId !== sessionId
+      ? (message.author.sessionId as SessionId)
+      : null;
   const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -4006,7 +4071,10 @@ const UserMessageRowView = ({
     >
       <div {...stylex.props(conversationSurface.author)}>
         {message.author?.kind === 'agent' ? (
-          <MessageAuthorIdentity author={message.author} />
+          <MessageAuthorIdentity
+            author={message.author}
+            onNavigateSession={navigateSourceSession}
+          />
         ) : (
           <UserMessageAuthorAvatar
             user={user}
@@ -4033,9 +4101,18 @@ const UserMessageRowView = ({
       >
         <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
           {message.author?.kind === 'agent' ? (
-            <span title={message.author.role?.name ?? message.author.name}>
-              {message.author.role?.name ?? message.author.name}
-            </span>
+            <>
+              <span title={message.author.role?.name ?? message.author.name}>
+                {message.author.role?.name ?? message.author.name}
+              </span>
+              {sourceSessionId && navigateSourceSession ? (
+                <MessageAuthorSourceLink
+                  sourceSessionId={sourceSessionId}
+                  isMobile={isMobile}
+                  onNavigate={navigateSourceSession}
+                />
+              ) : null}
+            </>
           ) : showSenderIdentity && user?.name ? (
             <span className="max-w-40 truncate font-medium" title={user.name}>
               {user.name}
