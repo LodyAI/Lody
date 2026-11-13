@@ -1,6 +1,5 @@
 packages:
   - packages/*
-  # Full upstream-derived runtime workspace; built and validated independently.
   - '!packages/acp-extension-kimi'
   - '!packages/acp-extension-pi'
   - apps/cli
@@ -25,7 +24,9 @@ catalog:
   '@devframes/plugin-inspect--assets': 1.0.0
   '@devframes/plugin-terminals': 1.0.0
   '@devframes/plugin-terminals--assets': 1.0.0
-  '@loro-dev/flock-wasm': ^0.4.4
+  '@effect/platform-node-shared': 4.0.2
+  '@effect/vitest': 4.0.2
+  '@loro-dev/flock-wasm': ^0.5.0
   '@loro-dev/loro-cli': 0.6.0
   '@loro-dev/roost': 0.3.1
   '@loro-dev/sqlite-riverrun': 0.2.0
@@ -42,14 +43,10 @@ catalog:
   '@vitejs/plugin-react': ^5.2.0
   better-auth: 1.6.33
   better-auth-capacitor: 0.3.6
-  # >=13.0.2 ships prebuilt N-API binaries and has no install script. Keep this
-  # lower bound so `npx lody` also works when package install scripts are disabled.
   better-sqlite3: ^13.0.2
   convex: ^1.33.1
   devframe: 1.0.0
   effect: 4.0.2
-  '@effect/vitest': 4.0.2
-  '@effect/platform-node-shared': 4.0.2
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
   loro-crdt: 1.17.0
@@ -71,16 +68,12 @@ catalog:
 
 ignoredBuiltDependencies:
   - node-pty
-  # >=13.0.2 has no install script; pnpm still offers to build it because the
-  # package retains binding.gyp for explicit source builds.
   - better-sqlite3
 
 managePackageManagerVersions: true
 
-# Delay newly published package versions for seven days before pnpm may resolve them.
 minimumReleaseAge: 10080
 
-# Keep approved upgrades and grandfathered versions exact; later releases remain quarantined.
 minimumReleaseAgeExclude:
   - '@typescript-eslint/project-service@8.72.2'
   - '@typescript-eslint/scope-manager@8.72.2'
@@ -90,41 +83,35 @@ minimumReleaseAgeExclude:
   - '@typescript-eslint/typescript-estree@8.72.2'
   - '@typescript-eslint/utils@8.72.2'
   - '@typescript-eslint/visitor-keys@8.72.2'
-  - 'tsx@4.23.12'
-  - 'mcp-hello-world@1.1.2'
-  - 'esbuild@0.28.2'
+  - tsx@4.23.12
+  - mcp-hello-world@1.1.2
+  - esbuild@0.28.2
   - '@types/cross-spawn@6.0.6'
-  - 'typescript@6.0.3 || 7.0.2'
-  - 'globals@17.14.0'
-  - 'eslint-config-prettier@10.1.8'
-  - 'eslint@10.14.0'
-  - 'ajv-formats@3.0.1'
-  - 'ajv@8.20.0'
+  - typescript@6.0.3 || 7.0.2
+  - globals@17.14.0
+  - eslint-config-prettier@10.1.8
+  - eslint@10.14.0
+  - ajv-formats@3.0.1
+  - ajv@8.20.0
   - '@typescript-eslint/parser@8.72.2'
   - '@typescript-eslint/eslint-plugin@8.72.2'
   - '@tsconfig/node22@22.0.6'
   - '@eslint/js@10.0.1'
-  # Verified managed-runtime upgrades retain exact SDK, native package, and adapter versions.
-  - 'zod@4.6.7'
-  # Allow the approved CodeMode release for the automation interpreter.
+  - zod@4.6.7
   - '@opencode/codemode@2.2.0'
-  # Reviewed security patches for GHSA-xjj6-f33q-929c and GHSA-px85-f4q5-jh77.
-  - 'undici@6.29.1 || 7.30.1 || 8.12.2 || 8.12.3'
-  - 'storybook@10.6.2'
+  - undici@6.29.1 || 7.30.1 || 8.12.2 || 8.12.3
+  - storybook@10.6.2
   - '@storybook/react@10.6.2'
   - '@storybook/react-vite@10.6.2'
   - '@storybook/react-dom-shim@10.6.2'
   - '@storybook/builder-vite@10.6.2'
-  # Highlights migration: pin the beta API and matching Diffs/theme adapters.
   - '@pierre/highlights@0.2.0'
   - '@pierre/diffs@1.6.1'
   - '@pierre/theme@2.0.0'
   - '@pierre/theming@1.0.2'
-  # Approved lifecycle fixes and the matching test helper; future releases wait seven days.
   - effect@4.0.2
   - '@effect/vitest@4.0.2'
   - '@effect/platform-node-shared@4.0.2'
-  # Keep the split release's complete optional platform graph available on every host.
   - '@loro-dev/roost-node@0.3.1'
   - '@loro-dev/roost-node-darwin-arm64@0.3.1'
   - '@loro-dev/roost-node-darwin-x64@0.3.1'
@@ -132,11 +119,8 @@ minimumReleaseAgeExclude:
   - '@loro-dev/roost-node-linux-x64-gnu@0.3.1'
   - '@loro-dev/roost-node-win32-arm64-msvc@0.3.1'
   - '@loro-dev/roost-node-win32-x64-msvc@0.3.1'
-  # Use the pinned npm release instead of requiring a sibling Roost checkout.
   - '@loro-dev/roost@0.3.1'
-  # pnpm 10.20 uses the first rule per package; keep exact Codex versions together.
   - '@openai/codex@0.154.0 || 0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64 || 0.159.2 || 0.159.2-darwin-arm64 || 0.159.2-darwin-x64 || 0.159.2-linux-arm64 || 0.159.2-linux-x64 || 0.159.2-win32-arm64 || 0.159.2-win32-x64 || 0.164.0 || 0.164.0-darwin-arm64 || 0.164.0-darwin-x64 || 0.164.0-linux-arm64 || 0.164.0-linux-x64 || 0.164.0-win32-arm64 || 0.164.0-win32-x64 || 0.166.0 || 0.166.0-darwin-arm64 || 0.166.0-darwin-x64 || 0.166.0-linux-arm64 || 0.166.0-linux-x64 || 0.166.0-win32-arm64 || 0.166.0-win32-x64'
-  # Exact transitive dependencies already selected for werift.
   - '@peculiar/asn1-x509@2.10.0'
   - '@peculiar/asn1-x509-attr@2.10.0'
   - '@peculiar/asn1-rsa@2.10.0'
@@ -147,19 +131,12 @@ minimumReleaseAgeExclude:
   - '@peculiar/asn1-csr@2.10.0'
   - '@peculiar/asn1-cms@2.10.0'
   - mediabunny@1.61.0
-  # Mermaid renderer for chat diagrams; reviewed: no dependencies or install scripts.
   - pele@1.6.0
   - '@peculiar/asn1-schema@2.10.0'
-  # Electron 44.9.3 adds the compromised eMudhra certificate block; keep major 44.
-  # electron-vite 6.0.0-beta.2+ is the first release
-  # with Electron 42-44 build targets. rolldown and magic-string come with it.
-  # Every rolldown platform binding is listed: a quarantined optional binding is
-  # dropped from the lockfile without an error, and rolldown then loads another
-  # version's binding and fails while bundling electron.vite.config.ts.
-  - 'electron@44.9.3'
-  - 'electron-vite@6.0.0-beta.5'
-  - 'magic-string@1.4.2'
-  - 'rolldown@1.2.11'
+  - electron@44.9.3
+  - electron-vite@6.0.0-beta.5
+  - magic-string@1.4.2
+  - rolldown@1.2.11
   - '@rolldown/binding-android-arm-eabi@1.2.11'
   - '@rolldown/binding-android-arm64@1.2.11'
   - '@rolldown/binding-darwin-arm64@1.2.11'
@@ -175,38 +152,20 @@ minimumReleaseAgeExclude:
   - '@rolldown/binding-openharmony-arm64@1.2.11'
   - '@rolldown/binding-win32-arm64-msvc@1.2.11'
   - '@rolldown/binding-win32-x64-msvc@1.2.11'
-  # ACP SDK versions selected by the Claude and Codex submodule source syncs.
   - '@agentclientprotocol/sdk@1.5.1 || 2.0.2 || 2.5.0'
-  # Exact pins required by the reviewed Claude upstream 0.84.0 source sync.
   - '@anthropic-ai/sdk@0.128.0 || 0.126.0 || 1.7.0'
   - '@types/node@26.6.3 || 26.6.6 || 26.1.0'
-  - 'prettier@3.9.9 || 3.9.7 || 3.9.10'
-  - 'vitest@5.0.2 || 5.0.1 || 5.1.0'
+  - prettier@3.9.9 || 3.9.7 || 3.9.10
+  - vitest@5.0.2 || 5.0.1 || 5.1.0
   - '@vitest/mocker@5.0.2 || 5.0.1 || 5.1.0'
   - '@vitest/spy@5.0.2 || 5.0.1 || 5.1.0'
-  # Concurrent-import replay fixes plus the reviewed pending-export API in loro#1220.
-  - 'loro-crdt@1.16.3 || 1.17.0'
-  # Safe error provenance and context, reviewed with loro-repo#144.
-  # Native lifecycle/upload contracts reviewed in loro-streams#425; exact releases approved.
-  # 0.19.1/0.12.1 stop the live-read spin after a failed flush (loro-dev/loro-streams#429).
-  # 0.19.2 keeps live progress and bounded persistence retry after disk write failures (#435).
+  - loro-crdt@1.16.3 || 1.17.0
   - '@loro-dev/streams-crdt@0.16.2 || 0.19.0 || 0.19.1 || 0.19.2'
   - '@loro-dev/streams-client@0.9.0 || 0.10.0 || 0.12.0 || 0.12.1'
-  # Reviewed Repo native capabilities and fixes (loro-dev/loro-repo#150-#153);
-  # 0.23.1 stops Flock persistence queue amplification (loro-dev/loro-repo#154);
-  # 0.23.2 serializes compaction and keeps its retries bounded (loro-dev/loro-repo#156);
-  # 0.23.3 retries SQLITE_BUSY without blocking the event loop (loro-dev/loro-repo#159).
-  # 0.24.0 preserves received pending updates across saves and restarts (loro-dev/loro-repo#165).
-  # 0.25.0 includes reviewed stale-session, IndexedDB reopen and write-observer fixes (#162-#164).
-  - 'loro-repo@0.22.0 || 0.23.0 || 0.23.1 || 0.23.2 || 0.23.3 || 0.24.0 || 0.25.0'
-  # Reviewed upgrade; 0.4.4 was published today once the release pipeline was fixed.
-  - '@loro-dev/flock-wasm@0.4.4'
-  # Adds the `remend` option the streaming Markdown renderer passes (lobehub/streamdown#5).
+  - loro-repo@0.22.0 || 0.23.0 || 0.23.1 || 0.23.2 || 0.23.3 || 0.24.0 || 0.25.0
+  - '@loro-dev/flock-wasm@0.5.0'
   - '@lobehub/streamdown@1.4.0'
-  # Replaces the removed @lody/virtua fork: this release's source plus unused keyed changes.
   - virtua@0.52.7
-  # Built-in runtime refresh, verified together with the pinned adapters.
-  # Exact dependency pins from the ACP adapters already selected on main.
   - '@anthropic-ai/claude-agent-sdk@0.3.316 || 0.3.284 || 0.3.280 || 0.3.274 || 0.3.321'
   - '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.316 || 0.3.284 || 0.3.280 || 0.3.274 || 0.3.321'
   - '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.316 || 0.3.284 || 0.3.280 || 0.3.274 || 0.3.321'
@@ -256,28 +215,22 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
-  # The quote converters exchange HAST nodes and must share their augmented types.
-  'hast-util-from-dom>@types/hast': 3.0.5
-  'hast-util-to-mdast>@types/hast': 3.0.5
-  # Tango Consumable needs one class identity across ADB and scrcpy streams.
-  '@yume-chan/stream-extra': 2.6.1
-  # CodeMode tools and Lody must share the same Effect runtime and schema identity.
-  '@opencode/codemode>effect': 4.0.2
-  # GHSA-xjj6-f33q-929c: patch each affected major without crossing API/runtime floors.
-  'undici@>=6.23.0 <6.29.1': 6.29.1
-  'undici@>=7.18.0 <7.30.1': 7.30.1
-  'undici@>=8.0.0 <8.12.2': 8.12.2
-  # The local Lab server shares the approved Node-API 10 SQLite runtime.
+  '@loro-dev/streams-crdt>@loro-dev/flock-wasm': ^0.5.0
+  'loro-repo>@loro-dev/flock-wasm': ^0.5.0
+  '@loro-dev/loro-cli>loro-crdt': 1.16.3
   '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
-  # ASN.1 decorators and consumers must share one schema registry for WebRTC DTLS certificates.
+  '@opencode/codemode>effect': 4.0.2
   '@peculiar/x509>@peculiar/asn1-schema': 2.10.0
+  '@yume-chan/stream-extra': 2.6.1
   acp-extension-core: workspace:*
   electron-builder-squirrel-windows: ^26.15.3
-  '@loro-dev/loro-cli>loro-crdt': 1.16.3
+  hast-util-from-dom>@types/hast: 3.0.5
+  hast-util-to-mdast>@types/hast: 3.0.5
   tsx@4.21.0>esbuild: 0.27.0
+  undici@>=6.23.0 <6.29.1: 6.29.1
+  undici@>=7.18.0 <7.30.1: 7.30.1
+  undici@>=8.0.0 <8.12.2: 8.12.2
   vite@7.3.1>esbuild: 0.27.0
-  # Keep a single zod major graph so better-auth/better-call peer types do not
-  # fork (TanStack router-generator otherwise pulls 4.4.x next to catalog 4.3.x).
   zod: 4.3.6
 
 packageExtensions:
@@ -288,21 +241,20 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
-  # Backport isaacs/node-glob 4682e8c9; remove when compatible parents adopt the fix.
-  glob@13.0.1: patches/glob@13.0.1.patch
-  '@hpke/common@1.10.1': patches/@hpke__common@1.10.1.patch
-  '@loro-dev/streams-crdt@0.19.2': patches/@loro-dev__streams-crdt@0.19.2.patch
-  '@loro-dev/sqlite-riverrun@0.3.0': patches/@loro-dev__sqlite-riverrun@0.3.0.patch
-  pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch
-  '@xterm/xterm@5.5.0': patches/@xterm__xterm@5.5.0.patch
-  '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
-  werift@0.24.4: patches/werift@0.24.4.patch
-  app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
   '@better-auth/api-key@1.6.33': patches/@better-auth__api-key@1.6.33.patch
   '@better-auth/electron@1.6.33': patches/@better-auth__electron@1.6.33.patch
+  '@hpke/common@1.10.1': patches/@hpke__common@1.10.1.patch
   '@lobehub/streamdown@1.4.0': patches/@lobehub__streamdown@1.4.0.patch
+  '@loro-dev/sqlite-riverrun@0.3.0': patches/@loro-dev__sqlite-riverrun@0.3.0.patch
+  '@loro-dev/streams-crdt@0.19.2': patches/@loro-dev__streams-crdt@0.19.2.patch
   '@pierre/diffs@1.6.1': patches/@pierre__diffs@1.6.1.patch
+  '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   '@tanstack/router-generator@1.159.4': patches/@tanstack__router-generator@1.159.4.patch
+  '@xterm/xterm@5.5.0': patches/@xterm__xterm@5.5.0.patch
+  app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
+  glob@13.0.1: patches/glob@13.0.1.patch
   mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
+  pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch
   react-photo-view@1.2.7: patches/react-photo-view@1.2.7.patch
   remend@1.3.0: patches/remend@1.3.0.patch
+  werift@0.24.4: patches/werift@0.24.4.patch
