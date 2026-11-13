@@ -788,15 +788,7 @@ const prHistoryStyles = stylex.create({
     cursor: 'pointer',
   },
   rowStatic: { cursor: 'default', backgroundColor: 'transparent' },
-  number: { color: colors.label, fontVariantNumeric: 'tabular-nums', flexShrink: 0 },
-  repo: {
-    flex: 1,
-    minWidth: 0,
-    color: colors.secondaryLabel,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
+  number: { flex: 1, color: colors.label, fontVariantNumeric: 'tabular-nums' },
 });
 
 /**
@@ -866,7 +858,6 @@ function PrHistoryControl({
                   <span {...stylex.props(prHistoryStyles.number)}>
                     {view.number != null ? `#${view.number}` : 'PR'}
                   </span>
-                  <span {...stylex.props(prHistoryStyles.repo)}>{view.repoFullName ?? ''}</span>
                   {isCurrent ? <Badge>{t('sessions.pr.historyCurrent', 'Current')}</Badge> : null}
                 </>
               );
