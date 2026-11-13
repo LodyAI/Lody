@@ -4895,3 +4895,130 @@ void test('desktop status skips an abandoned retained write hint with only K1 in
     })
   )
 })
+
+for (const inlineHistory of [true, false]) {
+  void test(`revoke persists the suffix with ${inlineHistory ? 2 : 3} cloud actions and no genesis download`, async (t) => {
+    const directory = await fixture(t)
+    const { makeE2eeCloudClient } = await import('./e2ee-cloud-client.mts')
+    let target
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        const prepared = yield* bind(owner)
+        const genesis = Result.getOrThrow(
+          Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+        )
+        const signer = yield* owner.custody.openDevice(genesis)
+        const machine = yield* owner.custody.prepareDevice()
+        let records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+        let view = Result.getOrThrow(
+          verifyLedger({
+            anchor: genesis,
+            records,
+            checkpoint: { head: hashRecordBytes(records[0]), length: 1 }
+          })
+        )
+        const admission = yield* prepareDeviceAdmission({
+          genesis,
+          membershipId: view.inspectState().owner,
+          signer: machine,
+          encryptionPublicKey: machine.enc,
+          kind: 'machine',
+          machineId: 'revocation-performance'
+        })
+        const admitted = yield* signLedgerRecord(
+          Result.getOrThrow(prepareLedgerCommand(view, signer.publicKey, admission)),
+          signer
+        )
+        records.push(admitted)
+        view = Result.getOrThrow(
+          extendLedger(view, [admitted], { head: hashRecordBytes(admitted), length: 2 })
+        )
+        target = hex(machine.publicKey.toBytes())
+        yield* owner.custody.discardDevice(machine)
+        yield* owner.host.open(workspaceId)
+        yield* owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, prepared.genesisHashHex, 0)
+        )
+        const calls = []
+        const client = yield* makeE2eeCloudClient({
+          platformKind: 'cloud',
+          deploymentUrl: 'https://synthetic.convex.cloud',
+          convexToken: async () => ({ data: { token: 'synthetic-jwt' } }),
+          fetch: async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            let value
+            if (path === 'e2eeWorkspaces:history') {
+              assert.ok(args.after, 'bootstrapped management must use an opaque suffix position')
+              value = page(records, prepared.genesisHashHex, 2)
+            } else {
+              assert.equal(path, 'e2eeWorkspaces:appendRecord')
+              assert.deepEqual(Object.keys(args).sort(), ['recordHex', 'requestId', 'workspaceId'])
+              const record = new Uint8Array(Buffer.from(args.recordHex, 'hex'))
+              view = Result.getOrThrow(
+                extendLedger(view, [record], {
+                  head: hashRecordBytes(record),
+                  length: view.length + 1
+                })
+              )
+              records = [...records, record]
+              value = {
+                status: 'committed',
+                recordHash: hex(hashRecordBytes(record).toBytes()),
+                ...(inlineHistory ? { historyPage: page(records, prepared.genesisHashHex, 2) } : {})
+              }
+            }
+            return Response.json({ status: 'success', value })
+          }
+        })
+        const result = yield* owner.host.manage(
+          workspaceId,
+          { type: 'revoke', target },
+          (signal, feed) => ({
+            log: client.ledgerLog(workspaceId, signal, feed),
+            history: (request) => client.history(request, signal),
+            staging: () => {
+              throw new Error('revocation must not stage keys')
+            },
+            mailbox: () => {
+              throw new Error('revocation must not receive keys')
+            }
+          })
+        )
+        assert.equal(result, 'Committed')
+        const local = yield* owner.host.status(workspaceId)
+        assert.equal(local.length, 3)
+        assert.equal(local.headHash, hex(view.head.toBytes()))
+        assert.equal(
+          (yield* owner.host.managementState(workspaceId)).devices.some(
+            (device) => device.key === target
+          ),
+          false
+        )
+        assert.equal(
+          calls.filter((call) => call.path === 'e2eeWorkspaces:history').length,
+          inlineHistory ? 1 : 2
+        )
+        assert.equal(calls.filter((call) => call.path === 'e2eeWorkspaces:appendRecord').length, 1)
+      })
+    )
+    await execute(
+      Effect.gen(function* () {
+        const reopened = yield* ownerWithHost(directory)
+        yield* reopened.host.open(workspaceId)
+        assert.equal((yield* reopened.host.status(workspaceId)).length, 3)
+        assert.equal(
+          (yield* reopened.host.managementState(workspaceId)).devices.some(
+            (device) => device.key === target
+          ),
+          false
+        )
+      })
+    )
+  })
+}

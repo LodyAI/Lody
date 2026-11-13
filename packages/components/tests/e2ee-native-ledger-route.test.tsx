@@ -675,6 +675,7 @@ it('closes only its captured portable reader and spares the workspace reader', a
       readers.add(requested ?? 'legacy-control-reader');
       return { ...local.status, readerOwner: requested };
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => local.status,
     close: async (...args) => {
@@ -706,6 +707,7 @@ it('joins one legacy reader close when member removal and unmount overlap', asyn
       count += 1;
       return { ...local.status, readerOwner: 'account-owner' };
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => {
       throw new Error('e2ee_member_removed');
@@ -741,6 +743,7 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
         throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked");
       return { ...local.status, readerOwner: 'account-owner' };
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => {
       throw new Error('e2ee_device_revoked');
@@ -774,6 +777,7 @@ it('stops reopening a host that keeps refusing a revoked identity and offers re-
       opens += 1;
       return { ...local.status, readerOwner: 'account-owner' };
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => {
       throw new Error('e2ee_device_revoked');
@@ -831,6 +835,7 @@ it.each(['describe', 'history'] as const)(
         readers.delete(reader!);
         closed.resolve();
       },
+      status: async () => local.status,
       ledgerView: async () => local,
       ingestLedgerRecords: async (_id, received) => {
         ingested.push(received);
@@ -888,6 +893,7 @@ it('does not let an old public-directory read block a newly available protected 
       open: async () => local.status,
       recordCreated: async () => {},
       close: async () => {},
+      status: async () => local.status,
       ledgerView: async () => local,
       ingestLedgerRecords: async () => local.status,
     };
@@ -921,6 +927,7 @@ it('retains an incomplete cold reader across remounts while independent workspac
       }
       return { ...local.status, workspaceId: id, readerOwner: reader };
     },
+    status: async (id) => ({ ...local.status, workspaceId: id }),
     ledgerView: async (id) => ({ ...local, status: { ...local.status, workspaceId: id } }),
     ingestLedgerRecords: async (id) => ({ ...local.status, workspaceId: id }),
     close: async (id, account, reader) => {
@@ -973,6 +980,7 @@ it('offers the routed workspace only after a successful approved host open', asy
       if (!approved) throw new PersonalHostError({ code: 'approval-required' });
       return local.status;
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => local.status,
     recordCreated: async () => {
@@ -1357,6 +1365,7 @@ it.each([
   fixture.port = displayPort(async () => [] as never);
   fixture.port.runtime = {
     open: async () => local.status,
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => local.status,
     recordCreated: async () => {
@@ -1492,6 +1501,7 @@ function roleChangePort(initialLength: 1 | 2 = 2) {
       readers--;
       await drain.promise;
     },
+    status: async () => current.status,
     ledgerView: async () => {
       if (!readers) throw new Error('e2ee_not_open');
       return current;
@@ -1526,6 +1536,7 @@ function liveLedgerPort() {
   const requests: string[] = [];
   let hold: Promise<E2eeWorkspaceHistoryPage> | undefined;
   Object.assign(f.port.runtime!, {
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async (_id: string, page: E2eeWorkspaceHistoryPage) => {
       // Simulate the host's verified result, using the real signed vector.
@@ -1577,8 +1588,32 @@ function liveLedgerPort() {
     },
     subscribed: () => subscribed,
     local: () => local,
+    nativeAdvance: (length: 1 | 2 | 3) => {
+      local = roleLedger(length);
+    },
   };
 }
+
+it('publishes a native-ingested hint without fetching or ingesting the same suffix again', async () => {
+  const f = liveLedgerPort();
+  const ingest = vi.spyOn(f.port.runtime!, 'ingestLedgerRecords');
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    const before = ingest.mock.calls.length;
+    f.nativeAdvance(2);
+    await act(async () => f.notify(2));
+    expect(renderedRoles()).toBe('member,owner');
+    expect(f.requests).toHaveLength(1);
+    expect(ingest.mock.calls).toHaveLength(before);
+    await act(async () => f.notify(1));
+    expect(renderedRoles()).toBe('member,owner');
+    expect(f.requests).toHaveLength(1);
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
 
 it('updates remote ledger changes from suffixes, skips unchanged hints and unsubscribes on close', async () => {
   const f = liveLedgerPort();

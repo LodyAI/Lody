@@ -1,5 +1,5 @@
 import { own } from '../lifecycle';
-import { Brand, Context, Effect, Layer, Ref, Schema, Semaphore, Result } from 'effect';
+import { Brand, Context, Effect, Layer, Ref, Schema, Semaphore, Result, Option } from 'effect';
 import type { GenesisHash } from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
 import {
@@ -7,12 +7,13 @@ import {
   extendLedger,
   extendLedgerEffect,
   hashRecordBytes,
+  hasVerifiedCheckpoint,
   verifyLedgerEffect,
   type LedgerCheckpoint,
   type LedgerError,
   type LedgerView,
 } from '../ledger';
-import type { LedgerLogError, LocalStoreError } from '../../services/errors';
+import { LedgerLogError, type LocalStoreError } from '../../services/errors';
 import {
   LedgerLog,
   SubmissionJournal,
@@ -20,6 +21,7 @@ import {
   type SubmissionOutcome,
   type SubmissionResult,
 } from '../../services/ledger';
+import { VerifiedLedger } from '../ledger/verified-ledger';
 import { WorkspaceScope } from '../../services/workspace';
 
 /** Branded proof of a pre-CAS inspection for a specific submission turn. */
@@ -99,6 +101,7 @@ export class LedgerSubmission extends Context.Service<
       const anchor: GenesisHash = (yield* WorkspaceScope).genesis;
       const journal = own(yield* SubmissionJournal);
       const log = own(yield* LedgerLog);
+      const verifiedOpt = yield* Effect.serviceOption(VerifiedLedger);
       const store = <A>(effect: Effect.Effect<A, LocalStoreError>) =>
         effect.pipe(Effect.mapError(fromStore));
 
@@ -109,14 +112,47 @@ export class LedgerSubmission extends Context.Service<
         record: Uint8Array,
         pin: LedgerCheckpoint | null
       ) {
+        const decoded = yield* Effect.fromResult(decodeRecord(record));
+        if (decoded.body.type !== 'ordinary') return yield* fail('ordinary-only');
+        const parent = decoded.body.previousHash;
+        if (log.readFrom && Option.isSome(verifiedOpt)) {
+          const base = yield* verifiedOpt.value
+            .current()
+            .pipe(Effect.mapError((cause) => new LedgerLogError({ cause })));
+          if (base.head.equals(parent) && (!pin || pin.length >= base.historyStart)) {
+            const incoming = yield* log.readFrom(anchor, base);
+            const suffix: Uint8Array[] = [];
+            for (const bytes of incoming.records)
+              suffix.push((yield* Effect.fromResult(decodeRecord(bytes))).recordBytes);
+            const view = yield* extendLedgerEffect(base, suffix, incoming.checkpoint);
+            if (pin) {
+              const included = hasVerifiedCheckpoint(view, pin);
+              if (Result.isFailure(included) || !included.success) return yield* fail('rollback');
+            }
+            yield* Effect.fromResult(
+              extendLedger(base, [record], {
+                head: hashRecordBytes(record),
+                length: base.length + 1,
+              })
+            );
+            const outcome: SubmissionOutcome | null = suffix.some((bytes) =>
+              bytesEqual(bytes, record)
+            )
+              ? 'Committed'
+              : view.head.equals(parent)
+                ? null
+                : 'Conflict';
+            return PreCasInspection({
+              outcome,
+              checkpoint: { head: view.head, length: view.length },
+            });
+          }
+        }
         const incoming = yield* log.read(anchor);
         // Parsing bounds each copy and detaches arrays owned by an asynchronous host.
         const records: Uint8Array[] = [];
         for (const bytes of incoming.records)
           records.push((yield* Effect.fromResult(decodeRecord(bytes))).recordBytes);
-        const decoded = yield* Effect.fromResult(decodeRecord(record));
-        if (decoded.body.type !== 'ordinary') return yield* fail('ordinary-only');
-        const parent = decoded.body.previousHash;
         const parentIndex = records.findIndex((bytes) => hashRecordBytes(bytes).equals(parent));
         if (parentIndex < 0) return yield* fail('missing-parent');
         // Authenticate the predecessor once, then verify only the remote suffix.

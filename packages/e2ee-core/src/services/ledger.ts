@@ -48,6 +48,14 @@ export class LedgerLog extends Context.Service<
       },
       LedgerLogError
     >;
+    /** Read only the untrusted suffix after a genuine base; callers verify its endpoint and continuation. Optional for older adapters. */
+    readFrom?(
+      anchor: GenesisHash,
+      base: LedgerView
+    ): Effect.Effect<
+      { readonly records: readonly Uint8Array[]; readonly checkpoint: LedgerCheckpoint },
+      LedgerLogError
+    >;
     /** Atomically append at `expected`; only an explicitly typed pre-CAS quota refusal establishes non-dispatch for this attempt. */
     appendCas(
       anchor: GenesisHash,

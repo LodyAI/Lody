@@ -20,7 +20,8 @@ import type {
   E2eeJoinRequests,
   E2eeMemberOffer,
   E2eeMemberRequests,
-  E2eeWorkspaceHistoryRequest
+  E2eeWorkspaceHistoryRequest,
+  E2eeWorkspaceHistoryPage
 } from '@lody/cloud-api'
 import {
   LedgerLog,
@@ -88,7 +89,11 @@ const historyPage = z.object({
   position: z.string().min(1),
   nextCursor: z.string().min(1).nullable()
 })
-const appended = z.object({ status: z.enum(['committed', 'conflict']), recordHash: hash })
+const appended = z.object({
+  status: z.enum(['committed', 'conflict']),
+  recordHash: hash,
+  historyPage: historyPage.optional()
+})
 const pairingStatus = z.enum(['pending', 'approved', 'declined', 'expired'])
 const pairingSummary = z.object({
   requestId: z.string().min(1),
@@ -778,9 +783,85 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         undefined,
         true
       ),
-    ledgerLog: (workspaceId: string, signal?: AbortSignal): LedgerLog['Service'] => {
+    ledgerLog: (
+      workspaceId: string,
+      signal?: AbortSignal,
+      feed?: {
+        position: () => Effect.Effect<string | undefined, unknown>
+        ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<unknown, unknown>
+      }
+    ): LedgerLog['Service'] & {
+      observe: (point: { head: Bytes.RecordHash; length: number }) => Effect.Effect<void>
+    } => {
       let observed: { head: string; length: number } | undefined
-      return LedgerLog.of({
+      let inline: E2eeWorkspaceHistoryPage | undefined
+      return {
+        observe: (point) =>
+          Effect.sync(() => {
+            observed = { head: hex(point.head.toBytes()), length: point.length }
+          }),
+        ...(feed
+          ? {
+              readFrom: (anchor: Bytes.GenesisHash, base: import('@lody/e2ee-core').LedgerView) =>
+                Effect.gen(function* () {
+                  const anchorHex = hex(anchor.toBytes())
+                  const after = yield* feed.position()
+                  const retained = inline
+                  inline = undefined
+                  let cursor: string | undefined
+                  let fixed: E2eeWorkspaceHistoryPage['checkpoint'] | undefined
+                  const records: Uint8Array[] = []
+                  let bytes = 0
+                  for (let pageNumber = 0; pageNumber < 256; pageNumber++) {
+                    const page =
+                      pageNumber === 0 &&
+                      retained &&
+                      retained.workspaceId === workspaceId &&
+                      retained.genesisHash === anchorHex &&
+                      retained.startIndex === base.length &&
+                      retained.nextCursor === null
+                        ? retained
+                        : yield* request(
+                            (client) =>
+                              client.action(api.e2eeWorkspaces.history, {
+                                workspaceId,
+                                ...(cursor ? { cursor, checkpoint: fixed } : after ? { after } : {})
+                              }),
+                            historyPage,
+                            signal
+                          )
+                    fixed ??= page.checkpoint
+                    if (
+                      page.workspaceId !== workspaceId ||
+                      page.genesisHash !== anchorHex ||
+                      page.startIndex !== base.length + records.length ||
+                      page.checkpoint.length !== fixed.length ||
+                      page.checkpoint.headHash !== fixed.headHash
+                    )
+                      return yield* unavailable()
+                    for (const value of page.recordsHex) {
+                      const original = raw(value)
+                      bytes += original.length
+                      if (bytes > 33554432) return yield* unavailable()
+                      records.push(original)
+                    }
+                    yield* feed.ingest(page)
+                    if (page.nextCursor === null) {
+                      observed = { head: fixed.headHash, length: fixed.length }
+                      return {
+                        records,
+                        checkpoint: {
+                          head: Result.getOrThrow(Bytes.recordHash(raw(fixed.headHash))),
+                          length: fixed.length
+                        }
+                      }
+                    }
+                    cursor = page.nextCursor
+                  }
+                  return yield* unavailable()
+                }).pipe(Effect.mapError((cause) => new LedgerLogError({ cause })))
+            }
+          : {}),
         read: (anchor) =>
           Effect.gen(function* () {
             const anchorHex = hex(anchor.toBytes())
@@ -882,12 +963,14 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
               appended,
               signal
             )
+            if (reply.historyPage && reply.historyPage.recordsHex.length > 0)
+              inline = reply.historyPage
             if (reply.recordHash !== recordHash || reply.status !== 'committed')
               return yield* unavailable()
             return undefined
           }).pipe(Effect.mapError((cause) => new LedgerLogError({ cause })))
         }
-      })
+      }
     },
     appendRecord: (requestInput: E2eeAppendRecordRequest) => {
       const original = { ...requestInput }

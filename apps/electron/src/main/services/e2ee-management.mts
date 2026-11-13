@@ -42,7 +42,9 @@ export type DesktopE2eeManagementCommand =
   | { type: 'transferOwner'; membershipId: string }
 
 export type DesktopE2eeManagementRemote = {
-  log: LedgerLog['Service']
+  log: LedgerLog['Service'] & {
+    observe?: (point: { head: Bytes.RecordHash; length: number }) => Effect.Effect<void>
+  }
   staging: (round?: string) => EpochStagingStore['Service']
   mailbox: () => KeyMailbox['Service']
   history: (
@@ -51,7 +53,9 @@ export type DesktopE2eeManagementRemote = {
 }
 
 export type DesktopE2eeManagementPorts = {
-  log: LedgerLog['Service']
+  log: LedgerLog['Service'] & {
+    observe?: (point: { head: Bytes.RecordHash; length: number }) => Effect.Effect<void>
+  }
   staging: (round?: string) => EpochStagingStore['Service']
   refresh: () => Effect.Effect<void, unknown>
   receive: () => Effect.Effect<void, unknown>
@@ -182,8 +186,7 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     Layer.succeed(EpochStagingStore, makeRoundStaging(input.db, input.ports.staging)),
     Layer.succeed(LedgerSync, {
       current: input.current,
-      refresh: () =>
-        invalidateTurnSync.pipe(Effect.andThen(refreshIfNeeded), Effect.andThen(input.current()))
+      refresh: () => refreshIfNeeded.pipe(Effect.andThen(input.current()))
     }),
     Layer.succeed(EpochCandidateStore, Context.get(input.stores, EpochCandidateStore)),
     Layer.succeed(SubmissionJournal, Context.get(input.stores, SubmissionJournal))
@@ -207,6 +210,45 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
           cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
         )
       ),
+    ...(input.ports.log.readFrom
+      ? {
+          readFrom: (anchor: Bytes.GenesisHash, base: import('@lody/e2ee-core').LedgerView) =>
+            Effect.gen(function* () {
+              const synced = yield* Ref.get(turnSync)
+              if (
+                synced &&
+                synced.syncedLength === base.length &&
+                synced.syncedHead === Buffer.from(base.head.toBytes()).toString('hex') &&
+                input.ports.log.observe
+              ) {
+                yield* input.ports.log.observe({ head: base.head, length: base.length })
+                return { records: [], checkpoint: { head: base.head, length: base.length } }
+              }
+              const value = yield* input.ports.log.readFrom!(anchor, base)
+              const local = yield* input.verified.current()
+              if (
+                local.length === value.checkpoint.length &&
+                local.head.equals(value.checkpoint.head)
+              )
+                yield* Ref.set(
+                  turnSync,
+                  makePersistedCheckpointProof({
+                    syncedLength: local.length,
+                    syncedHead: Buffer.from(local.head.toBytes()).toString('hex')
+                  })
+                )
+              else {
+                yield* invalidateTurnSync
+                yield* refreshIfNeeded
+              }
+              return value
+            }).pipe(
+              Effect.mapError((cause) =>
+                cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
+              )
+            )
+        }
+      : {}),
     appendCas: (anchor, point, source) =>
       invalidateTurnSync.pipe(Effect.andThen(input.ports.log.appendCas(anchor, point, source)))
   })
@@ -356,5 +398,5 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     const result = yield* control.execute(intent)
     yield* control.acknowledge(result)
     return result.outcome
-  })
+  }, Effect.ensuring(invalidateTurnSync))
 })

@@ -293,7 +293,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         >
         manage: (
           command: DesktopE2eeManagementCommand,
-          ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
+          ports: (
+            signal: AbortSignal,
+            feed: {
+              position: () => Effect.Effect<string | undefined, unknown>
+              ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<unknown, unknown>
+            }
+          ) => DesktopE2eeManagementRemote
         ) => Effect.Effect<unknown, unknown>
         managementState: () => Effect.Effect<import('@lody/platform').E2eeManagementState, unknown>
         scope: Scope.Closeable
@@ -1579,6 +1585,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
           const mayRotate =
             self?.kind === 'personal' && (member?.role === 'owner' || member?.role === 'admin')
+          const personalCounts = new Map<string, number>()
+          const recoveryMembers = new Set<string>()
+          for (const device of state.devices.values()) {
+            const membership = hex(device.membershipId.toBytes())
+            if (device.kind === 'personal')
+              personalCounts.set(membership, (personalCounts.get(membership) ?? 0) + 1)
+            if (device.kind === 'recovery') recoveryMembers.add(membership)
+          }
           return {
             epoch: state.epoch.number,
             rotationRequired: state.epoch.rotationRequired,
@@ -1595,18 +1609,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               cryptoUserId: hex(
                 state.members.get(hex(entry.membershipId.toBytes()))!.userId.toBytes()
               ),
-              recoveryDeviceAvailable: [...state.devices.values()].some(
-                (other) =>
-                  other.kind === 'recovery' && other.membershipId.equals(entry.membershipId)
-              ),
+              recoveryDeviceAvailable: recoveryMembers.has(hex(entry.membershipId.toBytes())),
               requiresRecoveryConfirmation:
                 entry.kind === 'personal' &&
-                ![...state.devices.entries()].some(
-                  ([otherKey, other]) =>
-                    otherKey !== key &&
-                    other.kind === 'personal' &&
-                    other.membershipId.equals(entry.membershipId)
-                ),
+                personalCounts.get(hex(entry.membershipId.toBytes())) === 1,
               machineId: entry.machineId ?? null,
               self: key === ownKey,
               mayRevoke: Result.isSuccess(
@@ -1640,7 +1646,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           })
         const manage = Effect.fnUntraced(function* (
           command: DesktopE2eeManagementCommand,
-          remote: (signal: AbortSignal) => DesktopE2eeManagementRemote
+          remote: (
+            signal: AbortSignal,
+            feed: {
+              position: () => Effect.Effect<string | undefined, unknown>
+              ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<unknown, unknown>
+            }
+          ) => DesktopE2eeManagementRemote
         ) {
           return yield* Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
@@ -1648,7 +1660,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
               const done = Deferred.makeUnsafe<void, unknown>()
               managing = done
-              currentManagementRemote = remote(networkAbort.signal)
+              currentManagementRemote = remote(networkAbort.signal, {
+                position: () => status().pipe(Effect.map((value) => value.position ?? undefined)),
+                ingest: (page) =>
+                  serial.withPermit(
+                    Effect.suspend(() => (closing ? Effect.fail(fail('closed')) : ingest(page)))
+                  )
+              })
               return yield* Effect.gen(function* () {
                 if (!manager)
                   manager = yield* makeDesktopE2eeManagement({
@@ -1664,6 +1682,17 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     ports: {
                       log: {
                         read: (anchor) => currentManagementRemote!.log.read(anchor),
+                        ...(currentManagementRemote!.log.readFrom
+                          ? {
+                              readFrom: (anchor, base) =>
+                                currentManagementRemote!.log.readFrom!(anchor, base)
+                            }
+                          : {}),
+                        ...(currentManagementRemote!.log.observe
+                          ? {
+                              observe: (point) => currentManagementRemote!.log.observe!(point)
+                            }
+                          : {}),
                         appendCas: (anchor, point, source) =>
                           currentManagementRemote!.log.appendCas(anchor, point, source)
                       },
@@ -1968,7 +1997,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       manage: (
         workspaceId: string,
         command: DesktopE2eeManagementCommand,
-        ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
+        ports: (
+          signal: AbortSignal,
+          feed: {
+            position: () => Effect.Effect<string | undefined, unknown>
+            ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<unknown, unknown>
+          }
+        ) => DesktopE2eeManagementRemote
       ) =>
         Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
           entry.manage(command, ports)

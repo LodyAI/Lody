@@ -2757,8 +2757,8 @@ export class E2eeIpc extends ProductWindowIpcService {
             accountId: owner.accountId,
             credential,
             status: yield* owner.host.status(workspaceId),
-            work: owner.host.manage(workspaceId, command, (signal) => ({
-              log: cloud.client.ledgerLog(workspaceId, signal),
+            work: owner.host.manage(workspaceId, command, (signal, feed) => ({
+              log: cloud.client.ledgerLog(workspaceId, signal, feed),
               staging: (round) => cloud.client.staging({ workspaceId, credential }, signal, round),
               history: (request) => cloud.client.history(request, signal),
               mailbox: () => cloud.client.mailbox({ workspaceId, credential }, signal)
