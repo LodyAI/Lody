@@ -171,7 +171,7 @@ export class TurnPostProcessingService {
     };
   }
 
-  async updateSessionDiffStats(
+  async recordGitTurnDiffs(
     sessionId: SessionId,
     session: ISession,
     options: {
@@ -226,7 +226,6 @@ export class TurnPostProcessingService {
     const runGit = this.gitRunner(session, signal);
 
     let fileDiff: SessionHistoryInput['fileDiff'] = [];
-    let diffStats: SessionMeta['diffStats'] = { allChange: { add: 0, del: 0 } };
 
     // Runs alongside the diff-stats pipeline rather than after it; the two share
     // nothing but `runGit`, and this one swallows its own failures.
@@ -241,7 +240,6 @@ export class TurnPostProcessingService {
       });
       if (stats) {
         fileDiff = stats.commitFileDiff;
-        diffStats = stats.baseDiffStats;
       }
     } catch (error) {
       this.deps.logger.debug(`[${sessionId}] Failed to compute git diff stats:`, error);
@@ -254,12 +252,13 @@ export class TurnPostProcessingService {
       // be queried (transient spawn failure); overwriting the durable value with
       // a stale `false` would hide Create PR / Commit & Push on a session that
       // really does have unpublished work, until a later turn recomputes it.
-      const metaPatch: Partial<SessionMeta> = { diffStats, ...(await workspaceGitState) };
+      const metaPatch = await workspaceGitState;
       signal?.throwIfAborted();
-      await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
+      if (Object.keys(metaPatch).length > 0)
+        await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
     } catch (error) {
       this.deps.logger.debug(
-        `[${sessionId}] Failed to persist session meta diffStats: ${formatErrorMessage(error)}`
+        `[${sessionId}] Failed to persist workspace git state: ${formatErrorMessage(error)}`
       );
     }
 

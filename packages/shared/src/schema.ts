@@ -842,6 +842,7 @@ export type LineChange = {
 };
 
 export type SessionDiffStats = {
+  /** Workspace base versus current files, including committed and uncommitted changes. */
   allChange: LineChange;
 };
 

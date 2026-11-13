@@ -1,4 +1,4 @@
-import type { FileDiff, LineChange, SessionDiffStats } from '@lody/shared';
+import type { FileDiff } from '@lody/shared';
 import { gitDiffBaseRefCandidates } from './git-diff-base';
 
 export type GitRunner = (args: string[]) => Promise<string>;
@@ -7,7 +7,6 @@ export type GitDiffStats = {
   baseRef: string;
   mergeBase: string;
   commitFileDiff: FileDiff[];
-  baseDiffStats: SessionDiffStats;
 };
 
 export type GitMergeBase = {
@@ -47,13 +46,6 @@ export const parseGitNumstat = (output: string): FileDiff[] => {
     diffs.push({ filePath, add, del });
   }
   return diffs;
-};
-
-export const sumLineChange = (diffs: readonly FileDiff[]): LineChange => {
-  return diffs.reduce<LineChange>(
-    (acc, diff) => ({ add: acc.add + diff.add, del: acc.del + diff.del }),
-    { add: 0, del: 0 }
-  );
 };
 
 const buildUntrackedFileDiffs = async (
@@ -356,14 +348,6 @@ export const getGitDiffStats = async (
   if (!mergeBaseResult) return null;
   const { baseRef, mergeBase } = mergeBaseResult;
 
-  // Session-level all-change stats must match GitHub PR compare totals, which are
-  // calculated from committed content, not from uncommitted working-tree changes.
-  const baseNumstat = await runGit(['diff', '--numstat', '--no-renames', mergeBase, 'HEAD']);
-  const baseDiff = parseGitNumstat(baseNumstat);
-  const baseDiffStats: SessionDiffStats = {
-    allChange: sumLineChange(baseDiff),
-  };
-
   let commitFileDiff: FileDiff[];
   if (options?.baseCommitHash) {
     // Calculate diff between the recorded base commit and current working tree
@@ -422,5 +406,5 @@ export const getGitDiffStats = async (
     commitFileDiff = [];
   }
 
-  return { baseRef, mergeBase, commitFileDiff, baseDiffStats };
+  return { baseRef, mergeBase, commitFileDiff };
 };

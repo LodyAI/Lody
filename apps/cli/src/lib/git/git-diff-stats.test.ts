@@ -7,9 +7,7 @@ import {
 } from './git-diff-stats';
 
 describe('git diff stats', () => {
-  it('returns empty turn fileDiff without a turn baseline and still computes base lineChange', async () => {
-    const baseNumstat = ['5\t1\ta.ts', '0\t2\tb.ts', ''].join('\n');
-
+  it('does not attribute files to a turn without its baseline', async () => {
     const runGit: GitRunner = async (args) => {
       const key = args.join(' ');
 
@@ -21,7 +19,6 @@ describe('git diff stats', () => {
       }
 
       if (key === 'merge-base main HEAD') return 'abc123\n';
-      if (key === 'diff --numstat --no-renames abc123 HEAD') return baseNumstat;
 
       throw new Error(`Unexpected git args: ${key}`);
     };
@@ -30,9 +27,6 @@ describe('git diff stats', () => {
       baseRef: 'main',
       mergeBase: 'abc123',
       commitFileDiff: [],
-      baseDiffStats: {
-        allChange: { add: 5, del: 3 },
-      },
     });
   });
 
@@ -71,7 +65,6 @@ describe('git diff stats', () => {
     const changedBeforeHash = 'b'.repeat(40);
     const changedAfterHash = 'c'.repeat(40);
     const untrackedHash = 'd'.repeat(40);
-    const baseNumstat = ['5\t1\ta.ts', ''].join('\n');
     const workingTreeDiffNumstat = [
       '1\t0\tpreexisting.ts',
       '2\t1\tchanged-dirty.ts',
@@ -91,7 +84,6 @@ describe('git diff stats', () => {
       }
 
       if (key === 'merge-base main HEAD') return 'abc123\n';
-      if (key === 'diff --numstat --no-renames abc123 HEAD') return baseNumstat;
       if (key === 'diff --numstat --no-renames def456') return workingTreeDiffNumstat;
       if (key === 'ls-files --others --exclude-standard -z') return '';
       if (key === 'hash-object -- preexisting.ts changed-dirty.ts preexisting-untracked.ts') {
@@ -118,18 +110,14 @@ describe('git diff stats', () => {
         { filePath: 'changed-dirty.ts', add: 2, del: 1 },
         { filePath: 'new-file.ts', add: 10, del: 0 },
       ],
-      baseDiffStats: {
-        allChange: { add: 5, del: 1 },
-      },
     });
   });
 
-  it('excludes untracked files from base stats and filters unchanged turn-start untracked files', async () => {
+  it('filters unchanged turn-start untracked files from the fallback attribution', async () => {
     const preexistingUntrackedHash = 'a'.repeat(40);
     const changedUntrackedBeforeHash = 'b'.repeat(40);
     const changedUntrackedAfterHash = 'c'.repeat(40);
     const newUntrackedHash = 'd'.repeat(40);
-    const baseNumstat = ['5\t1\ta.ts', ''].join('\n');
     const workingTreeDiffNumstat = ['2\t0\ttracked.ts', ''].join('\n');
 
     const runGit: GitRunner = async (args) => {
@@ -143,7 +131,6 @@ describe('git diff stats', () => {
       }
 
       if (key === 'merge-base main HEAD') return 'abc123\n';
-      if (key === 'diff --numstat --no-renames abc123 HEAD') return baseNumstat;
       if (key === 'diff --numstat --no-renames def456') return workingTreeDiffNumstat;
       if (key === 'ls-files --others --exclude-standard -z') {
         return [
@@ -203,9 +190,6 @@ describe('git diff stats', () => {
         { filePath: 'new-untracked.ts', add: 3, del: 0 },
         { filePath: 'unreadable-untracked.ts', add: 0, del: 0 },
       ],
-      baseDiffStats: {
-        allChange: { add: 5, del: 1 },
-      },
     });
   });
 });

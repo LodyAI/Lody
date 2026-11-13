@@ -42,6 +42,7 @@ import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import type { SessionExec } from '@/lib/git/resolve-git-branch-name';
 import { WorkspaceGitService } from './workspace-git-service';
+import { CodeCollabV2Service } from '../lib/code-collab/code-collab-v2-service';
 
 const projectRun = (): SessionProjectRun => ({
   id: '12345678-1234-4234-8234-123456789012' as never,
@@ -461,8 +462,88 @@ describe('WorkspaceGitService', () => {
     api!.diff = { add: 5, del: 7 };
     expect(projectRunMetaPatch(run)).toMatchObject({
       workspaceDirty: true,
-      diffStats: { allChange: { add: 7, del: 10 } },
     });
+    expect(projectRunMetaPatch(run)).not.toHaveProperty('diffStats');
+  });
+
+  it('publishes workspace totals even with an open PR and preserves them on unknown results', async () => {
+    const { service, meta, workspaceDocument } = fixture();
+    meta.set(owner, {
+      pullRequests: [{ url: 'https://github.com/example/web/pull/1', status: 'open' }],
+      diffStats: { allChange: { add: 0, del: 0 } },
+    });
+    const stats = { allChange: { add: 4, del: 2 } };
+    await service.publishDiffStats({ ownerSessionId: owner, allChangesDiffStats: stats });
+    expect(meta.get(owner)).toMatchObject({ diffStats: stats });
+    await service.publishDiffStats({ ownerSessionId: owner, allChangesDiffStats: null });
+    expect(meta.get(owner)).toMatchObject({ diffStats: stats });
+    const write = vi.spyOn(workspaceDocument.repo, 'upsertDocMeta');
+    write.mockRejectedValueOnce(new Error('synthetic metadata failure'));
+    const next = { allChange: { add: 5, del: 3 } };
+    await expect(
+      service.publishDiffStats({ ownerSessionId: owner, allChangesDiffStats: next })
+    ).rejects.toThrow('synthetic metadata failure');
+    expect(meta.get(owner)).toMatchObject({ diffStats: stats });
+    await service.publishDiffStats({ ownerSessionId: owner, allChangesDiffStats: next });
+    expect(meta.get(owner)).toMatchObject({ diffStats: next });
+  });
+
+  it('reconciles group aggregates and preserves other owner fields', async () => {
+    const { service, meta } = fixture();
+    const run = projectRun();
+    const [web, api] = Object.values(run.members);
+    if (!web || !api) throw new Error('Expected two project members');
+    web.diff = { add: 2, del: 1 };
+    api.diff = { add: 3, del: 0 };
+    meta.set(owner, {
+      projectRun: run,
+      branchName: 'feature/keep',
+      diffStats: { allChange: { add: 0, del: 0 } },
+    });
+    await service.publishDiffStats({
+      ownerSessionId: owner,
+      allChangesDiffStats: { allChange: { add: 5, del: 1 } },
+      memberDiffStats: { web: { allChange: web.diff }, api: { allChange: api.diff } },
+    });
+    expect(meta.get(owner)).toMatchObject({
+      branchName: 'feature/keep',
+      diffStats: { allChange: { add: 5, del: 1 } },
+    });
+    expect(meta.get(owner)?.projectRun?.members).toEqual(run.members);
+    await service.publishDiffStats({
+      ownerSessionId: owner,
+      allChangesDiffStats: null,
+      memberDiffStats: { web: { allChange: { add: 8, del: 2 } }, api: null },
+    });
+    expect(meta.get(owner)?.diffStats).toEqual({ allChange: { add: 5, del: 1 } });
+    expect(Object.values(meta.get(owner)?.projectRun?.members ?? {})[0]?.diff).toEqual({
+      add: 8,
+      del: 2,
+    });
+  });
+
+  it('does not publish a cancelled comparison queued behind another owner mutation', async () => {
+    const { service, meta } = fixture();
+    const previous = { allChange: { add: 4, del: 2 } };
+    meta.set(owner, { diffStats: previous });
+    let release: () => void = () => {
+      throw new Error('Gate not initialized');
+    };
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mutation = service.withOwnerMutation(owner, () => gate);
+    const controller = new AbortController();
+    const write = service.publishDiffStats({
+      ownerSessionId: owner,
+      allChangesDiffStats: { allChange: { add: 1, del: 0 } },
+      signal: controller.signal,
+    });
+    const cancelled = expect(write).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    release();
+    await Promise.all([mutation, cancelled]);
+    expect(meta.get(owner)).toMatchObject({ diffStats: previous });
   });
 
   it('probes working submodule configuration without fetching, writing config or exposing host paths', async () => {
@@ -663,12 +744,28 @@ describe('WorkspaceGitService', () => {
             );
             await writeFile(join(prepared.workdir, apiPath, 'new-file.txt'), 'uncommitted');
             await service.syncLocalWorkspace(owner, prepared.workdir);
+            const files = new CodeCollabV2Service({
+              resolveWorkspace: async () => ({
+                ok: true,
+                ownerSessionId: owner,
+                workspaceRoot: prepared.workdir,
+                projectRun: meta.get(owner)?.projectRun,
+              }),
+              publishFileIndex: async (state) => {
+                if (state.persistAllChangesDiffStats) await service.publishDiffStats(state);
+              },
+            });
+            try {
+              await files.initDirectory({ sessionId: owner, path: '.' });
+            } finally {
+              files.dispose();
+            }
             const members = Object.values(meta.get(owner)!.projectRun!.members);
             expect(members.map((member) => member.dirty)).toEqual([layout !== 'roots', true]);
             expect(meta.get(owner)).toMatchObject({
               workspaceDirty: true,
               branchName: firstBranches[0],
-              diffStats: { allChange: { add: 0, del: 0 } },
+              diffStats: { allChange: { add: 1, del: 0 } },
             });
             meta.set(owner, { ...meta.get(owner), isArchived: true });
             await archiveProjectGroup({

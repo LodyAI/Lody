@@ -35,13 +35,5 @@ export function projectRunMetaPatch(run: SessionProjectRun): Partial<SessionMeta
     if (gitMembers.some((member) => member[field] === true)) patch[target] = true;
     else if (gitMembers.every((member) => member[field] === false)) patch[target] = false;
   }
-  if (members.every((member) => member.diff !== undefined)) {
-    patch.diffStats = {
-      allChange: members.reduce(
-        (sum, member) => ({ add: sum.add + member.diff!.add, del: sum.del + member.diff!.del }),
-        { add: 0, del: 0 }
-      ),
-    };
-  }
   return patch;
 }

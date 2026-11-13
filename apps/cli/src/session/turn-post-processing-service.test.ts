@@ -1,3 +1,11 @@
+import { execFile } from 'node:child_process';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
+import { CodeCollabV2Service } from '../lib/code-collab/code-collab-v2-service';
+import { WorkspaceGitService } from './workspace-git-service';
+const execFileAsync = promisify(execFile);
 import { describe, expect, it, vi } from 'vitest';
 import type { LocalProjectId, ProjectRef, SessionId, SessionMeta, WorkspaceId } from '@lody/shared';
 
@@ -164,7 +172,7 @@ describe('TurnPostProcessingService', () => {
       }),
     } as unknown as ISession;
 
-    await service.updateSessionDiffStats(sessionId, session, {
+    await service.recordGitTurnDiffs(sessionId, session, {
       turnId: 'assistant-turn-1',
       skipHistoryFileDiff: true,
     });
@@ -383,94 +391,97 @@ describe('TurnPostProcessingService', () => {
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
-  it('can skip history fileDiff while still updating session diff stats', async () => {
-    const logger = createLogger();
-    const setLatestAssistantHistoryFileDiff = vi.fn();
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({})),
-      setLatestAssistantHistoryFileDiff,
-    } as unknown as SessionDocument;
-    const upsertDocMeta = vi.fn(async () => {});
+  it('preserves complete workspace totals through Git finalization, commit and net cancellation', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'lody-workspace-stat-'));
+    const git = async (...args: string[]) =>
+      (
+        await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root })
+      ).stdout.trim();
+    let meta: Partial<SessionMeta> = { project: githubProject };
     const workspaceDocument = {
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: async () => ({ getMetaState: async () => meta }),
       repo: {
-        upsertDocMeta,
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+        },
       },
     } as unknown as LoroDocumentManager;
-    const service = createService({ logger, workspaceDocument });
-    const session = {
-      getWorkdir: () => '/repo',
-      exec: vi.fn(async (_command: string, args: string[]) => {
-        const key = args.join(' ');
-        if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
-        if (key === 'rev-parse --verify origin/main^{commit}') return 'origin-main\n';
-        if (key === 'merge-base origin/main HEAD') return 'merge-base\n';
-        if (key === 'diff --numstat --no-renames merge-base HEAD') return '2\t1\tsrc/app.ts\n';
-        if (key === 'diff --numstat --no-renames turn-base') return '99\t88\twrong.ts\n';
-        if (key === 'ls-files --others --exclude-standard -z') return '';
-        if (key === 'status --porcelain') return ' M src/app.ts\n';
-        if (key === 'rev-list @{u}..HEAD --count') return '0\n';
-        throw new Error(`Unexpected git args: ${key}`);
-      }),
-    } as unknown as ISession;
-
-    const fileDiff = await service.updateSessionDiffStats(sessionId, session, {
-      turnId: 'assistant-turn-1',
-      baseCommitHash: 'turn-base',
-      skipHistoryFileDiff: true,
-    });
-
-    expect(fileDiff).toEqual([{ filePath: 'wrong.ts', add: 99, del: 88 }]);
-    expect(setLatestAssistantHistoryFileDiff).not.toHaveBeenCalled();
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      'session-session-1',
-      expect.objectContaining({
-        diffStats: { allChange: { add: 2, del: 1 } },
-        workspaceDirty: true,
-      })
-    );
-  });
-
-  it('does not overwrite workspaceDirty when the dirty probe is indeterminate', async () => {
     const logger = createLogger();
-    const setLatestAssistantHistoryFileDiff = vi.fn();
-    const sessionDoc = {
-      // The durable meta already records the session as dirty.
-      getMetaState: vi.fn(async () => ({ workspaceDirty: true })),
-      setLatestAssistantHistoryFileDiff,
-    } as unknown as SessionDocument;
-    const upsertDocMeta = vi.fn(async () => {});
-    const workspaceDocument = {
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-      repo: {
-        upsertDocMeta,
-      },
-    } as unknown as LoroDocumentManager;
-    const service = createService({ logger, workspaceDocument });
-    const session = {
-      getWorkdir: () => '/repo',
-      exec: vi.fn(async (_command: string, args: string[]) => {
-        const key = args.join(' ');
-        if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
-        if (key === 'rev-parse --verify origin/main^{commit}') return 'origin-main\n';
-        if (key === 'merge-base origin/main HEAD') return 'merge-base\n';
-        if (key === 'diff --numstat --no-renames merge-base HEAD') return '2\t1\tsrc/app.ts\n';
-        // The dirty probe fails transiently (e.g. spawn failure under load).
-        if (key === 'status --porcelain') throw new Error('spawn git ENOMEM');
-        throw new Error(`Unexpected git args: ${key}`);
+    const workspace = new WorkspaceGitService({ logger, workspaceDocument });
+    const files = new CodeCollabV2Service({
+      resolveWorkspace: async () => ({
+        ok: true,
+        ownerSessionId: sessionId,
+        workspaceRoot: root,
+        allChangesBaseBranch: 'main',
       }),
-    } as unknown as ISession;
-
-    await service.updateSessionDiffStats(sessionId, session, {
-      turnId: 'assistant-turn-1',
-      skipHistoryFileDiff: true,
+      publishFileIndex: async (state) => {
+        if (state.persistAllChangesDiffStats) await workspace.publishDiffStats(state);
+      },
     });
-
-    expect(upsertDocMeta).toHaveBeenCalledTimes(1);
-    const [, metaPatch] = upsertDocMeta.mock.calls[0] as [unknown, Partial<SessionMeta>];
-    // diffStats still updates, but workspaceDirty is left untouched so a transient
-    // failure cannot clobber the durable dirty=true into a stale false.
-    expect(metaPatch).toEqual({ diffStats: { allChange: { add: 2, del: 1 } } });
-    expect('workspaceDirty' in metaPatch).toBe(false);
+    try {
+      await git('-c', 'init.defaultBranch=main', 'init');
+      await git('config', 'user.email', 'synthetic@example.invalid');
+      await git('config', 'user.name', 'Synthetic Test');
+      await writeFile(path.join(root, 'app.txt'), 'base\n');
+      await git('add', '.');
+      await git('commit', '-m', 'baseline');
+      const baseline = await git('rev-parse', 'HEAD');
+      await git('update-ref', 'refs/remotes/origin/main', baseline);
+      await git('checkout', '-b', 'feature');
+      await writeFile(path.join(root, 'committed.txt'), 'committed\n');
+      await git('add', '.');
+      await git('commit', '-m', 'branch work');
+      await writeFile(path.join(root, 'app.txt'), 'edited\n');
+      await writeFile(path.join(root, 'new.txt'), 'untracked\n');
+      await files.initDirectory({ sessionId, path: '.' });
+      const expected = { allChange: { add: 3, del: 1 } };
+      expect(meta.diffStats).toEqual(expected);
+      const post = createService({ logger, workspaceDocument });
+      const session = {
+        getWorkdir: () => root,
+        exec: async (_command: string, args: string[]) => git(...args),
+      } as unknown as ISession;
+      await post.recordGitTurnDiffs(sessionId, session, {
+        turnId: 'turn',
+        baseCommitHash: baseline,
+        skipHistoryFileDiff: true,
+      });
+      expect(meta).toMatchObject({ diffStats: expected, workspaceDirty: true });
+      await files.refreshSharedStateAfterTurn({ sessionId });
+      expect(meta.diffStats).toEqual(expected);
+      await post.recordGitTurnDiffs(
+        sessionId,
+        {
+          getWorkdir: () => root,
+          exec: async () => {
+            throw new Error('synthetic git failure');
+          },
+        } as unknown as ISession,
+        { turnId: 'failed-probe', skipHistoryFileDiff: true }
+      );
+      expect(meta).toMatchObject({ diffStats: expected, workspaceDirty: true });
+      await git('add', '.');
+      await git('commit', '-m', 'save the remaining work');
+      await post.recordGitTurnDiffs(sessionId, session, {
+        turnId: 'committed',
+        skipHistoryFileDiff: true,
+      });
+      await files.refreshSharedStateAfterTurn({ sessionId });
+      expect(meta).toMatchObject({ diffStats: expected, workspaceDirty: false });
+      meta = { ...meta, diffStats: { allChange: { add: 0, del: 0 } } };
+      await files.refreshSharedStateAfterTurn({ sessionId });
+      expect(meta.diffStats).toEqual(expected);
+      await writeFile(path.join(root, 'app.txt'), 'base\n');
+      await rm(path.join(root, 'committed.txt'));
+      await rm(path.join(root, 'new.txt'));
+      await files.refreshSharedStateAfterTurn({ sessionId });
+      expect(meta.diffStats).toEqual({ allChange: { add: 0, del: 0 } });
+      expect(await git('diff', '--numstat', baseline)).toBe('');
+    } finally {
+      files.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

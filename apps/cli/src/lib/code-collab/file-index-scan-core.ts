@@ -12,6 +12,7 @@ import type {
   CodeCollabV2AllChangesState,
   CodeCollabV2AllChangesValue,
   CodeCollabV2FileTreeValue,
+  SessionDiffStats,
 } from '@lody/shared';
 
 // The shared facade directly: the CLI one loads the daemon's winston logger.
@@ -113,6 +114,18 @@ async function runGitLsFiles(
 
 export type ProjectGitMember = { readonly path: string; readonly base: string };
 
+/** Summarize the complete comparison before its file index is bounded for transport. */
+export function summarizeAllChanges(changes: CodeCollabV2AllChangesState): SessionDiffStats | null {
+  let add = 0;
+  let del = 0;
+  for (const change of Object.values(changes)) {
+    if (change === true || change.diff === undefined) return null;
+    add += change.diff[0];
+    del += change.diff[1];
+  }
+  return { allChange: { add, del } };
+}
+
 export async function resolveProjectGitDirectory(
   root: string,
   memberPath: string
@@ -205,7 +218,7 @@ export async function computeAllChanges(
   const nameStatus = nameStatusResult.value;
   const untracked = untrackedResult.value;
   if (!numstat.ok && !nameStatus.ok && !untracked.ok) {
-    return {};
+    throw new Error('Git workspace comparison could not be read.');
   }
 
   const deletedPaths = nameStatus.ok

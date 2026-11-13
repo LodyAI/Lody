@@ -131,12 +131,12 @@ A notification failure cannot replay Agent execution.
 - `workspace-git-service.ts` — observes checkout branches for local folders and worktrees,
   serializes reads/writes per owner Session, and publishes the last named branch. Execution
   binds, terminal turns, and authorized Code Collab activation/refresh use this service;
-  observation requires neither a running agent nor a GitHub remote.
-- `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats,
+  observation requires neither a running agent nor a GitHub remote. Its `publishDiffStats`
+  serializes Code Collab's workspace totals and Member projections on that same owner queue.
+- `turn-post-processing-service.ts` — post-turn work (Git fallback turn records, PR discovery,
   and the `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
   Commit & Push action; both cancellation routes refresh the branch and run `syncWorkspaceGitState`,
   which self-gates on the session's GitHub binding).
-- `session-diff-stats-target.ts` — chooses which writer owns a session's `diffStats`.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,
   D11). It may allow owner-cached turns from the catalog snapshot, allow a workspace member
   whose backend allow for the same local project is under one hour old, deny `remote_missing`

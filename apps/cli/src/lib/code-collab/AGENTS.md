@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Ground truth for the rewrite: specs/code-collab-v2.md.
+Current behavior and protocol references: [file surfaces](../../../../../.agents/docs/sessions-file-surfaces.md).
 File-by-file responsibilities: [README.md](README.md).
 
 ## Invariants
@@ -34,8 +34,10 @@ File-by-file responsibilities: [README.md](README.md).
   and the named Flock bridge in `apps/cli/src/lib/loro/doc.ts` lets Electron
   invalidate and refresh its Machine RPC snapshot. Both streams have 180-day TTL and
   must not enter repo meta. Root activation and terminal turn refresh may mirror only
-  compact aggregate add/del `diffStats`; file/diff watcher refreshes stay Flock-only, and PR
-  sessions retain committed compare totals. The injected `observeWorkspaceGit` observer
+  compact aggregate add/del `diffStats` from the complete All Changes set before index
+  trimming, including uncommitted work even with an associated PR. Statistics reconciliation
+  must run when requested even if the index is unchanged; unknown counts preserve prior totals.
+  File/diff watcher refreshes stay Flock-only. The injected `observeWorkspaceGit` observer
   runs only on activation/explicit root refresh, never file watcher or terminal diff refresh;
   it must not gate file snapshots.
 - The whole published file index stays within `CODE_COLLAB_FILE_INDEX_LIMITS`

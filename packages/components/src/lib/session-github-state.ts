@@ -33,12 +33,10 @@ export type SessionGitHubState = {
    */
   workspaceUnpushed: boolean;
   /**
-   * Whether the session has any changes to base a PR on — uncommitted
-   * (`workspaceDirty`) OR already committed (`diffStats.allChange > 0`). These
-   * two signals come from independent writers (post-turn `git status` vs the
-   * Code Collab file-index scanner), so together they survive one being stale
-   * and, unlike `workspaceDirty` alone, keep "Create PR" available after the
-   * agent commits (clean tree, real commits, still no PR).
+   * Whether the session has changes to base a PR on. Workspace diff totals
+   * include committed and uncommitted changes against the workspace base.
+   * `workspaceDirty` also covers changes without text-line counts and remains
+   * independent of the asynchronously refreshed comparison summary.
    */
   hasChanges: boolean;
 };
@@ -91,11 +89,9 @@ export const getSessionGitHubState = (
   const workspaceDirty = sourceSession?.workspaceDirty ?? false;
   const workspaceUnpushed = sourceSession?.workspaceUnpushed ?? false;
   const allChange = sourceSession?.diffStats?.allChange;
-  const hasCommittedDiff = allChange ? allChange.add + allChange.del > 0 : false;
-  // `diffStats` is published only when every Member reports a diff, and a
-  // non-Git Member never does. Fall back to the Member rows so committed work
-  // still enables Create PR in a mixed Project group.
-  const memberHasCommittedDiff = sourceSession?.projectRun
+  const hasWorkspaceDiff = allChange ? allChange.add + allChange.del > 0 : false;
+  // A group total can be unknown while some Members have a complete comparison.
+  const memberHasWorkspaceDiff = sourceSession?.projectRun
     ? Object.values(sourceSession.projectRun.members).some(
         (member) => member.diff && member.diff.add + member.diff.del > 0
       )
@@ -112,6 +108,6 @@ export const getSessionGitHubState = (
     hasExistingPr: !!repoFullName && !!latestPr,
     workspaceDirty,
     workspaceUnpushed,
-    hasChanges: workspaceDirty || hasCommittedDiff || memberHasCommittedDiff,
+    hasChanges: workspaceDirty || hasWorkspaceDiff || memberHasWorkspaceDiff,
   };
 };
