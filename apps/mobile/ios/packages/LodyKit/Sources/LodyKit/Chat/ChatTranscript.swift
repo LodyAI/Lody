@@ -78,13 +78,6 @@ struct ChatMessageAttachment: Decodable, Equatable {
   var mimeType: String? = nil
 }
 
-struct ChatTextReference: Decodable, Equatable {
-  var start: Int
-  var end: Int
-  let kind: String
-  let target: String?
-}
-
 struct ChatOperationCard: Decodable, Equatable {
   let id: String
   let kind: String
