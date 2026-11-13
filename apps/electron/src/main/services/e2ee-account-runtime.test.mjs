@@ -365,7 +365,10 @@ void test('uncertain admission preserves append and reconciliation failures, the
     bootstrap: { deviceCredential: () => Effect.succeed('synthetic-credential') },
     readers: new Map([['workspace', new Set([sender.id])]]),
     host: {
-      ledgerView: () => Effect.succeed(ledger),
+      ledgerView: () => {
+        if (ledger === null) throw new Error('synthetic ledger export failure')
+        return Effect.succeed(ledger)
+      },
       localPairingContext: () => Effect.succeed({ pairingSessionId: '44'.repeat(16) }),
       approveLocalPairing: () => Effect.succeed(request),
       confirmLocalPairing: () =>
@@ -488,6 +491,10 @@ void test('uncertain admission preserves append and reconciliation failures, the
   assert.equal((await ipc.admitLocalAgent('workspace', session)).ready, true)
   handoffs.push(...activations.slice(-2).map((message) => message.ledgerRecordsHex?.length ?? null))
   assert.deepEqual(handoffs, [null, null, 2, null])
+  // The handoff is optional: a failed ledger export never fails a confirmed admission.
+  ledger = null
+  assert.equal((await ipc.admitLocalAgent('workspace', session)).ready, true)
+  assert.equal(activations.at(-1).ledgerRecordsHex, undefined)
   assert.deepEqual(warnings, [])
 })
 

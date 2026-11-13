@@ -360,15 +360,9 @@ export function makeDesktopAgentPairing(ports: DesktopAgentPairingPorts) {
       )
       if (Exit.isFailure(refreshed)) ports.remember(Cause.squash(refreshed.cause))
       const distributed = Exit.isSuccess(refreshed)
-      // Confirmation and the optional ledger view are both local reads of the same
-      // verified ledger, so one account turn covers them.
       const verified = yield* Effect.result(
         same(pending.accountId, workspaceId, id, (owner) =>
-          Effect.gen(function* () {
-            const confirmed = yield* owner.host.confirmLocalPairing(workspaceId, pairingSessionId)
-            const view = distributed ? yield* Effect.exit(owner.host.ledgerView(workspaceId)) : null
-            return { confirmed, view }
-          })
+          owner.host.confirmLocalPairing(workspaceId, pairingSessionId)
         )
       )
       if (verified._tag === 'Failure') {
@@ -388,10 +382,14 @@ export function makeDesktopAgentPairing(ports: DesktopAgentPairingPorts) {
         )
       }
       if (!distributed) return { admitted: true as const, ready: false }
-      const { confirmed, view } = verified.success
+      const confirmed = verified.success
       // The CLI verifies these same originals from its own pinned genesis instead of
-      // replaying history from the network; unavailable or oversized views are omitted.
-      const handoff = view && Exit.isSuccess(view) ? localLedgerHandoff(view.value) : undefined
+      // replaying history from the network. The view has its own turn, after the
+      // confirmation, so an unavailable or oversized view only omits the handoff.
+      const view = yield* Effect.exit(
+        same(pending.accountId, workspaceId, id, (owner) => owner.host.ledgerView(workspaceId))
+      )
+      const handoff = Exit.isSuccess(view) ? localLedgerHandoff(view.value) : undefined
       const activate = (ledger?: { ledgerRecordsHex: string[]; ledgerPosition: string }) =>
         promised(() =>
           ports.cli().activateLocalE2eeDevice({
