@@ -162,3 +162,16 @@ $ pnpm build:mac
 # For Linux
 $ pnpm build:linux
 ```
+
+## Runtime dependency packaging
+
+Electron Builder collects the production dependency graph from this app's manifest
+for both desktop compositions. Renderer-only `@tanstack/react-router` and `jotai`
+are development dependencies because Vite ships their code in renderer assets.
+Keep Devframe resource loaders, native addons, and their runtime dependencies in
+production dependencies; Cloud composition also consumes this manifest.
+
+Run `node apps/electron/scripts/verify-runtime-dependencies.mjs` from the repository
+root to check the installed production graph using Electron Builder's traversal
+collector. This checks dependency selection, including transitive dependencies;
+full packaging and native afterPack probes remain required release validation.
