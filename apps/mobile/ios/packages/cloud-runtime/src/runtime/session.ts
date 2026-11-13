@@ -492,7 +492,7 @@ export async function actOnPendingInput(
 }
 
 /** User turns in a Loro transcript's first window and in each older page. */
-const HISTORY_PAGE_TURNS = 20;
+const HISTORY_PAGE_TURNS = 6;
 /** UTF-8 budget per envelope; the iOS host replaces envelopes above 12 MiB with an overflow marker. */
 const ENVELOPE_BUDGET_BYTES = 8 * 1024 * 1024;
 const entryField = (entry: unknown, key: string) =>
