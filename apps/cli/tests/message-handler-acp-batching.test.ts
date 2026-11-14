@@ -263,7 +263,6 @@ const createRecoveryHarness = async (
     },
     flushSessionUsage: async () => {},
     persistCodeCollabTurnDiffs: async () => false,
-    recordGitTurnDiffs: async () => [],
     detectAndAssociatePR: async () => null,
     syncWorkspaceGitState: async () => {},
     notifySessionCompleted: async () => {},

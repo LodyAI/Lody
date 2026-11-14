@@ -59,7 +59,6 @@ const createService = (options: { logger: Logger; workspaceDocument?: LoroDocume
     logger: options.logger,
     workspaceDocument: options.workspaceDocument ?? ({} as unknown as LoroDocumentManager),
     workspaceId,
-    preferredBaseBranch: 'main',
     prAssociation: null,
   });
 
@@ -142,6 +141,7 @@ describe('TurnPostProcessingService', () => {
     } as unknown as SessionDocument;
     const parentSessionDoc = {
       getMetaState: vi.fn(async () => ({
+        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
         pullRequests: [pullRequest],
       })),
     } as unknown as SessionDocument;
@@ -172,10 +172,7 @@ describe('TurnPostProcessingService', () => {
       }),
     } as unknown as ISession;
 
-    await service.recordGitTurnDiffs(sessionId, session, {
-      turnId: 'assistant-turn-1',
-      skipHistoryFileDiff: true,
-    });
+    await service.syncWorkspaceGitState(sessionId, session);
 
     expect(workspaceDocument.getOrCreateSessionDoc).toHaveBeenCalledWith(parentSessionId);
     expect(upsertDocMeta).toHaveBeenCalledWith(
@@ -443,31 +440,20 @@ describe('TurnPostProcessingService', () => {
         getWorkdir: () => root,
         exec: async (_command: string, args: string[]) => git(...args),
       } as unknown as ISession;
-      await post.recordGitTurnDiffs(sessionId, session, {
-        turnId: 'turn',
-        baseCommitHash: baseline,
-        skipHistoryFileDiff: true,
-      });
+      await post.syncWorkspaceGitState(sessionId, session);
       expect(meta).toMatchObject({ diffStats: expected, workspaceDirty: true });
       await files.refreshSharedStateAfterTurn({ sessionId });
       expect(meta.diffStats).toEqual(expected);
-      await post.recordGitTurnDiffs(
-        sessionId,
-        {
-          getWorkdir: () => root,
-          exec: async () => {
-            throw new Error('synthetic git failure');
-          },
-        } as unknown as ISession,
-        { turnId: 'failed-probe', skipHistoryFileDiff: true }
-      );
+      await post.syncWorkspaceGitState(sessionId, {
+        getWorkdir: () => root,
+        exec: async () => {
+          throw new Error('synthetic git failure');
+        },
+      } as unknown as ISession);
       expect(meta).toMatchObject({ diffStats: expected, workspaceDirty: true });
       await git('add', '.');
       await git('commit', '-m', 'save the remaining work');
-      await post.recordGitTurnDiffs(sessionId, session, {
-        turnId: 'committed',
-        skipHistoryFileDiff: true,
-      });
+      await post.syncWorkspaceGitState(sessionId, session);
       await files.refreshSharedStateAfterTurn({ sessionId });
       expect(meta).toMatchObject({ diffStats: expected, workspaceDirty: false });
       meta = { ...meta, diffStats: { allChange: { add: 0, del: 0 } } };

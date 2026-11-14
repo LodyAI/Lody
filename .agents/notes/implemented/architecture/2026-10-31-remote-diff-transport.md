@@ -68,6 +68,18 @@ and do not reconstruct the requested turn. Explicit current/All Changes reads
 remain independent. This establishes failure behavior, not the cause of missing
 historical evidence or a new capture/retention policy.
 
+New per-turn file cards and their before/after contents share the same retained
+ACP editing evidence. Turn finalization does not synthesize `history.fileDiff`
+from Git statistics when evidence is absent or fails to save. The removed Git
+summary fallback could create clickable cards without stored contents, and its
+workspace comparisons cannot prove that every change belongs to this Agent turn.
+Without editing evidence, terminal-only changes therefore have no new turn card;
+current All Changes still reads them from Git. Existing metadata-only history is
+not backfilled or deleted, and unavailable historical reads retain the notice above.
+Git dirty/unpushed observations, PR discovery, evidence retries, finalization
+budgets and release ownership remain independent. No new capture or storage
+format is introduced; the existing Promise evidence/history boundary is retained.
+
 A handle is issued only by an authorized manifest and keyed by requested session
 and content key, with resolved owner, workspace and source. Every page reauthorizes
 the session and checks that binding. Unsupported symlinks, directories and Gitlinks
@@ -243,6 +255,9 @@ owners. A read-worker shutdown error is reported after the writer, tunnels and d
 
 Behavioral evidence lives in:
 
+- `apps/cli/tests/session-execution-service.test.ts`: turns without edit evidence
+  do not acquire Git-only file cards, captured content settles before successor
+  edits, and cancelled or older Git observations cannot overwrite newer flags.
 - `apps/mobile/ios/apps/ios/tests/native/files-rpc.test.mjs` and
   `apps/mobile/android/runtime/test/contract-bridge.test.mjs`: unavailable turns
   remain unavailable while current workspace contents are readable; retained turn

@@ -33,8 +33,8 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   [Statistics ownership](../../../../../.agents/notes/implemented/architecture/2026-11-14-workspace-diff-stat-ownership.md)
   explains the shared workspace meaning and why Git finalization cannot replace it.
 - `file-index-scan-core.ts` — shared scan and Git merge-base resolution. Tracking
-  lookup normalizes qualified local owner refs using `git/git-diff-base.ts`, also
-  consumed by committed summary stats. An owner without a recorded base (a direct
+  lookup normalizes qualified local owner refs using `git/git-diff-base.ts`.
+  An owner without a recorded base (a direct
   local checkout) compares against the remote default branch (`origin/HEAD`) before
   `main`/`master`, so an abandoned `main` cannot turn repository history into session
   changes. Batch diffs pin the resolved commit for their list and inline snapshots;
@@ -45,6 +45,10 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   associated user-history timestamp/order key for turn/GC order and the calibrated
   recorded time separately. Storage/FastCDC/GC invariants live in
   [packages/turn-diff-store/AGENTS.md](../../../../../packages/turn-diff-store/AGENTS.md).
+  Per-turn cards use the summaries returned by this same evidence write. Missing
+  evidence produces no new card; Git workspace statistics never fill turn history.
+  Terminal-only edits remain visible in current All Changes. See the
+  [turn evidence decision](../../../../../.agents/notes/implemented/architecture/2026-10-31-remote-diff-transport.md#sources-and-authority).
 - `file-index-scan-worker.ts` / `file-index-scan-pool.ts` — off-main-thread directory
   scanning and full file-index state refresh. For Git worktrees the worker computes
   Git-backed All Changes; for non-Git/no-Git workspaces it first requests

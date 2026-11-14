@@ -87,8 +87,8 @@ only signed input; the default ceiling had no room for those rules.
 - Completion publication follows [notification ownership](../lib/notifications/AGENTS.md).
 - No content: `recordSilentTurnFailure`, not `setDispatchHandled`. Await
   `turnProducedVisibleOutput` before `finalizeTurn`; finalize, advance pointers, fail open.
-- Turn diff content retains CLI-local ACP evidence. Workspace totals obey the
-  [Code Collab statistics ownership rules](../lib/code-collab/AGENTS.md#invariants).
+- Turn summaries and diff content share CLI-local ACP evidence. Git statistics never populate turn history.
+  Workspace totals follow [Code Collab rules](../lib/code-collab/AGENTS.md#invariants).
 
 ## Lifecycle
 

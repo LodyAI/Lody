@@ -109,7 +109,8 @@ A notification failure cannot replay Agent execution.
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
 - `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
-  lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
+  lifecycle/error handling, GitHub/local project setup, evidence-backed turn history,
+  and post-turn workspace refresh.
 - `acp-session-config-applier.ts` — resolves top-level and config-option selections,
   then applies mode, model, and dependent options in that order. This prevents model switches
   from resetting an already-applied effort. Reports rejected model selections through the GUI
@@ -133,10 +134,10 @@ A notification failure cannot replay Agent execution.
   binds, terminal turns, and authorized Code Collab activation/refresh use this service;
   observation requires neither a running agent nor a GitHub remote. Its `publishDiffStats`
   serializes Code Collab's workspace totals and Member projections on that same owner queue.
-- `turn-post-processing-service.ts` — post-turn work (Git fallback turn records, PR discovery,
-  and the `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
+- `turn-post-processing-service.ts` — post-turn PR discovery and the
+  `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
   Commit & Push action; both cancellation routes refresh the branch and run `syncWorkspaceGitState`,
-  which self-gates on the session's GitHub binding).
+  which self-gates on the session's GitHub binding. It never writes per-turn file summaries.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,
   D11). It may allow owner-cached turns from the catalog snapshot, allow a workspace member
   whose backend allow for the same local project is under one hour old, deny `remote_missing`

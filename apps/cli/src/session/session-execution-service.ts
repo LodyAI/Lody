@@ -44,12 +44,6 @@ import { getAcpCapabilitySourceVersion, resolveACPProcessLaunch } from '@/agent/
 import { captureCli } from '@/lib/analytics/posthog';
 import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
-  captureGitWorkingTreeDiffBaseline,
-  getCurrentCommitHash,
-  type GitRunner,
-  type GitWorkingTreeDiffBaseline,
-} from '@/lib/git/git-diff-stats';
-import {
   readMachineLocalProjects,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   readLocalProjectRootResolveSyncTimeoutMs,
@@ -205,8 +199,6 @@ type FinalizeTurnContext = {
   session: ISession;
   sessionDoc: SessionDocument;
   turnId: string;
-  baseCommitHash: string | null;
-  turnStartWorkingTreeDiff?: GitWorkingTreeDiffBaseline | null;
   project?: ProjectRef;
   isTurnCancelled?: () => boolean;
   abortSignal?: AbortSignal;
@@ -293,18 +285,6 @@ type TurnFinalizationEffects = {
     signal?: AbortSignal
   ) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
-  recordGitTurnDiffs: (
-    sessionId: SessionId,
-    session: ISession,
-    options: {
-      turnId: string;
-      baseCommitHash?: string;
-      turnStartWorkingTreeDiff?: GitWorkingTreeDiffBaseline | null;
-      preferredBaseBranch?: string;
-      skipHistoryFileDiff?: boolean;
-      signal?: AbortSignal;
-    }
-  ) => Promise<SessionHistoryInput['fileDiff']>;
   detectAndAssociatePR: (ctx: {
     sessionId: SessionId;
     session: ISession;
@@ -313,7 +293,7 @@ type TurnFinalizationEffects = {
     branchName?: string | null;
     signal?: AbortSignal;
   }) => Promise<{ readonly baseBranch: string } | null>;
-  /** Publish the workspace dirty/unpushed flags alone, for paths that skip diff stats. */
+  /** Publish workspace dirty/unpushed flags independently of turn edit evidence. */
   syncWorkspaceGitState: (
     sessionId: SessionId,
     session: ISession,
@@ -386,8 +366,6 @@ type TurnRuntimeState = {
   goalControl?: GoalPromptControl;
   session?: ISession;
   project?: ProjectRef;
-  baseCommitHash?: string | null;
-  turnStartWorkingTreeDiff?: GitWorkingTreeDiffBaseline | null;
   promptStarted: boolean;
   promptInFlight: boolean;
   promptFailed: boolean;
@@ -4474,19 +4452,18 @@ export class SessionExecutionService {
     sessionId: SessionId,
     turnId: string | undefined,
     signal: AbortSignal
-  ): Promise<boolean> {
+  ): Promise<void> {
     const persist = this.deps.turnFinalization.persistCodeCollabTurnDiffs;
     if (!persist || !turnId) {
-      return false;
+      return;
     }
     try {
       signal.throwIfAborted();
-      return await persist(sessionId, turnId, signal);
+      await persist(sessionId, turnId, signal);
     } catch (error) {
       this.deps.logger.warn(
-        `[${sessionId}] Failed to persist Code Collab v2 turn diff evidence; not falling back to git history fileDiff: ${formatErrorMessage(error)}`
+        `[${sessionId}] Failed to persist Code Collab v2 turn diff evidence: ${formatErrorMessage(error)}`
       );
-      return true;
     }
   }
 
@@ -4499,13 +4476,6 @@ export class SessionExecutionService {
    * probes twice and rewrites the same values. `syncWorkspaceGitState` swallows
    * its own failures, so no caller needs to guard this.
    */
-  private markWorkspaceGitStateSynced(sessionId: SessionId, turnId: string): void {
-    const runtime = this.getTurnRuntime(sessionId, turnId);
-    if (runtime) {
-      runtime.workspaceGitStateSynced = true;
-    }
-  }
-
   private async syncWorkspaceGitStateOnce(
     sessionId: SessionId,
     turnId: string,
@@ -4563,9 +4533,9 @@ export class SessionExecutionService {
     sessionId: SessionId,
     turnId: string | undefined,
     signal: AbortSignal
-  ): Promise<boolean> {
+  ): Promise<void> {
     signal.throwIfAborted();
-    const codeCollabHistoryFileDiffPersisted = await this.runTurnFinalizationStage(
+    await this.runTurnFinalizationStage(
       sessionId,
       turnId ?? '',
       'persistCodeCollabTurnDiffs',
@@ -4576,7 +4546,6 @@ export class SessionExecutionService {
     await this.runTurnFinalizationStage(sessionId, turnId ?? '', 'flushSessionUsage', async () => {
       await this.deps.turnFinalization.flushSessionUsage(sessionId);
     });
-    return codeCollabHistoryFileDiffPersisted;
   }
 
   private async finalizeYieldedTurnOutput(
@@ -4629,15 +4598,7 @@ export class SessionExecutionService {
     ctx: FinalizeTurnContext,
     signal: AbortSignal
   ): Promise<void> {
-    const {
-      sessionId,
-      session,
-      sessionDoc,
-      turnId,
-      baseCommitHash,
-      turnStartWorkingTreeDiff,
-      project,
-    } = ctx;
+    const { sessionId, session, sessionDoc, turnId, project } = ctx;
     const isTurnCancelled = ctx.isTurnCancelled ?? (() => false);
     const githubProject = resolveProjectGitHubRepo(project);
     const stopIfTurnCancelled = async (stage: string): Promise<boolean> => {
@@ -4658,20 +4619,10 @@ export class SessionExecutionService {
       return true;
     };
 
-    const codeCollabHistoryFileDiffPersisted = await this.persistTurnDiffsAndFlushUsage(
-      sessionId,
-      turnId,
-      signal
-    );
+    await this.persistTurnDiffsAndFlushUsage(sessionId, turnId, signal);
 
     if (await stopIfTurnCancelled('ACP finalization')) {
       return;
-    }
-
-    let preferredStatsBaseBranch = project?.branch;
-    if (project?.kind === 'local') {
-      preferredStatsBaseBranch =
-        (await sessionDoc.getMetaState())?.baseBranch?.trim() || preferredStatsBaseBranch;
     }
 
     const branchName = await this.runTurnFinalizationStage(
@@ -4688,7 +4639,7 @@ export class SessionExecutionService {
 
     if (githubProject) {
       try {
-        const detectedPr = await this.runTurnFinalizationStage(
+        await this.runTurnFinalizationStage(
           sessionId,
           turnId,
           'detectAndAssociatePR',
@@ -4703,7 +4654,6 @@ export class SessionExecutionService {
             }),
           signal
         );
-        preferredStatsBaseBranch = detectedPr?.baseBranch ?? preferredStatsBaseBranch;
       } catch (error) {
         this.deps.logger.debug(`[${sessionId}] PR detection failed: ${formatErrorMessage(error)}`);
       }
@@ -4717,25 +4667,9 @@ export class SessionExecutionService {
       // session on the fast refresh cadence after a turn ends
       // (specs/pr-status-reconciler.md).
 
-      await this.runTurnFinalizationStage(
-        sessionId,
-        turnId,
-        'recordGitTurnDiffs',
-        async () => {
-          await this.deps.turnFinalization.recordGitTurnDiffs(sessionId, session, {
-            turnId,
-            baseCommitHash: baseCommitHash ?? undefined,
-            turnStartWorkingTreeDiff,
-            preferredBaseBranch: preferredStatsBaseBranch,
-            skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted,
-            signal,
-          });
-          this.markWorkspaceGitStateSynced(sessionId, turnId);
-        },
-        signal
-      );
+      await this.syncWorkspaceGitStateOnce(sessionId, turnId, session, signal);
 
-      if (await stopIfTurnCancelled('diff recording')) {
+      if (await stopIfTurnCancelled('Git state synchronization')) {
         return;
       }
     }
@@ -7318,8 +7252,6 @@ export class SessionExecutionService {
         yield* Effect.fail(new Error('AUTOMATION_NATIVE_SESSION_CHANGED'));
       let activeSession = readySession;
       let staleAcpPromptRecoveryAttempted = false;
-      let baseCommitHash: string | null = null;
-      let turnStartWorkingTreeDiff: GitWorkingTreeDiffBaseline | null = null;
 
       // A requester switch re-derives commit identity for this turn only;
       // the bounded policy lookup falls back to owner rules on failure.
@@ -7457,34 +7389,6 @@ export class SessionExecutionService {
         return undefined;
       });
 
-      const capturePromptBaseline = Effect.fnUntraced(function* (
-        targetSession: ISession,
-        triggerReason: 'initial' | 'stale_acp_recovery'
-      ): Effect.fn.Return<void, unknown, never> {
-        const workdir = targetSession.getWorkdir();
-        const runGit: GitRunner = (args) => targetSession.exec('git', args, workdir, false);
-        baseCommitHash = yield* self.tryPromise(() =>
-          traceAsync(
-            self.deps.logger,
-            'execution.get_base_commit_hash',
-            { sessionId, turnId, triggerReason },
-            async () => await getCurrentCommitHash(runGit)
-          )
-        );
-        turnStartWorkingTreeDiff = yield* self.tryPromise(() =>
-          traceAsync(
-            self.deps.logger,
-            'execution.capture_worktree_diff_baseline',
-            { sessionId, turnId, triggerReason },
-            async () => await captureGitWorkingTreeDiffBaseline(runGit)
-          )
-        );
-        runtime.project = project;
-        runtime.baseCommitHash = baseCommitHash;
-        runtime.turnStartWorkingTreeDiff = turnStartWorkingTreeDiff;
-        return undefined;
-      });
-
       // Inbox has already crossed its durable start fence before prompt submission.
       // A disconnected transport with no observed output cannot prove non-consumption.
       // Encrypted turns also retain their start evidence instead of retrying an
@@ -7540,7 +7444,6 @@ export class SessionExecutionService {
               yield* applyPromptConfig(restoredSession, 'stale_acp_recovery');
               yield* maybeRecordHistoryReplayNotice();
               yield* validatePromptCredentials(restoredSession, 'stale_acp_recovery');
-              yield* capturePromptBaseline(restoredSession, 'stale_acp_recovery');
 
               let retryPromptBlocks = promptBlocks;
               if (usedHistoryReplay && !hadHistoryReplay && replayPromptResult?.promptText) {
@@ -7580,7 +7483,7 @@ export class SessionExecutionService {
       yield* abortIfCancelled();
 
       yield* validatePromptCredentials(activeSession, 'initial');
-      yield* capturePromptBaseline(activeSession, 'initial');
+      runtime.project = project;
 
       yield* abortIfCancelled();
 
@@ -7627,8 +7530,6 @@ export class SessionExecutionService {
               session: activeSession,
               sessionDoc,
               turnId: completedTurnId,
-              baseCommitHash,
-              turnStartWorkingTreeDiff,
               project,
               producedOutput,
               isTurnCancelled: () => self.isTurnCancelled(sessionId, completedTurnId),
@@ -8367,27 +8268,7 @@ export class SessionExecutionService {
 
           yield* abortIfCancelled();
 
-          const containerWorkdir = session.getWorkdir();
-          const runGit: GitRunner = (args) => session.exec('git', args, containerWorkdir, false);
-          const baseCommitHash = yield* self.tryPromise(() =>
-            traceAsync(
-              self.deps.logger,
-              'execution.get_base_commit_hash',
-              { sessionId, turnId },
-              async () => await getCurrentCommitHash(runGit)
-            )
-          );
-          const turnStartWorkingTreeDiff = yield* self.tryPromise(() =>
-            traceAsync(
-              self.deps.logger,
-              'execution.capture_worktree_diff_baseline',
-              { sessionId, turnId },
-              async () => await captureGitWorkingTreeDiffBaseline(runGit)
-            )
-          );
           runtime.project = project;
-          runtime.baseCommitHash = baseCommitHash;
-          runtime.turnStartWorkingTreeDiff = turnStartWorkingTreeDiff;
 
           yield* abortIfCancelled();
 
@@ -8442,8 +8323,6 @@ export class SessionExecutionService {
                   session,
                   sessionDoc,
                   turnId: completedTurnId,
-                  baseCommitHash,
-                  turnStartWorkingTreeDiff,
                   project,
                   producedOutput,
                   isTurnCancelled: () => self.isTurnCancelled(sessionId, completedTurnId),

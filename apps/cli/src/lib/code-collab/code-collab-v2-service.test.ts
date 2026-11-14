@@ -28,7 +28,6 @@ import {
   type CodeCollabV2WorkspaceResolver,
 } from './code-collab-v2-service';
 import { CodeCollabV2DiffStore } from './code-collab-v2-diff-store';
-import { getGitDiffStats } from '../git/git-diff-stats';
 import type {
   WorkspaceWatchCoordinatorApi,
   WorkspaceWatchDirtyReason,
@@ -1625,12 +1624,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         publishFileIndex,
       });
       try {
-        for (const preferredBaseBranch of ['main', 'refs/heads/main', 'refs/remotes/origin/main']) {
-          const stats = await getGitDiffStats((args) => git(...args), { preferredBaseBranch });
-          expect(stats).toMatchObject({
-            mergeBase: upstream,
-          });
-        }
         await service.refreshSharedState({ sessionId: SESSION_ID });
         expect(published.at(-1)?.allChanges).toEqual({ 'avatar.txt': { diff: [1, 0] } });
         const preMergeProjection = published.at(-1)!;
@@ -1668,9 +1661,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
           files: 0,
           allChange: { add: 0, del: 0 },
         });
-        expect(
-          await getGitDiffStats((args) => git(...args), { preferredBaseBranch: 'refs/heads/main' })
-        ).toMatchObject({ mergeBase: head });
+
         expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
           status: 'ok',
           base: head,
@@ -1739,17 +1730,6 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
           status: 'ok',
           base: develop,
-        });
-        expect(await getGitDiffStats((args) => git(...args))).toMatchObject({
-          baseRef: 'origin/HEAD',
-          mergeBase: develop,
-        });
-
-        // A recorded base stays authoritative, even when it names the abandoned branch.
-        expect(
-          await getGitDiffStats((args) => git(...args), { preferredBaseBranch: 'main' })
-        ).toMatchObject({
-          mergeBase: abandonedMain,
         });
 
         // Without a remote default, the conventional names remain the fallback.
