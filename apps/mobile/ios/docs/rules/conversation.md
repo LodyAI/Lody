@@ -8,6 +8,8 @@ Read before changing the conversation page: the transcript and its turns, header
 
 - Chat process, summary and sub-agent rows use Home's rail glyphs and tree lines; answer text uses the full width with 16 pt margins. File changes form one grouped `lodyInset` block, and code blocks use `lodyInset` fill. The composer is outside the design language rail scope.
 
+- A tool step's detail sheet (`ItemDetailController`) formats its content as web's expanded `ToolCallCard` (`ItemDetailBlockView.views`, ported from `tool-call-detail.tsx` and `tool-call-command.ts`): one inset sheet of hairline-divided sections in order — the command (`$` prompt only for shell steps, shell wrappers unwrapped), the output (ANSI stripped, a non-zero exit in red), JSON or a single fenced block verbatim in mono, other text as inline Markdown, and `rawOutput` last — with each diff as its own surface between sheets. Echoes of the command and an execute step's one-line description are dropped. A string `rawOutput` shows as its text, not a quoted JSON string; `rawInput`, which web never shows, stays behind its toggle.
+
 - Process headers use the duration’s regular 12 pt monospaced style throughout, without enlarged or bold status text. Duration headers have no loading/done glyph; completed headers omit tool counts. Expanding work preserves prose/tool/prose order: each tool summary stays after its preceding text and opens only that contiguous tool group; command rows remain one line with tail truncation.
 
 - A failed command gets no special treatment in a conversation (no warning mark, no orange): only a step waiting on permission flags its process summary, with a neutral mark. Android's step rows likewise drop the red "Failed" label.
