@@ -34,8 +34,34 @@ the reasoning behind those rules.
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
   a pointer heading for a tick counts as arrival.
+- `html-preview/markdown-html-fences.ts` uses Markdown parser fence events to mark
+  closure. Only closed, case-sensitive `html` fences reach
+  `html-preview/markdown-html-block.tsx`; unfinished fences remain source even after
+  completion. Raw HTML parsing and sanitization can erase fence properties, so
+  parser-owned source positions restore closure evidence afterward. Attributes in
+  raw HTML cannot grant execution. Each preview has an opaque-origin
+  `allow-scripts` sandbox and accepts only bootstrap confirmation and height/error
+  reports from its current window and instance. It exposes no host actions.
+  Unstyled native controls inherit the host font and sampled `@lody/ui` semantic
+  colors, shadows, radius, control height and spacing. Theme and control defaults
+  live in the first CSS fallback layer with zero-specificity selectors, so authored
+  class, universal, inline and later-layer styles override them. Storybook
+  `Controls` and `AuthoredOverrides` expose both cases with the original counter.
+  Source and fullscreen keep the same iframe; reload, content changes and theme
+  changes create a new document.
+  Previews load within 800px of the scroll container, reserve 120px, clip above
+  480px until expanded, and cap reported height at 10,000px. A bounded 500-entry
+  memory of seen source/heights accelerates virtual remounts without preserving
+  JavaScript state. A fetched bootstrap document owns its script policy so the
+  enclosing host's CSP stays strict. Missing bootstrap confirmation after one
+  second shows a load error; confirmation without height feedback keeps the finite
+  preview visible without an error. Source and Reload remain available. External
+  resources can load over HTTP(S); the sandbox does not promise network isolation.
+
 - `markdown-renderer.tsx` renders finished text with react-markdown and a
-  streaming turn with `@lobehub/streamdown`. Finished static text uses
+  streaming turn with `@lobehub/streamdown`. Messages containing an `html` code
+  candidate use react-markdown throughout streaming and completion so an executing
+  document survives the handoff. Finished static text uses
   `lib/markdown-parse-cache.ts` to reuse only the raw syntax tree across remounts.
   Each parser configuration retains at most 64 entries, 1,048,576 source characters
   and 8,192 AST nodes; an input above 131,072 characters is not retained. Each
