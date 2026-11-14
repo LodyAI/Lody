@@ -6870,3 +6870,63 @@ void test('a slow sign-in token still completes a request when nothing is quitti
   signIn.answerAll()
   assert.equal((await read).position, 'p1:workspace:1:synthetic')
 })
+
+void test('retained inline append suffix falls back until initial bootstrap position exists, then skips history round-trips', async () => {
+  let position = null
+  let length = 1
+  const historyCalls = []
+  const ingestedPages = []
+  const inlinePage = (idx) => ({
+    workspaceId: 'team',
+    genesisHash: '11'.repeat(32),
+    checkpoint: { headHash: '22'.repeat(32), length: idx + 1 },
+    startIndex: idx,
+    recordsHex: ['aa'],
+    position: `p1:team:${idx + 1}:cursor`,
+    nextCursor: null
+  })
+  const f = await memberIpcFixture({
+    realRefresh: true,
+    client: {
+      history: (args) =>
+        Effect.sync(() => {
+          historyCalls.push(args)
+          return {
+            workspaceId: 'team',
+            genesisHash: '11'.repeat(32),
+            checkpoint: { headHash: '22'.repeat(32), length: 2 },
+            startIndex: 0,
+            recordsHex: ['00', 'aa'],
+            position: 'p1:team:2:bootstrapped',
+            nextCursor: null
+          }
+        })
+    },
+    host: {
+      status: () =>
+        Effect.succeed({
+          hasCurrentKey: true,
+          genesisHash: '11'.repeat(32),
+          length,
+          position
+        }),
+      ingestLedgerRecords: (_ws, page) =>
+        Effect.sync(() => {
+          ingestedPages.push(page.startIndex)
+          position = page.position
+          length = page.checkpoint.length
+        })
+    }
+  })
+  // Brand-new workspace (position === null): must not pass startIndex=1 into bootstrap ingest.
+  f.ipc.retainInlineHistory('team', inlinePage(1))
+  await f.ipc.refresh('team', { installKeys: false })
+  assert.equal(historyCalls.length, 1)
+  assert.deepEqual(ingestedPages, [0])
+
+  // Bootstrapped workspace (position !== null): inline suffix serves refresh without calling history.
+  f.ipc.retainInlineHistory('team', inlinePage(2))
+  await f.ipc.refresh('team', { installKeys: false })
+  assert.equal(historyCalls.length, 1)
+  assert.deepEqual(ingestedPages, [0, 2])
+})
