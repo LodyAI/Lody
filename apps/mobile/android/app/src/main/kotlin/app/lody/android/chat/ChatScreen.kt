@@ -105,7 +105,7 @@ internal data class PreviewMenu(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, context: ChatContext, onBack: () -> Unit, onSelectTab: (String) -> Unit = {}, creation: app.lody.android.create.CreationSubmissions.Submission? = null) {
+fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, context: ChatContext, onBack: () -> Unit, onSelectTab: (String) -> Unit = {}, creation: app.lody.android.create.CreationSubmissions.Submission? = null, persistDraft: Boolean = false) {
     BackHandler(onBack = onBack)
     var retry by remember(id, scope) { mutableIntStateOf(0) }
     var status by remember(id, scope) { mutableStateOf("syncing") }
@@ -124,7 +124,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     var outgoing by remember(id, scope) { mutableStateOf(emptyList<Outgoing>()) }
     var forgetId by remember(id, scope) { mutableStateOf<String?>(null) }
     var forgotten by remember(id, scope) { mutableStateOf(emptySet<String>()) }
-    var prompt by rememberSaveable(id) { mutableStateOf("") }
+    val draftContext = LocalContext.current.applicationContext
+    var prompt by rememberSaveable(id) { mutableStateOf(if (persistDraft) ComposerDrafts.read(draftContext, scope, ComposerDrafts.session(id)) else "") }
+    // Kept on the device until sent, so leaving the page or the app dying keeps the typed text.
+    LaunchedEffect(scope, id, prompt) { if (persistDraft) ComposerDrafts.write(draftContext, scope, ComposerDrafts.session(id), prompt) }
     // The field with its caret and IME composition; the @ panel reads the trigger at the caret.
     var field by remember(id) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(prompt, androidx.compose.ui.text.TextRange(prompt.length))) }
     LaunchedEffect(prompt) {
