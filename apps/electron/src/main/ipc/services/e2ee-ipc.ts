@@ -1844,6 +1844,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     let cursor: string | undefined
     let checkpoint: import('@lody/cloud-api').E2eeLedgerCheckpoint | undefined
     let useInline =
+      after !== undefined &&
       retainedInline !== undefined &&
       retainedInline.workspaceId === workspaceId &&
       retainedInline.genesisHash === access.status.genesisHash &&
