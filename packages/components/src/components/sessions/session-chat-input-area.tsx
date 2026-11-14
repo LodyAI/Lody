@@ -58,6 +58,7 @@ import { useWorkspaceAgentRoles } from '@/hooks/use-workspace-agent-roles';
 import {
   DesktopPermissionModeButton,
   DesktopRunConfigMenu,
+  type DesktopRunConfigMenuProps,
 } from '@/components/sessions/desktop-run-config-menu';
 import {
   ChatComposer,
@@ -488,6 +489,8 @@ export interface SessionChatInputAreaProps {
   configOptionSelectors?: AcpConfigOptionSelector[];
   /** Current values for each configOption (configId → value). */
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Devin Fusion builder wiring; in-session edits apply from the next message. */
+  fusionBuilder?: DesktopRunConfigMenuProps['fusionBuilder'];
   /** Whether the session's repo is public (for #mention feature) */
   isRepoPublic?: boolean;
   /** Available slash commands from the ACP agent. */
@@ -620,6 +623,7 @@ export const SessionChatInputArea = memo(
       isContextCompacting = false,
       configOptionSelectors,
       configOptionValues,
+      fusionBuilder,
       isRepoPublic,
       availableCommands,
       commandsEnabled = true,
@@ -2453,6 +2457,7 @@ export const SessionChatInputArea = memo(
           configOptionSelectors={configOptionSelectors}
           configOptionValues={configOptionValues}
           onConfigOptionChange={onConfigOptionChange}
+          fusionBuilder={fusionBuilder}
           modeOptions={modeOptions}
           selectedModeId={selectedModeId}
           agentRoles={agentRolesProp}

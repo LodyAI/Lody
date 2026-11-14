@@ -93,6 +93,16 @@ this page is the full text of the rules summarised there.
   The same tasks-side Model submenu
   (`tasks/task-agent-run-config-menu.tsx`) is still an unsearchable clone and
   should adopt it.
+  For builtin Devin, callers that pass `fusionBuilder` (the session composer and
+  chat landing) get a **Fusion** row after Model. It opens
+  `FusionBuilderDialog` (`fusion-builder-dialog.tsx`, logic in
+  `lib/devin-fusion.ts`): Lead and Sidekick choices structured from the
+  advertised `fusion-*` model values, the lead effort and Speed that pair's own
+  selectors offer (`useAcpModelSelectorResolver`), and a line comparing the draft
+  with `acpRuntimeConfig`. Apply sends one advertised model value plus those
+  options through the ordinary composer edits, so the next turn applies them;
+  it never composes a model id
+  ([decision](../notes/implemented/feature/2026-11-14-devin-fusion-builder.md)).
   `DesktopRunConfigMenu` gains a **Role** row when the caller passes
   `agentRoles`. It sits ABOVE Agent, since a Role answers every row under it at
   once. The callers split by whether a Session exists yet, and that difference

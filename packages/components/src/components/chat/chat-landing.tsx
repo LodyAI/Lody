@@ -182,7 +182,10 @@ import {
   openAgentRoleEditorForEdit,
   type AgentRoleEditorState,
 } from '@/components/settings/agent-role-editor-dialog';
-import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
+import {
+  useAcpModelSelectorResolver,
+  useAcpSelectorOptions,
+} from '@/hooks/use-acp-selector-options';
 import {
   useAgentRoleAvailability,
   useWorkspaceAgentRoles,
@@ -1861,16 +1864,33 @@ function WorkspaceChatLanding({
       : (selectedAgent?.agentId ?? 'none'),
     preferences: selectedAgentDefaults,
   });
-  const selectorOptions = useAcpSelectorOptions({
-    configId: selectedConfig?.id,
-    cliType: selectedConfig?.cliType,
-    agentType: selectedConfig?.agentType,
-    selectedModeId: sessionConfigCandidates.modeId,
-    selectedModelId: sessionConfigCandidates.modelId,
-    configOptionValues: sessionConfigCandidates.configOptionValues,
-    runtimeOverrides: selectedConfig?.runtimeOverrides,
-    machine: selectedMachine,
-  });
+  const acpSelectorTarget = useMemo(
+    () => ({
+      configId: selectedConfig?.id,
+      cliType: selectedConfig?.cliType,
+      agentType: selectedConfig?.agentType,
+      selectedModeId: sessionConfigCandidates.modeId,
+      selectedModelId: sessionConfigCandidates.modelId,
+      configOptionValues: sessionConfigCandidates.configOptionValues,
+      runtimeOverrides: selectedConfig?.runtimeOverrides,
+      machine: selectedMachine,
+    }),
+    [
+      selectedConfig,
+      sessionConfigCandidates.modeId,
+      sessionConfigCandidates.modelId,
+      sessionConfigCandidates.configOptionValues,
+      selectedMachine,
+    ]
+  );
+  const selectorOptions = useAcpSelectorOptions(acpSelectorTarget);
+  /* Per-model selector lookup for the Devin Fusion builder: a new chat has no
+     agent-confirmed runtime, so appliesOn is the conversation start. */
+  const selectorsForModel = useAcpModelSelectorResolver(acpSelectorTarget);
+  const fusionBuilder = useMemo(
+    () => ({ selectorsForModel, appliesOn: 'conversationStart' as const }),
+    [selectorsForModel]
+  );
   const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
   const {
     selectedModeId,
@@ -4206,6 +4226,7 @@ function WorkspaceChatLanding({
           configOptionSelectors={configOptionSelectors}
           configOptionValues={configOptionValues}
           onConfigOptionChange={handleConfigOptionChange}
+          fusionBuilder={fusionBuilder}
           recentRunConfigs={recentRunConfigItems}
           onRecentRunConfigSelect={handleRecentRunConfigSelect}
           modeOptions={modeOptions}

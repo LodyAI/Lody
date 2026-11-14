@@ -343,6 +343,7 @@ import {
   useAcpSessionConfigSelectionState,
   useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
+import { areAcpSessionConfigPreferencesEqual } from '@/lib/acp-session-config-selection';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { MessageListErrorFallback } from './message-list-error-fallback';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
@@ -2817,6 +2818,7 @@ export const SessionChatInterface = memo(
       modeOptions,
       modelOptions,
       selectorOptions,
+      selectorsForModel,
       sessionMachine,
     } = useSessionAcpSelectorContext({
       machineId: session.machineId,
@@ -2838,6 +2840,31 @@ export const SessionChatInterface = memo(
         cliType: session.cliType,
         agentType: session.agentType,
       });
+    /* In-session Fusion edits freeze into the next Turn, so pending state is
+       compared against the agent-confirmed runtime config. The doc mirror
+       rebuilds `sessionRuntimeConfig` with unchanged values on every merge
+       frame while an agent streams; value-stabilize it (same pattern as
+       `useAcpSessionConfigSelectionState`) so `fusionBuilder` keeps its
+       identity and the memoized input area does not re-render per frame.
+       While a local send is pending there is no runtime claim to compare. */
+    const stableSessionRuntimeConfigRef = useRef(sessionRuntimeConfig);
+    if (
+      !areAcpSessionConfigPreferencesEqual(
+        stableSessionRuntimeConfigRef.current,
+        sessionRuntimeConfig
+      )
+    ) {
+      stableSessionRuntimeConfigRef.current = sessionRuntimeConfig;
+    }
+    const stableSessionRuntimeConfig = stableSessionRuntimeConfigRef.current;
+    const fusionBuilder = useMemo(
+      () => ({
+        selectorsForModel,
+        runtimeConfig: hasPendingConfig ? null : stableSessionRuntimeConfig,
+        appliesOn: 'nextMessage' as const,
+      }),
+      [selectorsForModel, hasPendingConfig, stableSessionRuntimeConfig]
+    );
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),
       [isLocalSession, localHomeDir, machineFlockRows]
@@ -7863,6 +7890,7 @@ export const SessionChatInterface = memo(
                             isContextCompacting={isContextCompacting}
                             configOptionSelectors={configOptionSelectors}
                             configOptionValues={configOptionValues}
+                            fusionBuilder={fusionBuilder}
                             isRepoPublic={isRepoPublic}
                             availableCommands={availableCommands}
                             commandsEnabled={isVisible}
