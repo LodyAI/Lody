@@ -51,6 +51,7 @@ import { getGhShimSessionBinRoot } from '@/lib/gh-shim-script';
 import {
   DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION,
   resolveDeepSeekHarnessProcessLaunch,
+  type DeepSeekHarnessCatalogModel,
 } from '@/agent/deepseek-harness-runtime';
 
 export interface ACPSetting {
@@ -307,7 +308,10 @@ export function getAcpCapabilitySourceVersion(
     );
     const suffix = getBuiltinRuntimeOverrideSourceVersionSuffix(input.runtimeOverrides);
     const prefix = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
-    return `${prefix}+magpie-v1:${createHash('sha256').update(gateway).digest('hex').slice(0, 12)}${suffix}`;
+    // v2: a gateway launch now carries the catalog into the Harness profile, so
+    // probes cached under v1 recorded model capabilities those launches never
+    // announced (image prompts included).
+    return `${prefix}+magpie-v2:${createHash('sha256').update(gateway).digest('hex').slice(0, 12)}${suffix}`;
   }
   if (input.cliType === 'custom') {
     // Derive from the launch spec itself so editing the command invalidates
@@ -644,7 +648,8 @@ export function resolveCliAdapterEntry(
 }
 
 async function resolveBuiltinACPProcessLaunch(
-  input: ResolveACPProcessLaunchInput
+  input: ResolveACPProcessLaunchInput,
+  modelCatalog?: readonly DeepSeekHarnessCatalogModel[]
 ): Promise<ResolvedACPProcessLaunch> {
   if (!isBuiltinAgentType(input.agentType)) {
     throw new Error(`Unsupported builtin ACP type: ${input.agentType}`);
@@ -655,6 +660,7 @@ async function resolveBuiltinACPProcessLaunch(
       adapterPath,
       providerId: input.agentConfigId,
       extraArgs: input.extraArgs,
+      modelCatalog,
     });
     return {
       ...launch,
@@ -871,10 +877,14 @@ export async function resolveACPProcessLaunchAsync(
   input: ResolveACPProcessLaunchInput
 ): Promise<ResolvedACPProcessLaunch> {
   if (input.cliType === 'builtin') {
-    const launch = await resolveBuiltinACPProcessLaunch(input);
     const gateway = input.magpieGatewayUrl;
-    if (!gateway) return launch;
-    const magpie = await prepareMagpieRuntime(input.agentType, gateway, input.signal);
+    // The gateway catalog is a launch input for the DeepSeek profile, not only
+    // an environment overlay, so it must be known before the launch resolves.
+    const magpie = gateway
+      ? await prepareMagpieRuntime(input.agentType, gateway, input.signal)
+      : undefined;
+    const launch = await resolveBuiltinACPProcessLaunch(input, magpie?.modelCatalog);
+    if (!magpie) return launch;
     return {
       ...launch,
       env: { ...launch.env, ...magpie.env },
