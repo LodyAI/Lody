@@ -3418,7 +3418,6 @@ export class MessageHandler {
       logger: this.logger,
       workspaceDocument: this.workspaceDocument,
       workspaceId: this.workspaceId,
-      preferredBaseBranch: this.configuredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
     });
     this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
@@ -3478,8 +3477,6 @@ export class MessageHandler {
         persistCodeCollabTurnDiffs: async (sessionId, turnId, signal) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId, signal),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-        recordGitTurnDiffs: async (sessionId, session, options) =>
-          await this.turnPostProcessingService.recordGitTurnDiffs(sessionId, session, options),
         refreshCodeCollabSharedState: async (sessionId, signal) => {
           await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId, signal });
         },

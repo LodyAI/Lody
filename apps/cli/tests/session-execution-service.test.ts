@@ -101,6 +101,8 @@ import {
 } from '@lody/shared';
 import { pendingEventFromAgentEditEvidence } from '../src/lib/code-collab/code-collab-v2-diff-evidence';
 import { TurnPostProcessingService } from '../src/session/turn-post-processing-service';
+import { CodeCollabV2DiffStore } from '../src/lib/code-collab/code-collab-v2-diff-store';
+import { CodeCollabV2Service } from '../src/lib/code-collab/code-collab-v2-service';
 import Database from 'better-sqlite3';
 import { Data, Effect, Fiber, Result } from 'effect';
 import type { LoroRepo } from 'loro-repo';
@@ -355,7 +357,7 @@ const createBaseDeps = (
     turnFinalization: {
       finalizeACPState: vi.fn(async () => {}),
       flushSessionUsage: vi.fn(async () => {}),
-      recordGitTurnDiffs: vi.fn(async () => []),
+
       detectAndAssociatePR: vi.fn(async () => null),
       syncWorkspaceGitState: vi.fn(async () => {}),
       onTurnOutcome: vi.fn(async () => {}),
@@ -4936,7 +4938,7 @@ describe('SessionExecutionService', () => {
           turnFinalization: {
             finalizeACPState: vi.fn(async () => {}),
             flushSessionUsage: vi.fn(async () => {}),
-            recordGitTurnDiffs: vi.fn(async () => [{ filePath: 'src/a.ts', add: 1, del: 0 }]),
+
             refreshCodeCollabSharedState,
             detectAndAssociatePR: vi.fn(async () => ({ baseBranch: 'release/v2' })),
             syncWorkspaceGitState: vi.fn(async () => {}),
@@ -4962,14 +4964,7 @@ describe('SessionExecutionService', () => {
         await vi.advanceTimersByTimeAsync(20_000);
         await first;
         releaseRefresh();
-        expect(deps.turnFinalization.recordGitTurnDiffs).toHaveBeenCalledWith(
-          'session-1',
-          activeSession,
-          expect.objectContaining({
-            baseCommitHash: 'abc123',
-            preferredBaseBranch: 'release/v2',
-          })
-        );
+
         expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
         expect(presence.size).toBe(0);
         history.push({ id: 'turn-user-2', role: 'user', status: 'pending', read: false });
@@ -6608,11 +6603,6 @@ describe('SessionExecutionService', () => {
       'session-session-local-restore',
       expect.objectContaining({ baseBranch: expect.anything() })
     );
-    expect(deps.turnFinalization.recordGitTurnDiffs).toHaveBeenCalledWith(
-      'session-local-restore',
-      restoredSession,
-      expect.objectContaining({ preferredBaseBranch: 'refs/remotes/origin/remote-base' })
-    );
   });
 
   it('resumes a non-worktree local project on its current dirty branch without checkout', async () => {
@@ -6737,11 +6727,6 @@ describe('SessionExecutionService', () => {
       expect.objectContaining({ baseBranch: expect.anything() })
     );
     expect(persistPendingChanges).not.toHaveBeenCalledWith('session-local-base-ref');
-    expect(deps.turnFinalization.recordGitTurnDiffs).toHaveBeenCalledWith(
-      'session-local-tracking-restore',
-      restoredSession,
-      expect.objectContaining({ preferredBaseBranch: 'foo' })
-    );
   });
 
   it('releases ACP replay suppression when a restore turn is interrupted before prompt', async () => {
@@ -10473,7 +10458,7 @@ describe('SessionExecutionService', () => {
           expect(result).toEqual({ success: true });
         }),
         flushSessionUsage: vi.fn(async () => {}),
-        recordGitTurnDiffs: vi.fn(async () => []),
+
         detectAndAssociatePR: vi.fn(async () => null),
         syncWorkspaceGitState: vi.fn(async () => {}),
         onTurnOutcome: vi.fn(async () => {}),
@@ -10512,7 +10497,7 @@ describe('SessionExecutionService', () => {
       expect.anything(),
       expect.any(AbortSignal)
     );
-    expect(deps.turnFinalization.recordGitTurnDiffs).not.toHaveBeenCalled();
+
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-finalizing-cancel', {
       lastHandledUserMsgId: 'turn-finalizing-user',
       processingUserMsgId: undefined,
@@ -15195,7 +15180,110 @@ describe('Operation Inbox execution boundary', () => {
     if (!released) await f.service.continueSession(next);
   }
 
-  it.each(['edit evidence', 'Git fallback'])(
+  it.each(['absent', 'saved', 'failed'] as const)(
+    'keeps turn cards tied to saved evidence while workspace diffs remain readable (%s)',
+    async (evidence) => {
+      const root = createGitLocalProject();
+      const file = path.join(root, 'config.ts');
+      fs.writeFileSync(file, 'value = 0\n');
+      runGit(root, ['add', 'config.ts']);
+      runGit(root, ['commit', '-m', 'tracked file before turn']);
+      const f = inboxExecutionFixture(async () => {
+        fs.writeFileSync(file, 'value = 1\n');
+        return { stopReason: 'end_turn' };
+      });
+      f.session.getWorkdir = () => root;
+      f.session.exec = async (_cmd, args) => runGit(root, args);
+      const post = new TurnPostProcessingService({
+        logger: f.deps.logger,
+        workspaceDocument: f.deps.workspaceDocument,
+        workspaceId: f.deps.workspaceId,
+        prAssociation: null,
+      });
+      f.deps.turnFinalization.syncWorkspaceGitState = post.syncWorkspaceGitState.bind(post);
+      const store = new CodeCollabV2DiffStore(f.deps.workspaceId, {
+        dbPath: path.join(root, '.git', 'turn-evidence.sqlite'),
+        now: () => 100,
+      });
+      const files = new CodeCollabV2Service({
+        readOnly: true,
+        diffStore: store,
+        resolveWorkspace: async () => ({
+          ok: true,
+          ownerSessionId: f.message.sessionId,
+          workspaceRoot: root,
+          allChangesBaseBranch: 'main',
+        }),
+      });
+      f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (sessionId, turnId) => {
+        if (evidence === 'absent') return false;
+        if (evidence === 'failed') throw new Error('Synthetic evidence persistence failure');
+        const fileDiff = await store.recordTurnDiffs({
+          workspaceRoot: root,
+          ownerSessionId: sessionId,
+          turnId,
+          capturedAtMs: 100,
+          recordedAtMs: 100,
+          events: [
+            { path: 'config.ts', oldText: 'value = 0\n', newText: fs.readFileSync(file, 'utf8') },
+          ],
+        });
+        const backend = await createSessionBackend(f.doc);
+        return (
+          (
+            await backend.applyHistoryAction({
+              kind: 'assistant-file-diff',
+              turnId,
+              change: { kind: 'set', value: fileDiff },
+            })
+          ).matched ?? false
+        );
+      };
+      const message = {
+        ...f.message,
+        project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' },
+      };
+      try {
+        await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(message.sessionId), {
+          project: message.project,
+        });
+        await f.accept();
+        await f.service.continueSession(message);
+        await f.service.drainInboxExecutions();
+        const history = await (await createSessionBackend(f.doc)).readHistory();
+        const turn = history.find((entry) => entry.id === 'assistant:human-input');
+        expect(turn).toBeDefined();
+        const historical = await files.openTurnDiff({
+          sessionId: message.sessionId,
+          turnId: 'assistant:human-input',
+          path: 'config.ts',
+        });
+        if (evidence === 'saved') {
+          expect(turn?.fileDiff).toEqual([{ filePath: 'config.ts', add: 1, del: 1 }]);
+          expect(historical).toMatchObject({
+            status: 'ok',
+            oldSnapshot: { kind: 'text', text: { text: 'value = 0\n' } },
+            newSnapshot: { kind: 'text', text: { text: 'value = 1\n' } },
+          });
+        } else {
+          expect(turn?.fileDiff).toEqual([]);
+          expect(historical).toMatchObject({ status: 'unavailable', reason: 'turn_unavailable' });
+        }
+        expect(
+          await files.openCurrentDiff({ sessionId: message.sessionId, path: 'config.ts' })
+        ).toMatchObject({ status: 'ok' });
+        expect(await f.doc.getMetaState()).toMatchObject({ workspaceDirty: true });
+        expect(f.service.getExecutionSnapshot(message.sessionId).hasActiveTurn).toBe(false);
+      } finally {
+        await f.close();
+        await files.dispose();
+        await store.close();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['edit evidence', 'missing edit evidence'])(
     'keeps turn-one results before release (%s)',
     async (kind) => {
       const root = createGitLocalProject(),
@@ -15216,10 +15304,9 @@ describe('Operation Inbox execution boundary', () => {
         logger: f.deps.logger,
         workspaceDocument: f.deps.workspaceDocument,
         workspaceId: f.deps.workspaceId,
-        preferredBaseBranch: 'main',
         prAssociation: null,
       });
-      f.deps.turnFinalization.recordGitTurnDiffs = post.recordGitTurnDiffs.bind(post);
+      f.deps.turnFinalization.syncWorkspaceGitState = post.syncWorkspaceGitState.bind(post);
       f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, turn) => {
         if (turn === 'assistant:human-input') {
           entered.resolve();
@@ -15252,11 +15339,7 @@ describe('Operation Inbox execution boundary', () => {
           expect(JSON.stringify(captured)).not.toContain('TURN_TWO');
         } else {
           const history = await (await createSessionBackend(f.doc)).readHistory();
-          expect(
-            history
-              .find((turn) => turn.id === 'assistant:human-input')
-              ?.fileDiff?.map((diff) => diff.filePath)
-          ).toEqual(['one.txt']);
+          expect(history.find((turn) => turn.id === 'assistant:human-input')?.fileDiff).toEqual([]);
         }
       } finally {
         finish.resolve();
@@ -15267,14 +15350,14 @@ describe('Operation Inbox execution boundary', () => {
   );
 
   it.each([false, true])(
-    'keeps newer dirty/unpushed flags after old stats (deadline=%s)',
+    'keeps newer dirty/unpushed flags after an older probe (deadline=%s)',
     async (expires) => {
       if (expires) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
       const started = createDeferred<void>(),
         finishOld = createDeferred<void>(),
         newerWritten = createDeferred<void>();
       let dirty = false,
-        firstMerge = true,
+        firstProbe = true,
         n = 0;
       const f = inboxExecutionFixture(async () => {
         if (++n === 2) dirty = true;
@@ -15290,7 +15373,6 @@ describe('Operation Inbox execution boundary', () => {
         logger: f.deps.logger,
         workspaceDocument: f.deps.workspaceDocument,
         workspaceId: f.deps.workspaceId,
-        preferredBaseBranch: 'main',
         prAssociation: null,
       });
       f.session.exec = async (_cmd, args) => {
@@ -15298,19 +15380,19 @@ describe('Operation Inbox execution boundary', () => {
         if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
         if (key === 'rev-parse HEAD' || key.startsWith('rev-parse --verify'))
           return 'a'.repeat(40) + '\n';
-        if (args[0] === 'merge-base') {
-          if (firstMerge) {
-            firstMerge = false;
+        if (key === 'status --porcelain') {
+          const observedDirty = dirty;
+          if (firstProbe) {
+            firstProbe = false;
             started.resolve();
             await finishOld.promise;
           }
-          return 'a'.repeat(40) + '\n';
+          return observedDirty ? ' M a.txt\n' : '';
         }
-        if (key === 'status --porcelain') return dirty ? ' M a.txt\n' : '';
         if (args[0] === 'rev-list') return dirty ? '1\n' : '0\n';
         return '';
       };
-      f.deps.turnFinalization.recordGitTurnDiffs = post.recordGitTurnDiffs.bind(post);
+      f.deps.turnFinalization.syncWorkspaceGitState = post.syncWorkspaceGitState.bind(post);
       const message = {
         ...f.message,
         project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' },

@@ -1,40 +1,26 @@
 import { resolveSessionPullRequests } from '@lody/shared';
-import path from 'node:path';
-import { realpath } from 'node:fs/promises';
 import { WorkspaceGitService } from './workspace-git-service';
 import {
   getSessionRoomId,
-  resolveSessionFilePath,
   resolveProjectGitHubRepo,
   type ProjectRef,
-  type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
 
-import {
-  getGitDiffStats,
-  hasUnpushedCommits,
-  isWorkspaceDirty,
-  type GitRunner,
-  type GitWorkingTreeDiffBaseline,
-} from '@/lib/git/git-diff-stats';
-import { countWorkingTreeTextFileLines } from '@/lib/git/working-tree-line-count';
+import { hasUnpushedCommits, isWorkspaceDirty, type GitRunner } from '@/lib/git/git-diff-stats';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { detectPullRequestForBranch, type DetectedPullRequest } from '@/lib/pr-detector';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import type { ISession } from '@/session/session-manager';
 import type { CloudPrAssociationPort } from '@lody/platform';
-import { createSessionBackend } from './session-backend';
 
 export type TurnPostProcessingServiceDeps = {
   logger: Logger;
   workspaceDocument: LoroDocumentManager;
   workspaceId: WorkspaceId;
-  /** Operator override (`LODY_BASE_BRANCH`); `undefined` lets Git choose the repository default. */
-  preferredBaseBranch: string | undefined;
   prAssociation: CloudPrAssociationPort | null;
 };
 
@@ -169,114 +155,6 @@ export class TurnPostProcessingService {
       ...(workspaceDirty !== undefined ? { workspaceDirty } : {}),
       ...(workspaceUnpushed !== undefined ? { workspaceUnpushed } : {}),
     };
-  }
-
-  async recordGitTurnDiffs(
-    sessionId: SessionId,
-    session: ISession,
-    options: {
-      turnId: string;
-      baseCommitHash?: string;
-      turnStartWorkingTreeDiff?: GitWorkingTreeDiffBaseline | null;
-      preferredBaseBranch?: string;
-      skipHistoryFileDiff?: boolean;
-      signal?: AbortSignal;
-    }
-  ): Promise<SessionHistoryInput['fileDiff']> {
-    const signal = options.signal;
-    signal?.throwIfAborted();
-    const ownerDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const ownerContext = await this.resolveWorkspaceSessionContext(sessionId, ownerDoc);
-    if (ownerContext.ownerMeta?.projectRun) {
-      await new WorkspaceGitService(this.deps).syncSession(sessionId, session, signal);
-      const fileDiff: NonNullable<SessionHistoryInput['fileDiff']> = [];
-      const root = await realpath(session.getWorkdir());
-      for (const member of Object.values(ownerContext.ownerMeta.projectRun.members)) {
-        const cwd = await realpath(path.join(root, member.path)).catch(() => null);
-        if (
-          !cwd ||
-          resolveSessionFilePath([{ id: 'main', absolutePath: root }], cwd)?.relativePath !==
-            member.path
-        )
-          continue;
-        const stats = await getGitDiffStats(this.gitRunner(session, signal, cwd), {
-          preferredBaseBranch: member.base,
-          countWorkingTreeFileLines: (file) => countWorkingTreeTextFileLines(cwd, file),
-        }).catch(() => null);
-        if (stats)
-          fileDiff.push(
-            ...stats.commitFileDiff.map((file) => ({
-              ...file,
-              filePath: `${member.path}/${file.filePath}`,
-            }))
-          );
-      }
-      if (options.skipHistoryFileDiff !== true) {
-        const backend = await createSessionBackend(ownerDoc, await ownerDoc.getMetaState());
-        signal?.throwIfAborted();
-        await backend.applyHistoryAction({
-          kind: 'assistant-file-diff',
-          change: { kind: 'set', value: fileDiff },
-          turnId: options.turnId,
-        });
-      }
-      return fileDiff;
-    }
-    const workdir = session.getWorkdir();
-    const runGit = this.gitRunner(session, signal);
-
-    let fileDiff: SessionHistoryInput['fileDiff'] = [];
-
-    // Runs alongside the diff-stats pipeline rather than after it; the two share
-    // nothing but `runGit`, and this one swallows its own failures.
-    const workspaceGitState = this.probeWorkspaceGitState(sessionId, runGit);
-
-    try {
-      const stats = await getGitDiffStats(runGit, {
-        preferredBaseBranch: options.preferredBaseBranch?.trim() || this.deps.preferredBaseBranch,
-        baseCommitHash: options.baseCommitHash,
-        turnStartWorkingTreeDiff: options.turnStartWorkingTreeDiff,
-        countWorkingTreeFileLines: (filePath) => countWorkingTreeTextFileLines(workdir, filePath),
-      });
-      if (stats) {
-        fileDiff = stats.commitFileDiff;
-      }
-    } catch (error) {
-      this.deps.logger.debug(`[${sessionId}] Failed to compute git diff stats:`, error);
-    }
-
-    try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
-      // Only conclusive probes contribute a key. `undefined` means git could not
-      // be queried (transient spawn failure); overwriting the durable value with
-      // a stale `false` would hide Create PR / Commit & Push on a session that
-      // really does have unpublished work, until a later turn recomputes it.
-      const metaPatch = await workspaceGitState;
-      signal?.throwIfAborted();
-      if (Object.keys(metaPatch).length > 0)
-        await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to persist workspace git state: ${formatErrorMessage(error)}`
-      );
-    }
-
-    if (options.skipHistoryFileDiff !== true) {
-      try {
-        const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-        signal?.throwIfAborted();
-        await backend.applyHistoryAction({
-          kind: 'assistant-file-diff',
-          change: { kind: 'set', value: fileDiff },
-          turnId: options.turnId,
-        });
-      } catch (error) {
-        this.deps.logger.debug(`[${sessionId}] Failed to persist history fileDiff:`, error);
-      }
-    }
-    return fileDiff;
   }
 
   async detectAndAssociatePR(ctx: {
