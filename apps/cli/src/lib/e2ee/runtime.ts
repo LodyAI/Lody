@@ -50,6 +50,7 @@ import {
   makeStreamsUpdateBinding,
   makeRealtimeContentBinding,
 } from '@lody/e2ee-core/adapters/loro-streams';
+import { LEDGER_LOOKAHEAD_EPOCHS, type ContentKeyPendingState } from './content-ledger-catch-up';
 
 /** Safe local failures. Raw errors and decrypted material never cross this boundary. */
 export class CliE2eeRuntimeError extends Data.TaggedError('CliE2eeRuntimeError')<{
@@ -648,6 +649,35 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
     executionGeneration: () => executionGeneration,
     executionAuthoritySignal: () => executionAuthority.signal,
     readSharingEpochKey: (epoch: number) => history.read(epoch),
+    /** Pending-key / bounded ledger-lag verdict for a failed content open, matching desktop/portable. */
+    keyPending: (
+      epoch: number,
+      unknownAuthority = false
+    ): Effect.Effect<ContentKeyPendingState, unknown> =>
+      serial.withPermit(
+        Effect.gen(function* () {
+          yield* guard();
+          const state = (yield* verified.current()).inspectState();
+          const own = state.devices.get(hex(options.device.publicKey.toBytes()));
+          if (
+            !Number.isSafeInteger(epoch) ||
+            epoch < 0 ||
+            !own ||
+            !state.members.has(hex(own.membershipId.toBytes()))
+          )
+            return false;
+          const current = state.epoch.number;
+          if (
+            epoch <= current + LEDGER_LOOKAHEAD_EPOCHS &&
+            (epoch > current || (epoch === current && unknownAuthority))
+          )
+            return 'pending';
+          if (unknownAuthority || epoch > current) return false;
+          const checked = yield* Effect.result(installed.check(epoch));
+          if (Result.isSuccess(checked)) return 'installed';
+          return checked.failure.reason === 'missing-key' ? 'pending' : false;
+        })
+      ),
     binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number | 'current') =>
       makeStreamsUpdateBinding({
         genesis,
@@ -715,7 +745,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             )
               yield* (yield* ensureRepair(keyScope, mailbox)).flush();
             yield* receiver.resume();
-            for (let cursor: string | null = null; ;) {
+            for (let cursor: string | null = null; ; ) {
               const page: { readonly processed: number; readonly next: string | null } =
                 yield* receiver.fetchAndInstall(cursor, 100).pipe(
                   Effect.catchTag('MailboxInstallError', (error) =>

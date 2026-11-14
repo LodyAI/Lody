@@ -23,6 +23,7 @@ import { makeEncryptedRpcReceiver } from './realtime-rpc';
 import { runMachineIrohListener } from './iroh-listener';
 import { loadIrohNative, proxyUrlFromEnv } from '@lody/iroh-native';
 import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
+import { makeContentLedgerCatchUp } from './content-ledger-catch-up';
 import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
 import { getLogger } from '../../utils/logger';
 import { encryptedMemberRequester, lazyExecutionJournal } from './agent-execution';
@@ -997,6 +998,20 @@ async function openWorkspaceOwned(
     observe: (event) => getLogger('e2ee').warn('[e2ee] rpc request epoch rejected', event),
   });
   const dispatchNative = withLedgerCatchUp(rpc, catchUpLedger);
+  const contentCatchUp = makeContentLedgerCatchUp({
+    isClosed: () => closed,
+    keyPending: (epoch, unknownAuthority) =>
+      run(opened.runtime.keyPending(epoch, unknownAuthority)),
+    catchUp: async () => {
+      // Join an older round without extending it; if that round left the current
+      // key missing, run at most one follow-up inside this spaced reception.
+      const joined = Boolean(refresh);
+      await (refresh ?? refreshInBackground(false));
+      if (closed) return;
+      if (joined && !(await run(opened.runtime.status())).hasCurrentKey)
+        await refreshInBackground(false);
+    },
+  });
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   let irohFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
@@ -1046,7 +1061,11 @@ async function openWorkspaceOwned(
               header: Uint8Array.from(input.header),
               additionalData: Uint8Array.from(input.additionalData),
             };
-            const result = await run((await getForEpoch()).openAuthenticated(originalFrame));
+            const result = await contentCatchUp.openWithCatchUp(
+              descriptor.model,
+              originalFrame,
+              async () => run((await getForEpoch()).openAuthenticated(originalFrame))
+            );
             if (
               descriptor.model === 'loro' &&
               descriptor.resource.startsWith('doc:') &&
@@ -1208,6 +1227,7 @@ async function openWorkspaceOwned(
     clearLedgerRetry();
     clearRefreshRetry();
     clearAuthorityCheck();
+    contentCatchUp.close();
     removalRecorded = (async (): Promise<boolean> => {
       if (!memberRemoved && !deviceRevoked) return false;
       const removedStatus = memberRemoved ? await run(opened.runtime.status()) : undefined;
@@ -1534,6 +1554,7 @@ async function openWorkspaceOwned(
     clearLedgerRetry();
     clearRefreshRetry();
     clearAuthorityCheck();
+    contentCatchUp.close();
     return (closeReceipt ??= (async () => {
       await stopRpc();
       await epochTransition.close();
