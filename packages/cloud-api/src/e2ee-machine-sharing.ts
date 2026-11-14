@@ -43,7 +43,10 @@ export type E2eeMachineSharingReadResult =
  * Removed generations are terminal. Re-admission creates a different generation/resource and fresh owner
  * intent starts its revision 1/null parent; never resume an old generation at n+1 or migrate its pins/grants. */
 export type E2eeMachineSharingRequests = {
-  readHead: E2eeDeviceAccess & E2eeMachineSharingScope;
+  /** `includeVersion` asks a backend that supports it to inline the active head's original,
+   * saving the separate `readVersion` round trip. Older backends may reject the field;
+   * callers then retry without it. */
+  readHead: E2eeDeviceAccess & E2eeMachineSharingScope & { includeVersion?: true };
   readVersion: E2eeDeviceAccess & E2eeMachineSharingScope & { revision: number };
   readRequest: E2eeDeviceAccess & E2eeMachineSharingScope & { requestId: string };
   commit: E2eeDeviceAccess &
@@ -59,7 +62,9 @@ export type E2eeMachineSharingRequests = {
 };
 /** A commit acknowledgement is storage evidence only. Clients independently verify every returned head/frame. */
 export type E2eeMachineSharingReplies = {
-  readHead: E2eeMachineSharingHeadState | null;
+  /** An active head may inline its original (`includeVersion`). Clients verify it exactly as a
+   * `readVersion` reply and never persist it as part of the head. */
+  readHead: (E2eeMachineSharingHeadState & { version?: E2eeMachineSharingVersion }) | null;
   /** Missing or purged ciphertext may return null; readHead still preserves the removed high water. */
   readVersion: E2eeMachineSharingReadResult;
   readRequest: E2eeMachineSharingReadResult;

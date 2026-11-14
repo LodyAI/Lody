@@ -1,5 +1,5 @@
 import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview'
-import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas'
+import { makeInlineVersionReadHead, sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas'
 import type { SharingRemote } from '@lody/e2ee-machine-sharing'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
@@ -302,6 +302,8 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     owner.abort()
   })
   yield* Effect.addFinalizer(() => close)
+  // Per client: a backend without inlined sharing originals costs one refused request.
+  const inlineVersionReadHead = makeInlineVersionReadHead()
   const fetch = input.fetch ?? globalThis.fetch
 
   function request<T>(
@@ -979,7 +981,10 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     machineSharing: (signal?: AbortSignal): SharingRemote => ({
       readHead: (sharingInput) =>
         request(
-          (client) => client.action(api.e2eeMachineSharing.readHead, sharingInput),
+          (client) =>
+            inlineVersionReadHead(sharingInput, (args) =>
+              client.action(api.e2eeMachineSharing.readHead, args)
+            ),
           sharingReplySchemas.readHead,
           signal,
           true

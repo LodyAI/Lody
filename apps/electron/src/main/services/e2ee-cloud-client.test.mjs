@@ -196,6 +196,44 @@ for (const code of ['e2ee_staging_invalid', 'e2ee_staging_corrupt']) {
   })
 }
 
+void test('sharing heads ask for an inlined original and stop asking a backend that refuses the field', async () => {
+  const scope = {
+    workspaceId: 'workspace',
+    genesisHash: '11'.repeat(32),
+    machineId: 'machine',
+    ownerMembershipId: '22'.repeat(16),
+    generation: '33'.repeat(32)
+  }
+  const head = { ...scope, status: 'active', revision: 1, digest: '44'.repeat(32) }
+  for (const deployed of [true, false]) {
+    const sent = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const args = JSON.parse(init.body).args[0]
+            sent.push(args.includeVersion ?? null)
+            if (args.includeVersion && !deployed)
+              return new Response(
+                'ArgumentValidationError: Object contains extra field `includeVersion` that is not in the validator.',
+                { status: 400 }
+              )
+            return response(head)
+          })
+          const sharing = client.machineSharing()
+          for (let i = 0; i < 2; i++)
+            assert.deepEqual(
+              yield* sharing.readHead({ ...scope, credential: access.credential }),
+              head
+            )
+        })
+      )
+    )
+    // An older backend costs one refused request per client, then plain reads.
+    assert.deepEqual(sent, deployed ? [true, true] : [true, null, null])
+  }
+})
+
 void test('staging cancellation rejects a late response and isolates other workspaces', async () => {
   const dto = encodeEpochStagedGroup(stagedGroup())
   const entered = Promise.withResolvers(),

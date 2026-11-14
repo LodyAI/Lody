@@ -362,11 +362,14 @@ it.each(['chromium', 'webkit'] as const)(
       await savesSignedSchedule(page);
       expect((await raw(page, 'rotateRemote')).ok).toBe(true);
       // Another device's frame at an epoch this device's verified ledger does not hold
-      // yet keeps its original failure; once the ledger holds it, the read is retryable.
+      // yet (Streams ahead of the ledger feed) is retryable lag within the bounded
+      // lookahead; a forged far-future epoch keeps its original failure. Once the
+      // ledger holds the epoch, the read stays retryable until the key arrives.
       expect(await good(page, 'sealRemoteRotated')).toEqual({ epoch: 1 });
-      const unknownEpoch = await call(page, 'openRemote');
-      expect(unknownEpoch.ok).toBe(false);
-      expect(unknownEpoch.reason).not.toBe('key-pending');
+      expect((await call(page, 'openRemote')).reason).toBe('key-pending');
+      const farFuture = await call(page, 'openRemoteFarFuture');
+      expect(farFuture.ok).toBe(false);
+      expect(farFuture.reason).not.toBe('key-pending');
       expect(await good(page, 'refresh')).toMatchObject({
         epoch: 1,
         hasCurrentKey: false,

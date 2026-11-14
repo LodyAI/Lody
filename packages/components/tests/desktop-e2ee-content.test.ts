@@ -4,6 +4,7 @@ import { LoroDoc } from 'loro-crdt';
 import { PersonalHostError } from '@lody/e2ee-client';
 import {
   createDesktopE2eeContent,
+  KEY_PENDING_REFRESH_INTERVAL_MS,
   KEY_PENDING_WAIT_MS,
 } from '../src/providers/desktop-e2ee-content';
 
@@ -585,6 +586,44 @@ describe('reading an epoch whose key this device has not received yet', () => {
       await expect(again.open()).rejects.toThrow('e2ee_key-pending');
       expect(retried).toBe(2);
       await again.access.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('spaces receptions so frames the ledger cannot verify yet cost at most one refresh per interval', async () => {
+    vi.useFakeTimers();
+    try {
+      // Streams ahead of the ledger feed: every open stays pending until the ledger
+      // catches up, as a peer streaming unverifiable frames would keep it.
+      let caughtUp = false;
+      const refresh = vi.fn(async () => ({
+        epoch: 3,
+        rotationRequired: false,
+        hasCurrentKey: true,
+      }));
+      const { access, open } = setup({
+        openContent: async () => {
+          if (!caughtUp) throw pendingKey();
+          return Uint8Array.of(9);
+        },
+        refresh,
+      } as unknown as Partial<E2eeWorkspaceRuntime>);
+      await expect(open()).rejects.toThrow('e2ee_key-pending');
+      expect(refresh).toHaveBeenCalledTimes(1);
+      // Reads arriving inside the interval share one reception that waits for it.
+      const later = [open(), open(), open()];
+      await vi.advanceTimersByTimeAsync(KEY_PENDING_REFRESH_INTERVAL_MS - 1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      caughtUp = true;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await Promise.all(later)).toEqual([
+        Uint8Array.of(9),
+        Uint8Array.of(9),
+        Uint8Array.of(9),
+      ]);
+      expect(refresh).toHaveBeenCalledTimes(2);
+      await access.close();
     } finally {
       vi.useRealTimers();
     }

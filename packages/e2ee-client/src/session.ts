@@ -90,6 +90,10 @@ import { decodeMemberKeyPackage, signMemberOffer, verifyAutomaticMemberAdmission
 import { irohTargetDevice, makePersonalIrohRoute } from './iroh-route';
 import type { PersonalIrohEndpoint } from './platform';
 
+/** How far ahead of the verified epoch an unverified content frame may point and still
+ * count as ledger lag (Streams faster than the ledger feed) rather than forgery. Desktop
+ * applies the same bound. */
+const LEDGER_LOOKAHEAD_EPOCHS = 4;
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
   prepared: PreparedPersonalIdentity,
@@ -422,11 +426,14 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           return 'e2ee_key_recipient_ineligible';
         })
       );
-    /** True only when this device's own verified ledger already holds `epoch`, this
-     * device is an active member device there, and its installed key store genuinely
-     * lacks that epoch: a rotation it has not received yet. Unreadable keys, unknown
-     * epochs and access loss are never pending. */
-    const keyPending = (epoch: number) =>
+    /** True only for an active member device of this device's own verified ledger, when
+     * either that ledger already holds `epoch` and the installed key store genuinely lacks
+     * it (a rotation not received yet), or the frame is ledger lag: `epoch` is at most
+     * {@link LEDGER_LOOKAHEAD_EPOCHS} ahead of the verified epoch, or at it while its author
+     * is unknown (`unknownAuthority`), because Streams delivered it before the ledger feed.
+     * Unreadable keys, older unknown authors, epochs further ahead and access loss are
+     * never pending. */
+    const keyPending = (epoch: number, unknownAuthority = false) =>
       withKeys((ctx) =>
         Effect.gen(function* () {
           const state = (yield* admitted()).inspectState();
@@ -434,11 +441,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           if (
             !Number.isSafeInteger(epoch) ||
             epoch < 0 ||
-            epoch > state.epoch.number ||
             !own ||
             !state.members.has(toHex(own.membershipId.toBytes()))
           )
             return false;
+          const current = state.epoch.number;
+          if (
+            epoch <= current + LEDGER_LOOKAHEAD_EPOCHS &&
+            (epoch > current || (epoch === current && unknownAuthority))
+          )
+            return true;
+          if (unknownAuthority || epoch > current) return false;
           const checked = yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch));
           return Result.isFailure(checked) && checked.failure.reason === 'missing-key';
         })
@@ -1118,7 +1131,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       },
       keyRound: (mode?: PersonalKeyRoundMode) => run(keyRound(mode)),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
-      keyPending: (epoch: number) => run(keyPending(epoch)),
+      keyPending: (epoch: number, unknownAuthority?: boolean) =>
+        run(keyPending(epoch, unknownAuthority)),
       status: () => run(status()),
       document: (
         resource: string,

@@ -1,6 +1,6 @@
 import { hostname, type as osType, release as osRelease } from 'node:os';
 import { getLodyCLIVersion } from '@/utils';
-import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas';
+import { makeInlineVersionReadHead, sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas';
 import { StreamsClient } from '@loro-dev/streams-client';
 import {
   CloudE2eeMemberRemoved,
@@ -340,15 +340,19 @@ export function createCloudE2eePort(
       return classifyE2eeRejection(cause);
     }
   };
+  // Per port: a backend without inlined sharing originals costs one refused request.
+  const inlineVersionReadHead = makeInlineVersionReadHead();
   return {
     ...(irohRelays ? { irohRelays } : {}),
     machineSharing: {
       readHead: async (input) =>
         sharingReplySchemas.readHead.parse(
-          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readHead, {
-            ...input,
-            ...(options.token === undefined ? {} : { cliToken: options.token }),
-          })
+          await inlineVersionReadHead(input, (args) =>
+            client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readHead, {
+              ...args,
+              ...(options.token === undefined ? {} : { cliToken: options.token }),
+            })
+          )
         ),
       readVersion: async (input) =>
         sharingReplySchemas.readVersion.parse(
