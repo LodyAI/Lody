@@ -1098,7 +1098,19 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
   }
   private func saveDraft() {
+    draftSave?.cancel()
+    draftSave = nil
     onDraftChange?(input.draftEnvelope)
+  }
+  /// Typing persists shortly after it pauses, so a draft survives the app being killed
+  /// while the page is open, not only leaving the page or the app.
+  private var draftSave: DispatchWorkItem?
+  private func scheduleDraftSave() {
+    guard onDraftChange != nil else { return }
+    draftSave?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.saveDraft() }
+    draftSave = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
   }
   @objc private func appDidEnterBackground() {
     saveDraft()
@@ -2010,7 +2022,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     guard activeMentionItems != nil else { return }
     updateComposer()
   }
-  func textViewDidChange(_ textView: UITextView) { updateComposer() }
+  func textViewDidChange(_ textView: UITextView) {
+    updateComposer()
+    scheduleDraftSave()
+  }
   func textViewDidBeginEditing(_ textView: UITextView) { updateComposer() }
   func textViewDidEndEditing(_ textView: UITextView) {
     setFullScreen(false)

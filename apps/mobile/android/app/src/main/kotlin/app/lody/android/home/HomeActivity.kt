@@ -175,11 +175,11 @@ class HomeActivity : ComponentActivity() {
                     ) { destination ->
                         val id = destination.takeUnless { it == "create" || it == "home" }
                         if (id != null && workspace != null) {
-                            ChatScreen(repository, RuntimeScope(user.id, workspace.id), id, chatContext(catalog, id, selectedTitle, user), onBack = { selectedId = null }, onSelectTab = { selectedId = it; selectedTitle = "" }, creation = submissions[id]?.takeIf { it.scope == activeScope })
+                            ChatScreen(repository, RuntimeScope(user.id, workspace.id), id, chatContext(catalog, id, selectedTitle, user), onBack = { selectedId = null }, onSelectTab = { selectedId = it; selectedTitle = "" }, creation = submissions[id]?.takeIf { it.scope == activeScope }, persistDraft = workspace.contentMode == WorkspaceContentMode.PLAINTEXT)
                         } else if (destination == "create" && workspace != null) {
                             // Like web, new session is its own full screen over Home; back returns.
                             BackHandler { creating = false }
-                            CreateSessionScreen(catalog.snapshot, creator, RuntimeScope(user.id, workspace.id), onSubmit = { request -> app.submissions.submit(RuntimeScope(user.id, workspace.id), request); selectedId = request.sessionId; selectedTitle = request.text.take(200); creating = false }, onBack = { creating = false })
+                            CreateSessionScreen(catalog.snapshot, creator, RuntimeScope(user.id, workspace.id), onSubmit = { request -> app.submissions.submit(RuntimeScope(user.id, workspace.id), request); selectedId = request.sessionId; selectedTitle = request.text.take(200); creating = false }, onBack = { creating = false }, persistDraft = workspace.contentMode == WorkspaceContentMode.PLAINTEXT)
                         } else screens.SaveableStateProvider("list/${user.id}/${workspace?.id}") {
                             ChatListScreen(
                                 state = uiState(account, catalog).copy(members = members + listOfNotNull(user?.let { it.id to (members[it.id] ?: WorkspaceMember(it.id, it.name, it.image)) }).toMap()),

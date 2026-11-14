@@ -55,6 +55,9 @@ class CreateSessionHostController: UIViewController, LodyPageOwnedHeader {
   private var optionsRefresh: Task<Void, Never>?
   private var capabilityTask: Task<Void, Never>?
   private var capabilityConfig: String?
+  /// Set once the Outbox holds the typed turn, so a composer that keeps its text visible while
+  /// the page dismisses does not write it back as the next new-chat draft.
+  private var draftSubmitted = false
   var onCreated: (@MainActor ([String: Any]) async throws -> Void)?
 
   init(params: CreateSessionHostParams, service: CreateSessionService = .live) {
@@ -139,7 +142,10 @@ class CreateSessionHostController: UIViewController, LodyPageOwnedHeader {
       default: break
       }
     }
-    controller.restoreDraft = { [weak self] token in self?.input.restoreDraft(token: token) }
+    controller.restoreDraft = { [weak self] token in
+      self?.draftSubmitted = false
+      self?.input.restoreDraft(token: token)
+    }
     controller.showMessage = { LodyToastOverlay.shared.show(message: $0, kind: $1) }
     controller.onCancel = { [weak self] in self?.close() }
     let prefsKey = CreateSessionService.prefsKey(userId: params.userId, workspaceId: params.workspaceId)
@@ -201,6 +207,35 @@ class CreateSessionHostController: UIViewController, LodyPageOwnedHeader {
     controller.form.open(projectId: params.projectId, context: params.context)
     if let text = params.initialText, !text.isEmpty { input.composer.setInitialDraft(text) }
     if let attachments = params.initialAttachmentsJSON, !attachments.isEmpty { input.composer.setInitialAttachments(attachments) }
+    persistDraft()
+  }
+
+  static func draftKey(userId: String, workspaceId: String) -> String { "create-draft:v1:" + CreateJSON.encode([userId, workspaceId]) }
+
+  /// The typed new-chat text is kept per account and workspace, as a conversation's draft is.
+  /// Shared content opens its own page and leaves the stored draft alone; encrypted workspaces
+  /// never write plaintext.
+  private func persistDraft() {
+    guard service.persistShare, service.workspaceMode(params.workspaceId) == .plaintext,
+      params.initialText?.isEmpty != false, params.initialAttachmentsJSON?.isEmpty != false else { return }
+    let key = Self.draftKey(userId: params.userId, workspaceId: params.workspaceId)
+    let store = LocalStore.shared
+    input.composer.onDraftChange = { [weak self] text in
+      guard self?.draftSubmitted != true else { return }
+      LocalStore.queue.async { try? store.write(key, text) }
+    }
+    LocalStore.queue.async { [weak self] in
+      guard let text = try? store.read(key), !text.isEmpty else { return }
+      DispatchQueue.main.async { self?.input.composer.setStoredDraft(text) }
+    }
+  }
+
+  private func clearStoredDraft() {
+    guard input.composer.onDraftChange != nil, !draftSubmitted else { return }
+    draftSubmitted = true
+    let key = Self.draftKey(userId: params.userId, workspaceId: params.workspaceId)
+    let store = LocalStore.shared
+    LocalStore.queue.async { try? store.write(key, "") }
   }
 
   private func selectionChanged(_ form: CreateSessionForm) {
@@ -265,6 +300,7 @@ class CreateSessionHostController: UIViewController, LodyPageOwnedHeader {
     let task: Task<Void, Error>
     do { task = try service.submit(user: userId, workspace: workspaceId, json: built.recordJSON) }
     catch { controller.submissionFailed(); return }
+    clearStoredDraft()
     Task { [service] in
       guard (try? await task.value) == nil, let failed else { return }
       _ = try? await service.submit(user: userId, workspace: workspaceId, json: String(decoding: (try? JSONEncoder().encode(failed)) ?? Data(), as: UTF8.self)).value
