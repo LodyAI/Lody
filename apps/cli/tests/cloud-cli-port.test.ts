@@ -1176,114 +1176,125 @@ describe('CLI E2EE Round 2 optimizations', () => {
 
   it('consumes inline bootstrap from completeMachinePairing inside registerMachineAccess and falls back when unsupported', async () => {
     vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => globalThis.fetch);
-    const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
-    type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
-    const bootstrapSnapshot = {
-      status: 'authorized' as const,
-      userId: 'acc1',
-      workspaces: [
-        {
-          id: 'ws1',
-          name: 'Workspace',
-          slug: null,
-          role: 'member',
-          contentMode: 'e2ee' as const,
-          genesisHash: genesis,
-        },
-      ],
-    };
-    const mutationFlags: Array<boolean | null> = [];
-    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
-      const body = JSON.parse(String(init.body)) as {
-        path: string;
-        args: [Record<string, unknown>];
+    vi.stubEnv('LODY_PLATFORM', 'cloud');
+    try {
+      const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
+      type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+      const bootstrapSnapshot = {
+        status: 'authorized' as const,
+        userId: 'acc1',
+        workspaces: [
+          {
+            id: 'ws1',
+            name: 'Workspace',
+            slug: null,
+            role: 'member',
+            contentMode: 'e2ee' as const,
+            genesisHash: genesis,
+          },
+        ],
       };
-      const args = body.args[0] ?? {};
-      expect(body.path).toBe('e2eeMachinePairing:complete');
-      mutationFlags.push((args.includeBootstrap as boolean | undefined) ?? null);
-      return Response.json({
-        status: 'success',
-        value: {
-          pairingSessionId: 'ab'.repeat(16),
-          status: 'ready',
-          expiresAt: Date.now() + 60_000,
-          material: null,
-          location: null,
-          bootstrap: bootstrapSnapshot,
-        },
-      });
-    });
-
-    const queryCalls: unknown[] = [];
-    const fakeClient: Client = {
-      onUpdate: () => Object.assign(() => {}, { getCallCount: () => 0 }) as never,
-      query: async (ref, args) => {
-        queryCalls.push({ ref, args });
-        return bootstrapSnapshot;
-      },
-      close: async () => {},
-    };
-
-    const e2ee = createCloudE2eePort({
-      authBaseUrl: 'https://pairing-round2.convex.cloud',
-      logger,
-    });
-    await e2ee.completeMachinePairing!({
-      workspaceId: 'ws1',
-      credential: 'cred-1',
-      pairingSessionId: 'ab'.repeat(16),
-    });
-    const machinePort = createCloudE2eeMachinePort({
-      accountId: 'acc1',
-      workspaceId: 'ws1',
-      genesisHash: genesis,
-      machineId: 'machine-1',
-      credential: 'cred-1',
-      authBaseUrl: 'https://pairing-round2.convex.cloud',
-      serverBaseUrl: 'https://server-round2.example',
-      logger,
-      client: fakeClient,
-    });
-    // First registerMachineAccess uses the inline bootstrap snapshot -> 0 queries.
-    await machinePort.access.registerMachineAccess({ workspaceId: 'ws1', machineId: 'machine-1' });
-    expect(queryCalls).toHaveLength(0);
-    // Single-use cache: a subsequent registerMachineAccess queries bootstrap normally.
-    await machinePort.access.registerMachineAccess({ workspaceId: 'ws1', machineId: 'machine-1' });
-    expect(queryCalls).toHaveLength(1);
-    expect(mutationFlags).toEqual([true]);
-
-    // Fallback test on older backend rejecting includeBootstrap.
-    const legacyFlags: Array<boolean | null> = [];
-    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
-      const body = JSON.parse(String(init.body)) as {
-        path: string;
-        args: [Record<string, unknown>];
-      };
-      const args = body.args[0] ?? {};
-      legacyFlags.push((args.includeBootstrap as boolean | undefined) ?? null);
-      if (args.includeBootstrap) {
+      const mutationFlags: Array<boolean | null> = [];
+      vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          path: string;
+          args: [Record<string, unknown>];
+        };
+        const args = body.args[0] ?? {};
+        expect(body.path).toBe('e2eeMachinePairing:complete');
+        mutationFlags.push((args.includeBootstrap as boolean | undefined) ?? null);
         return Response.json({
-          status: 'error',
-          errorMessage:
-            'ArgumentValidationError: Object contains extra field `includeBootstrap` that is not in the validator.',
+          status: 'success',
+          value: {
+            pairingSessionId: 'ab'.repeat(16),
+            status: 'ready',
+            expiresAt: Date.now() + 60_000,
+            material: null,
+            location: null,
+            bootstrap: bootstrapSnapshot,
+          },
         });
-      }
-      return Response.json({ status: 'success', value: null });
-    });
-    const legacyE2ee = createCloudE2eePort({
-      authBaseUrl: 'https://pairing-legacy.convex.cloud',
-      logger,
-    });
-    await legacyE2ee.completeMachinePairing!({
-      workspaceId: 'ws1',
-      credential: 'cred-2',
-      pairingSessionId: 'cd'.repeat(16),
-    });
-    await legacyE2ee.completeMachinePairing!({
-      workspaceId: 'ws1',
-      credential: 'cred-2',
-      pairingSessionId: 'cd'.repeat(16),
-    });
-    expect(legacyFlags).toEqual([true, null, null]);
+      });
+
+      const queryCalls: unknown[] = [];
+      const fakeClient: Client = {
+        onUpdate: () => Object.assign(() => {}, { getCallCount: () => 0 }) as never,
+        query: async (ref, args) => {
+          queryCalls.push({ ref, args });
+          return bootstrapSnapshot;
+        },
+        close: async () => {},
+      };
+
+      const e2ee = createCloudE2eePort({
+        authBaseUrl: 'https://pairing-round2.convex.cloud',
+        logger,
+      });
+      await e2ee.completeMachinePairing!({
+        workspaceId: 'ws1',
+        credential: 'cred-1',
+        pairingSessionId: 'ab'.repeat(16),
+      });
+      const machinePort = createCloudE2eeMachinePort({
+        accountId: 'acc1',
+        workspaceId: 'ws1',
+        genesisHash: genesis,
+        machineId: 'machine-1',
+        credential: 'cred-1',
+        authBaseUrl: 'https://pairing-round2.convex.cloud',
+        serverBaseUrl: 'https://server-round2.example',
+        logger,
+        client: fakeClient,
+      });
+      // First registerMachineAccess uses the inline bootstrap snapshot -> 0 queries.
+      await machinePort.access.registerMachineAccess({
+        workspaceId: 'ws1',
+        machineId: 'machine-1',
+      });
+      expect(queryCalls).toHaveLength(0);
+      // Single-use cache: a subsequent registerMachineAccess queries bootstrap normally.
+      await machinePort.access.registerMachineAccess({
+        workspaceId: 'ws1',
+        machineId: 'machine-1',
+      });
+      expect(queryCalls).toHaveLength(1);
+      expect(mutationFlags).toEqual([true]);
+
+      // Fallback test on older backend rejecting includeBootstrap.
+      const legacyFlags: Array<boolean | null> = [];
+      vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          path: string;
+          args: [Record<string, unknown>];
+        };
+        const args = body.args[0] ?? {};
+        legacyFlags.push((args.includeBootstrap as boolean | undefined) ?? null);
+        if (args.includeBootstrap) {
+          return Response.json({
+            status: 'error',
+            errorMessage:
+              'ArgumentValidationError: Object contains extra field `includeBootstrap` that is not in the validator.',
+          });
+        }
+        return Response.json({ status: 'success', value: null });
+      });
+      const legacyE2ee = createCloudE2eePort({
+        authBaseUrl: 'https://pairing-legacy.convex.cloud',
+        logger,
+      });
+      await legacyE2ee.completeMachinePairing!({
+        workspaceId: 'ws1',
+        credential: 'cred-2',
+        pairingSessionId: 'cd'.repeat(16),
+      });
+      await legacyE2ee.completeMachinePairing!({
+        workspaceId: 'ws1',
+        credential: 'cred-2',
+        pairingSessionId: 'cd'.repeat(16),
+      });
+      expect(legacyFlags).toEqual([true, null, null]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
