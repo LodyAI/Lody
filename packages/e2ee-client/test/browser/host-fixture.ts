@@ -2489,12 +2489,17 @@ export async function runtimeInvoke(action: string) {
         value = { epoch: Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch };
         break;
       }
-      case 'openRemote': {
+      case 'openRemote':
+      case 'openRemoteFarFuture': {
         const saved = JSON.parse(localStorage.getItem('runtime-remote-sealed')!);
+        const sealed = fromHex(saved.sealed);
+        // A forged epoch beyond the bounded ledger lookahead.
+        if (action === 'openRemoteFarFuture')
+          new DataView(sealed.buffer, sealed.byteOffset).setUint32(1, 999_999, false);
         const bytes = await runtime.openContent(offer.workspaceId, {
           room: { kind: 'doc', docId: '1' },
           context: runtimeContext,
-          sealed: fromHex(saved.sealed),
+          sealed,
           header: fromHex(saved.header),
           additionalData: Uint8Array.of(9),
         });

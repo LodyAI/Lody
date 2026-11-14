@@ -577,7 +577,71 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
         }),
         plaintext
       )
+      // skew-convex-slow: Streams delivers the newly admitted device's frame before the
+      // owner's ledger feed has its admission. That is retryable lag, not a terminal
+      // ledger failure, and it opens once the ledger catches up.
+      const ahead = yield* additional.host.seal(workspaceId, {
+        epoch: 0,
+        room,
+        context,
+        plaintext,
+        additionalData
+      })
+      const lagging = (sealed) =>
+        Effect.flip(
+          owner.host.openContent(workspaceId, { room, context, ...ahead, sealed, additionalData })
+        )
+      assert.equal((yield* lagging(ahead.sealed)).code, 'key-pending')
+      // A frame naming an epoch within the bounded lookahead is lag too; one beyond it
+      // (a forged far-future epoch) keeps its terminal failure and never asks for a refresh.
+      const withEpoch = (epoch) => {
+        const sealed = new Uint8Array(ahead.sealed)
+        new DataView(sealed.buffer).setUint32(1, epoch, false)
+        return sealed
+      }
+      assert.equal((yield* lagging(withEpoch(4))).code, 'key-pending')
+      assert.notEqual((yield* lagging(withEpoch(5))).code, 'key-pending')
+      assert.notEqual((yield* lagging(withEpoch(999_999))).code, 'key-pending')
       yield* owner.host.ingestLedgerRecords(workspaceId, expandedPage)
+      assert.deepEqual(
+        yield* owner.host.openContent(workspaceId, { room, context, ...ahead, additionalData }),
+        plaintext
+      )
+      // The member pairs a machine. Opening the workspace warms the owner's sharing read
+      // for that other member's machine once per entry; its own machines need none.
+      const memberSigner = yield* member.custody.openDevice(genesis)
+      const machine = yield* member.custody.prepareDevice()
+      const machineRecord = yield* signLedgerRecord(
+        Result.getOrThrow(
+          prepareLedgerCommand(
+            view,
+            memberSigner.publicKey,
+            yield* prepareDeviceAdmission({
+              genesis,
+              membershipId: memberState.membershipId,
+              encryptionPublicKey: machine.enc,
+              kind: 'machine',
+              machineId: 'member-machine',
+              signer: machine
+            })
+          )
+        ),
+        memberSigner
+      )
+      yield* owner.host.ingestLedgerRecords(
+        workspaceId,
+        page([...expanded, machineRecord], offer.genesisHash, 0)
+      )
+      const warmed = []
+      const sharingRemote = {
+        readHead: (input) => Effect.sync(() => (warmed.push(input.machineId), null)),
+        readVersion: () => Effect.die('no head'),
+        readRequest: () => Effect.die('no head'),
+        commit: () => Effect.die('read only')
+      }
+      yield* owner.host.prewarmMachineSharing(workspaceId, sharingRemote)
+      yield* owner.host.prewarmMachineSharing(workspaceId, sharingRemote)
+      assert.deepEqual(warmed, ['member-machine'])
     })
   )
   await execute(

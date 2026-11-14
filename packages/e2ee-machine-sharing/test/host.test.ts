@@ -332,6 +332,112 @@ describe('native machine-sharing control and execution', () => {
         expect(reads).toBe(2);
       })
     ));
+  it('shares one authenticated read among concurrent cold dispatch checks', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+        );
+        // A restarted machine host: no RAM grant, only the persisted pin.
+        const cold = yield* f.make('machine', f.f.phone.signer);
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let heads = 0;
+        let versions = 0;
+        const remote: SharingRemote = {
+          ...f.remote,
+          readHead: (input) =>
+            Effect.gen(function* () {
+              heads++;
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(release);
+              return yield* f.remote.readHead(input);
+            }),
+          readVersion: (input) => {
+            versions++;
+            return f.remote.readVersion(input);
+          },
+        };
+        const authorize = () =>
+          f.run(cold.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', remote));
+        const first = yield* Effect.forkChild(authorize());
+        yield* Deferred.await(entered);
+        const second = yield* Effect.forkChild(authorize());
+        const third = yield* Effect.forkChild(authorize());
+        yield* Deferred.succeed(release, undefined);
+        for (const fiber of [first, second, third])
+          expect(yield* Fiber.join(fiber)).toMatchObject({ allowed: true, reason: 'team' });
+        expect(heads).toBe(1);
+        expect(versions).toBeLessThanOrEqual(1);
+        // Warm: the shared read filled the cache for every later dispatch.
+        expect(yield* authorize()).toMatchObject({ allowed: true, reason: 'team' });
+        expect(heads).toBe(1);
+      })
+    ));
+  it('uses an inlined original from readHead instead of a second readVersion round trip', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+        );
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(2),
+            { kind: 'project', localProjectId: 'project-b', sharedWithTeam: true },
+            f.remote
+          )
+        );
+        let versions = 0;
+        const inlining = (version: (head: E2eeMachineSharingHeadState) => unknown) =>
+          ({
+            ...f.remote,
+            readHead: (input) =>
+              Effect.map(f.remote.readHead(input), (head) =>
+                head?.status === 'active' ? { ...head, version: version(head) } : head
+              ),
+            readVersion: (input) => {
+              versions++;
+              return f.remote.readVersion(input);
+            },
+          }) as SharingRemote;
+        // This machine host last pinned revision 1: revision 2 needs its original.
+        yield* f.run(f.machine.read('fixture-machine', f.remote));
+        const fresh = yield* f.make('machine-inline', f.f.phone.signer);
+        const decision = yield* f.run(
+          fresh.authorize(
+            'fixture-machine',
+            hex(f.bob.publicKey),
+            'project-b',
+            inlining((head) => f.versions.get(head.revision))
+          )
+        );
+        expect(decision).toMatchObject({ allowed: true, reason: 'team' });
+        expect(versions).toBe(0);
+        // An inlined original for a different head is ignored, never trusted.
+        const other = yield* f.make('machine-mismatch', f.f.phone.signer);
+        const mismatched = yield* f.run(
+          other.authorize(
+            'fixture-machine',
+            hex(f.bob.publicKey),
+            'project-b',
+            inlining(() => f.versions.get(1))
+          )
+        );
+        expect(mismatched).toMatchObject({ allowed: true, reason: 'team' });
+        expect(versions).toBe(1);
+        // The persisted pin stays the plain head: a restarted host reads it back and
+        // verifies the same revision from its retained original.
+        const reopened = yield* f.make('machine-inline', f.f.phone.signer);
+        expect(
+          yield* f.run(
+            reopened.authorize('fixture-machine', hex(f.bob.publicKey), 'project-b', f.remote)
+          )
+        ).toMatchObject({ allowed: true, reason: 'team' });
+        expect(versions).toBe(1);
+      })
+    ));
   it('keeps the accepted denial through a failed refresh without caching a grant', () =>
     test((f) =>
       Effect.gen(function* () {

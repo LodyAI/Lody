@@ -2528,9 +2528,37 @@ export class E2eeIpc extends ProductWindowIpcService {
     expectedAccountId?: string
   ) {
     const id = sender()
-    return observeClientLossOperation('open', workspaceId, id, () =>
+    const opened = await observeClientLossOperation('open', workspaceId, id, () =>
       this.openFor(id, workspaceId, observed, expectedAccountId)
     )
+    void this.prewarmMachineSharing(workspaceId, id)
+    return opened
+  }
+  /** Warm other members' machine-sharing grants after a reader opens, so its first
+   * dispatch skips the cold policy read. Background only: never awaited by the open,
+   * never reported, and it runs outside the account lock. */
+  private async prewarmMachineSharing(workspaceId: string, id: number) {
+    try {
+      const cloud = await desktopE2eeCloudClient()
+      const access = await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
+            ? Effect.succeed({
+                accountId: owner.accountId,
+                work: owner.host.prewarmMachineSharing(
+                  workspaceId,
+                  cloud.client.machineSharing(),
+                  (request) => cloud.client.history(request)
+                )
+              })
+            : Effect.succeed(undefined),
+        workspaceId,
+        false
+      )
+      if (access) await runDesktopE2eeOperation(access.accountId, access.work)
+    } catch {
+      /* Best effort: a cold dispatch still authorizes on demand. */
+    }
   }
   private async openFor(
     id: number,

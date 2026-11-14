@@ -135,6 +135,11 @@ denial/I/O cannot gate mailbox receipt. Show file protection; socket timeout sta
 
 Only rotate resumes candidates. Keep errors transport-free.
 
+A content frame the verified ledger has not caught up with (an epoch at most four
+ahead, or an unknown author at the current epoch) opens as retryable `key-pending`; the
+portable session applies the same bound, and frames further ahead keep their original
+failure. The shared content adapter's refresh catches up, at most once per interval.
+
 The iroh client (`e2ee-iroh.mts`) lives with its workspace entry and follows [these rules](../../../../../packages/iroh-native/AGENTS.md).
 
 Machine sharing uses `packages/e2ee-machine-sharing`.

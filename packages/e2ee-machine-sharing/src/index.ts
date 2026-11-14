@@ -45,6 +45,7 @@ export type {
 const fail = (code: MachineSharingError['code']) => new MachineSharingError({ code });
 export { sharingChangeSchema, sharingReplySchemas } from './schemas';
 import { id, requestId, sharingChangeSchema, sharingReplySchemas } from './schemas';
+export { makeInlineVersionReadHead } from './schemas';
 export type SharingRemote = {
   [K in keyof E2eeMachineSharingTransport]: (
     input: E2eeMachineSharingRequests[K]
@@ -123,6 +124,12 @@ const authorizeOwner = Effect.fnUntraced(function* (
 
 /** Workspace-scoped owner. Its store retains ciphertext/pins, never keys, credentials or
  * freshness. Atomic store steps fence concurrent results; no lock spans crypto/network work. */
+const withoutInlineVersion = ({
+  version: _,
+  ...head
+}: Extract<E2eeMachineSharingHeadState, { status: 'active' }> & {
+  version?: E2eeMachineSharingVersion;
+}): E2eeMachineSharingHeadState => head;
 export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(function* (options: {
   /** Opened in this host's Scope: `openSqliteMachineSharingStore` on desktop,
    * `openIndexedDbMachineSharingStore` in a browser or webview. */
@@ -308,7 +315,16 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       })
     );
   });
-  const latest = Effect.fnUntraced(function* (
+  const cachedLatest = Effect.fnUntraced(function* (binding: MachineSharingBinding) {
+    const cached = cache.get(key(binding));
+    if (!cached || !sharingFresh(cached.stamp, yield* sharingStamp)) return undefined;
+    return {
+      policy: cached.policy,
+      state: cached.policy.inspect(),
+      head: { ...binding, ...cached.policy.head, status: 'active' as const },
+    };
+  });
+  const readLatest = Effect.fnUntraced(function* (
     binding: MachineSharingBinding,
     remote: SharingRemote,
     machineGeneration: VerifiedMachineSharingGeneration,
@@ -316,19 +332,20 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
   ) {
     const token = invalidationToken;
     const resource = key(binding);
-    const cached = cache.get(resource);
-    if (!force && cached && sharingFresh(cached.stamp, yield* sharingStamp))
-      return {
-        policy: cached.policy,
-        state: cached.policy.inspect(),
-        head: { ...binding, ...cached.policy.head, status: 'active' as const },
-      };
+    if (!force) {
+      const fresh = yield* cachedLatest(binding);
+      if (fresh) return fresh;
+    }
     cache.delete(resource);
     const started = yield* sharingStamp;
     yield* options.refreshLedger();
     yield* remote.refreshLedger?.() ?? Effect.void;
     const access = { ...binding, credential: yield* credential() };
-    const head = yield* parse(sharingReplySchemas.readHead, yield* remote.readHead(access));
+    const reply = yield* parse(sharingReplySchemas.readHead, yield* remote.readHead(access));
+    // An inlined original is only a cheaper readVersion reply: it is verified below
+    // exactly like one, and never becomes part of the head that pins persist.
+    const inline = reply?.status === 'active' ? reply.version : undefined;
+    const head = reply?.status === 'active' ? withoutInlineVersion(reply) : reply;
     yield* guard();
     const saved = yield* pin(binding);
     if (head && !matches(binding, head)) return yield* fail('sharing_invalid');
@@ -349,10 +366,12 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     const raw =
       saved?.original?.revision === head.revision
         ? saved.original
-        : yield* parse(
-            sharingReplySchemas.readVersion,
-            yield* remote.readVersion({ ...access, revision: head.revision })
-          );
+        : inline && inline.revision === head.revision && inline.digest === head.digest
+          ? inline
+          : yield* parse(
+              sharingReplySchemas.readVersion,
+              yield* remote.readVersion({ ...access, revision: head.revision })
+            );
     if (!raw || 'status' in raw || raw.revision !== head.revision)
       return yield* fail('sharing_unavailable');
     const read = yield* readFrame(
@@ -382,7 +401,49 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       });
     return { policy, state: fullState, head };
   });
-  type Latest = Effect.Success<ReturnType<typeof latest>>;
+  type Latest = Effect.Success<ReturnType<typeof readLatest>>;
+  // Concurrent cold reads of one binding share a single authenticated read. A read
+  // started before an invalidation is never joined after it; forced reads never join.
+  const coldReads = new Map<
+    string,
+    { token: object; done: boolean; fiber?: Fiber.Fiber<Latest, unknown> }
+  >();
+  yield* Effect.addFinalizer(() => Effect.sync(() => coldReads.clear()));
+  const latest = Effect.fnUntraced(function* (
+    binding: MachineSharingBinding,
+    remote: SharingRemote,
+    machineGeneration: VerifiedMachineSharingGeneration,
+    force = false
+  ) {
+    if (force) return yield* readLatest(binding, remote, machineGeneration, true);
+    const fresh = yield* cachedLatest(binding);
+    if (fresh) return fresh;
+    yield* guard();
+    const resource = key(binding);
+    const joined = coldReads.get(resource);
+    if (joined?.fiber && !joined.done && joined.token === invalidationToken)
+      return yield* Fiber.join(joined.fiber);
+    const entry: { token: object; done: boolean; fiber?: Fiber.Fiber<Latest, unknown> } = {
+      token: invalidationToken,
+      done: false,
+    };
+    const fiber = yield* Effect.forkIn(
+      readLatest(binding, remote, machineGeneration, false).pipe(
+        Effect.onExit(() =>
+          Effect.sync(() => {
+            entry.done = true;
+            if (coldReads.get(resource) === entry) coldReads.delete(resource);
+          })
+        )
+      ),
+      scope
+    );
+    if (!entry.done) {
+      entry.fiber = fiber;
+      coldReads.set(resource, entry);
+    }
+    return yield* Fiber.join(fiber);
+  });
   type DenialRefresh = {
     stamp: Stamp;
     pending: boolean;

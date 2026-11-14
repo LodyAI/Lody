@@ -173,10 +173,10 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     return entry;
   });
   /**
-   * Retryable only when the frame's unverified epoch is one this device's own verified
-   * ledger already holds and the session confirms its installed key is genuinely
-   * missing: a rotation not received yet, as on the desktop. Malformed frames,
-   * unreadable keys, unknown epochs and access loss keep the original failure.
+   * Retryable only when the session classifies the frame's unverified epoch as pending,
+   * as on the desktop: a rotation not received yet, or bounded ledger lag behind a frame
+   * Streams delivered first. Malformed frames, unreadable keys, epochs beyond the
+   * lookahead and access loss keep the original failure.
    */
   const keyPending = Effect.fnUntraced(function* (
     session: Session,
@@ -196,7 +196,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           : 'flock-update'
     );
     if (Result.isFailure(metadata)) return yield* original;
-    return (yield* session.keyPending(metadata.success.epoch))
+    return (yield* session.keyPending(metadata.success.epoch, original.code === 'unauthorized'))
       ? yield* fail('key-pending')
       : yield* original;
   });
@@ -958,7 +958,8 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
                   return yield* document.open(input).pipe(
                     Effect.catchIf(
                       (error): error is ContentError =>
-                        error instanceof ContentError && error.code === 'missing-read-key',
+                        error instanceof ContentError &&
+                        (error.code === 'missing-read-key' || error.code === 'unauthorized'),
                       (original) => keyPending(session, descriptor.model, input, original)
                     )
                   );

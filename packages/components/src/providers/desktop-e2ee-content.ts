@@ -60,6 +60,14 @@ function untilAborted<A>(
  * holds (a rotation not received yet). One reception, then one retry of the open.
  */
 export const KEY_PENDING_WAIT_MS = 30_000;
+/**
+ * Minimum spacing between pending-key receptions of one workspace content. A frame the
+ * ledger has not caught up with (Streams ahead of the ledger feed) also reads as pending,
+ * so a peer streaming unverifiable frames could otherwise drive a refresh per frame; with
+ * this spacing it costs at most one ledger/key refresh per interval. Waiting reads join the
+ * next reception, still inside {@link KEY_PENDING_WAIT_MS}.
+ */
+export const KEY_PENDING_REFRESH_INTERVAL_MS = 3_000;
 const keyPending = (error: unknown) =>
   // A portable host reports its typed failure; the desktop its exact IPC result.
   personalHostFailureCode(error) === 'key-pending' ||
@@ -118,6 +126,7 @@ export function createE2eeContent(input: {
   const effects = clientLossEffects(input.workspaceId);
   // One shared reception for every open waiting on a not-yet-received key.
   let reception: Promise<void> | undefined;
+  let lastReception: number | undefined;
   const receiveKey = () =>
     (reception ??= (async () => {
       const deadline = new AbortController();
@@ -125,6 +134,28 @@ export function createE2eeContent(input: {
         () => deadline.abort(new Error('e2ee_key_pending_timeout')),
         KEY_PENDING_WAIT_MS
       );
+      let spacing: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Clamped: a wall clock moved backwards never stretches the spacing.
+        const wait =
+          lastReception === undefined
+            ? 0
+            : Math.min(
+                KEY_PENDING_REFRESH_INTERVAL_MS,
+                lastReception + KEY_PENDING_REFRESH_INTERVAL_MS - Date.now()
+              );
+        if (wait > 0)
+          await untilAborted(
+            new Promise<void>((resolve) => {
+              spacing = setTimeout(resolve, wait);
+            }),
+            [stopped.signal, deadline.signal]
+          );
+      } catch (error) {
+        clearTimeout(spacing);
+        clearTimeout(timer);
+        throw error;
+      }
       try {
         // Both hosts receive and install only this device's key; omitted options would
         // skip the key round on a portable host.
@@ -137,6 +168,7 @@ export function createE2eeContent(input: {
         // A failed round can still have installed the key (e.g. from a staged
         // group); the single retry below decides.
       } finally {
+        lastReception = Date.now();
         clearTimeout(timer);
       }
     })().finally(() => {

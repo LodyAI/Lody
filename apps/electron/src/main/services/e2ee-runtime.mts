@@ -145,6 +145,16 @@ const historyFailure = (error: unknown) =>
   )
     ? fail('local-history-recovery-required')
     : error
+/** How far ahead of this device's verified epoch an unverified frame may point and still
+ * be treated as ledger lag (Streams faster than the ledger feed) rather than forgery. */
+const LEDGER_LOOKAHEAD_EPOCHS = 4
+/** At most this many other members' machines are warmed when a workspace opens. */
+const SHARING_PREWARM_LIMIT = 16
+/** A frame the ledger has not caught up with yet: a bounded future epoch, or an author the
+ * current epoch does not know (`unauthorized` at an epoch the ledger already holds). */
+const ledgerLag = (code: string, epoch: number, current: number) =>
+  epoch <= current + LEDGER_LOOKAHEAD_EPOCHS &&
+  (epoch > current || (epoch === current && code === 'unauthorized'))
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 type KeyRoundMode = 'full' | 'receive' | 'distribute'
 const unhex = (value: string) => {
@@ -337,6 +347,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         refreshSharingLedger: (
           readHistory: DesktopE2eeManagementRemote['history']
         ) => Effect.Effect<void, unknown>
+        sharedMachineTargets: () => Effect.Effect<string[], unknown>
         sharing: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>>
         rpc: ReturnType<typeof makeE2eeRpcNative>
         /** This device's execution intent signature over one already-computed subject. */
@@ -1304,16 +1315,21 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* provider.open(input).pipe(
             Effect.catchIf(
               (error): error is ContentError =>
-                error instanceof ContentError && error.code === 'missing-read-key',
+                error instanceof ContentError &&
+                (error.code === 'missing-read-key' || error.code === 'unauthorized'),
               (error) => keyPending(input, error)
             )
           )
         })
         /**
-         * Retryable only when this device's own verified ledger proves the frame's
-         * epoch exists, this device is a current member device, and the installed
-         * key store genuinely lacks that epoch: a rotation it has not received yet.
-         * Unreadable keys, unknown epochs and access loss keep the original failure.
+         * Retryable when this device is a current member device and either its own
+         * verified ledger proves the frame's epoch exists while the installed key store
+         * genuinely lacks it (a rotation not received yet), or the frame is within
+         * {@link LEDGER_LOOKAHEAD_EPOCHS} ahead of, or at, the verified epoch while its
+         * epoch or signer is not in the local ledger yet: Streams delivered it before the
+         * slower ledger feed. The renderer's single bounded refresh then catches up and
+         * retries once. Malformed frames, older unknown authors, epochs further ahead,
+         * unreadable keys and access loss keep the original failure.
          */
         const keyPending = Effect.fnUntraced(function* (
           input: E2eeContentOpen,
@@ -1334,13 +1350,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           if (Result.isFailure(metadata)) return yield* original
           const state = (yield* verified.current()).inspectState()
           const own = state.devices.get(hex(device.publicKey.toBytes()))
-          if (
-            metadata.success.epoch > state.epoch.number ||
-            !own ||
-            !state.members.has(hex(own.membershipId.toBytes()))
-          )
-            return yield* original
-          const checked = yield* Effect.result(keys.check(metadata.success.epoch))
+          if (!own || !state.members.has(hex(own.membershipId.toBytes()))) return yield* original
+          const epoch = metadata.success.epoch
+          if (ledgerLag(original.code, epoch, state.epoch.number)) return yield* fail('key-pending')
+          if (original.code === 'unauthorized' || epoch > state.epoch.number) return yield* original
+          const checked = yield* Effect.result(keys.check(epoch))
           return yield* Result.isFailure(checked) && checked.failure.reason === 'missing-key'
             ? fail('key-pending')
             : original
@@ -1809,6 +1823,23 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           iroh,
           sharing,
           refreshSharingLedger: refreshManagementHistory,
+          /** Machines of other active members in this device's verified ledger: the
+           * targets whose sharing policy a dispatch from here must authorize. */
+          sharedMachineTargets: () =>
+            Effect.map(verified.current(), (view) => {
+              const state = view.inspectState()
+              const own = state.devices.get(hex(device.publicKey.toBytes()))
+              if (!own || !state.members.has(hex(own.membershipId.toBytes()))) return []
+              const self = hex(own.membershipId.toBytes())
+              return [...state.devices.values()].flatMap((entry) =>
+                entry.kind === 'machine' &&
+                entry.machineId &&
+                hex(entry.membershipId.toBytes()) !== self &&
+                state.members.has(hex(entry.membershipId.toBytes()))
+                  ? [entry.machineId]
+                  : []
+              )
+            }),
           // Same selection as KeyDistributor: an admitted device of an active member.
           keyDeliveryTarget: (device: string) =>
             Effect.map(verified.current(), (view) => {
@@ -1936,6 +1967,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         })
       )
     }
+    // Entries whose shared-machine grants were already warmed once.
+    const prewarmedSharing = new WeakSet<object>()
     const withSharingHistory = (
       entry: {
         refreshSharingLedger: (
@@ -2306,6 +2339,35 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               : undefined
           )
         ).pipe(boundary),
+      /**
+       * Best-effort, once per opened entry: authorize this device against the sharing
+       * policy of other members' machines so an interactive dispatch finds a fresh grant.
+       * Only an already open entry is used; failures are ignored and decide nothing.
+       */
+      prewarmMachineSharing: (
+        workspaceId: string,
+        remote: SharingRemote,
+        readHistory?: DesktopE2eeManagementRemote['history']
+      ) =>
+        Effect.flatMap(
+          run(Effect.sync(() => entries.get(workspaceId))),
+          (entry): Effect.Effect<void> => {
+            if (!entry || entry.isClosing() || prewarmedSharing.has(entry)) return Effect.void
+            prewarmedSharing.add(entry)
+            return Effect.gen(function* () {
+              const machines = (yield* entry.sharedMachineTargets()).slice(0, SHARING_PREWARM_LIMIT)
+              if (!machines.length) return
+              const requester = (yield* entry.status()).signingPublicKey ?? ''
+              const shared = withSharingHistory(entry, workspaceId, remote, readHistory)
+              yield* Effect.forEach(
+                machines,
+                (machineId) =>
+                  Effect.ignore(entry.sharing.authorize(machineId, requester, undefined, shared)),
+                { concurrency: 2, discard: true }
+              )
+            }).pipe(Effect.ignore)
+          }
+        ).pipe(Effect.ignore),
       prepareFeatureRpc: (
         workspaceId: string,
         input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput

@@ -10,6 +10,6 @@
     "apps/cli/src/session/AGENTS.md": 1320,
     "packages/components/src/hooks/AGENTS.md": 1280,
     "packages/e2ee-client/AGENTS.md": 1400,
-    "apps/electron/src/main/services/AGENTS.md": 1240
+    "apps/electron/src/main/services/AGENTS.md": 1290
   }
 }
