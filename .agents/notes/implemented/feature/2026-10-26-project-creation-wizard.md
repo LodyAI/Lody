@@ -66,7 +66,10 @@ picker to offer creation beside Settings and the sidebar menu.
   only by projects is listed again, and a GitHub repository needs nothing. Editing
   keeps the name step even with one member, since the project already exists.
 - Project names are unique (`name_taken`), compared trimmed and case-insensitively
-  against every other project; the suggested name skips taken ones (`web 2`).
+  against every other project offered on the same machine
+  (`collectTakenProjectGroupNames`). A project with folders on one machine is not
+  offered on any other, so another machine may hold one of the same name; a project
+  that runs anywhere meets every other. The suggested name skips taken ones (`web 2`).
 - The GitHub tab lists only repositories the workspace's GitHub integration lists
   (`ProjectMemberSourceOption.onGithub`). A repository known only from a local
   folder's remote is offered as that folder; ticking it as a clone would need
