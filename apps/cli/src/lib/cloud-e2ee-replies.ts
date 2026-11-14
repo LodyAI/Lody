@@ -22,7 +22,7 @@ export const e2eeHistoryPageSchema: z.ZodType<E2eeWorkspaceHistoryPage> = z.obje
   nextCursor: z.string().min(1).nullable(),
 });
 
-const mailboxStatusSchema = slot.extend({
+export const mailboxStatusSchema = slot.extend({
   revision: nonnegative,
   status: z.enum([
     'NeedsEnvelope',
@@ -46,6 +46,8 @@ export const e2eeMailboxReplySchemas: {
       .string()
       .regex(/^[0-9a-f]{64}:[0-9a-f]{64}$/)
       .nullable(),
+    slot: mailboxStatusSchema.optional(),
   }),
   status: mailboxStatusSchema,
+  batchStatus: z.array(mailboxStatusSchema),
 };

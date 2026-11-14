@@ -266,7 +266,12 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           // Concurrent exact retries may both finish signing before either has retained.
           // The first durable original wins; later callers adopt it, never publish their alternate frame.
           if (adoptExisting)
-            return { result: { ...previous, request: { ...previous.request, credential: '' } } };
+            return {
+              result: {
+                value: { ...previous, request: { ...previous.request, credential: '' } },
+                adopted: true,
+              },
+            };
           if (
             previous.intent !== value.intent ||
             JSON.stringify(previous.request) !== JSON.stringify(original) ||
@@ -274,7 +279,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           )
             throw fail('sharing_conflict');
         }
-        return { write: JSON.stringify(next), result: value };
+        return { write: JSON.stringify(next), result: { value, adopted: false } };
       });
     });
   const readFrame = Effect.fnUntraced(function* (
@@ -338,10 +343,15 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     }
     cache.delete(resource);
     const started = yield* sharingStamp;
-    yield* options.refreshLedger();
-    yield* remote.refreshLedger?.() ?? Effect.void;
     const access = { ...binding, credential: yield* credential() };
-    const reply = yield* parse(sharingReplySchemas.readHead, yield* remote.readHead(access));
+    const [, rawHead] = yield* Effect.all(
+      [
+        Effect.andThen(options.refreshLedger(), () => remote.refreshLedger?.() ?? Effect.void),
+        remote.readHead(access),
+      ],
+      { concurrency: 2 }
+    );
+    const reply = yield* parse(sharingReplySchemas.readHead, rawHead);
     // An inlined original is only a cheaper readVersion reply: it is verified below
     // exactly like one, and never becomes part of the head that pins persist.
     const inline = reply?.status === 'active' ? reply.version : undefined;
@@ -763,6 +773,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       Effect.gen(function* (): Effect.fn.Return<E2eeMachineSharingWriteResult, unknown> {
         const intent = JSON.stringify(normalized);
         let retained = yield* pending(binding, rid);
+        let wasRetained = Boolean(retained);
         if (
           retained &&
           (!matches(binding, retained.request) ||
@@ -827,7 +838,9 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
               frameHex: hex(frame),
             },
           };
-          retained = yield* retain(binding, retained, true);
+          const retainedResult = yield* retain(binding, retained, true);
+          retained = retainedResult.value;
+          wasRetained = retainedResult.adopted;
         }
         const original = {
           ...retained,
@@ -836,18 +849,28 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         if (original.state !== 'pending') return { status: original.state, requestId: rid };
         // A local withdrawal fences cached grants even if publication becomes uncertain.
         cache.delete(key(binding));
-        const reconcile = yield* Effect.result(
-          remote
-            .readRequest({ ...binding, credential: accessCredential, requestId: rid })
-            .pipe(Effect.flatMap((v) => parse(sharingReplySchemas.readRequest, v)))
-        );
-        if (Result.isFailure(reconcile)) return { status: 'pending', requestId: rid };
         let result: E2eeMachineSharingReplies['commit'];
-        if (reconcile.success) {
-          result =
-            'status' in reconcile.success
-              ? { status: 'removed', head: reconcile.success }
-              : { status: 'committed', version: reconcile.success };
+        if (wasRetained) {
+          const reconcile = yield* Effect.result(
+            remote
+              .readRequest({ ...binding, credential: accessCredential, requestId: rid })
+              .pipe(Effect.flatMap((v) => parse(sharingReplySchemas.readRequest, v)))
+          );
+          if (Result.isFailure(reconcile)) return { status: 'pending', requestId: rid };
+          if (reconcile.success) {
+            result =
+              'status' in reconcile.success
+                ? { status: 'removed', head: reconcile.success }
+                : { status: 'committed', version: reconcile.success };
+          } else {
+            const sent = yield* Effect.result(
+              remote
+                .commit(original.request)
+                .pipe(Effect.flatMap((v) => parse(sharingReplySchemas.commit, v)))
+            );
+            if (Result.isFailure(sent)) return { status: 'pending', requestId: rid };
+            result = sent.success;
+          }
         } else {
           const sent = yield* Effect.result(
             remote

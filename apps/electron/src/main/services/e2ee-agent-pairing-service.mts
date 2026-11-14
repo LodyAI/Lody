@@ -1,4 +1,5 @@
-import { Cause, Data, Effect, Exit } from 'effect'
+import { Cause, Data, Effect, Exit, Result } from 'effect'
+import { decodeRecord } from '@lody/e2ee-core/protocol'
 import {
   LOCAL_E2EE_LEDGER_HANDOFF_MAX_HEX_CHARS,
   LOCAL_E2EE_LEDGER_HANDOFF_MAX_RECORDS,
@@ -248,7 +249,12 @@ export function makeDesktopAgentPairing(ports: DesktopAgentPairingPorts) {
         Effect.orElseSucceed(() => false)
       )
       yield* promised(() =>
-        ports.refresh(workspaceId, { keyMode: holdsKey ? 'distribute' : 'full' })
+        ports.refresh(workspaceId, {
+          keyMode: holdsKey ? 'distribute' : 'full',
+          ...(current.material?.signingPublicKey
+            ? { recipients: [current.material.signingPublicKey] }
+            : {})
+        })
       )
       yield* same(pending.accountId, workspaceId, id, (owner) =>
         owner.host.confirmRemoteMachine(workspaceId, pairingSessionId)
@@ -348,7 +354,18 @@ export function makeDesktopAgentPairing(ports: DesktopAgentPairingPorts) {
         }))
       )
       let appendFailure: unknown
+      let admittedRecipients: string[] | undefined
       if (pending.request) {
+        const decoded = decodeRecord(new Uint8Array(Buffer.from(pending.request.recordHex, 'hex')))
+        if (
+          Result.isSuccess(decoded) &&
+          decoded.success.body.type === 'ordinary' &&
+          decoded.success.body.operation.type === 'admitDevice'
+        ) {
+          admittedRecipients = [
+            Buffer.from(decoded.success.body.operation.signingPublicKey.toBytes()).toString('hex')
+          ]
+        }
         const cloud = yield* cloudOf(pending.accountId)
         // Even an uncertain append is reconciled through verified readback below.
         // Its journal retains the same request and signature for the next attempt.
@@ -368,7 +385,10 @@ export function makeDesktopAgentPairing(ports: DesktopAgentPairingPorts) {
             Effect.orElseSucceed(() => false)
           )
           yield* promised(() =>
-            ports.refresh(workspaceId, { keyMode: holdsKey ? 'distribute' : 'full' })
+            ports.refresh(workspaceId, {
+              keyMode: holdsKey ? 'distribute' : 'full',
+              ...(admittedRecipients ? { recipients: admittedRecipients } : {})
+            })
           )
         })
       )

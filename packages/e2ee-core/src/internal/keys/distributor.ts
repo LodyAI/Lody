@@ -148,7 +148,8 @@ export class KeyDistributor extends Context.Service<
     /** Discover one page of current eligible devices (1–100, default 100) and durably schedule missing deliveries. */
     reconcileCurrentEpoch(
       limit?: number,
-      cursor?: string | null
+      cursor?: string | null,
+      recipients?: readonly string[]
     ): Effect.Effect<
       {
         readonly scheduled: number;
@@ -307,8 +308,18 @@ export class KeyDistributor extends Context.Service<
         if (inserted && !sameTask(stored, task)) return yield* fail('corrupt');
         return inserted;
       });
-      const reconcile = Effect.fnUntraced(function* (limit: number, cursor: string | null) {
-        if (!boundedPage(limit, cursor)) return yield* fail('invalid-input');
+      const reconcile = Effect.fnUntraced(function* (
+        limit: number,
+        cursor: string | null,
+        recipients?: readonly string[]
+      ) {
+        if (
+          !boundedPage(limit, cursor) ||
+          (recipients !== undefined &&
+            (!Array.isArray(recipients) ||
+              recipients.some((id) => typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id))))
+        )
+          return yield* fail('invalid-input');
         const view = yield* current(),
           epoch = view.inspectState().epoch.number;
         if (!senderEligible(view, self))
@@ -324,11 +335,13 @@ export class KeyDistributor extends Context.Service<
             yield* receiver.recordLocalInstallation(original);
         }
         const state = view.inspectState(),
+          allowed = recipients ? new Set(recipients) : null,
           targets = [...state.devices.entries()]
             .filter(
               ([id, device]) =>
                 id !== self &&
                 state.members.has(keyId(device.membershipId.toBytes())) &&
+                (!allowed || allowed.has(id)) &&
                 id > (cursor ?? '')
             )
             .map(([id]) => id)
@@ -416,8 +429,8 @@ export class KeyDistributor extends Context.Service<
 
       return KeyDistributor.of({
         reconcileCurrentEpoch: Effect.fn('@lody/e2ee-core/KeyDistributor.reconcileCurrentEpoch')(
-          function* (limit = 100, cursor = null) {
-            return yield* gate.run(reconcile(limit, cursor));
+          function* (limit = 100, cursor = null, recipients?: readonly string[]) {
+            return yield* gate.run(reconcile(limit, cursor, recipients));
           }
         ),
         resumePendingDeliveries: Effect.fn(

@@ -1025,3 +1025,265 @@ it('refuses remote history authorization without an injected endpoint before any
     mintCliSessionHistoryReadProof({ ...target, logger: {} as Logger, edit: true })
   ).rejects.toThrow('Cloud history authorization is unavailable');
 });
+
+describe('CLI E2EE Round 2 optimizations', () => {
+  const logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    trace: () => {},
+    success: () => {},
+    setLevel: () => {},
+    child: () => logger,
+    close: async () => {},
+  } as unknown as Logger;
+  const genesis = '11'.repeat(32);
+  const recipient = '22'.repeat(32);
+  const sender = '33'.repeat(32);
+  const slot = { genesis, epoch: 1, recipient };
+
+  it('primes self mailbox status from fetch(includeSlot), invalidates on report, coalesces batchStatus, and falls back on older backends', async () => {
+    vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => globalThis.fetch);
+    for (const deployed of [true, false]) {
+      const calls: Array<{ path: string; args: Record<string, unknown> }> = [];
+      let reported = false;
+      const slotStatus = { ...slot, revision: 1, status: 'EnvelopeStored' as const };
+      const afterReport = { ...slot, revision: 2, status: 'InstallationReported' as const };
+      vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          path: string;
+          args: [Record<string, unknown>];
+        };
+        const args = body.args[0] ?? {};
+        calls.push({ path: body.path, args });
+        if (body.path === 'e2eeMailbox:fetch') {
+          if (args.includeSlot && !deployed) {
+            return Response.json({
+              status: 'error',
+              errorMessage:
+                'ArgumentValidationError: Object contains extra field `includeSlot` that is not in the validator.',
+            });
+          }
+          return Response.json({
+            status: 'success',
+            value: {
+              items: [{ sender, frameHex: '01020304' }],
+              next: null,
+              ...(deployed ? { slot: slotStatus } : {}),
+            },
+          });
+        }
+        if (body.path === 'e2eeMailbox:batchStatus') {
+          if (!deployed) {
+            return Response.json({
+              status: 'error',
+              errorMessage: 'Could not find public function for "e2eeMailbox:batchStatus"',
+            });
+          }
+          const slots = args.slots as Array<typeof slot>;
+          return Response.json({
+            status: 'success',
+            value: slots.map((item) => ({ ...item, revision: 1, status: 'NeedsEnvelope' })),
+          });
+        }
+        if (body.path === 'e2eeMailbox:status') {
+          const item = args.slot as typeof slot;
+          if (item.recipient === recipient) {
+            return Response.json({ status: 'success', value: reported ? afterReport : slotStatus });
+          }
+          return Response.json({
+            status: 'success',
+            value: { ...item, revision: 1, status: 'NeedsEnvelope' },
+          });
+        }
+        if (body.path === 'e2eeMailbox:report') {
+          reported = true;
+          return Response.json({ status: 'success', value: null });
+        }
+        throw new Error(`unexpected path ${body.path}`);
+      });
+
+      const e2ee = createCloudE2eePort({
+        authBaseUrl: 'https://mailbox-round2.convex.cloud',
+        logger,
+      });
+      const fetched = await e2ee.mailboxCall('fetch', {
+        workspaceId: 'ws',
+        credential: 'cred',
+        epoch: 1,
+        cursor: null,
+        limit: 10,
+      });
+      expect(fetched.items).toHaveLength(1);
+      for (let i = 0; i < 4; i++) {
+        expect(
+          await e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot })
+        ).toEqual(slotStatus);
+      }
+      await e2ee.mailboxCall('report', {
+        workspaceId: 'ws',
+        credential: 'cred',
+        reportHex: '0a0b',
+      });
+      expect(
+        await e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot })
+      ).toEqual(afterReport);
+
+      const peerA = { genesis, epoch: 2, recipient: 'aa'.repeat(32) };
+      const peerB = { genesis, epoch: 2, recipient: 'bb'.repeat(32) };
+      const [statusA, statusB] = await Promise.all([
+        e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: peerA }),
+        e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: peerB }),
+      ]);
+      expect(statusA.recipient).toBe(peerA.recipient);
+      expect(statusB.recipient).toBe(peerB.recipient);
+
+      // Next fetch/batch after fallback does not resend includeSlot or batchStatus.
+      await e2ee.mailboxCall('fetch', {
+        workspaceId: 'ws',
+        credential: 'cred',
+        epoch: 1,
+        cursor: null,
+        limit: 10,
+      });
+      const peerC = { genesis, epoch: 3, recipient: 'cc'.repeat(32) };
+      const peerD = { genesis, epoch: 3, recipient: 'dd'.repeat(32) };
+      await Promise.all([
+        e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: peerC }),
+        e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: peerD }),
+      ]);
+
+      if (deployed) {
+        expect(calls.map((c) => c.path)).toEqual([
+          'e2eeMailbox:fetch',
+          'e2eeMailbox:report',
+          'e2eeMailbox:status',
+          'e2eeMailbox:batchStatus',
+          'e2eeMailbox:fetch',
+          'e2eeMailbox:batchStatus',
+        ]);
+      } else {
+        expect(
+          calls.filter((c) => c.path === 'e2eeMailbox:fetch').map((c) => c.args.includeSlot ?? null)
+        ).toEqual([true, null, null]);
+        expect(calls.filter((c) => c.path === 'e2eeMailbox:batchStatus')).toHaveLength(1);
+        expect(calls.filter((c) => c.path === 'e2eeMailbox:status')).toHaveLength(6);
+      }
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('consumes inline bootstrap from completeMachinePairing inside registerMachineAccess and falls back when unsupported', async () => {
+    vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => globalThis.fetch);
+    const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
+    type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+    const bootstrapSnapshot = {
+      status: 'authorized' as const,
+      userId: 'acc1',
+      workspaces: [
+        {
+          id: 'ws1',
+          name: 'Workspace',
+          slug: null,
+          role: 'member',
+          contentMode: 'e2ee' as const,
+          genesisHash: genesis,
+        },
+      ],
+    };
+    const mutationFlags: Array<boolean | null> = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as {
+        path: string;
+        args: [Record<string, unknown>];
+      };
+      const args = body.args[0] ?? {};
+      expect(body.path).toBe('e2eeMachinePairing:complete');
+      mutationFlags.push((args.includeBootstrap as boolean | undefined) ?? null);
+      return Response.json({
+        status: 'success',
+        value: {
+          pairingSessionId: 'ab'.repeat(16),
+          status: 'ready',
+          expiresAt: Date.now() + 60_000,
+          material: null,
+          location: null,
+          bootstrap: bootstrapSnapshot,
+        },
+      });
+    });
+
+    const queryCalls: unknown[] = [];
+    const fakeClient: Client = {
+      onUpdate: () => Object.assign(() => {}, { getCallCount: () => 0 }) as never,
+      query: async (ref, args) => {
+        queryCalls.push({ ref, args });
+        return bootstrapSnapshot;
+      },
+      close: async () => {},
+    };
+
+    const e2ee = createCloudE2eePort({
+      authBaseUrl: 'https://pairing-round2.convex.cloud',
+      logger,
+    });
+    await e2ee.completeMachinePairing!({
+      workspaceId: 'ws1',
+      credential: 'cred-1',
+      pairingSessionId: 'ab'.repeat(16),
+    });
+    const machinePort = createCloudE2eeMachinePort({
+      accountId: 'acc1',
+      workspaceId: 'ws1',
+      genesisHash: genesis,
+      machineId: 'machine-1',
+      credential: 'cred-1',
+      authBaseUrl: 'https://pairing-round2.convex.cloud',
+      serverBaseUrl: 'https://server-round2.example',
+      logger,
+      client: fakeClient,
+    });
+    // First registerMachineAccess uses the inline bootstrap snapshot -> 0 queries.
+    await machinePort.access.registerMachineAccess({ workspaceId: 'ws1', machineId: 'machine-1' });
+    expect(queryCalls).toHaveLength(0);
+    // Single-use cache: a subsequent registerMachineAccess queries bootstrap normally.
+    await machinePort.access.registerMachineAccess({ workspaceId: 'ws1', machineId: 'machine-1' });
+    expect(queryCalls).toHaveLength(1);
+    expect(mutationFlags).toEqual([true]);
+
+    // Fallback test on older backend rejecting includeBootstrap.
+    const legacyFlags: Array<boolean | null> = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as {
+        path: string;
+        args: [Record<string, unknown>];
+      };
+      const args = body.args[0] ?? {};
+      legacyFlags.push((args.includeBootstrap as boolean | undefined) ?? null);
+      if (args.includeBootstrap) {
+        return Response.json({
+          status: 'error',
+          errorMessage:
+            'ArgumentValidationError: Object contains extra field `includeBootstrap` that is not in the validator.',
+        });
+      }
+      return Response.json({ status: 'success', value: null });
+    });
+    const legacyE2ee = createCloudE2eePort({
+      authBaseUrl: 'https://pairing-legacy.convex.cloud',
+      logger,
+    });
+    await legacyE2ee.completeMachinePairing!({
+      workspaceId: 'ws1',
+      credential: 'cred-2',
+      pairingSessionId: 'cd'.repeat(16),
+    });
+    await legacyE2ee.completeMachinePairing!({
+      workspaceId: 'ws1',
+      credential: 'cred-2',
+      pairingSessionId: 'cd'.repeat(16),
+    });
+    expect(legacyFlags).toEqual([true, null, null]);
+  });
+});

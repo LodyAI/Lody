@@ -302,10 +302,11 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
   });
   const installKeys = Effect.fnUntraced(function* (
     session: Session,
-    mode: PersonalKeyRoundMode = 'full'
+    mode: PersonalKeyRoundMode = 'full',
+    recipients?: readonly string[]
   ) {
     for (let pass = 0; pass < 4; pass++) {
-      if (!(yield* session.keyRound(mode)).refreshRequired) return undefined;
+      if (!(yield* session.keyRound(mode, recipients)).refreshRequired) return undefined;
       yield* session.refresh();
     }
     return undefined;
@@ -401,7 +402,9 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           yield* Effect.result(
             session.refresh().pipe(Effect.timeoutOption(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))
           );
-        const round = yield* Effect.result(session.keyRound(retry === 0 ? 'distribute' : 'full'));
+        const round = yield* Effect.result(
+          session.keyRound(retry === 0 ? 'distribute' : 'full', [device])
+        );
         const evidence = yield* Effect.result(session.keyDeliveryEvidence(device));
         if (Result.isSuccess(evidence) && evidence.success === 'delivered') return 'delivered';
         return Result.isSuccess(round) && Result.isSuccess(evidence)
@@ -766,8 +769,8 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               run(Effect.asVoid(lease.session.refresh(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))),
             // The session's existing key round, so an approver can send the device it
             // just admitted the current epoch key. No key or credential leaves.
-            keyRound: (mode?: 'full' | 'distribute') =>
-              run(Effect.asVoid(lease.session.keyRound(mode))),
+            keyRound: (mode?: 'full' | 'distribute', recipients?: readonly string[]) =>
+              run(Effect.asVoid(lease.session.keyRound(mode, recipients))),
             keyDeliveryEvidence: (device: string) => run(lease.session.keyDeliveryEvidence(device)),
           };
         })
@@ -821,8 +824,16 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
             const mode = input?.keyMode ?? (input?.installKeys ? 'full' : 'none');
             if (mode !== 'none' && mode !== 'full' && mode !== 'receive' && mode !== 'distribute')
               return yield* fail('invalid-input');
+            if (
+              input?.recipients !== undefined &&
+              (!Array.isArray(input.recipients) ||
+                input.recipients.some(
+                  (recipient) => typeof recipient !== 'string' || !/^[0-9a-f]{64}$/.test(recipient)
+                ))
+            )
+              return yield* fail('invalid-input');
             yield* session.refresh();
-            if (mode !== 'none') yield* installKeys(session, mode);
+            if (mode !== 'none') yield* installKeys(session, mode, input?.recipients);
             return yield* status(session);
           })
         )
