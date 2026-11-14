@@ -435,7 +435,10 @@ export interface AccountPairingApproverSession {
    * distributor targets only devices of the verified ledger and journals each envelope,
    * so a later round retries the same id and bytes. `distribute` only reconciles and
    * sends this device's deliveries; an implementation without modes runs a full round. */
-  keyRound(mode?: 'full' | 'distribute'): Effect.Effect<unknown, unknown>;
+  keyRound(
+    mode?: 'full' | 'distribute',
+    recipients?: readonly string[]
+  ): Effect.Effect<unknown, unknown>;
   /** Positive mailbox evidence for `device` at the current epoch: 'delivered', or a
    * public retryable `e2ee_*` code. */
   keyDeliveryEvidence(device: string): Effect.Effect<string, unknown>;
@@ -645,7 +648,7 @@ export function makePortableAccountPairingApprover(input: {
                 // already-current device, so receive/repair would only delay the envelope.
                 // A retry runs the full round, which first receives a key this device lacks.
                 const round = yield* Effect.result(
-                  held.keyRound(retry === 0 ? 'distribute' : 'full')
+                  held.keyRound(retry === 0 ? 'distribute' : 'full', [device])
                 );
                 const evidence = yield* Effect.result(held.keyDeliveryEvidence(device));
                 if (Result.isSuccess(evidence) && evidence.success === 'delivered')

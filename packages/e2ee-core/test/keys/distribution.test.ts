@@ -498,3 +498,47 @@ it('bounds unacknowledged tasks while acknowledgements free capacity without del
     )
   );
 });
+
+it('reconcileCurrentEpoch narrows to ledger-verified recipients and never grants eligibility from hints', async () => {
+  const { f, file, config } = await setup(0);
+  const bogus = 'ff'.repeat(32);
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const host = yield* makeSqliteKeyMailbox({
+          path: file('host'),
+          mode: 'create',
+          genesis: f.context.genesis,
+          ledger: f.ledger,
+        });
+        const owner = ok(host.bind(f.owner.publicKey));
+        const queried: string[] = [];
+        const tracked: DistributionMailboxRemote = {
+          ...owner,
+          status: (slot) => {
+            if (slot.recipient !== hex(f.owner.raw)) queried.push(slot.recipient);
+            return owner.status(slot);
+          },
+        };
+        const client = yield* makeSqliteKeyDistribution({
+          ...config,
+          remote: tracked,
+        });
+        // Unadmitted hint schedules nothing and queries nothing.
+        expect(yield* client.reconcileCurrentEpoch(100, null, [bogus])).toEqual({
+          scheduled: 0,
+          blocked: [],
+          next: null,
+        });
+        expect(queried).toEqual([]);
+        // Intersecting with an eligible ledger target schedules only that verified device.
+        expect(yield* client.reconcileCurrentEpoch(100, null, [hex(f.phone.raw), bogus])).toEqual({
+          scheduled: 1,
+          blocked: [],
+          next: null,
+        });
+        expect(queried).toEqual([hex(f.phone.raw)]);
+      })
+    )
+  );
+});

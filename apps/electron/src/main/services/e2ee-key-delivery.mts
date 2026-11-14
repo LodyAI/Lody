@@ -531,7 +531,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
         const work = yield* turn((owner) =>
           Effect.succeed(
             owner.host
-              .distributeKeys(workspaceId, mailbox)
+              .distributeKeys(workspaceId, mailbox, targets)
               .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
           )
         )

@@ -11,7 +11,14 @@ import {
   hashRecordBytes
 } from '@lody/e2ee-core/protocol'
 import { ConvexHttpClient } from 'convex/browser'
-import { api, makeInlineMailboxPut, makeInlineStageGroup } from '@lody/cloud-api'
+import {
+  api,
+  makeBatchMailboxStatus,
+  makeInlineMailboxFetch,
+  makeInlineMailboxPut,
+  makeInlineStageGroup,
+  makeMailboxStatusCache
+} from '@lody/cloud-api'
 import type {
   E2eeAppendRecordRequest,
   E2eeContentTokenRequest,
@@ -318,8 +325,100 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   // Per client: a backend without inlined receipts/originals costs one refused request.
   const inlineVersionReadHead = makeInlineVersionReadHead()
   const inlineMailboxPut = makeInlineMailboxPut()
+  const inlineMailboxFetch = makeInlineMailboxFetch()
+  const batchMailboxStatus = makeBatchMailboxStatus()
+  const isUnsupportedBatchError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+    return /Could not find public function|ArgumentValidationError/.test(message)
+  }
   const inlineStageGroup = makeInlineStageGroup()
   const fetch = input.fetch ?? globalThis.fetch
+
+  async function runConvex<T>(
+    work: (client: ConvexHttpClient) => Promise<unknown>,
+    schema: z.ZodType<T>,
+    combined: AbortSignal,
+    credentialBound = false,
+    actionEnvelope = false,
+    preserveTokenOnError?: (error: unknown) => boolean
+  ): Promise<T> {
+    let terminalFailure: BackendError | undefined
+    try {
+      combined.throwIfAborted()
+      let token: string
+      if (reusable && now() < reusable.renewAt) token = reusable.token
+      else {
+        const response = await input.convexToken(combined).catch(() => {
+          throw unavailable()
+        })
+        combined.throwIfAborted()
+        const tokenResponse = z
+          .union([
+            z.object({ data: z.object({ token: z.string().min(1) }) }),
+            z.object({ token: z.string().min(1) })
+          ])
+          .safeParse(response)
+        if (!tokenResponse.success) throw unavailable()
+        token =
+          'data' in tokenResponse.data ? tokenResponse.data.data.token : tokenResponse.data.token
+        const renewAt = tokenRenewAt(token)
+        reusable = renewAt > now() ? { token, renewAt } : undefined
+      }
+      // A request owns its auth and abort signal. Concurrent work cannot change
+      // another request's credentials through a shared mutable SDK client.
+      const client = new ConvexHttpClient(input.deploymentUrl, {
+        auth: token,
+        logger: false,
+        fetch: async (url, options) => {
+          combined.throwIfAborted()
+          const httpResponse = await fetch(url, { ...options, signal: combined }).catch(() => {
+            throw unavailable()
+          })
+          // Convex's function-failure status, only for an explicitly credential-bound
+          // endpoint. JWT, transport and JSON exceptions never reach this assignment.
+          // The content grant action may report the same envelope over HTTP 200;
+          // queries keep requiring 560, and a success body is returned untouched.
+          if (
+            credentialBound &&
+            (httpResponse.status === 560 || (actionEnvelope && httpResponse.status === 200))
+          ) {
+            const unread = httpResponse.clone()
+            const rejection = z
+              .object({
+                status: z.literal('error'),
+                errorMessage: z.string(),
+                errorData: z.object({
+                  code: z.enum(['e2ee_member_removed', 'e2ee_device_revoked'])
+                })
+              })
+              .safeParse(
+                await httpResponse.json().catch(() => {
+                  throw unavailable()
+                })
+              )
+            combined.throwIfAborted()
+            if (rejection.success) {
+              terminalFailure =
+                rejection.data.errorData.code === 'e2ee_member_removed'
+                  ? new E2eeMemberRemovedError()
+                  : new E2eeDeviceRevokedError()
+              throw terminalFailure
+            }
+            return unread
+          }
+          return httpResponse
+        }
+      })
+      const value = await work(client)
+      combined.throwIfAborted()
+      return decode(schema, value)
+    } catch (error) {
+      if (!preserveTokenOnError?.(error)) reusable = undefined
+      throw terminalFailure !== undefined && error === terminalFailure
+        ? terminalFailure
+        : requestFailure(error)
+    }
+  }
 
   function request<T>(
     work: (client: ConvexHttpClient) => Promise<unknown>,
@@ -329,94 +428,22 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     /** Convex streams an action's failure as an HTTP 200 error envelope. */
     actionEnvelope = false
   ) {
-    return Effect.suspend(() => {
-      // Private to this evaluation: replays and concurrent calls cannot borrow authority.
-      let terminalFailure: BackendError | undefined
-      return Effect.tryPromise({
-        try: async (signal) => {
-          const combined = AbortSignal.any([
-            signal,
-            owner.signal,
-            ...(requestSignal ? [requestSignal] : [])
-          ])
-          combined.throwIfAborted()
-          let token: string
-          if (reusable && now() < reusable.renewAt) token = reusable.token
-          else {
-            const response = await input.convexToken(combined).catch(() => {
-              throw unavailable()
-            })
-            combined.throwIfAborted()
-            const tokenResponse = z
-              .union([
-                z.object({ data: z.object({ token: z.string().min(1) }) }),
-                z.object({ token: z.string().min(1) })
-              ])
-              .safeParse(response)
-            if (!tokenResponse.success) throw unavailable()
-            token =
-              'data' in tokenResponse.data
-                ? tokenResponse.data.data.token
-                : tokenResponse.data.token
-            const renewAt = tokenRenewAt(token)
-            reusable = renewAt > now() ? { token, renewAt } : undefined
-          }
-          // A request owns its auth and abort signal. Concurrent work cannot change
-          // another request's credentials through a shared mutable SDK client.
-          const client = new ConvexHttpClient(input.deploymentUrl, {
-            auth: token,
-            logger: false,
-            fetch: async (url, options) => {
-              combined.throwIfAborted()
-              const httpResponse = await fetch(url, { ...options, signal: combined }).catch(() => {
-                throw unavailable()
-              })
-              // Convex's function-failure status, only for an explicitly credential-bound
-              // endpoint. JWT, transport and JSON exceptions never reach this assignment.
-              // The content grant action may report the same envelope over HTTP 200;
-              // queries keep requiring 560, and a success body is returned untouched.
-              if (
-                credentialBound &&
-                (httpResponse.status === 560 || (actionEnvelope && httpResponse.status === 200))
-              ) {
-                const unread = httpResponse.clone()
-                const rejection = z
-                  .object({
-                    status: z.literal('error'),
-                    errorMessage: z.string(),
-                    errorData: z.object({
-                      code: z.enum(['e2ee_member_removed', 'e2ee_device_revoked'])
-                    })
-                  })
-                  .safeParse(
-                    await httpResponse.json().catch(() => {
-                      throw unavailable()
-                    })
-                  )
-                combined.throwIfAborted()
-                if (rejection.success) {
-                  terminalFailure =
-                    rejection.data.errorData.code === 'e2ee_member_removed'
-                      ? new E2eeMemberRemovedError()
-                      : new E2eeDeviceRevokedError()
-                  throw terminalFailure
-                }
-                return unread
-              }
-              return httpResponse
-            }
-          })
-          const value = await work(client)
-          combined.throwIfAborted()
-          return decode(schema, value)
-        },
-        catch: (error) => {
-          // Any failure may be a rejected token: the next call mints a fresh one.
-          reusable = undefined
-          return terminalFailure !== undefined && error === terminalFailure
-            ? terminalFailure
+    return Effect.suspend(() =>
+      Effect.tryPromise({
+        try: (signal) =>
+          runConvex(
+            work,
+            schema,
+            AbortSignal.any([signal, owner.signal, ...(requestSignal ? [requestSignal] : [])]),
+            credentialBound,
+            actionEnvelope
+          ),
+        catch: (error) =>
+          error instanceof E2eeMemberRemovedError ||
+          error instanceof E2eeDeviceRevokedError ||
+          error instanceof BackendError
+            ? error
             : requestFailure(error)
-        }
       }).pipe(
         // A deadline or cancellation interrupts the call before `catch`: drop the token too.
         Effect.onInterrupt(() =>
@@ -425,7 +452,7 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
           })
         )
       )
-    }).pipe(Effect.timeoutOrElse({ duration: '30 seconds', orElse: unavailable }))
+    ).pipe(Effect.timeoutOrElse({ duration: '30 seconds', orElse: unavailable }))
   }
 
   const staging = (
@@ -550,6 +577,9 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       return request(work, schema, signal, true)
     }
     const device = { ...access }
+    const selfStatusCache = makeMailboxStatusCache({ ttlMs: 1000 })
+    const withinRoundCache = makeMailboxStatusCache({ ttlMs: 200 })
+    let knownSelfRecipient: string | undefined
     const readCacheKey = (id: string) =>
       `${device.workspaceId}\0${device.credential}\0${device.cliToken ?? ''}\0${id}`
     const statusCacheKey = (target: { genesis: string; epoch: number; recipient: string }) =>
@@ -566,18 +596,27 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     return KeyMailbox.of({
       put: (id, frame) => {
         const frameHex = hex(frame)
-        return boundRequest(
-          (client) =>
-            inlineMailboxPut({ ...device, id, frameHex }, (args) =>
-              client.mutation(api.e2eeMailbox.put, args)
-            ),
-          z.union([z.null(), z.object({ frameHex: bytesHex(512), slot: status })])
-        ).pipe(
+        return Effect.suspend(() => {
+          selfStatusCache.invalidateAccess(device)
+          withinRoundCache.invalidateAccess(device)
+          return boundRequest(
+            (client) =>
+              inlineMailboxPut({ ...device, id, frameHex }, (args) =>
+                client.mutation(api.e2eeMailbox.put, args)
+              ),
+            z.union([z.null(), z.object({ frameHex: bytesHex(512), slot: status })])
+          )
+        }).pipe(
           Effect.tap((receipt) =>
             Effect.sync(() => {
               if (receipt !== null) {
                 cacheBounded(inlineMailboxReads, readCacheKey(id), receipt.frameHex)
                 cacheBounded(inlineMailboxStatuses, statusCacheKey(receipt.slot), receipt.slot)
+                selfStatusCache.invalidateSlot(device, receipt.slot)
+                withinRoundCache.invalidateSlot(device, receipt.slot)
+              } else {
+                selfStatusCache.invalidateAccess(device)
+                withinRoundCache.invalidateAccess(device)
               }
             })
           ),
@@ -600,9 +639,20 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         }),
       fetch: (epoch, cursor, limit) =>
         boundRequest(
-          (client) => client.query(api.e2eeMailbox.fetch, { ...device, epoch, cursor, limit }),
-          envelopes
+          (client) =>
+            inlineMailboxFetch({ ...device, epoch, cursor, limit }, (args) =>
+              client.query(api.e2eeMailbox.fetch, args)
+            ),
+          envelopes.extend({ slot: status.optional() })
         ).pipe(
+          Effect.tap((page) =>
+            Effect.sync(() => {
+              if (page.slot !== undefined && page.slot.epoch === epoch) {
+                knownSelfRecipient = page.slot.recipient
+                selfStatusCache.set(device, page.slot)
+              }
+            })
+          ),
           Effect.map((page) => ({
             items: page.items.map((item) => ({ sender: item.sender, frame: raw(item.frameHex) })),
             next: page.next
@@ -617,27 +667,114 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
             inlineMailboxStatuses.delete(cacheKey)
             return verifyStatus(target, cached)
           }
-          return boundRequest(
-            (client) => client.query(api.e2eeMailbox.status, { ...device, slot: target }),
-            status
-          ).pipe(Effect.flatMap((value) => verifyStatus(target, value)))
+          const cachedStatus =
+            selfStatusCache.get(device, target) ?? withinRoundCache.get(device, target)
+          if (cachedStatus !== undefined) return verifyStatus(target, cachedStatus)
+          return Effect.tryPromise({
+            try: (fiberSignal) => {
+              const waiterSignal = signal ? AbortSignal.any([fiberSignal, signal]) : fiberSignal
+              if (waiterSignal.aborted) return Promise.reject(unavailable())
+              let usedSingle = false
+              const promise = batchMailboxStatus(
+                { ...device, slot: target },
+                {
+                  single: (args) => {
+                    usedSingle = true
+                    return runConvex(
+                      (client) => client.query(api.e2eeMailbox.status, args),
+                      status,
+                      AbortSignal.any([waiterSignal, owner.signal]),
+                      true
+                    )
+                  },
+                  batch: (args) => {
+                    let rawError: unknown
+                    return runConvex(
+                      (client) =>
+                        client.query(api.e2eeMailbox.batchStatus, args).catch((error) => {
+                          rawError = error
+                          throw error
+                        }),
+                      z.array(status),
+                      signal ? AbortSignal.any([owner.signal, signal]) : owner.signal,
+                      true,
+                      false,
+                      () => rawError !== undefined && isUnsupportedBatchError(rawError)
+                    ).catch((error) => {
+                      if (rawError !== undefined && isUnsupportedBatchError(rawError))
+                        throw rawError
+                      throw error
+                    })
+                  }
+                }
+              ).then((value) => {
+                if (usedSingle) {
+                  if (target.recipient === knownSelfRecipient) selfStatusCache.set(device, value)
+                  else withinRoundCache.set(device, value)
+                }
+                return value
+              })
+              return new Promise<z.infer<typeof status>>((resolve, reject) => {
+                const onAbort = () => reject(unavailable())
+                waiterSignal.addEventListener('abort', onAbort, { once: true })
+                promise.then(
+                  (value) => {
+                    waiterSignal.removeEventListener('abort', onAbort)
+                    resolve(value)
+                  },
+                  (error) => {
+                    waiterSignal.removeEventListener('abort', onAbort)
+                    reject(error)
+                  }
+                )
+              })
+            },
+            catch: (error) =>
+              error instanceof E2eeMemberRemovedError ||
+              error instanceof E2eeDeviceRevokedError ||
+              error instanceof BackendError
+                ? error
+                : requestFailure(error)
+          }).pipe(
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                reusable = undefined
+              })
+            ),
+            Effect.timeoutOrElse({ duration: '30 seconds', orElse: unavailable }),
+            Effect.flatMap((value) => verifyStatus(target, value))
+          )
         }),
       report: (report, publication) => {
         const reportHex = hex(report),
           publicationHex = publication === undefined ? undefined : hex(publication)
-        return boundRequest(
-          (client) =>
-            client.mutation(api.e2eeMailbox.report, {
-              ...device,
-              reportHex,
-              ...(publicationHex === undefined ? {} : { publicationHex })
-            }),
-          z.null()
-        ).pipe(Effect.asVoid)
+        return Effect.suspend(() => {
+          selfStatusCache.invalidateAccess(device)
+          withinRoundCache.invalidateAccess(device)
+          return boundRequest(
+            (client) =>
+              client.mutation(api.e2eeMailbox.report, {
+                ...device,
+                reportHex,
+                ...(publicationHex === undefined ? {} : { publicationHex })
+              }),
+            z.null()
+          )
+        }).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              selfStatusCache.invalidateAccess(device)
+              withinRoundCache.invalidateAccess(device)
+            })
+          ),
+          Effect.asVoid
+        )
       },
       repair: (target, id, rejectedDigest) =>
         Effect.suspend(() => {
           inlineMailboxStatuses.delete(statusCacheKey(target))
+          selfStatusCache.invalidateSlot(device, target)
+          withinRoundCache.invalidateSlot(device, target)
           return boundRequest(
             (client) =>
               client.mutation(api.e2eeMailbox.repair, {
@@ -647,7 +784,15 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
                 ...(rejectedDigest === undefined ? {} : { rejectedDigest })
               }),
             z.null()
-          ).pipe(Effect.asVoid)
+          ).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                selfStatusCache.invalidateSlot(device, target)
+                withinRoundCache.invalidateSlot(device, target)
+              })
+            ),
+            Effect.asVoid
+          )
         })
     })
   }

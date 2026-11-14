@@ -41,6 +41,7 @@ import {
   Bytes,
   hashRecordBytes,
   verifyLedger,
+  decodeRecord,
   derivePairingKeys,
   disposePairingKeys,
   encodePairingSecret,
@@ -126,16 +127,22 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
                           )
                         : id === '@lody/e2ee-client/account-requester'
                           ? { KEY_DELIVERY_RETRY_DELAYS }
-                          : id === '../../services/e2ee-recovery-vault.mjs' ||
-                              id === '../../services/e2ee-passkey-macos.mjs'
-                            ? {}
-                            : id === '../../services/e2ee-client-loss-probe'
-                              ? // Production default: the E2E probe is disabled and forwards work.
-                                {
-                                  observeClientLossOperation: (_kind, _workspace, _sender, work) =>
-                                    work()
-                                }
-                              : require(id)
+                          : id === '@lody/e2ee-core/protocol'
+                            ? { decodeRecord }
+                            : id === '../../services/e2ee-recovery-vault.mjs' ||
+                                id === '../../services/e2ee-passkey-macos.mjs'
+                              ? {}
+                              : id === '../../services/e2ee-client-loss-probe'
+                                ? // Production default: the E2E probe is disabled and forwards work.
+                                  {
+                                    observeClientLossOperation: (
+                                      _kind,
+                                      _workspace,
+                                      _sender,
+                                      work
+                                    ) => work()
+                                  }
+                                : require(id)
     }
   )
   return exports

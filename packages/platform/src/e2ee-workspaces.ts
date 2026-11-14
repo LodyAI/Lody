@@ -103,6 +103,8 @@ export interface E2eeRefreshOptions {
   /** Legacy switch: `false` skips the key round when `keyMode` is absent. */
   readonly installKeys?: boolean;
   readonly keyMode?: E2eeRefreshKeyMode;
+  /** Optional narrowing filter (device signing keys) for immediate post-admission distribution. */
+  readonly recipients?: readonly string[];
 }
 export interface E2eeRuntimeStatus {
   readonly workspaceId: string;

@@ -9787,6 +9787,73 @@ describe('machine execution authorization freshness', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it('avoids duplicate getHistory when sharing calls refreshLedger inside the same authorize turn', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-dedup-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, makeGate, io } = yield* executionFixture(directory, 3);
+          const current = fixture.current;
+          const memberEntry = [...current.inspectState().members].find(
+            ([, member]) => member.role === 'member'
+          );
+          if (!memberEntry) throw new Error('missing synthetic member');
+          const [memberId] = memberEntry;
+          const requester = [...current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === memberId
+          );
+          if (!requester) throw new Error('missing synthetic requester');
+          const [requesterKey] = requester;
+          const capRecord = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(current, fixture.owner.publicKey, {
+                _tag: 'DeclareCapabilities',
+                capabilities: [1],
+              })
+            ),
+            fixture.owner
+          );
+          fixture.records.push(capRecord);
+          yield* runtime.ingest(page(fixture.records));
+
+          let gate!: Effect.Success<ReturnType<typeof makeGate>>;
+          let sharingCalls = 0;
+          gate = yield* makeGate(() =>
+            Effect.gen(function* () {
+              sharingCalls++;
+              // First refreshLedger inside sharing reuses authorize's fresh ledger read.
+              yield* gate.refreshLedger;
+              expect(io.reads).toBe(1);
+              // Second refreshLedger in the same sharing invocation still hits getHistory if retried.
+              if (sharingCalls === 2) {
+                yield* gate.refreshLedger;
+              }
+              return { allowed: true, isCurrent: () => true };
+            })
+          );
+
+          expect(yield* gate.authorizeExecution('workspace', requesterKey)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          expect(io.reads).toBe(1);
+
+          // Direct refreshLedger outside authorize always calls getHistory.
+          yield* gate.refreshLedger;
+          expect(io.reads).toBe(2);
+
+          // Next authorizeExecution: first refreshLedger skipped (total 3 reads), second retried (4 reads).
+          io.reads = 0;
+          expect(yield* gate.authorizeExecution('workspace', requesterKey)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          expect(io.reads).toBe(2);
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 it('revokes a real encrypted ACP owner when the verified runtime ledger changes', async () => {

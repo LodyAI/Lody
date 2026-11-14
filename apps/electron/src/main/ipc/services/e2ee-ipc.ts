@@ -1818,7 +1818,13 @@ export class E2eeIpc extends ProductWindowIpcService {
       (typeof options !== 'object' ||
         options === null ||
         (options.installKeys !== undefined && typeof options.installKeys !== 'boolean') ||
-        (options.keyMode !== undefined && !REFRESH_KEY_MODES.has(options.keyMode)))
+        (options.keyMode !== undefined && !REFRESH_KEY_MODES.has(options.keyMode)) ||
+        (options.recipients !== undefined &&
+          (!Array.isArray(options.recipients) ||
+            options.recipients.length > 100 ||
+            !options.recipients.every(
+              (recipient) => typeof recipient === 'string' && /^[0-9a-f]{64}$/.test(recipient)
+            ))))
     )
       throw new Error('e2ee_invalid-input')
     // Without `keyMode`, only `installKeys: false` skips the key round, as before.
@@ -1897,7 +1903,8 @@ export class E2eeIpc extends ProductWindowIpcService {
                 (signal) =>
                   cloud.client.staging({ workspaceId, credential: access.credential }, signal),
                 (signal) => (request) => cloud.client.history(request, signal),
-                keyMode
+                keyMode,
+                options?.recipients
               )
             )
           : Effect.fail(new Error('e2ee_not_open')),

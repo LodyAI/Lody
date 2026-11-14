@@ -1352,3 +1352,129 @@ void test('mailbox put and epoch staging inline receipts save post-write readbac
     }
   }
 })
+
+void test('mailbox fetch inline slot primes self status cache, report invalidates it, and older backends fall back cleanly', async () => {
+  const frameHex = '01020304'
+  const slotStatus = { ...target, revision: 3, status: 'EnvelopeStored' }
+  const afterReportStatus = { ...target, revision: 4, status: 'InstallationReported' }
+  for (const deployed of [true, false]) {
+    const calls = []
+    let reported = false
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            if (path === 'e2eeMailbox:fetch') {
+              if (args.includeSlot && !deployed)
+                return new Response(
+                  'ArgumentValidationError: Object contains extra field `includeSlot` that is not in the validator.',
+                  { status: 400 }
+                )
+              return response({
+                items: [{ sender, frameHex }],
+                next: null,
+                ...(deployed ? { slot: slotStatus } : {})
+              })
+            }
+            if (path === 'e2eeMailbox:status') {
+              return response(reported ? afterReportStatus : slotStatus)
+            }
+            if (path === 'e2eeMailbox:report') {
+              reported = true
+              return response(null)
+            }
+            throw new Error(`unexpected endpoint ${path}`)
+          })
+          const mailbox = client.mailbox(access)
+          const page = yield* mailbox.fetch(target.epoch, null, 10)
+          assert.equal(page.items.length, 1)
+          // 4 consecutive status reads (mirroring KeyReceiver) hit server 0 times when fetch primed slot,
+          // and 1 time (cached for the next 3) when older backend did not inline slot.
+          for (let i = 0; i < 4; i++) {
+            assert.deepEqual(yield* mailbox.status(target), slotStatus)
+          }
+          // Report must invalidate the cached slot status immediately.
+          yield* mailbox.report(new Uint8Array([9, 8, 7]))
+          assert.deepEqual(yield* mailbox.status(target), afterReportStatus)
+          // Second fetch after fallback does not resend includeSlot on older backend.
+          yield* mailbox.fetch(target.epoch, null, 10)
+        })
+      )
+    )
+    if (deployed) {
+      assert.deepEqual(
+        calls.map((c) => c.path),
+        ['e2eeMailbox:fetch', 'e2eeMailbox:report', 'e2eeMailbox:status', 'e2eeMailbox:fetch']
+      )
+    } else {
+      assert.deepEqual(
+        calls.filter((c) => c.path === 'e2eeMailbox:fetch').map((c) => c.args.includeSlot ?? null),
+        [true, null, null]
+      )
+      assert.equal(calls.filter((c) => c.path === 'e2eeMailbox:status').length, 2)
+    }
+  }
+})
+
+void test('concurrent mailbox status calls coalesce via batchStatus while single calls use status and fall back cleanly', async () => {
+  const slotA = { genesis: '11'.repeat(32), epoch: 1, recipient: 'aa'.repeat(32) }
+  const slotB = { genesis: '11'.repeat(32), epoch: 1, recipient: 'bb'.repeat(32) }
+  const statusOf = (slot) => ({ ...slot, revision: 2, status: 'NeedsEnvelope' })
+  for (const mode of ['batch', 'missing-fn', 'validation-error']) {
+    const calls = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            if (path === 'e2eeMailbox:batchStatus') {
+              if (mode === 'missing-fn')
+                return new Response(
+                  'Could not find public function for ' + '"e2eeMailbox:batchStatus"',
+                  { status: 400 }
+                )
+              if (mode === 'validation-error')
+                return new Response('ArgumentValidationError: Unknown function', { status: 400 })
+              return response(args.slots.map(statusOf))
+            }
+            if (path === 'e2eeMailbox:status') return response(statusOf(args.slot))
+            throw new Error(`unexpected endpoint ${path}`)
+          })
+          const mailbox = client.mailbox(access)
+          // Single-slot call in its own microtask tick must use single status endpoint.
+          assert.deepEqual(yield* mailbox.status(slotA), statusOf(slotA))
+          // Wait > 200ms (or use distinct slots/epochs) — here distinct slots in the same tick coalesce.
+          const slotC = { genesis: '11'.repeat(32), epoch: 2, recipient: 'cc'.repeat(32) }
+          const slotD = { genesis: '11'.repeat(32), epoch: 2, recipient: 'dd'.repeat(32) }
+          const [resC, resD] = yield* Effect.all([mailbox.status(slotC), mailbox.status(slotD)], {
+            concurrency: 2
+          })
+          assert.deepEqual(resC, statusOf(slotC))
+          assert.deepEqual(resD, statusOf(slotD))
+          // Next concurrent batch after fallback does not retry batchStatus.
+          const slotE = { genesis: '11'.repeat(32), epoch: 3, recipient: 'ee'.repeat(32) }
+          const slotF = { genesis: '11'.repeat(32), epoch: 3, recipient: 'ff'.repeat(32) }
+          yield* Effect.all([mailbox.status(slotE), mailbox.status(slotF)], { concurrency: 2 })
+        })
+      )
+    )
+    if (mode === 'batch') {
+      assert.deepEqual(
+        calls.map((c) => c.path),
+        ['e2eeMailbox:status', 'e2eeMailbox:batchStatus', 'e2eeMailbox:batchStatus']
+      )
+    } else {
+      assert.equal(calls.filter((c) => c.path === 'e2eeMailbox:batchStatus').length, 1)
+      assert.equal(calls.filter((c) => c.path === 'e2eeMailbox:status').length, 5)
+    }
+  }
+})

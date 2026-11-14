@@ -1,4 +1,4 @@
-import { Cause, Clock, Effect, Fiber, Result } from 'effect';
+import { Cause, Clock, Context, Effect, Fiber, Result } from 'effect';
 import { z } from 'zod';
 import { Bytes, contentPermissions, accountIdFromUserId } from '@lody/e2ee-core/protocol';
 import type { CloudE2eePort, E2eeMachineSharingView } from '@lody/platform';
@@ -41,6 +41,10 @@ const OUTAGE_READ_WINDOW_MS = 24 * 60 * 60_000;
 /** A failed read is not repeated for this long, so an outage does not delay every request. */
 const OUTAGE_RETRY_MS = 60_000;
 type Stamp = AuthorityStamp;
+const FreshAuthorizeLedgerAt = Context.Reference<{ readonly at: Stamp; used: boolean } | undefined>(
+  'lody/CliE2eeExecutionAuthorization/FreshAuthorizeLedgerAt',
+  { defaultValue: () => undefined }
+);
 /** Wall-clock ends of the outage window, for the person to see; never authority. */
 export type E2eeAccessWindow = { readonly executionUntilMs: number; readonly readUntilMs: number };
 
@@ -208,6 +212,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         for (const [device, start] of grants) if (!fresh(start, now)) grants.delete(device);
         let start = grants.get(requesterDevice);
         let relaxed = false;
+        let freshAuthorizeAt: Stamp | undefined;
         if (!start) {
           relaxed =
             !!outage &&
@@ -216,6 +221,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
             withinAuthorityLimit(lastRead, now, OUTAGE_READ_WINDOW_MS);
           if (!relaxed) {
             start = yield* refreshOnce;
+            if (start) freshAuthorizeAt = yield* stamp;
             relaxed = !start && !!outage;
           }
           if (relaxed) start = lastRead;
@@ -269,11 +275,10 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           if (access === 'session-read') {
             if (!sessionId || !options.sessionSharing) return denied('e2ee_machine_not_shared');
             const generation = options.runtime.executionGeneration();
-            const shared = yield* options.sessionSharing(
-              requesterDevice,
-              sessionId,
-              sessionOwnerUserId
-            );
+            const freshRef = freshAuthorizeAt ? { at: freshAuthorizeAt, used: false } : undefined;
+            const shared = yield* options
+              .sessionSharing(requesterDevice, sessionId, sessionOwnerUserId)
+              .pipe(Effect.provideService(FreshAuthorizeLedgerAt, freshRef));
             if (
               !shared.allowed ||
               !shared.isCurrent() ||
@@ -308,9 +313,11 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           }
           if (access !== 'execute') return denied('e2ee_machine_not_owned');
           if (!options.sharing) return denied('e2ee_machine_not_shared');
-          const shared = yield* options
-            .sharing(requesterDevice, localProjectId)
-            .pipe(Effect.catch(() => Effect.succeed({ allowed: false, isCurrent: undefined })));
+          const freshRef = freshAuthorizeAt ? { at: freshAuthorizeAt, used: false } : undefined;
+          const shared = yield* options.sharing(requesterDevice, localProjectId).pipe(
+            Effect.provideService(FreshAuthorizeLedgerAt, freshRef),
+            Effect.catch(() => Effect.succeed({ allowed: false, isCurrent: undefined }))
+          );
           if (!shared.allowed) return denied('e2ee_machine_not_shared');
           policyCurrent = shared.isCurrent;
           // The policy check yields, and verified records (a removal, revocation or
@@ -376,9 +383,15 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         authorize(workspaceId, requesterDevice, 'execute', localProjectId),
       authorizeOwnedExecution: (workspaceId: string, requesterDevice: string) =>
         authorize(workspaceId, requesterDevice, 'owned-execute'),
-      refreshLedger: refreshOnce.pipe(
-        Effect.flatMap((value) => (value ? Effect.void : Effect.fail('unavailable' as const)))
-      ),
+      refreshLedger: Effect.gen(function* () {
+        const freshRef = yield* FreshAuthorizeLedgerAt;
+        if (freshRef && !freshRef.used && !closed) {
+          freshRef.used = true;
+          if (withinAuthorityLimit(freshRef.at, yield* stamp, 1_000)) return;
+        }
+        const value = yield* refreshOnce;
+        if (!value) return yield* Effect.fail('unavailable' as const);
+      }),
       authorizeSessionRead: (
         workspaceId: string,
         requesterDevice: string,

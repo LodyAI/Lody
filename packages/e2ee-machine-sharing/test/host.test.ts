@@ -1684,3 +1684,104 @@ for (const revocation of ['member', 'device', 'generation', 'withdrawal'] as con
       })
     ));
 }
+
+it('skips remote.readRequest on fresh writes while reconciling retained pending writes via readRequest', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      let readRequests = 0;
+      const countedRemote: SharingRemote = {
+        ...f.remote,
+        readRequest: (input) => {
+          readRequests++;
+          return f.remote.readRequest(input);
+        },
+      };
+      // Fresh write succeeds with 0 readRequest calls.
+      const fresh = yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(10),
+          { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true },
+          countedRemote
+        )
+      );
+      expect(fresh.status).toBe('saved');
+      expect(readRequests).toBe(0);
+      expect(f.io.commits).toBe(1);
+
+      // Interrupted write retains a pending request, then retry reconciles via readRequest.
+      f.io.lost = true;
+      const pending = yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(11),
+          { kind: 'machine', sharedWithTeam: true },
+          countedRemote
+        )
+      );
+      expect(pending.status).toBe('pending');
+      expect(readRequests).toBe(0);
+      expect(f.io.commits).toBe(2);
+
+      f.io.lost = false;
+      const reconciled = yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(11),
+          { kind: 'machine', sharedWithTeam: true },
+          countedRemote
+        )
+      );
+      expect(reconciled.status).toBe('saved');
+      expect(readRequests).toBe(1);
+      expect(f.io.commits).toBe(2);
+    })
+  ));
+
+it('overlaps refreshLedger and readHead concurrently during read', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      const refreshEntered = yield* Deferred.make<void>();
+      const headEntered = yield* Deferred.make<void>();
+      const releaseRefresh = yield* Deferred.make<void>();
+      const releaseHead = yield* Deferred.make<void>();
+      const concurrentHost = yield* makeMachineSharingHost({
+        store: f.backend.storeFor('concurrent-read'),
+        workspaceId: 'workspace',
+        genesisHash: hex(f.view().genesis),
+        signer: f.f.owner.signer,
+        ledger: () => Effect.sync(() => f.view()),
+        refreshLedger: () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(refreshEntered, undefined);
+            yield* Deferred.await(releaseRefresh);
+          }),
+        admissionHistory: () =>
+          Effect.succeed(f.f.records().map((record, index) => ({ record, length: index + 1 }))),
+        readEpochKey: () => Effect.succeed(f.f.secret),
+        credential: 'synthetic-secret',
+      });
+      const overlappingRemote: SharingRemote = {
+        ...f.remote,
+        readHead: (input) =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(headEntered, undefined);
+            yield* Deferred.await(releaseHead);
+            return yield* f.remote.readHead(input);
+          }),
+      };
+      const fiber = yield* Effect.forkChild(
+        f.run(concurrentHost.read('fixture-machine', overlappingRemote))
+      );
+      // Both refreshLedger and readHead must enter before either is released.
+      yield* Deferred.await(refreshEntered);
+      yield* Deferred.await(headEntered);
+      yield* Deferred.succeed(releaseRefresh, undefined);
+      yield* Deferred.succeed(releaseHead, undefined);
+      const result = yield* Fiber.join(fiber);
+      expect(result.head).toBeNull();
+    })
+  ));

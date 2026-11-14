@@ -337,7 +337,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         yield* admitted();
         return value;
       });
-    const keyRound = (mode: PersonalKeyRoundMode = 'full') =>
+    const keyRound = (mode: PersonalKeyRoundMode = 'full', recipients?: readonly string[]) =>
       serialRound(
         withKeys((ctx) =>
           Effect.gen(function* () {
@@ -348,7 +348,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               // resume pending sends, acknowledge ended tasks. Receive and repair stay
               // with a full round; every task remains in the core distribution journal.
               const distributor = Context.get(ctx, KeyDistributor);
-              yield* distributor.reconcileCurrentEpoch(100, null);
+              yield* distributor.reconcileCurrentEpoch(100, null, recipients);
               yield* distributor.resumePendingDeliveries(100, null);
               const ended = yield* distributor.results(100, null);
               for (const item of ended.items) yield* distributor.acknowledge(item.id);
@@ -391,7 +391,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               const received = yield* receiver.fetchAndInstall(null, 100);
               return { refreshRequired: received.refreshRequired ?? false };
             }
-            return { refreshRequired: yield* maintenance!(epoch, beforeReceive) };
+            return { refreshRequired: yield* maintenance!(epoch, beforeReceive, recipients) };
           })
         )
       );
@@ -1135,7 +1135,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         const refresh = serialRound(control.refresh().pipe(Effect.andThen(ledger())));
         return run(timeoutMs === undefined ? refresh : refresh.pipe(Effect.timeout(timeoutMs)));
       },
-      keyRound: (mode?: PersonalKeyRoundMode) => run(keyRound(mode)),
+      keyRound: (mode?: PersonalKeyRoundMode, recipients?: readonly string[]) =>
+        run(keyRound(mode, recipients)),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
       keyPending: (epoch: number, unknownAuthority?: boolean) =>
         run(keyPending(epoch, unknownAuthority)),
