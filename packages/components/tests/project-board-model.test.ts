@@ -24,12 +24,17 @@ const session = (id: string, overrides: Partial<SessionMeta> = {}): SessionMeta 
 
 const coordinator = session('coordinator', { coordinator: { version: 1 }, lastMessageAt: 10 });
 
-function board(sessions: SessionMeta[], live: Record<string, SessionStatus> = {}) {
+function board(
+  sessions: SessionMeta[],
+  live: Record<string, SessionStatus> = {},
+  currentUserId: string | null = 'user-1'
+) {
   return buildProjectBoard({
     sessions,
     childSessionsByParent: buildChildSessionsByParent(sessions),
     project,
     coordinatorSessionId: coordinator.id,
+    currentUserId,
     liveSessionStatuses: new Map(Object.entries(live)),
     sendStates: {},
   });
@@ -77,6 +82,12 @@ describe('project board', () => {
       session('archived', { isArchived: true }),
       session('tab', { parentSessionId: 'manual' as never }),
       session('second-coordinator', { coordinator: { version: 1 } }),
+      // A teammate's conversation, even one this coordinator opened, is not listed.
+      session('teammate', { userId: 'user-2' }),
+      session('teammate-dispatched', {
+        userId: 'user-2',
+        openedBySessionId: coordinator.id as never,
+      }),
     ]);
     const rows = [...result.needsYou, ...result.working, ...result.unread, ...result.done];
 
@@ -85,6 +96,12 @@ describe('project board', () => {
     expect(rows.find((row) => row.session.id === 'dispatched-elsewhere')?.createdManually).toBe(
       false
     );
+  });
+
+  it('lists nothing while the current account is unknown', () => {
+    const result = board([coordinator, session('manual')], {}, null);
+
+    expect(Object.values(result).flat()).toEqual([]);
   });
 
   it('opens the user’s most recent coordinator of the project', () => {

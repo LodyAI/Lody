@@ -93,6 +93,7 @@ const board = buildProjectBoard({
   childSessionsByParent: buildChildSessionsByParent(sessions),
   project,
   coordinatorSessionId: coordinatorId,
+  currentUserId: 'user-story',
   liveSessionStatuses: liveStatuses,
   sendStates: {},
 });

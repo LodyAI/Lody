@@ -3033,6 +3033,8 @@ export function LoroAppSidebar({
     const sessionsByProject = new Map<string, SessionMeta[]>();
     for (const session of sessions) {
       if (session.parentSessionId) continue;
+      // Project mode shows only the user's own conversations.
+      if (!isSessionInMyScope(session, myAccountId)) continue;
       const key = getSessionCoordinatorProjectKey(session);
       if (!key) continue;
       const id = coordinatorProjectKeyId(key);
@@ -3065,6 +3067,7 @@ export function LoroAppSidebar({
     catalogLocalProjectSections,
     childSessionsByParent,
     liveSessionStatuses,
+    myAccountId,
     sendStates,
     sessions,
     showProjectList,
@@ -3097,7 +3100,11 @@ export function LoroAppSidebar({
       const project = projectModeProjects.find((entry) => entry.item.id === id);
       if (!project) return;
       closeMobileDrawer();
-      const coordinator = findProjectCoordinatorSession(allActiveSessions, project.key, userId);
+      const coordinator = findProjectCoordinatorSession(
+        allActiveSessions,
+        project.key,
+        myAccountId
+      );
       if (coordinator) {
         void router.navigate({
           to: '/$workspaceName/sessions/$sessionId',
@@ -3119,7 +3126,7 @@ export function LoroAppSidebar({
             : { context: 'github' as const, repo: project.key.repoFullName, coordinator: true },
       });
     },
-    [allActiveSessions, closeMobileDrawer, projectModeProjects, router, userId, workspaceSlug]
+    [allActiveSessions, closeMobileDrawer, myAccountId, projectModeProjects, router, workspaceSlug]
   );
 
   // Filter after pinned trees and opened-by placement have assigned each row

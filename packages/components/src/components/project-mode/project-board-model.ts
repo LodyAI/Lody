@@ -6,6 +6,7 @@ import {
 } from '@lody/shared';
 import type { SessionSendState } from '@/lib/session-send-status';
 import { getEffectiveSessionActivitySummary } from '@/components/sessions/session-list-rows';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 
 /**
  * A project as the project-mode prototype knows it: the sidebar's existing
@@ -98,13 +99,16 @@ export type ProjectBoard = Record<ProjectBoardBucket, ProjectBoardRow[]>;
 /**
  * Every conversation the coordinator opened (wherever it runs), plus the other
  * top-level conversations of its project, bucketed by derived status. Child
- * Tabs roll up into their root the way sidebar rows do.
+ * Tabs roll up into their root the way sidebar rows do. Only the current user's
+ * own conversations are listed, as in the sidebar's "My" scope; an unknown
+ * account lists none.
  */
 export function buildProjectBoard(options: {
   sessions: readonly SessionMeta[];
   childSessionsByParent: Map<string, SessionMeta[]>;
   project: CoordinatorProjectKey | null;
   coordinatorSessionId: string | null;
+  currentUserId: string | null | undefined;
   liveSessionStatuses: ReadonlyMap<string, SessionStatus>;
   sendStates: Readonly<Record<string, SessionSendState>>;
 }): ProjectBoard {
@@ -113,6 +117,7 @@ export function buildProjectBoard(options: {
   for (const session of options.sessions) {
     if (session.isArchived || session.parentSessionId) continue;
     if (session.id === coordinatorSessionId) continue;
+    if (!isSessionInMyScope(session, options.currentUserId)) continue;
     // Another coordinator of the same project is a conversation of its own, not a task.
     if (isCoordinatorSession(session)) continue;
     const opened =
