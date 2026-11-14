@@ -538,12 +538,17 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
         yield* outside(work)
         // A successful round is not evidence: an ineligible sender, a blocked target or a
         // joined round all succeed. Ask the mailbox per device, outside the account lock.
-        for (const device of targets) {
-          const check = yield* turn((owner) =>
+        const checks = yield* Effect.forEach(targets, (device) =>
+          turn((owner) =>
             Effect.succeed(owner.host.keyDeliveryEvidence(workspaceId, device, mailbox))
-          )
-          evidence.set(device, yield* outside(check))
-        }
+          ).pipe(Effect.map((check) => [device, check] as const))
+        )
+        const results = yield* Effect.forEach(
+          checks,
+          ([device, check]) => outside(check).pipe(Effect.map((value) => [device, value] as const)),
+          { concurrency: 8 }
+        )
+        for (const [device, value] of results) evidence.set(device, value)
         return evidence
       })
       return yield* Effect.acquireUseRelease(

@@ -1250,3 +1250,105 @@ for (const mode of ['conflict', 'empty', 'misbound', 'paged']) {
     )
   })
 }
+
+void test('mailbox put and epoch staging inline receipts save post-write readbacks and stop asking older backends', async () => {
+  const group = stagedGroup(),
+    dto = encodeEpochStagedGroup(group),
+    frame = new Uint8Array([1, 2, 3, 4]),
+    frameHex = Buffer.from(frame).toString('hex'),
+    id = 'ab'.repeat(16)
+  for (const deployed of [true, false]) {
+    const calls = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            if (path === 'e2eeMailbox:put') {
+              if (args.includeReceipt && !deployed)
+                return new Response(
+                  'ArgumentValidationError: Object contains extra field `includeReceipt` that is not in the validator.',
+                  { status: 400 }
+                )
+              return response(
+                deployed
+                  ? { frameHex, slot: { ...target, revision: 0, status: 'EnvelopeStored' } }
+                  : null
+              )
+            }
+            if (path === 'e2eeMailbox:read') return response(frameHex)
+            if (path === 'e2eeMailbox:status')
+              return response({ ...target, revision: 0, status: 'EnvelopeStored' })
+            if (path === 'e2eeEpochStaging:stageGroup') {
+              if (args.includeReadback && !deployed)
+                return new Response(
+                  'ArgumentValidationError: Object contains extra field `includeReadback` that is not in the validator.',
+                  { status: 400 }
+                )
+              return response(deployed ? { ok: true, group: dto } : { ok: true })
+            }
+            if (path === 'e2eeEpochStaging:readGroup') return response(dto)
+            throw new Error(`unexpected endpoint ${path}`)
+          })
+          const mailbox = client.mailbox(access)
+          yield* mailbox.put(id, frame)
+          assert.deepEqual(yield* mailbox.read(id), frame)
+          assert.deepEqual(yield* mailbox.status(target), {
+            ...target,
+            revision: 0,
+            status: 'EnvelopeStored'
+          })
+          // Single-use receipt: a second read/status goes back to the server.
+          assert.deepEqual(yield* mailbox.read(id), frame)
+          assert.deepEqual(yield* mailbox.status(target), {
+            ...target,
+            revision: 0,
+            status: 'EnvelopeStored'
+          })
+          // Second put on an older backend sends no includeReceipt flag.
+          yield* mailbox.put(id, frame)
+
+          // Stage in a round-scoped instance and read back on a fresh instance (matching makeRoundStaging).
+          yield* client.staging(access, undefined, 'round-1').stageGroup(group)
+          assert.deepEqual(
+            encodeEpochStagedGroup(yield* client.staging(access).readGroup(dto)),
+            dto
+          )
+          // Second readGroup hits the server after the single-use readback was consumed.
+          assert.deepEqual(
+            encodeEpochStagedGroup(yield* client.staging(access).readGroup(dto)),
+            dto
+          )
+          yield* client.staging(access, undefined, 'round-1').stageGroup(group)
+        })
+      )
+    )
+    const paths = calls.map((c) => c.path)
+    if (deployed) {
+      assert.deepEqual(paths, [
+        'e2eeMailbox:put',
+        'e2eeMailbox:read',
+        'e2eeMailbox:status',
+        'e2eeMailbox:put',
+        'e2eeEpochStaging:stageGroup',
+        'e2eeEpochStaging:readGroup',
+        'e2eeEpochStaging:stageGroup'
+      ])
+    } else {
+      assert.deepEqual(
+        calls.filter((c) => c.path === 'e2eeMailbox:put').map((c) => c.args.includeReceipt ?? null),
+        [true, null, null]
+      )
+      assert.deepEqual(
+        calls
+          .filter((c) => c.path === 'e2eeEpochStaging:stageGroup')
+          .map((c) => c.args.includeReadback ?? null),
+        [true, null, null]
+      )
+    }
+  }
+})

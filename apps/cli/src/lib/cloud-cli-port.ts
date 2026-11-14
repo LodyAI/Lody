@@ -14,7 +14,7 @@ import { LODY_SERVER_URL } from '@/utils/const';
 import { SimulatorIceServersSchema } from '@/ios-simulator/webrtc-protocol';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
-import { api } from '@lody/cloud-api';
+import { api, makeInlineMailboxPut } from '@lody/cloud-api';
 import { e2eeHistoryPageSchema, e2eeMailboxReplySchemas } from './cloud-e2ee-replies';
 import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery';
 import {
@@ -342,6 +342,19 @@ export function createCloudE2eePort(
   };
   // Per port: a backend without inlined sharing originals costs one refused request.
   const inlineVersionReadHead = makeInlineVersionReadHead();
+  const inlineMailboxPut = makeInlineMailboxPut();
+  const inlineMailboxReads = new Map<string, string>();
+  const inlineMailboxStatuses = new Map<
+    string,
+    import('@lody/cloud-api').E2eeMailboxReplies['status']
+  >();
+  const cacheBounded = <V>(map: Map<string, V>, key: string, value: V) => {
+    if (map.size >= 512 && !map.has(key)) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    map.set(key, value);
+  };
   return {
     ...(irohRelays ? { irohRelays } : {}),
     machineSharing: {
@@ -458,14 +471,41 @@ export function createCloudE2eePort(
         epoch: z.number().int().nonnegative(),
         recipient: z.string(),
       });
+      const readKey = (workspaceId: string, credential: string, id: string) =>
+        `${workspaceId}\0${credential}\0${options.token ?? ''}\0${id}`;
+      const statusKey = (
+        workspaceId: string,
+        credential: string,
+        target: { genesis: string; epoch: number; recipient: string }
+      ) =>
+        `${workspaceId}\0${credential}\0${options.token ?? ''}\0${target.genesis}\0${target.epoch}\0${target.recipient}`;
       let reply: unknown;
       switch (method) {
-        case 'put':
-          reply = await connection.mutation(api.e2eeMailbox.put, {
-            ...common.extend({ id: z.string(), frameHex: z.string() }).parse(input),
-            ...(options.token === undefined ? {} : { cliToken: options.token }),
-          });
+        case 'put': {
+          const parsedPut = common.extend({ id: z.string(), frameHex: z.string() }).parse(input);
+          const rawReply = await inlineMailboxPut(
+            {
+              ...parsedPut,
+              ...(options.token === undefined ? {} : { cliToken: options.token }),
+            },
+            (args) => connection.mutation(api.e2eeMailbox.put, args)
+          );
+          const receipt = e2eeMailboxReplySchemas.put.parse(rawReply);
+          if (receipt !== null) {
+            cacheBounded(
+              inlineMailboxReads,
+              readKey(parsedPut.workspaceId, parsedPut.credential, parsedPut.id),
+              receipt.frameHex
+            );
+            cacheBounded(
+              inlineMailboxStatuses,
+              statusKey(parsedPut.workspaceId, parsedPut.credential, receipt.slot),
+              receipt.slot
+            );
+          }
+          reply = null;
           break;
+        }
         case 'report':
           reply = await connection.mutation(api.e2eeMailbox.report, {
             ...common
@@ -474,20 +514,33 @@ export function createCloudE2eePort(
             ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
-        case 'repair':
+        case 'repair': {
+          const parsedRepair = common
+            .extend({ slot, id: z.string(), rejectedDigest: z.string().optional() })
+            .parse(input);
+          inlineMailboxStatuses.delete(
+            statusKey(parsedRepair.workspaceId, parsedRepair.credential, parsedRepair.slot)
+          );
           reply = await connection.mutation(api.e2eeMailbox.repair, {
-            ...common
-              .extend({ slot, id: z.string(), rejectedDigest: z.string().optional() })
-              .parse(input),
+            ...parsedRepair,
             ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
-        case 'read':
-          reply = await connection.query(api.e2eeMailbox.read, {
-            ...common.extend({ id: z.string() }).parse(input),
-            ...(options.token === undefined ? {} : { cliToken: options.token }),
-          });
+        }
+        case 'read': {
+          const parsedRead = common.extend({ id: z.string() }).parse(input);
+          const cacheKey = readKey(parsedRead.workspaceId, parsedRead.credential, parsedRead.id);
+          if (inlineMailboxReads.has(cacheKey)) {
+            reply = inlineMailboxReads.get(cacheKey)!;
+            inlineMailboxReads.delete(cacheKey);
+          } else {
+            reply = await connection.query(api.e2eeMailbox.read, {
+              ...parsedRead,
+              ...(options.token === undefined ? {} : { cliToken: options.token }),
+            });
+          }
           break;
+        }
         case 'fetch':
           reply = await connection.query(api.e2eeMailbox.fetch, {
             ...common
@@ -500,12 +553,24 @@ export function createCloudE2eePort(
             ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
-        case 'status':
-          reply = await connection.query(api.e2eeMailbox.status, {
-            ...common.extend({ slot }).parse(input),
-            ...(options.token === undefined ? {} : { cliToken: options.token }),
-          });
+        case 'status': {
+          const parsedStatus = common.extend({ slot }).parse(input);
+          const cacheKey = statusKey(
+            parsedStatus.workspaceId,
+            parsedStatus.credential,
+            parsedStatus.slot
+          );
+          if (inlineMailboxStatuses.has(cacheKey)) {
+            reply = inlineMailboxStatuses.get(cacheKey)!;
+            inlineMailboxStatuses.delete(cacheKey);
+          } else {
+            reply = await connection.query(api.e2eeMailbox.status, {
+              ...parsedStatus,
+              ...(options.token === undefined ? {} : { cliToken: options.token }),
+            });
+          }
           break;
+        }
         default:
           throw new Error('e2ee_unknown_method');
       }

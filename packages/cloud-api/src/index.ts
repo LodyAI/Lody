@@ -97,6 +97,7 @@ export type {
 } from './e2ee-recovery-vault';
 import type {
   StageEpochGroupRequest,
+  StageEpochGroupReply,
   ReadEpochGroupRequest,
   DeleteEpochGroupRequest,
   EpochStagedGroupDto,
@@ -106,6 +107,7 @@ export type {
   EpochStagedEnvelopeDto,
   EpochStagedGroupDto,
   StageEpochGroupRequest,
+  StageEpochGroupReply,
   ReadEpochGroupRequest,
   DeleteEpochGroupRequest,
 } from './e2ee-epoch-staging';
@@ -561,7 +563,7 @@ export type CloudApi = {
     deleteUnreferenced: Mutation<RecoveryVaultDeleteRequest, { ok: true }>;
   };
   e2eeEpochStaging: {
-    stageGroup: Mutation<StageEpochGroupRequest, { ok: true }>;
+    stageGroup: Mutation<StageEpochGroupRequest, StageEpochGroupReply>;
     readGroup: Query<ReadEpochGroupRequest, EpochStagedGroupDto | null>;
     deleteGroup: Mutation<DeleteEpochGroupRequest, { ok: true; done: boolean }>;
   };
@@ -1268,6 +1270,55 @@ export type CloudApi = {
  * generated client would construct; `CloudApi` owns the public protocol types.
  */
 export const api = anyApi as unknown as CloudApi;
+
+/** Convex refuses an unknown argument with `ArgumentValidationError`, naming the field. */
+const rejectsOptionalField = (error: unknown, field: string) => {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return /ArgumentValidationError/.test(message) && message.includes(field);
+};
+/**
+ * Ask `e2eeMailbox.put` to inline `{ frameHex, slot }`, saving the separate `read` and `status`
+ * queries after each stored envelope. A backend that predates `includeReceipt` refuses it once;
+ * this client instance retries without the field and stops asking.
+ */
+export function makeInlineMailboxPut() {
+  let supported = true;
+  return async <A>(
+    input: E2eeMailboxRequests['put'],
+    call: (input: E2eeMailboxRequests['put']) => Promise<A>
+  ): Promise<A> => {
+    const { includeReceipt: _, ...plain } = input;
+    if (!supported) return call(plain);
+    try {
+      return await call({ ...plain, includeReceipt: true });
+    } catch (error) {
+      if (!rejectsOptionalField(error, 'includeReceipt')) throw error;
+      supported = false;
+      return call(plain);
+    }
+  };
+}
+/**
+ * Ask `e2eeEpochStaging.stageGroup` to inline the stored `group`, saving the post-stage
+ * `readGroup` query while keeping client-side `EpochPublisher` verification intact.
+ */
+export function makeInlineStageGroup() {
+  let supported = true;
+  return async <A>(
+    input: StageEpochGroupRequest,
+    call: (input: StageEpochGroupRequest) => Promise<A>
+  ): Promise<A> => {
+    const { includeReadback: _, ...plain } = input;
+    if (!supported) return call(plain);
+    try {
+      return await call({ ...plain, includeReadback: true });
+    } catch (error) {
+      if (!rejectsOptionalField(error, 'includeReadback')) throw error;
+      supported = false;
+      return call(plain);
+    }
+  };
+}
 
 /** Server-selected display terms. Checkout remains authoritative. */
 export interface ReferralPolicy {
