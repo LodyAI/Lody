@@ -11,7 +11,7 @@ import {
   hashRecordBytes
 } from '@lody/e2ee-core/protocol'
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '@lody/cloud-api'
+import { api, makeInlineMailboxPut, makeInlineStageGroup } from '@lody/cloud-api'
 import type {
   E2eeAppendRecordRequest,
   E2eeContentTokenRequest,
@@ -296,14 +296,29 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       bytes: number
     }
   >()
+  const inlineMailboxReads = new Map<string, string>()
+  const inlineMailboxStatuses = new Map<string, z.infer<typeof status>>()
+  const inlineStagedGroups = new Map<string, unknown>()
+  const cacheBounded = <V extends unknown>(map: Map<string, V>, key: string, value: V) => {
+    if (map.size >= 512 && !map.has(key)) {
+      const oldest = map.keys().next().value
+      if (oldest !== undefined) map.delete(oldest)
+    }
+    map.set(key, value)
+  }
   const close = Effect.sync(() => {
     reusable = undefined
     ledgerCaches.clear()
+    inlineMailboxReads.clear()
+    inlineMailboxStatuses.clear()
+    inlineStagedGroups.clear()
     owner.abort()
   })
   yield* Effect.addFinalizer(() => close)
-  // Per client: a backend without inlined sharing originals costs one refused request.
+  // Per client: a backend without inlined receipts/originals costs one refused request.
   const inlineVersionReadHead = makeInlineVersionReadHead()
+  const inlineMailboxPut = makeInlineMailboxPut()
+  const inlineStageGroup = makeInlineStageGroup()
   const fetch = input.fetch ?? globalThis.fetch
 
   function request<T>(
@@ -421,6 +436,29 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     const device = { ...access }
     const invalid = () =>
       new BackendError({ service: 'EpochStagingStore', reason: 'invalid-response' })
+    const groupCacheKey = (key: {
+      genesis: string
+      epoch: number
+      commitment: string
+      recordHash: string
+    }) =>
+      `${device.workspaceId}\0${device.credential}\0${device.cliToken ?? ''}\0${key.genesis}\0${key.epoch}\0${key.commitment}\0${key.recordHash}`
+    const verifyGroup = (
+      key: { genesis: string; epoch: number; commitment: string; recordHash: string },
+      value: unknown
+    ) => {
+      if (value === null) return Effect.succeed(null)
+      return Effect.fromResult(Result.mapError(decodeEpochStagedGroup(value), invalid)).pipe(
+        Effect.flatMap((group) =>
+          group.genesis === key.genesis &&
+          group.epoch === key.epoch &&
+          group.commitment === key.commitment &&
+          group.recordHash === key.recordHash
+            ? Effect.succeed(group)
+            : Effect.fail(invalid())
+        )
+      )
+    }
     return EpochStagingStore.of({
       stageGroup: (source) => {
         // Own and encode before yielding: re-running this Effect resends the
@@ -432,14 +470,19 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
           Effect.flatMap((group) =>
             request(
               (client) =>
-                client.mutation(api.e2eeEpochStaging.stageGroup, {
-                  ...device,
-                  group,
-                  ...(round ? { round } : {})
-                }),
-              z.object({ ok: z.literal(true) }),
+                inlineStageGroup({ ...device, group, ...(round ? { round } : {}) }, (args) =>
+                  client.mutation(api.e2eeEpochStaging.stageGroup, args)
+                ),
+              z.object({ ok: z.literal(true), group: z.unknown().optional() }),
               signal,
               true
+            ).pipe(
+              Effect.tap((reply) =>
+                Effect.sync(() => {
+                  if (reply.group !== undefined)
+                    cacheBounded(inlineStagedGroups, groupCacheKey(group), reply.group)
+                })
+              )
             )
           ),
           Effect.asVoid
@@ -449,28 +492,21 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         const original = ownEpochStagedGroupKey(sourceKey)
         return Effect.fromResult(Result.mapError(original, invalid)).pipe(
           Effect.flatMap((key) =>
-            request(
-              (client) => client.query(api.e2eeEpochStaging.readGroup, { ...device, key }),
-              z.unknown(),
-              signal,
-              true
-            ).pipe(
-              Effect.flatMap((value) => {
-                if (value === null) return Effect.succeed(null)
-                return Effect.fromResult(
-                  Result.mapError(decodeEpochStagedGroup(value), invalid)
-                ).pipe(
-                  Effect.flatMap((group) =>
-                    group.genesis === key.genesis &&
-                    group.epoch === key.epoch &&
-                    group.commitment === key.commitment &&
-                    group.recordHash === key.recordHash
-                      ? Effect.succeed(group)
-                      : Effect.fail(invalid())
-                  )
-                )
-              })
-            )
+            Effect.suspend(() => {
+              if (signal?.aborted || owner.signal.aborted) return Effect.fail(unavailable())
+              const cacheKey = groupCacheKey(key)
+              if (inlineStagedGroups.has(cacheKey)) {
+                const cached = inlineStagedGroups.get(cacheKey)
+                inlineStagedGroups.delete(cacheKey)
+                return verifyGroup(key, cached)
+              }
+              return request(
+                (client) => client.query(api.e2eeEpochStaging.readGroup, { ...device, key }),
+                z.unknown(),
+                signal,
+                true
+              ).pipe(Effect.flatMap((value) => verifyGroup(key, value)))
+            })
           )
         )
       },
@@ -479,6 +515,7 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         const occupiedSlot = { ...occupied }
         return Effect.fromResult(Result.mapError(original, invalid)).pipe(
           Effect.flatMap((key) => {
+            inlineStagedGroups.delete(groupCacheKey(key))
             if (
               occupiedSlot.epoch !== key.epoch ||
               !/^[0-9a-f]{64}$/.test(occupiedSlot.commitment) ||
@@ -513,19 +550,54 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       return request(work, schema, signal, true)
     }
     const device = { ...access }
+    const readCacheKey = (id: string) =>
+      `${device.workspaceId}\0${device.credential}\0${device.cliToken ?? ''}\0${id}`
+    const statusCacheKey = (target: { genesis: string; epoch: number; recipient: string }) =>
+      `${device.workspaceId}\0${device.credential}\0${device.cliToken ?? ''}\0${target.genesis}\0${target.epoch}\0${target.recipient}`
+    const verifyStatus = (
+      target: { genesis: string; epoch: number; recipient: string },
+      value: z.infer<typeof status>
+    ) =>
+      value.genesis === target.genesis &&
+      value.epoch === target.epoch &&
+      value.recipient === target.recipient
+        ? Effect.succeed(value)
+        : Effect.fail(new BackendError({ service: 'KeyMailbox', reason: 'invalid-response' }))
     return KeyMailbox.of({
       put: (id, frame) => {
         const frameHex = hex(frame)
         return boundRequest(
-          (client) => client.mutation(api.e2eeMailbox.put, { ...device, id, frameHex }),
-          z.null()
-        ).pipe(Effect.asVoid)
+          (client) =>
+            inlineMailboxPut({ ...device, id, frameHex }, (args) =>
+              client.mutation(api.e2eeMailbox.put, args)
+            ),
+          z.union([z.null(), z.object({ frameHex: bytesHex(512), slot: status })])
+        ).pipe(
+          Effect.tap((receipt) =>
+            Effect.sync(() => {
+              if (receipt !== null) {
+                cacheBounded(inlineMailboxReads, readCacheKey(id), receipt.frameHex)
+                cacheBounded(inlineMailboxStatuses, statusCacheKey(receipt.slot), receipt.slot)
+              }
+            })
+          ),
+          Effect.asVoid
+        )
       },
       read: (id) =>
-        boundRequest(
-          (client) => client.query(api.e2eeMailbox.read, { ...device, id }),
-          bytesHex(512).nullable()
-        ).pipe(Effect.map((value) => (value === null ? null : raw(value)))),
+        Effect.suspend(() => {
+          if (signal?.aborted || owner.signal.aborted) return Effect.fail(unavailable())
+          const cacheKey = readCacheKey(id)
+          if (inlineMailboxReads.has(cacheKey)) {
+            const cached = inlineMailboxReads.get(cacheKey)!
+            inlineMailboxReads.delete(cacheKey)
+            return Effect.succeed(raw(cached))
+          }
+          return boundRequest(
+            (client) => client.query(api.e2eeMailbox.read, { ...device, id }),
+            bytesHex(512).nullable()
+          ).pipe(Effect.map((value) => (value === null ? null : raw(value))))
+        }),
       fetch: (epoch, cursor, limit) =>
         boundRequest(
           (client) => client.query(api.e2eeMailbox.fetch, { ...device, epoch, cursor, limit }),
@@ -537,18 +609,19 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
           }))
         ),
       status: (target) =>
-        boundRequest(
-          (client) => client.query(api.e2eeMailbox.status, { ...device, slot: target }),
-          status
-        ).pipe(
-          Effect.flatMap((value) =>
-            value.genesis === target.genesis &&
-            value.epoch === target.epoch &&
-            value.recipient === target.recipient
-              ? Effect.succeed(value)
-              : Effect.fail(new BackendError({ service: 'KeyMailbox', reason: 'invalid-response' }))
-          )
-        ),
+        Effect.suspend(() => {
+          if (signal?.aborted || owner.signal.aborted) return Effect.fail(unavailable())
+          const cacheKey = statusCacheKey(target)
+          if (inlineMailboxStatuses.has(cacheKey)) {
+            const cached = inlineMailboxStatuses.get(cacheKey)!
+            inlineMailboxStatuses.delete(cacheKey)
+            return verifyStatus(target, cached)
+          }
+          return boundRequest(
+            (client) => client.query(api.e2eeMailbox.status, { ...device, slot: target }),
+            status
+          ).pipe(Effect.flatMap((value) => verifyStatus(target, value)))
+        }),
       report: (report, publication) => {
         const reportHex = hex(report),
           publicationHex = publication === undefined ? undefined : hex(publication)
@@ -563,16 +636,19 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         ).pipe(Effect.asVoid)
       },
       repair: (target, id, rejectedDigest) =>
-        boundRequest(
-          (client) =>
-            client.mutation(api.e2eeMailbox.repair, {
-              ...device,
-              slot: target,
-              id,
-              ...(rejectedDigest === undefined ? {} : { rejectedDigest })
-            }),
-          z.null()
-        ).pipe(Effect.asVoid)
+        Effect.suspend(() => {
+          inlineMailboxStatuses.delete(statusCacheKey(target))
+          return boundRequest(
+            (client) =>
+              client.mutation(api.e2eeMailbox.repair, {
+                ...device,
+                slot: target,
+                id,
+                ...(rejectedDigest === undefined ? {} : { rejectedDigest })
+              }),
+            z.null()
+          ).pipe(Effect.asVoid)
+        })
     })
   }
   return Object.freeze({

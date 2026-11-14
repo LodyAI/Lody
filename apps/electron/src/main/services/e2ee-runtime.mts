@@ -1172,8 +1172,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 if (mode === 'receive') {
                   // Only this device's own key, from a staged group or the mailbox. Queued
                   // installation reports, distribution and repair stay with a full round.
-                  const { currentReceiver, beforeReceive } = yield* prepareReceive()
+                  const { epoch, currentReceiver, beforeReceive } = yield* prepareReceive()
                   yield* beforeReceive
+                  if (Result.isSuccess(yield* Effect.result(keys.check(epoch)))) return undefined
                   yield* currentReceiver.resume(100, null)
                   yield* currentReceiver.fetchAndInstall(null, 100)
                   return undefined

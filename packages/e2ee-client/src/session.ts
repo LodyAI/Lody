@@ -381,6 +381,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               // distribution and repair stay with a full round.
               const receiver = Context.get(ctx, KeyReceiver);
               yield* beforeReceive;
+              if (
+                Result.isSuccess(
+                  yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch))
+                )
+              )
+                return { refreshRequired: false };
               yield* receiver.resume(100, null);
               const received = yield* receiver.fetchAndInstall(null, 100);
               return { refreshRequired: received.refreshRequired ?? false };

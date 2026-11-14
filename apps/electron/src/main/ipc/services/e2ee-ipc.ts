@@ -391,6 +391,11 @@ export class E2eeIpc extends ProductWindowIpcService {
     },
     clear: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>)
   }
+  private readonly pendingInlineHistory = new Map<string, E2eeWorkspaceHistoryPage>()
+  private retainInlineHistory(workspaceId: string, page: E2eeWorkspaceHistoryPage | undefined) {
+    if (page && page.workspaceId === workspaceId && page.recordsHex.length > 0)
+      this.pendingInlineHistory.set(workspaceId, page)
+  }
   private readonly keyDelivery = makeDesktopKeyDelivery({
     identity: () => getIpcServiceDeps().authService.getCachedSessionIdentity(),
     now: () => this.keyDeliveryNow(),
@@ -414,6 +419,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     latestFailure: () => this.pairingFailure,
     // Late-bound: the same renderer-facing status and refresh, under this sender.
     status: (workspaceId) => this.status(workspaceId),
+    retainInlineHistory: (workspaceId, page) => this.retainInlineHistory(workspaceId, page),
     refresh: (workspaceId, options) => this.refresh(workspaceId, options),
     remoteMachineEndpoints: () => ({
       deploymentUrl: new URL(import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '').origin,
@@ -849,7 +855,9 @@ export class E2eeIpc extends ProductWindowIpcService {
     let primary: unknown
     if (pending) {
       try {
-        await Effect.runPromise(cloud.client.appendRecord(pending))
+        const appended = await Effect.runPromise(cloud.client.appendRecord(pending))
+        if (appended?.status === 'committed')
+          this.retainInlineHistory(workspaceId, appended.historyPage)
       } catch (cause) {
         if (accessLoss(cause)) return this.removeLocalWorkspace(access, accessLoss(cause)!)
         primary = cause
@@ -1457,7 +1465,9 @@ export class E2eeIpc extends ProductWindowIpcService {
       this.assertPersonalApproval(approval)
       let appendFailure: unknown
       try {
-        await Effect.runPromise(cloud.client.appendRecord(pending))
+        const appended = await Effect.runPromise(cloud.client.appendRecord(pending))
+        if (appended?.status === 'committed')
+          this.retainInlineHistory(workspaceId, appended.historyPage)
       } catch (error) {
         appendFailure = error
       }
@@ -1749,8 +1759,21 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
     await this.open(workspaceId)
     try {
+      if (history) {
+        for (const page of history) {
+          const ingest = await withDesktopE2eeAccount(
+            (owner) =>
+              owner.accountId === cloud.accountId
+                ? Effect.succeed(owner.host.ingestLedgerRecords(workspaceId, page))
+                : Effect.fail(new Error('e2ee_account_mismatch')),
+            workspaceId,
+            false
+          )
+          await runDesktopE2eeOperation(cloud.accountId, ingest)
+        }
+      }
       try {
-        await this.refresh(workspaceId)
+        await this.refresh(workspaceId, { keyMode: 'receive' })
       } catch (error) {
         this.pairingFailure = error
       }
@@ -1788,6 +1811,8 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
   }
   private async refreshLedger(workspaceId: string, options?: E2eeRefreshOptions) {
+    const retainedInline = this.pendingInlineHistory.get(workspaceId)
+    this.pendingInlineHistory.delete(workspaceId)
     if (
       options !== undefined &&
       (typeof options !== 'object' ||
@@ -1818,24 +1843,35 @@ export class E2eeIpc extends ProductWindowIpcService {
     let after = access.status.position ?? undefined
     let cursor: string | undefined
     let checkpoint: import('@lody/cloud-api').E2eeLedgerCheckpoint | undefined
+    let useInline =
+      retainedInline !== undefined &&
+      retainedInline.workspaceId === workspaceId &&
+      retainedInline.genesisHash === access.status.genesisHash &&
+      retainedInline.startIndex === access.status.length &&
+      retainedInline.recordsHex.length > 0 &&
+      retainedInline.checkpoint.length ===
+        retainedInline.startIndex + retainedInline.recordsHex.length &&
+      retainedInline.nextCursor === null
     do {
-      const page = await Effect.runPromise(
-        cloud.client.history({
-          workspaceId,
-          ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
-        })
-      ).catch(async (error) => {
-        try {
-          await Effect.runPromise(
-            cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
-          )
-        } catch (checked) {
-          if (accessLoss(checked)) {
-            return this.removeLocalWorkspace(access, accessLoss(checked)!)
-          }
-        }
-        throw error
-      })
+      const page = useInline
+        ? ((useInline = false), retainedInline!)
+        : await Effect.runPromise(
+            cloud.client.history({
+              workspaceId,
+              ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
+            })
+          ).catch(async (error) => {
+            try {
+              await Effect.runPromise(
+                cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
+              )
+            } catch (checked) {
+              if (accessLoss(checked)) {
+                return this.removeLocalWorkspace(access, accessLoss(checked)!)
+              }
+            }
+            throw error
+          })
       checkpoint ??= page.checkpoint
       const ingest = await withDesktopE2eeAccount(
         (owner) =>

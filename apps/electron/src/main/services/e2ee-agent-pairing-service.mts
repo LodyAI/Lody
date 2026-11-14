@@ -37,6 +37,10 @@ export interface DesktopAgentPairingPorts {
   latestFailure(): unknown
   /** The renderer-facing status and refresh of the same sender (`E2eeIpc`). */
   status(workspaceId: string): Promise<{ hasCurrentKey: boolean }>
+  retainInlineHistory?(
+    workspaceId: string,
+    page: import('@lody/cloud-api').E2eeWorkspaceHistoryPage | undefined
+  ): void
   refresh(workspaceId: string, options?: E2eeRefreshOptions): Promise<unknown>
   /** Origins a remote machine offer names for this deployment. */
   remoteMachineEndpoints(): { deploymentUrl: string; ingressUrl: string }
@@ -230,6 +234,8 @@ export function makeDesktopAgentPairing(ports: DesktopAgentPairingPorts) {
         // Verified readback below decides; a lost acknowledgement is only a diagnostic.
         const appended = yield* Effect.exit(cloud.client.appendRecord(pending.request))
         if (Exit.isFailure(appended)) ports.remember(Cause.squash(appended.cause))
+        else if (appended.value?.status === 'committed')
+          ports.retainInlineHistory?.(workspaceId, appended.value.historyPage)
       } else {
         const credential = yield* same(pending.accountId, workspaceId, id, (owner) =>
           owner.bootstrap.deviceCredential(workspaceId)
@@ -237,7 +243,13 @@ export function makeDesktopAgentPairing(ports: DesktopAgentPairingPorts) {
         yield* cloud.client.machineAuthorizeExisting({ workspaceId, pairingSessionId, credential })
       }
       // Refresh reads back the original and drives resumable key distribution.
-      yield* promised(() => ports.refresh(workspaceId))
+      const holdsKey = yield* promised(() => ports.status(workspaceId)).pipe(
+        Effect.map((status) => status.hasCurrentKey),
+        Effect.orElseSucceed(() => false)
+      )
+      yield* promised(() =>
+        ports.refresh(workspaceId, { keyMode: holdsKey ? 'distribute' : 'full' })
+      )
       yield* same(pending.accountId, workspaceId, id, (owner) =>
         owner.host.confirmRemoteMachine(workspaceId, pairingSessionId)
       )
@@ -342,6 +354,8 @@ export function makeDesktopAgentPairing(ports: DesktopAgentPairingPorts) {
         // Its journal retains the same request and signature for the next attempt.
         const appended = yield* Effect.exit(cloud.client.appendRecord(pending.request))
         if (Exit.isFailure(appended)) appendFailure = Cause.squash(appended.cause)
+        else if (appended.value?.status === 'committed')
+          ports.retainInlineHistory?.(workspaceId, appended.value.historyPage)
       }
       // The new agent only needs this device's envelope for the current epoch. A device
       // that already holds that key distributes alone; one without it keeps the full

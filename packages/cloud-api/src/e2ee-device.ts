@@ -24,8 +24,9 @@ export type E2eeMailboxStatus = E2eeMailboxSlot & {
   revision: number;
   status: 'NeedsEnvelope' | 'EnvelopeStored' | 'InstallationReported' | 'Ineligible' | 'Obsolete';
 };
+export type E2eeMailboxPutReceipt = { frameHex: string; slot: E2eeMailboxStatus };
 export type E2eeMailboxRequests = {
-  put: E2eeDeviceAccess & { id: string; frameHex: string };
+  put: E2eeDeviceAccess & { id: string; frameHex: string; includeReceipt?: true };
   read: E2eeDeviceAccess & { id: string };
   fetch: E2eeDeviceAccess & { epoch: number; cursor: string | null; limit: number };
   status: E2eeDeviceAccess & { slot: E2eeMailboxSlot };
@@ -33,7 +34,7 @@ export type E2eeMailboxRequests = {
   repair: E2eeDeviceAccess & { slot: E2eeMailboxSlot; id: string; rejectedDigest?: string };
 };
 export type E2eeMailboxReplies = {
-  put: null;
+  put: E2eeMailboxPutReceipt | null;
   read: string | null;
   fetch: { items: { sender: string; frameHex: string }[]; next: string | null };
   status: E2eeMailboxStatus;
