@@ -745,7 +745,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             )
               yield* (yield* ensureRepair(keyScope, mailbox)).flush();
             yield* receiver.resume();
-            for (let cursor: string | null = null; ; ) {
+            for (let cursor: string | null = null; ;) {
               const page: { readonly processed: number; readonly next: string | null } =
                 yield* receiver.fetchAndInstall(cursor, 100).pipe(
                   Effect.catchTag('MailboxInstallError', (error) =>
