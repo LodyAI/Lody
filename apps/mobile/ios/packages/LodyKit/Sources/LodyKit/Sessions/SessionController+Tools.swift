@@ -1,5 +1,4 @@
 import LodyCore
-import SafariServices
 import UIKit
 
 extension SessionController {
@@ -178,7 +177,10 @@ extension SessionController {
         if action == "copy" {
           UIPasteboard.general.string = address
           LodyToastOverlay.shared.show(message: String(localized: "session.preview.copied", bundle: .lody), kind: .neutral)
-        } else { present(SFSafariViewController(url: url), animated: true) }
+        } else {
+          // Embedded beside the conversation on iPad (inspector column), a sheet on compact widths.
+          LodyShell.shared.presentDetail(BrowserPreviewController(url: url), title: String(localized: "session.preview.title", bundle: .lody), from: self)
+        }
       } catch {
         guard viewIfLoaded?.window != nil else { return }
         let alert = UIAlertController(title: String(localized: "session.preview.failed", bundle: .lody), message: String(describing: error), preferredStyle: .alert)

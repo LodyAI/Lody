@@ -7223,23 +7223,6 @@
         }
       }
     },
-    "detail.rawOutput": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "原始输出"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Raw output"
-          }
-        }
-      }
-    },
     "detail.truncated": {
       "extractionState": "manual",
       "localizations": {
@@ -31359,6 +31342,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "在「设置 → Agent」里为它配置 Agent。"
+          }
+        }
+      }
+    },
+    "session.preview.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预览"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview"
+          }
+        }
+      }
+    },
+    "session.preview.reload": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新加载"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload"
+          }
+        }
+      }
+    },
+    "session.preview.openInSafari": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Safari 中打开"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in Safari"
+          }
+        }
+      }
+    },
+    "detail.terminalStreaming": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "终端输出正在 CLI 中实时显示"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminal output is streaming in your CLI"
+          }
+        }
+      }
+    },
+    "detail.earlierOutputHidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更早的输出未显示"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Earlier output not shown"
           }
         }
       }

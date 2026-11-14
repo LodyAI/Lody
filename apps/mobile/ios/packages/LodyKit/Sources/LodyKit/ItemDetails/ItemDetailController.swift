@@ -7,8 +7,14 @@ class ItemDetailController: UIViewController {
   private let scroll = UIScrollView()
   private let stack = UIStackView()
   private var expanded: Set<String> = []
+  /// The step's ACP kind and title from its transcript summary; they decide shell and prose rules.
+  private let kind: String?
+  private let stepTitle: String?
 
-  init(sessionId: String, entryId: String, itemIds: [String], generation: Int, service: ItemDetailService? = nil) {
+  init(sessionId: String, entryId: String, itemIds: [String], generation: Int, service: ItemDetailService? = nil,
+       kind: String? = nil, title: String? = nil) {
+    self.kind = kind
+    stepTitle = title
     store = ItemDetailStore(sessionId: sessionId, entryId: entryId, itemIds: itemIds, generation: generation,
                             service: service ?? .live(sessionId: sessionId))
     super.init(nibName: nil, bundle: nil)
@@ -70,9 +76,10 @@ class ItemDetailController: UIViewController {
     for id in store.itemIds {
       let item = store.items[id]
       if let detail = item?.detail {
-        for block in detail.blocks { stack.addArrangedSubview(ItemDetailBlockView.make(block)) }
+        for view in ItemDetailBlockView.views(blocks: detail.blocks, rawOutput: detail.rawOutput, kind: kind, title: stepTitle) {
+          stack.addArrangedSubview(view)
+        }
         raw(detail.rawInput, key: id + ":input", title: "detail.rawInput")
-        raw(detail.rawOutput, key: id + ":output", title: "detail.rawOutput")
         if detail.truncated {
           stack.addArrangedSubview(ItemDetailBlockView.text(String(localized: "detail.truncated", bundle: .lody), color: .secondaryLabel, monospaced: false))
           stack.addArrangedSubview(button("detail.loadMore", id: "item-detail-more-" + id, enabled: item?.loading != true) { [weak self] in

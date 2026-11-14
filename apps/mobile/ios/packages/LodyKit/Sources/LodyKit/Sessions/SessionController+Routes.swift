@@ -159,7 +159,7 @@ extension SessionController {
       return
     }
     let page = ItemDetailController(sessionId: sessionId, entryId: entryId, itemIds: [itemId], generation: feed?.generation ?? 0,
-                                    service: itemDetailService)
+                                    service: itemDetailService, kind: item["kind"] as? String, title: item["title"] as? String)
     LodyShell.shared.presentNative(page, title: String(localized: "detail.title", bundle: .lody), detents: [0.6, 1], grabber: true)
   }
 
