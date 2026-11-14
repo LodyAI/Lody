@@ -64,7 +64,12 @@ export type E2eeMachineSharingRequests = {
 export type E2eeMachineSharingReplies = {
   /** An active head may inline its original (`includeVersion`). Clients verify it exactly as a
    * `readVersion` reply and never persist it as part of the head. */
-  readHead: (E2eeMachineSharingHeadState & { version?: E2eeMachineSharingVersion }) | null;
+  readHead:
+    | (Extract<E2eeMachineSharingHeadState, { status: 'active' }> & {
+        version?: E2eeMachineSharingVersion;
+      })
+    | E2eeMachineSharingRemovedHead
+    | null;
   /** Missing or purged ciphertext may return null; readHead still preserves the removed high water. */
   readVersion: E2eeMachineSharingReadResult;
   readRequest: E2eeMachineSharingReadResult;
