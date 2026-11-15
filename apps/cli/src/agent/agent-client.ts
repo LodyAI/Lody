@@ -831,8 +831,8 @@ export class AgentClient implements acp.Client {
   }
 
   /**
-   * acp-extension-claude >= 0.44.0 surfaces AskUserQuestion as an ACP form
-   * elicitation rather than a permission request. Bridge it onto the existing
+   * Supported agents surface questions as an ACP form elicitation rather than
+   * a permission request. Bridge them onto the existing
    * AskUserQuestion permission flow: parse the form back into question metadata,
    * synthesize the permission request the UI already renders, then fold the
    * user's answers back into the elicitation response. Url-mode and non-question
@@ -843,7 +843,13 @@ export class AgentClient implements acp.Client {
     params: acp.CreateElicitationRequest
   ): Promise<acp.CreateElicitationResponse> {
     if (!this.isKnownSubagentInteraction(params._meta)) return { action: 'decline' };
-    const elicitation = parseAskUserQuestionElicitationRequest(params);
+    const elicitation = parseAskUserQuestionElicitationRequest(
+      params,
+      this.options.agentConfig?.cliType === 'builtin' &&
+        this.options.agentConfig.agentType === 'antigravity'
+        ? 'antigravity'
+        : undefined
+    );
     if (!elicitation) {
       this.logger.debug(
         `[${this.options.sessionId}] Declining unsupported elicitation (mode=${(params as { mode?: unknown }).mode})`

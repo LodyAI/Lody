@@ -1394,6 +1394,58 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
     });
   });
 
+  it.each([
+    { answer: 'CSV', expected: { q1: '2' } },
+    { answer: 'XML', expected: { q1_other: 'XML' } },
+  ])('bridges native Antigravity questions and submits $answer', async ({ answer, expected }) => {
+    const { client, onRequestPermission } = createTestClient({ agentType: 'antigravity' });
+    onRequestPermission.mockResolvedValueOnce({
+      outcome: {
+        outcome: 'selected',
+        optionId: 'answer',
+        _meta: { lody: { elicitation: { version: 1, answers: { q1: answer } } } },
+      },
+    } as unknown as Awaited<ReturnType<typeof onRequestPermission>>);
+    const request = {
+      mode: 'form',
+      sessionId: 'acp-test',
+      toolCallId: 'native-question',
+      message: 'The agent has a question.',
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          q1: {
+            type: 'string',
+            title: 'Which format?',
+            oneOf: [
+              { const: '1', title: 'JSON' },
+              { const: '2', title: 'CSV' },
+            ],
+          },
+          q1_other: { type: 'string', title: 'Other' },
+        },
+      },
+    } as unknown as CreateElicitationRequest;
+    await expect(client.unstable_createElicitation(request)).resolves.toEqual({
+      action: 'accept',
+      content: expected,
+    });
+    const calls = onRequestPermission.mock.calls as unknown as Array<
+      [string, RequestPermissionRequest]
+    >;
+    expect(calls[0]?.[1].toolCall.toolCallId).toBe('native-question');
+    expect(parseAskUserQuestionPermissionMeta(calls[0]?.[1]._meta)?.questions).toEqual([
+      {
+        id: 'q1',
+        question: 'Which format?',
+        header: '',
+        options: [{ label: 'JSON' }, { label: 'CSV' }],
+        multiSelect: false,
+        allowCustomAnswer: true,
+      },
+    ]);
+  });
+
   it('bridges a Droid question and returns its custom answer in the expected fields', async () => {
     const { client, onRequestPermission } = createTestClient({
       cliType: 'registry',

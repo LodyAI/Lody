@@ -592,7 +592,7 @@ describe('AskUserQuestionCard answer notes', () => {
   });
 });
 
-describe('Droid question card', () => {
+describe('Provider question cards', () => {
   let root: Root;
   let container: HTMLDivElement;
   beforeEach(async () => {
@@ -605,6 +605,60 @@ describe('Droid question card', () => {
     flushSync(() => root.unmount());
     container.remove();
   });
+  it('shows the native agy prompt and choices and submits its option ID', () => {
+    const elicitation = parseAskUserQuestionElicitationRequest(
+      {
+        mode: 'form',
+        message: 'The agent has a question.',
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            q1: {
+              type: 'string',
+              title: 'Which format?',
+              oneOf: [
+                { const: '1', title: 'JSON' },
+                { const: '2', title: 'CSV' },
+              ],
+            },
+            q1_other: { type: 'string', title: 'Other' },
+          },
+        },
+      },
+      'antigravity'
+    )!;
+    let answers: AskUserQuestionAnswers | undefined;
+    flushSync(() =>
+      root.render(
+        createElement(AskUserQuestionCard, {
+          meta: elicitation.meta,
+          mode: {
+            kind: 'interactive',
+            isReady: true,
+            isPendingSubmit: false,
+            isPendingCancel: false,
+            disabled: false,
+            onSubmit: (value) => {
+              answers = value;
+            },
+            onCancel: () => {},
+          },
+        })
+      )
+    );
+    expect(container.textContent).toContain('Which format?');
+    expect(container.textContent).not.toContain('The agent has a question.');
+    expect(getButton(container, 'JSON')).toBeDefined();
+    flushSync(() => getButton(container, 'CSV').click());
+    flushSync(() => getButton(container, 'Submit').click());
+    expect(answers).toEqual({ q1: 'CSV' });
+    const outcome = createAskUserQuestionPermissionOutcome('answer', answers!, elicitation.meta);
+    expect(buildAskUserQuestionElicitationResponse(elicitation, { outcome })).toEqual({
+      action: 'accept',
+      content: { q1: '2' },
+    });
+  });
+
   it('shows the question and readable choices and returns the chosen Droid value', () => {
     const elicitation = parseAskUserQuestionElicitationRequest({
       mode: 'form',
