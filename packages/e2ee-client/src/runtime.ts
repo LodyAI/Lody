@@ -36,6 +36,16 @@ import { decodeMemberKeyPackage } from './member';
 import { captureSeal, captureOpen, capturePage } from './runtime-input';
 import type { PersonalKeyRoundMode } from './maintenance';
 
+const isAllowedGatewayUrl = (rawUrl: unknown): boolean => {
+  if (typeof rawUrl !== 'string' || !rawUrl) return false;
+  const url = new URL(rawUrl);
+  if (url.protocol === 'https:') return true;
+  return (
+    url.protocol === 'http:' &&
+    (url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]')
+  );
+};
+
 const requesters = new WeakMap<E2eeWorkspaceRuntime, AccountPairingIdentityHost>();
 /** Purpose-bound account-pairing operations on this runtime's existing owned host.
  * Returns null for foreign runtimes; never constructs another identity owner. */
@@ -907,7 +917,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               return yield* fail('invalid-input');
             yield* Effect.try({
               try: () => {
-                if (new URL(grant.gatewayBaseUrl).protocol !== 'https:') throw new Error();
+                if (!isAllowedGatewayUrl(grant.gatewayBaseUrl)) throw new Error();
               },
               catch: () => fail('invalid-input'),
             });
