@@ -102,9 +102,30 @@ type TerminalOutputAccumulator = {
 
 type TerminalOutputState = Map<string, TerminalOutputAccumulator>;
 
+/**
+ * Running non-terminal tool text, per toolCallId. ACP content is a snapshot that
+ * replaces the previous one, but every replaced CRDT write stays in the document
+ * history. Once a call has written its budget, later snapshots wait in memory and
+ * only the last one is stored when the call ends.
+ */
+type RunningToolTextAccumulator = {
+  written: number;
+  deferred?: AcpToolCallUpdateContent;
+};
+
+type RunningToolTextState = Map<string, RunningToolTextAccumulator>;
+
+type AcpToolCallUpdateContent = NonNullable<
+  Extract<AcpSessionNotification['update'], { sessionUpdate: 'tool_call_update' }>['content']
+>;
+
+/** Text a single running tool call may write to history before it is deferred. */
+const RUNNING_TOOL_TEXT_HISTORY_BUDGET = 64 * 1024;
+
 const enrichmentStateByDoc = new WeakMap<SessionDocument, EnrichmentState>();
 const subagentEnrichmentByDoc = new WeakMap<SessionDocument, Map<string, EnrichmentState>>();
 const terminalOutputStateByDoc = new WeakMap<SessionDocument, TerminalOutputState>();
+const runningToolTextStateByDoc = new WeakMap<SessionDocument, RunningToolTextState>();
 
 const getEnrichmentState = (doc: SessionDocument): EnrichmentState => {
   let state = enrichmentStateByDoc.get(doc);
@@ -120,6 +141,15 @@ const getTerminalOutputState = (doc: SessionDocument): TerminalOutputState => {
   if (!state) {
     state = new Map();
     terminalOutputStateByDoc.set(doc, state);
+  }
+  return state;
+};
+
+const getRunningToolTextState = (doc: SessionDocument): RunningToolTextState => {
+  let state = runningToolTextStateByDoc.get(doc);
+  if (!state) {
+    state = new Map();
+    runningToolTextStateByDoc.set(doc, state);
   }
   return state;
 };
@@ -238,8 +268,15 @@ export const handleACPUpdateMessage = async (
   }
   const terminalOutputState = getTerminalOutputState(doc);
   const terminalOutputSnapshot = cloneTerminalOutputState(terminalOutputState);
+  const runningToolTextState = getRunningToolTextState(doc);
+  const runningToolTextSnapshot = new Map(
+    [...runningToolTextState].map(([id, running]) => [id, { ...running }])
+  );
   const persistable = filterNotificationsForHistory(
-    compactTerminalNotificationsForHistory(enrichedBatch, terminalOutputState),
+    boundRunningToolTextForHistory(
+      compactTerminalNotificationsForHistory(enrichedBatch, terminalOutputState),
+      runningToolTextState
+    ),
     valid.operationIds
   );
   const persistableBatch = persistable.notifications;
@@ -399,6 +436,8 @@ export const handleACPUpdateMessage = async (
     // write. Restore it when that write fails so retrying the original terminal
     // notification can still emit the accumulated output.
     restoreTerminalOutputState(terminalOutputState, terminalOutputSnapshot);
+    runningToolTextState.clear();
+    for (const [id, running] of runningToolTextSnapshot) runningToolTextState.set(id, running);
     throw error;
   }
 
@@ -1002,7 +1041,7 @@ const compactTerminalNotificationsForHistory = (
     if (message.update.sessionUpdate !== 'tool_call_update') return message;
 
     const { toolCallId, status } = message.update;
-    const extracted = terminalOutputFromNotification(message);
+    const extracted = terminalOutputFromNotification(message) ?? runningExecuteTextOutput(message);
     if (extracted) {
       const previous = state.get(toolCallId);
       state.set(toolCallId, {
@@ -1039,6 +1078,62 @@ const compactTerminalNotificationsForHistory = (
         ],
       },
     } as AcpSessionNotification;
+  });
+
+/**
+ * A running execute call's plain `content` text is a terminal snapshot even when
+ * no structured or fenced form identifies it. Completion updates keep their own
+ * path: enrichment turns their text into `rawOutput`.
+ */
+const runningExecuteTextOutput = (
+  message: AcpSessionNotification
+): TerminalOutputAccumulator | undefined => {
+  const update = message.update;
+  if (update.sessionUpdate !== 'tool_call_update') return undefined;
+  if (update.status === 'completed' || update.status === 'failed') return undefined;
+  if (update.kind !== 'execute' || !Array.isArray(update.content)) return undefined;
+  const texts = extractTextFromContentBlocks(update.content);
+  if (texts.length === 0) return undefined;
+  return { output: texts.join('\n'), truncated: false };
+};
+
+const toolTextLength = (content: AcpToolCallUpdateContent): number =>
+  extractTextFromContentBlocks(content).reduce((total, text) => total + text.length, 0);
+
+/**
+ * Bounds how much replaced running-tool text a call can leave in the CRDT
+ * history. Read/edit payloads are stripped by the shared compactor, and
+ * execute output has already been reduced to a terminal tail above.
+ */
+const boundRunningToolTextForHistory = (
+  batch: AcpSessionNotification[],
+  state: RunningToolTextState
+): AcpSessionNotification[] =>
+  batch.map((message) => {
+    const update = message.update;
+    if (update.sessionUpdate !== 'tool_call_update') return message;
+    const id = update.toolCallId;
+    if (update.status === 'completed' || update.status === 'failed') {
+      const running = state.get(id);
+      state.delete(id);
+      if (!running?.deferred || update.content !== undefined) return message;
+      return { ...message, update: { ...update, content: running.deferred } };
+    }
+    if (update.kind === 'read' || update.kind === 'edit' || !Array.isArray(update.content)) {
+      return message;
+    }
+    const length = toolTextLength(update.content);
+    if (length === 0) return message;
+    const running = state.get(id) ?? { written: 0 };
+    state.set(id, running);
+    if (!running.deferred && running.written + length <= RUNNING_TOOL_TEXT_HISTORY_BUDGET) {
+      running.written += length;
+      return message;
+    }
+    running.deferred = update.content;
+    const withoutContent = { ...update };
+    delete withoutContent.content;
+    return { ...message, update: withoutContent };
   });
 
 const filterNotificationsForHistory = (
