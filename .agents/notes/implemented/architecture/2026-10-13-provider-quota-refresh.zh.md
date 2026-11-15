@@ -12,7 +12,7 @@ Composer 和 Agent 设置原先只展示缓存额度，没有主动获取当前�
 
 ## 契约与职责
 
-Core 已定义 `_lody/rate_limits/get` 和 `{version: 1, query?: true}`，共享查询契约保持不变。展示要求运行时能力声明或官方 Antigravity 兼容读取器；刷新额外要求 `query: true` 和 Machine 协议 `providerRateLimitsRefresh: 1`。仅支持推送的 Provider 可以展示缓存。builtin 的环境变量／品牌覆盖配置和 Codex API-key profile 仍不适用；自定义 ACP Provider 对自己声明的账户语义负责。
+Core 已定义 `_lody/rate_limits/get` 和 `{version: 1, query?: true}`，共享查询契约保持不变。展示要求运行时能力声明或官方 Antigravity 兼容读取器；刷新额外要求 `query: true` 和 Machine 协议 `providerRateLimitsRefresh: 1`。仅支持推送的 Provider 可以展示缓存。builtin 的凭据／账户覆盖配置、品牌路由和 Codex API-key profile 仍不适用；自定义 ACP Provider 对自己声明的账户语义负责。
 
 共享 UI hook 在 composer／Provider 激活、页面回到前台、popover 打开时刷新。workspace runtime 合并请求，使用已有本地控制或 Machine RPC 路由，随后协调已有 Flock handle。没有轮询、新订阅、猜测百分比或加载遮罩。
 
@@ -30,7 +30,7 @@ Google registry ACP server 1.4.5 声明 `/usage`，但未声明 Core `rateLimits
 
 ## 内置 Antigravity
 
-内置 Provider 运行官方 agy，额度查询使用与 ACP 会话相同的已选可执行文件和账户环境。它执行 `--print /usage --output-format json`，要求返回成功的 `usage` 命令且 `num_turns: 0`，严格验证每组 weekly／5h 的剩余比例和重置时间。Lody 不读取凭据。额外启动参数和 Magpie 路由暂不支持此读取器，避免查询到另一个账户。输出未知或格式错误时保留缓存额度。
+内置 Provider 运行官方 agy，额度查询使用与 ACP 会话相同的已选可执行文件和账户环境。它执行 `--print /usage --output-format json`，要求返回成功的 `usage` 命令且 `num_turns: 0`，严格验证每组 weekly／5h 的剩余比例和重置时间。Lody 不读取凭据。额外启动参数和 Magpie 路由暂不支持此读取器，避免查询到另一个账户。输出未知或格式错误时保留缓存额度。内置 Antigravity 允许经过核对的代理和语言环境设置，未知环境变量仍不适用。探测与真实会话快照投影相同的兼容能力，原生 Core 声明保持优先，避免缓存 writer 一概保留过时能力。
 
 这个有时限的只读子进程由原生 Effect 命令持有：Provider 刷新触发它，取消／超时终止进程树，完成和失败交回既有刷新所有者。不创建 ACP 会话或模型轮次。上层 Provider 缓存与 ACP 流程仍保留既有 Promise 边界。新 builtin 使用独立身份；弃用的 registry Provider 保留旧启动器和会话，不做静默改写。
 

@@ -12,7 +12,7 @@ Composer and Agent settings previously displayed quota without asking for a curr
 
 ## Contract and ownership
 
-Core already defines `_lody/rate_limits/get` and `{version: 1, query?: true}`. The shared Core query contract remains unchanged. Display requires a runtime declaration or an official Antigravity compatibility reader; refresh additionally requires `query: true` and Machine protocol `providerRateLimitsRefresh: 1`. Push-only providers can display existing quota. Builtin environment/brand overrides and Codex API-key profiles remain ineligible; custom ACP providers own their declared account semantics.
+Core already defines `_lody/rate_limits/get` and `{version: 1, query?: true}`. The shared Core query contract remains unchanged. Display requires a runtime declaration or an official Antigravity compatibility reader; refresh additionally requires `query: true` and Machine protocol `providerRateLimitsRefresh: 1`. Push-only providers can display existing quota. Builtin credential/account overrides, brand routes, and Codex API-key profiles remain ineligible; custom ACP providers own their declared account semantics.
 
 The UI hook refreshes on visible composer/provider activation, foreground return, and popover opening. The workspace runtime coalesces requests and uses its existing local-control or Machine RPC route, then reconciles existing Flock handles. There is no polling, new subscription, guessed percentage, or loading overlay.
 
@@ -36,7 +36,7 @@ selected executable and account environment as the ACP session. It invokes
 `num_turns: 0`, and validates all reported weekly/five-hour fractions and reset
 instants. No credentials are read by Lody. Account-selecting extra arguments and
 Magpie routing remain unsupported for this reader rather than selecting a
-different account. Unknown/malformed output preserves cached quota.
+different account. Unknown/malformed output preserves cached quota. Builtin Antigravity permits audited proxy and locale environment settings; unknown keys remain ineligible. Probe and live-session snapshots project the same compatibility capability, while native Core declarations stay authoritative. This avoids preserving stale capability flags generically in the cache writer.
 
 A native Effect command owns this bounded read-only process: the Provider refresh
 starts it, cancellation/timeout terminates its tree, and completion or failure
