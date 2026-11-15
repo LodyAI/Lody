@@ -29,8 +29,8 @@ public failure projection, then delegates. Key delivery lives in
 lives in `services/e2ee-agent-pairing-service.mts`. Those modules receive the validated
 reader id and must not become renderer-facing.
 
-Confirm the signed admission through ledger-only refresh before publishing its
-invitation. Key distribution belongs to the existing account/workspace-bound main
+Confirm and persist the signed admission through the verified ledger feed, using
+inline originals or a ledger-only refresh, before publishing its invitation. Key distribution belongs to the existing account/workspace-bound main
 owner and must not block the approval response. Register that delivery before the
 publication await so reset or sign-out can stop it; a late publication result must
 never recreate a stopped task. Invitation publication is not key receipt or content

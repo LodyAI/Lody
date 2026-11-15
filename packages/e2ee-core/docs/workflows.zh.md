@@ -97,6 +97,10 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyMailbox`、
 
 ## KeyDistributor
 
+可选 `prepareDelivery(recipient)` 使用已安装的当前密钥，认证并保存相同的不可变 outbox 原件，
+不访问远端信箱。账号级批量中继可发送返回的 `{ id, frame }`；准备完成不代表收件设备已安装密钥。
+重试或重开后的普通分发继续复用这份原件。
+
 _需要接收者的全部端口，外加 `KeyReceiver`、`DeliveryOutbox`、`DistributionJournal`、`EpochPublicationSource`。_
 
 确保每台当前设备都能拿到当前密钥。

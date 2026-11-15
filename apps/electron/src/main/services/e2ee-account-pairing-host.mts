@@ -6,11 +6,16 @@ import type {
   E2eeAppendRecordRequest,
   E2eeDeviceAccess,
   E2eeWorkspaceHistoryPage,
+  E2eeAppendRecordReply,
+  E2eeWorkspaceBatchReply,
+  E2eeAccountPairingMailboxPreview,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
 import { decodeRecord } from '@lody/e2ee-core/protocol'
 import {
   makePortableAccountPairingRequester,
+  makeAccountPairingBatch,
+  accountPairingMailboxPreview,
   type AccountPairingIdentityHost
 } from '@lody/e2ee-client/account-requester'
 import type { EpochStagingStore, KeyMailbox } from '@lody/e2ee-core/services'
@@ -38,6 +43,12 @@ const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code }
 export interface AccountPairingCloud {
   history(request: E2eeWorkspaceHistoryRequest): Effect.Effect<E2eeWorkspaceHistoryPage, unknown>
   appendRecord(request: E2eeAppendRecordRequest): Effect.Effect<unknown, unknown>
+  historyBatch?(
+    items: E2eeWorkspaceHistoryRequest[]
+  ): Effect.Effect<E2eeWorkspaceBatchReply<E2eeWorkspaceHistoryPage>, unknown>
+  appendRecordsBatch?(
+    items: E2eeAppendRecordRequest[]
+  ): Effect.Effect<E2eeWorkspaceBatchReply<E2eeAppendRecordReply>, unknown>
   /** Key-round services for one device, bound to the current signed-in client. */
   keyServices(access: E2eeDeviceAccess): Effect.Effect<KeyRoundServices, unknown>
   pairingSubmit(
@@ -72,9 +83,17 @@ export interface AccountPairingOwner {
         deviceKind?: string | null
         signingPublicKey?: string | null
         position?: string | null
+        length?: number
+        headHash?: string
+        hasCurrentKey?: boolean
       },
       unknown
     >
+    prepareKeyDelivery?(
+      workspaceId: string,
+      recipient: string,
+      mailbox: KeyRoundServices['mailbox']
+    ): Effect.Effect<{ id: string; frameHex: string } | null, unknown>
     signAccountAdmission(
       workspaceId: string,
       row: {
@@ -97,9 +116,9 @@ export interface AccountPairingOwner {
     keyRound(
       workspaceId: string,
       mailbox: KeyRoundServices['mailbox'],
-      staging: KeyRoundServices['staging'],
+      staging: KeyRoundServices['staging'] | undefined,
       history: KeyRoundServices['history'],
-      mode?: 'full' | 'receive' | 'distribute'
+      mode?: 'full' | 'receive' | 'distribute' | 'receive-preview'
     ): Effect.Effect<unknown, unknown>
   }
   readonly bootstrap: {
@@ -170,6 +189,11 @@ export interface DesktopAccountPairingHostInput {
     requestId: string,
     device: string
   ) => Effect.Effect<void, never> | Promise<void> | void
+  prepareInlineDelivery?: (
+    workspaceId: string,
+    requestId: string,
+    device: string
+  ) => { active(): boolean; delivered(): void }
   now?: () => number
 }
 
@@ -281,31 +305,64 @@ export function makeDesktopAccountPairingWorkspaces(
   /** Opens the newly installed workspace, pulls its ledger forward and receives this
    * device's own current key with its own credential, all outside any owner turn. The
    * remaining report, distribution and repair work stays with the next full round. */
-  const activate = (workspaceId: string) =>
+  const activate = (workspaceId: string, preview?: E2eeAccountPairingMailboxPreview) =>
     transient(
       workspaceId,
       Effect.gen(function* () {
         yield* owner(workspaceId, (current) => current.host.open(workspaceId))
-        yield* refresh(workspaceId)
         const credential = yield* owner(workspaceId, (current) =>
           current.bootstrap.deviceCredential(workspaceId)
         )
         const services = yield* cloud.keyServices({ workspaceId, credential })
+        const mailboxes = new WeakMap<AbortSignal, KeyMailbox['Service']>()
+        const mailbox = (signal: AbortSignal) => {
+          let instance = mailboxes.get(signal)
+          if (!instance) {
+            const live = services.mailbox(signal)
+            instance = preview ? accountPairingMailboxPreview(live, preview) : live
+            mailboxes.set(signal, instance)
+          }
+          return instance
+        }
         const round = yield* owner(workspaceId, (current) =>
           Effect.succeed(
             current.host.keyRound(
               workspaceId,
-              services.mailbox,
-              services.staging,
+              mailbox,
+              preview?.items.length ? undefined : services.staging,
               services.history,
-              'receive'
+              preview?.items.length ? 'receive-preview' : 'receive'
             )
           )
         )
         yield* promise(() => input.run(round))
+        const installed = yield* owner(workspaceId, (current) => current.host.status(workspaceId))
+        if (installed.hasCurrentKey === false) {
+          yield* refresh(workspaceId)
+          yield* promise(() => input.run(round))
+        }
       })
     )
 
+  const ingestHistory = Effect.fnUntraced(function* (
+    workspaceId: string,
+    page: E2eeWorkspaceHistoryPage
+  ) {
+    const ingest = yield* owner(workspaceId, (current) =>
+      Effect.succeed(current.host.ingestLedgerRecords(workspaceId, page))
+    )
+    yield* promise(() => input.run(ingest))
+    if (page.nextCursor !== null) yield* refresh(workspaceId)
+  })
+  const settleAppend = Effect.fnUntraced(function* (workspaceId: string, record: Uint8Array) {
+    const settled = yield* disposition(workspaceId, record)
+    if (settled !== 'committed')
+      return yield* Effect.fail(fail(settled === 'lost' ? 'admission-lost' : 'append_unconfirmed'))
+  })
+  const batch =
+    cloud.historyBatch && cloud.appendRecordsBatch
+      ? makeAccountPairingBatch({ history: cloud.historyBatch, append: cloud.appendRecordsBatch })
+      : undefined
   type Status = Effect.Success<ReturnType<AccountPairingOwner['host']['status']>>
   const approves = (hint: AccountPairingWorkspaceHint, status: Status | null) =>
     status?.deviceKind === 'personal' &&
@@ -313,14 +370,53 @@ export function makeDesktopAccountPairingWorkspaces(
     !!status.signingPublicKey
   const approverWorkspace = (
     hint: AccountPairingWorkspaceHint,
-    signingPublicKey: string
+    signingPublicKey: string,
+    status: Status
   ): AccountPairingApproverWorkspace => {
     const workspaceId = hint.workspaceId
+    let inlineDelivery: { active(): boolean; delivered(): void } | undefined
     return {
       workspaceId,
       name: hint.name,
       genesis: raw(hint.genesisHash),
       signingPublicKey: raw(signingPublicKey),
+      ...(status.headHash && status.length !== undefined
+        ? {
+            checkpoint: {
+              headHash: status.headHash,
+              length: status.length,
+              ...(status.position ? { position: status.position } : {})
+            }
+          }
+        : {}),
+      ...(batch ? { batch } : {}),
+      ingestHistory: (page) => ingestHistory(workspaceId, page),
+      settleAppend: (record) => settleAppend(workspaceId, record),
+      prepareDelivery: (recipient, requestId) =>
+        Effect.gen(function* () {
+          const credential = yield* owner(workspaceId, (current) =>
+            current.bootstrap.deviceCredential(workspaceId)
+          )
+          const services = yield* cloud.keyServices({ workspaceId, credential })
+          return yield* owner(workspaceId, (current) =>
+            (
+              current.host.prepareKeyDelivery?.(workspaceId, hex(recipient), services.mailbox) ??
+              Effect.succeed(null)
+            ).pipe(
+              Effect.tap((prepared) =>
+                Effect.sync(() => {
+                  if (prepared)
+                    inlineDelivery = input.prepareInlineDelivery?.(
+                      workspaceId,
+                      requestId,
+                      hex(recipient)
+                    )
+                })
+              )
+            )
+          )
+        }),
+      delivered: () => Effect.sync(() => inlineDelivery?.delivered()),
       // The workflow's `releasing` bracket closes every listed workspace once at
       // the end of inspection or approval, avoiding repeated SQLite reopen churn.
       refresh: () => refresh(workspaceId),
@@ -337,7 +433,11 @@ export function makeDesktopAccountPairingWorkspaces(
             })
           )
           // Verified reads beat lost acknowledgements: settle from the ledger.
-          yield* refresh(workspaceId)
+          const page = Result.isSuccess(appended)
+            ? (appended.success as E2eeAppendRecordReply | null)?.historyPage
+            : undefined
+          if (page) yield* ingestHistory(workspaceId, page)
+          else yield* refresh(workspaceId)
           const settled = yield* disposition(workspaceId, record)
           if (settled === 'committed') return undefined
           if (settled === 'lost') return yield* Effect.fail(fail('admission-lost'))
@@ -358,7 +458,9 @@ export function makeDesktopAccountPairingWorkspaces(
         ? {
             deliverKeys: (device: Uint8Array, requestId: string) =>
               Effect.sync(() =>
-                firstPassOf(input.deliverKeys!(workspaceId, requestId, hex(device)))
+                inlineDelivery && !inlineDelivery.active()
+                  ? undefined
+                  : firstPassOf(input.deliverKeys!(workspaceId, requestId, hex(device)))
               )
           }
         : {})
@@ -393,7 +495,9 @@ export function makeDesktopAccountPairingWorkspaces(
       Effect.map((statuses) =>
         listed.flatMap((hint, index) => {
           const status = statuses[index] ?? null
-          return approves(hint, status) ? [approverWorkspace(hint, status!.signingPublicKey!)] : []
+          return approves(hint, status)
+            ? [approverWorkspace(hint, status!.signingPublicKey!, status!)]
+            : []
         })
       ),
       Effect.onError(() =>
@@ -476,7 +580,7 @@ export function makeDesktopAccountPairingWorkspaces(
           : Effect.fail(fail('invalid-ledger')),
       // Like the per-workspace claim: open, refresh and install current keys now. Best
       // effort: the shared requester only records a failure, and opening repeats this.
-      activate: () => Effect.asVoid(activate(workspaceId))
+      activate: (preview) => Effect.asVoid(activate(workspaceId, preview))
     }
   }
 
@@ -484,6 +588,7 @@ export function makeDesktopAccountPairingWorkspaces(
     accountId: input.accountId,
     workspaces: input.workspaces,
     history: (request) => cloud.history(request),
+    ...(cloud.historyBatch ? { historyBatch: cloud.historyBatch } : {}),
     verifyHistory: verifyMemberHistory,
     diagnostics: rememberDesktopE2eeFailure,
     // Workspaces where this device already holds an active personal identity need no

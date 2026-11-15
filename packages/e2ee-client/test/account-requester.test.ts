@@ -47,12 +47,16 @@ function fixture() {
       Effect.sync(() => void calls.push({ kind: 'accept', value })),
     activate: () => Effect.sync(() => void calls.push({ kind: 'activate' })),
   };
-  const requester = (accountId = 'acc1') =>
+  const requester = (
+    accountId = 'acc1',
+    overrides: Partial<Parameters<typeof makePortableAccountPairingRequester>[0]> = {}
+  ) =>
     makePortableAccountPairingRequester({
       workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash }],
       host: () => Effect.succeed(host),
       history: () => Effect.succeed(page),
       accountId,
+      ...overrides,
     });
   return {
     f,
@@ -64,6 +68,48 @@ function fixture() {
 }
 
 describe('portable account pairing requester', () => {
+  it('uses only a hash-authenticated admission original with a verified cached prefix when history is unavailable', async () => {
+    const { f, calls, requester, membershipId } = fixture();
+    const genesis = f.genesisRecord;
+    const original = f.records().at(-1)!;
+    let unavailable = false;
+    const [workspace] = await Effect.runPromise(
+      requester('acc1', {
+        history: () =>
+          unavailable
+            ? Effect.fail(new Error('history unavailable'))
+            : Effect.succeed({
+                workspaceId: 'w1',
+                genesisHash: hex(f.context.genesis.toBytes()),
+                startIndex: 0,
+                recordsHex: [hex(genesis)],
+                checkpoint: { headHash: hex(hashRecordBytes(genesis).toBytes()), length: 1 },
+                position: 'prefix',
+                nextCursor: null,
+              }),
+      })()
+    );
+    await Effect.runPromise(workspace!.identity());
+    unavailable = true;
+    await Effect.runPromise(
+      workspace!.accept(new Uint8Array([9]), hashRecordBytes(original).toBytes(), {
+        admissionRecordHex: hex(original),
+      })
+    );
+    expect(calls.find((call) => call.kind === 'accept')?.value).toMatchObject({
+      endorser: hex(f.owner.raw),
+      membershipId,
+      genesisRecordHex: hex(genesis),
+    });
+    const rejected = await Effect.runPromiseExit(
+      workspace!.accept(new Uint8Array([9]), new Uint8Array(32).fill(7), {
+        admissionRecordHex: hex(original),
+      })
+    );
+    expect(Exit.isFailure(rejected)).toBe(true);
+    expect(calls.filter((call) => call.kind === 'accept')).toHaveLength(1);
+  });
+
   it('proves possession for the membership the verified history gives this account', async () => {
     const { f, calls, requester, membershipId } = fixture();
     const [workspace] = await Effect.runPromise(requester()());

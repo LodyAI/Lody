@@ -301,6 +301,23 @@ void test(
   }
 )
 
+void test('inline publication marks delivery without a network round and its late receipt cannot survive reset', async () => {
+  const f = await memberApprovalFixture(() =>
+    Effect.die(new Error('inline delivery must not start a round'))
+  )
+  const first = f.ipc.keyDelivery.prepareInline('A', 'team', 'inline-first', approvalDevice)
+  assert.equal(first.active(), true)
+  first.delivered()
+  assert.equal(f.ipc.keyDelivery.list('A', 'team')[0].state, 'delivered')
+  const late = f.ipc.keyDelivery.prepareInline('A', 'team', 'inline-late', approvalDevice)
+  await f.ipc
+    .resetIdentity({ workspaceId: 'team', resetId: randomUUID(), confirm: true })
+    .catch(() => {})
+  assert.equal(late.active(), false)
+  late.delivered()
+  assert.equal(f.ipc.keyDelivery.slots.has('A\nteam'), false)
+})
+
 void test(
   'a workspace reset ends its pending key delivery so no timer reopens it',
   { timeout: 5000 },

@@ -152,6 +152,11 @@ _Requires the receiver's ports plus `KeyReceiver`, `DeliveryOutbox`,
 
 Makes sure every current device can obtain the current key.
 
+Optional `prepareDelivery(recipient)` authenticates and retains the same immutable
+outbox original using the installed current key, without mailbox I/O. Account-wide
+batch relays send this `{ id, frame }`; its completion never claims recipient
+custody. Ordinary distribution reuses that exact original after retries or reopen.
+
 ```text
 reconcileCurrentEpoch()     recipients from the verified ledger (never the server)
                             one task per (recipient, mailbox revision)

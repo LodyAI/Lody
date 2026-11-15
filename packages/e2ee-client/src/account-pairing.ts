@@ -4,6 +4,8 @@ import type {
   E2eeAccountPairingReplies,
   E2eeAccountPairingRequests,
   E2eeDeviceAccess,
+  E2eeAccountPairingMailboxPreview,
+  E2eeWorkspaceHistoryPage,
 } from '@lody/cloud-api';
 import {
   PAIRING_REQUEST_MAX_LIFETIME_MS,
@@ -111,8 +113,37 @@ export interface AccountPairingRequesterFilter {
   readonly geneses?: ReadonlySet<string>;
 }
 
+/** Independent local settlements for one account-wide transport round. */
+export interface AccountPairingApproverBatch {
+  refresh(
+    workspaces: readonly AccountPairingApproverWorkspace[]
+  ): Effect.Effect<ReadonlyMap<string, Result.Result<void, unknown>>, unknown>;
+  append(
+    items: readonly {
+      workspace: AccountPairingApproverWorkspace;
+      requestId: string;
+      record: Uint8Array;
+      credentialHash: Uint8Array;
+    }[]
+  ): Effect.Effect<ReadonlyMap<string, Result.Result<void, unknown>>, unknown>;
+}
+
 /** One workspace where this device is an active personal device. */
 export interface AccountPairingApproverWorkspace {
+  /** Snapshot of this host's verified boundary, used only for an equality skip. */
+  readonly checkpoint?: { headHash: string; length: number; position?: string };
+  /** Ingest through the existing verifier/feed; never trust transport checkpoints. */
+  ingestHistory?(page: E2eeWorkspaceHistoryPage): Effect.Effect<void, unknown>;
+  /** Settles an original against the locally verified ledger without a network read. */
+  settleAppend?(record: Uint8Array): Effect.Effect<void, unknown>;
+  readonly batch?: AccountPairingApproverBatch;
+  /** Retains and authenticates the original envelope locally, without network. */
+  prepareDelivery?(
+    recipient: Uint8Array,
+    requestId: string
+  ): Effect.Effect<{ id: string; frameHex: string } | null, unknown>;
+  /** Records the relay's successful inline delivery for status display. */
+  delivered?(recipient: Uint8Array, requestId: string): Effect.Effect<void, unknown>;
   readonly workspaceId: string;
   readonly name: string;
   readonly genesis: Uint8Array;
@@ -159,10 +190,22 @@ export interface AccountPairingRequesterWorkspace {
    * later request; never replaced here. */
   identity(): Effect.Effect<Omit<PairingRequestRow, 'genesis'>, unknown>;
   /** Verifies the invitation against the approved admission record and installs it. */
-  accept(invitation: Uint8Array, admissionRecordHash: Uint8Array): Effect.Effect<void, unknown>;
+  accept(
+    invitation: Uint8Array,
+    admissionRecordHash: Uint8Array,
+    hints?: {
+      admissionRecordHex?: string;
+      mailboxPreview?: E2eeAccountPairingMailboxPreview;
+    }
+  ): Effect.Effect<void, unknown>;
   /** Installs from the workspace's complete verified history, for an approval row that
    * carries no invitation (a Member approver cannot endorse a snapshot). */
-  acceptHistory?(admissionRecordHash: Uint8Array): Effect.Effect<void, unknown>;
+  acceptHistory?(
+    admissionRecordHash: Uint8Array,
+    hints?: { admissionRecordHex?: string; mailboxPreview?: E2eeAccountPairingMailboxPreview }
+  ): Effect.Effect<void, unknown>;
+  /** Prefetch required full-history rows in one transport round before acceptance. */
+  prepareHistoryBatch?(workspaceIds: readonly string[]): Effect.Effect<void, unknown>;
 }
 
 type Terminal = 'approved' | 'declined' | 'expired' | 'cancelled';
@@ -633,6 +676,20 @@ export function makeAccountPairing(input: {
               covers.approved.add(hex(approved.genesis));
           coverage.set(row.lookup_id, covers);
           const alreadyJoined = yield* sql(joinedSet(row.lookup_id));
+          const historyWorkspaces = approval.success.rows
+            .filter((item) => isHistoryRow(item.invitationDigest))
+            .flatMap((approved) => {
+              const workspace = workspaces.find(
+                (item) => hex(item.genesis) === hex(approved.genesis)
+              );
+              return workspace && !alreadyJoined.has(workspace.workspaceId) ? [workspace] : [];
+            });
+          if (historyWorkspaces.length && historyWorkspaces[0]?.prepareHistoryBatch)
+            yield* Effect.result(
+              historyWorkspaces[0].prepareHistoryBatch(
+                historyWorkspaces.map((workspace) => workspace.workspaceId)
+              )
+            );
           const tasks: {
             workspace: AccountPairingRequesterWorkspace;
             install: Effect.Effect<void, unknown>;
@@ -652,7 +709,12 @@ export function makeAccountPairing(input: {
             let install: Effect.Effect<void, unknown>;
             if (isHistoryRow(approved.invitationDigest)) {
               if (!workspace.acceptHistory) continue;
-              install = workspace.acceptHistory(approved.admissionRecordHash);
+              const hints = published.invitations.find(
+                (item) =>
+                  item.workspaceId === workspace.workspaceId &&
+                  item.genesisHash === hex(approved.genesis)
+              );
+              install = workspace.acceptHistory(approved.admissionRecordHash, hints);
             } else {
               const invitation = published.invitations.find(
                 (item) => item.genesisHash === hex(approved.genesis)
@@ -660,7 +722,7 @@ export function makeAccountPairing(input: {
               if (!invitation) continue;
               const bytes = raw(invitation.invitationHex);
               if (hex(sha256(bytes)) !== hex(approved.invitationDigest)) continue;
-              install = workspace.accept(bytes, approved.admissionRecordHash);
+              install = workspace.accept(bytes, approved.admissionRecordHash, invitation);
             }
             seenWorkspaces.add(workspace.workspaceId);
             tasks.push({ workspace, install });
@@ -725,12 +787,15 @@ export function makeAccountPairing(input: {
 
   /** Fetches the request for a code and authenticates it. Journaled bytes are used
    * on resume, and must equal whatever the relay returns. */
+  const verifiedRequests = new Map<string, NonNullable<E2eeAccountPairingReplies['read']>>();
   const authenticate = Effect.fnUntraced(function* (keys: PairingKeys) {
     const lookupId = hex(keys.lookupId);
     const settled = (yield* terminal(lookupId))?.state;
     if (settled === 'expired') return yield* Effect.fail(fail('pairing-expired'));
     if (settled) return yield* Effect.fail(fail('pairing-used'));
-    const relayed = yield* relay.read(lookupId);
+    for (const [id, cached] of verifiedRequests)
+      if (cached.expiresAt <= now()) verifiedRequests.delete(id);
+    const relayed = verifiedRequests.get(lookupId) ?? (yield* relay.read(lookupId));
     const retained = yield* sql(store.approvedRequest(lookupId));
     const journaled = retained
       ? { request: retained.request, request_tag: retained.requestTag }
@@ -762,6 +827,11 @@ export function makeAccountPairing(input: {
     if (Result.isFailure(lifetime)) {
       if (lifetime.failure.code === 'expired') yield* settle(lookupId, 'approver', 'expired');
       return yield* Effect.fail(fail('pairing-expired'));
+    }
+    if (relayed) {
+      if (verifiedRequests.size >= 32 && !verifiedRequests.has(lookupId))
+        verifiedRequests.delete(verifiedRequests.keys().next().value!);
+      verifiedRequests.set(lookupId, structuredClone(relayed));
     }
     return { lookupId, request, bytes, tag, relayed };
   });
@@ -939,13 +1009,39 @@ export function makeAccountPairing(input: {
               }
               toSign.push({ workspace, row });
             }
+            const batch = toSign[0]?.workspace.batch;
+            const needsRefresh = toSign.filter(({ workspace }) => {
+              const hinted = found.relayed?.workspaces.find(
+                (item) =>
+                  item.workspaceId === workspace.workspaceId &&
+                  item.genesisHash === hex(workspace.genesis)
+              )?.checkpoint;
+              return (
+                !hinted ||
+                !workspace.checkpoint ||
+                hinted.headHash !== workspace.checkpoint.headHash ||
+                hinted.length !== workspace.checkpoint.length
+              );
+            });
+            const refreshed =
+              batch &&
+              needsRefresh.every((item) => item.workspace.batch === batch) &&
+              needsRefresh.length
+                ? yield* Effect.result(batch.refresh(needsRefresh.map((item) => item.workspace)))
+                : null;
             const refreshedByWorkspace = yield* Effect.forEach(
               toSign,
               ({ workspace, row }) =>
                 Effect.map(
-                  workspace.refresh
-                    ? Effect.result(workspace.refresh())
-                    : Effect.succeed(Result.succeed(undefined)),
+                  !needsRefresh.some((item) => item.workspace === workspace)
+                    ? Effect.succeed(Result.succeed(undefined))
+                    : refreshed &&
+                        Result.isSuccess(refreshed) &&
+                        refreshed.success.has(workspace.workspaceId)
+                      ? Effect.succeed(refreshed.success.get(workspace.workspaceId)!)
+                      : workspace.refresh
+                        ? Effect.result(workspace.refresh())
+                        : Effect.succeed(Result.succeed(undefined)),
                   (refreshed) => ({ workspace, row, refreshed })
                 ),
               { concurrency: WORKSPACE_CONCURRENCY }
@@ -1001,17 +1097,37 @@ export function makeAccountPairing(input: {
               if (!journaled) continue;
               toAppend.push({ workspace, row, journaled });
             }
+            const appendBatch = toAppend[0]?.workspace.batch;
+            const batchAppended =
+              appendBatch &&
+              toAppend.length > 0 &&
+              toAppend.every((item) => item.workspace.batch === appendBatch)
+                ? yield* Effect.result(
+                    appendBatch.append(
+                      toAppend.map(({ workspace, row, journaled }) => ({
+                        workspace,
+                        requestId: journaled.request_id,
+                        record: new Uint8Array(journaled.record),
+                        credentialHash: row.credentialHash,
+                      }))
+                    )
+                  )
+                : null;
             const appendedByWorkspace = yield* Effect.forEach(
               toAppend,
               ({ workspace, row, journaled }) =>
                 Effect.map(
-                  Effect.result(
-                    workspace.append(
-                      journaled.request_id,
-                      new Uint8Array(journaled.record),
-                      row.credentialHash
-                    )
-                  ),
+                  batchAppended &&
+                    Result.isSuccess(batchAppended) &&
+                    batchAppended.success.has(workspace.workspaceId)
+                    ? Effect.succeed(batchAppended.success.get(workspace.workspaceId)!)
+                    : Effect.result(
+                        workspace.append(
+                          journaled.request_id,
+                          new Uint8Array(journaled.record),
+                          row.credentialHash
+                        )
+                      ),
                   (appended) => ({ workspace, row, journaled, appended })
                 ),
               { concurrency: WORKSPACE_CONCURRENCY }
@@ -1055,8 +1171,25 @@ export function makeAccountPairing(input: {
             // current epoch key from an existing device, which the invitation does not
             // carry. Only this admitted device is named; the port schedules it at once,
             // so its first attempt runs alongside the invitations and accesses below.
+            const inlineRelay =
+              found.relayed?.workspaces.some((item) => 'checkpoint' in item) === true;
+            const preparedDeliveries = new Map<string, { id: string; frameHex: string }>();
             const firstPasses: Effect.Effect<void, never>[] = [];
             for (const { workspace, row, journaled } of committed) {
+              if (inlineRelay && workspace.prepareDelivery) {
+                const prepared = yield* Effect.result(
+                  workspace.prepareDelivery(
+                    new Uint8Array(row.signingPublicKey),
+                    journaled.request_id
+                  )
+                );
+                if (Result.isSuccess(prepared) && prepared.success) {
+                  preparedDeliveries.set(workspace.workspaceId, prepared.success);
+                  continue;
+                }
+                if (Result.isFailure(prepared))
+                  rememberDesktopE2eeFailure('account-pairing-prepare-delivery', prepared.failure);
+              }
               if (!workspace.deliverKeys) continue;
               const scheduled = yield* Effect.result(
                 workspace.deliverKeys(new Uint8Array(row.signingPublicKey), journaled.request_id)
@@ -1157,6 +1290,10 @@ export function makeAccountPairing(input: {
                   ...accesses[index]!,
                   genesisHash: item.journaled.genesis,
                   invitationHex: hex(item.invitation ?? NO_INVITATION),
+                  ...(inlineRelay ? { admissionRecordHex: hex(item.journaled.record) } : {}),
+                  ...(preparedDeliveries.has(item.workspace.workspaceId)
+                    ? { delivery: preparedDeliveries.get(item.workspace.workspaceId)! }
+                    : {}),
                 }));
               const published = yield* Effect.result(
                 relay.publish({
@@ -1166,6 +1303,34 @@ export function makeAccountPairing(input: {
                   invitations,
                 })
               );
+              {
+                const reply = (Result.isSuccess(published) ? published.success : null) as {
+                  deliveredWorkspaces?: unknown;
+                } | null;
+                const delivered = new Set(
+                  Array.isArray(reply?.deliveredWorkspaces)
+                    ? reply.deliveredWorkspaces.filter((id): id is string => typeof id === 'string')
+                    : []
+                );
+                for (const item of committed) {
+                  if (!preparedDeliveries.has(item.workspace.workspaceId)) continue;
+                  if (delivered.has(item.workspace.workspaceId)) {
+                    if (item.workspace.delivered)
+                      yield* Effect.result(
+                        item.workspace.delivered(
+                          item.row.signingPublicKey,
+                          item.journaled.request_id
+                        )
+                      );
+                  } else if (item.workspace.deliverKeys)
+                    yield* Effect.result(
+                      item.workspace.deliverKeys(
+                        item.row.signingPublicKey,
+                        item.journaled.request_id
+                      )
+                    );
+                }
+              }
               for (const item of deliverable)
                 outcomes.set(
                   item.workspace.workspaceId,

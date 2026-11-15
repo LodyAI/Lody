@@ -156,7 +156,7 @@ const ledgerLag = (code: string, epoch: number, current: number) =>
   epoch <= current + LEDGER_LOOKAHEAD_EPOCHS &&
   (epoch > current || (epoch === current && code === 'unauthorized'))
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
-type KeyRoundMode = 'full' | 'receive' | 'distribute'
+type KeyRoundMode = 'full' | 'receive' | 'distribute' | 'receive-preview'
 const unhex = (value: string) => {
   if (typeof value !== 'string' || !/^(?:[0-9a-f]{2})+$/.test(value)) throw fail('invalid-input')
   return new Uint8Array(Buffer.from(value, 'hex'))
@@ -319,6 +319,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         memberApprovals: ReturnType<typeof makeDesktopMemberApprovals>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
+        prepareKeyDelivery: (
+          recipient: string,
+          mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+        ) => Effect.Effect<{ id: string; frameHex: string } | null, unknown>
         keyDeliveryTarget: (device: string) => Effect.Effect<boolean, unknown>
         keyDeliveryEvidence: (
           recipient: string
@@ -1011,6 +1015,72 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
         })
         const isClosing = () => closing
+        const publicationSource = Layer.succeed(EpochPublicationSource, {
+          current: (view) =>
+            sql(() => {
+              const epoch = view.inspectState().epoch.number
+              if (epoch === 0) return creation.record
+              for (const row of rows()
+                .filter((candidate) => candidate.position < view.length)
+                .reverse()) {
+                const parsed = Result.getOrThrow(decodeRecord(row.record)).body
+                if (
+                  parsed.type === 'ordinary' &&
+                  (parsed.operation.type === 'publishEpoch' ||
+                    parsed.operation.type === 'removeMemberAndPublishEpoch') &&
+                  parsed.operation.epoch === epoch
+                )
+                  return row.record
+              }
+              return null
+            }).pipe(
+              Effect.mapError(
+                () =>
+                  new LocalStoreError({
+                    store: 'EpochPublicationSource',
+                    reason: 'corrupt'
+                  })
+              )
+            )
+        })
+        const prepareKeyDelivery = (
+          recipient: string,
+          mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+        ) =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              if (closing) return yield* fail('closed')
+              const context = yield* Layer.build(
+                KeyDistributor.layer.pipe(
+                  Layer.provideMerge(KeyReceiver.layer),
+                  Layer.provide(
+                    Layer.mergeAll(
+                      sqliteDeliveryOutbox({
+                        path: join(directory, 'outbox.sqlite'),
+                        mode: 'create-or-open'
+                      }),
+                      sqliteDistributionJournal({
+                        path: join(directory, 'distribution.sqlite'),
+                        mode: 'create-or-open'
+                      }),
+                      sqliteReceiveJournal({
+                        path: join(directory, 'receive.sqlite'),
+                        mode: 'create-or-open'
+                      }),
+                      Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
+                      Layer.succeed(VerifiedLedger, verified),
+                      Layer.succeed(InstalledEpochKeys, keys),
+                      publicationSource
+                    ).pipe(Layer.provideMerge(base))
+                  )
+                )
+              )
+              const distributor = Context.get(context, KeyDistributor)
+              if (!distributor.prepareDelivery) return null
+              const prepared = yield* distributor.prepareDelivery(recipient)
+              return { id: prepared.id, frameHex: hex(prepared.frame) }
+            })
+          )
         const keyRound = Effect.fnUntraced(function* (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
           staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
@@ -1051,34 +1121,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                         Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
                         Layer.succeed(VerifiedLedger, verified),
                         Layer.succeed(InstalledEpochKeys, keys),
-                        Layer.succeed(EpochPublicationSource, {
-                          current: (view) =>
-                            sql(() => {
-                              const epoch = view.inspectState().epoch.number
-                              if (epoch === 0) return creation.record
-                              for (const row of rows()
-                                .filter((candidate) => candidate.position < view.length)
-                                .reverse()) {
-                                const parsed = Result.getOrThrow(decodeRecord(row.record)).body
-                                if (
-                                  parsed.type === 'ordinary' &&
-                                  (parsed.operation.type === 'publishEpoch' ||
-                                    parsed.operation.type === 'removeMemberAndPublishEpoch') &&
-                                  parsed.operation.epoch === epoch
-                                )
-                                  return row.record
-                              }
-                              return null
-                            }).pipe(
-                              Effect.mapError(
-                                () =>
-                                  new LocalStoreError({
-                                    store: 'EpochPublicationSource',
-                                    reason: 'corrupt'
-                                  })
-                              )
-                            )
-                        }),
+                        publicationSource,
                         base
                       ),
                       scope
@@ -1178,6 +1221,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                   yield* distributor.resumePendingDeliveries(100, null)
                   const ended = yield* distributor.results(100, null)
                   for (const item of ended.items) yield* distributor.acknowledge(item.id)
+                  return undefined
+                }
+                if (mode === 'receive-preview') {
+                  const { epoch, currentReceiver } = yield* prepareReceive()
+                  yield* Effect.result(currentReceiver.fetchAndInstall(null, 100))
+                  if (Result.isFailure(yield* Effect.result(keys.check(epoch))))
+                    yield* currentReceiver.fetchAndInstall(null, 100)
                   return undefined
                 }
                 if (mode === 'receive') {
@@ -1896,6 +1946,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               return { genesis: hex(genesis.toBytes()), epoch, signal: networkAbort.signal }
             }),
           keyRound,
+          prepareKeyDelivery,
           stop,
           isClosing: () => closing,
           close: closeEntry,
@@ -2443,6 +2494,17 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         ),
       ledgerView: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.ledgerView())),
+      /** Prepare the original authenticated current envelope without mailbox I/O. */
+      prepareKeyDelivery: (
+        workspaceId: string,
+        recipient: string,
+        mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.prepareKeyDelivery(recipient, mailbox)
+          )
+        ),
       /** Whether this device's verified ledger makes `device` a key distribution target. */
       keyDeliveryTarget: (workspaceId: string, device: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.keyDeliveryTarget(device))),

@@ -182,14 +182,36 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
       if (approval.kind === 'history') {
         const local = yield* feed.current();
         if (local.view.length < approval.view.length) {
-          // A missing suffix requires I/O; a conflicting local prefix never does.
           yield* Effect.fromResult(requireLedgerContinuation(local.view, approval.view));
-          yield* refresh();
+          // Acceptance already verified and retained these originals. Feed them
+          // through the same verifier/store instead of downloading them again.
+          for (const page of approval.pages) {
+            const state = yield* feed.current();
+            const start = state.bootstrap ? 0 : state.view.length;
+            const end = page.startIndex + page.recordsHex.length;
+            if (end <= start) continue;
+            if (page.startIndex > start) return yield* fail('conflict');
+            const records = page.recordsHex.slice(start - page.startIndex).map(fromHex);
+            if (!records.length) continue;
+            yield* feed.accept(
+              {
+                requestOffset: state.offset,
+                nextOffset: page.position,
+                records,
+                upToDate: end === approval.view.length,
+              },
+              { head: hashRecordBytes(records.at(-1)!), length: end }
+            );
+          }
         }
         // Re-verified persisted state can satisfy an already installed approval offline.
         yield* current();
       }
-      return Context.make(LedgerSync, { current, refresh }).pipe(
+      return Context.make(LedgerSync, {
+        current,
+        refresh,
+        ingest: (page, checkpoint) => feed.accept(page, checkpoint),
+      }).pipe(
         Context.add(LedgerPinStore, pins),
         Context.add(SubmissionJournal, submissions),
         Context.add(LedgerLog, {

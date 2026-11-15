@@ -1,3 +1,6 @@
+export type { E2eeAccountPairingMailboxPreview } from './e2ee-account-pairing';
+import type { E2eeWorkspaceBatchReply } from './e2ee-workspaces';
+export type { E2eeWorkspaceBatchReply } from './e2ee-workspaces';
 export type WorkspaceDirectoryMember = {
   userId: string;
   name: string | null;
@@ -540,6 +543,10 @@ export type CloudApi = {
   e2eeWorkspaces: {
     ledgerHead: Query<{ workspaceId: string }, E2eeWorkspaceLedgerHead>;
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
+    appendRecordsBatch: Action<
+      { items: E2eeAppendRecordRequest[] },
+      E2eeWorkspaceBatchReply<E2eeAppendRecordReply>
+    >;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
     reportDeviceProfile: Mutation<
@@ -549,6 +556,10 @@ export type CloudApi = {
     >;
     memberProfiles: Query<E2eeWorkspaceMemberProfilesRequest, E2eeWorkspaceMemberProfiles>;
     history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
+    historyBatch: Action<
+      { items: E2eeWorkspaceHistoryRequest[] },
+      E2eeWorkspaceBatchReply<E2eeWorkspaceHistoryPage>
+    >;
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
   accountSecurityEvents: {

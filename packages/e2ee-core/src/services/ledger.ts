@@ -267,5 +267,10 @@ export class LedgerSync extends Context.Service<
     current(): Effect.Effect<LedgerFeedState, unknown>;
     /** Read and verify up to an independently chosen endpoint, then persist it; never trust a server-selected endpoint implicitly. */
     refresh(): Effect.Effect<LedgerFeedState, unknown>;
+    /** Verify and persist an inline raw page through the existing feed owner. */
+    ingest?(
+      page: LedgerReadPage,
+      checkpoint: LedgerCheckpoint
+    ): Effect.Effect<LedgerFeedState, unknown>;
   }
 >()('@lody/e2ee-core/LedgerSync') {}

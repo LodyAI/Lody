@@ -196,6 +196,20 @@ has already closed, then releases only that reader after checking or receiving k
 
 ## Account-wide pairing workflow
 
+Upgraded hosts use one batch ledger append, one relay publication with locally
+prepared outbox envelopes, and one claim with live mailbox previews. Member-only
+approvals also batch their required full-history reads. With stable heads and
+single-page histories, the approval-to-current-key path uses three requests for
+snapshot approvals, or four when full history is required, for 1–64 workspaces.
+Long histories, conflicts and retries retain ordinary pagination and may need more
+requests. Advisory checkpoint equality skips a refresh without advancing a pin.
+Verified request bytes are cached in memory, bounded and expiry-checked; every
+signature still rechecks their MAC. Inline admission originals must match the
+MAC-authenticated record hash and cached verified genesis/member before snapshot
+acceptance. KeyReceiver verifies each preview frame and installs the actual key.
+Absent capabilities, unusable previews and older relays retain ordinary reads and
+idempotent original delivery. No key material is added to the relay.
+
 `@lody/e2ee-client/account-pairing` is the shared account-wide personal device pairing
 workflow ([foundations Spec](../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)).
 It owns the tag and expiry checks, the single-signature admission journal and local

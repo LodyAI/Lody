@@ -244,6 +244,10 @@ backwards scan of your local feed.
 
 ### LedgerSync
 
+Optional `ingest(page, checkpoint)` sends inline originals through the same feed
+verification and persistence as ordinary reads. The caller supplies the independent
+checkpoint and exact current request offset. It grants no authority or freshness.
+
 `refresh()` selects the target checkpoint independently and reads the local
 feed up to it; `current()` returns the stored state. `WorkspaceControl` and
 `E2eeWorkspace` use it, and the workspace derives `LedgerViewSource` from it.

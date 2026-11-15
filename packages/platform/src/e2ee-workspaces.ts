@@ -1,5 +1,6 @@
 import type {
   E2eeWorkspaceCreateRequest,
+  E2eeAccountPairingMailboxPreview,
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest,
@@ -174,7 +175,11 @@ export interface E2eeAccountApprovalSession {
     encryptionPublicKey: Uint8Array;
     possessionProof: Uint8Array;
   }): Promise<{ requestId: string; record: Uint8Array }>;
-  settle(record: Uint8Array): Promise<'committed' | 'lost' | 'unknown'>;
+  settle(record: Uint8Array, refresh?: boolean): Promise<'committed' | 'lost' | 'unknown'>;
+  /** Optional local transport optimizations; all originals pass the existing verifier. */
+  checkpoint?(): Promise<{headHash: string; length: number; position?: string}>;
+  ingest?(page: E2eeWorkspaceHistoryPage): Promise<void>;
+  prepareDelivery?(recipient: string): Promise<{id: string; frameHex: string} | null>;
   invitation(record: Uint8Array): Promise<Uint8Array | null>;
   access(): Promise<{ workspaceId: string; credential: string }>;
   refresh(): Promise<void>;
@@ -202,6 +207,8 @@ export interface E2eeWorkspaceRuntime
   /** Portable hosts that can sign an account-pairing admission from an already
    * approved workspace session. Absence keeps the approver surface hidden. */
   accountApproval?(workspaceId?: string): Promise<E2eeAccountApprovalSession>;
+  /** Receive after verified account admission, before requesting any new history. */
+  activateAccountPairing?(workspaceId: string, preview?: E2eeAccountPairingMailboxPreview): Promise<void>;
   readMachineSharing?(
     workspaceId: string,
     machineId: string

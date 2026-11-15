@@ -101,6 +101,22 @@ const appended = z.object({
   recordHash: hash,
   historyPage: historyPage.optional()
 })
+const workspaceBatch = <T extends z.ZodType>(schema: T) =>
+  z.object({
+    items: z
+      .array(
+        z.discriminatedUnion('status', [
+          z.object({ workspaceId: z.string().min(1), status: z.literal('ok'), result: schema }),
+          z.object({
+            workspaceId: z.string().min(1),
+            status: z.literal('error'),
+            code: z.string().min(1)
+          })
+        ])
+      )
+      .min(1)
+      .max(64)
+  })
 const pairingStatus = z.enum(['pending', 'approved', 'declined', 'expired'])
 const pairingSummary = z.object({
   requestId: z.string().min(1),
@@ -111,7 +127,13 @@ const pairingSummary = z.object({
   expiresAt: nonnegative
 })
 const pairingWorkspaces = z
-  .array(z.object({ workspaceId: z.string().min(1), genesisHash: hash }))
+  .array(
+    z.object({
+      workspaceId: z.string().min(1),
+      genesisHash: hash,
+      checkpoint: checkpoint.nullable().optional().catch(undefined)
+    })
+  )
   .max(PAIRING_MAX_WORKSPACES)
 const pairingRecord = pairingSummary.extend({
   lookupId: z.string().regex(/^[0-9a-f]{32}$/),
@@ -133,7 +155,17 @@ const pairingClaim = z
               z.object({
                 workspaceId: z.string().min(1),
                 genesisHash: hash,
-                invitationHex: bytesHex(3 * 1024 * 1024)
+                invitationHex: bytesHex(3 * 1024 * 1024),
+                admissionRecordHex: bytesHex(8192).optional().catch(undefined),
+                mailboxPreview: z
+                  .object({
+                    epoch: nonnegative,
+                    items: z.array(z.object({ sender: hash, frameHex: bytesHex(512) })).max(100),
+                    next: z.null(),
+                    slot: status
+                  })
+                  .optional()
+                  .catch(undefined)
               })
             )
             .max(PAIRING_MAX_WORKSPACES)
@@ -987,7 +1019,10 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       const original = { ...requestInput }
       return request(
         (client) => client.mutation(api.e2eeAccountPairing.publish, original),
-        z.object({ status: z.literal('published') })
+        z.object({
+          status: z.literal('published'),
+          deliveredWorkspaces: z.array(z.string().min(1)).max(64).optional().catch(undefined)
+        })
       )
     },
     pairingClaim: (requestInput: E2eeAccountPairingRequests['claim']) => {
@@ -1253,6 +1288,20 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
           }).pipe(Effect.mapError((cause) => new LedgerLogError({ cause })))
         }
       }
+    },
+    historyBatch: (items: E2eeWorkspaceHistoryRequest[]) => {
+      const original = structuredClone(items)
+      return request(
+        (client) => client.action(api.e2eeWorkspaces.historyBatch, { items: original }),
+        workspaceBatch(historyPage)
+      )
+    },
+    appendRecordsBatch: (items: E2eeAppendRecordRequest[]) => {
+      const original = structuredClone(items)
+      return request(
+        (client) => client.action(api.e2eeWorkspaces.appendRecordsBatch, { items: original }),
+        workspaceBatch(appended)
+      )
     },
     appendRecord: (requestInput: E2eeAppendRecordRequest) => {
       const original = { ...requestInput }
