@@ -1,5 +1,4 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   getAcpCapabilityCacheKey,
@@ -25,7 +24,15 @@ const machine = (id: string, capabilities: Record<string, unknown> = {}) =>
     acpCapabilities: capabilities,
   }) as unknown as MachineViewMeta;
 
-afterEach(() => localStorage.clear());
+beforeEach(() => {
+  vi.stubGlobal('window', { localStorage });
+  localStorage.clear();
+});
+
+afterEach(() => {
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 describe('a new schedule starts from the chat landing’s choices', () => {
   it('reuses the landing’s remembered Agent when it runs on one of the person’s machines', () => {

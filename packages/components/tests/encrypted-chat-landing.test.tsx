@@ -1,5 +1,5 @@
-import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
 // @vitest-environment jsdom
+import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider } from 'jotai';

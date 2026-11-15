@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { scheduleDeclarationSigner } from './helpers/encrypted-dispatch-signer';
 import { act, StrictMode } from 'react';
 import { Provider, createStore } from 'jotai';

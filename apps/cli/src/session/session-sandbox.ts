@@ -9,7 +9,11 @@ import { makeProcessRunnerLegacy, type ProcessRunnerLegacy } from '@lody/shared/
 import { platformLayer } from '@/platform/process-options';
 
 import { unwrapSpawnFailure } from '@lody/shared/node/process';
-import { nodeProcessLive, type NodeProcessApi } from '@lody/shared/node/process';
+import {
+  nodeProcessLive,
+  type NodeProcessApi,
+  type TerminationPolicy,
+} from '@lody/shared/node/process';
 import { makeCgroupContainer, type CgroupFs } from '@/platform/sandbox/cgroup-container';
 import { makeNoopContainer } from '@/platform/sandbox/noop-container';
 import {
@@ -127,6 +131,7 @@ interface SessionSandboxDeps {
   killPid: (pid: number, signal?: NodeJS.Signals | 0) => void;
   /** Must describe the same process table as `killPid`. */
   listProcessGroup?: NodeProcessApi['listProcessGroup'];
+  terminationPolicy?: (force: boolean) => TerminationPolicy;
 }
 
 interface CreateSessionSandboxFactoryOptions {
@@ -218,12 +223,20 @@ export function createSessionSandboxFactory(
           fs: deps.fs,
           readSelfCgroupPath: deps.readSelfCgroupPath,
           configureProcess: configureProcessBestEffort(deps, options.logger, `[${sessionId}] `),
+          terminationPolicy: deps.terminationPolicy,
         }),
         scope
       ).pipe(Effect.result)
     );
     if (cgroup._tag === 'Success') {
-      return new ContainerSessionSandbox(cgroup.success, scope, run, options.logger);
+      return new ContainerSessionSandbox(
+        cgroup.success,
+        scope,
+        run,
+        options.logger,
+        undefined,
+        deps.terminationPolicy ?? terminationPolicy
+      );
     }
     await run(Scope.close(scope, Exit.void));
     options.logger.debug(
@@ -263,6 +276,7 @@ function createNoopSandbox(
       makeNoopContainer({
         description,
         configureProcess: configureProcessBestEffort(deps, facade.logger),
+        terminationPolicy: deps.terminationPolicy,
       }),
       scope
     );
@@ -270,7 +284,14 @@ function createNoopSandbox(
   });
   const reopen = () => Effect.runSync(Effect.provide(build, platformLayer(facade)));
   const { scope, container } = reopen();
-  return new ContainerSessionSandbox(container, scope, run, facade.logger, reopen);
+  return new ContainerSessionSandbox(
+    container,
+    scope,
+    run,
+    facade.logger,
+    reopen,
+    deps.terminationPolicy ?? terminationPolicy
+  );
 }
 
 class ContainerSessionSandbox implements SessionSandbox {
@@ -283,7 +304,10 @@ class ContainerSessionSandbox implements SessionSandbox {
     private readonly logger: Logger | undefined,
     // The legacy noop sandbox is reusable; each new generation gets a fresh
     // Scope. A removed cgroup remains closed and never reopens implicitly.
-    private readonly reopen?: () => { container: ProcessContainer; scope: Scope.Closeable }
+    private readonly reopen?: () => { container: ProcessContainer; scope: Scope.Closeable },
+    private readonly resolveTerminationPolicy: (
+      force: boolean
+    ) => TerminationPolicy = terminationPolicy
   ) {}
 
   get enabled(): boolean {
@@ -306,7 +330,7 @@ class ContainerSessionSandbox implements SessionSandbox {
     if (this.scope.state._tag === 'Closed' && this.reopen) {
       // Keep the failed generation reachable until all its trees are gone.
       const retired = this.container;
-      await this.run(retired.terminateAll(terminationPolicy(true)));
+      await this.run(retired.terminateAll(this.resolveTerminationPolicy(true)));
       // Concurrent starts may both await the retired generation. Only the
       // first replaces it; the rest must use that same new owner.
       if (this.container === retired) {
@@ -350,13 +374,13 @@ class ContainerSessionSandbox implements SessionSandbox {
     return {
       child: contained.child,
       inspectExit: (exitCode, signal) => run(contained.inspectExit({ code: exitCode, signal })),
-      terminate: (force) => run(contained.terminate(terminationPolicy(force))),
+      terminate: (force) => run(contained.terminate(this.resolveTerminationPolicy(force))),
       ...events,
     };
   }
 
   async terminate(force: boolean = false): Promise<void> {
-    await this.run(this.container.terminateAll(terminationPolicy(force)));
+    await this.run(this.container.terminateAll(this.resolveTerminationPolicy(force)));
   }
 
   cleanup(): Promise<void> {
@@ -371,7 +395,7 @@ class ContainerSessionSandbox implements SessionSandbox {
     const attempt = (async () => {
       await this.cleanupReceipt?.catch(() => undefined);
       // Retry the retained resources, never a closed Scope's finalizer.
-      await this.run(container.terminateAll(terminationPolicy(true)));
+      await this.run(container.terminateAll(this.resolveTerminationPolicy(true)));
       await this.run(container.cleanup);
       if (scope.state._tag !== 'Closed') await this.run(Scope.close(scope, Exit.void));
     })();

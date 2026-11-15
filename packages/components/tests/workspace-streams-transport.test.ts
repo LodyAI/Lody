@@ -1375,9 +1375,9 @@ describe('P10 public crypto and published SDK preparation', () => {
     const reader = await openTab(`max-bytes-r-${sequence}` as WorkspaceId);
     reader.workspaceId = writer.workspaceId;
     const restored = (await reader.repo.openPersistedDoc('doc-a')).doc;
-    expect((await settle(transportFor(reader, cryptoContent()).syncDoc('doc-a', restored))).ok).toBe(
-      true
-    );
+    expect(
+      (await settle(transportFor(reader, cryptoContent()).syncDoc('doc-a', restored))).ok
+    ).toBe(true);
     expect(restored.toJSON()).toEqual(doc.toJSON());
     source.unsubscribe();
   });

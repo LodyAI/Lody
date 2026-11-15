@@ -31,6 +31,8 @@ import {
   type SessionLegacyMetaFields,
   type SessionMeta,
 } from '../src';
+import { normalizePersistedRateLimit } from '../src/acp/lody-rate-limit-migration';
+import { isLegacyPiProvider, migratePiProvider } from '../src/pi-provider-migration';
 
 class FakeMachineFlock implements MachineFlockWritableFlock {
   readonly rows = new Map<string, { key: MachineFlockKey; value: unknown }>();
@@ -470,4 +472,99 @@ it('reads, updates and deletes validated memory association rows without mixing 
   expect(
     getMachineFlockMemories(applyMachineFlockRowEvents(updated, [{ key }]), 'a' as MachineId)
   ).toEqual([]);
+});
+
+describe('rate limit entry keys and legacy persistence migrations', () => {
+  it('parses legacy rate limit keys and round-trips provider-scoped keys', () => {
+    expect(parseRateLimitEntryKey('codex')).toEqual({
+      agentConfigId: null,
+      cliType: 'codex',
+      limitId: null,
+    });
+    const agentConfigId = 'work::codex' as AgentConfigId;
+    const key = getRateLimitEntryKey('codex', 'codex::weekly', agentConfigId);
+    expect(parseRateLimitEntryKey(key)).toEqual({
+      agentConfigId,
+      cliType: 'codex',
+      limitId: 'codex::weekly',
+    });
+  });
+
+  it('normalizes legacy provider rate limit scales, durations, timestamps, and single-window Codex', () => {
+    const normalized = normalizePersistedRateLimit('claude', 'claude', {
+      planName: 'Claude Max',
+      fiveHour: 0.55,
+      sevenDay: 0.8,
+      fiveHourResetAt: 1_784_505_071_000,
+      sevenDayResetAt: 1_784_505_071,
+    });
+    expect(normalized).toMatchObject({
+      limitId: 'claude',
+      scope: { providerId: 'claude' },
+      planName: 'Claude Max',
+      windows: [
+        { windowDurationSeconds: 18_000, resetsAtEpochSeconds: 1_784_505_071 },
+        { windowDurationSeconds: 604_800, resetsAtEpochSeconds: 1_784_505_071 },
+      ],
+    });
+    expect(normalized?.windows[0]?.usedPercent).toBeCloseTo(55);
+    expect(normalized?.windows[1]?.usedPercent).toBeCloseTo(80);
+
+    expect(
+      normalizePersistedRateLimit('grok', 'grok', {
+        sevenDay: 0.5,
+        sevenDayResetAt: 1_784_505_071,
+      })?.windows
+    ).toEqual([
+      {
+        usedPercent: 0.5,
+        windowDurationSeconds: 604_800,
+        resetsAtEpochSeconds: 1_784_505_071,
+      },
+    ]);
+
+    expect(
+      normalizePersistedRateLimit('codex', 'codex', {
+        fiveHour: 29,
+        sevenDay: null,
+        fiveHourResetAt: 1_784_505_071,
+      })?.windows
+    ).toEqual([
+      {
+        usedPercent: 29,
+        windowDurationSeconds: 604_800,
+        resetsAtEpochSeconds: 1_784_505_071,
+      },
+    ]);
+  });
+
+  it('migrates legacy Pi providers while preserving unknown fields and skipping changed rows', () => {
+    const legacy = {
+      id: 'provider',
+      machineId: 'machine',
+      cliType: 'registry',
+      agentType: 'pi-acp',
+      name: 'My Pi',
+      env: { API_KEY: 'synthetic-secret' },
+      prompt: 'Instructions',
+      titleGeneration: { enabled: false },
+      futureField: 'preserved',
+    };
+
+    const upgraded = migratePiProvider(legacy);
+    expect(upgraded).toEqual({ ...legacy, cliType: 'builtin', agentType: 'pi' });
+    expect(legacy.cliType).toBe('registry');
+    expect(migratePiProvider(upgraded)).toBeUndefined();
+
+    for (const value of [
+      undefined,
+      null,
+      { ...legacy, agentType: 'codex-acp' },
+      { ...legacy, cliType: 'custom' },
+      { ...legacy, agentType: 'pi' },
+    ]) {
+      expect(isLegacyPiProvider(value)).toBe(false);
+      expect(migratePiProvider(value)).toBeUndefined();
+    }
+  });
 });

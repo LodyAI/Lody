@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { cloudOperations } from '../src/lib/cloud-api-operations';
 import { buildVisibleMachineIndex } from '../src/lib/visible-machine-index';
 import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
@@ -18,9 +19,7 @@ import { finalizePreparedSend } from '../src/lib/session-attachment-preparation'
 import type { SessionAttachmentDraft } from '../src/lib/session-attachment-draft';
 import { applyHistoryAction } from '../../shared/src/session-data/history-actions';
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
-// @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';

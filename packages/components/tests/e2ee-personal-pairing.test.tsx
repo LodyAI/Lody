@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { ClientCustodyError } from '@lody/e2ee-core/services';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

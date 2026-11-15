@@ -18,7 +18,15 @@ export const MODES = Object.freeze({
   FULL: 'full',
 });
 
-export const EXCLUDED_PACKAGES = Object.freeze(['acp-extension-claude', 'acp-extension-codex']);
+export const EXCLUDED_PACKAGES = Object.freeze([
+  'acp-extension-claude',
+  'acp-extension-codex',
+  'acp-extension-core',
+  'acp-extension-devin',
+  'acp-extension-dsh',
+  'acp-extension-grok',
+  'acp-extension-pi',
+]);
 
 export const ALWAYS_FULL_GLOBS = Object.freeze([
   'package.json',
@@ -58,6 +66,7 @@ const RUNTIME_MARKDOWN_GLOBS = Object.freeze(['packages/code-review-helper/promp
 const SKIPPABLE_GLOBS = Object.freeze([
   'specs/**',
   '.agents/**',
+  'scripts/docs/agents-budgets.json',
   'README.md',
   'README.zh-CN.md',
   'CONTRIBUTING.md',
@@ -89,9 +98,14 @@ const ACP_PREFIXES = Object.freeze([
   ['packages/acp-extension-claude', 'acp-extension-claude'],
   ['packages/acp-extension-codex', 'acp-extension-codex'],
   ['packages/acp-extension-core', 'acp-extension-core'],
+  ['packages/acp-extension-devin', 'acp-extension-devin'],
   ['packages/acp-extension-dsh', 'acp-extension-dsh'],
   ['packages/acp-extension-grok', 'acp-extension-grok'],
 ]);
+
+// Standalone directories outside pnpm-workspace.yaml that still participate in
+// root static boundary checks (`pnpm check:quick`), without root Vitest/typecheck.
+const STANDALONE_SCOPES = Object.freeze([['apps/mobile', '@lody/mobile']]);
 
 const GITHUB_OUTPUT_KEYS = Object.freeze([
   'mode',
@@ -308,6 +322,18 @@ export function loadWorkspace(root, io = defaultIo) {
     seen.add(name);
   }
 
+  for (const [dir, name] of STANDALONE_SCOPES) {
+    if (seen.has(name) || !isDirectory(io, join(root, dir))) continue;
+    packages.push({
+      name,
+      dir,
+      hasTest: false,
+      hasTypecheck: false,
+      workspaceDeps: [],
+    });
+    seen.add(name);
+  }
+
   return finalizeWorkspace(packages);
 }
 
@@ -358,6 +384,16 @@ function extraMapClassification(filePath) {
 
 export function classifyPath(filePath, workspace) {
   const path = toPosix(filePath);
+  // Documentation and word-budget metadata inside `scripts/` or `packages/configs/`
+  // are validated unconditionally by `pnpm run docs check` and `pnpm format:check`
+  // in Static checks and should not force all test shards to run.
+  if (
+    path === 'scripts/docs/agents-budgets.json' ||
+    ((path.startsWith('scripts/') || path.startsWith('packages/configs/')) &&
+      (matchesAnyGlob(path, SKIPPABLE_GLOBS) || matchGlob(path, REMAINING_MARKDOWN)))
+  ) {
+    return { kind: 'skippable' };
+  }
   if (matchesAnyGlob(path, ALWAYS_FULL_GLOBS)) {
     return { kind: 'always-full' };
   }
@@ -411,7 +447,7 @@ function packagesWithScripts(workspace, selected, field) {
   if (!workspace) return [];
   return uniqueSorted(
     selected.filter((name) => {
-      if (EXCLUDED_PACKAGES.includes(name)) return false;
+      if (EXCLUDED_PACKAGES.includes(name) || name.startsWith('acp-extension-')) return false;
       const pkg = workspace.byName.get(name);
       return Boolean(pkg?.[field]);
     })
@@ -616,7 +652,7 @@ export function parseNameStatusZ(buffer) {
   const text = Buffer.isBuffer(buffer) ? buffer.toString('utf8') : String(buffer);
   const parts = text.split('\0').filter((part) => part.length > 0);
   const files = [];
-  for (let index = 0; index < parts.length; ) {
+  for (let index = 0; index < parts.length;) {
     const status = parts[index];
     index += 1;
     const code = status[0];

@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement, useState } from 'react';
 import { frame, visualElementStore } from 'framer-motion';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

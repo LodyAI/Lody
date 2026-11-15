@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let knownFileTokens = new Set<string>();
 let knownSkillTokens = new Set<string>();
 let sessionItems: Array<{ sessionId: string; title: string; slug: string }> = [];
+let issueItems = new Map<number, { type: 'issue' | 'pr'; title: string; url?: string }>();
 
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -39,6 +38,14 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   useAgentRoleMentionItems: () => [],
 }));
 
+vi.mock('../src/components/mentions/issue-pr-hash-mention', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useKnownIssuePrItems: () => ({
+    knownItems: issueItems,
+    issuePrData: { entry: null, status: 'ready' as const, refresh: async () => undefined },
+  }),
+}));
+
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
 import { getComposerMentionChip } from '../src/components/mentions/mention-chips';
 import {
@@ -67,6 +74,7 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     knownFileTokens = new Set<string>();
     knownSkillTokens = new Set<string>();
     sessionItems = [];
+    issueItems = new Map();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -258,5 +266,91 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     );
     expect(spans).not.toContain('src/app.ts');
     expect(spans).toContain('src/other.ts');
+  });
+});
+
+/**
+ * One kind of mention must not cost another its decoration.
+ */
+describe('a draft with several kinds of mention keeps all of them', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    knownFileTokens = new Set(['src/app.ts']);
+    knownSkillTokens = new Set(['review']);
+    sessionItems = [
+      { sessionId: 'sess_fix', title: 'Fix CI', slug: 'fix-ci', activityAt: 1 } as never,
+    ];
+    issueItems = new Map([[123, { type: 'issue' as const, title: 'Bug' }]]);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  const kinds = () =>
+    Array.from(
+      new Set(
+        Array.from(container.querySelectorAll('[data-mention-kind]')).map((n) =>
+          n.getAttribute('data-mention-kind')
+        )
+      )
+    ).sort();
+
+  async function render(props: {
+    value: string;
+    persisted?: readonly PersistedMentionRange[];
+    onRanges?: (ranges: never) => void;
+  }) {
+    await act(async () => {
+      root.render(
+        <CombinedMentionTextarea
+          value={props.value}
+          onValueChange={() => undefined}
+          mentionSource={
+            { kind: 'local', localProjectId: 'p1', githubRepoFullName: 'o/r' } as never
+          }
+          skillAgent={{ machineId: 'm1' } as never}
+          persistedMentions={props.persisted}
+          onMentionRangesChange={props.onRanges as never}
+          getMentionChip={getComposerMentionChip}
+          resetOnEmpty={false}
+        />
+      );
+    });
+  }
+
+  const roundTrip = async (text: string, expected: string[]) => {
+    let reported: PersistedMentionRange[] = [];
+    await render({
+      value: text,
+      onRanges: ((r: never) => {
+        reported = toPersistedMentionRanges(r);
+      }) as never,
+    });
+    expect(kinds()).toEqual(expected);
+
+    await act(async () => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await render({ value: text, persisted: reported });
+    expect(kinds()).toEqual(expected);
+  };
+
+  it('keeps all four kinds at once', async () => {
+    await roundTrip('see @fix-ci @src/app.ts $review #123', ['file', 'issue', 'session', 'skill']);
+  });
+
+  it('keeps all four when the session mention comes last in the text', async () => {
+    await roundTrip('see @src/app.ts $review #123 @fix-ci', ['file', 'issue', 'session', 'skill']);
   });
 });

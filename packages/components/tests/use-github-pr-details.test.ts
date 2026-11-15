@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
-// @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GitHubCheckRunsSummary, GitHubMergeResult, GitHubPullRequestDetails } from '@lody/shared';
+import type {
+  GitHubCheckRunsSummary,
+  GitHubMergeResult,
+  GitHubPullRequestDetails,
+} from '@lody/shared';
 
 const githubMocks = vi.hoisted(() => ({
   githubBranchExists: vi.fn(),
@@ -128,7 +128,11 @@ vi.mock('@lody/shared', async (importOriginal) => {
   };
 });
 
-import type { GitHubPrDetailsData, UseGitHubPrDetailsInput, UseGitHubPrDetailsResult } from '../src/hooks/use-github-pr-details';
+import type {
+  GitHubPrDetailsData,
+  UseGitHubPrDetailsInput,
+  UseGitHubPrDetailsResult,
+} from '../src/hooks/use-github-pr-details';
 
 const { getAuthRecoveryBackoffMs, useGitHubPrDetails } =
   await import('../src/hooks/use-github-pr-details');

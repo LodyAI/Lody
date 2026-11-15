@@ -13,6 +13,7 @@ import {
   fromApplicationJson,
   toApplicationJson,
   applicationJsonText,
+  type HistoryProjectedMessage,
 } from '@loro-dev/roost/lody-history';
 import {
   agentReceiptPut,
@@ -22,7 +23,7 @@ import {
   stageRoostContent,
 } from '../src/session/roost-content-patches';
 import { createRoostHistoryReader } from '@lody/shared/session-data';
-import { createRoostReadPort } from '../src/session/roost-history-port';
+import { adaptRoostProjectedMessage, createRoostReadPort } from '../src/session/roost-history-port';
 import {
   createRoostHistoryChanges,
   roostCommitMetadata,
@@ -768,4 +769,35 @@ it('stages all content operations exactly like Native, including Unicode and own
     await client.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+describe('local Roost release-candidate binding', () => {
+  it('converts Roost lossless JSON into the Lody port DTO', () => {
+    const row: HistoryProjectedMessage = {
+      businessId: 'assistant-1',
+      segmentId: 'primary',
+      turnId: new Uint8Array(16),
+      content: fromApplicationJson({
+        id: 'storage-id-must-not-win',
+        role: 'assistant',
+        timestamp: '2026-10-03T00:00:01.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+      }),
+      nextSeq: 1n,
+      sealed: true,
+    };
+
+    expect(adaptRoostProjectedMessage(row)).toEqual({
+      businessId: 'assistant-1',
+      segmentId: 'primary',
+      content: {
+        id: 'storage-id-must-not-win',
+        role: 'assistant',
+        timestamp: '2026-10-03T00:00:01.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+      },
+      nextSeq: 1n,
+      sealed: true,
+    });
+  });
 });

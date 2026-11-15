@@ -4,6 +4,7 @@ import net from 'node:net'
 import test from 'node:test'
 import { LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION } from '@lody/shared/local-loro-data-plane'
 import { LoroDataPlaneRelay } from './loro-data-plane-relay.ts'
+import { TerminalRelay } from './terminal-relay.ts'
 
 void test('does not probe the local data plane while local agents are disabled', async () => {
   let connectionAttempts = 0
@@ -202,4 +203,35 @@ void test('redial discovers rotated addresses and secrets after an unavailable r
   assert.deepEqual(sockets[1].writes, [{ type: 'authenticate', token: 'b'.repeat(64) }])
   relay.destroy()
   await settle()
+})
+
+void test('a socket dropped for a protocol error does not fail requests on its successor', async () => {
+  const sockets = []
+  const relay = new TerminalRelay('/unused/terminal.sock', () => {
+    const socket = createControlledSocket()
+    sockets.push(socket)
+    return socket
+  })
+
+  const first = relay.list('session-1')
+  sockets[0].emit('connect')
+  await settle()
+  sockets[0].emit('data', Buffer.from('not json\n'))
+  await assert.rejects(first, /invalid_terminal_server_event/)
+
+  // The next request redials before the dropped socket's close arrives.
+  const second = relay.list('session-1')
+  assert.equal(sockets.length, 2)
+  sockets[1].emit('connect')
+  await settle()
+  const { requestId } = sockets[1].writes[0]
+  sockets[1].emit(
+    'data',
+    Buffer.from(
+      `${JSON.stringify({ type: 'terminals', requestId, sessionId: 'session-1', terminals: [] })}\n`
+    )
+  )
+
+  assert.deepEqual(await second, [])
+  relay.destroy()
 })

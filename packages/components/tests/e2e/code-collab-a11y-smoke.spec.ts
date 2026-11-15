@@ -115,5 +115,4 @@ test.describe('Code Collab a11y / visual smoke', () => {
     const monacoCount = await page.locator('.monaco-editor').count();
     expect(monacoCount).toBe(0);
   });
-
 });

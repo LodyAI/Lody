@@ -8,6 +8,7 @@ packages:
   - site-docs
 
 catalog:
+  vitest: 5.0.2
   '@agentclientprotocol/sdk': ^1.3.0
   '@better-auth/api-key': 1.6.33
   '@better-auth/core': 1.6.33

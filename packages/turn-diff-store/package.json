@@ -36,7 +36,7 @@
     "@types/node": "catalog:",
     "tsx": "^4.23.5",
     "typescript": "catalog:",
-    "vitest": "^3.2.4"
+    "vitest": "catalog:"
   },
   "license": "Apache-2.0"
 }

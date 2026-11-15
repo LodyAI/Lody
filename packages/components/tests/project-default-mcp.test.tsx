@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import i18next from 'i18next';
 import { Toast } from '@lody/ui';

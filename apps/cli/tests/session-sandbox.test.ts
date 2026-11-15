@@ -6,7 +6,12 @@ import { it as effectIt } from '@effect/vitest';
 import { Cause, Deferred, Effect, Exit, Fiber, Option } from 'effect';
 import { TestClock } from 'effect/testing';
 import { ChildProcessSpawner } from 'effect/process';
-import { processLayer, ProcessReleaseFailed, TerminationFailed } from '@lody/shared/node/process';
+import {
+  processLayer,
+  ProcessReleaseFailed,
+  TerminationFailed,
+  type TerminationPolicy,
+} from '@lody/shared/node/process';
 import { makeCgroupContainer } from '../src/platform/sandbox/cgroup-container';
 import type { ChildProcess } from 'child_process';
 import realSpawn from 'cross-spawn';
@@ -22,6 +27,11 @@ import {
 } from '../src/utils/process-resource-profile';
 import type { Logger } from '../src/utils/logger';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
+
+const fastTerminationPolicy = (force: boolean): TerminationPolicy => ({
+  graceMs: force ? 0 : 25,
+  killWaitMs: 25,
+});
 
 const createSilentLogger = (warnings: string[] = []): Logger => ({
   info: () => {},
@@ -502,6 +512,7 @@ describe('session sandbox', () => {
           table.api.kill(pid, signal ?? 'SIGTERM');
         },
         configureExecutionProcess: async () => {},
+        terminationPolicy: fastTerminationPolicy,
       },
     })('failed-generation' as SessionId);
     const first = await sandbox.spawn('agent', [], {});
@@ -962,6 +973,7 @@ it('shares a failed cleanup receipt and retries retained resources only through 
         table.api.kill(pid, signal ?? 'SIGTERM');
       },
       configureExecutionProcess: async () => {},
+      terminationPolicy: fastTerminationPolicy,
     },
   })('shared-cleanup' as SessionId);
   const child = await sandbox.spawn('agent', [], {});

@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { nativeShareState as state } from './stubs/native-share';
 import { runTouchImagePreviewAction } from '../src/lib/image-preview-export';
 import { shareFileBytesNatively } from '../src/lib/session-file-native-save';
 
@@ -10,45 +11,8 @@ vi.mock('../src/lib/session-file-upload', () => ({
   },
 }));
 
-const state = vi.hoisted(() => ({
-  files: new Map<string, Buffer>(),
-  received: [] as { name: string; bytes: Buffer }[],
-  failure: null as string | null,
-  failWrite: false,
-  failUri: false,
-}));
-
-vi.mock('@capacitor/filesystem', () => ({
-  Directory: { Cache: 'CACHE' },
-  Filesystem: {
-    async writeFile({ path, data }: { path: string; data: string }) {
-      state.files.set(path, Buffer.from(data, 'base64'));
-      if (state.failWrite) throw new Error('Disk full');
-    },
-    async appendFile({ path, data }: { path: string; data: string }) {
-      state.files.set(path, Buffer.concat([state.files.get(path)!, Buffer.from(data, 'base64')]));
-    },
-    async getUri({ path }: { path: string }) {
-      if (state.failUri) throw new Error('URI unavailable');
-      return { uri: `file://${path}` };
-    },
-    async deleteFile({ path }: { path: string }) {
-      state.files.delete(path);
-    },
-  },
-}));
-
-vi.mock('@capacitor/share', () => ({
-  Share: {
-    async share({ files }: { files: string[] }) {
-      const path = files[0].slice('file://'.length);
-      const bytes = state.files.get(path);
-      if (!bytes) throw new Error('Missing staged file');
-      if (state.failure) throw new Error(state.failure);
-      state.received.push({ name: path, bytes });
-    },
-  },
-}));
+vi.mock('@capacitor/filesystem');
+vi.mock('@capacitor/share');
 
 beforeEach(() => {
   state.files.clear();

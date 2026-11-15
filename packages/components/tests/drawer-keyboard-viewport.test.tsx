@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, useState } from 'react';
 
 import { Menu } from '@lody/ui/menu';
