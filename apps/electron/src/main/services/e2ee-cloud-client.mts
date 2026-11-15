@@ -164,7 +164,8 @@ const pairingClaim = z
                     next: z.null(),
                     slot: status
                   })
-                  .optional().catch(undefined)
+                  .optional()
+                  .catch(undefined)
               })
             )
             .max(PAIRING_MAX_WORKSPACES)
