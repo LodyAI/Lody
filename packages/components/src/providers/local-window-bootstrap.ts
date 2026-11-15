@@ -1,5 +1,5 @@
 import type { LoroRepo, StorageAdapter } from 'loro-repo';
-import { LoroDoc } from 'loro-crdt';
+import { LoroDoc, decodeImportBlobMeta } from 'loro-crdt';
 
 const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 const PEER_WAIT_MS = 150;
@@ -144,6 +144,17 @@ export async function readSessionBootstrapSnapshot(
   return (await readCache().catch(() => undefined)) ?? (await readPeer().catch(() => undefined));
 }
 
+/** Whether `doc` already holds every change in `snapshot`, read from its header only. */
+function containsSnapshot(doc: LoroDoc, snapshot: Uint8Array): boolean {
+  try {
+    const { partialEndVersionVector } = decodeImportBlobMeta(snapshot, false);
+    const order = doc.oplogVersion().compare(partialEndVersionVector);
+    return order === 0 || order === 1;
+  } catch {
+    return false;
+  }
+}
+
 /** Seed cold replicas before Repo subscribes, avoiding a full-history import diff. */
 export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadDoc' | 'save'>) {
   const pending = new Map<
@@ -158,22 +169,14 @@ export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadD
     const snapshot = await request.snapshot;
     if (!snapshot) return persisted;
     try {
-      // This candidate is not yet owned by Repo. Keep the original available if
-      // cache import/persistence fails; a live replica is never replaced.
-      //
-      // A plain snapshot omits received remote updates still waiting for
-      // missing causal dependencies. Re-import the durable sidecar after the
-      // bootstrap snapshot so adopting it does not hide those updates from the
-      // live replica. The storage journal remains their durability owner, so
-      // this does not write a second copy.
-      const seeded = LoroDoc.fromSnapshot(
-        persisted ? persisted.export({ mode: 'snapshot' }) : snapshot
-      );
-      if (persisted) {
-        seeded.import(snapshot);
-        const persistedPending = persisted.exportPendingUpdates();
-        if (persistedPending !== undefined) seeded.import(persistedPending);
-      }
+      // The cache entry outlives its first merge. Reopening a long conversation
+      // must not decode, import and rewrite its whole history again.
+      if (persisted && containsSnapshot(persisted, snapshot)) return persisted;
+      // This candidate is not yet owned by Repo, so merge into it directly: a
+      // rebuilt copy decodes the whole history twice more on the UI thread and
+      // drops received updates still waiting for missing causal dependencies.
+      const seeded = persisted ?? LoroDoc.fromSnapshot(snapshot);
+      if (persisted) seeded.import(snapshot);
       // Repo treats storage-loaded versions as durable. Save the merged state
       // before adoption so a later cursor cannot outrun its document.
       await storage.save({
@@ -184,7 +187,9 @@ export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadD
       request.loaded = seeded;
       return seeded;
     } catch {
-      return persisted;
+      // A failed merge or save must not adopt state that is not durable. Reload
+      // the stored document; foreground sync merges the bootstrap state live.
+      return persisted ? await loadDoc.call(storage, room) : undefined;
     }
   };
   return async (
@@ -201,7 +206,11 @@ export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadD
     try {
       const handle = await repo.openPersistedDoc(room);
       const snapshot = await request.snapshot;
-      if (snapshot && request.loaded !== handle.doc) {
+      if (
+        snapshot &&
+        request.loaded !== handle.doc &&
+        !containsSnapshot(handle.doc as LoroDoc, snapshot)
+      ) {
         try {
           // Already-owned replicas keep their identity, edits and subscribers.
           handle.doc.import(snapshot);

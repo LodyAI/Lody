@@ -299,6 +299,45 @@ describe('session snapshot adoption', () => {
     await repo.destroy();
   });
 
+  it('reopens a document that already contains its cached snapshot without rebuilding or rewriting it', async () => {
+    // A cache entry outlives its first merge, so every later cold open of a long
+    // conversation would otherwise decode, import and re-save the whole history.
+    const { storage, snapshots } = storageFixture();
+    const cached = remoteSnapshot();
+    const persisted = LoroDoc.fromSnapshot(cached);
+    persisted.getMap('fields').set('local', 'unsent');
+    persisted.commit();
+    snapshots.set('session-one', persisted.export({ mode: 'snapshot' }));
+    const stored = snapshots.get('session-one');
+    let loaded: LoroDoc | undefined;
+    const loadDoc = storage.loadDoc;
+    storage.loadDoc = async (room) => (loaded = await loadDoc(room));
+    const open = createSessionSnapshotLoader(storage);
+    const repo = await LoroRepo.create({ storageAdapter: storage });
+    const { doc } = await open(repo, 'session-one', async () => cached);
+    expect(doc).toBe(loaded);
+    expect(doc.toJSON()).toEqual({ fields: { remote: 'peer', local: 'unsent' } });
+    expect(snapshots.get('session-one')).toBe(stored);
+    await repo.destroy();
+  });
+
+  it('merges new cached history into the loaded document instead of a rebuilt copy', async () => {
+    const { storage, snapshots } = storageFixture();
+    const local = new LoroDoc();
+    local.getMap('fields').set('local', 'unsent');
+    snapshots.set('session-one', local.export({ mode: 'snapshot' }));
+    let loaded: LoroDoc | undefined;
+    const loadDoc = storage.loadDoc;
+    storage.loadDoc = async (room) => (loaded = await loadDoc(room));
+    const open = createSessionSnapshotLoader(storage);
+    const repo = await LoroRepo.create({ storageAdapter: storage });
+    const { doc } = await open(repo, 'session-one', async () => remoteSnapshot());
+    expect(doc).toBe(loaded);
+    expect(doc.toJSON()).toEqual({ fields: { remote: 'peer', local: 'unsent' } });
+    expect(LoroDoc.fromSnapshot(snapshots.get('session-one')!).toJSON()).toEqual(doc.toJSON());
+    await repo.destroy();
+  });
+
   it('ignores corrupt bootstrap data and retains persisted edits', async () => {
     const { storage, snapshots } = storageFixture();
     const local = new LoroDoc();
