@@ -58,7 +58,8 @@
     "build:electron:linux": "corepack pnpm --dir apps/electron build:linux",
     "check:local-loro-writer-boundary": "node scripts/check-local-loro-writer-boundary.mjs",
     "check:operation-inbox-boundary": "node scripts/check-operation-inbox-boundary.mjs",
-    "check:legacy-cloud-access": "node scripts/check-legacy-cloud-access.mjs"
+    "check:legacy-cloud-access": "node scripts/check-legacy-cloud-access.mjs",
+    "check:affected": "node scripts/run-local-check.mjs --affected"
   },
   "keywords": [
     "cli",

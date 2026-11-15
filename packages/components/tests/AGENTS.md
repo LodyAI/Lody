@@ -20,3 +20,7 @@ build/release guarantees; mixed suites keep only their qualifying cases.
   async owners; `setup-shared.ts` restores storage, timers and global test doubles.
   Files with persistent listeners or irreversible state belong in the explicit
   isolation list. File-path filters and CI shards must retain the same coverage.
+
+- Label-only translation fixtures use `test-i18n.tsx`: own an independent instance
+  and wrap each renderer root in its provider. Do not replace the global i18next
+  instance or mock the `react-i18next` module just to supply labels.

@@ -9,10 +9,9 @@ import {
   createUsageTimelineFormatter,
   formatUsageTimelineBucketLabel,
 } from '../src/components/settings/usage-timeline-bucket-label';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }),
-}));
+const testI18n = createTestI18n({ keyLabels: true });
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -45,22 +44,25 @@ function render(data: SettingsUsageTimelineData): HTMLDivElement {
   const firstDay = Math.floor(data.startMs / DAY_MS) * DAY_MS;
   const container = document.createElement('div');
   container.innerHTML = renderToStaticMarkup(
-    <UsageCalendarVisualization
-      timeline={data}
-      calendar={{
-        workspaceId: data.workspaceId,
-        timezone: 'UTC',
-        startMs: firstDay,
-        endMs: data.endMs,
-        days: Array.from({ length: 8 }, (_, index) => ({
-          dayStartMs: firstDay + index * DAY_MS,
-          date: new Date(firstDay + index * DAY_MS).toISOString().slice(0, 10),
-          tokens: 0,
-          costUSD: 0,
-          isFuture: false,
-        })),
-      }}
-    />
+    withTestI18n(
+      <UsageCalendarVisualization
+        timeline={data}
+        calendar={{
+          workspaceId: data.workspaceId,
+          timezone: 'UTC',
+          startMs: firstDay,
+          endMs: data.endMs,
+          days: Array.from({ length: 8 }, (_, index) => ({
+            dayStartMs: firstDay + index * DAY_MS,
+            date: new Date(firstDay + index * DAY_MS).toISOString().slice(0, 10),
+            tokens: 0,
+            costUSD: 0,
+            isFuture: false,
+          })),
+        }}
+      />,
+      testI18n
+    )
   );
   return container;
 }
@@ -200,7 +202,7 @@ describe('usage day selection across ranges', () => {
   });
 
   async function show(data: SettingsUsageTimelineData) {
-    await act(async () => root.render(<SelectionHarness data={data} />));
+    await act(async () => root.render(withTestI18n(<SelectionHarness data={data} />, testI18n)));
   }
 
   async function selectCell(index: number, range?: 'day' | 'week') {

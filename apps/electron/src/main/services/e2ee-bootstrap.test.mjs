@@ -304,7 +304,7 @@ void test('hard process exit releases creation ownership and preserves incomplet
         command: process.execPath,
         args: [
           '--import',
-          import.meta.resolve('tsx'),
+          new URL('../../../scripts/node-test-ts-resolve.mjs', import.meta.url).href,
           '--input-type=module',
           '-e',
           child,

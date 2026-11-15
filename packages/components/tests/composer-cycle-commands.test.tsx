@@ -6,10 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useComposerCycleCommands } from '../src/hooks/use-composer-cycle-commands';
 import { commands } from '../src/lib/commands';
 import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -99,23 +98,26 @@ describe('composer cycle command ownership', () => {
 
     const render = (active: 'first' | 'second') => {
       root.render(
-        <>
-          <CommandShortcutHost />
-          <CycleCommandProbe
-            id="first"
-            enabled={active === 'first'}
-            onModeSelect={first.mode}
-            onModelSelect={first.model}
-            onThinkEffortSelect={first.thinkEffort}
-          />
-          <CycleCommandProbe
-            id="second"
-            enabled={active === 'second'}
-            onModeSelect={second.mode}
-            onModelSelect={second.model}
-            onThinkEffortSelect={second.thinkEffort}
-          />
-        </>
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="first"
+              enabled={active === 'first'}
+              onModeSelect={first.mode}
+              onModelSelect={first.model}
+              onThinkEffortSelect={first.thinkEffort}
+            />
+            <CycleCommandProbe
+              id="second"
+              enabled={active === 'second'}
+              onModeSelect={second.mode}
+              onModelSelect={second.model}
+              onThinkEffortSelect={second.thinkEffort}
+            />
+          </>,
+          testI18n
+        )
       );
     };
 
@@ -146,16 +148,19 @@ describe('composer cycle command ownership', () => {
     const mode = vi.fn();
     act(() => {
       root.render(
-        <>
-          <CommandShortcutHost />
-          <CycleCommandProbe
-            id="composer"
-            enabled
-            onModeSelect={mode}
-            onModelSelect={vi.fn()}
-            onThinkEffortSelect={vi.fn()}
-          />
-        </>
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="composer"
+              enabled
+              onModeSelect={mode}
+              onModelSelect={vi.fn()}
+              onThinkEffortSelect={vi.fn()}
+            />
+          </>,
+          testI18n
+        )
       );
     });
 

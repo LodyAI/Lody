@@ -12,8 +12,8 @@
     "prebuild": "corepack pnpm run clean:out && corepack pnpm run generate && corepack pnpm run generate:routes",
     "build": "vite build && node scripts/finalize-prerender-html.mjs && node scripts/finalize-404-html.mjs",
     "preview:static": "node scripts/serve-static.mjs",
-    "pretypecheck": "corepack pnpm run generate && corepack pnpm run generate:routes",
-    "typecheck": "tsc --noEmit",
+    "pretypecheck": "node scripts/prepare-typecheck.mjs",
+    "typecheck": "tsgo --noEmit",
     "test": "node --test scripts/app-boundary.test.mjs scripts/postinstall.test.mjs scripts/site-paths.test.mjs scripts/static-host.test.mjs scripts/finalize-404-html.test.mjs scripts/finalize-prerender-html.test.mjs scripts/llms-answers.test.mjs && node --experimental-strip-types --test lib/metadata.test.ts lib/not-found-seo.test.ts lib/docs-faq.test.ts lib/after-first-paint.test.ts lib/module-preload.test.ts lib/nightly-downloads.test.ts",
     "test:static": "node scripts/verify-static-browser.mjs"
   },

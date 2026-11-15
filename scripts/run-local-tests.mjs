@@ -4,6 +4,8 @@ import { execFileSync, spawn } from 'node:child_process';
 import { availableParallelism, totalmem } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { collectLocalScope } from './local-check-scope.mjs';
+import { REST_PACKAGES } from './vitest-rest.config.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -48,6 +50,7 @@ export function buildSanitizedTestEnv(baseEnv = process.env, delimiter = path.de
 }
 
 export function computeLocalTestWaves({
+  scope = null,
   cpus = availableParallelism(),
   perfCores = detectPerformanceCores(),
   platform = process.platform,
@@ -81,7 +84,7 @@ export function computeLocalTestWaves({
     command: 'corepack',
     args: ['pnpm', '--filter', '@lody/electron', 'run', 'test'],
     env: {
-      LODY_ELECTRON_TEST_CONCURRENCY: String(Math.max(2, Math.min(4, Math.floor(budget / 2)))),
+      LODY_ELECTRON_TEST_CONCURRENCY: String(Math.max(2, Math.min(3, Math.floor(budget / 3)))),
     },
   };
 
@@ -115,26 +118,70 @@ export function computeLocalTestWaves({
   });
 
   // Rest's reusable Vitest workers and Electron's bounded groups share the last
-  // wave. Reserve about half the budget for each, instead of adding a long tail.
+  // wave. Leave capacity for the script/docs tasks alongside their worker pools.
   const restWorkers = Math.max(
     2,
-    Math.min(8, budget - Number(electronTask.env.LODY_ELECTRON_TEST_CONCURRENCY))
+    Math.min(8, budget - Number(electronTask.env.LODY_ELECTRON_TEST_CONCURRENCY) - 1)
   );
+
+  const select = (waves) => selectAffectedTestWaves(waves, scope);
 
   if (budget >= 16 && effectiveCores >= 16) {
     const dedicatedWorkers = Math.min(8, Math.floor(budget / 2));
-    return [
+    return select([
       [makeComponentsTask(dedicatedWorkers), makeCliTask(dedicatedWorkers)],
       [scriptsTask, siteDocsTask, makeRestTask(restWorkers), electronTask],
-    ];
+    ]);
   }
 
   const suiteWorkers = Math.max(2, Math.min(8, budget));
-  return [
+  return select([
     [makeComponentsTask(suiteWorkers)],
     [makeCliTask(suiteWorkers)],
     [scriptsTask, siteDocsTask, makeRestTask(restWorkers), electronTask],
-  ];
+  ]);
+}
+
+export function selectAffectedTestWaves(waves, scope) {
+  if (!scope || !['affected', 'skip-tests'].includes(scope.mode)) return waves;
+  if (!scope.runTests) return [];
+  if (!Array.isArray(scope.testPackages) || scope.testPackages.length === 0) return waves;
+  const selected = new Set(scope.testPackages);
+  const dedicated = {
+    components: '@lody/components',
+    cli: 'lody',
+    electron: '@lody/electron',
+    'site-docs': '@lody/site-docs',
+  };
+  const rest = REST_PACKAGES.filter((dir) =>
+    selected.has(dir === 'ignore' ? '@loro-dev/ignore' : `@lody/${dir}`)
+  );
+  const result = waves
+    .map((wave) =>
+      wave.flatMap((task) => {
+        if (task.id === 'scripts') return scope.runScriptTests ? [task] : [];
+        if (task.id === 'rest')
+          return rest.length
+            ? [{ ...task, args: [...task.args, ...rest.map((dir) => `--project=${dir}:*`)] }]
+            : [];
+        return selected.has(dedicated[task.id]) ? [task] : [];
+      })
+    )
+    .filter((wave) => wave.length);
+  const known = new Set([
+    ...Object.values(dedicated),
+    ...REST_PACKAGES.map((dir) => (dir === 'ignore' ? '@loro-dev/ignore' : `@lody/${dir}`)),
+  ]);
+  for (const name of selected)
+    if (!known.has(name))
+      result.push([
+        {
+          id: `workspace:${name}`,
+          command: 'corepack',
+          args: ['pnpm', '--filter', name, 'run', 'test'],
+        },
+      ]);
+  return result;
 }
 
 function runTask(task, { cwd, env }) {
@@ -183,7 +230,8 @@ function runTask(task, { cwd, env }) {
 async function main() {
   const verbose = process.argv.includes('--verbose') || process.env.LODY_CHECK_VERBOSE === '1';
   const env = buildSanitizedTestEnv(process.env);
-  const waves = computeLocalTestWaves({ env: process.env });
+  const scope = process.argv.includes('--affected') ? collectLocalScope() : null;
+  const waves = computeLocalTestWaves({ env: process.env, scope });
   const failures = [];
 
   for (const wave of waves) {

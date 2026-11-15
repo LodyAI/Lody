@@ -10,7 +10,9 @@ import {
   localAgentRunsWorkspace,
 } from '../src/components/e2ee-local-agent-approval';
 import type { ElectronCliState } from '@lody/shared';
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+import { createTestI18n, withTestI18n } from './test-i18n';
+
+const testI18n = createTestI18n({ keyLabels: true });
 
 describe('local encrypted agent approval', () => {
   let root: Root;
@@ -57,12 +59,15 @@ describe('local encrypted agent approval', () => {
   const render = (enabled = true, localAgentRunning: boolean | null = false) =>
     act(async () =>
       root.render(
-        <E2eeLocalAgentApproval
-          workspaceId="workspace"
-          runtime={runtime}
-          enabled={enabled}
-          localAgentRunning={localAgentRunning}
-        />
+        withTestI18n(
+          <E2eeLocalAgentApproval
+            workspaceId="workspace"
+            runtime={runtime}
+            enabled={enabled}
+            localAgentRunning={localAgentRunning}
+          />,
+          testI18n
+        )
       )
     );
   const click = async (label: string) => {
@@ -426,7 +431,12 @@ describe('local encrypted agent approval', () => {
       return { admitted: true, ready: true };
     };
     await act(async () =>
-      root.render(<E2eeLocalAgentApproval workspaceId="other" runtime={runtime} enabled />)
+      root.render(
+        withTestI18n(
+          <E2eeLocalAgentApproval workspaceId="other" runtime={runtime} enabled />,
+          testI18n
+        )
+      )
     );
     expect(container.textContent).toContain('e2ee.localAgent.enable');
     await click('e2ee.localAgent.enable');
@@ -518,7 +528,12 @@ describe('remote encrypted machine approval', () => {
     };
     try {
       await act(async () =>
-        root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
+        root.render(
+          withTestI18n(
+            <E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />,
+            testI18n
+          )
+        )
       );
       await click('e2ee.remoteMachine.create');
       expect(
@@ -603,7 +618,12 @@ describe('remote encrypted machine approval', () => {
       Array.from(container.querySelectorAll('button')).find((item) => item.textContent === key);
     try {
       await act(async () =>
-        root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
+        root.render(
+          withTestI18n(
+            <E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />,
+            testI18n
+          )
+        )
       );
       await act(async () => button('e2ee.remoteMachine.create')!.click());
       await act(async () => button('e2ee.remoteMachine.check')!.click());

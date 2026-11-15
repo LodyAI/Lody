@@ -2,6 +2,13 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+const nativeFlags = [
+  '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON',
+  '--experimental-strip-types',
+  '--import',
+  './scripts/node-test-ts-resolve.mjs'
+]
+
 // Each group shares transforms and module state. The two large runtime suites
 // retain separate processes so their actual test work can still overlap.
 export const ELECTRON_TEST_GROUPS = [
@@ -53,13 +60,13 @@ export const ELECTRON_TEST_GROUPS = [
   ...['e2ee-runtime', 'e2ee-account-runtime'].flatMap((name) =>
     ['', '-part-2', '-part-3'].map((suffix) => ({
       id: `${name}${suffix}`,
-      flags: ['--import', 'tsx'],
+      flags: nativeFlags,
       files: [`src/main/services/${name}${suffix}.test.mjs`]
     }))
   ),
   {
     id: 'e2ee-adapters',
-    flags: ['--import', 'tsx'],
+    flags: nativeFlags,
     files: [
       'src/main/e2ee-custody.test.mjs',
       'src/main/services/e2ee-bootstrap.test.mjs',
