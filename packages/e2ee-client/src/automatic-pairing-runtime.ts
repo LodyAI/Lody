@@ -711,8 +711,28 @@ export function makeAutomaticPairingRuntime(options: {
     return created;
   });
 
+  /** A completed request is read again when a page mounts or starts. Its approval stays
+   * retained; only this device's exact loss since then replaces the `joined` result, so a
+   * revoked or removed device never reopens on an earlier approval. One host status read,
+   * no key round or request; any other failure keeps `joined`. */
+  const recheckJoined = Effect.fnUntraced(function* (value: RequesterEntry) {
+    if (!runtime.status) return;
+    const current = yield* Effect.result(promise(() => runtime.status(value.context.workspaceId)));
+    yield* check();
+    if (
+      Result.isFailure(current) &&
+      value.state._tag === 'Terminal' &&
+      value.state.outcome === 'joined'
+    )
+      settleLost(value, current.failure);
+  });
+
   const requesterTick = Effect.fnUntraced(function* (value: RequesterEntry) {
-    if (yield* expiresRequester(value)) return snapshotRequester(value);
+    if (yield* expiresRequester(value)) {
+      if (value.state._tag === 'Terminal' && value.state.outcome === 'joined')
+        yield* recheckJoined(value);
+      return snapshotRequester(value);
+    }
     if (value.state._tag === 'AdmittedSyncing') {
       yield* updateKeys(value);
       return snapshotRequester(value);
@@ -988,6 +1008,9 @@ export function makeAutomaticPairingRuntime(options: {
           let initialState: RequesterState = { _tag: 'Negotiating' };
           if (runtime.status && !revoked) {
             const currentStatus = yield* Effect.result(promise(() => runtime.status(workspaceId)));
+            const loss = Result.isFailure(currentStatus)
+              ? options.accessLoss(currentStatus.failure)
+              : null;
             if (
               Result.isSuccess(currentStatus) &&
               currentStatus.success.genesisHash === hint.genesisHash &&
@@ -995,6 +1018,13 @@ export function makeAutomaticPairingRuntime(options: {
               currentStatus.success.hasDeviceCredential
             ) {
               initialState = { _tag: 'AdmittedSyncing' };
+            } else if (loss) {
+              // Show the exact loss; pairing again is the person's explicit next start.
+              initialState = {
+                _tag: 'Terminal',
+                outcome: loss === 'e2ee_device_revoked' ? 'revoked' : 'removed',
+                attempted: false,
+              };
             }
           }
           retained = requesterEntry(

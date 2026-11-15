@@ -1039,6 +1039,69 @@ describe('automatic pairing requester after access loss', () => {
     });
   });
 
+  it.each([
+    ['e2ee_device_revoked', 'revoked'],
+    ['e2ee_member_removed', 'removed'],
+  ] as const)(
+    'reports a later exact %s over its earlier joined result when the page reads it again',
+    async (code, phase) => {
+      const { pairing, host } = setup();
+      try {
+        await pairing.startAutomaticPairing('w1');
+        host.refresh.mockResolvedValueOnce({ ...retained, hasCurrentKey: true } as Status);
+        const joined = await pairing.automaticPairingState('w1');
+        expect(joined).toMatchObject({ phase: 'joined' });
+        // While nothing has changed, reading the joined result asks the host once and
+        // starts nothing: no key round, no new request.
+        host.status.mockResolvedValue({ ...retained, hasCurrentKey: true } as Status);
+        const refreshes = host.refresh.mock.calls.length;
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'joined' });
+        // Offline or an ordinary refusal never takes the completed approval back.
+        host.status.mockRejectedValueOnce(new Error('e2ee_network'));
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'joined' });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+        host.status.mockRejectedValue(exactLoss(code));
+        host.refresh.mockRejectedValue(exactLoss(code));
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({
+          id: joined!.id,
+          phase,
+        });
+        // A remounted page reads the loss rather than "joined", and starts nothing.
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ id: joined!.id, phase });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+        // Only the person's explicit start acts: a revoked device asks as a new pairing,
+        // a removed member's start re-verifies and still finds the loss.
+        expect(await pairing.startAutomaticPairing('w1')).toMatchObject({
+          phase: phase === 'revoked' ? 'preparing' : 'removed',
+        });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+      } finally {
+        pairing.disposeAutomaticPairing();
+      }
+    }
+  );
+
+  it.each([
+    ['e2ee_device_revoked', 'revoked'],
+    ['e2ee_member_removed', 'removed'],
+  ] as const)(
+    'shows an exact %s found on a fresh start instead of asking for approval by itself',
+    async (code, phase) => {
+      const { pairing, host } = setup();
+      try {
+        // A scanned join already ended this page's automatic request; the next mount
+        // starts fresh against a device whose access is gone.
+        host.status.mockRejectedValue(exactLoss(code));
+        const shown = await pairing.startAutomaticPairing('w1');
+        expect(shown).toMatchObject({ phase, comparisonCode: null });
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ id: shown.id, phase });
+        expect(host.refresh).not.toHaveBeenCalled();
+      } finally {
+        pairing.disposeAutomaticPairing();
+      }
+    }
+  );
+
   it('keeps syncing through outages and ordinary failures, and finishes once they clear', async () => {
     const { pairing, host, advance } = setup();
     await pairing.startAutomaticPairing('w1');
