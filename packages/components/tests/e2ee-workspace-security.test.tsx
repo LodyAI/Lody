@@ -1274,11 +1274,29 @@ describe('encrypted workspace settings', () => {
     expect(container.textContent).toBe('');
   });
   it('waits for an explicit click, keeps retry and device rows after failure, then completes and clears the badge', async () => {
+    let managementStateReads = 0;
+    let refreshReads = 0;
+    const baseRuntime = platform.e2eeWorkspaces!.runtime!;
+    platform.e2eeWorkspaces!.runtime = {
+      ...baseRuntime,
+      managementState: async (workspace) => {
+        managementStateReads++;
+        return baseRuntime.managementState!(workspace);
+      },
+      refresh: async (workspace, options) => {
+        refreshReads++;
+        return baseRuntime.refresh!(workspace, options);
+      },
+    };
     await render();
+    expect(managementStateReads).toBe(2);
+    expect(refreshReads).toBe(2);
     expect(signed).toBe(false);
     expect(container.querySelector('[role=status]')).not.toBeNull();
     fail = true;
     await click('e2ee.security.complete');
+    expect(managementStateReads).toBe(4);
+    expect(refreshReads).toBe(2);
     expect(container.textContent).toContain('e2ee.security.error.retry.title');
     await openConsole('devices');
     await act(async () =>
@@ -1292,6 +1310,8 @@ describe('encrypted workspace settings', () => {
     )!;
     await act(async () => complete.click());
     expect(signed).toBe(true);
+    expect(managementStateReads).toBe(6);
+    expect(refreshReads).toBe(2);
     expect(container.textContent).toContain('e2ee.security.current');
     expect(container.querySelector('[role=status]')).toBeNull();
   });

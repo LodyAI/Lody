@@ -1442,3 +1442,141 @@ for (const damaged of [false, true, 'header'])
         })
       )
   })
+
+void test('manual rotation retains turnSync across inline push-ingested appendCas without redundant post-CAS refresh or readFrom', async (t) => {
+  const directory = await fixture(t)
+  let prepared, records, view, genesis
+  const groups = new Map()
+  let historyCalls = 0,
+    readFromCalls = 0,
+    readCalls = 0,
+    observeCalls = 0,
+    observed = null
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      prepared = yield* bind(owner)
+      records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+      genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex')))
+      view = Result.getOrThrow(
+        verifyLedger({
+          anchor: genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+        })
+      )
+      const signer = yield* owner.custody.openDevice(genesis)
+      const machine = yield* owner.custody.prepareDevice()
+      const admitCommand = yield* prepareDeviceAdmission({
+        genesis,
+        membershipId: view.inspectState().owner,
+        signer: machine,
+        encryptionPublicKey: machine.enc,
+        kind: 'machine',
+        machineId: 'synthetic-machine'
+      })
+      const admitRecord = yield* signLedgerRecord(
+        Result.getOrThrow(prepareLedgerCommand(view, signer.publicKey, admitCommand)),
+        signer
+      )
+      records = [...records, admitRecord]
+      view = Result.getOrThrow(
+        extendLedger(view, [admitRecord], {
+          head: hashRecordBytes(admitRecord),
+          length: records.length
+        })
+      )
+      const revokeRecord = yield* signLedgerRecord(
+        Result.getOrThrow(
+          prepareLedgerCommand(view, signer.publicKey, {
+            _tag: 'RevokeDevice',
+            target: machine.publicKey,
+            confirmedRecoveryOnly: true
+          })
+        ),
+        signer
+      )
+      records = [...records, revokeRecord]
+      view = Result.getOrThrow(
+        extendLedger(view, [revokeRecord], {
+          head: hashRecordBytes(revokeRecord),
+          length: records.length
+        })
+      )
+      yield* owner.custody.discardDevice(machine)
+      yield* owner.host.open(workspaceId)
+      yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+      const mailboxHost = yield* makeSqliteKeyMailbox({
+        path: join(directory, 'management-mailbox.sqlite'),
+        mode: 'create',
+        genesis,
+        ledger: () => Effect.succeed(view)
+      })
+      const mailbox = Context.get(
+        yield* Layer.build(referenceKeyMailbox(mailboxHost, signer.publicKey)),
+        KeyMailbox
+      )
+      const ports = () => ({
+        history: () =>
+          Effect.sync(() => {
+            historyCalls++
+            return page(records, prepared.genesisHashHex, 0)
+          }),
+        mailbox: () => mailbox,
+        log: {
+          observe: (point) =>
+            Effect.sync(() => {
+              observeCalls++
+              observed = point
+            }),
+          read: () =>
+            Effect.sync(() => {
+              readCalls++
+              return { records, checkpoint: { head: view.head, length: records.length } }
+            }),
+          readFrom: (_anchor, base) =>
+            Effect.sync(() => {
+              readFromCalls++
+              return {
+                records: records.slice(base.length),
+                checkpoint: { head: view.head, length: records.length }
+              }
+            }),
+          appendCas: (_anchor, expected, record) =>
+            Effect.gen(function* () {
+              assert.equal(observed?.length, expected.length)
+              assert.equal(observed?.head.equals(expected.head), true)
+              assert.equal(view.head.equals(expected.head), true)
+              view = Result.getOrThrow(
+                extendLedger(view, [record], {
+                  head: hashRecordBytes(record),
+                  length: view.length + 1
+                })
+              )
+              records = [...records, record]
+              yield* owner.host.ingestLedgerRecords(
+                workspaceId,
+                page(records, prepared.genesisHashHex, 0)
+              )
+            })
+        },
+        staging: () => ({
+          stageGroup: (group) =>
+            Effect.sync(() => {
+              groups.set(group.recordHash, group)
+            }),
+          readGroup: (key) => Effect.succeed(groups.get(key.recordHash) ?? null),
+          deleteGroup: () => Effect.void
+        })
+      })
+      const outcome = yield* owner.host.manage(workspaceId, { type: 'rotate' }, ports)
+      assert.equal(outcome, 'Committed')
+      assert.equal(view.inspectState().epoch.number, 1)
+      assert.equal((yield* owner.host.managementState(workspaceId)).updatePending, false)
+      assert.equal(historyCalls, 1)
+      assert.equal(observeCalls, 1)
+      assert.equal(readFromCalls, 0)
+      assert.equal(readCalls, 0)
+    })
+  )
+})

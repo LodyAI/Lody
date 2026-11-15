@@ -1170,27 +1170,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       ),
     managementState: (id) => run(withSession(id, (session) => session.managementState())),
     updateKeys: (id) =>
-      run(
-        withSession(id, (session) =>
-          Effect.gen(function* () {
-            yield* session.refresh();
-            const local = yield* session.status();
-            if (local.usableEpoch !== local.currentEpoch) yield* installKeys(session, 'receive');
-            yield* session.recoverHistory();
-            const pending = yield* session.resumeRotation();
-            if (pending) {
-              yield* session.acknowledgeRotation(pending);
-              if (pending.outcome !== 'Committed') return yield* fail('conflict');
-            }
-            if ((yield* session.ledger()).inspectState().epoch.rotationRequired) {
-              const result = yield* session.rotate();
-              yield* session.acknowledgeRotation(result);
-              if (result.outcome !== 'Committed') return yield* fail('conflict');
-            }
-            return undefined;
-          })
-        )
-      ).then(() => {
+      run(withSession(id, (session) => session.updateKeys())).then(() => {
         // The publication already staged every recipient's envelope. Mailbox
         // reconciliation is owned by the existing session and may finish later.
         void run(withSession(id, (session) => installKeys(session, 'distribute'))).catch(
@@ -1234,7 +1214,6 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               return undefined;
             }
             const result = yield* session.removeMember(membershipId);
-            yield* session.refresh();
             yield* session.acknowledgeRotation(result);
             if (result.outcome !== 'Committed') return yield* fail('conflict');
             return undefined;

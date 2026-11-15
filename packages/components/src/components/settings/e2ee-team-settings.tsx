@@ -1,5 +1,9 @@
 import { seatBillingErrorKey } from './billing-errors';
-import { hostLedgerHistory, bytesToHex } from '@/lib/e2ee-ledger-history';
+import {
+  hostLedgerHistory,
+  bytesToHex,
+  type VerifiedLedgerHistory,
+} from '@/lib/e2ee-ledger-history';
 import { e2eeErrorCode, useAutomaticAdmissionRefusal } from '@/lib/e2ee-admission-refusals';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -608,6 +612,7 @@ function TeamHostSession({
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let latestHistory: VerifiedLedgerHistory | undefined;
     const read = async () => {
       try {
         const view = await runtime.ledgerView(workspaceId);
@@ -618,10 +623,12 @@ function TeamHostSession({
           status.hasDeviceCredential !== true ||
           !['owner', 'admin'].includes(status.memberRole ?? '')
         ) {
+          latestHistory = undefined;
           setState(null);
           return;
         }
-        const history = hostLedgerHistory(view);
+        const history = hostLedgerHistory(view, latestHistory);
+        latestHistory = history;
         setState({
           runtime,
           role: status.memberRole!,

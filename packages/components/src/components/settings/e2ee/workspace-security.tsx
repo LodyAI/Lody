@@ -65,10 +65,10 @@ function SecuritySettings({
     if (busy) return;
     setBusy(true);
     setError(undefined);
+    let succeeded = false;
     try {
       await work();
-      if (scope.accountId && scope.workspaceId)
-        notifyE2eeLedgerChanged(scope.accountId, scope.workspaceId);
+      succeeded = true;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : '';
       setError(
@@ -76,8 +76,13 @@ function SecuritySettings({
           'e2ee_management_retry'
       );
     } finally {
-      await scope.state.refetch();
-      setBusy(false);
+      try {
+        await scope.state.refetch();
+        if (succeeded && scope.accountId && scope.workspaceId)
+          notifyE2eeLedgerChanged(scope.accountId, scope.workspaceId);
+      } finally {
+        setBusy(false);
+      }
     }
   };
   const panelState = {

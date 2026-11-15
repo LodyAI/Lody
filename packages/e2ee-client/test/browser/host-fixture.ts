@@ -77,6 +77,7 @@ import {
   KeyMailbox,
   EpochStagingStore,
   EpochPublicationSource,
+  InstalledKeyStore,
 } from '@lody/e2ee-core/services';
 import {
   makeOwnedPersonalDeviceHost,
@@ -368,6 +369,11 @@ const remoteRotation = () =>
 let raceNextAppend = false;
 const stagingDeletes: { recordHash: string; occupiedEpoch: number }[] = [],
   stagedHashes: string[] = [];
+let feedReadAfterCalls = 0,
+  logReadFromCalls = 0,
+  logReadCalls = 0,
+  installedLoadEpochs: number[] = [],
+  extraMachineSeed = 40;
 export async function boot(
   input: typeof mode = 'create-or-open',
   controlledClose = false,
@@ -387,6 +393,11 @@ export async function boot(
   holdDeliveryRetry = false;
   putMark = 0;
   openRoundSleeps = [];
+  feedReadAfterCalls = 0;
+  logReadFromCalls = 0;
+  logReadCalls = 0;
+  installedLoadEpochs = [];
+  extraMachineSeed = 40;
   openRoundGate = new Promise((resolve) => {
     releaseOpenRound = resolve;
   });
@@ -644,6 +655,7 @@ export async function boot(
               const source = Layer.succeed(LedgerFeedSource, {
                 readAfter: (offset: string) =>
                   Effect.gen(function* () {
+                    feedReadAfterCalls++;
                     if (hang === 'feed') return yield* hung<never>();
                     if (localStorage.getItem('synthetic-offline'))
                       return yield* new LedgerFeedError({ code: 'native-unavailable' });
@@ -658,14 +670,20 @@ export async function boot(
               });
               const log = Layer.succeed(LedgerLog, {
                 readFrom: (_anchor, base) =>
-                  Effect.succeed({
-                    records: records.slice(base.length).map((r) => new Uint8Array(r)),
-                    checkpoint: { head: view().head, length: records.length },
+                  Effect.sync(() => {
+                    logReadFromCalls++;
+                    return {
+                      records: records.slice(base.length).map((r) => new Uint8Array(r)),
+                      checkpoint: { head: view().head, length: records.length },
+                    };
                   }),
                 read: () =>
-                  Effect.succeed({
-                    records: records.map((r) => new Uint8Array(r)),
-                    checkpoint: { head: view().head, length: records.length },
+                  Effect.sync(() => {
+                    logReadCalls++;
+                    return {
+                      records: records.map((r) => new Uint8Array(r)),
+                      checkpoint: { head: view().head, length: records.length },
+                    };
                   }),
                 appendCas: (_anchor, expected, record) =>
                   Effect.gen(function* () {
@@ -716,8 +734,27 @@ export async function boot(
             failKeys = false;
             return Layer.effectContext(Effect.fail(new Error('synthetic key I/O')));
           }
+          const keyStores = Layer.effectContext(
+            Effect.gen(function* () {
+              const built = yield* Layer.build(
+                indexedDbClientKeyStores({
+                  databaseName: `${databasePrefix}-custody`,
+                  binding,
+                  mode,
+                })
+              );
+              const inner = Context.get(built, InstalledKeyStore);
+              return Context.add(built, InstalledKeyStore, {
+                ...inner,
+                load: (epoch) =>
+                  Effect.sync(() => {
+                    installedLoadEpochs.push(epoch);
+                  }).pipe(Effect.andThen(inner.load(epoch))),
+              });
+            })
+          );
           return Layer.mergeAll(
-            indexedDbClientKeyStores({ databaseName: `${databasePrefix}-custody`, binding, mode }),
+            keyStores,
             Layer.succeed(KeyMailbox, {
               // The watched device's slot holds an envelope only after this device stored one.
               status: (slot) =>
@@ -1664,6 +1701,37 @@ export async function invoke(action: string) {
             retain();
             if (machineId === 'fixture-machine')
               irohFixture.machine = toHex(machine.publicKey.toBytes());
+            return true;
+          }
+          case 'addFreshMachine': {
+            const seed = ++extraMachineSeed;
+            const machineId = `fixture-machine-${seed}`;
+            const machine = yield* importBrowserDevice({
+              signingPrivate: new Uint8Array(32).fill(seed),
+              encryptionPrivate: new Uint8Array(32).fill(seed + 40),
+            }).pipe(Scope.provide(scope));
+            const proof = yield* prepareDeviceAdmission({
+              genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+              membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
+              encryptionPublicKey: machine.enc,
+              kind: 'machine',
+              machineId,
+              signer: machine,
+            });
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'machine',
+                machineId,
+                replaces: null,
+                signingPublicKey: machine.publicKey,
+                encryptionPublicKey: machine.enc,
+                possessionSignature: proof.possessionSignature,
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            irohFixture.machine = toHex(machine.publicKey.toBytes());
             return true;
           }
           case 'rpc':
@@ -2854,6 +2922,29 @@ export async function runtimeInvoke(action: string) {
       case 'updateKeys':
         value = await runtime.updateKeys!(offer.workspaceId);
         break;
+      case 'resetTelemetry':
+        feedReadAfterCalls = 0;
+        logReadFromCalls = 0;
+        logReadCalls = 0;
+        installedLoadEpochs = [];
+        value = true;
+        break;
+      case 'telemetry':
+        value = {
+          feedReadAfterCalls,
+          logReadFromCalls,
+          logReadCalls,
+          installedLoadEpochs: [...installedLoadEpochs],
+        };
+        break;
+      case 'concurrentUpdateAndRefresh': {
+        await Promise.all([
+          runtime.updateKeys!(offer.workspaceId),
+          runtime.refresh(offer.workspaceId),
+        ]);
+        value = true;
+        break;
+      }
       case 'memberThirdApplicant':
         memberRelay.item = await Effect.runPromise(memberApplicant(75, 0x54));
         value = memberRelay.item.requestId;

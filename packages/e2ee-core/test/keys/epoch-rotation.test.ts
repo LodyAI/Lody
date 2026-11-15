@@ -1996,4 +1996,106 @@ describe('durable local epoch rotation', () => {
       )
     );
   });
+  it('keeps native unprotect count O(1) across epochs and rejects forged or unverified candidates', async () => {
+    const f = fixture(0, 5);
+    let unprotectCalls = 0;
+    const baseUnprotect = f.native.protector.unprotect.bind(f.native.protector);
+    f.native.protector.unprotect = async (blob: Uint8Array) => {
+      unprotectCalls++;
+      return baseUnprotect(blob);
+    };
+    const counts: number[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation, installed } = yield* f.open('create');
+          for (const expectedEpoch of [1, 2, 3]) {
+            const before = unprotectCalls;
+            const res = yield* rotation.publish();
+            counts.push(unprotectCalls - before);
+            expect(res).toMatchObject({ outcome: 'Committed', epoch: expectedEpoch });
+            yield* rotation.acknowledge(res);
+            if (expectedEpoch < 3) f.requestRotation();
+          }
+          const latestKey = yield* installed.read(3);
+          const packet = ok(commitEpochKey(f.context.genesis, ok(Bytes.epochNumber(3)), latestKey));
+          disposeEpochKey(latestKey);
+          const group = [...f.groups.values()].find((g) => g.epoch === 3)!;
+          expect(group.envelopes).toHaveLength(f.view().inspectState().devices.size);
+          expect(group.commitment).toBe(Buffer.from(packet.toBytes()).toString('hex'));
+        })
+      )
+    );
+    expect(counts[1]).toBe(counts[2]);
+    expect(counts[1]).toBeLessThanOrEqual(4);
+
+    // Reject forged/unverified candidate records even when paired with restoreVerifiedState().
+    f.requestRotation();
+    const currentView = f.view();
+    const exported = ok(exportVerifiedState(currentView));
+    const restored = ok(
+      restoreVerifiedState({
+        bytes: exported.bytes,
+        genesis: exported.genesis,
+        head: exported.head,
+        length: exported.length,
+        stateDigest: exported.stateDigest,
+      })
+    );
+    const nextEpoch = ok(Bytes.epochNumber(currentView.inspectState().epoch.number + 1));
+    const nextKey = ok(Bytes.epochKey(new Uint8Array(32).fill(4)));
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { installed } = yield* f.open('open');
+          const installedPrev = yield* installed.read(currentView.inspectState().epoch.number);
+          const packet = ok(
+            sealHistoryPacket({
+              genesis: f.context.genesis,
+              epoch: nextEpoch,
+              currentKey: nextKey,
+              previousKey: installedPrev,
+            })
+          );
+          disposeEpochKey(installedPrev);
+          const body = ok(
+            encodeCbor([
+              currentView.head.toBytes(),
+              f.owner.publicKey.toBytes(),
+              [
+                7,
+                nextEpoch,
+                ok(commitEpochKey(f.context.genesis, nextEpoch, nextKey)).toBytes(),
+                packet,
+              ],
+            ])
+          );
+          const valid = yield* signLedgerRecord(
+            ok(prepareLedgerRecord(currentView, body)),
+            f.owner.signer
+          );
+          const forged = new Uint8Array(valid);
+          forged[forged.length - 1]! ^= 0xff;
+          failureCode(
+            yield* Effect.exit(
+              prepareEpochEnvelope({
+                context: {
+                  genesis: f.context.genesis,
+                  epoch: nextEpoch,
+                  sender: f.owner.publicKey,
+                  recipient: f.phone.publicKey,
+                },
+                key: nextKey,
+                signer: f.owner.signer,
+                ledger: () => Effect.succeed(restored),
+                candidate: { before: restored, record: forged },
+              })
+            ),
+            'bad-signature'
+          );
+        })
+      )
+    );
+    disposeEpochKey(nextKey);
+  });
 });

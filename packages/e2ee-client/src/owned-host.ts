@@ -208,6 +208,7 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         removeMember: (...args: Parameters<RawSession['removeMember']>) =>
           call(raw.removeMember(...args)),
         rotate: () => call(raw.rotate()),
+        updateKeys: () => call(raw.updateKeys()),
         abandonEpoch: (baseEpoch: number) => call(raw.abandonEpoch(baseEpoch)),
         recoverHistory: () => call(raw.recoverHistory()),
         resumeRotation: () => call(raw.resumeRotation()),

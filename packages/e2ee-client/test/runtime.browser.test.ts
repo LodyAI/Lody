@@ -649,6 +649,70 @@ it('a key update that loses its epoch to another rotation deletes its staged env
   }
 });
 
+it('multi-epoch updateKeys skips historical key unwraps and redundant feed/log round-trips while keeping historical decrypts usable', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-update-keys-perf-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await openedOwnerRuntime(directory);
+    context = opened.context;
+    const page = opened.page;
+    expect(await good(page, 'seal')).toEqual({ epoch: 0 });
+    expect(await good(page, 'openBody')).toEqual([72, 105]);
+
+    // Advance from epoch 0 to epoch 2 so historical epochs 0 and 1 exist.
+    for (const expectedEpoch of [1, 2]) {
+      expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+      await good(page, 'refresh');
+      await good(page, 'revokeMachine');
+      await good(page, 'updateKeys');
+      expect(await good(page, 'refresh')).toMatchObject({
+        epoch: expectedEpoch,
+        rotationRequired: false,
+        hasCurrentKey: true,
+      });
+    }
+
+    // Prepare epoch 2 -> 3 rotation with current key already installed, then measure updateKeys.
+    expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    await good(page, 'resetTelemetry');
+    await good(page, 'updateKeys');
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: 3,
+      rotationRequired: false,
+      hasCurrentKey: true,
+    });
+    const metrics = (await good(page, 'telemetry')) as {
+      feedReadAfterCalls: number;
+      logReadFromCalls: number;
+      logReadCalls: number;
+      installedLoadEpochs: number[];
+    };
+    expect(metrics.logReadCalls).toBe(0);
+    expect(metrics.logReadFromCalls).toBeLessThanOrEqual(1);
+    expect(metrics.feedReadAfterCalls).toBeLessThanOrEqual(3);
+    expect(metrics.installedLoadEpochs.every((epoch) => epoch >= 2)).toBe(true);
+
+    // Historical decryption at epoch 0 still works on demand after skipping history during updateKeys.
+    expect(await good(page, 'openBody')).toEqual([72, 105]);
+
+    // Concurrent updateKeys + refresh serialize cleanly under the single session permit.
+    expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    await good(page, 'concurrentUpdateAndRefresh');
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: 4,
+      rotationRequired: false,
+      hasCurrentKey: true,
+    });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 it('a member key delivery that fails its first round is retried and delivered without user action', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-retry-'));
   let context: BrowserContext | undefined;

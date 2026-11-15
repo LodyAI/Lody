@@ -98,6 +98,12 @@ import type { PersonalIrohEndpoint } from './platform';
  * count as ledger lag (Streams faster than the ledger feed) rather than forgery. Desktop
  * applies the same bound. */
 const LEDGER_LOOKAHEAD_EPOCHS = 4;
+type TurnSyncCell = {
+  current: { readonly length: number; readonly head: Bytes.RecordHash } | null;
+};
+const TurnSyncRef = Context.Reference<TurnSyncCell | null>('@lody/e2ee-client/TurnSyncRef', {
+  defaultValue: () => null,
+});
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
   prepared: PreparedPersonalIdentity,
@@ -146,8 +152,24 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       rawLog = Context.get(rawControl, LedgerLog);
     const sync = Object.freeze({
       current: rawSync.current.bind(rawSync),
-      refresh: rawSync.refresh.bind(rawSync),
       ingest: rawSync.ingest?.bind(rawSync),
+      refresh: () =>
+        Effect.gen(function* () {
+          const cell = yield* TurnSyncRef;
+          if (cell?.current) {
+            const local = yield* Effect.result(rawSync.current());
+            if (
+              Result.isSuccess(local) &&
+              local.success.view.length === cell.current.length &&
+              local.success.view.head.equals(cell.current.head)
+            )
+              return local.success;
+            cell.current = null;
+          }
+          const refreshed = yield* rawSync.refresh();
+          if (cell) cell.current = { length: refreshed.view.length, head: refreshed.view.head };
+          return refreshed;
+        }),
     });
     const log = Object.freeze({
       read: rawLog.read.bind(rawLog),
@@ -156,12 +178,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     });
     const refreshCheckpoint = (value: { checkpoint: import('@lody/e2ee-core').LedgerCheckpoint }) =>
       Effect.gen(function* () {
-        const local = yield* sync.current();
+        const cell = yield* TurnSyncRef;
+        const local = yield* rawSync.current();
         if (
           local.view.length !== value.checkpoint.length ||
           !local.view.head.equals(value.checkpoint.head)
-        )
+        ) {
+          if (cell) cell.current = null;
           yield* sync.refresh();
+        } else if (cell) {
+          cell.current = { length: local.view.length, head: local.view.head };
+        }
       });
     const controlPorts = Layer.succeedContext(
       Context.pick(
@@ -172,12 +199,46 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       )(rawControl).pipe(
         Context.add(LedgerSync, sync),
         Context.add(LedgerLog, {
-          appendCas: log.appendCas.bind(log),
+          appendCas: (anchor, point, record) =>
+            Effect.gen(function* () {
+              const cell = yield* TurnSyncRef;
+              if (cell) cell.current = null;
+              yield* log.appendCas(anchor, point, record);
+              if (cell) {
+                const local = yield* Effect.result(rawSync.current());
+                if (Result.isSuccess(local) && local.success.view.length > point.length)
+                  cell.current = {
+                    length: local.success.view.length,
+                    head: local.success.view.head,
+                  };
+              }
+            }),
           ...(log.readFrom
             ? {
                 readFrom: (anchor: Bytes.GenesisHash, base: import('@lody/e2ee-core').LedgerView) =>
-                  log.readFrom!(anchor, base).pipe(
-                    Effect.tap(refreshCheckpoint),
+                  Effect.gen(function* () {
+                    const cell = yield* TurnSyncRef;
+                    if (
+                      cell?.current &&
+                      cell.current.length === base.length &&
+                      cell.current.head.equals(base.head)
+                    ) {
+                      const local = yield* Effect.result(rawSync.current());
+                      if (
+                        Result.isSuccess(local) &&
+                        local.success.view.length === base.length &&
+                        local.success.view.head.equals(base.head)
+                      )
+                        return {
+                          records: [],
+                          checkpoint: { head: base.head, length: base.length },
+                        };
+                      cell.current = null;
+                    }
+                    const value = yield* log.readFrom!(anchor, base);
+                    yield* refreshCheckpoint(value);
+                    return value;
+                  }).pipe(
                     Effect.mapError((cause) =>
                       cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
                     )
@@ -242,7 +303,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     // and management are never blocked behind it. Core keeps an interrupted write's
     // original journaled for its exact resume; nothing is re-signed or regenerated.
     const bounded = boundedBy(platform.deadlines);
-    const serialRound = <A, E, R>(work: Effect.Effect<A, E, R>) => serial.withPermit(bounded(work));
+    const serialRound = <A, E, R>(work: Effect.Effect<A, E, R>) =>
+      serial.withPermit(bounded(Effect.provideService(work, TurnSyncRef, { current: null })));
     const run = <A, E>(effect: Effect.Effect<A, E>, dispose?: (value: A) => void) =>
       Effect.gen(function* () {
         yield* guard;
@@ -343,6 +405,45 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         yield* admitted();
         return value;
       });
+    const receiveFromStaging = (
+      ctx: Context.Context<Keys>,
+      view: import('@lody/e2ee-core').LedgerView,
+      epoch: number
+    ) =>
+      Effect.gen(function* () {
+        if (epoch === 0) return undefined;
+        const checked = yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch));
+        if (Result.isSuccess(checked)) return undefined;
+        const located = getCommittedEpochStagingKey(view, epoch);
+        if (Result.isFailure(located)) {
+          if (view.verification === 'endorsed-snapshot') return undefined;
+          return yield* located.failure;
+        }
+        // Staging availability must not gate the independent verified mailbox path.
+        const group = yield* Context.get(ctx, EpochStagingStore)
+          .readGroup(located.success)
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        if (
+          group !== null &&
+          group.envelopes.some((row) => row.recipient === toHex(device.publicKey.toBytes()))
+        )
+          yield* Context.get(ctx, KeyReceiver).receiveStagedGroup(group);
+        return undefined;
+      });
+    const receiveStep = (ctx: Context.Context<Keys>) =>
+      Effect.gen(function* () {
+        const view = yield* admitted(),
+          epoch = view.inspectState().epoch.number;
+        const receiver = Context.get(ctx, KeyReceiver);
+        yield* receiveFromStaging(ctx, view, epoch);
+        if (
+          Result.isSuccess(yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch)))
+        )
+          return { refreshRequired: false };
+        yield* receiver.resume(100, null);
+        const received = yield* receiver.fetchAndInstall(null, 100);
+        return { refreshRequired: received.refreshRequired ?? false };
+      });
     const keyRound = (mode: PersonalKeyRoundMode = 'full', recipients?: readonly string[]) =>
       serialRound(
         withKeys((ctx) =>
@@ -360,44 +461,70 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               for (const item of ended.items) yield* distributor.acknowledge(item.id);
               return { refreshRequired: false };
             }
-            const beforeReceive = Effect.gen(function* () {
-              if (epoch === 0) return undefined;
-              const checked = yield* Effect.result(
-                Context.get(ctx, InstalledEpochKeys).check(epoch)
-              );
-              if (Result.isSuccess(checked)) return undefined;
-              const located = getCommittedEpochStagingKey(view, epoch);
-              if (Result.isFailure(located)) {
-                if (view.verification === 'endorsed-snapshot') return undefined;
-                return yield* located.failure;
-              }
-              // Staging availability must not gate the independent verified mailbox path.
-              const group = yield* Context.get(ctx, EpochStagingStore)
-                .readGroup(located.success)
-                .pipe(Effect.catch(() => Effect.succeed(null)));
-              if (
-                group !== null &&
-                group.envelopes.some((row) => row.recipient === toHex(device.publicKey.toBytes()))
-              )
-                yield* Context.get(ctx, KeyReceiver).receiveStagedGroup(group);
-              return undefined;
-            });
             if (mode === 'receive') {
               // Only this device's own key, from a staged group or the mailbox. Reports,
               // distribution and repair stay with a full round.
-              const receiver = Context.get(ctx, KeyReceiver);
-              yield* beforeReceive;
-              if (
-                Result.isSuccess(
-                  yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch))
-                )
-              )
-                return { refreshRequired: false };
-              yield* receiver.resume(100, null);
-              const received = yield* receiver.fetchAndInstall(null, 100);
-              return { refreshRequired: received.refreshRequired ?? false };
+              return yield* receiveStep(ctx);
             }
-            return { refreshRequired: yield* maintenance!(epoch, beforeReceive, recipients) };
+            return {
+              refreshRequired: yield* maintenance!(
+                epoch,
+                receiveFromStaging(ctx, view, epoch),
+                recipients
+              ),
+            };
+          })
+        )
+      );
+    const updateKeys = () =>
+      run(
+        serialRound(
+          Effect.gen(function* () {
+            yield* sync.refresh();
+            return yield* withKeys((ctx) =>
+              Effect.gen(function* () {
+                const cell = yield* TurnSyncRef;
+                const installed = Context.get(ctx, InstalledEpochKeys);
+                const initialEpoch = (yield* admitted()).inspectState().epoch.number;
+                const missingCurrent = Result.isFailure(
+                  yield* Effect.result(installed.check(initialEpoch))
+                );
+                if (missingCurrent) {
+                  for (let pass = 0; pass < 4; pass++) {
+                    if (!(yield* receiveStep(ctx)).refreshRequired) break;
+                    if (cell) cell.current = null;
+                    yield* sync.refresh();
+                  }
+                }
+                yield* ownSubmission;
+                const activeCandidate = yield* Effect.result(
+                  Context.get(ctx, EpochCandidateStore).active()
+                );
+                const hasCandidate = Result.isSuccess(activeCandidate)
+                  ? activeCandidate.success !== null
+                  : true;
+                const pendingEntry = yield* submission.pending();
+                const publisher = Context.get(ctx, EpochPublisher);
+                if (missingCurrent || hasCandidate || pendingEntry.record !== null) {
+                  yield* Context.get(ctx, InstalledEpochHistory).recover();
+                  const pending = yield* publisher.resume();
+                  if (pending) {
+                    if (pending.outcome === 'Conflict')
+                      yield* Effect.ignore(publisher.cleanupStaged());
+                    yield* publisher.acknowledge(pending);
+                    if (pending.outcome !== 'Committed') return yield* fail('conflict');
+                  }
+                }
+                if ((yield* admitted()).inspectState().epoch.rotationRequired) {
+                  const result = yield* publisher.publish();
+                  if (result.outcome === 'Conflict')
+                    yield* Effect.ignore(publisher.cleanupStaged());
+                  yield* publisher.acknowledge(result);
+                  if (result.outcome !== 'Committed') return yield* fail('conflict');
+                }
+                return undefined;
+              })
+            );
           })
         )
       );
@@ -1318,6 +1445,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             )
           )
         ),
+      updateKeys,
       recoverHistory: () =>
         run(withKeys((ctx) => Context.get(ctx, InstalledEpochHistory).recover())),
       resumeRotation: () =>

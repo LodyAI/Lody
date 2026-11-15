@@ -250,7 +250,19 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
         }
       : {}),
     appendCas: (anchor, point, source) =>
-      invalidateTurnSync.pipe(Effect.andThen(input.ports.log.appendCas(anchor, point, source)))
+      Effect.gen(function* () {
+        yield* invalidateTurnSync
+        yield* input.ports.log.appendCas(anchor, point, source)
+        const local = yield* Effect.result(input.verified.current())
+        if (Result.isSuccess(local) && local.success.length > point.length)
+          yield* Ref.set(
+            turnSync,
+            makePersistedCheckpointProof({
+              syncedLength: local.success.length,
+              syncedHead: Buffer.from(local.success.head.toBytes()).toString('hex')
+            })
+          )
+      })
   })
   const submission = LedgerSubmission.layer.pipe(Layer.provideMerge(Layer.merge(ports, syncedLog)))
   const services = yield* Layer.build(
