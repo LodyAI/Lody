@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { getRateLimitEntryKey } from '@lody/shared';
+import { getRateLimitEntryKey, type AgentConfigId } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionUsagePopover } from '../src/components/sessions/session-usage-popover';
@@ -66,6 +66,67 @@ describe('SessionUsagePopover', () => {
 
     expect(container.querySelector('button')).toBeNull();
   });
+
+  it.each(['antigravity', 'antigravity-acp'])(
+    'shows both model groups and both quota windows alongside context for %s',
+    async (agentType) => {
+      const agentConfigId = 'antigravity-provider' as AgentConfigId;
+      const limits: MachineRateLimits = {
+        [getRateLimitEntryKey(agentType, agentType, agentConfigId)]: {
+          limitId: agentType,
+          scope: { providerId: 'antigravity' },
+          windows: [
+            {
+              label: 'Gemini Models',
+              usedPercent: 25,
+              windowDurationSeconds: 604_800,
+              resetsAtEpochSeconds: null,
+            },
+            {
+              label: 'Gemini Models',
+              usedPercent: 10,
+              windowDurationSeconds: 18_000,
+              resetsAtEpochSeconds: null,
+            },
+            {
+              label: 'Claude and GPT models',
+              usedPercent: 0,
+              windowDurationSeconds: 604_800,
+              resetsAtEpochSeconds: null,
+            },
+            {
+              label: 'Claude and GPT models',
+              usedPercent: 0,
+              windowDurationSeconds: 18_000,
+              resetsAtEpochSeconds: null,
+            },
+          ],
+        },
+      };
+      await renderUsage({
+        agentType,
+        agentConfigId,
+        modelId: 'gemini-pro-orchestrator',
+        contextWindowUsage: { used: 100, size: 1000 },
+        rateLimits: limits,
+      });
+      await act(async () => {
+        container
+          .querySelector('button')
+          ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const meters = document.body
+        .querySelector('[aria-label="Usage"]')
+        ?.querySelectorAll('[role="progressbar"]');
+      expect(Array.from(meters ?? []).map((meter) => meter.getAttribute('aria-label'))).toEqual([
+        'Context: 10% used',
+        'Weekly · Gemini Models: 25% used',
+        'Weekly · Claude and GPT models: 0% used',
+        '5 hours · Gemini Models: 10% used',
+        '5 hours · Claude and GPT models: 0% used',
+      ]);
+    }
+  );
 
   it.each([
     { fiveHourFirst: false, usedPercent: 11 },

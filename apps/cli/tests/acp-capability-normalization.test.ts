@@ -193,3 +193,16 @@ it('preserves the runtime quota declaration including push-only support', () => 
   });
   expect(normalizeAcpSessionCapabilities({}).rateLimits).toBeUndefined();
 });
+
+it('keeps native Antigravity declarations authoritative and does not enable custom namesakes', () => {
+  const agent = { cliType: 'builtin', agentType: 'antigravity' };
+  expect(
+    normalizeAcpSessionCapabilities({}, { agent, rateLimits: { version: 1 } }).rateLimits
+  ).toEqual({ version: 1 });
+  for (const other of [
+    { cliType: 'custom', agentType: 'antigravity' },
+    { cliType: 'custom', agentType: 'antigravity-acp' },
+    { cliType: 'registry', agentType: 'another-agent' },
+  ])
+    expect(normalizeAcpSessionCapabilities({}, { agent: other }).rateLimits).toBeUndefined();
+});

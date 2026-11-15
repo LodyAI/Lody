@@ -764,10 +764,12 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
           ),
       }))
         received.push(bytes);
-      expect(Buffer.concat(received)).toEqual(plaintext);
-      expect(Buffer.from(objects.get(uploaded.fileId)!)).not.toEqual(
-        plaintext.subarray(0, 4 * 1024 * 1024)
-      );
+      // Compare multi-megabyte payloads byte-for-byte without the generic matcher
+      // traversing millions of individual Buffer entries on CI.
+      expect(Buffer.concat(received).equals(plaintext)).toBe(true);
+      expect(
+        Buffer.from(objects.get(uploaded.fileId)!).equals(plaintext.subarray(0, 4 * 1024 * 1024))
+      ).toBe(false);
       const imageBytes = Buffer.from([137, 80, 78, 71, 1, 2, 3]);
       const imagePath = path.join(directory, 'private.png');
       await fs.writeFile(imagePath, imageBytes);

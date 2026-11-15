@@ -1,12 +1,8 @@
-import type { AgentConfigCliType } from '@lody/shared';
 import type { ClientSideConnection, SessionNotification } from '@agentclientprotocol/sdk';
-import type { RateLimitsSnapshot } from 'acp-extension-core';
+import type { LodyRateLimitsCapability, RateLimitsSnapshot } from 'acp-extension-core';
 import { z } from 'zod';
 
-export function isAntigravityRegistryAgent(agent: {
-  cliType: AgentConfigCliType;
-  agentType: string;
-}): boolean {
+export function isAntigravityRegistryAgent(agent: { cliType: string; agentType: string }): boolean {
   return agent.cliType === 'registry' && agent.agentType === 'antigravity-acp';
 }
 
@@ -152,9 +148,16 @@ export function parseAntigravityCliQuota(value: unknown): RateLimitsSnapshot {
   };
 }
 
-export function isAntigravityBuiltinAgent(agent: {
-  cliType: AgentConfigCliType;
-  agentType: string;
-}): boolean {
+export function isAntigravityBuiltinAgent(agent: { cliType: string; agentType: string }): boolean {
   return agent.cliType === 'builtin' && agent.agentType === 'antigravity';
+}
+
+/** Lody owns these query readers even when the official runtime advertises no Core extension. */
+export function getAntigravityQuotaCapability(agent?: {
+  cliType: string;
+  agentType: string;
+}): LodyRateLimitsCapability | undefined {
+  return agent && (isAntigravityBuiltinAgent(agent) || isAntigravityRegistryAgent(agent))
+    ? { version: 1, query: true }
+    : undefined;
 }

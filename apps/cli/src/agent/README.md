@@ -275,6 +275,13 @@ turns; its model-group weekly and five-hour fractions become the existing Provid
 quota windows. The ACP `/usage` prompt belongs only to the legacy server reader:
 agy does not advertise it and would send that text to the model.
 
+Capability probes and real new/load/resume session snapshots use the same
+normalizer to project the builtin and legacy Antigravity quota readers. Session
+startup must not erase that declaration while updating the Provider cache;
+native Core declarations remain authoritative. Builtin quota display accepts
+only audited proxy and locale environment overrides. Credential/home overrides,
+unknown environment keys, and Magpie routing remain ineligible.
+
 Native `ask_question` forms use each `qN.title` as the prompt, numbered option
 IDs with labels in `oneOf[].title` / `items.anyOf[].title`, and a `qN_other`
 custom-answer field. The shared bridge receives explicit builtin Antigravity
