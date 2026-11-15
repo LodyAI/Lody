@@ -729,20 +729,43 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Kimi Code');
     expect(
       getOptionButtons()
-        .slice(0, 7)
+        .slice(0, 10)
         .map((option) => option.textContent)
     ).toEqual([
+      expect.stringContaining('Codex'),
+      expect.stringContaining('Claude'),
+      expect.stringContaining('Antigravity'),
+      expect.stringContaining('DeepSeek Harness'),
+      expect.stringContaining('Grok'),
+      expect.stringContaining('Pi'),
       expect.stringContaining('Kimi Code'),
       expect.stringContaining('Devin'),
-      expect.stringContaining('Grok'),
-      expect.stringContaining('Claude'),
-      expect.stringContaining('Codex'),
-      expect.stringContaining('DeepSeek Harness'),
-      expect.stringContaining('Pi'),
+      expect.stringContaining('Bub'),
+      expect.stringContaining('Dimcode'),
     ]);
     expect(getOptionButtons().some((option) => option.textContent?.includes('Lody Agent'))).toBe(
       false
     );
+    expect(
+      getOptionButtons().some((option) => option.textContent?.includes('DeepSeek over Claude Code'))
+    ).toBe(false);
+    expect(
+      getOptionButtons()
+        .slice(10, 14)
+        .map((option) => option.textContent)
+    ).toEqual([
+      expect.stringContaining('GLM over Claude Code'),
+      expect.stringContaining('MiMo over Claude Code'),
+      expect.stringContaining('MiniMax over Claude Code'),
+      expect.stringContaining('Custom command'),
+    ]);
+    expect(
+      listAddableProviders(i18next.t).some(
+        (provider) =>
+          provider.key === 'preset:deepseek-over-claude-code' ||
+          provider.key === 'preset:deepseek-reasonix'
+      )
+    ).toBe(false);
 
     await act(async () => {
       getOptionByText('Custom command').dispatchEvent(new MouseEvent('click', { bubbles: true }));

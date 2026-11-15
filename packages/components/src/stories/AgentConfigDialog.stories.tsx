@@ -11,7 +11,6 @@ import {
 import {
   AgentConfigDialog,
   type AgentConfigDialogProps,
-  DEEPSEEK_CLAUDE_PRESET_ID,
   GLM_CLAUDE_PRESET_ID,
   GLM_ZAI_CREDENTIAL_MODE_ID,
   MIMO_CLAUDE_PRESET_ID,
@@ -259,27 +258,6 @@ function EditLongOptionListsWrapper() {
         agentType: 'kimi',
         success: true,
       })}
-    />
-  );
-}
-
-function DeepSeekPresetWrapper() {
-  const [open, setOpen] = useState(true);
-  return (
-    <AgentConfigDialog
-      open={open}
-      onOpenChange={setOpen}
-      mode={{
-        kind: 'create',
-        initialForm: {
-          name: 'DeepSeek over Claude Code',
-          presetId: DEEPSEEK_CLAUDE_PRESET_ID,
-          presetToken: 'sk-storybook-demo-token',
-        },
-      }}
-      machine={makeMachineWithClaudeCaps()}
-      onSubmit={async () => {}}
-      onRefreshCapabilities={refreshCapabilities}
     />
   );
 }
@@ -537,10 +515,6 @@ export const EditEnvCredentialProvider: Story = {
   render: () => <EditWrapper config={envCredentialConfig} />,
 };
 
-export const DeepSeekPreset: Story = {
-  render: () => <DeepSeekPresetWrapper />,
-};
-
 export const DeepSeekHarness: Story = {
   render: () => <DeepSeekHarnessWrapper />,
 };
@@ -611,13 +585,6 @@ export const MobileEdit: Story = {
 
 export const MobileEditEnvCredentialProvider: Story = {
   render: () => <EditWrapper config={envCredentialConfig} />,
-  parameters: {
-    viewport: { defaultViewport: 'mobile1' },
-  },
-};
-
-export const MobileDeepSeekPreset: Story = {
-  render: () => <DeepSeekPresetWrapper />,
   parameters: {
     viewport: { defaultViewport: 'mobile1' },
   },
