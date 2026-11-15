@@ -42,9 +42,14 @@ export function runCiTypecheck({
     return 'skip';
   }
 
-  runPnpm(execFileSync, cwd, ['--filter', 'lody', 'prepare:acp-adapters']);
+  if (typecheckPackages.includes('lody')) {
+    runPnpm(execFileSync, cwd, ['--filter', 'lody', 'prepare:acp-adapters']);
+  } else {
+    runPnpm(execFileSync, cwd, ['--filter', 'acp-extension-dsh', 'build']);
+  }
   runPnpm(execFileSync, cwd, [
     '-r',
+    '--no-sort',
     '--workspace-concurrency=4',
     ...EXCLUDED_FILTERS.flatMap((filter) => ['--filter', filter]),
     ...typecheckPackages.flatMap((name) => ['--filter', name]),

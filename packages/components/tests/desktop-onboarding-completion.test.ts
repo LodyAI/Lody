@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { enterDesktopProduct } from '../src/components/onboarding/desktop-onboarding-completion';
 import type { AgentConfigId, MachineId, ProviderSetupTask } from '@lody/shared';

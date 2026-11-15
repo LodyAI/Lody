@@ -56,9 +56,12 @@ export function computeLocalTestWaves({
 } = {}) {
   const forcedBudget = Number.parseInt(String(env.LODY_TEST_BUDGET ?? ''), 10);
   const memGiB = totalMemBytes / 1024 ** 3;
+  // After splitting large suites, efficiency cores can contribute throughput
+  // without owning an entire long tail. Count them at half a performance core;
+  // per-suite pools remain capped at eight and memory still limits the budget.
   const effectiveCores =
     perfCores && perfCores < cpus
-      ? perfCores
+      ? perfCores + Math.floor((cpus - perfCores) / 2)
       : platform === 'darwin'
         ? Math.max(4, Math.min(8, Math.floor(cpus * 0.5)))
         : Math.max(4, cpus - 2);
@@ -77,26 +80,24 @@ export function computeLocalTestWaves({
     id: 'electron',
     command: 'corepack',
     args: ['pnpm', '--filter', '@lody/electron', 'run', 'test'],
+    env: {
+      LODY_ELECTRON_TEST_CONCURRENCY: String(Math.max(2, Math.min(4, Math.floor(budget / 2)))),
+    },
   };
 
-  const makeRestTask = (workspaceConcurrency, restWorkers) => ({
-    id: 'rest',
+  const siteDocsTask = {
+    id: 'site-docs',
     command: 'corepack',
+    args: ['pnpm', '--filter', '@lody/site-docs', 'run', 'test'],
+  };
+  const makeRestTask = (restWorkers) => ({
+    id: 'rest',
+    command: process.execPath,
     args: [
-      'pnpm',
-      '-r',
-      '--no-sort',
-      `--workspace-concurrency=${workspaceConcurrency}`,
-      '--filter',
-      '!{**/acp-extension-*}',
-      '--filter',
-      '!@lody/components',
-      '--filter',
-      '!lody',
-      '--filter',
-      '!@lody/electron',
+      'packages/shared/node_modules/vitest/vitest.mjs',
       'run',
-      'test',
+      '--config',
+      'scripts/vitest-rest.config.mjs',
       `--maxWorkers=${restWorkers}`,
     ],
   });
@@ -113,24 +114,26 @@ export function computeLocalTestWaves({
     args: ['pnpm', '--filter', 'lody', 'run', 'test', `--maxWorkers=${workers}`],
   });
 
-  // Only co-schedule heavy Vitest suites when true performance-core headroom >= 16.
-  // On hybrid laptops (e.g. Apple Silicon 6P+12E), capping --maxWorkers to P-cores and running
-  // electron's unbounded node --test pool in its own wave avoids E-core stragglers and cache thrash.
+  // Rest's reusable Vitest workers and Electron's bounded groups share the last
+  // wave. Reserve about half the budget for each, instead of adding a long tail.
+  const restWorkers = Math.max(
+    2,
+    Math.min(8, budget - Number(electronTask.env.LODY_ELECTRON_TEST_CONCURRENCY))
+  );
+
   if (budget >= 16 && effectiveCores >= 16) {
     const dedicatedWorkers = Math.min(8, Math.floor(budget / 2));
     return [
-      [scriptsTask, makeComponentsTask(dedicatedWorkers), makeCliTask(dedicatedWorkers)],
-      [makeRestTask(2, Math.min(6, dedicatedWorkers))],
-      [electronTask],
+      [makeComponentsTask(dedicatedWorkers), makeCliTask(dedicatedWorkers)],
+      [scriptsTask, siteDocsTask, makeRestTask(restWorkers), electronTask],
     ];
   }
 
   const suiteWorkers = Math.max(2, Math.min(8, budget));
   return [
-    [scriptsTask, makeComponentsTask(suiteWorkers)],
+    [makeComponentsTask(suiteWorkers)],
     [makeCliTask(suiteWorkers)],
-    [makeRestTask(1, suiteWorkers)],
-    [electronTask],
+    [scriptsTask, siteDocsTask, makeRestTask(restWorkers), electronTask],
   ];
 }
 
@@ -140,7 +143,7 @@ function runTask(task, { cwd, env }) {
   return new Promise((resolve) => {
     const child = spawn(task.command, task.args, {
       cwd,
-      env,
+      env: { ...env, ...task.env },
       shell: process.platform === 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });

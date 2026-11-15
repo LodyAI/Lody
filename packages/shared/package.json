@@ -229,6 +229,6 @@
     "@types/node": "catalog:",
     "loro-repo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "5.0.2"
+    "vitest": "catalog:"
   }
 }

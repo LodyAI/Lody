@@ -12,12 +12,13 @@ The `Tests` job took 6–11 minutes. Most of that was the `@lody/components`
 suite (≈351 s) followed by `apps/cli` (≈158 s), in one job on a 4-vCPU runner.
 Letting the two suites overlap in that job (`pnpm -r --no-sort`) did not help:
 the runner is CPU-saturated, so the overlapped suites took 509 s and 252 s.
-`Tests` is now a matrix: three Vitest shards of components, cli, and the rest,
-each on its own runner, with an aggregate job that keeps the required `Tests`
-check. In addition, `setup-node`'s pnpm cache matched only the exact lockfile
-key and let each PR write its own ~800 MB copy. A composite action now
-restores the store with a prefix fallback, and only `main` writes it. Population
-uses hard-linked imports before pruning so macOS keeps the installed packages.
+`Tests` is now a five-runner matrix: two Vitest shards of components, two Vitest
+shards of cli, and the rest, each on its own runner, with an aggregate job that
+keeps the required `Tests` check. In addition, `setup-node`'s pnpm cache matched
+only the exact lockfile key and let each PR write its own ~800 MB copy. A
+composite action now restores the store with a prefix fallback, and only `main`
+writes it. Population uses hard-linked imports before pruning so macOS keeps the
+installed packages.
 
 ## Evidence before the change
 
@@ -47,9 +48,10 @@ and costs nothing, but it is not what shortens CI.
 
 1. **Split `Tests` into runner-level groups** (`.github/scripts/run-ci-tests.mjs`
    `--group`):
-   - `components`: three shards, `vitest --shard=k/3 --maxWorkers=4`.
-   - `cli`: `--maxWorkers=4`.
-   - `rest`: `test:scripts`, every other package, then electron.
+   - `components`: two shards, `vitest --shard=k/2 --maxWorkers=4`.
+   - `cli`: two shards, `vitest --shard=k/2 --maxWorkers=4`.
+   - `rest`: `test:scripts`, `@lody/site-docs`, single-boot `test:rest --maxWorkers=4`
+     across the remaining Vitest workspace projects, then `@lody/electron`.
 
    Each group runs scope selection, the YAML fail-open override, and `--plan`
    before `.github/actions/setup-workspace`, so unaffected groups skip store
@@ -100,15 +102,16 @@ offline reuses the package. This pins the mechanism, not a CI timing improvement
   runners are free for this public repository. Unaffected groups stop after
   checkout and `--plan` without restoring the pnpm store or installing packages.
 - **Reducing components per-file overhead** (`isolate: false`, lighter setup).
-  This is still the largest CPU cost, and remains open. It risks leaking state
-  between test files. See [components test module graph](2026-09-10-components-test-module-graph.md).
+  Vitest 5 projects now reuse safe graphs and cache disk transforms while keeping
+  module-mocked and long-lived owners isolated. Shared state still needs cleanup. See [components test module graph](2026-09-10-components-test-module-graph.md).
 - **Caching `node_modules`.** Not done: install with a warm store is 16–40 s.
 
 ## Verification
 
-- Locally, each group was run with `--full`. All passed; the three shards cover
-  168 files each, and `rest` ran exactly the previous package set minus
-  components and cli.
+- Locally, each group was run with `--full`. All passed; `components` and `cli`
+  each split across two Vitest shards while keeping the same five-runner matrix,
+  and `rest` runs `test:scripts`, `@lody/site-docs`, the aggregated `test:rest`
+  Vitest projects, and `@lody/electron`.
 - CI timings for the split and the cache restore are recorded in PR #992.
 
 ## Limits

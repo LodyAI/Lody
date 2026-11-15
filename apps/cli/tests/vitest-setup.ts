@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { afterEach, vi } from 'vitest';
 
 const hasManagedSessionBinSegment = (entry: string): boolean =>
   entry.split(/[\\/]+/).includes('gh-session-bin');
@@ -15,3 +16,9 @@ if (process.env.PATH) {
 if (process.env.GIT_EXEC_PATH && hasManagedSessionBinSegment(process.env.GIT_EXEC_PATH)) {
   delete process.env.GIT_EXEC_PATH;
 }
+
+// Vitest 5 retains called vi.fn instances until their histories are cleared.
+// Release per-test fixture arguments in both shared and isolated workers.
+afterEach(() => {
+  vi.clearAllMocks();
+});

@@ -89,9 +89,9 @@ jobs:
             # Gates apply to files this PR changed, so compare against the main commit
             # the checked-out merge commit was built on (its first parent), not the
             # possibly stale pull_request.base.sha. The shallow checkout still records
-            # the parent ids; fetch only that commit.
+            # the parent ids; fetch only that commit when not already local.
             base="$(git cat-file -p HEAD | sed -n 's/^parent //p' | head -n 1)"
-            git fetch --no-tags --depth=1 origin "$base"
+            git cat-file -e "${base}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$base"
             pnpm run docs check --base "$base"
           else
             pnpm run docs check
@@ -113,7 +113,7 @@ jobs:
         run: pnpm check:quick
 
   # The components and cli suites are CPU-bound on a 4-vCPU runner, so they run
-  # on their own runners (components in three Vitest shards). See
+  # on their own sharded runners (two Vitest shards each). See
   # .agents/notes/implemented/testing/2026-09-26-ci-test-groups-and-pnpm-store-cache.md.
   test-groups:
     name: Tests (${{ matrix.label }})
@@ -123,10 +123,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { group: components, shard: 1/3, label: components 1/3 }
-          - { group: components, shard: 2/3, label: components 2/3 }
-          - { group: components, shard: 3/3, label: components 3/3 }
-          - { group: cli, shard: '', label: cli }
+          - { group: components, shard: 1/2, label: components 1/2 }
+          - { group: components, shard: 2/2, label: components 2/2 }
+          - { group: cli, shard: 1/2, label: cli 1/2 }
+          - { group: cli, shard: 2/2, label: cli 2/2 }
           - { group: rest, shard: '', label: rest }
     steps:
       - name: Checkout
@@ -288,7 +288,7 @@ jobs:
           LODY_IROH_REQUIRE: '1'
         run: |
           pnpm --filter @lody/iroh-native test
-          pnpm --dir apps/cli exec vitest run src/lib/e2ee/realtime-rpc.test.ts tests/e2ee-runtime.test.ts
+          pnpm --dir apps/cli exec vitest run src/lib/e2ee/realtime-rpc.test.ts tests/e2ee-runtime.test.ts tests/e2ee-runtime-pairing.test.ts tests/e2ee-runtime-execution.test.ts
 
   # Stable required check: green only when every group succeeded.
   # Cancellation supersedes this run; do not turn cancelled groups into a failure.

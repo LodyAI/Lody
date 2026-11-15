@@ -667,11 +667,19 @@ describe('session-viewing-presence-bridge', () => {
   }
 
   function bootstrapResponse(signal?: AbortSignal | null): Response {
+    let detachAbort = () => {};
     return new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('event: bootstrap\ndata: AA==\n\n'));
-          signal?.addEventListener('abort', () => controller.close(), { once: true });
+          const onAbort = () => controller.close();
+          signal?.addEventListener('abort', onAbort, { once: true });
+          detachAbort = () => signal?.removeEventListener('abort', onAbort);
+        },
+        cancel() {
+          // Reader cancellation already closes the stream. The HTTP client's
+          // later abort must not close that same controller a second time.
+          detachAbort();
         },
       }),
       { headers: { 'Content-Type': 'text/event-stream', 'Stream-SSE-Data-Encoding': 'base64' } }
