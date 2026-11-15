@@ -1,3 +1,4 @@
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
@@ -118,7 +119,6 @@ import {
   getServerNow,
   collectOnlineMachineIdsFromPresence,
   previewVisualCommentDocSchema,
-  streamsSnapshotCodec,
   base64ToBytes,
   parseLodyPresenceStates,
   LODY_PRESENCE_TTL_MS,

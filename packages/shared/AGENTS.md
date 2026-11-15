@@ -6,6 +6,8 @@ Discover archive/restore/delete from one ready Repo snapshot, never UI caches.
 Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
 Exact deletion bypasses discovery: [relations](../../specs/session-relations.md).
 
+Snapshot compression is available only through `@lody/shared/streams-snapshot-codec`. Keep its runtime imports out of the shared root so Convex isolate bundles can use protocol helpers without loading Node compression dependencies.
+
 ## Session history
 
 - History tolerates unknown string item types without rewriting or blocking unrelated writes.

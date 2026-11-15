@@ -1,3 +1,4 @@
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
@@ -7,7 +8,6 @@ import {
   getLoroStreamIdForDocId,
   getLoroStreamsShardUrls,
   LORO_STREAMS_BUCKET_ID,
-  streamsSnapshotCodec,
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';

@@ -97,7 +97,6 @@ export * from './reliable-message';
 export * from './worktree-paths';
 export * from './loro-streams-auth';
 export * from './rpc-secret';
-export * from './streams-snapshot-codec';
 export * from './presence';
 export * from './machine-monitor';
 export * from './machine-protocol-capabilities';
