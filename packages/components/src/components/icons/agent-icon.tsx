@@ -64,7 +64,6 @@ export const AGENT_BRAND_ICONS: Record<AgentBrandId, BrandIconComponent> = {
 
 export type AgentIconSlug =
   | { kind: 'builtin'; agentType: BuiltinAgentType }
-  | { kind: 'preset'; preset: 'deepseek-claude' | 'deepseek-reasonix' }
   | { kind: 'registry'; agentType: string };
 
 export function AgentIcon({
