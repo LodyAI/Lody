@@ -1576,6 +1576,79 @@ describe('MessageHandler ACP batching', () => {
     }
   );
 
+  it('persists native Antigravity tool identity through start, completion and reopen', async () => {
+    vi.useRealTimers();
+    const sessionId = 'agy-tools' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing tool doc');
+    const host = handler as unknown as {
+      beginConversationTurn(id: SessionId): string;
+      enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+    };
+    const client = new AgentClient({
+      sessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
+      onUpdateMessage: (update) => host.enqueueACPUpdate(sessionId, update),
+    });
+    (client as unknown as { acpSessionId: ACPSessionId }).acpSessionId = 'native' as ACPSessionId;
+    try {
+      const turnId = host.beginConversationTurn(sessionId);
+      for (const [name, kind, title] of [
+        ['search_web', 'search', 'Search public documentation'],
+        ['invoke_subagent', 'other', 'Run invoke_subagent'],
+      ] as const) {
+        const update = {
+          toolCallId: name,
+          name,
+          args: { query: 'synthetic example' },
+          rawInput: { query: 'synthetic example' },
+          kind,
+          title,
+        };
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { ...update, sessionUpdate: 'tool_call', status: 'in_progress' },
+        });
+        await host.flushACPUpdatesNow(sessionId);
+        expect(
+          readItems((await doc.sessionData.history.readAll()).find((t) => t.id === turnId))
+        ).toContainEqual(
+          expect.objectContaining({ toolCallId: name, toolName: name, status: 'in_progress' })
+        );
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { ...update, sessionUpdate: 'tool_call_update', status: 'completed' },
+        });
+      }
+      await host.flushACPUpdatesNow(sessionId);
+      const reopened = new SessionDocument(repo, sessionId, async () => {});
+      await reopened.initOffline({ history: [] });
+      const items = readItems(
+        (await reopened.sessionData.history.readAll()).find((t) => t.id === turnId)
+      );
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'tool_call',
+          toolName: 'search_web',
+          kind: 'search',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          type: 'tool_call',
+          toolName: 'invoke_subagent',
+          status: 'completed',
+        }),
+      ]);
+      expect(items.some((item) => item.type === 'subagent_task')).toBe(false);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   it('persists Antigravity context occupancy and capacity for the composer, including zero and compaction', async () => {
     vi.useRealTimers();
     const sessionId = 'agy-context' as SessionId;

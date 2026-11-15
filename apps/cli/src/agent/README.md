@@ -275,6 +275,15 @@ turns; its model-group weekly and five-hour fractions become the existing Provid
 quota windows. The ACP `/usage` prompt belongs only to the legacy server reader:
 agy does not advertise it and would send that text to the model.
 
+Native tool updates carry the tool identity in a top-level `name`; AgentClient
+projects that bounded value into `_meta.lody.toolName` for history. Existing
+canonical metadata takes precedence. In live 1.5.9 Hydrogen experiments,
+`search_web`, `invoke_subagent` and `manage_subagents` emitted ordinary tool
+start/completion updates without `content` or `rawOutput`. Child activity and
+results were reported in parent assistant text, not structured child events;
+no `subagentEvents` capability was advertised. Keep these as tool calls rather
+than inventing child lifecycle or treating spawn acknowledgement as child success.
+
 `antigravity-usage.ts` projects end-turn `PromptResponse.usage` into disjoint token
 buckets. Each submitted request has a fresh accounting scope and freezes its
 confirmed session model before dispatch, so later model changes and smaller next

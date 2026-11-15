@@ -981,7 +981,9 @@ export class AgentClient implements acp.Client {
       return;
     }
 
-    const notification = parseSessionNotification(params);
+    const notification = this.normalizeAntigravityToolNotification(
+      parseSessionNotification(params)
+    );
 
     if (notification.update.sessionUpdate === 'available_commands_update') {
       this.availableCommands = notification.update.availableCommands.map(
@@ -1017,6 +1019,31 @@ export class AgentClient implements acp.Client {
 
     this.options.onUpdateMessage(notification);
     return;
+  }
+
+  private normalizeAntigravityToolNotification(
+    notification: AcpSessionNotification
+  ): AcpSessionNotification {
+    const update = notification.update;
+    if (
+      this.options.agentConfig?.cliType !== 'builtin' ||
+      this.options.agentConfig.agentType !== 'antigravity' ||
+      (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update')
+    )
+      return notification;
+    // Native agy puts identity outside ACP's standard tool fields. Project it
+    // into the shared contract before history strips the unstructured payload.
+    const native = z.object({ name: z.string().trim().min(1).max(160) }).safeParse(update);
+    if (!native.success) return notification;
+    const lody = isRecord(update._meta?.lody) ? update._meta.lody : undefined;
+    if (typeof lody?.toolName === 'string' && lody.toolName.length > 0) return notification;
+    return {
+      ...notification,
+      update: {
+        ...update,
+        _meta: { ...update._meta, lody: { ...lody, toolName: native.data.name } },
+      },
+    };
   }
 
   private handleGoalSessionInfoUpdate(notification: AcpSessionNotification): void {
