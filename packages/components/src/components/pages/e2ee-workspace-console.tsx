@@ -341,6 +341,7 @@ export function E2eeWorkspaceConsole({
             retainEncryptedWorkspaceMode(localStorage, accountId, descriptor);
             let publication = 0;
             let published = status;
+            let latestHistory: VerifiedLedgerHistory | undefined;
             const publish = async () => {
               if (!isCurrent()) return;
               const revision = ++publication;
@@ -348,7 +349,8 @@ export function E2eeWorkspaceConsole({
               if (!isCurrent() || revision !== publication) return;
               let history: VerifiedLedgerHistory;
               try {
-                history = hostLedgerHistory(exported);
+                history = hostLedgerHistory(exported, latestHistory);
+                latestHistory = history;
                 if (!history.continuityPending)
                   retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
               } catch (error) {

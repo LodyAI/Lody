@@ -99,6 +99,10 @@ function abandonedAt(state: InternalState, epoch: number): boolean {
 }
 // Closure-backed objects have no reflective constructor or exposed live state.
 const states = new WeakMap<object, InternalState>();
+/** Internal-only read access to a genuine view's persistent state without Map copies. */
+export function internalViewState(view: LedgerView): Readonly<InternalState> | undefined {
+  return states.get(view);
+}
 function viewOf(state: InternalState): LedgerView {
   const view: LedgerView = Object.freeze(
     Object.assign(Object.create(null), {
