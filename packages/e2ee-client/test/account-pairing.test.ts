@@ -73,7 +73,12 @@ describe('account pairing store contract (reference)', () => {
 });
 
 describe('portable account pairing workflow', () => {
-  it.each(['before-confirmation', 'during-cancellation', 'other-workspace'] as const)(
+  it.each([
+    'before-confirmation',
+    'during-cancellation',
+    'other-workspace',
+    'reader-handoff',
+  ] as const)(
     'preserves verified admission during explicit pairing recovery: %s',
     async (timing) => {
       const lookupId = 'a1'.repeat(16);
@@ -86,7 +91,7 @@ describe('portable account pairing workflow', () => {
         workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'pending' as const }],
       };
       let state: import('@lody/platform').E2eeAccountPairingRequestState =
-        timing === 'before-confirmation'
+        timing === 'before-confirmation' || timing === 'reader-handoff'
           ? {
               ...waiting,
               status: 'joined',
@@ -106,6 +111,7 @@ describe('portable account pairing workflow', () => {
       const resumed = new Promise<void>((resolve) => {
         release = resolve;
       });
+      let readers = 0;
       const recovered = makeAutomaticPairingRuntime({
         account: () => 'synthetic-account',
         workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
@@ -131,11 +137,25 @@ describe('portable account pairing workflow', () => {
             // Actual native cancellation preserves an already settled admission.
             if (state.status === 'waiting') state = { ...state, status: 'expired' };
           },
-          status: async () => ({
-            deviceKind: 'personal',
-            hasDeviceCredential: true,
-            hasCurrentKey: true,
-          }),
+          open: async () => {
+            readers++;
+            return { readerOwner: 'automatic-key-receive' };
+          },
+          close: async () => {
+            readers--;
+          },
+          status: async () => {
+            if (timing === 'reader-handoff' && readers === 0) throw new Error('e2ee_not_open');
+            return {
+              deviceKind: 'personal',
+              hasDeviceCredential: true,
+              hasCurrentKey: timing !== 'reader-handoff',
+            };
+          },
+          refresh: async () => {
+            expect(readers).toBe(1);
+            return { deviceKind: 'personal', hasDeviceCredential: true, hasCurrentKey: true };
+          },
         } as unknown as E2eeWorkspaceRuntime,
       });
       try {
@@ -152,6 +172,7 @@ describe('portable account pairing workflow', () => {
         expect((await result).phase).toBe(timing === 'other-workspace' ? 'preparing' : 'joined');
         expect(state.status).toBe('joined');
         expect(state.lookupId).toBe(lookupId);
+        expect(readers).toBe(0);
       } finally {
         release();
         recovered.disposeAutomaticPairing();

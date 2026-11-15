@@ -188,6 +188,12 @@ Core retains and verifies receive/report/distribution originals; the shared fini
 maintenance owner acknowledges only observed terminal results, including a
 successful sibling when another phase failed. There is no plaintext fallback.
 
+Management rotation checks the locally installed current key before receiving.
+It confirms and installs the staged publication before returning; mailbox distribution
+runs afterwards under the existing session, reports failures, and cannot reopen a
+closed reader. Automatic pairing borrows its own temporary reader when activation
+has already closed, then releases only that reader after checking or receiving keys.
+
 ## Account-wide pairing workflow
 
 `@lody/e2ee-client/account-pairing` is the shared account-wide personal device pairing

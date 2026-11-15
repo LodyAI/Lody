@@ -1166,25 +1166,29 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         withSession(id, (session) =>
           Effect.gen(function* () {
             yield* session.refresh();
-            yield* installKeys(session);
+            const local = yield* session.status();
+            if (local.usableEpoch !== local.currentEpoch) yield* installKeys(session, 'receive');
             yield* session.recoverHistory();
             const pending = yield* session.resumeRotation();
             if (pending) {
-              yield* session.refresh();
               yield* session.acknowledgeRotation(pending);
               if (pending.outcome !== 'Committed') return yield* fail('conflict');
             }
             if ((yield* session.ledger()).inspectState().epoch.rotationRequired) {
               const result = yield* session.rotate();
-              yield* session.refresh();
               yield* session.acknowledgeRotation(result);
               if (result.outcome !== 'Committed') return yield* fail('conflict');
             }
-            yield* session.keyRound();
             return undefined;
           })
         )
-      ),
+      ).then(() => {
+        // The publication already staged every recipient's envelope. Mailbox
+        // reconciliation is owned by the existing session and may finish later.
+        void run(withSession(id, (session) => installKeys(session, 'distribute'))).catch(
+          (cause: unknown) => report('e2ee-rotation-key-delivery', cause)
+        );
+      }),
     revokeDevice: (id, key, confirmation) =>
       run(
         withSession(

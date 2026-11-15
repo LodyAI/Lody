@@ -82,7 +82,7 @@ type AccountPairingJoin = {
   automatic?: boolean;
   cancel?: () => void;
 };
-const ACCOUNT_PAIRING_KEY_RETRY_MS = [300, 600, 1200, 2000, 3000, 4000] as const;
+const ACCOUNT_PAIRING_KEY_RETRY_MS = [300, 600, 1200, 2000, 4000, 8000, 15000, 30000] as const;
 const accountPairingJoins = new Map<string, AccountPairingJoin>();
 let accountPairingAccount: string | null | undefined;
 
@@ -755,30 +755,26 @@ export function E2eeWorkspaceConsole({
       });
     join.failed = false;
     join.request = (async () => {
-      try {
-        // Only this device's own current key; a host without modes runs its full round.
-        const first = await runtime.refresh(workspaceId, { installKeys: true, keyMode: 'receive' });
-        if (!first || first.hasCurrentKey) return true;
-        // Instant QR approval delivers mailbox keys asynchronously right after
-        // publishing the admission. Poll briefly while the mailbox catches up.
-        for (const delay of ACCOUNT_PAIRING_KEY_RETRY_MS) {
-          await wait(delay);
-          if (cancelled || accountPairingJoins.get(identity) !== join) return false;
+      for (const delay of [0, ...ACCOUNT_PAIRING_KEY_RETRY_MS]) {
+        if (delay) await wait(delay);
+        if (cancelled || accountPairingJoins.get(identity) !== join) return false;
+        try {
           const next = await runtime.refresh(workspaceId, {
             installKeys: true,
             keyMode: 'receive',
           });
-          if (!next || next.hasCurrentKey) return true;
+          if (next?.hasCurrentKey) return true;
+        } catch (error: unknown) {
+          if (cancelled) return false;
+          const failure = classifyE2eeControlFailure(error);
+          console.error('E2EE account pairing key request failed', failure.kind, failure.code);
+          // Reader handoff, custody contention and transport failures can recover.
+          // Identity/authority failures still require their existing recovery path.
+          if (failure.kind !== 'network' && failure.kind !== 'server') break;
         }
-        join.failed = true;
-        return false;
-      } catch (error: unknown) {
-        if (cancelled) return false;
-        const failure = classifyE2eeControlFailure(error);
-        console.error('E2EE account pairing key request failed', failure.kind, failure.code);
-        join.failed = true;
-        return false;
       }
+      if (!cancelled && accountPairingJoins.get(identity) === join) join.failed = true;
+      return false;
     })();
     observeKeyRequest(join.request);
   };

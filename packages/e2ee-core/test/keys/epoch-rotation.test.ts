@@ -1117,7 +1117,10 @@ describe('durable local epoch rotation', () => {
               )
             );
           }
-          const { rotation } = yield* f.open();
+          let independentlyObserved: LedgerView | undefined;
+          const { rotation } = yield* f.open('create', {
+            lookup: () => Effect.succeed(independentlyObserved ?? f.view()),
+          });
           failureCode(
             yield* Effect.exit(rotation.publishRemoving(f.view().inspectState().owner)),
             'unauthorized'
@@ -1151,6 +1154,9 @@ describe('durable local epoch rotation', () => {
           );
           expect(f.signed()).toBe(1);
           initial = f.records().map((record) => Buffer.from(record).toString('hex'));
+          // Neither readback nor a subscription has observed this commit: only
+          // the reopened process can confirm the retained original.
+          independentlyObserved = f.view();
           f.mode('lost-readback');
           failureCode(yield* Effect.exit(rotation.publishRemoving(target)), 'LedgerLogError');
           expect(f.row()!.record).toEqual(original.record);
