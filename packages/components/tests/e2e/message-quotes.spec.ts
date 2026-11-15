@@ -143,6 +143,33 @@ test('rejected sends preserve the narrow-screen quote draft', async ({ page }) =
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('a sent quote stays inside a narrow chat column in a wide window', async ({ page }) => {
+  // Desktop split panes narrow the chat column while the window stays wide, so
+  // window-width breakpoints must not lift the bubble's column bound.
+  await page.setViewportSize({ width: 1280, height: 780 });
+  await page.goto(story());
+  await selectPassage(page, 11);
+  await page.getByRole('button', { name: 'Quote', exact: true }).click();
+  await page.getByTestId('message-quote-add').click();
+  await expect.poll(() => composerText(input(page))).toContain('[Quote:');
+  await page.locator('#storybook-root').getByRole('button', { name: 'Send', exact: true }).click();
+  const bubble = page.locator('[data-user-message-bubble]').last();
+  await expect(bubble.getByRole('button').filter({ hasText: 'Quote:' })).toBeVisible();
+  await page.evaluate(() => {
+    document.body.style.width = '340px';
+  });
+  const metadata = page.getByTestId('user-message-metadata').last();
+  await expect
+    .poll(async () => {
+      const [bubbleBox, stackBox] = [
+        (await bubble.boundingBox())!,
+        (await metadata.boundingBox())!,
+      ];
+      return bubbleBox.x + bubbleBox.width - (stackBox.x + stackBox.width);
+    })
+    .toBeLessThanOrEqual(0.5);
+});
+
 test('a continuous selection across text rows in one response is quoted in full', async ({
   page,
 }) => {
