@@ -1,5 +1,5 @@
 import * as httpTransport from '../src/utils/http-transport';
-import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
+import { CloudE2eeDeviceRevoked, isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { Effect, Exit, Scope } from 'effect';
 import type { Logger } from '../src/utils/logger';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -1295,6 +1295,92 @@ describe('CLI E2EE Round 2 optimizations', () => {
       expect(legacyFlags).toEqual([true, null, null]);
     } finally {
       vi.unstubAllEnvs();
+    }
+  });
+
+  it('recovers from transient HTTP 502/503/504 gateway blips while immediately surfacing 401/403/560 and e2ee_* refusals without retry', async () => {
+    vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(
+      () => ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args)) as typeof fetch
+    );
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const e2ee = createCloudE2eePort({
+        authBaseUrl: 'https://retry-test.convex.cloud',
+        logger,
+      });
+
+      // Recovers after 2 transient 502/503 blips.
+      let attempts = 0;
+      vi.stubGlobal('fetch', async () => {
+        attempts += 1;
+        if (attempts === 1) return new Response('bad gateway', { status: 502 });
+        if (attempts === 2) return new Response('service unavailable', { status: 503 });
+        return Response.json({
+          status: 'success',
+          value: { ...slot, revision: 1, status: 'NeedsEnvelope' },
+        });
+      });
+      const pending = e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot });
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.advanceTimersByTimeAsync(150);
+      await expect(pending).resolves.toMatchObject({ status: 'NeedsEnvelope', revision: 1 });
+      expect(attempts).toBe(3);
+
+      // Immediately surfaces 401, 403, 560 (device revoked), and e2ee_* bodies inside 503 without retrying.
+      const nonRetryable: Array<{ status: number; body: string; expectedError: unknown }> = [
+        { status: 401, body: 'unauthorized', expectedError: /unauthorized/i },
+        { status: 403, body: 'forbidden', expectedError: /forbidden/i },
+        {
+          status: 560,
+          body: JSON.stringify({
+            status: 'error',
+            errorMessage: 'device revoked',
+            errorData: { code: 'e2ee_device_revoked' },
+          }),
+          expectedError: CloudE2eeDeviceRevoked,
+        },
+        {
+          status: 503,
+          body: JSON.stringify({ code: 'e2ee_device_unauthorized' }),
+          expectedError: /e2ee_device_unauthorized/i,
+        },
+      ];
+      for (const [index, testCase] of nonRetryable.entries()) {
+        let count = 0;
+        vi.stubGlobal('fetch', async () => {
+          count += 1;
+          return new Response(testCase.body, { status: testCase.status });
+        });
+        const freshSlot = { genesis, epoch: 1, recipient: String(index + 4).repeat(64) };
+        const call =
+          testCase.status === 560
+            ? e2ee.getHistory({ workspaceId: 'ws', credential: 'cred' })
+            : e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: freshSlot });
+        if (typeof testCase.expectedError === 'function') {
+          await expect(call).rejects.toBeInstanceOf(testCase.expectedError as never);
+        } else {
+          await expect(call).rejects.toThrow(testCase.expectedError as RegExp);
+        }
+        expect(count).toBe(1);
+      }
+
+      // Caller abort stops retry immediately without waiting for second attempt.
+      let abortedAttempts = 0;
+      const controller = new AbortController();
+      vi.stubGlobal('fetch', async () => {
+        abortedAttempts += 1;
+        return new Response('gateway timeout', { status: 504 });
+      });
+      const abortedCall = e2ee.readExecutionOriginPage(
+        { workspaceId: 'ws', credential: 'cred', docId: 'doc-1' },
+        controller.signal
+      );
+      await vi.advanceTimersByTimeAsync(10);
+      controller.abort(new Error('caller_aborted'));
+      await expect(abortedCall).rejects.toBeDefined();
+      expect(abortedAttempts).toBe(1);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

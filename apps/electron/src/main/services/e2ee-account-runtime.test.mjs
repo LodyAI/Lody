@@ -6878,7 +6878,7 @@ void test('a slow sign-in token still completes a request when nothing is quitti
   assert.equal((await read).position, 'p1:workspace:1:synthetic')
 })
 
-void test('retained inline append suffix falls back until initial bootstrap position exists, then skips history round-trips', async () => {
+void test('after workspace creation (length 1, no prior cursor), ingesting inline appendRecord historyPage at index 1 skips history RTT while non-contiguous pages still fall back', async () => {
   let position = null
   let length = 1
   const historyCalls = []
@@ -6901,10 +6901,10 @@ void test('retained inline append suffix falls back until initial bootstrap posi
           return {
             workspaceId: 'team',
             genesisHash: '11'.repeat(32),
-            checkpoint: { headHash: '22'.repeat(32), length: 2 },
+            checkpoint: { headHash: '22'.repeat(32), length: length + 1 },
             startIndex: 0,
-            recordsHex: ['00', 'aa'],
-            position: 'p1:team:2:bootstrapped',
+            recordsHex: Array.from({ length: length + 1 }, (_v, i) => (i === 0 ? '00' : 'aa')),
+            position: `p1:team:${length + 1}:bootstrapped`,
             nextCursor: null
           }
         })
@@ -6925,15 +6925,32 @@ void test('retained inline append suffix falls back until initial bootstrap posi
         })
     }
   })
-  // Brand-new workspace (position === null): must not pass startIndex=1 into bootstrap ingest.
+  // Brand-new workspace (position === null, length === 1): contiguous startIndex=1 skips history().
   f.ipc.retainInlineHistory('team', inlinePage(1))
   await f.ipc.refresh('team', { installKeys: false })
-  assert.equal(historyCalls.length, 1)
-  assert.deepEqual(ingestedPages, [0])
+  assert.equal(historyCalls.length, 0)
+  assert.deepEqual(ingestedPages, [1])
+  assert.equal(length, 2)
+  assert.equal(position, 'p1:team:2:cursor')
 
   // Bootstrapped workspace (position !== null): inline suffix serves refresh without calling history.
   f.ipc.retainInlineHistory('team', inlinePage(2))
   await f.ipc.refresh('team', { installKeys: false })
+  assert.equal(historyCalls.length, 0)
+  assert.deepEqual(ingestedPages, [1, 2])
+
+  // Non-contiguous inline page (startIndex=2 at length=1) or length > 1 without cursor still falls back to history().
+  position = null
+  length = 1
+  f.ipc.retainInlineHistory('team', inlinePage(2))
+  await f.ipc.refresh('team', { installKeys: false })
   assert.equal(historyCalls.length, 1)
-  assert.deepEqual(ingestedPages, [0, 2])
+  assert.deepEqual(ingestedPages, [1, 2, 0])
+
+  position = null
+  length = 2
+  f.ipc.retainInlineHistory('team', inlinePage(2))
+  await f.ipc.refresh('team', { installKeys: false })
+  assert.equal(historyCalls.length, 2)
+  assert.deepEqual(ingestedPages, [1, 2, 0, 0])
 })
