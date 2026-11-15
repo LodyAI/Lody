@@ -1,6 +1,11 @@
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
-import { createAntigravityQuotaReader, isAntigravityRegistryAgent } from './antigravity-quota';
+import {
+  parseAntigravityCliQuota,
+  isAntigravityBuiltinAgent,
+  createAntigravityQuotaReader,
+  isAntigravityRegistryAgent,
+} from './antigravity-quota';
 import {
   createSorbetAcpCustomProvider,
   deleteSorbetAcpCustomProvider,
@@ -31,6 +36,8 @@ import { z } from 'zod';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
+  ProcessCleanupFailed,
+  runCommandOk,
   runPromiseSquashedLegacy,
   startProcessLegacy,
   terminateChildTreeLegacy,
@@ -310,6 +317,8 @@ export type StartLocalAcpAgentOptions = {
   /** Set to false to disable terminal capability advertisement. Defaults to true. */
   terminalEnabled?: boolean;
   discoverAuthenticationMethods?: boolean;
+  onUsageUpdate?: CreateAcpClientOptions['onUsageUpdate'];
+  onContextWindowUsageUpdate?: CreateAcpClientOptions['onContextWindowUsageUpdate'];
   onUpdateMessage(message: AcpSessionNotification): void;
   onRequestPermission(
     requestId: string,
@@ -583,6 +592,43 @@ export async function runLocalSorbetCredentials(
 
 /** Core queries need no session; official Antigravity /usage needs an isolated scratch session. */
 export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
+  if (isAntigravityBuiltinAgent(options)) {
+    // Never drop account-selecting ACP arguments and accidentally read another account.
+    if (options.extraArgs?.length || options.magpieGatewayUrl)
+      throw new Error('Antigravity quota is unavailable for custom launch arguments');
+    const launch = await resolveACPProcessLaunchAsync({
+      ...options,
+      onManagedRuntimeProgress: options.onManagedRuntimeProgress,
+    });
+    const env = withoutElectronBootstrapCredentials(
+      mergeACPProcessEnv(
+        launch,
+        mergeLoginShellEnv(options.env ?? process.env, await getLoginShellEnvLegacy())
+      )
+    );
+    let quotaChild: ChildProcess | undefined;
+    const output = await runPromiseSquashedLegacy(
+      runCommandOk({
+        command: launch.command,
+        args: ['--print', '/usage', '--output-format', 'json'],
+        cwd: os.tmpdir(),
+        env,
+        timeout: 20_000,
+        maxOutputBytes: 65_536,
+        onSpawned: (child) => {
+          quotaChild = child;
+        },
+      }).pipe(
+        Effect.provide(platformLayer(withSpawn(options.spawnImpl, { logger: options.logger })))
+      ),
+      { signal: options.signal }
+    ).catch((cause: unknown) => {
+      if (cause instanceof ProcessCleanupFailed && quotaChild)
+        throw new AcpQuotaCleanupError(quotaChild, cause);
+      throw cause;
+    });
+    return parseAntigravityCliQuota(JSON.parse(output.stdout.toString('utf8')));
+  }
   const workdir = isAntigravityRegistryAgent(options)
     ? fs.mkdtempSync(path.join(os.tmpdir(), 'lody-antigravity-quota-'))
     : undefined;
@@ -915,6 +961,8 @@ async function startLocalAcpProtocol<T>(
         launcher,
         terminalEnabled: options.terminalEnabled,
         discoverAuthenticationMethods: options.discoverAuthenticationMethods,
+        onUsageUpdate: options.onUsageUpdate,
+        onContextWindowUsageUpdate: options.onContextWindowUsageUpdate,
         onUpdateMessage: options.onUpdateMessage,
         onRequestPermission: options.onRequestPermission,
         startupTimeouts,

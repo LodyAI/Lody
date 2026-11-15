@@ -756,6 +756,23 @@ describe('AgentConfigDialog', () => {
     expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
   });
 
+  it('offers managed Antigravity without exposing its deprecated registry launcher', async () => {
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION })
+    );
+    const providers = listAddableProviders(i18next.t);
+    expect(providers.some((p) => p.cliType === 'builtin' && p.agentType === 'antigravity')).toBe(
+      true
+    );
+    expect(providers.some((p) => p.agentType === 'antigravity-acp')).toBe(false);
+    const option = getOptionButtons().find((b) => b.textContent?.includes('Antigravity'));
+    expect(option).toBeDefined();
+    await act(async () => option?.click());
+    expect(document.body.querySelector('#custom-acp-command')).toBeNull();
+    expect(getSelectedOption()?.textContent).toContain('Antigravity');
+  });
+
   it('leaves Lody Agent to its own settings page even while its beta is on', async () => {
     store.set(developerModeEnabledAtom, true);
     store.set(lodyAgentBetaEnabledAtom, true);

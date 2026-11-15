@@ -100,6 +100,7 @@ export const CustomAcpLaunchSpecSchema = z
 
 export const BuiltinRuntimeOverridesSchema = z
   .object({
+    antigravityPath: SharedOptionalStringSchema,
     codexPath: SharedOptionalStringSchema,
     claudeCodeExecutable: SharedOptionalStringSchema,
     kimiPath: SharedOptionalStringSchema,

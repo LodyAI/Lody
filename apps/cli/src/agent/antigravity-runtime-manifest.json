@@ -1,0 +1,62 @@
+{
+  "name": "antigravity",
+  "version": "1.5.9",
+  "artifacts": {
+    "darwin-arm64": {
+      "fileName": "antigravity-1.5.9-darwin-arm64.tar.zst",
+      "sha256": "93bab7842f70e5217751368b6a9489928bec1173331bb9fbcefca3815eb45461",
+      "size": 77437892,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.9-4515810895593472/darwin-arm/cli_mac_arm64.tar.gz",
+      "sourceSha512": "690cd6a5a5fdb23564fb1b14f7f6ae368fa3636b7630f56c574a6dfc0e2791a0e5b93d6515be1650c8a268cfb28440e1b9cbaa1c5b85aa762ab25b51c1fccda5"
+    },
+    "darwin-x64": {
+      "fileName": "antigravity-1.5.9-darwin-x64.tar.zst",
+      "sha256": "d0172809c768ceb00faea7b913d804326c200e1938c04243ac898c3e82868bd7",
+      "size": 82233854,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.9-4515810895593472/darwin-x64/cli_mac_x64.tar.gz",
+      "sourceSha512": "5f3fd16127de1229bd978509649b0d77b602796292f465ab0e001edd141e902b4b9759991f744cde3264b892f7299eafca6fbae619eca8db24b985d7db40f25e"
+    },
+    "linux-arm64": {
+      "fileName": "antigravity-1.5.9-linux-arm64.tar.zst",
+      "sha256": "c22cc48136316577b51215d5aecadba40db226a642087eb5bad510cf2008ba56",
+      "size": 82849995,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.9-4515810895593472/linux-arm/cli_linux_arm64.tar.gz",
+      "sourceSha512": "16c632a09b81f598f7652bc11180861f9d2ee4408ffa161dadc83b2010de7a9cd055e97b4b46cd01903e35c0e8bf21d8262462ba7c5f168cc6dada9ac3d522c0"
+    },
+    "linux-x64": {
+      "fileName": "antigravity-1.5.9-linux-x64.tar.zst",
+      "sha256": "abb3ddf8fe532c9277497ae351e1df245bc763e377ccf171de2ea1739041c84e",
+      "size": 91365449,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.9-4515810895593472/linux-x64/cli_linux_x64.tar.gz",
+      "sourceSha512": "d01eb13ba7750eed18907f1ae8860864371e0ad9064415e8d033d22b4bd7b9b4e4c7f962058520b452d67db1c33163d9a889d55a7dffa159596ec6cd91a87b79"
+    },
+    "linux-arm64-musl": {
+      "fileName": "antigravity-1.5.9-linux-arm64-musl.tar.zst",
+      "sha256": "bd66edb825c6e12c8a01fb7599f2734e9213bc2e2a15fe0b93d61b799f4537de",
+      "size": 79309644,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.9-4515810895593472/linux-arm-musl/cli_linux_arm64_musl.tar.gz",
+      "sourceSha512": "9ca280f6175b25e8b764548a683c540edec29d2c63232cf96b2c6242bc67eda0b064b7068d579ff2243632317d3b1ec38438accca56f6fccde9ea6a9ec07b044"
+    },
+    "linux-x64-musl": {
+      "fileName": "antigravity-1.5.9-linux-x64-musl.tar.zst",
+      "sha256": "3f7d548f8ae38a265ffe2ae03ad5f89f52b4a0c1d43acfc20e1e58973b4a5809",
+      "size": 83625820,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.9-4515810895593472/linux-x64-musl/cli_linux_x64_musl.tar.gz",
+      "sourceSha512": "ab668614b675fb371a597275641aab49ac1fec87e90b546a75e804a766c49a99fe06b2e5188a7629f6eac7874a6d742302735c64b731070cdd35a5484d589cd6"
+    },
+    "win32-arm64": {
+      "fileName": "antigravity-1.5.9-win32-arm64.tar.zst",
+      "sha256": "58c99e585420469b12b3064b877dae4f75981c9252e3910c8dc6df4aa9170924",
+      "size": 68740563,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.9-4515810895593472/windows-arm/cli_windows_arm64.exe",
+      "sourceSha512": "2fad3c679c83f9b7d686959980099899a5608ce56866bdd18fe8693dc60c1b0cfc77466910caaa74b5fe7eeebfb5b553aff7815574bf7bdeadcbb27da22b57ae"
+    },
+    "win32-x64": {
+      "fileName": "antigravity-1.5.9-win32-x64.tar.zst",
+      "sha256": "356f8cc994e67cd3234ad254544d8b12a751de251a3316547172a76b83fc39d1",
+      "size": 74017642,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.9-4515810895593472/windows-x64/cli_windows_x64.exe",
+      "sourceSha512": "539a9415a686d9ec45f5c59fe7d32c485c6fa9abaea50208ae8ede4ed3622b9fb2bfd6680c87dc52344981172a96ddacb261ff4231276b5572fb5b62a9b0221e"
+    }
+  }
+}

@@ -25,6 +25,7 @@ import {
   hasBuiltinEnvAuthentication,
   isAcpAuthenticationFormWithinByteLimit,
   isManagedBuiltinAgentType,
+  usesAcpProtocolAuthentication,
 } from '@lody/shared';
 
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
@@ -117,6 +118,7 @@ const STATUS_PROBE_KILL_WAIT_MS = 2_000;
 
 const BUILTIN_AUTH_METHODS = {
   // Pi credentials are configured through the official Pi CLI on the host.
+  antigravity: [],
   pi: [],
   devin: [],
   kimi: [
@@ -615,11 +617,11 @@ export class AcpAuthenticationManager {
       ) => Promise<Record<string, unknown>>;
     }) => Promise<void>;
   }): Promise<AcpAuthenticationResult> {
-    // Devin advertises its own browser method over ACP, not a native login command.
+    // Protocol-authenticated builtins advertise their sign-in methods over ACP.
     const isBuiltinAuthentication =
       options.cliType === 'builtin' &&
       isManagedBuiltinAgentType(options.agentType) &&
-      options.agentType !== 'devin';
+      !usesAcpProtocolAuthentication(options.cliType, options.agentType);
     const displayName = isBuiltinAuthentication
       ? getBuiltinDisplayName(options.agentType)
       : options.agentType;

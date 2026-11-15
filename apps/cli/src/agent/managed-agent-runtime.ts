@@ -33,6 +33,7 @@ import devinPinsJson from './devin-runtime-manifest.json';
 import grokPinsJson from './grok-runtime-manifest.json';
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
 import codexRuntimeManifestJson from './codex-runtime-manifest.json';
+import antigravityRuntimeManifestJson from './antigravity-runtime-manifest.json';
 import kimiRuntimeManifestJson from './kimi-runtime-manifest.json';
 import piRuntimeManifestJson from './pi-runtime-manifest.json';
 
@@ -149,6 +150,7 @@ type ManagedRuntimeInstallEntry = {
 };
 
 const MANAGED_RUNTIME_NAME_VALUES = [
+  'antigravity',
   'pi',
   'codex',
   'claude-code',
@@ -332,6 +334,7 @@ const CODEX_DEPENDENCY_VERSION = resolveSingleDependencyVersion(
   '@openai/codex',
   codexPackageJson.dependencies['@openai/codex']
 );
+export const ANTIGRAVITY_RUNTIME_VERSION = antigravityRuntimeManifestJson.version;
 export const CODEX_RUNTIME_VERSION = codexRuntimeManifestJson.version;
 if (CODEX_RUNTIME_VERSION !== CODEX_DEPENDENCY_VERSION) {
   throw new Error(
@@ -433,6 +436,22 @@ function createDevinRuntimeArchive(platform: keyof typeof devinPinsJson.artifact
 }
 
 const RUNTIMES: Record<ManagedRuntimeName, RuntimeDefinition> = {
+  antigravity: {
+    name: 'antigravity',
+    version: ANTIGRAVITY_RUNTIME_VERSION,
+    platforms: Object.fromEntries(
+      Object.entries(antigravityRuntimeManifestJson.artifacts).map(([platform, artifact]) => [
+        platform,
+        {
+          fileName: artifact.fileName,
+          sha256: artifact.sha256,
+          size: artifact.size,
+          compression: 'zstd' as const,
+          cmd: platform.startsWith('win32-') ? 'agy.exe' : 'agy',
+        },
+      ])
+    ),
+  },
   devin: {
     name: 'devin',
     version: DEVIN_RUNTIME_VERSION,
@@ -583,7 +602,8 @@ export function mapManagedRuntimePlatform(
   if (platform === 'darwin') return `darwin-${archPart}`;
   if (platform === 'win32') return `win32-${archPart}`;
   if (platform === 'linux') {
-    const muslSuffix = name === 'claude-code' && isMuslLibc() ? '-musl' : '';
+    const muslSuffix =
+      (name === 'claude-code' || name === 'antigravity') && isMuslLibc() ? '-musl' : '';
     return `linux-${archPart}${muslSuffix}`;
   }
   return undefined;

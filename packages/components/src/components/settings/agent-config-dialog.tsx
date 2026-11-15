@@ -1111,6 +1111,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     agentType: 'bub',
     searchKeys: 'bub bubbuild acp',
   },
+  {
+    kind: 'builtin',
+    value: 'builtin:antigravity',
+    label: 'Antigravity',
+    descriptionKey: 'settings.agent.dialog.option.antigravity.description',
+    descriptionDefault: 'Google Antigravity CLI with automatic installation',
+    cliType: 'builtin',
+    agentType: 'antigravity',
+    searchKeys: 'google antigravity agy',
+  },
 ];
 
 const PRESET_OPTIONS: AgentTypeOption[] = PRESETS.map((p) => ({
@@ -1808,19 +1818,21 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
-      : formData.agentType === 'codex'
-        ? 'codexPath'
-        : formData.agentType === 'claude'
-          ? 'claudeCodeExecutable'
-          : formData.agentType === 'kimi'
-            ? 'kimiPath'
-            : formData.agentType === 'devin'
-              ? 'devinPath'
-              : formData.agentType === 'grok'
-                ? 'grokPath'
-                : formData.agentType === 'pi'
-                  ? 'piPath'
-                  : null;
+      : formData.agentType === 'antigravity'
+        ? 'antigravityPath'
+        : formData.agentType === 'codex'
+          ? 'codexPath'
+          : formData.agentType === 'claude'
+            ? 'claudeCodeExecutable'
+            : formData.agentType === 'kimi'
+              ? 'kimiPath'
+              : formData.agentType === 'devin'
+                ? 'devinPath'
+                : formData.agentType === 'grok'
+                  ? 'grokPath'
+                  : formData.agentType === 'pi'
+                    ? 'piPath'
+                    : null;
   const builtinRuntimeOverrideValue = builtinRuntimeOverrideKey
     ? (formData.runtimeOverrides?.[builtinRuntimeOverrideKey] ?? '')
     : '';
@@ -3106,35 +3118,40 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                     value={builtinRuntimeOverrideValue}
                     onChange={(event) => updateBuiltinRuntimeOverride(event.target.value)}
                     placeholder={
-                      formData.agentType === 'codex'
+                      formData.agentType === 'antigravity'
                         ? t(
-                            'settings.agent.dialog.runtimeOverride.codexPlaceholder',
-                            '/path/to/codex'
+                            'settings.agent.dialog.runtimeOverride.antigravityPlaceholder',
+                            '/path/to/agy'
                           )
-                        : formData.agentType === 'kimi'
+                        : formData.agentType === 'codex'
                           ? t(
-                              'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
-                              '/path/to/kimi'
+                              'settings.agent.dialog.runtimeOverride.codexPlaceholder',
+                              '/path/to/codex'
                             )
-                          : formData.agentType === 'devin'
+                          : formData.agentType === 'kimi'
                             ? t(
-                                'settings.agent.dialog.runtimeOverride.devinPlaceholder',
-                                '/path/to/devin'
+                                'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
+                                '/path/to/kimi'
                               )
-                            : formData.agentType === 'grok'
+                            : formData.agentType === 'devin'
                               ? t(
-                                  'settings.agent.dialog.runtimeOverride.grokPlaceholder',
-                                  '/path/to/grok'
+                                  'settings.agent.dialog.runtimeOverride.devinPlaceholder',
+                                  '/path/to/devin'
                                 )
-                              : formData.agentType === 'pi'
+                              : formData.agentType === 'grok'
                                 ? t(
-                                    'settings.agent.dialog.runtimeOverride.piPlaceholder',
-                                    '/path/to/pi'
+                                    'settings.agent.dialog.runtimeOverride.grokPlaceholder',
+                                    '/path/to/grok'
                                   )
-                                : t(
-                                    'settings.agent.dialog.runtimeOverride.claudePlaceholder',
-                                    '/path/to/claude'
-                                  )
+                                : formData.agentType === 'pi'
+                                  ? t(
+                                      'settings.agent.dialog.runtimeOverride.piPlaceholder',
+                                      '/path/to/pi'
+                                    )
+                                  : t(
+                                      'settings.agent.dialog.runtimeOverride.claudePlaceholder',
+                                      '/path/to/claude'
+                                    )
                     }
                     autoComplete="off"
                     spellCheck={false}

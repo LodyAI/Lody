@@ -712,3 +712,191 @@ describe('ACP system Node prerequisites', () => {
     );
   });
 });
+
+describe('builtin agy quota command', () => {
+  const quota = {
+    status: 'SUCCESS',
+    num_turns: 0,
+    command: {
+      name: 'usage',
+      data: {
+        groups: [
+          {
+            name: 'Gemini Models',
+            buckets: [
+              {
+                id: 'gemini-weekly',
+                window: 'weekly',
+                remaining_fraction: 0.25,
+                reset_time: '2030-01-08T12:00:00Z',
+              },
+              { id: 'gemini-5h', window: '5h', remaining_fraction: 0 },
+            ],
+          },
+          {
+            name: 'Other models',
+            buckets: [{ id: 'other-weekly', window: 'weekly', remaining_fraction: 1 }],
+          },
+        ],
+      },
+    },
+  };
+  it('queries the selected binary and account environment without creating a model turn', async () => {
+    vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
+    vi.spyOn(setting, 'resolveACPProcessLaunchAsync').mockResolvedValue({
+      command: '/selected/agy',
+      args: ['acp'],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+    });
+    try {
+      const snapshot = await queryLocalAcpRateLimits({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        workdir: os.tmpdir(),
+        env: { AGY_TEST_ACCOUNT: 'chosen' },
+        logger: createSilentLogger(),
+        terminalManager: {} as never,
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+        spawnImpl: ((command, args, options) =>
+          spawn(
+            process.execPath,
+            [
+              '-e',
+              `
+          if (${JSON.stringify('/selected/agy')} !== ${JSON.stringify(command)} || process.env.AGY_TEST_ACCOUNT !== 'chosen' || process.env.AGY_CLI_DISABLE_AUTO_UPDATE !== 'true') process.exit(2);
+          if (JSON.stringify(process.argv.slice(1)) !== JSON.stringify(['--print','/usage','--output-format','json'])) process.exit(3);
+          console.log(${JSON.stringify(JSON.stringify(quota))});
+        `,
+              '--',
+              ...args,
+            ],
+            options
+          )) as NonNullable<Parameters<typeof queryLocalAcpRateLimits>[0]['spawnImpl']>,
+      });
+      expect(snapshot.rateLimits[0]).toEqual({
+        limitId: 'antigravity',
+        scope: { providerId: 'antigravity' },
+        windows: [
+          {
+            label: 'Gemini Models',
+            usedPercent: 75,
+            windowDurationSeconds: 604800,
+            resetsAtEpochSeconds: Date.parse('2030-01-08T12:00:00Z') / 1000,
+          },
+          {
+            label: 'Gemini Models',
+            usedPercent: 100,
+            windowDurationSeconds: 18000,
+            resetsAtEpochSeconds: null,
+          },
+          {
+            label: 'Other models',
+            usedPercent: 0,
+            windowDurationSeconds: 604800,
+            resetsAtEpochSeconds: null,
+          },
+        ],
+      });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+describe('agy quota failure isolation', () => {
+  const options = () => ({
+    cliType: 'builtin' as const,
+    agentType: 'antigravity',
+    workdir: os.tmpdir(),
+    env: {},
+    logger: createSilentLogger(),
+    terminalManager: {} as never,
+    onUpdateMessage: () => {},
+    onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
+  });
+  it.each([
+    'invalid json',
+    JSON.stringify({
+      status: 'SUCCESS',
+      num_turns: 1,
+      command: { name: 'usage', data: { groups: [] } },
+    }),
+    JSON.stringify({
+      status: 'SUCCESS',
+      num_turns: 0,
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            {
+              name: 'Gemini',
+              buckets: [{ id: 'weekly', window: 'weekly', remaining_fraction: 2 }],
+            },
+          ],
+        },
+      },
+    }),
+  ])(
+    'rejects unavailable or malformed quota without returning a fabricated reading: %#',
+    async (payload) => {
+      vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
+      vi.spyOn(setting, 'resolveACPProcessLaunchAsync').mockResolvedValue({
+        command: '/selected/agy',
+        args: ['acp'],
+      });
+      try {
+        await expect(
+          queryLocalAcpRateLimits({
+            ...options(),
+            spawnImpl: ((_cmd, _args, opts) =>
+              spawn(
+                process.execPath,
+                ['-e', `console.log(${JSON.stringify(payload)})`],
+                opts
+              )) as never,
+          })
+        ).rejects.toThrow();
+      } finally {
+        vi.restoreAllMocks();
+      }
+    }
+  );
+  it('cancels the owned quota child and waits for its exit before allowing a retry', async () => {
+    vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
+    vi.spyOn(setting, 'resolveACPProcessLaunchAsync').mockResolvedValue({
+      command: '/selected/agy',
+      args: ['acp'],
+    });
+    const controller = new AbortController();
+    let ready = () => {};
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    let child: ChildProcess | undefined;
+    try {
+      const outcome = queryLocalAcpRateLimits({
+        ...options(),
+        signal: controller.signal,
+        spawnImpl: ((_cmd, _args, opts) => {
+          child = spawn(
+            process.execPath,
+            ['-e', "console.error('ready'); setInterval(()=>{}, 10000);"],
+            opts
+          );
+          child.stderr?.on('data', (chunk) => {
+            if (String(chunk).includes('ready')) ready();
+          });
+          return child;
+        }) as never,
+      });
+      const rejected = expect(outcome).rejects.toThrow();
+      await started;
+      controller.abort();
+      await rejected;
+      expect(child?.exitCode !== null || child?.signalCode !== null).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

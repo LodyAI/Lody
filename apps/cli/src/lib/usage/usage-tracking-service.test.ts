@@ -1,3 +1,4 @@
+import { readAntigravityPromptUsage } from '../../agent/antigravity-usage';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ConvexHttpClient } from 'convex/browser';
 import type { Logger } from '@/utils/logger';
@@ -154,6 +155,37 @@ describe('usage delivery', () => {
       modelUsage: { 'gpt-5.6': { ...usage, costUSD: 0.5 }, 'gpt-5.5': usage },
     });
     expect(persisted[0]?.modelUsage?.['gpt-5.5'].costUSD).toBeUndefined();
+  });
+
+  it('persists Antigravity context capacity alongside tokens without putting it in per-model counters', async () => {
+    const update = readAntigravityPromptUsage(
+      { usage: { inputTokens: 100, outputTokens: 5 } },
+      'native',
+      'gemini-4-hydrogen',
+      1048576
+    );
+    if (!update) throw new Error('Missing native usage');
+    service.recordSessionUsageUpdate({
+      ...input(0, 'antigravity'),
+      acpSessionId: 'native:scope:first',
+      update,
+    });
+    await service.flushSessionUsage('s');
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        cliType: 'antigravity',
+        acpSessionId: 'native:scope:first',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 5,
+          cacheReadInputTokens: 0,
+          contextWindow: 1048576,
+        },
+        modelUsage: {
+          'gemini-4-hydrogen': { inputTokens: 100, outputTokens: 5, cacheReadInputTokens: 0 },
+        },
+      }),
+    ]);
   });
 
   it('projects provider fields without losing token buckets, known costs or unknown costs', async () => {

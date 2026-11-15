@@ -1777,3 +1777,132 @@ describe('AgentClient goal session info', () => {
     expect(onUpdateMessage).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('builtin Antigravity end-turn token accounting', () => {
+  const response = {
+    stopReason: 'end_turn',
+    usage: {
+      inputTokens: 30,
+      outputTokens: 12,
+      cachedReadTokens: 70,
+      cachedWriteTokens: 4,
+      thoughtTokens: 8,
+      totalTokens: 116,
+    },
+  };
+  it('keeps each turn independent across model changes and separates reasoning and cache tokens', async () => {
+    const { client, onUsageUpdate } = createTestClient({ agentType: 'antigravity' });
+    const rows = new Map<string, unknown>();
+    onUsageUpdate.mockImplementation((u, id) => rows.set(id, u));
+    // @ts-expect-error - synthetic protocol connection
+    client.connection = { prompt: async () => response };
+    client.currentModel = { modelId: 'gemini-4-hydrogen', name: 'Hydrogen' };
+    await client.prompt('acp-test' as ACPSessionId, []);
+    client.currentModel = { modelId: 'gemini-4-carbon', name: 'Carbon' };
+    await client.prompt('acp-test' as ACPSessionId, []);
+    expect(rows.size).toBe(2);
+    expect([...rows.keys()].every((id) => id.startsWith('acp-test:scope:'))).toBe(true);
+    const usage = {
+      inputTokens: 30,
+      outputTokens: 4,
+      cacheReadInputTokens: 70,
+      cacheCreationInputTokens: 4,
+      reasoningOutputTokens: 8,
+    };
+    expect([...rows.values()]).toEqual([
+      {
+        sessionId: 'acp-test',
+        usage,
+        modelUsage: { 'gemini-4-hydrogen': usage },
+        delta: { usage, modelUsage: { 'gemini-4-hydrogen': usage } },
+      },
+      {
+        sessionId: 'acp-test',
+        usage,
+        modelUsage: { 'gemini-4-carbon': usage },
+        delta: { usage, modelUsage: { 'gemini-4-carbon': usage } },
+      },
+    ]);
+  });
+  it('records a late cancelled response under the model captured before a switch', async () => {
+    const { client, onUsageUpdate } = createTestClient({ agentType: 'antigravity' });
+    const rows: unknown[] = [];
+    onUsageUpdate.mockImplementation((u) => rows.push(u));
+    let finish: (value: unknown) => void = () => {};
+    const pending = new Promise((resolve) => {
+      finish = resolve;
+    });
+    // @ts-expect-error - synthetic protocol connection
+    client.connection = { prompt: () => pending, cancel: async () => {} };
+    client.currentModel = { modelId: 'gemini-4-hydrogen', name: 'Hydrogen' };
+    const controller = new AbortController();
+    const prompt = client.prompt('acp-test' as ACPSessionId, [], { signal: controller.signal });
+    const rejected = expect(prompt).rejects.toThrow('aborted');
+    controller.abort();
+    await rejected;
+    client.currentModel = { modelId: 'gemini-4-carbon', name: 'Carbon' };
+    finish(response);
+    await pending;
+    await Promise.resolve();
+    expect(rows).toEqual([
+      expect.objectContaining({
+        modelUsage: { 'gemini-4-hydrogen': expect.objectContaining({ inputTokens: 30 }) },
+      }),
+    ]);
+  });
+  it.each([
+    { usage: { inputTokens: -1, outputTokens: 1 } },
+    { usage: { inputTokens: 1, outputTokens: 1, thoughtTokens: 2 } },
+    { usage: { inputTokens: 1, outputTokens: Infinity } },
+    {},
+  ])('ignores malformed optional telemetry without failing the prompt: %#', async (value) => {
+    const { client, onUsageUpdate } = createTestClient({ agentType: 'antigravity' });
+    const rows: unknown[] = [];
+    onUsageUpdate.mockImplementation((u) => rows.push(u));
+    // @ts-expect-error - synthetic protocol connection
+    client.connection = { prompt: async () => value };
+    client.currentModel = { modelId: 'gemini-4-hydrogen', name: 'Hydrogen' };
+    expect(await client.prompt('acp-test' as ACPSessionId, [])).toBe(value);
+    expect(rows).toEqual([]);
+  });
+});
+
+describe('Antigravity context capacity in usage records', () => {
+  it('records the latest native capacity without accumulating it across turns or compaction', async () => {
+    const { client, onUsageUpdate } = createTestClient({ agentType: 'antigravity' });
+    const rows: unknown[] = [];
+    onUsageUpdate.mockImplementation((u) => rows.push(u));
+    // @ts-expect-error - synthetic protocol connection
+    client.connection = {
+      prompt: async () => ({
+        stopReason: 'end_turn',
+        usage: { inputTokens: 100, outputTokens: 5 },
+      }),
+    };
+    client.currentModel = { modelId: 'gemini-4-hydrogen', name: 'Hydrogen' };
+    for (const context of [
+      { size: 1048576, used: 0 },
+      { size: 1048576, used: 12000 },
+      { size: 524288, used: 4000 },
+    ]) {
+      await client.sessionUpdate(makeUsageUpdateNotification(context));
+      await client.prompt('acp-test' as ACPSessionId, []);
+      expect(client.getAutomationObservations().context).toEqual(context);
+    }
+    expect(rows).toEqual(
+      [1048576, 1048576, 524288].map((contextWindow) => ({
+        sessionId: 'acp-test',
+        usage: { inputTokens: 100, outputTokens: 5, cacheReadInputTokens: 0, contextWindow },
+        modelUsage: {
+          'gemini-4-hydrogen': { inputTokens: 100, outputTokens: 5, cacheReadInputTokens: 0 },
+        },
+        delta: {
+          usage: { inputTokens: 100, outputTokens: 5, cacheReadInputTokens: 0, contextWindow },
+          modelUsage: {
+            'gemini-4-hydrogen': { inputTokens: 100, outputTokens: 5, cacheReadInputTokens: 0 },
+          },
+        },
+      }))
+    );
+  });
+});

@@ -1,3 +1,4 @@
+import { getContextWindowUsageData } from '../../../packages/components/src/lib/session-usage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
 import { RequestError } from '@agentclientprotocol/sdk';
@@ -1574,6 +1575,59 @@ describe('MessageHandler ACP batching', () => {
       }
     }
   );
+
+  it('persists Antigravity context occupancy and capacity for the composer, including zero and compaction', async () => {
+    vi.useRealTimers();
+    const sessionId = 'agy-context' as SessionId;
+    const { repo, docs, handler, sessionManager } = await createHandlerHarness(
+      [sessionId],
+      (logger, document) =>
+        new SessionManager(logger, 't', 'm-1' as MachineId, 'ws-1' as WorkspaceId, document, {
+          cloudPort: createTestCloudPort(),
+        })
+    );
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing context doc');
+    const host = handler as unknown as {
+      setupSessionEventHandlers(): void;
+      flushSessionContextWindowUsage(id: SessionId): Promise<void>;
+    };
+    host.setupSessionEventHandlers();
+    const client = new AgentClient({
+      sessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
+      onUpdateMessage: () => {},
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      onContextWindowUsageUpdate: (usage) =>
+        sessionManager.emit('onContextWindowUsageUpdate', sessionId, usage),
+    });
+    try {
+      for (const context of [
+        { size: 1048576, used: 0 },
+        { size: 1048576, used: 12000 },
+        { size: 524288, used: 4000 },
+      ]) {
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { sessionUpdate: 'usage_update', ...context },
+        } as never);
+        await host.flushSessionContextWindowUsage(sessionId);
+        const meta = await doc.getMetaState();
+        expect(meta?.contextWindowUsage).toEqual(context);
+        const stored = await repo.getDocMeta(getSessionRoomId(sessionId));
+        expect(stored?.meta?.contextWindowUsage).toEqual(context);
+        expect(getContextWindowUsageData(meta?.contextWindowUsage)).toMatchObject({
+          usedTokens: context.used,
+          contextWindow: context.size,
+          remainingTokens: context.size - context.used,
+        });
+      }
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
 
   it('routes custom ACP usage with its accounting identity and user attribution', async () => {
     vi.useRealTimers();

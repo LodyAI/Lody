@@ -471,6 +471,7 @@ function isACPSessionConfig(value: unknown): boolean {
   // import the ESM runtime table. Keep builtin additions aligned with ai.ts and the TS/CJS
   // parity test when changing this feature.
   const isBuiltinAgentType =
+    agentType === 'antigravity' ||
     agentType === 'claude' ||
     agentType === 'codex' ||
     agentType === 'kimi' ||

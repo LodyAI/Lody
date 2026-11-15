@@ -456,6 +456,7 @@ function isACPSessionConfig(value) {
   // this literal aligned with the TS source and its Bub parity test when
   // changing this feature.
   const isBuiltinAgentType =
+    agentType === 'antigravity' ||
     agentType === 'claude' ||
     agentType === 'codex' ||
     agentType === 'kimi' ||
