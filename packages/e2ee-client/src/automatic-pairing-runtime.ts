@@ -120,7 +120,8 @@ type RequesterState =
     }
   | {
       readonly _tag: 'Terminal';
-      readonly outcome: 'joined' | 'declined' | 'cancelled' | 'expired';
+      /** `revoked` / `removed`: this device's exact access loss for this workspace. */
+      readonly outcome: 'joined' | 'declined' | 'cancelled' | 'expired' | 'revoked' | 'removed';
       readonly lookupId?: string;
       readonly attempted: boolean;
     };
@@ -232,6 +233,10 @@ export function makeAutomaticPairingRuntime(options: {
   readonly workspaces: () => readonly Hint[];
   readonly deviceName: string;
   readonly canPresent: () => boolean;
+  /** The product's exact access-loss recognizer (`e2eeAccessLoss`) for failures of this
+   * runtime's `status`, `open` and `refresh`. Only its answer ends a request as lost;
+   * every other failure, including transport and timeouts, leaves the request as it was. */
+  readonly accessLoss: (error: unknown) => 'e2ee_device_revoked' | 'e2ee_member_removed' | null;
   /** Advisory background hint only, after retained local identity verification. */
   readonly notifyPending?: (id: string) => void;
   /** Surfaces `preparing` reviews once this device's local identity is verified, so
@@ -372,6 +377,9 @@ export function makeAutomaticPairingRuntime(options: {
     }
   };
 
+  const isRequesterLost = (state: RequesterState): boolean =>
+    state._tag === 'Terminal' && (state.outcome === 'revoked' || state.outcome === 'removed');
+
   const isRequesterAdmitted = (state: RequesterState): boolean =>
     state._tag === 'AdmittedSyncing' || (state._tag === 'Terminal' && state.outcome === 'joined');
 
@@ -507,7 +515,7 @@ export function makeAutomaticPairingRuntime(options: {
 
   const settleRequesterTerminal = (
     value: RequesterEntry,
-    outcome: 'joined' | 'declined' | 'cancelled' | 'expired'
+    outcome: 'joined' | 'declined' | 'cancelled' | 'expired' | 'revoked' | 'removed'
   ) => {
     const prev = value.state;
     const lookupId = requesterLookupIdOf(prev);
@@ -538,7 +546,12 @@ export function makeAutomaticPairingRuntime(options: {
 
   const expiresRequester = Effect.fnUntraced(function* (value: RequesterEntry) {
     yield* check();
-    if (!isRequesterAdmitted(value.state) && (yield* now) >= value.context.expiresAt) {
+    // An access loss stays the reported outcome; expiry never relabels it.
+    if (
+      !isRequesterAdmitted(value.state) &&
+      !isRequesterLost(value.state) &&
+      (yield* now) >= value.context.expiresAt
+    ) {
       settleRequesterTerminal(value, 'expired');
       return true;
     }
@@ -557,11 +570,22 @@ export function makeAutomaticPairingRuntime(options: {
     return value.state._tag === 'Terminal';
   });
 
+  /** Ends the request when a failure is this device's exact access loss here. A retained
+   * credential or an earlier approval is no current admission; ordinary failures
+   * leave the request for the next round. */
+  const settleLost = (value: RequesterEntry, failure: unknown) => {
+    const loss = options.accessLoss(failure);
+    if (!loss) return false;
+    settleRequesterTerminal(value, loss === 'e2ee_device_revoked' ? 'revoked' : 'removed');
+    return true;
+  };
+
   const updateKeys = Effect.fnUntraced(function* (value: RequesterEntry) {
     const inspected = yield* Effect.result(
       promise(() => runtime.status(value.context.workspaceId))
     );
     yield* check();
+    if (Result.isFailure(inspected) && settleLost(value, inspected.failure)) return;
     let status = Result.isSuccess(inspected) ? inspected.success : null;
     if (Result.isFailure(inspected)) {
       // accountPairingRequest may activate and close a temporary workspace reader.
@@ -599,6 +623,7 @@ export function makeAutomaticPairingRuntime(options: {
         )
       );
       yield* check();
+      if (Result.isFailure(received) && settleLost(value, received.failure)) return;
       if (Result.isSuccess(received)) status = received.success;
     }
     if (status?.deviceKind === 'personal' && status.hasDeviceCredential && !status.hasCurrentKey) {
@@ -609,6 +634,7 @@ export function makeAutomaticPairingRuntime(options: {
         )
       );
       yield* check();
+      if (Result.isFailure(received) && settleLost(value, received.failure)) return;
       if (Result.isSuccess(received)) status = received.success;
     }
     if (status?.deviceKind === 'personal' && status.hasDeviceCredential && status.hasCurrentKey) {
@@ -935,7 +961,8 @@ export function makeAutomaticPairingRuntime(options: {
           retained &&
           (yield* expiresRequester(retained)) &&
           isRequesterAttempted(retained.state) &&
-          !isRequesterAdmitted(retained.state)
+          !isRequesterAdmitted(retained.state) &&
+          !isRequesterLost(retained.state)
         ) {
           const expectedLookupId = requesterLookupIdOf(retained.state);
           if (expectedLookupId)
@@ -947,14 +974,19 @@ export function makeAutomaticPairingRuntime(options: {
             });
           }
         }
+        // A device whose access loss ended its request pairs again only when asked, and
+        // then as a new pairing: its retained credential is the revoked one.
+        const revoked = retained?.state._tag === 'Terminal' && retained.state.outcome === 'revoked';
         if (
           !retained ||
           (retained.state._tag === 'Terminal' &&
-            ['expired', 'declined', 'cancelled'].includes(retained.state.outcome))
+            ['expired', 'declined', 'cancelled', 'revoked', 'removed'].includes(
+              retained.state.outcome
+            ))
         ) {
           if (retained) disposeRequesterCrypto(retained.state);
           let initialState: RequesterState = { _tag: 'Negotiating' };
-          if (runtime.status) {
+          if (runtime.status && !revoked) {
             const currentStatus = yield* Effect.result(promise(() => runtime.status(workspaceId)));
             if (
               Result.isSuccess(currentStatus) &&
@@ -1179,7 +1211,8 @@ export function makeAutomaticPairingRuntime(options: {
               Effect.gen(function* () {
                 if (isRequesterAdmitted(value.state)) return false;
                 const lookupId = requesterLookupIdOf(value.state);
-                if (isRequesterAttempted(value.state) && lookupId)
+                // A lost request's native original already settled; only detach it.
+                if (isRequesterAttempted(value.state) && lookupId && !isRequesterLost(value.state))
                   yield* promise(() =>
                     runtime.cancelAccountPairing!({ expectedLookupId: lookupId })
                   );

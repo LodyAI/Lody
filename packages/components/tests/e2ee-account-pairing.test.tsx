@@ -1046,6 +1046,64 @@ describe('automatic pairing product flow', () => {
     expect(opened).toBe(true);
     expect(text()).toContain('e2ee.auto.syncing.title');
   });
+  it.each(['revoked', 'removed'] as const)(
+    'stops showing an approved device as syncing once the runtime reports it %s',
+    async (phase) => {
+      const { E2eeAutomaticPairingPage } =
+        await import('../src/components/pages/e2ee-automatic-pairing');
+      const syncing: import('@lody/platform').E2eeAutomaticPairingState = {
+        id: 'request',
+        workspaceId: 'w1',
+        workspaceName: 'Synthetic team',
+        deviceName: 'Phone',
+        expiresAt: NOW + 600_000,
+        comparisonCode: null,
+        phase: 'syncing',
+      };
+      let saved = syncing;
+      let starts = 0;
+      const runtime = {
+        automaticPairingState: async () => saved,
+        startAutomaticPairing: async () => {
+          starts += 1;
+          return (saved = {
+            ...syncing,
+            id: 'again',
+            comparisonCode: '123456',
+            phase: 'waiting',
+          });
+        },
+        cancelAutomaticPairing: async () => {},
+      } as unknown as E2eeWorkspaceRuntime;
+      await act(async () =>
+        root.render(
+          <E2eeAutomaticPairingPage
+            runtime={runtime}
+            workspaceId="w1"
+            onJoined={() => {}}
+            onBack={() => {}}
+          />
+        )
+      );
+      expect(text()).toContain('e2ee.auto.syncing.title');
+      saved = { ...syncing, phase };
+      await tick(2000);
+      expect(text()).toContain(`e2ee.auto.${phase}.title`);
+      expect(text()).not.toContain('e2ee.auto.syncing.title');
+      await tick(2000);
+      expect(starts).toBe(0);
+      if (phase === 'removed') {
+        // Only a new invitation helps: no request of this device's own is offered.
+        expect(container.querySelector('[data-testid="e2ee-auto-pair-again"]')).toBeNull();
+        expect(text()).not.toContain('e2ee.auto.restart');
+        return;
+      }
+      await click('e2ee.devices.pairAgain');
+      expect(starts).toBe(1);
+      expect(text()).toContain('123 456');
+      expect(text()).not.toContain('e2ee.auto.syncing.title');
+    }
+  );
   it('retains a deferred approval behind the device requests entry and authorizes only after the new device code is typed', async () => {
     const { E2eeAutomaticPairingInbox, E2eeDeviceRequestsButton } =
       await import('../src/components/pages/e2ee-automatic-pairing');

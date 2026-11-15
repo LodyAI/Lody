@@ -212,7 +212,11 @@ export function E2eeAutomaticPairingPage({
     handheld &&
     Boolean(runtime.requestAccountPairing && runtime.accountPairingRequest) &&
     cameraSupported();
-  const receiving = state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined';
+  // This device's exact access loss here ends any earlier approval, including a joined
+  // scan on this page: it is never shown as authorized again.
+  const lost = state?.phase === 'revoked' || state?.phase === 'removed';
+  const receiving =
+    !lost && (state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined');
   const linkGuardRef = useRef({ busy, canStart, lostAllOpen, receiving });
   linkGuardRef.current = { busy, canStart, lostAllOpen, receiving };
   useEffect(() => {
@@ -579,7 +583,10 @@ export function E2eeAutomaticPairingPage({
     recovery?.onRecovered();
   };
   const terminal =
-    !receiving && !activeQr && state && ['declined', 'expired', 'cancelled'].includes(state.phase);
+    !receiving &&
+    !activeQr &&
+    state &&
+    ['declined', 'expired', 'cancelled', 'revoked', 'removed'].includes(state.phase);
   const scanButton = (label: string) =>
     qrSupported && (
       <Button
@@ -622,9 +629,17 @@ export function E2eeAutomaticPairingPage({
             <p className="mt-4 text-sm text-muted-foreground">
               {t(`e2ee.auto.${state.phase}.help`)}
             </p>
-            <Button className="mt-6" disabled={busy} onClick={() => void restart()}>
-              {t('e2ee.auto.restart')}
-            </Button>
+            {/* A removed member needs a new invitation; this device cannot ask for one. */}
+            {state.phase !== 'removed' && (
+              <Button
+                className="mt-6"
+                disabled={busy}
+                data-testid={state.phase === 'revoked' ? 'e2ee-auto-pair-again' : undefined}
+                onClick={() => void restart()}
+              >
+                {t(state.phase === 'revoked' ? 'e2ee.devices.pairAgain' : 'e2ee.auto.restart')}
+              </Button>
+            )}
           </>
         ) : receiving ? (
           <>

@@ -28,7 +28,16 @@ function Preview({
   removal = 'removed',
   form = 'phone',
 }: {
-  mode: 'awaiting' | 'waiting' | 'expired' | 'syncing' | 'approval' | 'previous' | 'addDevice';
+  mode:
+    | 'awaiting'
+    | 'waiting'
+    | 'expired'
+    | 'syncing'
+    | 'revoked'
+    | 'removed'
+    | 'approval'
+    | 'previous'
+    | 'addDevice';
   /** This host can restore from a backup: "Can't approve on another device?" offers it first. */
   backup?: boolean;
   /** The account role the lost-access steps read; absent hides the way out. */
@@ -241,6 +250,10 @@ export const DesktopOwnerDeletionBillingRefused: Story = {
 };
 export const PhoneExpired: Story = { args: { mode: 'expired' } };
 export const PhoneSyncing: Story = { args: { mode: 'syncing' } };
+/** Another device revoked this one: it offers pairing again, never "approved". */
+export const PhoneRevoked: Story = { args: { mode: 'revoked' } };
+/** The member was removed: only a new invitation helps. */
+export const PhoneRemoved: Story = { args: { mode: 'removed' } };
 /** Open “Restart this device’s previous pairing” to inspect its confirmation. */
 export const PhonePreviousRequest: Story = { args: { mode: 'previous' } };
 /** A computer approving: reveal a QR code for a new phone, or type a new computer's code. */

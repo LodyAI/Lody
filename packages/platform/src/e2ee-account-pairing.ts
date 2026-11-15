@@ -140,7 +140,18 @@ export type E2eeAutomaticPairingState = {
   deviceName: string;
   expiresAt: number;
   comparisonCode: string | null;
-  phase: 'preparing' | 'waiting' | 'syncing' | 'joined' | 'declined' | 'expired' | 'cancelled';
+  /** `revoked` / `removed`: this device's exact access loss for this workspace ended the
+   * requester; only the device (`revoked`) can pair again. Never reported by approvers. */
+  phase:
+    | 'preparing'
+    | 'waiting'
+    | 'syncing'
+    | 'joined'
+    | 'declined'
+    | 'expired'
+    | 'cancelled'
+    | 'revoked'
+    | 'removed';
 };
 /** A host-authenticated, current-workspace-only approval preview. It carries no
  * comparison code: the person types the code the new device shows, and the host
