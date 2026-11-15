@@ -770,7 +770,10 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               encryptionPublicKey: Uint8Array;
               possessionProof: Uint8Array;
             }) => run(approval.sign(row)),
-            settle: (record: Uint8Array) => run(approval.settle(record)),
+            settle: (record: Uint8Array, refresh = true) => run(approval.settle(record, refresh)),
+            checkpoint: () => run(approval.checkpoint()),
+            ingest: (page: Parameters<typeof approval.ingest>[0]) => run(approval.ingest(page)),
+            prepareDelivery: (recipient: string) => run(approval.prepareDelivery(recipient)),
             invitation: (record: Uint8Array) => run(approval.invitation(record)),
             access: () => run(approval.access()),
             // Bounded inside the session: this Promise cannot be cancelled by its caller,
@@ -826,6 +829,8 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         })
       ),
     status: (id) => run(withSession(id, status)),
+    activateAccountPairing: (id, preview) =>
+      run(withSession(id, (session) => session.activateAccountPairing(preview))),
     refresh: (id, input) =>
       run(
         withSession(id, (session) =>
@@ -1090,7 +1095,10 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
                     Effect.forEach(points, (point) =>
                       Effect.fromResult(hasVerifiedCheckpoint(candidate, point))
                     ).pipe(Effect.map((results) => results.every(Boolean)));
-                  if (!(yield* contains(view))) view = yield* session.refresh();
+                  if (!(yield* contains(view))) {
+                    yield* session.ingest(page);
+                    view = yield* session.ledger();
+                  }
                   if (!(yield* contains(view))) return yield* fail('conflict');
                   // The existing feed owner persists and verifies. Relay pages never create a parallel trusted cache or advance an opaque cursor themselves.
                   return yield* status(session);

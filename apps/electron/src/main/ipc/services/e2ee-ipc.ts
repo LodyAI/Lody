@@ -202,6 +202,18 @@ function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
   return {
     history: (request) => Effect.flatMap(current, (client) => client.history(request)),
     appendRecord: (request) => Effect.flatMap(current, (client) => client.appendRecord(request)),
+    historyBatch: (items) =>
+      Effect.flatMap(current, (client) =>
+        typeof client.historyBatch === 'function'
+          ? client.historyBatch(items)
+          : Effect.fail(new Error('e2ee_batch_unsupported'))
+      ),
+    appendRecordsBatch: (items) =>
+      Effect.flatMap(current, (client) =>
+        typeof client.appendRecordsBatch === 'function'
+          ? client.appendRecordsBatch(items)
+          : Effect.fail(new Error('e2ee_batch_unsupported'))
+      ),
     keyServices: (access) =>
       Effect.map(current, (client) => ({
         mailbox: (signal: AbortSignal) => client.mailbox(access, signal),
@@ -1576,6 +1588,8 @@ export class E2eeIpc extends ProductWindowIpcService {
           // The same main-owned delivery as a member approval: distribute-only round,
           // per-device mailbox evidence, backoff retry and `memberKeyDeliveries` status.
           // The approval waits, bounded, on its first pass before publishing.
+          prepareInlineDelivery: (workspaceId, requestId, device) =>
+            this.keyDelivery.prepareInline(accountId, workspaceId, requestId, device),
           deliverKeys: (workspaceId, requestId, device) => {
             this.trackKeyDelivery(accountId, workspaceId, requestId, device)
             return this.keyDelivery.firstPass(accountId, workspaceId, requestId)

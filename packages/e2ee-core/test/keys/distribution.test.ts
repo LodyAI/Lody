@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import { Effect, Result } from 'effect';
-import { ContentError } from '@lody/e2ee-core/protocol';
+import { authenticateEpochEnvelope, ContentError } from '@lody/e2ee-core/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeSqliteKeyDistribution, type DistributionMailboxRemote } from './harness';
 import { makeSqliteProtectedEpochKeys } from './harness';
@@ -96,6 +96,43 @@ async function setup(kind: 0 | 1 | 2 = 0) {
 }
 
 describe('verified targets and durable finite distribution', () => {
+  it('prepares an authenticated original without mailbox access and reuses it after reopen', async () => {
+    const { f, file, config, reopen } = await setup();
+    const prepare = (configuration: typeof config) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const host = yield* makeSqliteKeyMailbox({
+            path: file('host'),
+            mode: configuration.mode,
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+          });
+          const owner = ok(host.bind(f.owner.publicKey));
+          const forbidden = () =>
+            Effect.die(new Error('local preparation must not access the mailbox'));
+          const client = yield* makeSqliteKeyDistribution({
+            ...configuration,
+            remote: {
+              ...owner,
+              put: forbidden,
+              read: forbidden,
+              status: forbidden,
+              list: forbidden,
+            } as DistributionMailboxRemote,
+          });
+          return yield* client.prepareDelivery!(hex(f.phone.raw));
+        })
+      );
+    const first = await Effect.runPromise(prepare(config));
+    expect(saved(file('outbox'))).toEqual([{ slot: first.id, frame: first.frame }]);
+    expect(Result.isSuccess(authenticateEpochEnvelope(f.view(), f.context, first.frame))).toBe(
+      true
+    );
+    const retried = await Effect.runPromise(prepare(reopen()));
+    expect(retried).toEqual(first);
+    expect(saved(file('outbox'))).toHaveLength(1);
+  });
+
   it('registered Recovery receives but cannot schedule or send epoch keys', async () => {
     const { f, file, config, protect } = await setup(2);
     expect(f.view().inspectState().devices.get(hex(f.phone.raw))!.kind).toBe('recovery');

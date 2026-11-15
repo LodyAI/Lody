@@ -1,4 +1,4 @@
-import type { E2eeDeviceAccess } from './e2ee-device';
+import type { E2eeDeviceAccess, E2eeMailboxStatus } from './e2ee-device';
 
 /** Account-wide personal device pairing relay. Every operation requires the
  * signed-in account and is scoped to it; the service never sees the pairing
@@ -13,6 +13,13 @@ export type E2eeAccountPairingStatus = 'pending' | 'approved' | 'declined' | 'ex
 
 /** Routing hint for one workspace row of the canonical request. */
 export type E2eeAccountPairingWorkspace = { workspaceId: string; genesisHash: string };
+/** One-shot transport hint. The receiver authenticates and decrypts every frame. */
+export type E2eeAccountPairingMailboxPreview = {
+  epoch: number;
+  items: { sender: string; frameHex: string }[];
+  next: null;
+  slot: E2eeMailboxStatus;
+};
 
 export type E2eeAccountPairingSubmitRequest = {
   /** HKDF lookup ID derived from the pairing secret; 16 bytes. */
@@ -44,7 +51,10 @@ export type E2eeAccountPairingRequestRecord = E2eeAccountPairingSummary & {
   lookupId: string;
   requestHex: string;
   requestTagHex: string;
-  workspaces: E2eeAccountPairingWorkspace[];
+  workspaces: (E2eeAccountPairingWorkspace & {
+    /** Untrusted equality hint; it never advances a locally verified checkpoint. */
+    checkpoint?: { headHash: string; length: number } | null;
+  })[];
 };
 
 /** One workspace's signed snapshot invitation from the approver. The device
@@ -53,6 +63,8 @@ export type E2eeAccountPairingRequestRecord = E2eeAccountPairingSummary & {
 export type E2eeAccountPairingInvitation = E2eeDeviceAccess & {
   genesisHash: string;
   invitationHex: string;
+  admissionRecordHex?: string;
+  delivery?: { id: string; frameHex: string };
 };
 
 /** One approver's publication. Several approvers may each cover the workspaces
@@ -61,7 +73,13 @@ export type E2eeAccountPairingApproval = {
   /** Canonical DAG-CBOR approval, exactly as covered by `approvalTag`. */
   approvalHex: string;
   approvalTagHex: string;
-  invitations: { workspaceId: string; genesisHash: string; invitationHex: string }[];
+  invitations: {
+    workspaceId: string;
+    genesisHash: string;
+    invitationHex: string;
+    admissionRecordHex?: string;
+    mailboxPreview?: E2eeAccountPairingMailboxPreview;
+  }[];
   publishedAt: number;
 };
 
@@ -86,7 +104,7 @@ export type E2eeAccountPairingReplies = {
   pending: E2eeAccountPairingSummary[];
   read: E2eeAccountPairingRequestRecord | null;
   decline: { status: 'declined' };
-  publish: { status: 'published' };
+  publish: { status: 'published'; deliveredWorkspaces?: string[] };
   claim: {
     status: E2eeAccountPairingStatus;
     approvals: E2eeAccountPairingApproval[];

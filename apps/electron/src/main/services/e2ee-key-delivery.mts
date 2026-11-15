@@ -509,8 +509,15 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
           else evidence.set(device, KEY_DELIVERY_NOT_INGESTED)
         if (targets.length === 0 || aborted()) return evidence
         const credential = yield* turn((owner) => owner.bootstrap.deviceCredential(workspaceId))
-        const mailbox = (signal: AbortSignal) =>
-          cloud.client.mailbox({ workspaceId, credential }, signal)
+        const roundMailboxes = new WeakMap<AbortSignal, ReturnType<Cloud['client']['mailbox']>>()
+        const mailbox = (signal: AbortSignal) => {
+          let instance = roundMailboxes.get(signal)
+          if (!instance) {
+            instance = cloud.client.mailbox({ workspaceId, credential }, signal)
+            roundMailboxes.set(signal, instance)
+          }
+          return instance
+        }
         // #2459: the control-only approver may not hold the current key yet.
         // Receive on this main-owned reader, without putting it back on the approval wait.
         if (!(yield* turn((owner) => owner.host.status(workspaceId))).hasCurrentKey) {
@@ -620,6 +627,47 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
   function idle(accountId: string, workspaceId: string) {
     return slots.get(keyOf(accountId, workspaceId))?.running ?? Promise.resolve()
   }
-  return { slots, track, firstPass, retryDue, list, retryNow, dropWorkspace, ingest, idle }
+  /** Register an inline attempt before publication, without starting network work.
+   * Its completion is fenced to this exact slot and login, including after reset. */
+  function prepareInline(
+    accountId: string,
+    workspaceId: string,
+    requestId: string,
+    device: string
+  ) {
+    const slot = slotFor(accountId, workspaceId)
+    const delivery: MemberKeyDelivery = { state: 'delivering', device, attempts: 0, retryAt: 0 }
+    const active = () =>
+      slots.get(keyOf(accountId, workspaceId)) === slot && current(accountId, slot) && !slot.aborted
+    slot.requests.set(requestId, delivery)
+    while (slot.requests.size > KEY_DELIVERY_RETAINED) {
+      const removable = [...slot.requests].find(
+        ([id, item]) => id !== requestId && item.state === 'delivered'
+      )
+      const evicted = removable?.[0] ?? slot.requests.keys().next().value!
+      slot.requests.delete(evicted)
+      settleFirstPass(slot, evicted)
+    }
+    return {
+      active,
+      delivered: () => {
+        if (!active() || slot.requests.get(requestId) !== delivery) return
+        delivery.state = 'delivered'
+        settleFirstPass(slot, requestId)
+      }
+    }
+  }
+  return {
+    slots,
+    track,
+    firstPass,
+    retryDue,
+    list,
+    retryNow,
+    dropWorkspace,
+    ingest,
+    idle,
+    prepareInline
+  }
 }
 export type DesktopKeyDelivery = ReturnType<typeof makeDesktopKeyDelivery>

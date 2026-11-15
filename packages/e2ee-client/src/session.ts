@@ -29,6 +29,7 @@ import {
   getCommittedEpochStagingKey,
   requireLedgerContinuation,
   decodeRecord,
+  hashRecordBytes,
   prepareLedgerCommand,
   signLedgerRecord,
   signLedgerSnapshot,
@@ -75,7 +76,10 @@ import {
 } from './installation';
 import { PersonalHostPlatform, PersonalMachineSharing, type PersonalApproval } from './platform';
 import { boundedBy } from './deadline';
-import { assertPersonalAdmission } from './admission';
+import { assertPersonalAdmission, captureHistoryPages } from './admission';
+import { accountPairingMailboxPreview } from './account-requester';
+import type { E2eeAccountPairingMailboxPreview } from '@lody/cloud-api';
+import type { E2eeWorkspaceHistoryPage } from '@lody/cloud-api';
 import { fail } from './errors';
 import type { PersonalRecoverySetupInput } from './recovery-restore';
 import { fromHex, toHex } from './bytes';
@@ -143,6 +147,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     const sync = Object.freeze({
       current: rawSync.current.bind(rawSync),
       refresh: rawSync.refresh.bind(rawSync),
+      ingest: rawSync.ingest?.bind(rawSync),
     });
     const log = Object.freeze({
       read: rawLog.read.bind(rawLog),
@@ -267,6 +272,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     type Keys =
       | Layer.Success<typeof keyLayer>
       | EpochStagingStore
+      | ReceiveJournal
       | EpochCandidateStore
       | KeyMailbox;
     let keyServices: Context.Context<Keys> | undefined;
@@ -724,7 +730,132 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       });
     // Account pairing, approver side. The shared workflow journals each original and
     // never asks for a second signature over one request.
+    const ingestPage = Effect.fnUntraced(function* (supplied: E2eeWorkspaceHistoryPage) {
+      const page = (yield* Effect.fromResult(captureHistoryPages([supplied])))[0]!;
+      if (
+        page.workspaceId !== prepared.binding.workspaceId ||
+        page.genesisHash !== toHex(prepared.binding.genesis.toBytes())
+      )
+        return yield* fail('scope-mismatch');
+      if (!sync.ingest) {
+        yield* control.refresh();
+        return;
+      }
+      const before = yield* sync.current();
+      const end = page.startIndex + page.recordsHex.length;
+      if (
+        end > page.checkpoint.length ||
+        (page.nextCursor === null) !== (end === page.checkpoint.length)
+      )
+        return yield* fail('invalid-input');
+      // The feed bootstrap requires genesis even when append inlines only its suffix.
+      const bootstrap = before.bootstrap && page.startIndex === 1 && before.view.length === 1;
+      const start = before.bootstrap ? 0 : before.view.length;
+      if (!bootstrap && (page.startIndex > start || end < start)) return yield* fail('conflict');
+      const allRecords = page.recordsHex.map(fromHex);
+      if (!bootstrap && page.startIndex < start) {
+        const overlap = allRecords[start - page.startIndex - 1];
+        if (!overlap || !hashRecordBytes(overlap).equals(before.view.head))
+          return yield* fail('conflict');
+      }
+      const records =
+        !bootstrap && page.startIndex < start
+          ? allRecords.slice(start - page.startIndex)
+          : allRecords;
+      const head = records.length ? hashRecordBytes(records.at(-1)!) : before.view.head;
+      if (
+        page.nextCursor === null &&
+        (end !== page.checkpoint.length || toHex(head.toBytes()) !== page.checkpoint.headHash)
+      )
+        return yield* fail('conflict');
+      yield* sync.ingest(
+        {
+          requestOffset: before.offset,
+          nextOffset: page.position,
+          records: bootstrap ? [fromHex(approval.offer.genesisRecordHex), ...records] : records,
+          upToDate: page.nextCursor === null,
+        },
+        { head, length: end }
+      );
+      yield* ledger();
+      if (page.nextCursor !== null) yield* control.refresh();
+    });
     const accountApproval = {
+      checkpoint: () =>
+        run(
+          serialRound(
+            Effect.gen(function* () {
+              const view = yield* ledger();
+              const state = yield* sync.current();
+              return {
+                headHash: toHex(view.head.toBytes()),
+                length: view.length,
+                ...(state.offset.startsWith('p1:') ? { position: state.offset } : {}),
+              };
+            })
+          )
+        ),
+      ingest: (page: E2eeWorkspaceHistoryPage) => run(serialRound(ingestPage(page))),
+      activateAccountPairing: (preview?: E2eeAccountPairingMailboxPreview) =>
+        run(
+          Effect.gen(function* () {
+            if (preview?.items.length)
+              yield* serialRound(
+                withKeys((ctx) =>
+                  Effect.scoped(
+                    Effect.gen(function* () {
+                      const receiver = yield* Layer.build(
+                        KeyReceiver.layer.pipe(
+                          Layer.provide(
+                            Layer.succeed(
+                              KeyMailbox,
+                              accountPairingMailboxPreview(Context.get(ctx, KeyMailbox), preview)
+                            )
+                          ),
+                          Layer.provide(Layer.succeedContext(ctx)),
+                          Layer.provide(Layer.succeedContext(controlServices))
+                        )
+                      );
+                      // A rejected preview is never evidence; the ordinary receive/repair path remains available.
+                      const currentReceiver = Context.get(receiver, KeyReceiver);
+                      yield* Effect.result(currentReceiver.fetchAndInstall(null, 100));
+                      const epoch = (yield* admitted()).inspectState().epoch.number;
+                      if (
+                        Result.isFailure(
+                          yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch))
+                        )
+                      )
+                        yield* Effect.result(currentReceiver.fetchAndInstall(null, 100));
+                    })
+                  )
+                )
+              );
+            for (let pass = 0; pass < 2; pass++) {
+              if ((yield* status()).usableEpoch === (yield* admitted()).inspectState().epoch.number)
+                return;
+              const received = yield* Effect.result(keyRound('receive'));
+              if ((yield* status()).usableEpoch === (yield* admitted()).inspectState().epoch.number)
+                return;
+              if (pass === 0) yield* serialRound(control.refresh());
+              else if (Result.isFailure(received)) return yield* Effect.fail(received.failure);
+            }
+          })
+        ),
+
+      prepareDelivery: (recipient: string) =>
+        run(
+          serialRound(
+            withKeys((ctx) => {
+              const distributor = Context.get(ctx, KeyDistributor);
+              return distributor.prepareDelivery
+                ? Effect.map(distributor.prepareDelivery(recipient), ({ id, frame }) => ({
+                    id,
+                    frameHex: toHex(frame),
+                  }))
+                : Effect.succeed(null);
+            })
+          )
+        ),
       /** Signs one personal `AdmitDevice` against the current verified ledger. No network. */
       sign: (row: {
         signingPublicKey: Uint8Array;
@@ -760,11 +891,11 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       /** Where a signed original stands after a refresh: in the verified ledger,
        * displaced (its parent is no longer the head and its device is absent), or
        * not yet decided. */
-      settle: (record: Uint8Array) =>
+      settle: (record: Uint8Array, refresh = true) =>
         run(
           serialRound(
             Effect.gen(function* () {
-              yield* control.refresh();
+              if (refresh) yield* control.refresh();
               const { view, signed, admittedDevice } = yield* ownAdmission(record);
               if (admittedDevice) return 'committed' as const;
               return signed.previousHash.equals(view.head)
@@ -1010,6 +1141,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     return Object.freeze({
       binding: Object.freeze({ ...prepared.binding }),
       accountApproval: Object.freeze(accountApproval),
+      activateAccountPairing: accountApproval.activateAccountPairing,
+      ingest: (page: E2eeWorkspaceHistoryPage) => run(serialRound(ingestPage(page))),
       members: Object.freeze(members),
       /** Set up this workspace's recovery without exposing its signer or epoch keys. */
       setupRecovery: (input: PersonalRecoverySetupInput) =>

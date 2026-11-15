@@ -182,6 +182,48 @@ function device({
   }
 }
 
+void test('an inspected immutable request can finish approval while relay reads are unavailable, but expires locally', async () => {
+  const relay = makeRelay()
+  const clock = { now: NOW }
+  const requester = requesterHosts()
+  const fresh = device({ relay, requester, clock })
+  const state = await run(fresh.pairing.requestAccountPairing({}))
+  const approver = device({ relay, approver: approverHosts(['w1', 'w2']), clock, seed: 50 })
+  const inspected = await run(approver.pairing.inspectAccountPairing(state.pairingString))
+  relay.read = () => Effect.fail(new Error('relay read unavailable'))
+  const result = await run(
+    approver.pairing.approveAccountPairing({
+      pairingString: state.pairingString,
+      requestId: inspected.requestId,
+      workspaceIds: ['w1', 'w2']
+    })
+  )
+  assert.ok(result.workspaces.every((item) => item.outcome === 'admitted'))
+  assert.equal((await run(fresh.pairing.accountPairingRequest())).status, 'joined')
+  const expiringRelay = makeRelay()
+  // Use the actual request relay for an independently inspected expiry case.
+  const expiring = device({ relay: expiringRelay, requester: requesterHosts(), clock })
+  const request = await run(expiring.pairing.requestAccountPairing({}))
+  const reviewer = device({
+    relay: expiringRelay,
+    approver: approverHosts(['w1']),
+    clock,
+    seed: 80
+  })
+  const preview = await run(reviewer.pairing.inspectAccountPairing(request.pairingString))
+  clock.now += 600_001
+  assert.equal(
+    await refusal(
+      reviewer.pairing.approveAccountPairing({
+        pairingString: request.pairingString,
+        requestId: preview.requestId,
+        workspaceIds: ['w1']
+      })
+    ),
+    'pairing-expired'
+  )
+})
+
 void test('a new device is approved per workspace, verifying each approval before installing', async () => {
   const relay = makeRelay()
   const clock = { now: NOW }

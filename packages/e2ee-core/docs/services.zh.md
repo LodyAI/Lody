@@ -159,6 +159,9 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 
 ### LedgerSync
 
+可选 `ingest(page, checkpoint)` 将内联原件交给普通读取所用的同一个 feed，验证后持久化。
+调用方提供独立检查点及当前精确请求位置；此入口不授予权限，也不证明新鲜度。
+
 `refresh()` 独立选择目标检查点，并把本地 feed 读到该检查点；`current()` 返回已存状态。`WorkspaceControl` 与 `E2eeWorkspace` 使用它，工作区由它派生 `LedgerViewSource`。
 
 ## 本地存储端口

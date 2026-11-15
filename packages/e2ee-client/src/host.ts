@@ -612,6 +612,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     membershipId: string;
     invitationHex: string;
     endorser: string;
+    history?: unknown;
   }) =>
     Effect.gen(function* () {
       const p = yield* accountIdentity(input);
@@ -621,7 +622,27 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         invitationHex: input.invitationHex,
         endorser: input.endorser,
       };
-      const approval = yield* withIdentity(p, () => verifyApproval(p, descriptor));
+      const approval = yield* withIdentity(p, (identity) =>
+        Effect.gen(function* () {
+          const approved = yield* verifyApproval(p, descriptor);
+          if (input.history === undefined) return approved;
+          const pages = yield* Effect.fromResult(captureHistoryPages(input.history));
+          const qualified = yield* verifyApproval(
+            p,
+            {
+              kind: 'history',
+              origin: { invitationHex: input.invitationHex, endorser: input.endorser },
+            },
+            pages
+          );
+          const store = yield* evidence(p, identity);
+          yield* store.retain(
+            p.offer.pairingSessionId,
+            pages.map((page) => encode(page))
+          );
+          return qualified;
+        })
+      );
       yield* pairings.compareAndSet(key(p, 'approval'), null, {
         revision: 1,
         original: encode({ version: 1, offer: p.offer, requestHex: p.requestHex, ...descriptor }),
