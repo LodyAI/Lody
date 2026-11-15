@@ -124,3 +124,13 @@ describe('supportsAuthenticationWhenRequired', () => {
     );
   });
 });
+
+it('authenticates managed Antigravity through the methods advertised by ACP', () => {
+  expect(usesAcpProtocolAuthentication('builtin', 'antigravity')).toBe(true);
+  expect(
+    supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'antigravity', env: {} })
+  ).toBe(false);
+  expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'antigravity' })).toBe(
+    true
+  );
+});

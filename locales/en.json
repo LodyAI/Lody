@@ -5627,6 +5627,8 @@
   "settings.agent.provider.conversationCount_other": "{{count}} conversations",
   "settings.agent.provider.conversationCount": "{{count}} conversations",
   "settings.agent.provider.lastUsed": "Used {{ago}}",
+  "settings.agent.dialog.option.antigravity.description": "Google Antigravity CLI with automatic installation",
+  "settings.agent.dialog.runtimeOverride.antigravityPlaceholder": "/path/to/agy",
   "settings.agent.dialog.option.devin.description": "Cognition Devin coding agent runtime",
   "settings.agent.dialog.option.grok.description": "xAI Grok coding agent runtime",
   "settings.agent.machineTabs.more_one": "{{count}} more",

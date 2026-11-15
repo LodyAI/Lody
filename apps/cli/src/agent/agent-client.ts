@@ -1,3 +1,4 @@
+import { readAntigravityPromptUsage } from './antigravity-usage';
 import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { daemonLossObserver } from '@/lib/e2ee/client-loss-observer';
 import type {
@@ -980,7 +981,9 @@ export class AgentClient implements acp.Client {
       return;
     }
 
-    const notification = parseSessionNotification(params);
+    const notification = this.normalizeAntigravityToolNotification(
+      parseSessionNotification(params)
+    );
 
     if (notification.update.sessionUpdate === 'available_commands_update') {
       this.availableCommands = notification.update.availableCommands.map(
@@ -1016,6 +1019,31 @@ export class AgentClient implements acp.Client {
 
     this.options.onUpdateMessage(notification);
     return;
+  }
+
+  private normalizeAntigravityToolNotification(
+    notification: AcpSessionNotification
+  ): AcpSessionNotification {
+    const update = notification.update;
+    if (
+      this.options.agentConfig?.cliType !== 'builtin' ||
+      this.options.agentConfig.agentType !== 'antigravity' ||
+      (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update')
+    )
+      return notification;
+    // Native agy puts identity outside ACP's standard tool fields. Project it
+    // into the shared contract before history strips the unstructured payload.
+    const native = z.object({ name: z.string().trim().min(1).max(160) }).safeParse(update);
+    if (!native.success) return notification;
+    const lody = isRecord(update._meta?.lody) ? update._meta.lody : undefined;
+    if (typeof lody?.toolName === 'string' && lody.toolName.length > 0) return notification;
+    return {
+      ...notification,
+      update: {
+        ...update,
+        _meta: { ...update._meta, lody: { ...lody, toolName: native.data.name } },
+      },
+    };
   }
 
   private handleGoalSessionInfoUpdate(notification: AcpSessionNotification): void {
@@ -2771,6 +2799,12 @@ export class AgentClient implements acp.Client {
         `[${this.options.sessionId}] Session match verified, calling connection.prompt`
       );
       const promptMeta = goalPrompt?._meta ?? options?._meta;
+      const antigravityModel =
+        this.options.agentConfig?.cliType === 'builtin' &&
+        this.options.agentConfig.agentType === 'antigravity'
+          ? this.currentModel?.modelId
+          : undefined;
+      const usageAccountingId = antigravityModel ? `${sessionId}:scope:${randomUUID()}` : undefined;
       const promptPromise = this.connection?.prompt({
         sessionId,
         prompt,
@@ -2787,6 +2821,23 @@ export class AgentClient implements acp.Client {
       // A local abort does not finish the remote request. Track every raw
       // request, including overlapping prompts used by acknowledged handoff.
       this.trackPendingExecution(promptPromise);
+      if (antigravityModel) {
+        void promptPromise
+          .then((result) => {
+            const usage = readAntigravityPromptUsage(
+              result,
+              sessionId,
+              antigravityModel,
+              this.latestContextObservation?.size
+            );
+            if (usage) this.options.onUsageUpdate?.(usage, usageAccountingId);
+          })
+          .catch(() => {
+            this.logger.debug(
+              `[${this.options.sessionId}] Antigravity optional token usage unavailable`
+            );
+          });
+      }
 
       let abortListener: (() => void) | undefined;
       let trackedPromptCompletion: ActivePromptCompletion | undefined;

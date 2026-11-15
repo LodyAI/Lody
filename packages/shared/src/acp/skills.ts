@@ -38,7 +38,7 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
     [DEFAULT_PROJECT_SKILL_DIR, CLAUDE_PROJECT_SKILL_DIR],
     [DEFAULT_GLOBAL_SKILL_DIR, CLAUDE_GLOBAL_SKILL_DIR]
   ),
-  antigravity: skillDirs([DEFAULT_PROJECT_SKILL_DIR], ['~/.gemini/antigravity/skills']),
+  antigravity: skillDirs([DEFAULT_PROJECT_SKILL_DIR], ['~/.gemini/antigravity-cli/skills']),
   'antigravity-cli': skillDirs([DEFAULT_PROJECT_SKILL_DIR], ['~/.gemini/antigravity-cli/skills']),
   astrbot: skillDirs(['data/skills'], ['~/.astrbot/data/skills']),
   auggie: skillDirs(

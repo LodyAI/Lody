@@ -79,6 +79,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   to the shared abort signal; ZIP cancellation destroys the yauzl endpoint, awaits the
   relay/output pipeline, and fences cleanup on the reader's real close/error event — never await
   the yauzl endpoint, whose `destroy()` does not settle.
+- Builtin Antigravity follows its [runtime contract](README.md#managed-antigravity).
 - Builtin Dimcode is user-installed.
 - `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
   profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned
@@ -93,7 +94,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Claude capability refresh runs its native status command first so missing credentials surface
   as structured auth-required state before adapter startup; explicit environment-authenticated
   paths bypass it.
-- Registry/custom/Devin advertises no terminal capability; only agent-driven methods run.
+- Protocol-authenticated providers advertise no terminal capability; only agent-driven methods run.
   Reject deprecated `env_var`; `terminal` needs a real Machine RPC interactive bridge.
   Keep method lists/elicitations on the original request, one pending interaction at a time.
   Replies carry interaction ids and use encrypted remote authentication-input. Bound URL schemes, sizes,
