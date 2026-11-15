@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { commands } from '../src/lib/commands/registry';
+import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
 
 function ev(init: Partial<KeyboardEventInit> & { key: string }): KeyboardEvent {
   let prevented = false;
@@ -21,6 +22,7 @@ function ev(init: Partial<KeyboardEventInit> & { key: string }): KeyboardEvent {
 }
 
 beforeEach(() => {
+  __resetPlatformCacheForTests();
   // Force non-mac default to keep Mod = Ctrl in tests.
   vi.stubGlobal('navigator', { platform: 'Linux x86_64', userAgent: '' });
 });
@@ -29,6 +31,7 @@ afterEach(() => {
   commands.setShortcutAnalyticsHandler(null);
   for (const cmd of commands.list()) commands.unregister(cmd.id);
   vi.unstubAllGlobals();
+  __resetPlatformCacheForTests();
 });
 
 describe('CommandRegistry keydown dispatch', () => {
