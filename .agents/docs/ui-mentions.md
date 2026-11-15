@@ -102,6 +102,13 @@ single paragraph. Callers read and write text and caret only through
 
 ## Ranking
 
+Typed `@` searches merge the capped source results into one list. Selectable
+matches come first, Agent Roles take priority, and fuzzy scores order the
+remaining matches across sources. Equal scores retain source order. Each row
+shows its source, with matching category links after the results; source loading
+and error messages remain visible. Bare `@` and namespaced searches retain their
+category navigation and source-specific ordering.
+
 File menus use `useMentionFileSearch`: a Worker owns the file/directory index,
 path metadata, and matching. The registry reads only the bounded current result.
 Opening a file query creates the Worker; leaving file search, closing the menu,
