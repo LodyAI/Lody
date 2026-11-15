@@ -861,7 +861,7 @@ export const MainComposerRoleCatalogAtCaret: Story = {
   ),
 };
 
-/** Search `@review`, scroll to Roles, and hover between file and Role rows. */
+/** Search `@review`: Roles lead, then cross-source matches; hover previews details. */
 export const MainComposerAggregateRoles: Story = {
   args: { search: '' },
   render: () => (

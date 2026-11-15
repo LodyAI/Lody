@@ -37,6 +37,7 @@ import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import type { AgentRoleDetailSubject } from '@/components/sessions/agent-role-detail-pane';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import type { MentionKind } from '@/ui/mention/index';
+import { scoreMentionMatch } from './mention-rank';
 
 /** The shared category-menu trigger. Skills and commands also retain their
  * direct `$` and `/` entry points. */
@@ -217,10 +218,10 @@ export type MentionMenuView =
   | {
       level: 'aggregate';
       term: string;
-      /** Categories whose own name matches, offered above the results. */
+      /** Categories whose own name matches, offered after ranked results. */
       categories: MentionCategory[];
       groups: MentionCandidateGroup[];
-      /** Direct / and 、 searches are one relevance-ordered list across sources. */
+      /** Typed @, / and 、 searches share one ordered list across sources. */
       rankedCandidates?: Array<{ category: MentionCategory; candidate: MentionCandidate }>;
       /** Direct grouped triggers activate only their own sources, even while empty. */
       queriedCategories?: readonly MentionCategory[];
@@ -323,6 +324,25 @@ export function selectMentionMenuView(
     term: search,
     categories: categories.filter((category) => matchesCategoryName(category, search)),
     groups,
+    rankedCandidates: groups
+      .flatMap(({ category, candidates }) =>
+        candidates.map((candidate) => ({
+          category,
+          candidate,
+          score: Math.max(
+            ...[candidate.label, candidate.title, candidate.detail?.agentRole?.role.name].map(
+              (field) => (field ? (scoreMentionMatch(search, field) ?? 0) : 0)
+            )
+          ),
+        }))
+      )
+      .sort(
+        (left, right) =>
+          Number(Boolean(left.candidate.disabled)) - Number(Boolean(right.candidate.disabled)) ||
+          Number(right.category.id === 'agent_role') - Number(left.category.id === 'agent_role') ||
+          right.score - left.score
+      )
+      .map(({ category, candidate }) => ({ category, candidate })),
   };
 }
 
