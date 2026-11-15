@@ -3877,7 +3877,11 @@ const MessageAuthorSourceLink = memo(function MessageAuthorSourceLink({
 }) {
   const { t } = useTranslation();
   const titleAtom = useMemo(
-    () => selectAtom(sessionMetaAtomFamily(getSessionRoomId(sourceSessionId)), selectSourceSessionTitle),
+    () =>
+      selectAtom(
+        sessionMetaAtomFamily(getSessionRoomId(sourceSessionId)),
+        selectSourceSessionTitle
+      ),
     [sourceSessionId]
   );
   const sourceTitle = useAtomValue(titleAtom);
@@ -4166,7 +4170,7 @@ const UserMessageRowView = ({
                 item's `min-width:auto` resolves to the content's min-content, which WebKit
                 (Safari / iOS Capacitor WebView) computes WITHOUT honoring the inner
                 `overflow-wrap:anywhere`. The item then refuses to shrink below a long
-                unbreakable line, the content grows to its `sm:max-w-[800px]` cap, and being
+                unbreakable line, the content grows to its 800px cap, and being
                 right-aligned (`justify-end`) it overflows the column on the left. Chromium
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
             <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
@@ -4177,10 +4181,13 @@ const UserMessageRowView = ({
                 {...withClassName(
                   stylex.props(isEditing ? conversationSurface.userEditContent : undefined),
                   cn(
-                    'min-w-0 max-w-full text-foreground',
+                    // The 800px cap must never lift the column bound: `sm:` follows the
+                    // window, not this column, so a wide window with a narrow chat panel
+                    // would let a `w-fit` bubble grow to an unbreakable chip's min-content
+                    // (a quote chip is one atomic inline-flex box) and spill onto the avatar.
+                    'min-w-0 max-w-[min(100%,800px)] text-foreground',
                     isEditing ? 'w-full' : 'w-fit',
-                    hasWideContent ? 'min-w-[480px]' : '',
-                    'sm:max-w-[800px]'
+                    hasWideContent ? 'min-w-[480px]' : ''
                   )
                 )}
                 data-native-selection-allow
