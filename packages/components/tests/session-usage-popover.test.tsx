@@ -6,18 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionUsagePopover } from '../src/components/sessions/session-usage-popover';
 import type { MachineRateLimits } from '../src/lib/session-usage';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: string, values?: Record<string, string | number>): string => {
-      if (typeof fallback !== 'string') return key;
-      return fallback.replace(/\{\{(\w+)\}\}/g, (match, name: string) =>
-        values?.[name] === undefined ? match : String(values[name])
-      );
-    },
-    i18n: { language: 'en' },
-  }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -58,11 +49,14 @@ describe('SessionUsagePopover', () => {
   ): Promise<void> => {
     await act(async () => {
       root.render(
-        createElement(SessionUsagePopover, {
-          agentType: 'codex',
-          modelId: 'gpt-5.4',
-          ...props,
-        })
+        withTestI18n(
+          createElement(SessionUsagePopover, {
+            agentType: 'codex',
+            modelId: 'gpt-5.4',
+            ...props,
+          }),
+          testI18n
+        )
       );
     });
   };

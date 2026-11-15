@@ -13,7 +13,7 @@
     "test": "node scripts/run-tests.mjs",
     "typecheck:node": "tsgo --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsgo --noEmit -p tsconfig.web.json --composite false",
-    "typecheck": "tsgo --noEmit -p tsconfig.node.json --composite false && tsgo --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "node scripts/run-typecheck.mjs",
     "start:local": "node scripts/start-local.mjs",
     "dev:local": "node scripts/dev-local.mjs",
     "preview:local": "electron-vite preview --skipBuild --mode oss",

@@ -11,7 +11,15 @@ import {
 } from '../apps/electron/scripts/run-tests.mjs';
 import path from 'node:path';
 import { REST_PACKAGES } from './vitest-rest.config.mjs';
-import { runLocalCheck } from './run-local-check.mjs';
+import { runLocalCheck, planLocalCheck } from './run-local-check.mjs';
+import { collectLocalScope } from './local-check-scope.mjs';
+import {
+  prepareTypecheck as prepareSiteTypecheck,
+  GENERATED_FILES,
+} from '../site-docs/scripts/prepare-typecheck.mjs';
+import { runTypechecks as runElectronTypechecks } from '../apps/electron/scripts/run-typecheck.mjs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { prepareAdapters, ADAPTERS } from './prepare-acp-adapters.mjs';
 
 import { BOUNDARY_CHECK_SCRIPTS, runBoundaryChecks } from './run-boundary-checks.mjs';
@@ -103,7 +111,7 @@ test('computeLocalTestWaves bounds hybrid worker pools and scales on workstation
   assert.ok(hybridWaves[2].find((task) => task.id === 'rest').args.includes('--maxWorkers=8'));
   assert.equal(
     hybridWaves[2].find((task) => task.id === 'electron').env.LODY_ELECTRON_TEST_CONCURRENCY,
-    '4'
+    '3'
   );
   const constrained = computeLocalTestWaves({
     cpus: 18,
@@ -377,4 +385,287 @@ test('Electron groups include all source tests once and settle failures across g
     false
   );
   assert.deepEqual(completed.sort(), groups.map((group) => group.id).sort());
+});
+
+// These fixtures exercise the same Git inventory and CI selector as the local
+// entry point; no repository tests or network requests are launched here.
+test('affected scope includes committed, staged, working and untracked paths', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'lody-affected-'));
+  const git = (args) =>
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Synthetic Test',
+        '-c',
+        'user.email=test@example.invalid',
+        '-c',
+        'commit.gpgSign=false',
+        ...args,
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: buildSanitizedTestEnv(process.env),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+    );
+  try {
+    await writeFile(path.join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+    await writeFile(path.join(root, 'package.json'), '{"name":"fixture","private":true}');
+    const manifests = [
+      ['shared', '@lody/shared', {}],
+      ['electron', '@lody/electron', { '@lody/shared': 'workspace:*' }],
+      ['ui', '@lody/ui', {}],
+      [
+        'components',
+        '@lody/components',
+        { '@lody/ui': 'workspace:*', 'acp-extension-dsh': 'workspace:*' },
+      ],
+    ];
+    for (const [dir, name, dependencies] of manifests) {
+      await mkdir(path.join(root, 'packages', dir, 'src'), { recursive: true });
+      await writeFile(
+        path.join(root, 'packages', dir, 'package.json'),
+        JSON.stringify({
+          name,
+          dependencies,
+          scripts: { test: 'vitest run', typecheck: 'tsgo --noEmit' },
+        })
+      );
+      await writeFile(path.join(root, 'packages', dir, 'src/index.ts'), 'export const value = 1;');
+    }
+    git(['init', '-q']);
+    git(['add', '.']);
+    git(['commit', '-qm', 'fixture']);
+    assert.equal(collectLocalScope({ root, git }).mode, 'skip-tests');
+    git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    await writeFile(path.join(root, 'packages/shared/src/index.ts'), 'export const value = 2;');
+    git(['add', '.']);
+    git(['commit', '-qm', 'committed source']);
+    await writeFile(path.join(root, 'packages/ui/src/index.ts'), 'export const value = 3;');
+    await writeFile(
+      path.join(root, 'packages/electron/src/staged.test.ts'),
+      'synthetic staged test'
+    );
+    git(['add', 'packages/electron/src/staged.test.ts']);
+    await writeFile(
+      path.join(root, 'packages/shared/src/new file.test.ts'),
+      'synthetic untracked test'
+    );
+    // Reversing a committed edit locally must still include its committed path.
+    await writeFile(path.join(root, 'packages/shared/src/index.ts'), 'export const value = 1;');
+    const scope = collectLocalScope({ root, git });
+    assert.equal(scope.mode, 'affected');
+    assert.deepEqual(scope.changedFiles, [
+      'packages/electron/src/staged.test.ts',
+      'packages/shared/src/index.ts',
+      'packages/shared/src/new file.test.ts',
+      'packages/ui/src/index.ts',
+    ]);
+    assert.deepEqual(scope.testPackages, [
+      '@lody/components',
+      '@lody/electron',
+      '@lody/shared',
+      '@lody/ui',
+    ]);
+    assert.deepEqual(scope.adapterPackages, ['acp-extension-dsh']);
+    const plan = planLocalCheck(scope);
+    assert.ok(plan.prepare.includes('acp-extension-dsh'));
+    assert.ok(plan.static[0].includes('--no-sort'));
+    const waves = computeLocalTestWaves({ cpus: 8, perfCores: 4, env: {}, scope });
+    const tasks = waves.flat();
+    assert.deepEqual(
+      tasks.map((t) => t.id),
+      ['components', 'rest', 'electron']
+    );
+    assert.ok(tasks.find((t) => t.id === 'rest').args.includes('--project=shared:*'));
+    assert.ok(tasks.find((t) => t.id === 'rest').args.includes('--project=ui:*'));
+    assert.ok(!tasks.some((t) => t.id === 'cli'));
+    await writeFile(path.join(root, 'pnpm-lock.yaml'), 'changed lock');
+    assert.equal(collectLocalScope({ root, git }).mode, 'full');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('affected checks fail open on Git errors and skip all work for docs-only scope', async () => {
+  const failed = collectLocalScope({
+    git: () => {
+      throw Object.assign(new Error('git unavailable'), { code: 'EACCES' });
+    },
+  });
+  assert.equal(failed.mode, 'full');
+  const unrelated = collectLocalScope({
+    git: (args) => {
+      if (args[0] === 'merge-base')
+        throw Object.assign(new Error('unrelated history'), { status: 1 });
+      return 'existing-ref\n';
+    },
+  });
+  assert.equal(unrelated.mode, 'full');
+  const commands = [];
+  assert.equal(
+    await runLocalCheck({
+      affected: true,
+      scope: failed,
+      run: async (args) => {
+        commands.push(args);
+        return true;
+      },
+    }),
+    true
+  );
+  assert.deepEqual(commands, [
+    planLocalCheck().prepare,
+    ...planLocalCheck().static,
+    planLocalCheck().tests,
+  ]);
+  const scope = {
+    mode: 'skip-tests',
+    reason: 'docs_only',
+    runTests: false,
+    runTypecheck: false,
+    runCheckQuick: false,
+    prepareAcpAdapters: false,
+    testPackages: [],
+    typecheckPackages: [],
+  };
+  assert.equal(
+    await runLocalCheck({
+      affected: true,
+      scope,
+      run: () => {
+        throw new Error('docs-only check launched work');
+      },
+    }),
+    true
+  );
+  assert.deepEqual(computeLocalTestWaves({ scope }), []);
+  const cli = {
+    ...scope,
+    mode: 'affected',
+    runTests: true,
+    runTypecheck: true,
+    runCheckQuick: true,
+    prepareAcpAdapters: true,
+    testPackages: ['lody'],
+    typecheckPackages: ['lody'],
+  };
+  assert.deepEqual(planLocalCheck(cli).prepare, ['--filter', 'lody', 'prepare:acp-adapters']);
+  assert.deepEqual(
+    computeLocalTestWaves({ scope: cli })
+      .flat()
+      .map((task) => task.id),
+    ['cli']
+  );
+});
+
+test('site-docs typecheck cache invalidates inputs and every generated output, and clears failures', async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'lody-site-cache-'));
+  const root = path.join(workspace, 'site-docs');
+  try {
+    await mkdir(path.join(root, 'lib'), { recursive: true });
+    await mkdir(path.join(root, 'content'), { recursive: true });
+    await writeFile(path.join(workspace, 'pnpm-lock.yaml'), 'synthetic lock');
+    await writeFile(path.join(root, 'package.json'), '{}');
+    await writeFile(path.join(root, 'content/guide.mdx'), 'first content');
+    const generate = async () => {
+      for (const file of [...GENERATED_FILES, '.source/server.ts', '.source/browser.ts']) {
+        await mkdir(path.dirname(path.join(root, file)), { recursive: true });
+        await writeFile(path.join(root, file), 'synthetic generated output');
+      }
+    };
+    const prepare = () => prepareSiteTypecheck({ root, generate });
+    assert.equal(await prepare(), true);
+    assert.equal(await prepare(), false);
+    await writeFile(path.join(root, 'content/guide.mdx'), 'edited content');
+    assert.equal(await prepare(), true);
+    for (const file of [...GENERATED_FILES, '.source/browser.ts']) {
+      await rm(path.join(root, file));
+      assert.equal(await prepare(), true, `missing ${file} must regenerate`);
+    }
+    assert.equal(await prepare(), false);
+    await writeFile(path.join(workspace, 'pnpm-lock.yaml'), 'new dependency lock');
+    assert.equal(await prepare(), true);
+    await writeFile(path.join(root, 'content/guide.mdx'), 'failing content');
+    await assert.rejects(
+      prepareSiteTypecheck({
+        root,
+        generate: async () => {
+          await generate();
+          throw new Error('generator failed');
+        },
+      }),
+      /generator failed/
+    );
+    const stamp = path.join(workspace, 'node_modules/.cache/lody-site-docs-typecheck-stamp.json');
+    await assert.rejects(readFile(stamp), { code: 'ENOENT' });
+    assert.equal(await prepare(), true);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Electron native loader resolves TypeScript paths and non-erasable syntax without tsx', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'lody-native-loader-'));
+  try {
+    await mkdir(path.join(root, 'directory'));
+    await mkdir(path.join(root, 'packages/shared/src'), { recursive: true });
+    await writeFile(
+      path.join(root, 'packages/shared/src/type.ts'),
+      'export type OnlyType = number;'
+    );
+    await writeFile(
+      path.join(root, 'packages/shared/src/legacy.ts'),
+      "import { OnlyType } from './type'; export const legacy: OnlyType = 0;"
+    );
+    await writeFile(path.join(root, 'real.js'), 'export const real = 7;');
+    await writeFile(path.join(root, 'real.ts'), 'export const real = 999;');
+    await writeFile(path.join(root, 'value.ts'), 'export const value: number = 2;');
+    await writeFile(path.join(root, 'index.ts'), 'export const directory: number = 4;');
+    await writeFile(path.join(root, 'data.json'), '{"value":0}');
+    await writeFile(path.join(root, 'plain.tsx'), 'export const plain: number = 3;');
+    await writeFile(path.join(root, 'directory/index.ts'), "export { directory } from '..';");
+    await writeFile(
+      path.join(root, 'types.generated.ts'),
+      'export class Box { constructor(readonly number: number) {} }'
+    );
+    await writeFile(
+      path.join(root, 'entry.ts'),
+      "import {legacy} from './packages/shared/src/legacy'; import data from './data.json'; import {value} from './value.js'; import {plain} from './plain'; import {directory} from './directory'; import {Box} from './types.generated'; import {real} from './real.js'; export const result = legacy + data.value + value + plain + directory + new Box(5).number + real;"
+    );
+    await writeFile(
+      path.join(root, 'main.mjs'),
+      "import { createRequire } from 'node:module'; import { result } from './entry'; const required = createRequire(import.meta.url)('./entry'); if (required.result !== result) throw new Error('require and import disagree'); process.stdout.write(String(result));"
+    );
+    const loader = fileURLToPath(
+      new URL('../apps/electron/scripts/node-test-ts-resolve.mjs', import.meta.url)
+    );
+    const output = execFileSync(
+      process.execPath,
+      ['--experimental-strip-types', '--import', loader, path.join(root, 'main.mjs')],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    assert.equal(output.trim(), '21');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Electron typecheck joins both configurations before reporting failure', async () => {
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const seen = [];
+  const result = runElectronTypechecks({
+    run: async (config) => {
+      seen.push(config);
+      return config === 'tsconfig.node.json' ? held : false;
+    },
+  });
+  assert.deepEqual(seen, ['tsconfig.node.json', 'tsconfig.web.json']);
+  release(true);
+  assert.equal(await result, false);
 });

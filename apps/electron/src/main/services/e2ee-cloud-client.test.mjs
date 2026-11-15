@@ -1615,6 +1615,7 @@ void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway bl
     let attempts = 0
     const controller = new AbortController()
     const inDelay = Promise.withResolvers()
+    let abortedInDelay = false
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -1627,19 +1628,25 @@ void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway bl
               retryDelay: (_ms, signal) => {
                 inDelay.resolve()
                 return new Promise((_resolve, reject) => {
-                  signal.addEventListener('abort', () => reject(new Error('aborted')), {
-                    once: true
-                  })
+                  signal.addEventListener(
+                    'abort',
+                    () => {
+                      abortedInDelay = true
+                      reject(new Error('aborted'))
+                    },
+                    { once: true }
+                  )
                 })
               }
             }
           )
           const fiber = yield* Effect.forkChild(
-            Effect.result(client.mailbox(access).status(target, controller.signal))
+            Effect.result(client.mailbox(access, controller.signal).status(target))
           )
           yield* Effect.promise(() => inDelay.promise)
           controller.abort()
           const result = yield* Fiber.join(fiber)
+          assert.equal(abortedInDelay, true)
           assert.equal(result._tag, 'Failure')
           assert.equal(result.failure.reason, 'unavailable')
         })

@@ -456,7 +456,7 @@ void test('hard process exit releases the OS mutex and preserves the same KEK be
         command: process.execPath,
         args: [
           '--import',
-          import.meta.resolve('tsx'),
+          new URL('../../scripts/node-test-ts-resolve.mjs', import.meta.url).href,
           '--input-type=module',
           '-e',
           child,
@@ -805,7 +805,7 @@ void test('another OS process reopens encrypted identity and epoch data without 
     })));
     console.log(JSON.stringify(result));
   `
-  const loader = import.meta.resolve('tsx')
+  const loader = new URL('../../scripts/node-test-ts-resolve.mjs', import.meta.url).href
   const result = await Effect.runPromise(
     runCommandOk({
       command: process.execPath,
@@ -876,7 +876,14 @@ void test('recovers a journaled replacement after a crash when only the old nati
   const ended = await Effect.runPromise(
     runCommand({
       command: process.execPath,
-      args: ['--import', import.meta.resolve('tsx'), '--input-type=module', '-e', child, directory],
+      args: [
+        '--import',
+        new URL('../../scripts/node-test-ts-resolve.mjs', import.meta.url).href,
+        '--input-type=module',
+        '-e',
+        child,
+        directory
+      ],
       cwd: new URL('../../', import.meta.url).pathname,
       env: { ...process.env },
       maxOutputBytes: 65536
