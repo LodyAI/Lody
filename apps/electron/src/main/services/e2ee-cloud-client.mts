@@ -174,6 +174,46 @@ const memberDeviceAccess = (source: E2eeDeviceAccess): E2eeDeviceAccess => ({
   ...(source.cliToken === undefined ? {} : { cliToken: source.cliToken })
 })
 const unavailable = () => new BackendError({ service: 'E2eeCloud', reason: 'unavailable' })
+const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504])
+const TRANSIENT_RETRY_DELAYS_MS = [60, 150] as const
+
+async function hasE2eeRefusalBody(response: Response, signal: AbortSignal): Promise<boolean> {
+  if (typeof response.clone !== 'function') return false
+  let onAbort: (() => void) | undefined
+  try {
+    const cloned = response.clone()
+    const aborted = new Promise<string>((_resolve, reject) => {
+      if (signal.aborted) {
+        reject(unavailable())
+        return
+      }
+      onAbort = () => reject(unavailable())
+      signal.addEventListener('abort', onAbort, { once: true })
+    })
+    const text = await Promise.race([cloned.text(), aborted])
+    return /\be2ee_[a-z0-9_]+/i.test(text)
+  } catch {
+    if (signal.aborted) throw unavailable()
+    return false
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  }
+}
+
+function defaultRetryDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(unavailable())
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(unavailable())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 /** Safe server capacity receipt; never contains request data or credentials. */
 export class E2eeStagingCapacityError extends BackendError {
@@ -286,6 +326,8 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   fetch?: typeof globalThis.fetch
   /** Wall clock for token reuse; injected by tests. */
   now?: () => number
+  /** Backoff delay hook between transient HTTP gateway retries; injected by tests. */
+  retryDelay?: (ms: number, signal: AbortSignal) => Promise<void>
 }) {
   if (input.platformKind !== 'cloud')
     return yield* new BackendError({ service: 'E2eeCloud', reason: 'unauthorized' })
@@ -364,16 +406,33 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         const renewAt = tokenRenewAt(token)
         reusable = renewAt > now() ? { token, renewAt } : undefined
       }
+      const retryDelay = input.retryDelay ?? defaultRetryDelay
       // A request owns its auth and abort signal. Concurrent work cannot change
       // another request's credentials through a shared mutable SDK client.
       const client = new ConvexHttpClient(input.deploymentUrl, {
         auth: token,
         logger: false,
         fetch: async (url, options) => {
-          combined.throwIfAborted()
-          const httpResponse = await fetch(url, { ...options, signal: combined }).catch(() => {
-            throw unavailable()
-          })
+          let httpResponse!: Response
+          for (let attempt = 0; attempt <= TRANSIENT_RETRY_DELAYS_MS.length; attempt++) {
+            combined.throwIfAborted()
+            httpResponse = await fetch(url, { ...options, signal: combined }).catch(() => {
+              throw unavailable()
+            })
+            if (
+              TRANSIENT_GATEWAY_STATUSES.has(httpResponse.status) &&
+              attempt < TRANSIENT_RETRY_DELAYS_MS.length &&
+              !(await hasE2eeRefusalBody(httpResponse, combined))
+            ) {
+              void httpResponse.body?.cancel?.().catch(() => {})
+              await retryDelay(TRANSIENT_RETRY_DELAYS_MS[attempt]!, combined).catch(() => {
+                throw unavailable()
+              })
+              combined.throwIfAborted()
+              continue
+            }
+            break
+          }
           // Convex's function-failure status, only for an explicitly credential-bound
           // endpoint. JWT, transport and JSON exceptions never reach this assignment.
           // The content grant action may report the same envelope over HTTP 200;
