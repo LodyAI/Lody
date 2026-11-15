@@ -132,6 +132,10 @@ readerLeases: preallocated-v1 接受 open 第四个参数中的唯一调用标�
 仍允许 mailbox 接收。背书快照缺少发布原件时走 mailbox/history。core 保留并验证
 receive/report/distribution 原件；共享有限维护流程只确认已观察到的业务终态，也会确认另一阶段失败时成功的兄弟阶段。没有明文降级。
 
+管理换钥先检查本地是否已安装当前钥，再决定是否接收。暂存发布确认并安装后即可返回；
+mailbox 分发随后在现有 session 下执行，记录失败，不重新打开已关闭的 reader。
+自动配对若发现临时激活 reader 已关闭，会借用自己的 reader 检查和接收密钥，完成后只释放它。
+
 ## 账号级配对流程
 
 `@lody/e2ee-client/account-pairing` 是各宿主共用的账号级个人设备配对流程（[基础规范](../../specs/e2ee-foundations.zh.md#账号级个人设备配对owner-于-2026-11-01-批准)）。它负责标签和有效期检查、单次签名的接纳日志，以及本地终态。宿主需要提供四样东西：

@@ -1257,40 +1257,59 @@ const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promis
   } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
 };
 
-// A failed key request after an account-pairing join must not leave the device on a
-// keyless control page without saying so, and it is retried only when the user asks.
-it('shows a failed key request after account pairing joins this device, and retries it once on request', async () => {
-  fixture.session.user.id = 'account-key-retry';
-  const keyRefreshes: unknown[] = [];
-  keyRequestPort(async (options) => {
-    keyRefreshes.push(options);
-    if (keyRefreshes.length === 1) throw new Error('e2ee_key_round_failed');
+it('receives the approved device key after a transient reader handoff without showing permanent failure', async () => {
+  fixture.session.user.id = 'account-key-transient';
+  let attempts = 0;
+  keyRequestPort(async () => {
+    if (++attempts === 1) throw new Error('e2ee_not_open');
   });
   const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => {});
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  await act(async () => root.render(createElement(Component)));
-  await act(async () => {});
-  await act(async () => {});
-  expect(keyRefreshes).toHaveLength(1);
-  expect(fixture.navigation).toEqual([]);
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-    'e2ee.accountPair.request.keyFailed'
-  );
-  expect(diagnostics).toHaveBeenCalledWith(
-    'E2EE account pairing key request failed',
-    expect.anything(),
-    expect.anything()
-  );
-  diagnostics.mockRestore();
-  const retry = [...container.querySelectorAll('button')].find(
-    (button) => button.textContent === 'e2ee.accountPair.request.keyRetry'
-  );
-  await act(async () => retry?.click());
-  await act(async () => {});
-  expect(keyRefreshes).toHaveLength(2);
-  expect(fixture.navigation).toEqual([
-    { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
-  ]);
+  vi.useFakeTimers();
+  try {
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    expect(fixture.navigation).toEqual([]);
+    expect(container.textContent).not.toContain('e2ee.accountPair.request.keyFailed');
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(fixture.navigation).toEqual([
+      { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+    ]);
+  } finally {
+    vi.useRealTimers();
+    diagnostics.mockRestore();
+  }
+});
+
+it('offers manual key receipt retry after exhausting the bounded automatic recovery window', async () => {
+  fixture.session.user.id = 'account-key-retry';
+  let unavailable = true;
+  keyRequestPort(async () => {
+    if (unavailable) throw new Error('e2ee_key_round_failed');
+  });
+  const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.useFakeTimers();
+  try {
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(61_100); });
+    expect(fixture.navigation).toEqual([]);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'e2ee.accountPair.request.keyFailed'
+    );
+    unavailable = false;
+    const retry = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'e2ee.accountPair.request.keyRetry'
+    );
+    await act(async () => retry?.click());
+    expect(fixture.navigation).toEqual([
+      { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+    ]);
+  } finally {
+    vi.useRealTimers();
+    diagnostics.mockRestore();
+  }
 });
 
 // The join and its single key request outlive the control page: remounting it for the

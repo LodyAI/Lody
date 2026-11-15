@@ -965,9 +965,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         // only reconciles and sends deliveries; `full` is the maintenance round.
         let roundMode: KeyRoundMode = 'full'
         let roundRecipients: Set<string> | undefined
-        const coversRecipients = (active: Set<string> | undefined, requested?: readonly string[]) =>
-          active === undefined ||
-          (requested !== undefined && requested.every((id) => active.has(id)))
         let managing: Deferred.Deferred<void, unknown> | undefined
         let managementStores: Context.Context<EpochCandidateStore | SubmissionJournal> | undefined
         const localManagement = Effect.fnUntraced(function* () {
@@ -1023,13 +1020,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         ) {
           if (closing) return yield* fail('closed')
           if (mode === 'full' && recipients === undefined) roundAgain = true
-          // One round at a time. A caller joins a running full round or one of its own
-          // mode whose recipient scope covers the request; otherwise it waits that round out and runs its own.
+          // A targeted request may follow a new admission after a running round
+          // captured its recipients. Wait it out and reconcile the target again.
+          // Only broad full rounds coalesce, scheduling their existing follow-up pass.
           while (round) {
             const joined = round
             if (
-              (roundMode === 'full' && roundRecipients === undefined) ||
-              (roundMode === mode && coversRecipients(roundRecipients, recipients))
+              mode === 'full' &&
+              recipients === undefined &&
+              roundMode === 'full' &&
+              roundRecipients === undefined
             )
               return yield* Deferred.await(joined)
             yield* Effect.exit(Deferred.await(joined))

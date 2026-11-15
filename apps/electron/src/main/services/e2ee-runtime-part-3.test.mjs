@@ -209,6 +209,79 @@ void test('native content uses a durable bounded grace and immediately prefers a
 // receive-only or distribute-only open never creates unused maintenance stores. The
 // distributor records this device's own publication through the receiver, so it needs
 // receive.sqlite as well; repair.sqlite belongs to full rounds only.
+void test('a device admitted during an older full round receives its key before targeted distribution returns', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const f = yield* maintenanceFixture(directory)
+      const records = [Buffer.from(f.prepared.genesisRecordHex, 'hex')]
+      const admit = Effect.fnUntraced(function* () {
+        const initial = f.view()
+        const joining = yield* f.owner.custody.prepareDevice()
+        const command = yield* prepareDeviceAdmission({
+          genesis: f.genesis,
+          membershipId: initial.inspectState().owner,
+          encryptionPublicKey: joining.enc,
+          kind: 'personal',
+          signer: joining
+        })
+        const record = yield* signLedgerRecord(
+          Result.getOrThrow(prepareLedgerCommand(initial, f.device.publicKey, command)),
+          f.device
+        )
+        records.push(record)
+        f.setView(
+          Result.getOrThrow(
+            extendLedger(initial, [record], {
+              head: hashRecordBytes(record),
+              length: records.length
+            })
+          )
+        )
+        yield* f.owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, f.prepared.genesisHashHex, 0)
+        )
+        return joining
+      })
+      const existing = yield* admit()
+      const entered = yield* Deferred.make()
+      const release = yield* Deferred.make()
+      let held = false
+      const mailbox = {
+        ...f.mailbox,
+        status: (slot) =>
+          Effect.gen(function* () {
+            if (!held && slot.recipient === hex(existing.publicKey.toBytes())) {
+              held = true
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+            }
+            return yield* f.mailbox.status(slot)
+          })
+      }
+      const full = yield* Effect.forkChild(f.owner.host.keyRound(workspaceId, () => mailbox))
+      yield* Deferred.await(entered)
+      const joining = yield* admit()
+      const recipient = hex(joining.publicKey.toBytes())
+      const targeted = yield* Effect.forkChild(
+        f.owner.host.distributeKeys(workspaceId, () => mailbox, [recipient]),
+        { startImmediately: true }
+      )
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(full)
+      yield* Fiber.join(targeted)
+      assert.notEqual(
+        (yield* f.mailbox.status({ genesis: f.prepared.genesisHashHex, epoch: 0, recipient }))
+          .status,
+        'NeedsEnvelope'
+      )
+      yield* f.owner.custody.discardDevice(joining)
+      yield* f.owner.custody.discardDevice(existing)
+    })
+  )
+})
+
 void test('key rounds create only the maintenance journals their mode needs', async (t) => {
   const journals = (directory) =>
     ['receive', 'outbox', 'distribution', 'repair'].filter((name) =>

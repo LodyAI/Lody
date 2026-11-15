@@ -69,6 +69,63 @@ const using = <A, E, R>(
   );
 
 describe('durable submission', () => {
+  it.each([false, true])(
+    'confirms an exact committed original when a ledger subscription advances before the append reply (later record=%s)',
+    async (later) => {
+      const f = fixture();
+      try {
+        const original = rotate();
+        let records = [genesis];
+        let local = Result.getOrThrow(
+          verifyLedger({ anchor, records, checkpoint: checkpoint(records) })
+        );
+        const remote = LedgerLog.of({
+          read: () => Effect.fail(new LedgerLogError({})),
+          readFrom: (_anchor, base) =>
+            Effect.sync(() => ({
+              records: records.slice(base.length),
+              checkpoint: checkpoint(records),
+            })),
+          appendCas: () =>
+            Effect.sync(() => {
+              records = later
+                ? [
+                    genesis,
+                    original,
+                    signed([hashRecordBytes(original).toBytes(), owner.pk, [9, [1]]]),
+                  ]
+                : [genesis, original];
+              local = Result.getOrThrow(
+                verifyLedger({ anchor, records, checkpoint: checkpoint(records) })
+              );
+            }),
+        });
+        await Effect.runPromise(
+          Effect.scoped(
+            using(
+              f,
+              Effect.gen(function* () {
+                const submission = yield* LedgerSubmission;
+                const result = yield* submission.submit(original);
+                expect(result.outcome).toBe('Committed');
+                yield* submission.acknowledge(result);
+                expect((yield* submission.pending()).record).toBeNull();
+              }).pipe(Effect.provide(submissionLayer(anchor))),
+              remote
+            ).pipe(
+              Effect.provideService(VerifiedLedger, {
+                current: () => Effect.sync(() => local),
+                ensureCurrent: () => Effect.void,
+              })
+            )
+          )
+        );
+      } finally {
+        f.close();
+      }
+    }
+  );
+
   it.each(['committed', 'conflict', 'tampered', 'rollback', 'rate-limited', 'fallback'] as const)(
     'verifies suffix submission at the owned prefix: %s',
     async (mode) => {

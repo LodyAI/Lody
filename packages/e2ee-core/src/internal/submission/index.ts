@@ -8,6 +8,7 @@ import {
   extendLedgerEffect,
   hashRecordBytes,
   hasVerifiedCheckpoint,
+  hasVerifiedRecordHash,
   verifyLedgerEffect,
   type LedgerCheckpoint,
   type LedgerError,
@@ -115,11 +116,29 @@ export class LedgerSubmission extends Context.Service<
         const decoded = yield* Effect.fromResult(decodeRecord(record));
         if (decoded.body.type !== 'ordinary') return yield* fail('ordinary-only');
         const parent = decoded.body.previousHash;
-        if (log.readFrom && Option.isSome(verifiedOpt)) {
+        if (Option.isSome(verifiedOpt)) {
           const base = yield* verifiedOpt.value
             .current()
             .pipe(Effect.mapError((cause) => new LedgerLogError({ cause })));
-          if (base.head.equals(parent) && (!pin || pin.length >= base.historyStart)) {
+          // A push subscriber can verify this exact original before appendCas returns.
+          // Its genuine view already proves commitment; another network read cannot
+          // improve that proof and must not turn a successful append into a retry.
+          if (
+            (!pin || pin.length >= base.historyStart) &&
+            (yield* Effect.fromResult(hasVerifiedRecordHash(base, hashRecordBytes(record))))
+          ) {
+            if (pin && !(yield* Effect.fromResult(hasVerifiedCheckpoint(base, pin))))
+              return yield* fail('rollback');
+            return PreCasInspection({
+              outcome: 'Committed',
+              checkpoint: { head: base.head, length: base.length },
+            });
+          }
+          if (
+            log.readFrom &&
+            base.head.equals(parent) &&
+            (!pin || pin.length >= base.historyStart)
+          ) {
             const incoming = yield* log.readFrom(anchor, base);
             const suffix: Uint8Array[] = [];
             for (const bytes of incoming.records)

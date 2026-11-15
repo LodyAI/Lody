@@ -57,6 +57,11 @@ A record signed by a device that was revoked meanwhile ends as `Conflict`
 without re-signing. The journal keeps the newest observed log checkpoint and
 refuses a log that rolled back.
 
+If an independently verified local view already contains the exact signed original,
+submission confirms it locally, including when that view has advanced further.
+The journal checkpoint must still belong to that verified history. Push hints and
+append replies alone are never commitment proof.
+
 For an explicit pre-CAS `LedgerLogError.reason = self-service-rate-limited`, P09 releases only a newly created self-service slot at its unchanged first-attempt revision, preserves its checkpoint and returns `retryAt`. SQLite and IndexedDB atomically compare original/checkpoint/revision. Existing SQLite journals gain only revision metadata, preserving pending originals and checkpoints. Unknown outcomes, older pending entries, competing attempts and generic HTTP 429 retain their originals; a later refusal cannot erase an earlier possibly committed request.
 
 ## InstalledEpochKeys and InstalledEpochHistory

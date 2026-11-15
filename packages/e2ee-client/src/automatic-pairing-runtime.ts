@@ -1,4 +1,4 @@
-import { Clock, Effect, Result, Semaphore } from 'effect';
+import { Clock, Effect, Exit, Result, Semaphore } from 'effect';
 import { toHex } from './bytes';
 import {
   derivePairingKeys,
@@ -563,6 +563,44 @@ export function makeAutomaticPairingRuntime(options: {
     );
     yield* check();
     let status = Result.isSuccess(inspected) ? inspected.success : null;
+    if (Result.isFailure(inspected)) {
+      // accountPairingRequest may activate and close a temporary workspace reader.
+      // Own a separate reader for this check instead of depending on a React mount.
+      const accountId = options.account() ?? undefined;
+      const owner =
+        runtime.readerLeases === 'preallocated-v1' ? options.crypto.randomUUID() : undefined;
+      const received = yield* Effect.result(
+        Effect.acquireUseRelease(
+          promise(() => runtime.open(value.context.workspaceId, undefined, accountId, owner)).pipe(
+            Effect.onExit((exit) =>
+              Exit.isFailure(exit) && owner !== undefined
+                ? promise(() => runtime.close(value.context.workspaceId, accountId, owner)).pipe(
+                    Effect.orDie
+                  )
+                : Effect.void
+            )
+          ),
+          (current) =>
+            Effect.gen(function* () {
+              if (owner !== undefined && current.readerOwner !== owner)
+                return yield* Effect.fail(refuse('reader-owner-mismatch'));
+              if (current.hasCurrentKey) return current;
+              return yield* promise(() =>
+                runtime.refresh(value.context.workspaceId, {
+                  installKeys: true,
+                  keyMode: 'receive',
+                })
+              );
+            }),
+          (current) =>
+            promise(() =>
+              runtime.close(value.context.workspaceId, accountId, owner ?? current.readerOwner)
+            ).pipe(Effect.orDie)
+        )
+      );
+      yield* check();
+      if (Result.isSuccess(received)) status = received.success;
+    }
     if (status?.deviceKind === 'personal' && status.hasDeviceCredential && !status.hasCurrentKey) {
       const received = yield* Effect.result(
         // Only this device's own current key; a host without modes runs its full round.

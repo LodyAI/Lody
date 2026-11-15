@@ -41,6 +41,9 @@ acknowledge(r):  释放已完成的结果
 
 签名设备在此期间被吊销时，记录以 `Conflict` 结束，不会重新签名。日志记住观察到的最新检查点，拒绝已回滚的日志。
 
+若独立验证的本地视图已包含同一签名原件，提交可直接确认，包括视图已继续前进的情况。
+日志检查点仍必须属于该已验证历史。推送提示和追加回复本身不能证明提交成功。
+
 自助设备记录若在 CAS 前明确收到 `LedgerLogError.reason = self-service-rate-limited`，P09 仅在本次新建槽位的首次尝试且修订号未被其他尝试推进时释放该原件，保留检查点并返回 `retryAt`。SQLite 与 IndexedDB 原子核对原件、检查点、修订号；SQLite 对既有日志只增补修订字段，保留待定原件与检查点。结果未知、旧 pending、并发尝试及普通 HTTP 429 都继续保留原件，不允许借后续拒绝抹掉先前可能生效的请求。
 
 ## InstalledEpochKeys 与 InstalledEpochHistory
