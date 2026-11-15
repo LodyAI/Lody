@@ -5,7 +5,6 @@ vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => true }));
 import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { Result } from 'effect';
 import vector from '../../e2ee-core/test/ledger-v1-vector.json';
 import {
   Bytes,
@@ -19,6 +18,8 @@ import type {
   WorkspacesState,
 } from '@lody/platform';
 import { PersonalHostError } from '@lody/e2ee-client';
+import { makeAutomaticPairingRuntime } from '@lody/e2ee-client/automatic-pairing';
+import { Effect, Result } from 'effect';
 import type { E2eeWorkspaceLedgerHead, E2eeWorkspaceHistoryPage } from '@lody/cloud-api';
 const fixture = vi.hoisted(() => ({
   port: undefined as PlatformE2eeWorkspaces | undefined,
@@ -152,6 +153,7 @@ import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
 import { E2eeWorkspaceConsole } from '../src/components/pages/e2ee-workspace-console';
 import { writePreferredWorkspaceSlug } from '../src/lib/workspace';
 import { useE2eeAccountId } from '../src/lib/e2ee-account';
+import { e2eeAccessLoss } from '../src/lib/e2ee-member-removal';
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 // The portable host's own strict page capture: what a Web or mobile runtime accepts.
 import { capturePage } from '../../e2ee-client/src/runtime-input';
@@ -765,6 +767,138 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
   expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
 });
 
+it.each(['automatic', 'scanned'] as const)(
+  'shows a device revoked after it joined (%s) as revoked with pairing again, never as syncing',
+  async (joinedBy) => {
+    fixture.workspaces = {
+      status: 'ready',
+      activeWorkspaceId: workspaceId,
+      workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+    };
+    fixture.port = displayPort(async () => [] as never);
+    delete fixture.port.memberProfiles;
+    let revoked = false,
+      opens = 0,
+      requests = 0;
+    // Main's exact public projection after it recorded this device's revocation.
+    const refused = (method: string) =>
+      new Error(`Error invoking remote method 'e2ee.${method}': Error: e2ee_device_revoked`);
+    const joined = { ...local.status, hasDeviceCredential: true };
+    const host = {
+      recordCreated: async () => {},
+      open: async () => {
+        opens += 1;
+        if (revoked && opens > 1) throw refused('open');
+        return { ...joined, readerOwner: 'account-owner' };
+      },
+      status: async () => {
+        if (revoked) throw refused('status');
+        return joined;
+      },
+      refresh: async () => {
+        if (revoked) throw refused('refresh');
+        return joined;
+      },
+      ledgerView: async () => local,
+      ingestLedgerRecords: async () => {
+        if (revoked) throw refused('ingestLedgerRecords');
+        return joined;
+      },
+      close: async () => {},
+      requestAccountPairing: async () => {
+        requests += 1;
+        throw new Error('e2ee_network');
+      },
+      accountPairingRequest: async () => null,
+      cancelAccountPairing: async () => {},
+    } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+    const relayed = new Map<string, unknown>();
+    // The application's real coordinator over this host, as the cloud provider builds it.
+    const automatic = makeAutomaticPairingRuntime({
+      runtime: host,
+      relay: {
+        pending: () => Effect.succeed([]),
+        read: () => Effect.succeed(null),
+        exchange: (command) => {
+          if (command.context) relayed.set(command.id, command.context);
+          return Effect.succeed({
+            id: command.id,
+            state: command.terminal ?? 'pending',
+            context: relayed.get(command.id),
+          } as never);
+        },
+      },
+      account: () => 'account',
+      workspaces: () => [{ workspaceId, name: 'Protected', genesisHash }],
+      deviceName: 'Synthetic phone',
+      canPresent: () => true,
+      accessLoss: e2eeAccessLoss,
+      crypto: globalThis.crypto,
+      run: Effect.runPromise,
+    });
+    try {
+      if (joinedBy === 'automatic') {
+        // Earlier in this app session the automatic request completed.
+        expect(await automatic.startAutomaticPairing(workspaceId)).toMatchObject({
+          phase: 'joined',
+        });
+      } else {
+        // A scanned join finished on the page, which then ended the automatic request.
+        revoked = true;
+        await automatic.startAutomaticPairing(workspaceId).catch(() => null);
+        await automatic.cancelAutomaticPairing(workspaceId);
+        revoked = false;
+      }
+      // The page's coordinator calls are the completion signals awaited below.
+      const pending = new Set<Promise<unknown>>();
+      const tracked = Object.fromEntries(
+        Object.entries(automatic).map(([name, method]) => [
+          name,
+          (...args: unknown[]) => {
+            const result = (method as (...input: unknown[]) => unknown)(...args);
+            if (result instanceof Promise) {
+              pending.add(result);
+              void result.then(
+                () => pending.delete(result),
+                () => pending.delete(result)
+              );
+            }
+            return result;
+          },
+        ])
+      );
+      const settle = async () => {
+        for (let turn = 0; turn < 20; turn++) await act(async () => {});
+        while (pending.size > 0)
+          await act(async () => {
+            await Promise.allSettled([...pending]);
+          });
+        await act(async () => {});
+      };
+      fixture.port.runtime = { ...host, ...tracked };
+      revoked = true;
+      const Component = Route.options.component as () => ReturnType<typeof createElement>;
+      await act(async () => root.render(createElement(Component)));
+      await settle();
+      expect(container.textContent).toContain('e2ee.auto.revoked.title');
+      expect(container.textContent).not.toContain('e2ee.auto.syncing.title');
+      expect(requests).toBe(0);
+      const again = container.querySelector<HTMLButtonElement>(
+        '[data-testid="e2ee-auto-pair-again"]'
+      );
+      expect(again).not.toBeNull();
+      // Pairing again is a new request, never the revoked credential's old approval.
+      await act(async () => again!.click());
+      await settle();
+      expect(container.textContent).not.toContain('e2ee.auto.revoked.title');
+      expect(container.textContent).not.toContain('e2ee.auto.syncing.title');
+      expect(container.textContent).toContain('e2ee.auto.waiting.title');
+    } finally {
+      automatic.disposeAutomaticPairing();
+    }
+  }
+);
+
 it('stops reopening a host that keeps refusing a revoked identity and offers re-pairing', async () => {
   fixture.port = displayPort(async () => [] as never);
   delete fixture.port.memberProfiles;
@@ -1271,7 +1405,9 @@ it('receives the approved device key after a transient reader handoff without sh
     await act(async () => {});
     expect(fixture.navigation).toEqual([]);
     expect(container.textContent).not.toContain('e2ee.accountPair.request.keyFailed');
-    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
     expect(fixture.navigation).toEqual([
       { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
     ]);
@@ -1293,7 +1429,9 @@ it('offers manual key receipt retry after exhausting the bounded automatic recov
     const Component = Route.options.component as () => ReturnType<typeof createElement>;
     await act(async () => root.render(createElement(Component)));
     await act(async () => {});
-    await act(async () => { await vi.advanceTimersByTimeAsync(61_100); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_100);
+    });
     expect(fixture.navigation).toEqual([]);
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'e2ee.accountPair.request.keyFailed'

@@ -938,7 +938,9 @@ export function E2eeWorkspaceConsole({
   )
     return (
       <E2eeAutomaticPairingPage
-        key={identity}
+        // A revocation found after this page joined (by scan or automatically) starts
+        // it over, so no local "joined" outlives the loss.
+        key={current?.failure?.code === 'device-revoked' ? `${identity}:revoked` : identity}
         runtime={port.runtime}
         workspaceId={workspaceId}
         onJoined={() => onAccountPairingJoined(true)}

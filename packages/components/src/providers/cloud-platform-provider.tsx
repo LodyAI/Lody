@@ -4,6 +4,7 @@ import { makeAutomaticPairingRuntime } from '@lody/e2ee-client/automatic-pairing
 import { E2eeAutomaticPairingInbox } from '@/components/pages/e2ee-automatic-pairing';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { assertLegacyWorkspaceAccess } from '@/lib/legacy-workspace-admission';
+import { e2eeAccessLoss } from '@/lib/e2ee-member-removal';
 import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
 import {
   useCallback,
@@ -451,6 +452,7 @@ export function CloudPlatformProvider({
       // A visible but unfocused window (another app in front, a second screen) still
       // answers; only a hidden window falls back to the system notification.
       canPresent: () => document.visibilityState === 'visible',
+      accessLoss: e2eeAccessLoss,
       includePreparingReviews: Boolean(electron && runtime.accountPairingCode),
       notifyPending: (id) => {
         if (!electron) return;

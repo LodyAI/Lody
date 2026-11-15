@@ -285,6 +285,21 @@ device if that responder quits. Transient errors retry exact originals. Approval
 means verified admission; the content route still opens its reader and installs the
 current key before use. Public relay terminal state cannot grant access.
 
+Syncing is not authority either. A request reaches `syncing` from verified admission
+or from a retained personal credential, and keeps retrying while key reception or
+status fails for ordinary reasons (offline, timeouts, other refusals); slow delivery
+never expires it. It ends as `revoked` or `removed` only when the application's
+injected `accessLoss` recognizer (the product's `e2eeAccessLoss`) classifies a
+`status`, `open` or receive `refresh` failure as this device's exact loss for that
+workspace. A completed (`joined`) request stays retained, but each page read or start
+asks the host's `status` once more, without a key round or a request, and an exact
+loss found there replaces `joined`; other failures keep it. A start whose first
+`status` reports the exact loss shows it instead of requesting approval. That outcome is terminal for the request: expiry, polling, a credential
+that still reads as present and a late key cannot turn it back into an admission,
+and other workspaces are unaffected. Only an explicit new start pairs a revoked
+device again, as a fresh request without the retained-credential shortcut; a
+removed member needs a new invitation, and a new start only re-verifies.
+
 A renderer reload can lose its automatic exchange while the native account owner
 still holds the previous request. Recovery shows that request's workspace names
 and expiry, then requires a separate confirmation to end it. Hosts expose the

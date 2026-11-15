@@ -16,6 +16,13 @@ import {
 } from '../src/account-pairing';
 import { accountPairingStoreChecks } from './account-pairing-store-contract';
 
+/** The product's exact access-loss results only, as `e2eeAccessLoss` recognizes them. */
+const exactAccessLoss = (error: unknown) =>
+  error instanceof Error &&
+  (error.message === 'e2ee_device_revoked' || error.message === 'e2ee_member_removed')
+    ? error.message
+    : null;
+
 /** Reference store for tests: the same semantics as the durable adapters. */
 function memoryStore(): AccountPairingStore {
   const terminal = new Map<string, 'approved' | 'declined' | 'expired' | 'cancelled'>();
@@ -117,6 +124,7 @@ describe('portable account pairing workflow', () => {
         workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
         deviceName: 'Phone',
         canPresent: () => true,
+        accessLoss: exactAccessLoss,
         crypto,
         now: () => 0,
         run: Effect.runPromise,
@@ -311,6 +319,7 @@ describe('portable account pairing workflow', () => {
         workspaces: () => hints,
         deviceName: 'Synthetic phone',
         canPresent: () => true,
+        accessLoss: exactAccessLoss,
         crypto,
         now: () => time,
         run: Effect.runPromise,
@@ -695,6 +704,7 @@ describe('portable account pairing workflow', () => {
           workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
           deviceName: 'Synthetic phone',
           canPresent: () => foreground,
+          accessLoss: exactAccessLoss,
           notifyPending: (id: string) => {
             notices.push(id);
           },
@@ -887,6 +897,7 @@ describe('automatic pairing requester wake-ups', () => {
         workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
         deviceName: 'Synthetic phone',
         canPresent: () => true,
+        accessLoss: exactAccessLoss,
         crypto,
         now: () => 1000,
         run: Effect.runPromise,
@@ -915,6 +926,200 @@ describe('automatic pairing requester wake-ups', () => {
     expect(watched.size).toBe(1);
     disposed.disposeAutomaticPairing();
     expect(watched.size).toBe(0);
+  });
+});
+
+describe('automatic pairing requester after access loss', () => {
+  type Status = Awaited<ReturnType<E2eeWorkspaceRuntime['status']>>;
+  type Loss = 'e2ee_device_revoked' | 'e2ee_member_removed';
+  const genesisHash = '11'.repeat(32);
+  const retained = {
+    genesisHash,
+    deviceKind: 'personal',
+    hasDeviceCredential: true,
+    hasCurrentKey: false,
+  } as unknown as Status;
+  /** The product's exact access-loss result, as the runtime boundary projects it. */
+  const exactLoss = (code: Loss) => Object.assign(new Error(code), { code });
+  const setup = () => {
+    let time = 0;
+    const host = {
+      status: vi.fn<(workspaceId: string) => Promise<Status>>(async () => retained),
+      refresh: vi.fn<(workspaceId: string) => Promise<Status>>(async () => retained),
+    };
+    const relayed = new Map<string, unknown>();
+    const pairing = makeAutomaticPairingRuntime({
+      relay: {
+        pending: () => Effect.succeed([]),
+        read: () => Effect.succeed(null),
+        exchange: (command) => {
+          if (command.context) relayed.set(command.id, command.context);
+          return Effect.succeed({
+            id: command.id,
+            state: command.terminal ?? 'pending',
+            context: relayed.get(command.id),
+          } as unknown as E2eeAutomaticPairingRecord);
+        },
+      },
+      runtime: {
+        status: (workspaceId: string) => host.status(workspaceId),
+        refresh: (workspaceId: string) => host.refresh(workspaceId),
+        open: async () => {
+          throw new Error('unused');
+        },
+        close: async () => {},
+        requestAccountPairing: async () => {
+          throw new Error('e2ee_network');
+        },
+        accountPairingRequest: async () => null,
+        cancelAccountPairing: async () => {},
+      } as unknown as E2eeWorkspaceRuntime,
+      account: () => 'synthetic-account',
+      workspaces: () => [
+        { workspaceId: 'w1', name: 'Alpha', genesisHash },
+        { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+      ],
+      deviceName: 'Synthetic phone',
+      canPresent: () => true,
+      accessLoss: exactAccessLoss,
+      crypto,
+      now: () => time,
+      run: Effect.runPromise,
+    });
+    return { pairing, host, advance: (ms: number) => (time += ms) };
+  };
+
+  it.each([
+    ['status', 'e2ee_device_revoked', 'revoked'],
+    ['status', 'e2ee_member_removed', 'removed'],
+    ['receive', 'e2ee_device_revoked', 'revoked'],
+    ['receive', 'e2ee_member_removed', 'removed'],
+  ] as const)(
+    'ends a retained admission when %s reports the exact %s, and nothing revives it',
+    async (where, code, phase) => {
+      const { pairing, host, advance } = setup();
+      expect(await pairing.startAutomaticPairing('w1')).toMatchObject({ phase: 'syncing' });
+      if (where === 'status') host.status.mockRejectedValue(exactLoss(code));
+      else host.refresh.mockRejectedValue(exactLoss(code));
+      expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase });
+      // The loss is terminal for this request: polling, time and the device's retained
+      // credential coming back never turn it into an admission again.
+      host.status.mockResolvedValue(retained);
+      host.refresh.mockResolvedValue({ ...retained, hasCurrentKey: true } as Status);
+      advance(3_600_000);
+      expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase });
+      // Another workspace is not held back by this one's loss.
+      host.status.mockRejectedValueOnce(new Error('e2ee_network'));
+      expect(await pairing.startAutomaticPairing('w2')).toMatchObject({
+        workspaceId: 'w2',
+        phase: 'preparing',
+      });
+    }
+  );
+
+  it('pairs a revoked device again only on request, as a new pairing rather than its old credential', async () => {
+    const { pairing, host } = setup();
+    await pairing.startAutomaticPairing('w1');
+    host.refresh.mockRejectedValue(exactLoss('e2ee_device_revoked'));
+    const lost = await pairing.automaticPairingState('w1');
+    expect(lost).toMatchObject({ phase: 'revoked' });
+    // Reopening the page reads the same loss; it does not start a request by itself.
+    expect(await pairing.automaticPairingState('w1')).toMatchObject({
+      id: lost!.id,
+      phase: 'revoked',
+    });
+    // Its retained credential still reads as present; that is no current admission.
+    host.refresh.mockResolvedValue({ ...retained, hasCurrentKey: true } as Status);
+    const again = await pairing.startAutomaticPairing('w1');
+    expect(again).toMatchObject({ phase: 'preparing' });
+    expect(again.id).not.toBe(lost!.id);
+    expect(await pairing.automaticPairingState('w1')).toMatchObject({
+      id: again.id,
+      phase: 'preparing',
+    });
+  });
+
+  it.each([
+    ['e2ee_device_revoked', 'revoked'],
+    ['e2ee_member_removed', 'removed'],
+  ] as const)(
+    'reports a later exact %s over its earlier joined result when the page reads it again',
+    async (code, phase) => {
+      const { pairing, host } = setup();
+      try {
+        await pairing.startAutomaticPairing('w1');
+        host.refresh.mockResolvedValueOnce({ ...retained, hasCurrentKey: true } as Status);
+        const joined = await pairing.automaticPairingState('w1');
+        expect(joined).toMatchObject({ phase: 'joined' });
+        // While nothing has changed, reading the joined result asks the host once and
+        // starts nothing: no key round, no new request.
+        host.status.mockResolvedValue({ ...retained, hasCurrentKey: true } as Status);
+        const refreshes = host.refresh.mock.calls.length;
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'joined' });
+        // Offline or an ordinary refusal never takes the completed approval back.
+        host.status.mockRejectedValueOnce(new Error('e2ee_network'));
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'joined' });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+        host.status.mockRejectedValue(exactLoss(code));
+        host.refresh.mockRejectedValue(exactLoss(code));
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({
+          id: joined!.id,
+          phase,
+        });
+        // A remounted page reads the loss rather than "joined", and starts nothing.
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ id: joined!.id, phase });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+        // Only the person's explicit start acts: a revoked device asks as a new pairing,
+        // a removed member's start re-verifies and still finds the loss.
+        expect(await pairing.startAutomaticPairing('w1')).toMatchObject({
+          phase: phase === 'revoked' ? 'preparing' : 'removed',
+        });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+      } finally {
+        pairing.disposeAutomaticPairing();
+      }
+    }
+  );
+
+  it.each([
+    ['e2ee_device_revoked', 'revoked'],
+    ['e2ee_member_removed', 'removed'],
+  ] as const)(
+    'shows an exact %s found on a fresh start instead of asking for approval by itself',
+    async (code, phase) => {
+      const { pairing, host } = setup();
+      try {
+        // A scanned join already ended this page's automatic request; the next mount
+        // starts fresh against a device whose access is gone.
+        host.status.mockRejectedValue(exactLoss(code));
+        const shown = await pairing.startAutomaticPairing('w1');
+        expect(shown).toMatchObject({ phase, comparisonCode: null });
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ id: shown.id, phase });
+        expect(host.refresh).not.toHaveBeenCalled();
+      } finally {
+        pairing.disposeAutomaticPairing();
+      }
+    }
+  );
+
+  it('keeps syncing through outages and ordinary failures, and finishes once they clear', async () => {
+    const { pairing, host, advance } = setup();
+    await pairing.startAutomaticPairing('w1');
+    for (const failure of [
+      new Error('e2ee_network'),
+      new Error('timeout'),
+      Object.assign(new Error('Unauthorized'), { code: 'e2ee_device_revoked_hint' }),
+    ]) {
+      host.status.mockRejectedValueOnce(failure);
+      expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'syncing' });
+      host.refresh.mockRejectedValueOnce(failure);
+      expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'syncing' });
+    }
+    // A slow key delivery is not an expiry.
+    advance(3_600_000);
+    expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'syncing' });
+    host.refresh.mockResolvedValueOnce({ ...retained, hasCurrentKey: true } as Status);
+    expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'joined' });
   });
 });
 
