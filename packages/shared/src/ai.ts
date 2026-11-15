@@ -25,6 +25,7 @@ import {
 } from './deepseek-harness';
 
 export const MANAGED_BUILTIN_RUNTIMES = [
+  { runtimeName: 'antigravity', agentType: 'antigravity', displayName: 'Antigravity' },
   { runtimeName: 'kimi-code', agentType: 'kimi', displayName: 'Kimi Code' },
   { runtimeName: 'devin', agentType: 'devin', displayName: 'Devin' },
   { runtimeName: 'grok-build', agentType: 'grok', displayName: 'Grok' },
@@ -64,6 +65,7 @@ export type AgentType = string;
  * Exhaustive on purpose: adding a builtin agent must not silently default it.
  */
 const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged'> = {
+  antigravity: 'none',
   pi: 'none',
   devin: 'none',
   claude: 'untagged',
@@ -139,6 +141,7 @@ export type CustomAcpLaunchSpec = {
  * manages the official runtime binary for the selected builtin agent.
  */
 export type BuiltinRuntimeOverrides = {
+  antigravityPath?: string;
   codexPath?: string;
   claudeCodeExecutable?: string;
   kimiPath?: string;
@@ -156,6 +159,7 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     return false;
   }
   const record = value as {
+    antigravityPath?: unknown;
     codexPath?: unknown;
     claudeCodeExecutable?: unknown;
     kimiPath?: unknown;
@@ -165,6 +169,7 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     piExtensions?: unknown;
   };
   return (
+    (record.antigravityPath === undefined || typeof record.antigravityPath === 'string') &&
     (record.codexPath === undefined || typeof record.codexPath === 'string') &&
     (record.claudeCodeExecutable === undefined ||
       typeof record.claudeCodeExecutable === 'string') &&
@@ -775,6 +780,7 @@ export type StaticBuiltinAcpCapabilities = {
 export const CODEX_AUTO_REVIEW_MODE_ID = 'agent-auto-review';
 
 const BUILTIN_DEFAULT_MODE_IDS = {
+  antigravity: 'default',
   kimi: 'auto',
   // Grok advertises `default` / `plan`, not Codex `agent`. Injecting `agent`
   // makes Role/MCP session create fail with "Unsupported ACP mode".

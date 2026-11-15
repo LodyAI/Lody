@@ -346,11 +346,64 @@ export function createCloudE2eePort(
   const irohRelays = irohRelaysFromEnv();
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
   const fetchImpl = getCliHttpFetch({ logger: options.logger });
+  const transientGatewayStatuses = new Set([502, 503, 504]);
+  const transientRetryDelaysMs = [60, 150] as const;
+  const hasE2eeRefusalBody = async (response: Response, signal: AbortSignal): Promise<boolean> => {
+    if (typeof response.clone !== 'function') return false;
+    let onAbort: (() => void) | undefined;
+    try {
+      const cloned = response.clone();
+      const aborted = new Promise<string>((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener('abort', onAbort, { once: true });
+      });
+      const text = await Promise.race([cloned.text(), aborted]);
+      return /\be2ee_[a-z0-9_]+/i.test(text);
+    } catch {
+      signal.throwIfAborted();
+      return false;
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort);
+    }
+  };
+  const waitRetryDelay = (ms: number, signal: AbortSignal): Promise<void> => {
+    if (signal.aborted) return Promise.reject(signal.reason);
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  };
   const client = (signal: AbortSignal, onStatus?: (status: number) => void) =>
     new ConvexHttpClient(authBaseUrl, {
       logger: false,
       fetch: async (input, init) => {
-        const response = await fetchImpl(input, { ...init, signal });
+        let response!: Response;
+        for (let attempt = 0; attempt <= transientRetryDelaysMs.length; attempt++) {
+          signal.throwIfAborted();
+          response = await fetchImpl(input, { ...init, signal });
+          if (
+            transientGatewayStatuses.has(response.status) &&
+            attempt < transientRetryDelaysMs.length &&
+            !(await hasE2eeRefusalBody(response, signal))
+          ) {
+            void response.body?.cancel?.().catch(() => {});
+            await waitRetryDelay(transientRetryDelaysMs[attempt]!, signal);
+            signal.throwIfAborted();
+            continue;
+          }
+          break;
+        }
         onStatus?.(response.status);
         return response;
       },

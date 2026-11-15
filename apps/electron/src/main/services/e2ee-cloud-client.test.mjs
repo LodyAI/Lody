@@ -1119,7 +1119,7 @@ void test('relay calls reuse one unexpired Convex token, renew it near expiry an
         seen.push(new Headers(init.headers).get('authorization'))
         if (failNext) {
           failNext = false
-          return new Response('unavailable', { status: 503 })
+          return new Response('unauthorized', { status: 401 })
         }
         return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
       },
@@ -1476,5 +1476,175 @@ void test('concurrent mailbox status calls coalesce via batchStatus while single
       assert.equal(calls.filter((c) => c.path === 'e2eeMailbox:batchStatus').length, 1)
       assert.equal(calls.filter((c) => c.path === 'e2eeMailbox:status').length, 5)
     }
+  }
+})
+
+void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway blips with bounded backoff without masking 401/403/409/429/500/560 or e2ee_* refusals', async () => {
+  // 1. Recovers after 1 and 2 transient 502/503/504 responses using [60, 150] ms delays without burning token cache.
+  {
+    const delays = []
+    let minted = 0
+    let attempts = 0
+    const statuses = [502, 503]
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(
+            async () => {
+              const status = statuses[attempts]
+              attempts++
+              if (status !== undefined) return new Response('gateway blip', { status })
+              return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
+            },
+            {
+              now: () => 1_000_000,
+              convexToken: async () => ({ data: { token: jwtExpiringAt(1_000 + 600, ++minted) } }),
+              retryDelay: async (ms) => {
+                delays.push(ms)
+              }
+            }
+          )
+          const res = yield* client.mailbox(access).status(target)
+          assert.equal(res.status, 'NeedsEnvelope')
+        })
+      )
+    )
+    assert.equal(attempts, 3)
+    assert.deepEqual(delays, [60, 150])
+    assert.equal(minted, 1)
+  }
+
+  // 2. Exhausting 3 consecutive 503 attempts surfaces unavailable and drops cached token.
+  {
+    const delays = []
+    let minted = 0
+    let attempts = 0
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(
+            async () => {
+              attempts++
+              if (attempts <= 3) return new Response('bad gateway', { status: 504 })
+              return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
+            },
+            {
+              now: () => 1_000_000,
+              convexToken: async () => ({ data: { token: jwtExpiringAt(1_000 + 600, ++minted) } }),
+              retryDelay: async (ms) => {
+                delays.push(ms)
+              }
+            }
+          )
+          const failed = yield* Effect.result(client.mailbox(access).status(target))
+          assert.equal(failed._tag, 'Failure')
+          assert.equal(failed.failure.reason, 'unavailable')
+          assert.equal(attempts, 3)
+          assert.deepEqual(delays, [60, 150])
+          // Next call mints a fresh token and succeeds.
+          const recovered = yield* client.mailbox(access).status(target)
+          assert.equal(recovered.status, 'NeedsEnvelope')
+          assert.equal(minted, 2)
+        })
+      )
+    )
+  }
+
+  // 3. Non-retryable statuses (401, 403, 409, 429, 500, 560) and e2ee_* refusals (even inside 503) NEVER retry.
+  const nonRetryableCases = [
+    { status: 401, body: 'unauthorized', expectedReason: 'unavailable' },
+    { status: 403, body: 'forbidden', expectedReason: 'unavailable' },
+    { status: 409, body: 'conflict', expectedReason: 'unavailable' },
+    { status: 429, body: 'rate limited', expectedReason: 'unavailable' },
+    { status: 500, body: 'internal error', expectedReason: 'unavailable' },
+    {
+      status: 560,
+      body: JSON.stringify({
+        status: 'error',
+        errorMessage: 'device revoked',
+        errorData: { code: 'e2ee_device_revoked' }
+      }),
+      expectedInstance: E2eeDeviceRevokedError
+    },
+    {
+      status: 560,
+      body: JSON.stringify({
+        status: 'error',
+        errorMessage: 'member removed',
+        errorData: { code: 'e2ee_member_removed' }
+      }),
+      expectedInstance: E2eeMemberRemovedError
+    },
+    {
+      status: 503,
+      body: JSON.stringify({ code: 'e2ee_device_unauthorized' }),
+      expectedReason: 'unavailable'
+    }
+  ]
+  for (const testCase of nonRetryableCases) {
+    let attempts = 0
+    const delays = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(
+            async () => {
+              attempts++
+              return new Response(testCase.body, { status: testCase.status })
+            },
+            {
+              retryDelay: async (ms) => {
+                delays.push(ms)
+              }
+            }
+          )
+          const failed = yield* Effect.result(client.mailbox(access).status(target))
+          assert.equal(failed._tag, 'Failure')
+          if (testCase.expectedInstance)
+            assert.equal(failed.failure instanceof testCase.expectedInstance, true)
+          else assert.equal(failed.failure.reason, testCase.expectedReason)
+        })
+      )
+    )
+    assert.equal(attempts, 1, `status ${testCase.status} must not retry`)
+    assert.deepEqual(delays, [])
+  }
+
+  // 4. Caller AbortSignal aborts immediately during retry delay without waiting for the next attempt.
+  {
+    let attempts = 0
+    const controller = new AbortController()
+    const inDelay = Promise.withResolvers()
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(
+            async () => {
+              attempts++
+              return new Response('unavailable', { status: 503 })
+            },
+            {
+              retryDelay: (_ms, signal) => {
+                inDelay.resolve()
+                return new Promise((_resolve, reject) => {
+                  signal.addEventListener('abort', () => reject(new Error('aborted')), {
+                    once: true
+                  })
+                })
+              }
+            }
+          )
+          const fiber = yield* Effect.forkChild(
+            Effect.result(client.mailbox(access).status(target, controller.signal))
+          )
+          yield* Effect.promise(() => inDelay.promise)
+          controller.abort()
+          const result = yield* Fiber.join(fiber)
+          assert.equal(result._tag, 'Failure')
+          assert.equal(result.failure.reason, 'unavailable')
+        })
+      )
+    )
+    assert.equal(attempts, 1)
   }
 })

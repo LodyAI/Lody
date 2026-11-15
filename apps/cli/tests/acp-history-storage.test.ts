@@ -511,6 +511,102 @@ describe('session history storage (integration)', () => {
     expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(2500);
   });
 
+  describe('running tool snapshots do not accumulate in the document', () => {
+    // A 32 KiB window over a build log whose start moves every update, as a
+    // carriage-return progress screen or tail window does. The prefix/suffix
+    // text diff cannot reuse it, so each stored snapshot would stay in the oplog.
+    // Deterministic pseudo-random lines keep snapshot compression from hiding that.
+    const screen = (step: number) => {
+      let seed = step + 1;
+      const word = () => {
+        seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return seed.toString(36);
+      };
+      return Array.from(
+        { length: 512 },
+        (_, line) => `[${step}:${line}] cc ${word()} ${word()} ${word()} ${word()}\r`
+      )
+        .join('\n')
+        .padEnd(32 * 1024, '.')
+        .slice(0, 32 * 1024);
+    };
+    const textContent = (text: string) => [
+      { type: 'content' as const, content: { type: 'text' as const, text } },
+    ];
+    const run = async (kind: 'execute' | 'other', completion: Record<string, unknown>) => {
+      const repo = await LoroRepo.create({});
+      const doc = new SessionDocument(repo, uuidv4() as SessionId);
+      await doc.initOffline();
+      const toolCallId = `running-${kind}`;
+      const updates: SessionNotification[] = [
+        {
+          sessionId: 'agent',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId,
+            title: 'make build-pro',
+            kind,
+            status: 'in_progress',
+          },
+        },
+        ...Array.from({ length: 60 }, (_, step) => ({
+          sessionId: 'agent',
+          update: {
+            sessionUpdate: 'tool_call_update' as const,
+            toolCallId,
+            status: 'in_progress' as const,
+            content: textContent(screen(step)),
+          },
+        })),
+        {
+          sessionId: 'agent',
+          update: { sessionUpdate: 'tool_call_update', toolCallId, ...completion },
+        },
+      ];
+      try {
+        for (const update of updates) await appendAutonomousACPNotifications(doc, update);
+        return {
+          tool: findToolCall(await doc.sessionData.history.readAll(), toolCallId),
+          snapshotBytes: doc.handle?.doc.export({ mode: 'snapshot' }).length ?? Infinity,
+        };
+      } finally {
+        await repo.destroy();
+      }
+    };
+
+    it('keeps only the bounded tail of unfenced execute output', async () => {
+      const { tool, snapshotBytes } = await run('execute', { status: 'completed' });
+      const output = tool?.content?.find((block) => block.type === 'terminal_output');
+      expect(tool?.status).toBe('completed');
+      expect(output?.type === 'terminal_output' && screen(59).endsWith(output.output)).toBe(true);
+      expect(output?.type === 'terminal_output' && output.output.length).toBeLessThanOrEqual(1024);
+      expect(snapshotBytes).toBeLessThan(16 * 1024);
+    });
+
+    it('bounds a failed execute call the same way', async () => {
+      const { tool, snapshotBytes } = await run('execute', { status: 'failed' });
+      expect(tool?.status).toBe('failed');
+      expect(tool?.content?.some((block) => block.type === 'terminal_output')).toBe(true);
+      expect(snapshotBytes).toBeLessThan(16 * 1024);
+    });
+
+    it('stores the last snapshot of another tool once it outgrows the running budget', async () => {
+      const { tool, snapshotBytes } = await run('other', { status: 'completed' });
+      expect(tool?.status).toBe('completed');
+      expect(tool?.content).toEqual(textContent(screen(59)));
+      expect(snapshotBytes).toBeLessThan(256 * 1024);
+    });
+
+    it('lets the completion content of another tool supersede deferred snapshots', async () => {
+      const { tool, snapshotBytes } = await run('other', {
+        status: 'completed',
+        content: textContent('done'),
+      });
+      expect(tool?.content).toEqual(textContent('done'));
+      expect(snapshotBytes).toBeLessThan(160 * 1024);
+    });
+  });
+
   it('should record notifications', async () => {
     const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;

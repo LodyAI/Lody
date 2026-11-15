@@ -17,7 +17,9 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   `MentionInput` for chat composer usage, and exposes `mentionActionsRef`
   (`insertSessionMention` and `insertPathMentions`) for drop-time insertion.
 - `mention-registry.ts` holds the two-level menu contract: category definitions,
-  candidate building, and `selectMentionMenuView`.
+  candidate building, and `selectMentionMenuView`. Typed `@` searches merge
+  results across categories, prioritizing available Agent Roles and then fuzzy
+  relevance. Each row identifies its source; category links follow results.
 - `mention-two-level-menu.tsx` renders that contract as the single `@` menu and
   owns the activation latch plus the `menu_open` → `category_enter` → `select`
   funnel, both through `hooks/use-fire-once` rather than private refs.

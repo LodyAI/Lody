@@ -34,6 +34,7 @@ import {
   prepareLedgerCommand,
   readFile,
   referenceKeyMailbox,
+  rm,
   signDeviceCredentialBinding,
   signLedgerRecord,
   test,
@@ -1612,6 +1613,65 @@ void test('local machine approval retains its exact signed original across resta
       })
       assert.equal(yield* owner.host.approveLocalPairing(workspaceId, original.session), null)
       assert.equal((yield* owner.host.status(workspaceId)).length, 2)
+    })
+  )
+})
+
+void test('after workspace creation (verified length 1, no prior cursor), ingesting an inline appendRecord historyPage starting at index 1 advances the verified ledger without an extra history fetch and rejects tampered records', async (t) => {
+  const directory = await fixture(t)
+  let prepared, records, suffixPage
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      prepared = yield* bind(owner)
+      records = yield* makeRecords(owner.custody, prepared, 2)
+      const opened = yield* owner.host.open(workspaceId)
+      assert.equal(opened.length, 1)
+      assert.equal(opened.position, null)
+
+      // Tampered record at index 1 must still be rejected by cryptographic verification without advancing state.
+      const tampered = records[1].slice()
+      tampered[tampered.length - 1] ^= 1
+      const tamperedPage = page([records[0], tampered], prepared.genesisHashHex, 1)
+      const rejected = yield* Effect.result(
+        owner.host.ingestLedgerRecords(workspaceId, tamperedPage)
+      )
+      assert.equal(Result.isFailure(rejected), true)
+      const afterReject = yield* owner.host.status(workspaceId)
+      assert.equal(afterReject.length, 1)
+      assert.equal(afterReject.position, null)
+
+      // Contiguous startIndex=1 suffix advances verified length to 2 without re-sending genesis.
+      suffixPage = page(records, prepared.genesisHashHex, 1)
+      assert.equal(suffixPage.startIndex, 1)
+      assert.equal(suffixPage.recordsHex.length, 1)
+      const advanced = yield* owner.host.ingestLedgerRecords(workspaceId, suffixPage)
+      assert.equal(advanced.length, 2)
+      assert.equal(advanced.position, suffixPage.position)
+      assert.equal(advanced.headHash, hex(hashRecordBytes(records[1]).toBytes()))
+      assert.equal(
+        historyDb(directory, (db) => db.prepare('SELECT COUNT(*) AS n FROM records').get().n),
+        2
+      )
+    })
+  )
+  // Deleting the disposable cache forces replay from SQLite originals, confirming full genesis->index 1 integrity.
+  await rm(join(directory, 'workspaces', workspaceId, 'ledger-feed.sqlite'), { force: true }).catch(
+    () => {}
+  )
+  const fsPromises = await import('node:fs/promises')
+  const entries = await fsPromises.readdir(join(directory, 'workspaces', workspaceId))
+  for (const entry of entries) {
+    if (entry.startsWith('ledger-feed'))
+      await rm(join(directory, 'workspaces', workspaceId, entry), { force: true })
+  }
+  await execute(
+    Effect.gen(function* () {
+      const reopened = yield* ownerWithHost(directory)
+      const status = yield* reopened.host.open(workspaceId)
+      assert.equal(status.length, 2)
+      assert.equal(status.position, suffixPage.position)
+      assert.equal(status.headHash, hex(hashRecordBytes(records[1]).toBytes()))
     })
   )
 })

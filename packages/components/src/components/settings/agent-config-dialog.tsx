@@ -643,8 +643,6 @@ const styles = stylex.create({
 // Preset definitions
 // =============================================================================
 
-export const DEEPSEEK_CLAUDE_PRESET_ID = 'deepseek-over-claude-code';
-export const DEEPSEEK_REASONIX_PRESET_ID = 'deepseek-reasonix';
 const LEGACY_DSH_MODELS_ENV = 'ACP_EXTENSION_DSH_MODELS';
 type DeepSeekEndpointMode = 'official' | 'custom';
 export const MIMO_CLAUDE_PRESET_ID = 'mimo-over-claude-code';
@@ -657,8 +655,6 @@ export const GLM_BIGMODEL_CREDENTIAL_MODE_ID = 'bigmodel';
 export const GLM_ZAI_CREDENTIAL_MODE_ID = 'zai';
 
 type PresetId =
-  | typeof DEEPSEEK_CLAUDE_PRESET_ID
-  | typeof DEEPSEEK_REASONIX_PRESET_ID
   | typeof MIMO_CLAUDE_PRESET_ID
   | typeof MINIMAX_CLAUDE_PRESET_ID
   | typeof GLM_CLAUDE_PRESET_ID;
@@ -731,56 +727,6 @@ type PresetDefinition = {
   credentialModeGroupLabelDefault?: string;
   credentialModeGroupHintKey?: string;
   credentialModeGroupHintDefault?: string;
-};
-
-const DEEPSEEK_CLAUDE_PRESET: PresetDefinition = {
-  id: DEEPSEEK_CLAUDE_PRESET_ID,
-  brandId: 'deepseek',
-  label: 'DeepSeek over Claude Code',
-  labelKey: 'settings.agent.dialog.preset.deepseekClaude.label',
-  descriptionKey: 'settings.agent.dialog.preset.deepseekClaude.description',
-  descriptionDefault: 'Route Claude Code through DeepSeek — just paste your API token.',
-  cliType: 'builtin',
-  agentType: 'claude',
-  badge: 'Preset',
-  tokenLabelKey: 'settings.agent.dialog.preset.deepseekClaude.tokenLabel',
-  tokenLabelDefault: 'DeepSeek API token',
-  tokenPlaceholderKey: 'settings.agent.dialog.preset.deepseekClaude.tokenPlaceholder',
-  tokenPlaceholderDefault: 'sk-XXXXXXXXXXXX',
-  tokenHelpKey: 'settings.agent.dialog.preset.deepseekClaude.tokenHelp',
-  tokenHelpDefault: 'Create or copy one at platform.deepseek.com.',
-  tokenEnvKey: 'ANTHROPIC_AUTH_TOKEN',
-  fixedEnv: {
-    ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
-    ANTHROPIC_MODEL: 'deepseek-v4-pro[1m]',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash',
-    CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-v4-pro',
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-    CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: '1',
-    CLAUDE_CODE_EFFORT_LEVEL: 'max',
-  },
-};
-
-const DEEPSEEK_REASONIX_PRESET: PresetDefinition = {
-  id: DEEPSEEK_REASONIX_PRESET_ID,
-  brandId: 'deepseek',
-  label: 'DeepSeek Reasonix',
-  labelKey: 'settings.agent.dialog.preset.deepseekReasonix.label',
-  descriptionKey: 'settings.agent.dialog.preset.deepseekReasonix.description',
-  descriptionDefault: 'Run DeepSeek Reasonix through ACP — just paste your API token.',
-  cliType: 'registry',
-  agentType: 'reasonix',
-  badge: 'Preset',
-  tokenLabelKey: 'settings.agent.dialog.preset.deepseekReasonix.tokenLabel',
-  tokenLabelDefault: 'DeepSeek API token',
-  tokenPlaceholderKey: 'settings.agent.dialog.preset.deepseekReasonix.tokenPlaceholder',
-  tokenPlaceholderDefault: 'sk-XXXXXXXXXXXX',
-  tokenHelpKey: 'settings.agent.dialog.preset.deepseekReasonix.tokenHelp',
-  tokenHelpDefault: 'Create or copy one at platform.deepseek.com.',
-  tokenEnvKey: 'DEEPSEEK_API_KEY',
-  fixedEnv: {},
 };
 
 const MIMO_TOKEN_PLAN_BASE_URL_OPTIONS: PresetBaseUrlOption[] = [
@@ -979,13 +925,7 @@ const GLM_CLAUDE_PRESET: PresetDefinition = {
   ],
 };
 
-const PRESETS: PresetDefinition[] = [
-  DEEPSEEK_CLAUDE_PRESET,
-  DEEPSEEK_REASONIX_PRESET,
-  MIMO_CLAUDE_PRESET,
-  MINIMAX_CLAUDE_PRESET,
-  GLM_CLAUDE_PRESET,
-];
+const PRESETS: PresetDefinition[] = [GLM_CLAUDE_PRESET, MIMO_CLAUDE_PRESET, MINIMAX_CLAUDE_PRESET];
 const PRESETS_BY_ID: Record<string, PresetDefinition> = Object.fromEntries(
   PRESETS.map((p) => [p.id, p])
 );
@@ -1012,13 +952,64 @@ type AgentTypeOption = {
 const BUILTIN_OPTIONS: AgentTypeOption[] = [
   {
     kind: 'builtin',
-    value: 'builtin:sorbet',
-    label: 'Lody Agent',
-    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
-    descriptionDefault: 'An agent harness for work that outlives one conversation. Built for Lody.',
+    value: 'builtin:codex',
+    label: 'Codex',
+    descriptionKey: 'settings.agent.dialog.option.codex.description',
+    descriptionDefault: 'OpenAI Codex runtime',
     cliType: 'builtin',
-    agentType: 'sorbet',
-    searchKeys: 'lody agent sorbet',
+    agentType: 'codex',
+    searchKeys: 'codex openai',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:claude',
+    label: 'Claude',
+    descriptionKey: 'settings.agent.dialog.option.claude.description',
+    descriptionDefault: 'Anthropic Claude Code runtime',
+    cliType: 'builtin',
+    agentType: 'claude',
+    searchKeys: 'claude anthropic',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:antigravity',
+    label: 'Antigravity',
+    descriptionKey: 'settings.agent.dialog.option.antigravity.description',
+    descriptionDefault: 'Google Antigravity CLI with automatic installation',
+    cliType: 'builtin',
+    agentType: 'antigravity',
+    searchKeys: 'google antigravity agy',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:deepseek',
+    label: 'DeepSeek Harness',
+    descriptionKey: 'settings.agent.dialog.option.deepseek.description',
+    descriptionDefault: 'DeepSeek coding agent over ACP (developer preview)',
+    cliType: 'builtin',
+    agentType: 'deepseek',
+    experimental: true,
+    searchKeys: 'deepseek harness dsh acp',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:grok',
+    label: 'Grok',
+    descriptionKey: 'settings.agent.dialog.option.grok.description',
+    descriptionDefault: 'xAI Grok coding agent runtime',
+    cliType: 'builtin',
+    agentType: 'grok',
+    searchKeys: 'grok xai',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:pi',
+    label: 'Pi',
+    descriptionKey: 'settings.agent.dialog.option.pi.description',
+    descriptionDefault: 'Lody-managed Pi ACP runtime',
+    cliType: 'builtin',
+    agentType: 'pi',
+    searchKeys: 'pi acp',
   },
   {
     kind: 'builtin',
@@ -1042,54 +1033,13 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
-    value: 'builtin:grok',
-    label: 'Grok',
-    descriptionKey: 'settings.agent.dialog.option.grok.description',
-    descriptionDefault: 'xAI Grok coding agent runtime',
+    value: 'builtin:bub',
+    label: 'Bub',
+    descriptionKey: 'settings.agent.dialog.option.bub.description',
+    descriptionDefault: 'Bub agent runtime over ACP (install the bub-acp-server plugin)',
     cliType: 'builtin',
-    agentType: 'grok',
-    searchKeys: 'grok xai',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:claude',
-    label: 'Claude',
-    descriptionKey: 'settings.agent.dialog.option.claude.description',
-    descriptionDefault: 'Anthropic Claude Code runtime',
-    cliType: 'builtin',
-    agentType: 'claude',
-    searchKeys: 'claude anthropic',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:codex',
-    label: 'Codex',
-    descriptionKey: 'settings.agent.dialog.option.codex.description',
-    descriptionDefault: 'OpenAI Codex runtime',
-    cliType: 'builtin',
-    agentType: 'codex',
-    searchKeys: 'codex openai',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:deepseek',
-    label: 'DeepSeek Harness',
-    descriptionKey: 'settings.agent.dialog.option.deepseek.description',
-    descriptionDefault: 'DeepSeek coding agent over ACP (developer preview)',
-    cliType: 'builtin',
-    agentType: 'deepseek',
-    experimental: true,
-    searchKeys: 'deepseek harness dsh acp',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:pi',
-    label: 'Pi',
-    descriptionKey: 'settings.agent.dialog.option.pi.description',
-    descriptionDefault: 'Lody-managed Pi ACP runtime',
-    cliType: 'builtin',
-    agentType: 'pi',
-    searchKeys: 'pi acp',
+    agentType: 'bub',
+    searchKeys: 'bub bubbuild acp',
   },
   {
     kind: 'builtin',
@@ -1103,13 +1053,13 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
-    value: 'builtin:bub',
-    label: 'Bub',
-    descriptionKey: 'settings.agent.dialog.option.bub.description',
-    descriptionDefault: 'Bub agent runtime over ACP (install the bub-acp-server plugin)',
+    value: 'builtin:sorbet',
+    label: 'Lody Agent',
+    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
+    descriptionDefault: 'An agent harness for work that outlives one conversation. Built for Lody.',
     cliType: 'builtin',
-    agentType: 'bub',
-    searchKeys: 'bub bubbuild acp',
+    agentType: 'sorbet',
+    searchKeys: 'lody agent sorbet',
   },
 ];
 
@@ -1808,19 +1758,21 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
-      : formData.agentType === 'codex'
-        ? 'codexPath'
-        : formData.agentType === 'claude'
-          ? 'claudeCodeExecutable'
-          : formData.agentType === 'kimi'
-            ? 'kimiPath'
-            : formData.agentType === 'devin'
-              ? 'devinPath'
-              : formData.agentType === 'grok'
-                ? 'grokPath'
-                : formData.agentType === 'pi'
-                  ? 'piPath'
-                  : null;
+      : formData.agentType === 'antigravity'
+        ? 'antigravityPath'
+        : formData.agentType === 'codex'
+          ? 'codexPath'
+          : formData.agentType === 'claude'
+            ? 'claudeCodeExecutable'
+            : formData.agentType === 'kimi'
+              ? 'kimiPath'
+              : formData.agentType === 'devin'
+                ? 'devinPath'
+                : formData.agentType === 'grok'
+                  ? 'grokPath'
+                  : formData.agentType === 'pi'
+                    ? 'piPath'
+                    : null;
   const builtinRuntimeOverrideValue = builtinRuntimeOverrideKey
     ? (formData.runtimeOverrides?.[builtinRuntimeOverrideKey] ?? '')
     : '';
@@ -3106,35 +3058,40 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                     value={builtinRuntimeOverrideValue}
                     onChange={(event) => updateBuiltinRuntimeOverride(event.target.value)}
                     placeholder={
-                      formData.agentType === 'codex'
+                      formData.agentType === 'antigravity'
                         ? t(
-                            'settings.agent.dialog.runtimeOverride.codexPlaceholder',
-                            '/path/to/codex'
+                            'settings.agent.dialog.runtimeOverride.antigravityPlaceholder',
+                            '/path/to/agy'
                           )
-                        : formData.agentType === 'kimi'
+                        : formData.agentType === 'codex'
                           ? t(
-                              'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
-                              '/path/to/kimi'
+                              'settings.agent.dialog.runtimeOverride.codexPlaceholder',
+                              '/path/to/codex'
                             )
-                          : formData.agentType === 'devin'
+                          : formData.agentType === 'kimi'
                             ? t(
-                                'settings.agent.dialog.runtimeOverride.devinPlaceholder',
-                                '/path/to/devin'
+                                'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
+                                '/path/to/kimi'
                               )
-                            : formData.agentType === 'grok'
+                            : formData.agentType === 'devin'
                               ? t(
-                                  'settings.agent.dialog.runtimeOverride.grokPlaceholder',
-                                  '/path/to/grok'
+                                  'settings.agent.dialog.runtimeOverride.devinPlaceholder',
+                                  '/path/to/devin'
                                 )
-                              : formData.agentType === 'pi'
+                              : formData.agentType === 'grok'
                                 ? t(
-                                    'settings.agent.dialog.runtimeOverride.piPlaceholder',
-                                    '/path/to/pi'
+                                    'settings.agent.dialog.runtimeOverride.grokPlaceholder',
+                                    '/path/to/grok'
                                   )
-                                : t(
-                                    'settings.agent.dialog.runtimeOverride.claudePlaceholder',
-                                    '/path/to/claude'
-                                  )
+                                : formData.agentType === 'pi'
+                                  ? t(
+                                      'settings.agent.dialog.runtimeOverride.piPlaceholder',
+                                      '/path/to/pi'
+                                    )
+                                  : t(
+                                      'settings.agent.dialog.runtimeOverride.claudePlaceholder',
+                                      '/path/to/claude'
+                                    )
                     }
                     autoComplete="off"
                     spellCheck={false}

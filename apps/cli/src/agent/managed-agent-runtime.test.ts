@@ -765,6 +765,8 @@ describe('ManagedAgentRuntimeManager', () => {
       });
       resetMuslLibcCacheForTests(true);
       expect(mapManagedRuntimePlatform('claude-code', 'linux', 'x64')).toBe('linux-x64-musl');
+      expect(mapManagedRuntimePlatform('antigravity', 'linux', 'x64')).toBe('linux-x64-musl');
+      expect(mapManagedRuntimePlatform('antigravity', 'linux', 'arm64')).toBe('linux-arm64-musl');
       expect(mapManagedRuntimePlatform('claude-code', 'linux', 'arm64')).toBe('linux-arm64-musl');
       expect(mapManagedRuntimePlatform('codex', 'linux', 'x64')).toBe('linux-x64');
       expect(mapManagedRuntimePlatform('grok-build', 'linux', 'arm64')).toBe('linux-arm64');

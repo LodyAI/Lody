@@ -8,11 +8,11 @@ PR: https://github.com/LodyAI/Lody/pull/1535
 
 ## Abstract
 
-Composer and Agent settings previously displayed quota without asking for a current reading. Lody now projects Core's existing `rateLimits` capability into its Provider cache and requests an independent quota read when eligible UI becomes visible. A daemon-owned, short-lived ACP process queries independently; Core queries need no session, while official registry Antigravity uses an isolated `/usage` session. Failed or ambiguous empty responses preserve cached quota; authoritative snapshot replacement and freshness timestamps remain deferred.
+Composer and Agent settings previously displayed quota without asking for a current reading. Lody now projects Core's existing `rateLimits` capability into its Provider cache and requests an independent quota read when eligible UI becomes visible. A daemon-owned, short-lived ACP process queries independently; Core queries need no session, while legacy registry Antigravity uses an isolated `/usage` session and builtin Antigravity uses agy's zero-turn JSON command. Failed or ambiguous empty responses preserve cached quota; authoritative snapshot replacement and freshness timestamps remain deferred.
 
 ## Contract and ownership
 
-Core already defines `_lody/rate_limits/get` and `{version: 1, query?: true}`. No Core, adapter, managed artifact, or dependency pin changes are required. Display requires a runtime declaration or the official registry Antigravity compatibility reader; refresh additionally requires `query: true` and Machine protocol `providerRateLimitsRefresh: 1`. Push-only providers can display existing quota. Builtin environment/brand overrides and Codex API-key profiles remain ineligible; custom ACP providers own their declared account semantics.
+Core already defines `_lody/rate_limits/get` and `{version: 1, query?: true}`. The shared Core query contract remains unchanged. Display requires a runtime declaration or an official Antigravity compatibility reader; refresh additionally requires `query: true` and Machine protocol `providerRateLimitsRefresh: 1`. Push-only providers can display existing quota. Builtin environment/brand overrides and Codex API-key profiles remain ineligible; custom ACP providers own their declared account semantics.
 
 The UI hook refreshes on visible composer/provider activation, foreground return, and popover opening. The workspace runtime coalesces requests and uses its existing local-control or Machine RPC route, then reconciles existing Flock handles. There is no polling, new subscription, guessed percentage, or loading overlay.
 
@@ -20,13 +20,30 @@ The RPC accepts only a persisted config ID plus routing identifiers. The daemon 
 
 Requests share a Provider/config-fingerprint owner: 15-second successful TTL, 5-second failure backoff, and bounded settled metadata. Existing ACP startup admission controls launch concurrency. A changed config waits for the previous raw operation to settle. UI unmount does not terminate shared work. Query timeout is 20 seconds after process startup, within a 45-second overall signal.
 
-## Official Antigravity compatibility
+## Legacy Antigravity compatibility
 
 Google’s registry ACP server 1.4.5 advertises `/usage`, but no Core `rateLimits` extension. Lody projects its own query capability for that registry entry. The query checks the server identity, creates a unique temporary workdir and ACP session without MCP servers, and waits for that session’s command announcement before submitting `/usage`. Missing commands never become model prompts. Custom namesakes remain unsupported unless they declare Core support themselves.
 
 The streamed Markdown quota section becomes one Provider-level bucket with named weekly/five-hour windows. This preserves all model groups in existing settings and composer readers without guessing model-to-pool membership. Remaining percentages become used percentages; zero remains exhausted, and absent or unparseable UTC resets remain unknown. Output is bounded; incomplete, unavailable or malformed readings fail without replacing cached data. No history is written to Lody; the upstream may retain its own temporary session metadata.
 
 The selected Provider’s official executable and account environment stay authoritative. A separate `agy` could select another login; private Google endpoints would require another credential reader and undocumented protocol. Existing process ownership, deadlines, cleanup quarantine and config/push fences apply. Scratch cleanup follows confirmed process cleanup; an unconfirmed tree retains its scratch directory with its quarantined Provider. The external ACP SDK remains a Promise boundary, so this compatibility read does not claim a native Effect migration.
+
+## Builtin Antigravity
+
+The builtin Provider runs official agy, so its quota reader can use the same
+selected executable and account environment as the ACP session. It invokes
+`--print /usage --output-format json`, requires a successful `usage` command with
+`num_turns: 0`, and validates all reported weekly/five-hour fractions and reset
+instants. No credentials are read by Lody. Account-selecting extra arguments and
+Magpie routing remain unsupported for this reader rather than selecting a
+different account. Unknown/malformed output preserves cached quota.
+
+A native Effect command owns this bounded read-only process: the Provider refresh
+starts it, cancellation/timeout terminates its tree, and completion or failure
+reaches the existing refresh owner. No ACP session or model turn is created. The
+upper Provider cache and ACP workflows retain their existing Promise boundaries.
+The new builtin is independently identified; the deprecated registry Provider
+keeps its launcher and sessions rather than being silently rewritten.
 
 ## Persistence and ordering
 

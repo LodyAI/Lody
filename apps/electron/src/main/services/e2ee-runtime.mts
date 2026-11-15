@@ -1469,13 +1469,20 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const ingest = Effect.fnUntraced(function* (page: E2eeWorkspaceHistoryPage) {
           const state = yield* feed.current()
           const start = state.bootstrap ? 0 : state.view.length
+          const bootstrapGenesisSuffix =
+            state.bootstrap &&
+            invitation === undefined &&
+            state.view.length === 1 &&
+            page?.startIndex === 1 &&
+            Array.isArray(page?.recordsHex) &&
+            page.recordsHex.length > 0
           if (
             !page ||
             page.workspaceId !== workspaceId ||
             page.genesisHash !== creation.genesisHash ||
             !Number.isSafeInteger(page.startIndex) ||
             page.startIndex < 0 ||
-            page.startIndex > start ||
+            (!bootstrapGenesisSuffix && page.startIndex > start) ||
             (invitation !== undefined && page.startIndex < initialCount) ||
             !Array.isArray(page.recordsHex) ||
             page.recordsHex.length > 64 ||
@@ -1556,7 +1563,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               {
                 requestOffset: state.offset,
                 nextOffset: page.position,
-                records: records.slice(overlap),
+                records: bootstrapGenesisSuffix
+                  ? [creation.record, ...records]
+                  : records.slice(overlap),
                 upToDate: page.nextCursor === null
               },
               { head, length }
