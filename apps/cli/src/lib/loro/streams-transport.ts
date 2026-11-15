@@ -1,3 +1,4 @@
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
   WorkspaceStreamsConfigurationError,
   type WorkspaceStreamsContent,
@@ -14,7 +15,6 @@ import {
   isCodeCollabFileIndexFlockDocId,
   isCodeCollabFileIndexSignalFlockDocId,
   LORO_STREAMS_BUCKET_ID,
-  streamsSnapshotCodec,
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';

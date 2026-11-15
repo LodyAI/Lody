@@ -1,3 +1,7 @@
+import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
@@ -14,7 +18,6 @@ import {
   getLoroStreamsPresenceBaseUrl,
   getLoroStreamsShardUrls,
   normalizeLoroStreamsShardHostSuffix,
-  streamsSnapshotCodec,
   type SessionId,
   type WorkspaceId,
 } from '../src';
@@ -23,6 +26,30 @@ const workspaceId = 'workspace-1' as WorkspaceId;
 const sessionId = 'session-1' as SessionId;
 
 describe('loro streams helpers', () => {
+  it('lets a Convex isolate bundle and execute protocol helpers without loading snapshot compression', async () => {
+    const result = await build({
+      stdin: {
+        contents:
+          'import { getServerNow } from "@lody/shared"; globalThis.clockResult = getServerNow();',
+        resolveDir: fileURLToPath(new URL('..', import.meta.url)),
+      },
+      bundle: true,
+      platform: 'browser',
+      format: 'iife',
+      write: false,
+      logLevel: 'silent',
+    });
+    const context = {
+      Date: class extends Date {
+        static now() {
+          return 123456;
+        }
+      },
+      clockResult: 0,
+    };
+    runInNewContext(result.outputFiles[0]!.text, context);
+    expect(context.clockResult).toBe(123456);
+  });
   it('requires an injected base url and normalizes it', () => {
     expect(DEFAULT_LORO_STREAMS_BASE_URL).toBe('https://streams.invalid');
     expect(() => getLoroStreamsBaseUrl(undefined)).toThrow(/must be provided/);

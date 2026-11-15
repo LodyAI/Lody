@@ -1,3 +1,4 @@
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
   WorkspaceStreamsConfigurationError,
   requirePlaintextWorkspaceStreamsContent,
@@ -17,7 +18,6 @@ import {
   getMachineRoomId,
   isSessionDocRoomId,
   LORO_STREAMS_BUCKET_ID,
-  streamsSnapshotCodec,
   type MachineId,
   type WorkspaceId,
 } from '@lody/shared';

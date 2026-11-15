@@ -1,3 +1,4 @@
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 /**
  * Web tabs (and a reloaded primary window) of one workspace open the same repo
  * IndexedDB and the same LoroDoc cursor database, each with its own in-memory
@@ -34,7 +35,6 @@ import {
   createLoroStreamUrl,
   getLoroStreamIdForDocId,
   LORO_STREAMS_BUCKET_ID,
-  streamsSnapshotCodec,
   type WorkspaceId,
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
