@@ -7,7 +7,13 @@ import type {
 } from '@lody/shared';
 import { resolveLocalProjectForApp } from './app';
 import { resolveAppResetCacheAction } from './app-reset-cache';
+import { feedbackCommand } from './feedback';
+import { createWorkspaceSummary, syncItems } from './sync';
 import { buildOpenLocalProjectDeepLink } from '@/lib/desktop-deep-link';
+import {
+  assertAgentFeedbackHasNoObviousSecret,
+  collectAgentFeedbackSystemInfo,
+} from '@/lib/feedback';
 
 const MACHINE_ID = 'machine-1' as MachineId;
 const ROOT_PATH = '/tmp/lody-app-test-project';
@@ -165,5 +171,80 @@ describe('lody app reset-cache', () => {
     expect(() => resolveAppResetCacheAction({ cancel: true, hard: true })).toThrow(
       /--cancel or --hard/
     );
+  });
+});
+
+describe('resolveFeedbackText', () => {
+  it('preserves option-like tokens after positional feedback begins', () => {
+    expect(
+      feedbackCommand.parseOptions([
+        'The',
+        '--wait',
+        'flag',
+        'and',
+        '--json',
+        'output',
+        'are',
+        'confusing',
+      ]).operands
+    ).toEqual(['The', '--wait', 'flag', 'and', '--json', 'output', 'are', 'confusing']);
+  });
+});
+
+describe('agent feedback validation', () => {
+  it('rejects obvious secret patterns and allows normal product feedback', () => {
+    expect(() =>
+      assertAgentFeedbackHasNoObviousSecret('-----BEGIN RSA PRIVATE KEY-----\nabc')
+    ).toThrow(/secret/i);
+    expect(() =>
+      assertAgentFeedbackHasNoObviousSecret('Authorization: Bearer abcdefghijklmnop1234')
+    ).toThrow(/secret/i);
+    expect(() => assertAgentFeedbackHasNoObviousSecret('key sk-proj-abcdefghijklmnop1234')).toThrow(
+      /secret/i
+    );
+    expect(() => assertAgentFeedbackHasNoObviousSecret('api_key=supersecretvalue123')).toThrow(
+      /secret/i
+    );
+    expect(() =>
+      assertAgentFeedbackHasNoObviousSecret('Please add --json output to session list.')
+    ).not.toThrow();
+    expect(collectAgentFeedbackSystemInfo('1.2.3')).toEqual({
+      cliVersion: '1.2.3',
+      platform: process.platform,
+      arch: process.arch,
+    });
+  });
+});
+
+describe('sync command helpers', () => {
+  it('continues syncing remaining items after one item fails', async () => {
+    const summary = createWorkspaceSummary('workspace-1');
+    const syncOne = vi.fn(async (id: string) => {
+      if (id === 'doc-2') {
+        throw new Error('network unavailable');
+      }
+    });
+
+    await syncItems({
+      summary,
+      kind: 'doc',
+      ids: ['doc-1', 'doc-2', 'doc-3'],
+      concurrency: 2,
+      outputMode: 'json',
+      syncOne,
+    });
+
+    expect(syncOne).toHaveBeenCalledTimes(3);
+    expect(summary.totals.doc).toBe(3);
+    expect(summary.completed.doc).toBe(2);
+    expect(summary.failed.doc).toBe(1);
+    expect(summary.failures).toEqual([
+      {
+        workspaceId: 'workspace-1',
+        kind: 'doc',
+        id: 'doc-2',
+        error: 'network unavailable',
+      },
+    ]);
   });
 });

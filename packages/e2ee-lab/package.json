@@ -50,7 +50,7 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run --no-file-parallelism",
+    "test": "vitest run",
     "check": "pnpm typecheck && pnpm test",
     "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts' 'test/**/*.mts'",
     "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts' 'test/**/*.mts'",

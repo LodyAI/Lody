@@ -44,6 +44,7 @@ import {
   rethrowWorktreeGitInfrastructureFailure,
   worktreeGitLegacy,
 } from '../src/session/worktree/git-execution-legacy';
+import { isWorkspaceDirty, type GitRunner } from '../src/lib/git/git-diff-stats';
 
 const nativeError = <A, E>(exit: Exit.Exit<A, E>) =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
@@ -404,5 +405,19 @@ describe('worktree Git execution boundary', () => {
       stderr: '',
     });
     expect(() => rethrowWorktreeGitInfrastructureFailure(absent)).not.toThrow();
+  });
+});
+
+describe('git diff stats', () => {
+  it('returns undefined (unknown, NOT clean) when git status throws — a transient spawn failure', async () => {
+    const runGit: GitRunner = async (args) => {
+      const key = args.join(' ');
+      if (key === 'status --porcelain') throw new Error('spawn git ENOMEM');
+      throw new Error(`Unexpected git args: ${key}`);
+    };
+
+    // Must NOT be `false`: a transient failure that read as "clean" hid the
+    // Create PR / Commit & Push actions on genuinely dirty sessions.
+    await expect(isWorkspaceDirty(runGit)).resolves.toBeUndefined();
   });
 });

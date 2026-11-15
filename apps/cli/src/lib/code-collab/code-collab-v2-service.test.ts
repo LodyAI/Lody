@@ -4,11 +4,21 @@ import { symlink, utimes } from 'node:fs/promises';
 import { encodeSessionFilePath } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import * as processCommands from '@lody/shared/node/process';
 
 import {
@@ -1962,10 +1972,26 @@ describe('CodeCollabV2Service text RPC boundary', () => {
   });
 });
 
+let gitInitSeedDir: string | undefined;
+
+afterAll(async () => {
+  if (gitInitSeedDir) {
+    await rm(gitInitSeedDir, { recursive: true, force: true });
+    gitInitSeedDir = undefined;
+  }
+});
+
 async function initGitRepoWithCommit(workspaceRoot: string): Promise<void> {
-  await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init'], { cwd: workspaceRoot });
-  await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: workspaceRoot });
-  await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: workspaceRoot });
+  if (!gitInitSeedDir) {
+    const seed = await mkdtemp(path.join(tmpdir(), 'lody-cc-git-seed-'));
+    await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init'], { cwd: seed });
+    await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: seed });
+    await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: seed });
+    gitInitSeedDir = seed;
+  }
+  await cp(path.join(gitInitSeedDir, '.git'), path.join(workspaceRoot, '.git'), {
+    recursive: true,
+  });
 }
 
 async function gitCommitAll(workspaceRoot: string, message: string): Promise<void> {

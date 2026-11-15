@@ -9,6 +9,16 @@ import {
   summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
 } from '../src';
+import {
+  classifyPermissionModeFace,
+  getBuiltinDefaultModeId,
+  getManagedBuiltinRuntimeByAgentType,
+  getManagedBuiltinRuntimeByRuntimeName,
+  hasBuiltinRuntimeOverrideValues,
+  isBuiltinAgentType,
+  isManagedBuiltinAgentType,
+  supportsBuiltinProviderSetup,
+} from '../src/ai';
 
 describe('builtin independent Plan preflight', () => {
   it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
@@ -587,5 +597,64 @@ describe('observed per-model option lists', () => {
       },
       { id: 'adaptive', name: 'adaptive', reasoningEffortValues: [] },
     ]);
+  });
+});
+
+describe('builtin agent static contracts', () => {
+  it('waits for a live probe before advertising DeepSeek or Bub endpoint-dependent options', () => {
+    const deepseek = getStaticBuiltinAcpCapabilities('builtin', 'deepseek');
+    expect(deepseek?.models).toEqual([]);
+    expect(deepseek?.configOptions.map((option) => option.id)).toEqual([
+      'plan_mode',
+      'mode',
+      'agent_preset',
+    ]);
+    expect(getStaticBuiltinAcpCapabilities('builtin', 'bub')).toBeUndefined();
+    expect(getBuiltinDefaultModeId('builtin', 'bub')).toBeUndefined();
+  });
+
+  it('accepts Sorbet into the verification queue without treating it as a managed runtime', () => {
+    expect(isBuiltinAgentType('sorbet')).toBe(true);
+    expect(isManagedBuiltinAgentType('sorbet')).toBe(false);
+    expect(supportsBuiltinProviderSetup('sorbet')).toBe(true);
+    expect(supportsBuiltinProviderSetup('unknown')).toBe(false);
+  });
+
+  it('maps Grok and Kimi builtins to managed runtimes, approval faces, defaults, and override invalidation', () => {
+    expect(isBuiltinAgentType('grok')).toBe(true);
+    expect(getManagedBuiltinRuntimeByAgentType('grok')).toEqual({
+      runtimeName: 'grok-build',
+      agentType: 'grok',
+      displayName: 'Grok',
+    });
+    expect(getManagedBuiltinRuntimeByRuntimeName('grok-build')?.agentType).toBe('grok');
+    expect(classifyPermissionModeFace('always-approve')).toEqual({
+      kind: 'full-access',
+      tone: 'warning',
+      render: 'icon',
+    });
+    expect(hasBuiltinRuntimeOverrideValues({ grokPath: ' /opt/grok ' })).toBe(true);
+    expect(
+      getStaticBuiltinAcpCapabilities('builtin', 'grok', { grokPath: '/opt/grok' })
+    ).toBeUndefined();
+
+    expect(isBuiltinAgentType('kimi')).toBe(true);
+    expect(getManagedBuiltinRuntimeByAgentType('kimi')?.runtimeName).toBe('kimi-code');
+    expect(getManagedBuiltinRuntimeByRuntimeName('kimi-code')?.agentType).toBe('kimi');
+    expect(getStaticBuiltinAcpCapabilities('builtin', 'kimi')?.models).toEqual([]);
+    expect(classifyPermissionModeFace('yolo')).toEqual({
+      kind: 'full-access',
+      tone: 'warning',
+      render: 'icon',
+    });
+    expect(getBuiltinDefaultModeId('builtin', 'codex')).toBe('agent-auto-review');
+    expect(getBuiltinDefaultModeId('builtin', 'claude')).toBe('auto');
+    expect(getBuiltinDefaultModeId('builtin', 'kimi')).toBe('auto');
+    expect(getBuiltinDefaultModeId('registry', 'codex')).toBeUndefined();
+    expect(getBuiltinDefaultModeId('builtin', 'other')).toBeUndefined();
+    expect(hasBuiltinRuntimeOverrideValues({ kimiPath: ' /opt/kimi ' })).toBe(true);
+    expect(
+      getStaticBuiltinAcpCapabilities('builtin', 'kimi', { kimiPath: '/opt/kimi' })
+    ).toBeUndefined();
   });
 });

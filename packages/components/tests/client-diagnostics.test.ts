@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { collectClientDiagnostics } from '../src/lib/client-diagnostics';
 import { readClientLog } from '../src/lib/client-log';

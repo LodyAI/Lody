@@ -1,7 +1,6 @@
+// @vitest-environment jsdom
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
-// @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SessionId } from '@lody/shared';

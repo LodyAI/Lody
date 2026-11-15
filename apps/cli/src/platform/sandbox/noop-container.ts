@@ -1,8 +1,7 @@
 import { Effect, Scope, Exit } from 'effect';
 import { ChildProcessSpawner } from 'effect/process';
 
-import { SpawnFailed } from '@lody/shared/node/process';
-import { spawnProcess } from '@lody/shared/node/process';
+import { SpawnFailed, spawnProcess, type TerminationPolicy } from '@lody/shared/node/process';
 
 import { FORCED_TERMINATION, type ProcessContainer } from './types';
 
@@ -17,6 +16,7 @@ export { LINGERING_GROUP_PROBE_INTERVAL } from './process-tree-registry';
 export const makeNoopContainer = Effect.fnUntraced(function* (options: {
   readonly description: string;
   readonly configureProcess: (pid: number) => Effect.Effect<void>;
+  readonly terminationPolicy?: (force: boolean) => TerminationPolicy;
 }): Effect.fn.Return<
   ProcessContainer,
   never,
@@ -25,6 +25,10 @@ export const makeNoopContainer = Effect.fnUntraced(function* (options: {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Effect.scope;
   const registry = yield* makeProcessTreeRegistry;
+  const forcedPolicy = options.terminationPolicy
+    ? options.terminationPolicy(true)
+    : FORCED_TERMINATION;
+  const releasePolicy = options.terminationPolicy ? options.terminationPolicy(false) : undefined;
 
   const container: ProcessContainer = {
     enabled: false,
@@ -44,9 +48,10 @@ export const makeNoopContainer = Effect.fnUntraced(function* (options: {
               (childScope) =>
                 Scope.provide(
                   Effect.gen(function* () {
-                    const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
-                      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
-                    );
+                    const managed = yield* spawnProcess(
+                      { ...spec, processGroup: true },
+                      releasePolicy
+                    ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
                     const pid = managed.child.pid;
                     if (typeof pid === 'number' && pid > 0) {
                       const releaseWhenDone = yield* registry.track(managed);
@@ -72,7 +77,7 @@ export const makeNoopContainer = Effect.fnUntraced(function* (options: {
     })),
     cleanup: Effect.suspend(() =>
       container
-        .terminateAll(FORCED_TERMINATION)
+        .terminateAll(forcedPolicy)
         .pipe(Effect.catch((error) => Effect.logWarning(error.message)))
     ),
   };

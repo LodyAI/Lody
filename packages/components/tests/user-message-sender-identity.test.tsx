@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -137,9 +135,7 @@ describe('user message sender identity', () => {
     expect(
       container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
     ).toContain('Reviewer');
-    expect(
-      container?.querySelector('[data-testid="user-message-source-session-link"]')
-    ).toBeNull();
+    expect(container?.querySelector('[data-testid="user-message-source-session-link"]')).toBeNull();
     expect(container?.textContent).toContain('🔎');
     expect(container?.querySelector('button[aria-label="View profile for Maya Chen"]')).toBeNull();
     const trigger = container?.querySelector('button[aria-label="View sender: Reviewer"]');

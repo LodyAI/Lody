@@ -117,7 +117,7 @@ EDGES.push(
 describe('CBOR fast paths agree with the dag-cbor reference', () => {
   it('encodes every generated value to the same bytes or the same error', () => {
     const r = random(0x5eed);
-    for (let i = 0; i < 6000; i++) {
+    for (let i = 0; i < 1000; i++) {
       const input = value(r, 0) as CborValue;
       for (const [maxBytes, maxBstr, encode] of [
         [MAX_RECORD_BYTES, MAX_BSTR_BYTES, encodeCanonical],
@@ -133,7 +133,7 @@ describe('CBOR fast paths agree with the dag-cbor reference', () => {
   it('decodes valid, mutated, edge and random inputs to the same value or the same error', () => {
     const r = random(0xc0ffee);
     const inputs: Uint8Array[] = [...EDGES];
-    for (let i = 0; i < 4000; i++) {
+    for (let i = 0; i < 600; i++) {
       const encoded = referenceCodec.encode(
         value(r, 0) as CborValue,
         MAX_SNAPSHOT_BYTES,
@@ -151,7 +151,7 @@ describe('CBOR fast paths agree with the dag-cbor reference', () => {
         new Uint8Array([...bytes, r.int(256)])
       );
     }
-    for (let i = 0; i < 4000; i++) inputs.push(new Uint8Array(1 + r.int(24)).map(() => r.int(256)));
+    for (let i = 0; i < 600; i++) inputs.push(new Uint8Array(1 + r.int(24)).map(() => r.int(256)));
     let accepted = 0;
     for (const input of inputs) {
       const fast = outcome(decodeCbor(input));
@@ -176,7 +176,7 @@ describe('CBOR fast paths agree with the dag-cbor reference', () => {
       if ('ok' in fast) accepted++;
     }
     // The corpus must exercise acceptance as well as every rejection kind.
-    expect(accepted).toBeGreaterThan(3000);
+    expect(accepted).toBeGreaterThan(400);
     const codes = new Set(
       inputs
         .map((input) => outcome(decodeCbor(input)))

@@ -1,8 +1,7 @@
+// @vitest-environment jsdom
 import { resolveDirectMarkdownFileOpenTarget } from '../src/lib/session-file-open-target';
 import { NativeTextSelectionHoldContext } from '../src/hooks/use-conversation-text-selection';
-// @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

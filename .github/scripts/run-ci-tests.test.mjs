@@ -44,6 +44,7 @@ void test('full run assigns each package to exactly one group', () => {
 void test('full rest group runs repository scripts, the remaining packages, then electron', () => {
   const plan = planCiTests({ scope: null, group: 'rest' });
   assert.deepEqual(plan[0], ['test:scripts']);
+  assert.ok(plan[1].includes('!{**/acp-extension-*}'));
   assert.deepEqual(plan.at(-1), ['--filter', '@lody/electron', 'run', 'test']);
 });
 

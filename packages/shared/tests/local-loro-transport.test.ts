@@ -401,6 +401,137 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
   });
 });
 
+describe('local data plane doc-update chunking', () => {
+  const CHUNK_WORKSPACE_ID = 'ws-chunk';
+  const MAX_PAYLOAD_BYTES = 512;
+
+  class ChunkHarness {
+    private readonly tasks: Array<() => void | Promise<void>> = [];
+    private readonly rendererListeners = new Set<(m: LocalLoroDataPlaneServerMessage) => void>();
+    private readonly serverDocs = new Map<string, LoroDoc>();
+    readonly pushed: LocalLoroDataPlaneServerMessage[] = [];
+    readonly engine = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
+      workspaceId: CHUNK_WORKSPACE_ID,
+      resolveDoc: async (docId) => this.serverDoc(docId),
+      resolveFlockDoc: async () => {
+        throw new Error('unused');
+      },
+      maxPayloadBytes: MAX_PAYLOAD_BYTES,
+    });
+
+    private readonly sharedConnection = {
+      id: 'dp:relay:1',
+      send: (message: LocalLoroDataPlaneServerMessage) => {
+        this.pushed.push(message);
+        this.tasks.push(() => {
+          for (const listener of this.rendererListeners) listener(message);
+        });
+      },
+    };
+
+    serverDoc(docId: string): LoroDoc {
+      const existing = this.serverDocs.get(docId);
+      if (existing) return existing;
+      const doc = new LoroDoc();
+      this.serverDocs.set(docId, doc);
+      return doc;
+    }
+
+    createAdapter(peerId: string): LocalLoroTransportAdapter {
+      const connection = {
+        send: (message: LocalLoroDataPlaneClientMessage) => {
+          this.tasks.push(async () => {
+            if (message.type === 'ping') return;
+            await this.engine.handleMessage(this.sharedConnection, message);
+          });
+        },
+        onMessage: (listener: (m: LocalLoroDataPlaneServerMessage) => void) => {
+          this.rendererListeners.add(listener);
+          return () => this.rendererListeners.delete(listener);
+        },
+        onStatusChange: () => () => {},
+        isConnected: () => true,
+      };
+      return new LocalLoroTransportAdapter({
+        workspaceId: CHUNK_WORKSPACE_ID,
+        peerId,
+        connection,
+        maxPayloadBytes: MAX_PAYLOAD_BYTES,
+      });
+    }
+
+    async settle(): Promise<void> {
+      for (let round = 0; round < 500; round += 1) {
+        if (this.tasks.length === 0) {
+          await vi.advanceTimersByTimeAsync(1);
+          if (this.tasks.length === 0) return;
+        }
+        const batch = this.tasks.splice(0);
+        for (const task of batch) {
+          await task();
+        }
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      throw new Error('settle_did_not_converge');
+    }
+  }
+
+  const appendText = (doc: LoroDoc, value: string): void => {
+    doc.getText('t').insert(doc.getText('t').length, value);
+    doc.commit();
+  };
+  const bigText = (seed: string): string => seed.repeat(Math.ceil(4096 / seed.length));
+  const errorFrames = (pushed: LocalLoroDataPlaneServerMessage[]) =>
+    pushed.filter((m) => m.type === 'error');
+
+  it('an oversized join catch-up is chunked and converges instead of failing terminally', async () => {
+    const harness = new ChunkHarness();
+    appendText(harness.serverDoc('doc-1'), bigText('server-history '));
+
+    const renderer = harness.createAdapter('renderer:a');
+    const docA = new LoroDoc();
+    const sub = renderer.joinDocRoom('doc-1', docA);
+    await harness.settle();
+
+    expect(errorFrames(harness.pushed)).toEqual([]);
+    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
+    expect(sub.status).toBe('joined');
+  });
+
+  it('an oversized live push after join is chunked and converges', async () => {
+    const harness = new ChunkHarness();
+    const renderer = harness.createAdapter('renderer:a');
+    const docA = new LoroDoc();
+    renderer.joinDocRoom('doc-1', docA);
+    await harness.settle();
+
+    appendText(harness.serverDoc('doc-1'), bigText('live-burst '));
+    await harness.settle();
+
+    expect(errorFrames(harness.pushed)).toEqual([]);
+    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
+  });
+
+  it('a sibling window converges through a chunked relay of another window’s upload', async () => {
+    const harness = new ChunkHarness();
+    const windowA = harness.createAdapter('renderer:a');
+    const windowB = harness.createAdapter('renderer:b');
+    const docA = new LoroDoc();
+    const docB = new LoroDoc();
+    windowA.joinDocRoom('doc-1', docA);
+    windowB.joinDocRoom('doc-1', docB);
+    await harness.settle();
+
+    appendText(docA, bigText('multi-window '));
+    await harness.settle();
+
+    expect(errorFrames(harness.pushed)).toEqual([]);
+    expect(text(docB)).toBe(text(docA));
+    expect(text(harness.serverDoc('doc-1'))).toBe(text(docA));
+  });
+});
+
 let writerLegacy: LocalLoroWriterLegacy;
 beforeEach(() => {
   vi.useFakeTimers();

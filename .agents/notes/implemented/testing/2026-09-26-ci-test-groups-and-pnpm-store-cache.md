@@ -51,11 +51,15 @@ and costs nothing, but it is not what shortens CI.
    - `cli`: `--maxWorkers=4`.
    - `rest`: `test:scripts`, every other package, then electron.
 
-   Each group plans its own commands from the affected scope, and skips install
-   when it owns no listed package. Missing or invalid scope output still falls
-   back to a full run. The YAML override for CI-definition changes passes
-   `--full`. A final `Tests` job `needs` the matrix and succeeds only if the
-   matrix succeeded, so the required check name is unchanged.
+   Each group runs scope selection, the YAML fail-open override, and `--plan`
+   before `.github/actions/setup-workspace`, so unaffected groups skip store
+   restore, `pnpm install`, and adapter preparation. Missing or invalid scope
+   output still falls back to a full run. The YAML override for CI-definition
+   changes passes `--full`. Active `cli` runs prepare all CLI ACP adapters,
+   while `components` and `rest` build only `acp-extension-dsh` (`acp-extension-core`
+   builds during `pnpm install`). Nested `acp-extension-*` submodules are excluded
+   from root test and typecheck filters. A final `Tests` job `needs` the matrix and
+   succeeds only if the matrix succeeded, so the required check name is unchanged.
 
 2. **`.github/actions/setup-workspace`** replaces `pnpm/action-setup` plus
    `setup-node` `cache: pnpm` in `ci.yml` and the Desktop E2E workflows. It uses
@@ -91,9 +95,10 @@ offline reuses the package. This pins the mechanism, not a CI timing improvement
 
 ## Trade-offs and alternatives
 
-- Five test runners instead of one. Each pays ~70 s of checkout, restore,
-  install and adapter setup, so total runner minutes rise. Standard runners are
-  free for this public repository. Unaffected groups skip their install.
+- Five test runners instead of one. Active groups pay checkout, restore,
+  install and adapter setup, so total runner minutes rise on full runs. Standard
+  runners are free for this public repository. Unaffected groups stop after
+  checkout and `--plan` without restoring the pnpm store or installing packages.
 - **Reducing components per-file overhead** (`isolate: false`, lighter setup).
   This is still the largest CPU cost, and remains open. It risks leaking state
   between test files. See [components test module graph](2026-09-10-components-test-module-graph.md).

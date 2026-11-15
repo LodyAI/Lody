@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { TestCloudPlatformProvider } from './test-platform';
 
 import { act, createElement } from 'react';

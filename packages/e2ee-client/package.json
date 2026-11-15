@@ -21,7 +21,7 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run --no-file-parallelism",
+    "test": "vitest run",
     "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts'",
     "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts'",
     "test:browser": "vitest run --config vitest.browser.config.ts"

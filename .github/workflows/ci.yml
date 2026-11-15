@@ -54,11 +54,11 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Identical block in Static checks and Tests. Write force_full once.
-          # Default fail-open; only a successful allowlist miss may set false.
+          # Identical block in Static checks and Tests (do not move this floor
+          # into select-ci-scope.mjs — that script is untrusted).
           force=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
+            if (git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$PR_BASE_SHA") \
               && git diff -z --name-only "$PR_BASE_SHA" HEAD >/tmp/ci-changed-files; then
               force=false
               while IFS= read -r -d '' f; do
@@ -135,11 +135,6 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      - name: Set up workspace toolchain
-        uses: ./.github/actions/setup-workspace
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
       - name: Select CI scope
         id: scope
         env:
@@ -159,11 +154,11 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Must stay byte-identical to the Static checks override (do not
-          # move this floor into select-ci-scope.mjs — that script is untrusted).
+          # Identical block in Static checks and Tests (do not move this floor
+          # into select-ci-scope.mjs — that script is untrusted).
           force=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
+            if (git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$PR_BASE_SHA") \
               && git diff -z --name-only "$PR_BASE_SHA" HEAD >/tmp/ci-changed-files; then
               force=false
               while IFS= read -r -d '' f; do
@@ -198,6 +193,12 @@ jobs:
         run: |
           echo "Skipping ${{ matrix.label }}: ${{ steps.scope.outputs.reason }}"
 
+      - name: Set up workspace toolchain
+        if: steps.plan.outputs.run != 'false'
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install dependencies
         if: steps.plan.outputs.run != 'false'
         env:
@@ -207,7 +208,12 @@ jobs:
 
       - name: Prepare ACP adapters
         if: steps.plan.outputs.run != 'false'
-        run: pnpm --filter lody prepare:acp-adapters
+        run: |
+          if [ "${{ matrix.group }}" = "cli" ]; then
+            pnpm --filter lody prepare:acp-adapters
+          else
+            pnpm --filter acp-extension-dsh build
+          fi
 
       - name: Run tests
         if: steps.plan.outputs.run != 'false'

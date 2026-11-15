@@ -4,7 +4,12 @@ import { execFileSync as defaultExecFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const EXCLUDED_FILTERS = ['!@lody/electron', '!acp-extension-codex', '!acp-extension-claude'];
+const EXCLUDED_FILTERS = [
+  '!@lody/electron',
+  '!{**/acp-extension-*}',
+  '!acp-extension-codex',
+  '!acp-extension-claude',
+];
 
 // The two suites that dominate CI get their own runners. On a 4-vCPU runner
 // they are CPU-bound, so overlapping them in one job gains nothing; splitting

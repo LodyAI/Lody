@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionProjectRunSchema, type LocalProjectId } from '@lody/shared';
 
 import { buildPrompt } from '../src/session/session-execution-helpers';
+import { TURN_BUDGETS } from '../src/session/turn-budgets';
 
 describe('session execution prompt helpers', () => {
   it('requires command-specific help before executing Lody commands', () => {
@@ -103,5 +104,17 @@ describe('session execution prompt helpers', () => {
     );
     expect(prompt).toContain('if renaming fails, report it briefly and continue the task.');
     expect(prompt).not.toContain('gh pr create');
+  });
+});
+
+describe('turn release budgets', () => {
+  it('ends a Git observation before the shared workspace-statistics budget', () => {
+    expect(TURN_BUDGETS.gitObservationMs).toBeLessThan(TURN_BUDGETS.workspaceStatsMs);
+  });
+
+  it('writes shutdown release receipts inside the CLI shutdown budget', () => {
+    expect(
+      TURN_BUDGETS.shutdownReleaseWaitMs + TURN_BUDGETS.shutdownForcedWriteMs
+    ).toBeLessThanOrEqual(TURN_BUDGETS.cliShutdownMs);
   });
 });

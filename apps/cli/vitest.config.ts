@@ -19,6 +19,7 @@ export default defineConfig({
         ? ['tests/**/*.e2e.test.ts']
         : ['src/__tests__/**/*.ts', 'src/**/*.{test,spec}.ts', 'tests/**/*.test.ts'],
     exclude: process.env.LODY_E2E === '1' ? [] : ['tests/**/*.e2e.test.ts'],
+    setupFiles: process.env.LODY_E2E === '1' ? [] : ['tests/vitest-setup.ts'],
     // Passing tests intentionally exercise noisy runtime paths. Preserve their
     // output on failure without streaming it during every successful run.
     silent: 'passed-only',

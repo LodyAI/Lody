@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createRequire } from 'node:module'
-import { runInNewContext } from 'node:vm'
+import { Script } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
 import {
@@ -76,75 +76,80 @@ import {
 } from '../../../../../packages/components/src/lib/e2ee-workspace-storage.ts'
 import * as proxyEnv from '../../../../../packages/shared/src/proxy-env.ts'
 const require = createRequire(import.meta.url)
+const compiledScriptCache = new Map()
+function getCompiledScript(relative, env) {
+  const envJson = JSON.stringify(env)
+  const cacheKey = `${relative}\0${envJson}`
+  let script = compiledScriptCache.get(cacheKey)
+  if (!script) {
+    const source = readFileSync(new URL(relative, import.meta.url), 'utf8')
+    const { outputText } = ts.transpileModule(source.replaceAll('import.meta.env', envJson), {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.CommonJS,
+        experimentalDecorators: true
+      }
+    })
+    script = new Script(outputText, { filename: relative })
+    compiledScriptCache.set(cacheKey, script)
+  }
+  return script
+}
 async function load(relative, dependencies, console = globalThis.console, env = {}, globals = {}) {
   return loadSync(relative, dependencies, console, env, globals)
 }
 /** Loads one module in the same sandbox and dependency map as its importer, so main
  * modules split out of `E2eeIpc` share its console, clock and mocked account runtime. */
 function loadSync(relative, dependencies, console = globalThis.console, env = {}, globals = {}) {
-  const source = readFileSync(new URL(relative, import.meta.url), 'utf8')
   const exports = {}
-  runInNewContext(
-    ts.transpileModule(source.replaceAll('import.meta.env', JSON.stringify(env)), {
-      compilerOptions: {
-        target: ts.ScriptTarget.ES2022,
-        module: ts.ModuleKind.CommonJS,
-        experimentalDecorators: true
-      }
-    }).outputText,
-    {
-      exports,
-      Error,
-      crypto: globalThis.crypto,
-      Buffer,
-      URL,
-      setTimeout,
-      clearTimeout,
-      console,
-      ...globals,
-      require: (id) =>
-        Object.hasOwn(dependencies, id)
-          ? dependencies[id]
-          : id === './e2ee-diagnostics.mjs'
-            ? { rememberDesktopE2eeFailure }
-            : id === '../../services/e2ee-member-join.mjs'
-              ? memberJoining
-              : id === '../../services/e2ee-cloud-errors.mjs' || id === './e2ee-cloud-errors.mjs'
-                ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
-                : id === '../../services/e2ee-personal-pairing.mjs'
-                  ? { PersonalPairingOfferSchema }
-                  : id === '../../services/e2ee-account-pairing-host.mjs'
-                    ? { makeDesktopAccountPairingHost }
-                    : id === '../../services/e2ee-key-delivery.mjs'
-                      ? loadSync('./e2ee-key-delivery.mts', dependencies, console, env, globals)
-                      : id === '../../services/e2ee-agent-pairing-service.mjs'
-                        ? loadSync(
-                            './e2ee-agent-pairing-service.mts',
-                            dependencies,
-                            console,
-                            env,
-                            globals
-                          )
-                        : id === '@lody/e2ee-client/account-requester'
-                          ? { KEY_DELIVERY_RETRY_DELAYS }
-                          : id === '@lody/e2ee-core/protocol'
-                            ? { decodeRecord }
-                            : id === '../../services/e2ee-recovery-vault.mjs' ||
-                                id === '../../services/e2ee-passkey-macos.mjs'
-                              ? {}
-                              : id === '../../services/e2ee-client-loss-probe'
-                                ? // Production default: the E2E probe is disabled and forwards work.
-                                  {
-                                    observeClientLossOperation: (
-                                      _kind,
-                                      _workspace,
-                                      _sender,
-                                      work
-                                    ) => work()
-                                  }
-                                : require(id)
-    }
-  )
+  getCompiledScript(relative, env).runInNewContext({
+    exports,
+    Error,
+    crypto: globalThis.crypto,
+    Buffer,
+    URL,
+    setTimeout,
+    clearTimeout,
+    console,
+    ...globals,
+    require: (id) =>
+      Object.hasOwn(dependencies, id)
+        ? dependencies[id]
+        : id === './e2ee-diagnostics.mjs'
+          ? { rememberDesktopE2eeFailure }
+          : id === '../../services/e2ee-member-join.mjs'
+            ? memberJoining
+            : id === '../../services/e2ee-cloud-errors.mjs' || id === './e2ee-cloud-errors.mjs'
+              ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
+              : id === '../../services/e2ee-personal-pairing.mjs'
+                ? { PersonalPairingOfferSchema }
+                : id === '../../services/e2ee-account-pairing-host.mjs'
+                  ? { makeDesktopAccountPairingHost }
+                  : id === '../../services/e2ee-key-delivery.mjs'
+                    ? loadSync('./e2ee-key-delivery.mts', dependencies, console, env, globals)
+                    : id === '../../services/e2ee-agent-pairing-service.mjs'
+                      ? loadSync(
+                          './e2ee-agent-pairing-service.mts',
+                          dependencies,
+                          console,
+                          env,
+                          globals
+                        )
+                      : id === '@lody/e2ee-client/account-requester'
+                        ? { KEY_DELIVERY_RETRY_DELAYS }
+                        : id === '@lody/e2ee-core/protocol'
+                          ? { decodeRecord }
+                          : id === '../../services/e2ee-recovery-vault.mjs' ||
+                              id === '../../services/e2ee-passkey-macos.mjs'
+                            ? {}
+                            : id === '../../services/e2ee-client-loss-probe'
+                              ? // Production default: the E2E probe is disabled and forwards work.
+                                {
+                                  observeClientLossOperation: (_kind, _workspace, _sender, work) =>
+                                    work()
+                                }
+                              : require(id)
+  })
   return exports
 }
 async function account(options = {}) {

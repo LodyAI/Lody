@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

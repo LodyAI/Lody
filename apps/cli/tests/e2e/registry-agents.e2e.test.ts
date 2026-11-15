@@ -85,366 +85,341 @@ e2eDescribe('registry agents ACP e2e', () => {
 
   for (const agent of REGISTRY_AGENTS) {
     describe(agent.displayName, () => {
-      it(
-        'newSession returns modes/models/configOptions',
-        async () => {
-          const logger = createDebugLogger();
-          const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-newsession`);
-          fs.mkdirSync(workdir, { recursive: true });
+      it('newSession returns modes/models/configOptions', async () => {
+        const logger = createDebugLogger();
+        const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-newsession`);
+        fs.mkdirSync(workdir, { recursive: true });
 
-          const notifications: AcpSessionNotification[] = [];
-          const { agentProcess, client, acpSessionId, sessionResponse } =
-            await startLocalAcpAgent({
-              cliType: agent.cliType,
-              agentType: agent.agentType,
-              workdir,
-              logger,
-              terminalManager: noopTerminalManager,
-              onUpdateMessage: (msg) => {
-                notifications.push(msg);
-              },
-              onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-            });
-          processes.push(agentProcess);
+        const notifications: AcpSessionNotification[] = [];
+        const { agentProcess, client, acpSessionId, sessionResponse } = await startLocalAcpAgent({
+          cliType: agent.cliType,
+          agentType: agent.agentType,
+          workdir,
+          logger,
+          terminalManager: noopTerminalManager,
+          onUpdateMessage: (msg) => {
+            notifications.push(msg);
+          },
+          onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+        });
+        processes.push(agentProcess);
 
-          console.log(
-            `\n=== ${agent.displayName} newSession ===`,
-            JSON.stringify(
-              {
-                sessionId: sessionResponse.sessionId,
-                modes: sessionResponse.modes,
-                models: sessionResponse.models,
-                configOptions: sessionResponse.configOptions?.map((o) => ({
-                  id: o.id,
-                  type: o.type,
-                  category: (o as { category?: string }).category,
-                  name: o.name,
-                })),
-              },
-              null,
-              2
-            )
-          );
-
-          // Verify session was created
-          expect(acpSessionId).toBeTruthy();
-          expect(sessionResponse.sessionId).toBeTruthy();
-
-          // Check modes or configOptions
-          const hasModes =
-            sessionResponse.modes?.availableModes &&
-            sessionResponse.modes.availableModes.length > 0;
-          const hasConfigModeOption = sessionResponse.configOptions?.some(
-            (o) => (o as { category?: string }).category === 'mode'
-          );
-          console.log(
-            `${agent.displayName}: hasModes=${hasModes}, hasConfigModeOption=${hasConfigModeOption}`
-          );
-
-          // Check models or configOptions
-          const hasModels =
-            sessionResponse.models?.availableModels &&
-            sessionResponse.models.availableModels.length > 0;
-          const hasConfigModelOption = sessionResponse.configOptions?.some(
-            (o) => (o as { category?: string }).category === 'model'
-          );
-          console.log(
-            `${agent.displayName}: hasModels=${hasModels}, hasConfigModelOption=${hasConfigModelOption}`
-          );
-
-          // At least one of modes/models/configOptions should be present
-          expect(hasModes || hasConfigModeOption || hasModels || hasConfigModelOption).toBe(true);
-
-          await shutdownLocalAcpAgent({
-            agentProcess,
-            client,
-            acpSessionId,
-            logger,
-            sessionLabel: `e2e-${agent.agentType}`,
-          });
-        },
-        120_000
-      );
-
-      it(
-        'prompt returns a response',
-        async () => {
-          const logger = createDebugLogger();
-          const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-prompt`);
-          fs.mkdirSync(workdir, { recursive: true });
-
-          const textChunks: string[] = [];
-          const { agentProcess, client, acpSessionId } = await startLocalAcpAgent({
-            cliType: agent.cliType,
-            agentType: agent.agentType,
-            workdir,
-            logger,
-            terminalManager: noopTerminalManager,
-            onUpdateMessage: (msg) => {
-              const update = msg.update as Record<string, unknown>;
-              if (
-                update.sessionUpdate === 'agent_message_chunk' &&
-                typeof update.content === 'object' &&
-                update.content !== null &&
-                (update.content as { type?: string }).type === 'text'
-              ) {
-                textChunks.push((update.content as { text: string }).text);
-              }
+        console.log(
+          `\n=== ${agent.displayName} newSession ===`,
+          JSON.stringify(
+            {
+              sessionId: sessionResponse.sessionId,
+              modes: sessionResponse.modes,
+              models: sessionResponse.models,
+              configOptions: sessionResponse.configOptions?.map((o) => ({
+                id: o.id,
+                type: o.type,
+                category: (o as { category?: string }).category,
+                name: o.name,
+              })),
             },
-            onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-          });
-          processes.push(agentProcess);
+            null,
+            2
+          )
+        );
 
-          const response = await client.prompt(acpSessionId, [
-            { type: 'text', text: 'Reply with only the single word "pong". Nothing else.' },
-          ]);
+        // Verify session was created
+        expect(acpSessionId).toBeTruthy();
+        expect(sessionResponse.sessionId).toBeTruthy();
 
-          const collectedText = textChunks.join('');
-          const responseText = extractTextFromAgentResponse(response);
-          console.log(
-            `\n=== ${agent.displayName} prompt response ===\n` +
-              `responseText: ${responseText}\n` +
-              `collectedText: ${collectedText}`
-          );
+        // Check modes or configOptions
+        const hasModes =
+          sessionResponse.modes?.availableModes && sessionResponse.modes.availableModes.length > 0;
+        const hasConfigModeOption = sessionResponse.configOptions?.some(
+          (o) => (o as { category?: string }).category === 'mode'
+        );
+        console.log(
+          `${agent.displayName}: hasModes=${hasModes}, hasConfigModeOption=${hasConfigModeOption}`
+        );
 
-          // Either the response or the streamed text should contain "pong"
-          const combinedText = `${responseText ?? ''} ${collectedText}`.toLowerCase();
-          expect(combinedText).toContain('pong');
+        // Check models or configOptions
+        const hasModels =
+          sessionResponse.models?.availableModels &&
+          sessionResponse.models.availableModels.length > 0;
+        const hasConfigModelOption = sessionResponse.configOptions?.some(
+          (o) => (o as { category?: string }).category === 'model'
+        );
+        console.log(
+          `${agent.displayName}: hasModels=${hasModels}, hasConfigModelOption=${hasConfigModelOption}`
+        );
 
-          await shutdownLocalAcpAgent({
-            agentProcess,
-            client,
-            acpSessionId,
-            logger,
-            sessionLabel: `e2e-${agent.agentType}`,
-          });
-        },
-        120_000
-      );
+        // At least one of modes/models/configOptions should be present
+        expect(hasModes || hasConfigModeOption || hasModels || hasConfigModelOption).toBe(true);
 
-      it(
-        'setSessionMode works',
-        async () => {
-          const logger = createDebugLogger();
-          const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-mode`);
-          fs.mkdirSync(workdir, { recursive: true });
+        await shutdownLocalAcpAgent({
+          agentProcess,
+          client,
+          acpSessionId,
+          logger,
+          sessionLabel: `e2e-${agent.agentType}`,
+        });
+      }, 120_000);
 
-          const { agentProcess, client, acpSessionId, sessionResponse } =
-            await startLocalAcpAgent({
-              cliType: agent.cliType,
-              agentType: agent.agentType,
-              workdir,
-              logger,
-              terminalManager: noopTerminalManager,
-              onUpdateMessage: () => {},
-              onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-            });
-          processes.push(agentProcess);
+      it('prompt returns a response', async () => {
+        const logger = createDebugLogger();
+        const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-prompt`);
+        fs.mkdirSync(workdir, { recursive: true });
 
-          // Try setting mode via configOptions first
-          const modeOption = sessionResponse.configOptions?.find(
-            (o) => (o as { category?: string }).category === 'mode'
-          );
-          const modes = sessionResponse.modes?.availableModes ?? [];
-
-          if (modeOption && modeOption.type === 'select') {
-            const selectOption = modeOption as Extract<SessionConfigOption, { type: 'select' }>;
-            const firstValue = selectOption.options[0];
-            if (firstValue && 'value' in firstValue) {
-              console.log(
-                `\n=== ${agent.displayName} setSessionConfigOption mode=${firstValue.value} ===`
-              );
-              const result = await client.setSessionConfigOption(
-                acpSessionId,
-                modeOption.id,
-                firstValue.value
-              );
-              console.log(
-                `setSessionConfigOption result: ${JSON.stringify(result?.map((o) => o.id))}`
-              );
-              // Should not throw
+        const textChunks: string[] = [];
+        const { agentProcess, client, acpSessionId } = await startLocalAcpAgent({
+          cliType: agent.cliType,
+          agentType: agent.agentType,
+          workdir,
+          logger,
+          terminalManager: noopTerminalManager,
+          onUpdateMessage: (msg) => {
+            const update = msg.update as Record<string, unknown>;
+            if (
+              update.sessionUpdate === 'agent_message_chunk' &&
+              typeof update.content === 'object' &&
+              update.content !== null &&
+              (update.content as { type?: string }).type === 'text'
+            ) {
+              textChunks.push((update.content as { text: string }).text);
             }
-          } else if (modes.length > 0) {
-            const firstMode = modes[0];
-            if (firstMode) {
-              console.log(`\n=== ${agent.displayName} setSessionMode mode=${firstMode.id} ===`);
-              await client.setSessionMode(acpSessionId, firstMode.id);
-              console.log(`setSessionMode succeeded`);
-            }
-          } else {
-            console.log(`\n=== ${agent.displayName}: No modes available, skipping mode test ===`);
+          },
+          onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+        });
+        processes.push(agentProcess);
+
+        const response = await client.prompt(acpSessionId, [
+          { type: 'text', text: 'Reply with only the single word "pong". Nothing else.' },
+        ]);
+
+        const collectedText = textChunks.join('');
+        const responseText = extractTextFromAgentResponse(response);
+        console.log(
+          `\n=== ${agent.displayName} prompt response ===\n` +
+            `responseText: ${responseText}\n` +
+            `collectedText: ${collectedText}`
+        );
+
+        // Either the response or the streamed text should contain "pong"
+        const combinedText = `${responseText ?? ''} ${collectedText}`.toLowerCase();
+        expect(combinedText).toContain('pong');
+
+        await shutdownLocalAcpAgent({
+          agentProcess,
+          client,
+          acpSessionId,
+          logger,
+          sessionLabel: `e2e-${agent.agentType}`,
+        });
+      }, 120_000);
+
+      it('setSessionMode works', async () => {
+        const logger = createDebugLogger();
+        const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-mode`);
+        fs.mkdirSync(workdir, { recursive: true });
+
+        const { agentProcess, client, acpSessionId, sessionResponse } = await startLocalAcpAgent({
+          cliType: agent.cliType,
+          agentType: agent.agentType,
+          workdir,
+          logger,
+          terminalManager: noopTerminalManager,
+          onUpdateMessage: () => {},
+          onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+        });
+        processes.push(agentProcess);
+
+        // Try setting mode via configOptions first
+        const modeOption = sessionResponse.configOptions?.find(
+          (o) => (o as { category?: string }).category === 'mode'
+        );
+        const modes = sessionResponse.modes?.availableModes ?? [];
+
+        if (modeOption && modeOption.type === 'select') {
+          const selectOption = modeOption as Extract<SessionConfigOption, { type: 'select' }>;
+          const firstValue = selectOption.options[0];
+          if (firstValue && 'value' in firstValue) {
+            console.log(
+              `\n=== ${agent.displayName} setSessionConfigOption mode=${firstValue.value} ===`
+            );
+            const result = await client.setSessionConfigOption(
+              acpSessionId,
+              modeOption.id,
+              firstValue.value
+            );
+            console.log(
+              `setSessionConfigOption result: ${JSON.stringify(result?.map((o) => o.id))}`
+            );
+            // Should not throw
           }
-
-          await shutdownLocalAcpAgent({
-            agentProcess,
-            client,
-            acpSessionId,
-            logger,
-            sessionLabel: `e2e-${agent.agentType}`,
-          });
-        },
-        120_000
-      );
-
-      it(
-        'setSessionModel works',
-        async () => {
-          const logger = createDebugLogger();
-          const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-model`);
-          fs.mkdirSync(workdir, { recursive: true });
-
-          const { agentProcess, client, acpSessionId, sessionResponse } =
-            await startLocalAcpAgent({
-              cliType: agent.cliType,
-              agentType: agent.agentType,
-              workdir,
-              logger,
-              terminalManager: noopTerminalManager,
-              onUpdateMessage: () => {},
-              onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-            });
-          processes.push(agentProcess);
-
-          const modelOption = sessionResponse.configOptions?.find(
-            (o) => (o as { category?: string }).category === 'model'
-          );
-          const models = sessionResponse.models?.availableModels ?? [];
-
-          if (modelOption && modelOption.type === 'select') {
-            const selectOption = modelOption as Extract<SessionConfigOption, { type: 'select' }>;
-            const firstValue = selectOption.options[0];
-            if (firstValue && 'value' in firstValue) {
-              console.log(
-                `\n=== ${agent.displayName} setSessionConfigOption model=${firstValue.value} ===`
-              );
-              const result = await client.setSessionConfigOption(
-                acpSessionId,
-                modelOption.id,
-                firstValue.value
-              );
-              console.log(
-                `setSessionConfigOption result: ${JSON.stringify(result?.map((o) => o.id))}`
-              );
-            }
-          } else if (models.length > 0) {
-            const firstModel = models[0];
-            if (firstModel) {
-              console.log(
-                `\n=== ${agent.displayName} unstable_setSessionModel model=${firstModel.modelId} ===`
-              );
-              await client.unstable_setSessionModel(acpSessionId, firstModel.modelId);
-              console.log(`unstable_setSessionModel succeeded`);
-            }
-          } else {
-            console.log(`\n=== ${agent.displayName}: No models available, skipping model test ===`);
+        } else if (modes.length > 0) {
+          const firstMode = modes[0];
+          if (firstMode) {
+            console.log(`\n=== ${agent.displayName} setSessionMode mode=${firstMode.id} ===`);
+            await client.setSessionMode(acpSessionId, firstMode.id);
+            console.log(`setSessionMode succeeded`);
           }
+        } else {
+          console.log(`\n=== ${agent.displayName}: No modes available, skipping mode test ===`);
+        }
 
-          await shutdownLocalAcpAgent({
-            agentProcess,
-            client,
-            acpSessionId,
-            logger,
-            sessionLabel: `e2e-${agent.agentType}`,
-          });
-        },
-        120_000
-      );
+        await shutdownLocalAcpAgent({
+          agentProcess,
+          client,
+          acpSessionId,
+          logger,
+          sessionLabel: `e2e-${agent.agentType}`,
+        });
+      }, 120_000);
 
-      it(
-        'loadSession / resumeSession works',
-        async () => {
-          const logger = createDebugLogger();
-          const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-resume`);
-          fs.mkdirSync(workdir, { recursive: true });
+      it('setSessionModel works', async () => {
+        const logger = createDebugLogger();
+        const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-model`);
+        fs.mkdirSync(workdir, { recursive: true });
 
-          // Start first session
-          const { agentProcess, client, acpSessionId } = await startLocalAcpAgent({
-            cliType: agent.cliType,
-            agentType: agent.agentType,
-            workdir,
-            logger,
-            terminalManager: noopTerminalManager,
-            onUpdateMessage: () => {},
-            onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-          });
-          processes.push(agentProcess);
+        const { agentProcess, client, acpSessionId, sessionResponse } = await startLocalAcpAgent({
+          cliType: agent.cliType,
+          agentType: agent.agentType,
+          workdir,
+          logger,
+          terminalManager: noopTerminalManager,
+          onUpdateMessage: () => {},
+          onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+        });
+        processes.push(agentProcess);
 
-          // Send a prompt to create session state
-          await client.prompt(acpSessionId, [
-            { type: 'text', text: 'Remember this word: "banana".' },
-          ]);
+        const modelOption = sessionResponse.configOptions?.find(
+          (o) => (o as { category?: string }).category === 'model'
+        );
+        const models = sessionResponse.models?.availableModels ?? [];
 
-          // Shutdown the first session
-          await shutdownLocalAcpAgent({
-            agentProcess,
-            client,
-            acpSessionId,
-            logger,
-            sessionLabel: `e2e-${agent.agentType}-resume-1`,
-          });
-
-          // Spawn a fresh ACP process and resume using the original acpSessionId
-          const resumeProcess = spawnAcpProcess({
-            cliType: agent.cliType,
-            agentType: agent.agentType,
-            workdir,
-            env: process.env,
-          });
-          processes.push(resumeProcess);
-
-          if (!resumeProcess.stdout || !resumeProcess.stdin) {
-            throw new Error('Agent process stdio not available');
+        if (modelOption && modelOption.type === 'select') {
+          const selectOption = modelOption as Extract<SessionConfigOption, { type: 'select' }>;
+          const firstValue = selectOption.options[0];
+          if (firstValue && 'value' in firstValue) {
+            console.log(
+              `\n=== ${agent.displayName} setSessionConfigOption model=${firstValue.value} ===`
+            );
+            const result = await client.setSessionConfigOption(
+              acpSessionId,
+              modelOption.id,
+              firstValue.value
+            );
+            console.log(
+              `setSessionConfigOption result: ${JSON.stringify(result?.map((o) => o.id))}`
+            );
           }
-          const output = createStdoutReadableStream(resumeProcess.stdout);
-          const input = createStdinWritableStream(resumeProcess.stdin);
-          const stream = ndJsonStream(input, output);
+        } else if (models.length > 0) {
+          const firstModel = models[0];
+          if (firstModel) {
+            console.log(
+              `\n=== ${agent.displayName} unstable_setSessionModel model=${firstModel.modelId} ===`
+            );
+            await client.unstable_setSessionModel(acpSessionId, firstModel.modelId);
+            console.log(`unstable_setSessionModel succeeded`);
+          }
+        } else {
+          console.log(`\n=== ${agent.displayName}: No models available, skipping model test ===`);
+        }
 
-          const textChunks: string[] = [];
-          const { client: resumedClient, acpSessionId: resumedSessionId } =
-            await createAcpClient({
-              stream,
-              workdir,
-              logger,
-              terminalManager: noopTerminalManager,
-              agentConfig: { cliType: agent.cliType, agentType: agent.agentType },
-              resumeSessionId: acpSessionId,
-              onUpdateMessage: (msg) => {
-                const update = msg.update as Record<string, unknown>;
-                if (
-                  update.sessionUpdate === 'agent_message_chunk' &&
-                  typeof update.content === 'object' &&
-                  update.content !== null &&
-                  (update.content as { type?: string }).type === 'text'
-                ) {
-                  textChunks.push((update.content as { text: string }).text);
-                }
-              },
-              onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-            });
+        await shutdownLocalAcpAgent({
+          agentProcess,
+          client,
+          acpSessionId,
+          logger,
+          sessionLabel: `e2e-${agent.agentType}`,
+        });
+      }, 120_000);
 
-          console.log(
-            `\n=== ${agent.displayName} resume: resumed session (original=${acpSessionId}, resumed=${resumedSessionId}) ===`
-          );
-          expect(resumedSessionId).toBe(acpSessionId);
+      it('loadSession / resumeSession works', async () => {
+        const logger = createDebugLogger();
+        const workdir = path.join(os.tmpdir(), `lody-e2e-${agent.agentType}-resume`);
+        fs.mkdirSync(workdir, { recursive: true });
 
-          // Ask about the remembered word to verify session context was restored
-          await resumedClient.prompt(resumedSessionId, [
-            { type: 'text', text: 'What word did I ask you to remember? Reply with just that word.' },
-          ]);
-          const collectedText = textChunks.join('').toLowerCase();
-          console.log(`\n=== ${agent.displayName} resume response: ${collectedText} ===`);
-          expect(collectedText).toContain('banana');
+        // Start first session
+        const { agentProcess, client, acpSessionId } = await startLocalAcpAgent({
+          cliType: agent.cliType,
+          agentType: agent.agentType,
+          workdir,
+          logger,
+          terminalManager: noopTerminalManager,
+          onUpdateMessage: () => {},
+          onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+        });
+        processes.push(agentProcess);
 
-          await shutdownLocalAcpAgent({
-            agentProcess: resumeProcess,
-            client: resumedClient,
-            acpSessionId: resumedSessionId,
-            logger,
-            sessionLabel: `e2e-${agent.agentType}-resume-2`,
-          });
-        },
-        180_000
-      );
+        // Send a prompt to create session state
+        await client.prompt(acpSessionId, [
+          { type: 'text', text: 'Remember this word: "banana".' },
+        ]);
+
+        // Shutdown the first session
+        await shutdownLocalAcpAgent({
+          agentProcess,
+          client,
+          acpSessionId,
+          logger,
+          sessionLabel: `e2e-${agent.agentType}-resume-1`,
+        });
+
+        // Spawn a fresh ACP process and resume using the original acpSessionId
+        const resumeProcess = spawnAcpProcess({
+          cliType: agent.cliType,
+          agentType: agent.agentType,
+          workdir,
+          env: process.env,
+        });
+        processes.push(resumeProcess);
+
+        if (!resumeProcess.stdout || !resumeProcess.stdin) {
+          throw new Error('Agent process stdio not available');
+        }
+        const output = createStdoutReadableStream(resumeProcess.stdout);
+        const input = createStdinWritableStream(resumeProcess.stdin);
+        const stream = ndJsonStream(input, output);
+
+        const textChunks: string[] = [];
+        const { client: resumedClient, acpSessionId: resumedSessionId } = await createAcpClient({
+          stream,
+          workdir,
+          logger,
+          terminalManager: noopTerminalManager,
+          agentConfig: { cliType: agent.cliType, agentType: agent.agentType },
+          resumeSessionId: acpSessionId,
+          onUpdateMessage: (msg) => {
+            const update = msg.update as Record<string, unknown>;
+            if (
+              update.sessionUpdate === 'agent_message_chunk' &&
+              typeof update.content === 'object' &&
+              update.content !== null &&
+              (update.content as { type?: string }).type === 'text'
+            ) {
+              textChunks.push((update.content as { text: string }).text);
+            }
+          },
+          onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+        });
+
+        console.log(
+          `\n=== ${agent.displayName} resume: resumed session (original=${acpSessionId}, resumed=${resumedSessionId}) ===`
+        );
+        expect(resumedSessionId).toBe(acpSessionId);
+
+        // Ask about the remembered word to verify session context was restored
+        await resumedClient.prompt(resumedSessionId, [
+          { type: 'text', text: 'What word did I ask you to remember? Reply with just that word.' },
+        ]);
+        const collectedText = textChunks.join('').toLowerCase();
+        console.log(`\n=== ${agent.displayName} resume response: ${collectedText} ===`);
+        expect(collectedText).toContain('banana');
+
+        await shutdownLocalAcpAgent({
+          agentProcess: resumeProcess,
+          client: resumedClient,
+          acpSessionId: resumedSessionId,
+          logger,
+          sessionLabel: `e2e-${agent.agentType}-resume-2`,
+        });
+      }, 180_000);
     });
   }
 });

@@ -35,7 +35,7 @@ PR: https://github.com/LodyAI/Lody/pull/992
    - `cli`：`--maxWorkers=4`。
    - `rest`：先跑 `test:scripts`，再跑其余所有包，最后跑 electron。
 
-   每组根据受影响范围自己规划要执行的命令，名单里没有本组的包时就连安装都跳过。scope 输出缺失或无效时，仍然回退为全量。CI 定义文件有改动时，YAML 覆盖逻辑会传入 `--full`。最后的 `Tests` job `needs` 整个矩阵，只有矩阵全部成功它才成功，因此必需检查名保持不变。
+   每组先在 `.github/actions/setup-workspace` 之前完成受影响范围计算、YAML fail-open 覆盖检查和 `--plan`，名单里没有本组的包时连 store 恢复、`pnpm install` 和 adapter 准备都一起跳过。scope 输出缺失或无效时，仍然回退为全量。CI 定义文件有改动时，YAML 覆盖逻辑会传入 `--full`。需要执行的 `cli` 组准备全部 CLI ACP adapter，`components` 与 `rest` 组只构建 `acp-extension-dsh`（`acp-extension-core` 在 `pnpm install` 时构建），根级测试和类型检查过滤掉嵌套 `acp-extension-*` 子模块。最后的 `Tests` job `needs` 整个矩阵，只有矩阵全部成功它才成功，因此必需检查名保持不变。
 
 2. **新增 `.github/actions/setup-workspace`**，替换 `ci.yml` 和各 Desktop E2E workflow 里的 `pnpm/action-setup` 加 `setup-node` `cache: pnpm`。它用 `actions/cache/restore` 恢复缓存，key 为 `pnpm-store-v2-<os>-<arch>-<lockfile hash>`，先按 `pnpm-store-v2-<os>-<arch>-` 前缀回退，再按 v1 前缀回退。即使恢复到的是旧 store，pnpm 也只需下载缺少的包。
 3. **`.github/workflows/pnpm-store-cache.yml` 是唯一的写入者。** 它在 `main` 上 lockfile 或缓存定义有变动的 push 时运行，也可以手动触发。它覆盖 Linux、macOS 和 Windows，通过 `--package-import-method=hardlink` 安装，保存前会先 prune。它不是必需检查，所以它的 `paths` 过滤和 `ci.yml` 不用 `paths` 的规则并不冲突。
@@ -58,7 +58,7 @@ v2 key 绕开旧 key 的精确命中保护，让 `main` 重新填充已有的空
 
 ## 取舍与其他方案
 
-- 测试 runner 从 1 台变成 5 台。每台都要花约 70 秒做 checkout、缓存恢复、安装和 adapter 准备，所以 runner 总分钟数会上升。本仓库是公开仓库，标准 runner 不收费。不受影响的组会跳过安装。
+- 测试 runner 从 1 台变成 5 台。实际运行的组需要各自完成 checkout、缓存恢复、安装和 adapter 准备，因此全量运行时 runner 总分钟数会上升。本仓库是公开仓库，标准 runner 不收费。不受影响的组在 checkout 和 `--plan` 后直接结束，不再恢复 pnpm store 或安装依赖。
 - **降低 components 每个文件的固定开销**（`isolate: false`、精简 setup）。这仍是最大的 CPU 开销，还没有处理，而且有测试文件之间共享状态的风险。参见 [components test module graph](2026-09-10-components-test-module-graph.zh.md)。
 - **缓存 `node_modules`。** 没有做：store 热的时候安装只要 16–40 秒。
 

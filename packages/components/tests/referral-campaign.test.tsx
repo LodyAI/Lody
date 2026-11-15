@@ -44,18 +44,29 @@ describe('campaign checkout display', () => {
       newcomerDiscount: false,
     };
     const render = async (discountPercent: number, rewardPercent: number) => {
-      await act(async () => root.render(
-        <ReferralSettingsView
-          overview={{ ...overview, policy: { campaignId: 'example', discountPercent, rewardPercent } }}
-          canManage={false}
-          onCopy={() => {}}
-          onOpenDetails={() => {}}
-        />
-      ));
+      await act(async () =>
+        root.render(
+          <ReferralSettingsView
+            overview={{
+              ...overview,
+              policy: { campaignId: 'example', discountPercent, rewardPercent },
+            }}
+            canManage={false}
+            onCopy={() => {}}
+            onOpenDetails={() => {}}
+          />
+        )
+      );
     };
     await render(20, 25);
-    expect(Array.from(container.querySelectorAll('s'), (el) => el.textContent)).toEqual(['9 折', '20%']);
-    expect(Array.from(container.querySelectorAll('strong'), (el) => el.textContent)).toEqual(['8 折', '25%']);
+    expect(Array.from(container.querySelectorAll('s'), (el) => el.textContent)).toEqual([
+      '9 折',
+      '20%',
+    ]);
+    expect(Array.from(container.querySelectorAll('strong'), (el) => el.textContent)).toEqual([
+      '8 折',
+      '25%',
+    ]);
     await render(10, 25);
     expect(Array.from(container.querySelectorAll('s'), (el) => el.textContent)).toEqual(['20%']);
     await render(10, 20);
@@ -82,7 +93,9 @@ describe('campaign checkout display', () => {
     expect(container.textContent).toContain('$76.80');
     expect(container.textContent).toContain('then $96/year');
     expect(container.textContent).toContain('Campaign: 10/24/2026–10/28/2026');
-    await act(async () => { await initI18n('zh_CN'); });
+    await act(async () => {
+      await initI18n('zh_CN');
+    });
     expect(container.textContent).toContain('活动时间：2026/10/24 至 2026/10/28');
   });
   it('distinguishes retained checkout pricing from a new order after the campaign', async () => {
