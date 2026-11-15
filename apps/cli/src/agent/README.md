@@ -275,6 +275,13 @@ turns; its model-group weekly and five-hour fractions become the existing Provid
 quota windows. The ACP `/usage` prompt belongs only to the legacy server reader:
 agy does not advertise it and would send that text to the model.
 
+Native `ask_question` forms use each `qN.title` as the prompt, numbered option
+IDs with labels in `oneOf[].title` / `items.anyOf[].title`, and a `qN_other`
+custom-answer field. The shared bridge receives explicit builtin Antigravity
+provenance, persists readable Core questions/answers, and maps replies back to
+the original IDs or custom field. It does not reinterpret other providers'
+legacy forms or canonical Core forms.
+
 Native tool updates carry the tool identity in a top-level `name`; AgentClient
 projects that bounded value into `_meta.lody.toolName` for history. Existing
 canonical metadata takes precedence. In live 1.5.9 Hydrogen experiments,
