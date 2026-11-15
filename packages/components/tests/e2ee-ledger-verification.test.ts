@@ -77,6 +77,87 @@ describe('e2ee-ledger-verification', () => {
     expect(() => hostLedgerHistory({ ...received, recordsHex: damaged })).toThrow();
   });
 
+  it('incrementally extends an existing full-history host view while still rejecting mutated prefixes or state digests', () => {
+    const prefixHex = vector.records.slice(0, 11).map((record) => record.hex);
+    const fullHex = vector.records.map((record) => record.hex);
+    const fullHistory = appendLedgerHistory(
+      null,
+      {
+        workspaceId: 'w',
+        genesisHash: vector.anchor,
+        checkpoint: { headHash: vector.records.at(-1)!.hash, length: vector.records.length },
+        startIndex: 0,
+        nextCursor: null,
+        recordsHex: fullHex,
+      },
+      { workspaceId: 'w', genesisHash: vector.anchor, localPin: vector.anchor }
+    );
+    const exportedPrefix = Result.getOrThrow(exportVerifiedState(history.view));
+    const prefixView = hostLedgerHistory({
+      status: {
+        workspaceId: 'w',
+        genesisHash: vector.anchor,
+        length: history.view.length,
+        headHash: head,
+        stateDigest: bytesToHex(exportedPrefix.stateDigest.toBytes()),
+        position: 'opaque-11',
+        epoch: history.view.inspectState().epoch.number,
+        rotationRequired: false,
+        deviceKind: 'personal',
+        hasCurrentKey: true,
+        continuityPending: false,
+      },
+      stateHex: bytesToHex(exportedPrefix.bytes),
+      recordsHex: prefixHex,
+    });
+    const exportedFull = Result.getOrThrow(exportVerifiedState(fullHistory.view));
+    const fullInput = {
+      status: {
+        workspaceId: 'w',
+        genesisHash: vector.anchor,
+        length: fullHistory.view.length,
+        headHash: bytesToHex(fullHistory.view.head.toBytes()),
+        stateDigest: bytesToHex(exportedFull.stateDigest.toBytes()),
+        position: 'opaque-14',
+        epoch: fullHistory.view.inspectState().epoch.number,
+        rotationRequired: true,
+        deviceKind: 'personal' as const,
+        hasCurrentKey: true,
+        continuityPending: false,
+      },
+      stateHex: bytesToHex(exportedFull.bytes),
+      recordsHex: fullHex,
+    };
+    const extended = hostLedgerHistory(fullInput, prefixView);
+    expect(extended.view.length).toBe(fullHistory.view.length);
+    expect(bytesToHex(extended.view.head.toBytes())).toBe(
+      bytesToHex(fullHistory.view.head.toBytes())
+    );
+    expect(bytesToHex(Result.getOrThrow(exportVerifiedState(extended.view)).stateDigest.toBytes())).toBe(
+      bytesToHex(exportedFull.stateDigest.toBytes())
+    );
+    expect(extended.records.map((record) => record.hash)).toEqual(
+      fullHistory.records.map((record) => record.hash)
+    );
+    expect(hostLedgerHistory(fullInput, extended).view.head.equals(fullHistory.view.head)).toBe(
+      true
+    );
+
+    const badDigestInput = {
+      ...fullInput,
+      status: { ...fullInput.status, stateDigest: 'ff'.repeat(32) },
+    };
+    expect(() => hostLedgerHistory(badDigestInput, prefixView)).toThrow();
+
+    const corruptedPrefix = [...fullHex];
+    const bytes = Buffer.from(corruptedPrefix[2]!, 'hex');
+    bytes[bytes.length - 1]! ^= 1;
+    corruptedPrefix[2] = bytes.toString('hex');
+    expect(() =>
+      hostLedgerHistory({ ...fullInput, recordsHex: corruptedPrefix }, prefixView)
+    ).toThrow();
+  });
+
   describe('ledger verification code', () => {
     it('matches only the same digest at the same version', () => {
       expect(compareVerificationCode(history, { stateDigest: code.stateDigest })).toEqual({
