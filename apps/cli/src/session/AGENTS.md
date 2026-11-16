@@ -2,9 +2,9 @@
 
 `CLAUDE.md` links here; edit this file.
 
-The 1,320-word ceiling preserves complete dispatch identity and output-lifetime rules alongside
-existing authorization and execution boundaries, including encrypted starts that run
-only signed input; the default ceiling had no room for those rules.
+The 1,340-word ceiling preserves complete dispatch identity, commit identity precedence and
+output-lifetime rules alongside existing authorization and execution boundaries, including
+encrypted starts that run only signed input; the default ceiling had no room for those rules.
 
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
@@ -19,7 +19,8 @@ only signed input; the default ceiling had no room for those rules.
   never role/author. [Rules](../orchestration/AGENTS.md).
 - Host-scope Machine/Provider credentials. Use frozen Turn identity for attribution,
   authorization and commits; trusted conversation owner for GitHub network auth.
-- Git: owner uses local config, no profile query; others never read it.
+- Git: the owner's repository identity, an approved requester, the owner's native config,
+  then LodyAI. Only a decided identity is exported as env. Non-owners never read machine config.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
   Commit attribution never restarts ACP; owner changes retire the runtime.
 

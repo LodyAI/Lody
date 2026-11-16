@@ -413,34 +413,53 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     userName: string,
     userEmail: string,
     userId: string | undefined,
-    options: { preferMachineIdentity: boolean; personalIdentityEnabled?: boolean }
+    options: {
+      preferMachineIdentity: boolean;
+      personalIdentityEnabled?: boolean;
+      /** Approved account identity for an owner turn, whose dispatch profile is a placeholder. */
+      personalIdentity?: { name: string; email: string };
+    }
   ): void {
     const configEnv = this.config.env ?? {};
     if (options.personalIdentityEnabled !== undefined) {
       this.personalIdentityEnabled = options.personalIdentityEnabled;
     }
-    // Set git identity using Git's recognized environment variables directly.
-    // The env is per agent process, so a shared machine never mixes requesters.
-    const { name, email } = resolveSessionGitIdentity(
-      { name: userName, email: userEmail },
-      {
-        preferMachineIdentity: options.preferMachineIdentity,
-        personalIdentityEnabled: options.personalIdentityEnabled ?? this.personalIdentityEnabled,
-      }
-    );
-    configEnv.GIT_AUTHOR_NAME = name;
-    configEnv.GIT_COMMITTER_NAME = name;
-    configEnv.GIT_AUTHOR_EMAIL = email;
-    configEnv.GIT_COMMITTER_EMAIL = email;
+    const requested = options.personalIdentity ?? { name: userName, email: userEmail };
+    let workdir: string | undefined;
+    try {
+      workdir = this.getWorkdir();
+    } catch {
+      workdir = undefined;
+    }
+    // Only an explicit decision is exported: GIT_AUTHOR_*/GIT_COMMITTER_* beat every Git
+    // config scope. An owner's own Git setup is left to Git. The env is per agent process,
+    // so a shared machine never mixes requesters.
+    const identity = resolveSessionGitIdentity(requested, {
+      preferMachineIdentity: options.preferMachineIdentity,
+      personalIdentityEnabled: options.personalIdentityEnabled ?? this.personalIdentityEnabled,
+      workdir,
+    });
+    for (const [key, value] of [
+      ['GIT_AUTHOR_NAME', identity.name],
+      ['GIT_COMMITTER_NAME', identity.name],
+      ['GIT_AUTHOR_EMAIL', identity.email],
+      ['GIT_COMMITTER_EMAIL', identity.email],
+    ] as const) {
+      if (identity.inject) configEnv[key] = value;
+      else delete configEnv[key];
+    }
     this.config.env = configEnv;
     this.gitIdentity = {
       id: userId ?? this.gitIdentity.id,
-      name,
-      email,
+      name: requested.name,
+      email: requested.email,
     };
-    this.logger.debug(`[${this.sessionId}] Git identity updated: ${name} <${email}>`);
+    this.logger.debug(
+      `[${this.sessionId}] Git identity updated: ${identity.name} <${identity.email}> (${identity.inject ? 'exported' : 'native Git config'})`
+    );
   }
 
+  /** The requester profile this Session resolved, for a fork by the same requester. */
   getGitIdentityForUser(userId: string): { id: string; name: string; email: string } | null {
     return this.gitIdentity.id === userId ? { ...this.gitIdentity } : null;
   }

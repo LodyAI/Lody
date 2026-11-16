@@ -445,13 +445,17 @@ retries once, and returns personal identity disabled after two failures. Startup
 and agent launch. Late policy results have no side effects. This deadline also covers
 per-turn identity refresh; it is separate from network credential fallback.
 
-The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env (`session.ts`
-`updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`). When
-the turn requester is the machine owner, the repository/machine Git identity is used without a cloud profile lookup; missing local
-identity uses neutral LodyAI. Non-owner profile queries have a 60-second deadline; failed or
-timed-out entries are evicted so later turns can retry. A non-owner requester always uses their resolved
-Lody/GitHub identity and can never inherit the machine owner's Git config; if no usable requester
-identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
+Precedence: for owner turns, the workdir repository's own configured identity; then an approved
+("Act as you") requester; then the owner's other native Git identity; then neutral LodyAI (`session.ts` `updateGitIdentity`, re-applied per turn via the execution
+service's `bindReadySession`). Only a decided identity is exported as
+`GIT_AUTHOR_*`/`GIT_COMMITTER_*`; the owner's identity is otherwise left to Git, so repository
+config and conditional includes apply. Repository identity of a Lody-managed shared GitHub clone
+is replaced by the owner's user-level identity or LodyAI
+([decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-native-owner-git-identity.md)).
+Owner turns skip the profile query unless approved, which adds one 3-second account lookup.
+Non-owner profile queries have a 60-second deadline; failed or timed-out entries are evicted so
+later turns can retry. A non-owner never inherits the machine owner's Git config and commits as
+LodyAI without approval. The cloud composition root owns hosted
 user resolution because the daemon does not own an end-user browser session; the local access
 port resolves only its synthetic owner and never performs network I/O. PR and push identity
 itself comes from the conversation-owner GitHub credential, not from git config. Identity
