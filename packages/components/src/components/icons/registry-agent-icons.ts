@@ -33,6 +33,7 @@ import kiroSvg from './registry-assets/kiro.svg?raw';
 import minimaxCodeSvg from './registry-assets/minimax-code.svg?raw';
 import minionCodeSvg from './registry-assets/minion-code.svg?raw';
 import mistralVibeSvg from './registry-assets/mistral-vibe.svg?raw';
+import museCodeSvg from './registry-assets/muse-code.svg?raw';
 import novaSvg from './registry-assets/nova.svg?raw';
 import opencodeSvg from './registry-assets/opencode.svg?raw';
 import opencodeV2Svg from './registry-assets/opencode-v2.svg?raw';
@@ -78,6 +79,7 @@ export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   'minimax-code': minimaxCodeSvg,
   'minion-code': minionCodeSvg,
   'mistral-vibe': mistralVibeSvg,
+  'muse-code': museCodeSvg,
   nova: novaSvg,
   opencode: opencodeSvg,
   'opencode-v2': opencodeV2Svg,
