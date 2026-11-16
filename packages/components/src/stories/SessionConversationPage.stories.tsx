@@ -1877,6 +1877,7 @@ export function SessionConversationStoryHarness({
   machineInfo,
   machineOnly = false,
   annotationPreview = false,
+  custom = false,
   firstUserMessage,
   onPresented,
   composerModelLabel,
@@ -1897,6 +1898,7 @@ export function SessionConversationStoryHarness({
   machineInfo?: SessionMachineInfo;
   machineOnly?: boolean;
   annotationPreview?: boolean;
+  custom?: boolean;
   firstUserMessage?: string;
   onPresented?: () => void;
   composerModelLabel?: string;
@@ -1924,6 +1926,7 @@ export function SessionConversationStoryHarness({
     const baseSession = buildSession(state, frame);
     return {
       ...baseSession,
+      ...(custom ? { cliType: 'custom' as const, agentType: 'custom' } : {}),
       ...(shareImage
         ? { title: 'Product list rendering performance' }
         : showCollaborators
@@ -1934,7 +1937,7 @@ export function SessionConversationStoryHarness({
       ...(repoFullName ? { repoFullName } : {}),
       ...(branchName ? { branchName } : {}),
     };
-  }, [branchName, frame, repoFullName, sessionTitle, shareImage, showCollaborators, state]);
+  }, [branchName, custom, frame, repoFullName, sessionTitle, shareImage, showCollaborators, state]);
   useEffect(() => {
     setReadingPanel(annotationPreview ? { kind: 'preview' } : null);
   }, [annotationPreview, session.id]);
@@ -2606,6 +2609,11 @@ export const DesktopReadingReviewWorking: Story = {
   args: { ...DesktopReadingReview.args, state: 'reading-working' },
   globals: { theme: 'dark' },
   decorators: [withDesktopViewport],
+};
+
+export const DesktopCustomAcpThoughts: Story = {
+  ...DesktopReadingReviewWorking,
+  args: { ...DesktopReadingReviewWorking.args, custom: true },
 };
 
 export const DesktopReadingReviewAnnotations: Story = {

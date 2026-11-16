@@ -7,7 +7,7 @@ Translation: current
 
 ## Behavior
 
-Builtin DeepSeek Harness conversations show thoughts in independent default-closed
+Builtin DeepSeek Harness and custom ACP conversations show thoughts in independent default-closed
 disclosures and tools in separate default-closed groups, preserving their order.
 Explicit toggles remain respected and search can reveal matching thoughts. Tool
 arrival must not change the reader’s choice for preceding thoughts. During streaming, prose stays

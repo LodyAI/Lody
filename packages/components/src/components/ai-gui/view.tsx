@@ -1819,7 +1819,9 @@ export const SessionChatStreamView = forwardRef<
       () =>
         selectAtom(
           sessionMetaAtomFamily(getSessionRoomId(sessionId)),
-          (meta) => meta?.cliType === 'builtin' && meta.agentType === 'deepseek'
+          (meta) =>
+            meta?.cliType === 'custom' ||
+            (meta?.cliType === 'builtin' && meta.agentType === 'deepseek')
         ),
       [sessionId]
     );
