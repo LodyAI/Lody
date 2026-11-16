@@ -16,7 +16,7 @@ import {
 import { InMemoryRemoteCursorStore } from '@loro-dev/streams-crdt';
 import { RepoSyncError, RepoTransportError, type RepoSyncReport } from 'loro-repo';
 
-import { Effect, Layer } from 'effect';
+import { Cause, Effect, Layer } from 'effect';
 import {
   makeLoroStreamsTokenProvider,
   makeLoroStreamsTokenWebPorts,
@@ -26,6 +26,7 @@ import {
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
 import {
   PresenceHost,
+  PresenceReleaseFailed,
   PresenceTransport,
   WorkspacePresenceOwnersLive,
 } from '../src/lib/loro/workspace-presence';
@@ -989,6 +990,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     manager.machine = {
       destroy: async () => {
         events.push('machine');
+        throw Object.assign(new Error('private detail TOKEN=synthetic-secret'), { code: 'EACCES' });
       },
     } as never;
     Object.assign(manager, {
@@ -1001,9 +1003,56 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     const failure = await manager.cleanUp({ fast: true }).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(AggregateError);
     expect((failure as AggregateError).errors[0].message).toContain(failed);
+    expect((failure as Error).message).toContain('Session unsaved-session: disk is full');
+    expect((failure as Error).message).toContain('Machine document: permission denied');
+    expect((failure as Error).message).toContain('persistence unconfirmed');
+    expect((failure as Error).message).not.toContain('synthetic-secret');
     expect(events).toEqual(['failed', 'sibling', 'machine', 'repo', 'encrypted']);
     await manager.cleanUp({ fast: true });
     expect(manager.getConnectedRoomCount()).toBe(0);
+  });
+
+  it('reports the presence release timeout retained inside the Effect cause', async () => {
+    const manager = new LoroDocumentManager({
+      repo: { destroy: async () => {} } as unknown as LoroDocumentManager['repo'],
+      workspaceId: 'cleanup-presence' as WorkspaceId,
+      userId: 'user-1',
+      metaSub: createMetaSubscription(),
+      logger: createSilentLogger(),
+      initialTransportStatus: 'connected',
+      initialMetaSyncPromise: Promise.resolve(true),
+      initialMetaSyncCompleted: true,
+    });
+    const presenceFailure = new WorkspacePresenceLegacyFailure(
+      Cause.fail(
+        new PresenceReleaseFailed({
+          cause: Cause.fail(new Cause.TimeoutError()),
+          owner: {} as never,
+          generation: 1,
+        })
+      )
+    );
+    Object.assign(manager, {
+      catalogSync: {
+        close: async () => {
+          throw new Error('unclassified failure with TOKEN=synthetic-secret');
+        },
+      },
+      presenceRuntime: {
+        stop: async () => {
+          throw presenceFailure;
+        },
+      },
+    });
+
+    const failure = await manager.cleanUp({ fast: true }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as Error).message).toContain(
+      'Catalog subscriptions: underlying reason unavailable'
+    );
+    expect((failure as Error).message).toContain('Presence release: timed out');
+    expect((failure as Error).message).not.toContain('synthetic-secret');
+    expect((failure as AggregateError).errors[1].cause).toBe(presenceFailure);
   });
 
   it('settles a queued manual reconnect when cleanup runs first', async () => {
