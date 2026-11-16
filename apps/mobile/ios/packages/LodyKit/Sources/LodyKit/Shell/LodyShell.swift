@@ -183,7 +183,6 @@ final class LodyShell {
   func openSessionFromExternal(_ id: String) {
     guard let navigation else { preconditionFailure("Application navigation has not started") }
     let open = {
-      HomeController.current?.reset()
       navigation.popToRootViewController(animated: false)
       HomeController.current?.openSession(id)
     }

@@ -20,6 +20,8 @@ Read before changing the conversation page: the transcript and its turns, header
 
 - Definite send failures must leave the composer available for a fresh turn. Keep the failed pending turn retryable until an explicit replacement; never reuse its attachments for the new turn or relax the fence for unconfirmed delivery.
 
+- Switching conversations replaces the existing detail page directly. Configure the title, machine and navigation actions from the catalog without waiting for history; keep this chrome available while history is unavailable.
+
 - `SessionFeed` retains a subscription on its captured runtime and releases only the final page owner (`SessionSubscriptions`). Cache/bootstrap/recovery snapshots set `isLiveUpdate = false`; the transcript suppresses reveal/fade for those snapshots and only the current visible text tail streams. Combined Fast/model/effort changes use `CreateLogic.applyingComposerChange` atomically. Session sync diagnostics hash session IDs and allow only bounded status/code fields, never message bodies.
 
 - The conversation Tabs panel (`Chat/ChatTabsPanel`, `SessionController.presentTabs`) uses `ChatTabsOverlay`, a Liquid Glass card below the header with a clear tap-to-dismiss layer. It retains status marks, selection, close/history/restore and Reduce Motion behavior. The header machine subtitle opens machine details, not Tabs.

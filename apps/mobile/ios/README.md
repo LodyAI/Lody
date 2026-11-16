@@ -157,7 +157,8 @@ management stays in Settings.
 
 Conversation Back, title/machine, Tabs and More controls belong to the page, so
 UIKit’s interactive pop moves them with its content instead of separately animating
-the system back circle. The transparent header registers its controls with UIKit through
+the system back circle. Switching conversations replaces the detail directly; the catalog
+supplies its header and actions before history arrives. The transparent header registers its controls with UIKit through
 `UIScrollEdgeElementContainerInteraction`, retaining the transcript’s native `.soft`
 top-edge blur. A noninteractive 55% semantic canvas tint protects the title and
 machine subtitle, fading to transparent over 32 pt below the header rather than

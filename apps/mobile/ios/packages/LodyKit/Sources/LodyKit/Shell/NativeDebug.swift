@@ -281,6 +281,16 @@ enum NativeHomeFixture {
     let url = Bundle.main.url(forResource: "DebugHome", withExtension: "json")!
     let fixture = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
     catalog = fixture["catalog"] as! [String: Any]
+    if LodyUIVerify.has("--ui-verify-session-tabs"), var sessions = catalog["sessions"] as? [[String: Any]],
+       var tab = sessions.first(where: { $0["id"] as? String == "ui-design" }) {
+      HomeScope.store(.team)
+      tab["id"] = "ui-history-tab"
+      tab["title"] = "Waiting for tab history"
+      tab["parentSessionId"] = "ui-design"
+      tab["status"] = "running"
+      sessions.append(tab)
+      catalog["sessions"] = sessions
+    }
     if LodyUIVerify.has("--ui-verify-sticky-groups") {
       HomeGrouping.store(.project)
       let names = ["Alpha project", "Beta project", "Gamma project"]

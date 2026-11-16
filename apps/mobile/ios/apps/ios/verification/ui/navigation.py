@@ -78,7 +78,7 @@ home('initial-home')
 for index in range(2 if embedded else 3):
     subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'ai.lody.mobile'], check=True, timeout=30)
     ui.invalidate_axe()
-    launch = ['xcrun', 'simctl', 'launch', udid, 'ai.lody.mobile', '--ui-verify', '--ui-verify-home',
+    launch = ['xcrun', 'simctl', 'launch', udid, 'ai.lody.mobile', '--ui-verify', '--ui-verify-home', '--ui-verify-session-tabs',
               '-AppleLanguages', f'({catalog.LANGUAGE})',
               '-AppleLocale', 'en_US' if catalog.LANGUAGE == 'en' else 'zh_CN']
     subprocess.run(launch, check=True, timeout=30)
@@ -98,6 +98,19 @@ def no_home_search():
 
 no_home_search()
 ui.capture('toolbar-pushed')
+
+# This Tab deliberately has no cached or incoming history. Navigation chrome
+# and the loading body must stay available while its feed remains unresolved.
+ui.axe('tap', '--id', 'chat-directory-tabs', '--post-delay', '.3')
+ui.axe('tap', '--id', 'tab:ui-history-tab', '--post-delay', '.3')
+session('Waiting for tab history')
+ui.element('chat-page-header')
+ui.element('chat-transcript')
+ui.capture('tab-waiting-for-history')
+ui.axe('tap', '--id', 'chat-directory-tabs', '--post-delay', '.3')
+ui.axe('tap', '--id', 'tab:ui-design', '--post-delay', '.3')
+session('首页交互设计')
+ui.capture('tab-return')
 
 def conversation_header_geometry():
     back = ui.element('BackButton')['frame']

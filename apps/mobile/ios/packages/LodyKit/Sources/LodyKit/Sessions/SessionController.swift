@@ -231,7 +231,6 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     markViewed()
     prepareSimulator(state, session)
-    startFeed(state)
     chat.setAttachmentContext(Self.json(["workspaceId": state.workspaceId, "sessionId": sessionId]))
     if chat.proposalUserID != state.userId {
       chat.proposalUserID = state.userId
@@ -274,8 +273,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
       chat.applyRows()
     }
     renderMentions(state, session)
-    renderFeed(session)
+    // Navigation and actions belong to the catalog; show them before history arrives.
+    startFeed(state)
     updateMoreMenu(session)
+    renderFeed(session)
   }
 
   private func startFeed(_ state: SessionListState) {
