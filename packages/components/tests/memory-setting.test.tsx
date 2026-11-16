@@ -410,3 +410,114 @@ it('uses only associated identities in the Role picker and prevents selecting a 
   expect(container.textContent).toContain('Review lessons');
   expect(button('Link').disabled).toBe(true);
 });
+
+it('shows the provider’s current name and description after the identity is edited in nmem', async () => {
+  ready();
+  mocks.entries = [saved];
+  mocks.provider.result.memories = [
+    { id: 'reviewer', name: 'Gate reviewer', description: 'Read-only review of diffs' },
+  ];
+  await renderSetting();
+  expect(container.textContent).toContain('Gate reviewer');
+  expect(container.textContent).toContain('Read-only review of diffs');
+  expect(container.textContent).not.toContain('Review lessons');
+  mocks.provider.result = { type: 'machine/memory', status: 'error', memories: [] };
+  await renderSetting();
+  expect(container.textContent).toContain('Review lessons');
+});
+
+async function renderPicker(initial?: { providerId: string; memoryId: string }) {
+  let value = initial;
+  const changes: unknown[] = [];
+  const draw = () =>
+    root.render(
+      <Provider store={createStore()}>
+        <RoleMemoryPicker
+          machineId={localId}
+          value={value}
+          onChange={(next) => {
+            changes.push(next);
+            value = next;
+            draw();
+          }}
+        />
+      </Provider>
+    );
+  await act(async () => draw());
+  return { changes, current: () => value };
+}
+function rowNames() {
+  return [...container.querySelectorAll('[aria-pressed]')]
+    .filter((node) => node.tagName === 'BUTTON' && !node.textContent?.match(/^(Link|Linked)$/))
+    .map((node) => node.textContent);
+}
+function manyMemories(count: number) {
+  const memories = Array.from({ length: count }, (_, index) => ({
+    id: `role-${index}`,
+    name: `Role ${index}`,
+    description: index === 3 ? 'Finds root causes' : undefined,
+  }));
+  mocks.provider.result = { type: 'machine/memory', status: 'ready', memories };
+  mocks.entries = memories.map((memory) => ({
+    ...saved,
+    memoryId: memory.id,
+    name: memory.name,
+    description: memory.description,
+  }));
+}
+
+it('unlinks a Role memory by pressing its Linked button again', async () => {
+  ready();
+  mocks.entries = [saved];
+  const picker = await renderPicker({ providerId: 'nowledge-mem', memoryId: 'reviewer' });
+  await click('Linked');
+  expect(picker.current()).toBeUndefined();
+  await click('Link');
+  expect(picker.current()).toEqual({ providerId: 'nowledge-mem', memoryId: 'reviewer' });
+});
+
+it('lets a Role unlink a memory whose provider identity was deleted', async () => {
+  ready();
+  mocks.entries = [saved];
+  mocks.provider.result.memories = [];
+  const picker = await renderPicker({ providerId: 'nowledge-mem', memoryId: 'reviewer' });
+  await click('Linked');
+  expect(picker.current()).toBeUndefined();
+  expect(button('Link').disabled).toBe(true);
+});
+
+it('filters a long Role memory list by name or description and lists the linked memory first', async () => {
+  manyMemories(10);
+  const picker = await renderPicker({ providerId: 'nowledge-mem', memoryId: 'role-8' });
+  expect(rowNames()[0]).toContain('Role 8');
+  await fill('Search memories', 'root cause');
+  expect(rowNames()).toHaveLength(1);
+  expect(rowNames()[0]).toContain('Role 3');
+  await click('Link');
+  expect(picker.current()).toEqual({ providerId: 'nowledge-mem', memoryId: 'role-3' });
+  await fill('Search memories', 'nothing like this');
+  expect(container.textContent).toContain('No memories match');
+});
+
+it('omits search for a short Role memory list', async () => {
+  ready();
+  mocks.entries = [saved];
+  await renderPicker();
+  expect(document.querySelector('[aria-label="Search memories"]')).toBeNull();
+});
+
+it('adds search to the Memory page only above seven imported memories on the machine', async () => {
+  manyMemories(7);
+  await renderSetting();
+  expect(document.querySelector('[aria-label="Search memories"]')).toBeNull();
+  manyMemories(8);
+  await renderSetting();
+  await fill('Search memories', 'ROOT CAUSE');
+  expect(container.textContent).toContain('Role 3');
+  expect(container.textContent).not.toContain('Role 7');
+  await fill('Search memories', 'role-7');
+  expect(container.textContent).toContain('Role 7');
+  expect(container.textContent).not.toContain('Role 3');
+  await fill('Search memories', 'nothing like this');
+  expect(container.textContent).toContain('No memories match');
+});
