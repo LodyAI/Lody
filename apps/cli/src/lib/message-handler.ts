@@ -3508,6 +3508,15 @@ export class MessageHandler {
           },
           { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
         ),
+      recordNativeWorkInterrupted: async (sessionId, turnId) =>
+        await this.recordAgentWarning(
+          sessionId,
+          {
+            message: 'The agent process ended while it still reported background work.',
+            source: 'nativeWorkInterrupted',
+          },
+          { noticeId: `native-work-interrupted-${turnId}` }
+        ),
       maybeGenerateAndStoreSessionTitle: async (
         sessionId,
         cliType,

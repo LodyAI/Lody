@@ -68,6 +68,27 @@ to GC:
    protects the session. An agent without the level keeps the old rule that
    only user actions and turn ends count, so its GC behavior does not change.
 
+## Completion signals
+
+Added 2026-11-16. The same level also decides when a Turn counts as finished for
+its reader. A Turn that ends while its agent still reports `running` or
+`background` no longer marks the Session unread or sends the success notification
+at release; `SessionExecutionService` waits on that agent instance's lifecycle
+events, without a clock, and publishes once the agent reports idle, with the
+later activity time. If the process ends first (idle GC after its 24-hour cap,
+memory pressure, a crash), the conversation gets a `nativeWorkInterrupted` notice,
+the Session is still marked unread, and the user is alerted to an `unknown` result
+(`native_work_interrupted`) instead of a success. A newer Turn on the Session
+withdraws the wait, because that Turn publishes its own completion.
+
+The wait is not completion bookkeeping: it holds no write, so it does not count
+in `inspectClientLoss` or the shutdown drain, which a background dev server could
+otherwise hold for a day. Only the publication after it is owned work. Shutdown
+withdraws the wait and publishes nothing, and a daemon restart loses it, so a
+Turn whose background work was still live at restart gets no completion signal.
+Agents that report no level keep immediate completion, as for GC. Failure and
+cancellation attention is unchanged and never waits.
+
 ## Alternatives
 
 - **Raise `LODY_SESSION_GC_IDLE_TIMEOUT_MS`.** This needs no code, but it keeps
@@ -78,6 +99,9 @@ to GC:
 - **Infer background work from history.** Background Bash tool calls are in
   history, but nothing there reliably says when the task ended. Only the SDK's
   live-task level does.
+- **Publish completion at release and only show background work in the row.**
+  The working mark already shows native work, but the unread mark and the
+  notification still told the user the work was done while it was running.
 - **Protect pending wakeups and crons from history.** History already holds
   enough to compute the next fire time (`collectPendingScheduledTasksFromHistory`).
   This was left for a separate change.

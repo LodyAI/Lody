@@ -1,7 +1,21 @@
 import { Effect } from 'effect';
 import type { SessionDocument, LoroDocumentManager } from '../lib/loro/doc';
 import { createSessionBackend } from './session-backend';
-import { publishTurnCompletion } from './turn-completion';
+import {
+  awaitNativeWorkSettlement,
+  publishTurnCompletion,
+  type NativeWorkSettlement,
+  type NativeWorkWatch,
+} from './turn-completion';
+
+/**
+ * @deprecated Promise host adapter for the same execution owner as below. The wait is
+ * not completion bookkeeping: it holds no write and ends with the agent or the signal.
+ */
+export const awaitNativeWorkSettlementLegacy = (
+  watch: NativeWorkWatch,
+  signal: AbortSignal
+): Promise<NativeWorkSettlement> => Effect.runPromise(awaitNativeWorkSettlement(watch), { signal });
 
 /**
  * @deprecated Promise host adapter. Remove when Session execution and history owners

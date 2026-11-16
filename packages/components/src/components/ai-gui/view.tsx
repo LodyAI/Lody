@@ -3676,7 +3676,12 @@ const AgentWarningNoticeBody = ({
               'sessions.systemNotices.agentWarning.stopTerminationFailed',
               'Could not stop the task'
             )
-          : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
+          : source === 'nativeWorkInterrupted'
+            ? t(
+                'sessions.systemNotices.agentWarning.nativeWorkInterrupted',
+                'Background work was interrupted'
+              )
+            : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
   const guidance =
     source === 'sessionCancelFailed'
       ? t(
@@ -3693,7 +3698,12 @@ const AgentWarningNoticeBody = ({
               'sessions.systemNotices.agentWarning.stopTerminationFailedGuidance',
               'The task may still be running. Try restarting Lody’s background service on this machine.'
             )
-          : undefined;
+          : source === 'nativeWorkInterrupted'
+            ? t(
+                'sessions.systemNotices.agentWarning.nativeWorkInterruptedGuidance',
+                'The agent stopped before its background tasks finished, so their results may be missing.'
+              )
+            : undefined;
   return (
     <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
       <AgentNoticeBanner

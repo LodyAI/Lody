@@ -11,7 +11,11 @@ import { daemonLossObserver, createDaemonLossTasks } from '@/lib/e2ee/client-los
 import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
 import { MAX_DERIVED_TURNS_PER_ORIGIN } from '@/lib/e2ee/derivation-limits';
 import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
-import { publishTurnCompletionLegacy } from './turn-completion-legacy';
+import {
+  awaitNativeWorkSettlementLegacy,
+  publishTurnCompletionLegacy,
+} from './turn-completion-legacy';
+import type { NativeWorkWatch } from './turn-completion';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
@@ -735,6 +739,8 @@ export type SessionExecutionServiceDeps = {
     turnId: string,
     failure: { phase: SessionStopFailurePhase; message: string }
   ) => Promise<void>;
+  /** Persists the notice that agent work outliving this Turn ended unfinished. */
+  recordNativeWorkInterrupted?: (sessionId: SessionId, turnId: string) => Promise<void>;
   maybeGenerateAndStoreSessionTitle: (
     sessionId: SessionId,
     cliType: AgentConfigCliType,
@@ -3267,6 +3273,61 @@ export class SessionExecutionService {
   private registerTurnRuntime(runtime: TurnRuntimeState): void {
     this.releasedTurnBySession.delete(runtime.sessionId);
     this.turnRuntimeBySession.set(runtime.sessionId, runtime);
+    // A newer Turn owns the Session's completion signals from here on.
+    for (const supersede of this.nativeWorkSupersede.get(runtime.sessionId) ?? []) supersede();
+  }
+
+  /** Completion publications still waiting for agent work that outlived their Turn. */
+  private readonly nativeWorkSupersede = new Map<SessionId, Set<() => void>>();
+
+  /**
+   * Watches the released Turn's own agent instance while it still reports work. Absent
+   * for agents that report no `sessionActivity`, which keep immediate completion.
+   */
+  private watchNativeWork(sessionId: SessionId): NativeWorkWatch | undefined {
+    const sessionManager = this.deps.sessionManager;
+    const session = sessionManager.getSession(sessionId);
+    const client = session?.agentClient;
+    if (!session || !client) return undefined;
+    try {
+      // An unreadable observation must not hold back completion; publish it as before.
+      if (client.getNativeWork() === null) return undefined;
+    } catch (cause) {
+      this.deps.logger.debug(
+        `[${sessionId}] Native agent work unreadable at release: ${formatErrorMessage(cause)}`
+      );
+      return undefined;
+    }
+    return {
+      current: () => client.getNativeWork(),
+      subscribe: (onEvent) => {
+        const supersede = () => onEvent('superseded');
+        const supersedeSet = this.nativeWorkSupersede.get(sessionId) ?? new Set();
+        supersedeSet.add(supersede);
+        this.nativeWorkSupersede.set(sessionId, supersedeSet);
+        // Detach publishes null before removing the instance; read it after that.
+        const onChanged = (changed: SessionId) => {
+          if (changed !== sessionId) return;
+          queueMicrotask(() =>
+            onEvent(sessionManager.getSession(sessionId) === session ? 'changed' : 'ended')
+          );
+        };
+        const onEnded = (event: { sessionId: SessionId }) => {
+          if (event.sessionId === sessionId) onEvent('ended');
+        };
+        sessionManager.on('onNativeWorkChanged', onChanged);
+        sessionManager.on('exit', onEnded);
+        sessionManager.on('terminated', onEnded);
+        return () => {
+          supersedeSet.delete(supersede);
+          if (!supersedeSet.size && this.nativeWorkSupersede.get(sessionId) === supersedeSet)
+            this.nativeWorkSupersede.delete(sessionId);
+          sessionManager.off('onNativeWorkChanged', onChanged);
+          sessionManager.off('exit', onEnded);
+          sessionManager.off('terminated', onEnded);
+        };
+      },
+    };
   }
 
   /**
@@ -5881,30 +5942,68 @@ export class SessionExecutionService {
         const notify = async () => {
           if (fact) await this.publishTurnOutcomeFact(fact);
         };
+        const own = (work: Promise<unknown>) => {
+          const owned = Promise.allSettled([work]);
+          this.ownedWork.add(owned);
+          void owned.then(() => {
+            this.ownedWork.delete(owned);
+            daemonLossObserver.changed();
+          });
+        };
         // Failure attention is independent of successful delivery. Never delay it on sync.
         const completion = runtime.finalizeCompleted && !runtime.releaseFailure;
-        const delivery = completion
-          ? publishTurnCompletionLegacy({
-              signal: this.completionPublicationAbort.signal,
-              completedAt,
-              sessionDoc,
-              workspaceDocument: this.deps.workspaceDocument,
-              notify: fact?.outcome.kind === 'succeeded' ? notify : async () => {},
-            }).catch((error: unknown) => {
-              this.deps.logger.warn(
-                `[${sessionId}] Turn completion publication incomplete (turnId=${runtime.turnId}): ${formatErrorMessage(error)}`
-              );
+        const publishCompletion = (settlement: 'settled' | 'interrupted', at: number) =>
+          publishTurnCompletionLegacy({
+            signal: this.completionPublicationAbort.signal,
+            completedAt: at,
+            sessionDoc,
+            workspaceDocument: this.deps.workspaceDocument,
+            notify:
+              fact?.outcome.kind !== 'succeeded'
+                ? async () => {}
+                : settlement === 'interrupted'
+                  ? () =>
+                      this.publishTurnOutcomeFact({
+                        ...fact,
+                        outcome: { kind: 'unknown', code: 'native_work_interrupted' },
+                      })
+                  : notify,
+          }).catch((error: unknown) => {
+            this.deps.logger.warn(
+              `[${sessionId}] Turn completion publication incomplete (turnId=${runtime.turnId}): ${formatErrorMessage(error)}`
+            );
+          });
+        // Agent work that outlived the Turn keeps it unfinished for its reader. The wait
+        // holds no write, so only the publication after it is owned bookkeeping.
+        const nativeWork = completion ? this.watchNativeWork(sessionId) : undefined;
+        if (nativeWork)
+          void awaitNativeWorkSettlementLegacy(nativeWork, this.completionPublicationAbort.signal)
+            .then((settlement) => {
+              if (settlement === 'superseded') return;
+              if (settlement === 'interrupted')
+                own(this.recordNativeWorkInterrupted(sessionId, runtime.turnId));
+              own(publishCompletion(settlement, Math.max(completedAt, getServerNow())));
             })
-          : Promise.resolve();
-        const attention = fact?.outcome.kind !== 'succeeded' ? notify() : Promise.resolve();
-        const owned = Promise.allSettled([delivery, attention]);
-        this.ownedWork.add(owned);
-        void owned.then(() => {
-          this.ownedWork.delete(owned);
-          daemonLossObserver.changed();
-        });
+            .catch(() => {
+              // Shutdown withdrew the wait; nothing was published or written.
+            });
+        else if (completion) own(publishCompletion('settled', completedAt));
+        if (fact?.outcome.kind !== 'succeeded') own(notify());
       }
     }
+  }
+
+  /**
+   * The agent reported work after its Turn and its process ended first: the conversation
+   * records it, and the reader is alerted to an unknown result rather than a success.
+   */
+  private recordNativeWorkInterrupted(sessionId: SessionId, turnId: string): Promise<void> {
+    return (this.deps.recordNativeWorkInterrupted?.(sessionId, turnId) ?? Promise.resolve()).catch(
+      (cause: unknown) =>
+        this.deps.logger.warn(
+          `[${sessionId}] Failed to record interrupted background work: ${formatErrorMessage(cause)}`
+        )
+    );
   }
 
   /** Freeze provenance once the exact input is available; never changes authorization. */
