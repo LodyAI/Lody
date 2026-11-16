@@ -350,6 +350,17 @@ export const sidebarShowBranchNamesAtom = atomWithStorage<boolean>(
 );
 
 /**
+ * Project (Workspace) organize mode only: when true, a project with no visible
+ * Session rows is left out of the sidebar, and a machine section with no
+ * remaining projects goes with it. When false, every registered local project
+ * and every workspace project is listed, empty or not. Defaults on.
+ */
+export const sidebarHideEmptyProjectsAtom = atomWithStorage<boolean>(
+  'lody-sidebar-hide-empty-projects',
+  true
+);
+
+/**
  * Per-bucket collapse state for the Updated and Status organize modes.
  * Keyed by Updated's single 'all' bucket and by each status group; value is
  * whether collapsed. (Persisted entries from the retired today/week/older

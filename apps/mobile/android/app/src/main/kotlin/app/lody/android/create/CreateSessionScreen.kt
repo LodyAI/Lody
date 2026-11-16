@@ -246,6 +246,12 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
     val roleItems = CreateSessionModel.roleItems(roles.orEmpty(), target.machineId, agents)
     val activeRole = roleItems.firstOrNull { it.role.id == roleId }
         ?.takeIf { CreateSessionModel.roleApplied(it, agent?.id, modelId, modeId, effort) }
+    // Web's Plan / Fast switches; null keeps the Role's pin or the agent's own value. Another agent clears them.
+    var planPick by rememberSaveable(agent?.id) { mutableStateOf<Boolean?>(null) }
+    var fastPick by rememberSaveable(agent?.id) { mutableStateOf<Boolean?>(null) }
+    val optionValues = CreateSessionModel.optionValues(
+        capability, activeRole?.let { CreateSessionModel.roleChoice(it.target).options }.orEmpty(), modelId, planPick, fastPick,
+    )
     LaunchedEffect(runtimeScope, agent?.id, optionsFresh, capability != null) {
         val selected = agent ?: return@LaunchedEffect
         if (optionsFresh) {
@@ -319,7 +325,7 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                 // Role labels ("🧪 Reviewer") go out as their tokens (`@role:<id>`).
                 sessionId, turnId, target.projectId.takeUnless { target.chat }, chosen.machineId, chosen.id, mentions.resolve(prompt), branch.takeIf { github }, target.worktree, modelId, modeId, effort,
                 agentRoleId = activeRole?.role?.id,
-                configOptionValues = activeRole?.let { CreateSessionModel.roleChoice(it.target).options }.orEmpty(),
+                configOptionValues = optionValues,
             ).let { request ->
                 // The first bubble shows the prompt as composed, chips included, not its tokens.
                 val (shown, references) = mentions.shown(prompt)
@@ -481,7 +487,7 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                 roleItems.firstOrNull { it.role.id == id && it.unavailable == null }?.let { item ->
                     val choice = CreateSessionModel.roleChoice(item.target)
                     agentId = item.target.agentConfigId; modelId = choice.modelId; modeId = choice.modeId; effort = choice.effort
-                    roleId = item.role.id
+                    roleId = item.role.id; planPick = null; fastPick = null
                 }
             }
             val currentKey = agent?.let { CreateSessionModel.recentKey(it.machineId, RunSelection(it.id, modelId, modeId, effort), activeRole?.role?.id) }
@@ -514,7 +520,7 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                             if (recentAgent != null) {
                                 val applied = CreateSessionModel.applicable(record.selection, options?.capability(recentAgent))
                                 agentId = applied.agentId; modelId = applied.modelId; modeId = applied.modeId; effort = applied.effort
-                                roleId = null
+                                roleId = null; planPick = null; fastPick = null
                             }
                         }
                     }
@@ -548,6 +554,12 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     capability?.modes?.takeIf { it.isNotEmpty() }?.let { modes ->
                         add(RunConfigRow(MODE, stringResource(R.string.create_mode), modes.map { PickerOption(it.id, it.name, it.id == modeId) }))
                     }
+                    capability?.planOn(optionValues)?.let { on ->
+                        add(RunConfigRow(PLAN, stringResource(R.string.run_config_plan), emptyList(), toggle = on))
+                    }
+                    capability?.fastOn(optionValues, modelId)?.let { on ->
+                        add(RunConfigRow(FAST, stringResource(R.string.run_config_fast), emptyList(), toggle = on))
+                    }
                 },
                 defaultLabel = stringResource(R.string.create_default),
             ) { row, id ->
@@ -559,6 +571,8 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     MODEL -> { modelId = id; effort = null }
                     EFFORT -> effort = id
                     MODE -> modeId = id
+                    PLAN -> planPick = id == RUN_CONFIG_ON
+                    FAST -> fastPick = id == RUN_CONFIG_ON
                 }
             }
         }
@@ -571,6 +585,8 @@ private const val AGENT = "agent"
 private const val MODEL = "model"
 private const val EFFORT = "effort"
 private const val MODE = "mode"
+private const val PLAN = "plan"
+private const val FAST = "fast"
 
 @Composable
 private fun ContextPanel(catalog: CatalogSnapshot, target: CreateTarget, onSearchFocus: (Boolean) -> Unit, open: String?, onOpenChange: (String?) -> Unit, onlineMachines: Set<String>?, availableMachines: Set<String>?, onChange: (CreateTarget) -> Unit) {

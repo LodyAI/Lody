@@ -112,4 +112,36 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
       container?.querySelector('button[aria-label="Filter sidebar"]')?.getAttribute('aria-expanded')
     ).toBe('true');
   });
+
+  it('offers Hide Empty Projects only in the Project view and keeps the menu open', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const onHideEmptyProjectsChange = vi.fn();
+    const renderFilter = (organize: 'workspace' | 'updated') =>
+      flushSync(() => {
+        root?.render(
+          <SidebarFilterPopover
+            organize={organize}
+            scope="my"
+            hideEmptyProjects
+            onHideEmptyProjectsChange={onHideEmptyProjectsChange}
+            open
+          />
+        );
+      });
+
+    renderFilter('updated');
+    expect(document.body.querySelector('[data-sidebar-filter-hide-empty-projects]')).toBeNull();
+
+    renderFilter('workspace');
+    const row = document.body.querySelector('[data-sidebar-filter-hide-empty-projects]');
+    expect(row?.getAttribute('aria-label')).toBe('Hide Empty Projects');
+    expect(row?.getAttribute('aria-checked')).toBe('true');
+    flushSync(() => {
+      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onHideEmptyProjectsChange.mock.calls[0]?.[0]).toBe(false);
+    expect(document.body.querySelector('[data-sidebar-filter-hide-empty-projects]')).not.toBeNull();
+  });
 });

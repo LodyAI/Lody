@@ -52,3 +52,33 @@ export function placeProjectGroups<
   anywhere.states = anywhere.states.filter((state) => active.has(state.projectId));
   return { byMachine, anywhere };
 }
+
+/**
+ * The machine sections the Project view lists. With `hideEmptyProjects` on, a
+ * project is listed only while it has Session rows after pinned-tree separation
+ * and opener placement, and a machine section stays only while it still lists a
+ * project or holds a multi-repository project with conversations. With it off,
+ * every registered project of every catalog section is listed, empty or not.
+ */
+export function selectVisibleLocalProjectSections<
+  Section extends { machineId?: MachineId | null; projects: readonly { id: string }[] },
+>(input: {
+  sections: readonly Section[];
+  hideEmptyProjects: boolean;
+  sessionCountOf: (machineId: MachineId | null | undefined, projectId: string) => number;
+  projectGroupSessionCountOf: (machineId: MachineId) => number;
+}): Section[] {
+  if (!input.hideEmptyProjects) return [...input.sections];
+  return input.sections
+    .map((section) => ({
+      ...section,
+      projects: section.projects.filter(
+        (project) => input.sessionCountOf(section.machineId, project.id) > 0
+      ),
+    }))
+    .filter((section) => {
+      if (section.projects.length > 0) return true;
+      const machineId = section.machineId;
+      return machineId ? input.projectGroupSessionCountOf(machineId) > 0 : false;
+    });
+}

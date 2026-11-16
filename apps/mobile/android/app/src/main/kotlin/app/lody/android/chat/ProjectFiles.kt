@@ -103,6 +103,7 @@ private sealed interface FilesPage {
  * A near full-screen sheet, the same shape as [FilesSheet]: a folder lists its folders and files
  * as one card of ruled rows; a folder or Markdown file slides in, the back arrow or system Back
  * slides back. Links in a rendered file open other Markdown files here and web links in the browser.
+ * With [startFile] (a transcript file link) the sheet opens on that file instead of the root folder.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,10 +112,11 @@ internal fun ProjectFilesSheet(
     readFile: suspend (path: String) -> FileContent,
     openExternal: (String) -> Unit,
     onDismiss: () -> Unit,
+    startFile: String? = null,
 ) {
     val colors = LodyTheme.colors
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var stack by remember { mutableStateOf(listOf<FilesPage>(FilesPage.Folder(""))) }
+    var stack by remember(startFile) { mutableStateOf(listOf(if (startFile != null) FilesPage.File(startFile) else FilesPage.Folder(""))) }
     BackHandler(enabled = stack.size > 1) { stack = stack.dropLast(1) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = colors.bgBase) {
         AnimatedContent(
