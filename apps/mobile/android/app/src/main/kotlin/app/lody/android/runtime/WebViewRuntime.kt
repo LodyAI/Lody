@@ -66,7 +66,7 @@ open class WebViewRuntime internal constructor(
             val value = call("createTab", JSONArray().put(command.parentId).put(command.id).put(command.title).put(backend.preferRoost).put(command.billing ?: JSONObject.NULL), CommandDeadline.WRITE) as JSONObject
             RuntimeResult.Created(CreationReceipt(command.id, value.getString("state"), value.optString("reason").ifBlank { null }))
         }
-        is RuntimeCommand.GetCreationOptions -> RuntimeResult.Options(CreationJson.options(call("creationOptions", JSONArray().put(command.projectId ?: JSONObject.NULL).put(command.agentConfigId ?: JSONObject.NULL), CommandDeadline.QUERY) as JSONObject))
+        is RuntimeCommand.GetCreationOptions -> RuntimeResult.Options(CreationJson.options(call("creationOptions", JSONArray().put(command.projectId ?: JSONObject.NULL).put(command.agentConfigId ?: JSONObject.NULL).put(command.includeOffline), CommandDeadline.QUERY) as JSONObject))
         RuntimeCommand.ListAgentRoles -> RuntimeResult.Roles(CreationJson.roles(call("agentRoles", deadline = CommandDeadline.QUERY) as JSONObject))
         RuntimeCommand.ListProjectGroups -> {
             val rows = (call("projectGroups", deadline = CommandDeadline.QUERY) as JSONObject).optJSONArray("groups") ?: JSONArray()

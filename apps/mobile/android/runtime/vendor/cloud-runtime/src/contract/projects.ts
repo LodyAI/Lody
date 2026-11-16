@@ -66,6 +66,11 @@ export const CreationOptionsParams = z
     workspaceId: z.string().min(1),
     projectId: z.string().optional(),
     agentConfigId: z.string().min(1).optional(),
+    /**
+     * Schedule targets: every readable machine's agents, online or not (a
+     * schedule runs later, as on Web). New chats omit it and get online agents.
+     */
+    includeOffline: z.boolean().optional(),
   })
   .meta({ id: 'CreationOptionsParams' });
 

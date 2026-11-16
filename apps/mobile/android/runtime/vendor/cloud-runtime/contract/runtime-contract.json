@@ -1638,7 +1638,8 @@
       "properties": {
         "workspaceId": { "type": "string", "minLength": 1 },
         "projectId": { "type": "string" },
-        "agentConfigId": { "type": "string", "minLength": 1 }
+        "agentConfigId": { "type": "string", "minLength": 1 },
+        "includeOffline": { "type": "boolean" }
       },
       "required": ["workspaceId"]
     },

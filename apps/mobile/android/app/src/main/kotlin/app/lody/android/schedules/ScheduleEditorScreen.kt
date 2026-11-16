@@ -123,7 +123,7 @@ fun ScheduleEditorScreen(
     LaunchedEffect(creation, state.scope) {
         if (creation == null) return@LaunchedEffect
         options = try { creation.cachedOptions(state.scope, null) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
-        try { options = creation.options(state.scope, null) }
+        try { options = creation.scheduleOptions(state.scope) }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { }
     }
@@ -138,10 +138,11 @@ fun ScheduleEditorScreen(
         catch (failure: ScheduleFailure) { loadFailure = failure.code }
         catch (_: Exception) { loadFailure = "runtime_failed" }
     }
-    // A new schedule starts on the first computer and agent offered.
+    // A new schedule starts on the first owned computer and agent offered (schedules run only on the owner's computers).
     LaunchedEffect(options, creating) {
         if (!creating || form != null) return@LaunchedEffect
-        val agent = options?.agents?.firstOrNull() ?: if (options == null && creation != null) return@LaunchedEffect else null
+        val owned = state.list?.ownedMachineIds
+        val agent = options?.agents?.firstOrNull { owned?.contains(it.machineId) != false } ?: if (options == null && creation != null) return@LaunchedEffect else null
         form = ScheduleForms.blank(agent?.machineId, agent?.id, System.currentTimeMillis(), zone)
     }
 
