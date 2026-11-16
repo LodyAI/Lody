@@ -538,14 +538,58 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     expect(mockState.listSessions.mock.calls.length).toBeGreaterThan(callsAfterConfig);
     expect(harness.client.getNativeWork()).toBe('background');
 
-    // A new prompt stops the monitor; a turn without background work does not restart it.
+    // A new prompt stops the monitor first, so its live stream reaches Lody.
     transcript.items = [user('Wait'), timer, user('Hi'), say('Hello')];
     promptOnce([say('Hello')]);
     await send(harness, 'Hi');
+    expect(texts(harness.updates)).toEqual(['Hello']);
+  });
+
+  it('keeps tracking background work when the user sends another message before it finishes', async () => {
+    const harness = createHarness();
+    const transcript = installTranscript();
+    await harness.client.startSession({} as never, '/synthetic/project');
+
+    const running = tool('cmd-1', 'run_command', 'in_progress');
+    transcript.items = [user('Run suite'), running];
+    promptOnce([running]);
+    await send(harness, 'Run suite');
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    // The next turn has no background tool of its own; the earlier command is still running.
+    transcript.items = [user('Run suite'), running, user('Read the README'), say('README read.')];
+    promptOnce([say('README read.')]);
+    await send(harness, 'Read the README');
+    expect(harness.client.getNativeWork()).toBe('background');
+    await vi.advanceTimersByTimeAsync(DEFAULT_ANTIGRAVITY_POLL_TIMINGS.settleQuietMs + 10_000);
+    expect(harness.client.getNativeWork()).toBe('background');
+
+    // The command finishes and agy wakes the model after the latest user message.
+    const before = harness.updates.length;
+    transcript.items = [
+      user('Run suite'),
+      tool('cmd-1', 'run_command', 'completed', { rawOutput: { Stdout: '42 passed' } }),
+      user('Read the README'),
+      say('README read.'),
+      say('Tests finished: 42 passed.'),
+    ];
+    transcript.updatedAt = '2026-01-01T00:02:00Z';
+    await vi.advanceTimersByTimeAsync(2_000);
+    const replayed = harness.updates.slice(before);
+    expect(replayed.map((u) => u.update.sessionUpdate)).toEqual([
+      'tool_call_update',
+      'agent_message_chunk',
+    ]);
+    expect(texts(replayed)).toEqual(['\n\nTests finished: 42 passed.']);
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_ANTIGRAVITY_POLL_TIMINGS.settleQuietMs + 5_000);
     expect(harness.client.getNativeWork()).toBeNull();
-    const callsAfterPrompt = mockState.listSessions.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(mockState.listSessions.mock.calls.length).toBe(callsAfterPrompt);
+
+    // Once settled, a later turn does not inherit it.
+    transcript.items = [...transcript.items, user('Thanks'), say('Welcome')];
+    promptOnce([say('Welcome')]);
+    await send(harness, 'Thanks');
+    expect(harness.client.getNativeWork()).toBeNull();
   });
 
   it('never re-emits history replayed when a session resumes', async () => {

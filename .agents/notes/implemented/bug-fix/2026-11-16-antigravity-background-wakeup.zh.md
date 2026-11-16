@@ -37,7 +37,9 @@ turn，与 Claude 后台任务的处理方式相同。
   没有输出的 workflow，或输出是 agy「running as a background task」占位文本的工具），
   则为 10 分钟。agy 会让 `schedule` 一直保持 `in_progress` 直到触发，所以定时器
   不需要特殊处理。守护进程（`IsDaemon: true`）不计入。单个监视器最长 24 小时，
-  与 Core `background` 上限一致。
+  与 Core `background` 上限一致。用户在后台工作完成前发出新消息时，尚未结束的工作会
+  延续到新 turn，新 turn 结束后监视器继续运行并回放其完成结果；工具本身的更新写回该工具
+  最初出现的那条回复。
 - **只读回放。** 监视器每 2 秒查询一次 `session/list`，`updatedAt` 变化时执行
   `session/load`；最近 90 秒内有输出变化时每 6 秒额外加载一次，释放前再加载一次。
   agy 用步骤开始那一秒作为 `updatedAt`，慢回复可能在不改变它的情况下完成。

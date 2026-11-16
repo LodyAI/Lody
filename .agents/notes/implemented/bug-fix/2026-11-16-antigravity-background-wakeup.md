@@ -44,7 +44,9 @@ finished turn, the same way Claude background tasks are handled.
   output is agy's "running as a background task" placeholder). agy keeps a `schedule`
   `in_progress` until it fires, so timers need no special case. Daemon processes
   (`IsDaemon: true`) are never counted. A monitor lasts at most 24 hours, matching the
-  Core `background` cap.
+  Core `background` cap. Work that has not settled when the user sends another message
+  carries into that turn, so the monitor resumes after it and still replays the
+  completion; the tool's own update lands in the entry where the tool first appeared.
 - **Read-only replay.** The monitor polls `session/list` every 2 seconds and runs
   `session/load` when `updatedAt` changes. While output changed in the last 90
   seconds, it also reloads every 6 seconds, and it reloads once more before releasing.

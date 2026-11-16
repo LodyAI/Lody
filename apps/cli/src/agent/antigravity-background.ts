@@ -218,6 +218,8 @@ export class AntigravitySessionTracker {
   private readonly tools = new Map<string, KnownTool>();
   /** Tools first seen in the current turn or its wakeups; only these may emit snapshot deltas. */
   private turnToolIds = new Set<string>();
+  /** Unsettled tools inherited from an earlier turn; their items live in that turn's entry. */
+  private carriedToolIds = new Set<string>();
   private pendingAtTurnEnd = new Set<string>();
   private livePermissionToolIds = new Set<string>();
   private postTurnPendingSinceMs = new Map<string, number>();
@@ -235,6 +237,8 @@ export class AntigravitySessionTracker {
   private lastOutputAtMs = 0;
   private lastTextAtMs = 0;
   private asyncDispatched = false;
+  /** Set once a monitor saw this work settle; until then a new turn inherits it. */
+  private released = true;
 
   constructor(
     private readonly sessionId: acp.SessionId,
@@ -262,7 +266,13 @@ export class AntigravitySessionTracker {
 
   /** Reset per-turn state right before dispatching `session/prompt`. */
   beginTurn(): void {
-    this.turnToolIds = new Set();
+    // A user may keep chatting while earlier background work runs. Work that has not
+    // settled carries into this turn so its completion is still tracked and replayed.
+    const carried = this.released ? new Set<string>() : new Set(this.pendingToolIds());
+    this.asyncDispatched = !this.released && this.asyncDispatched;
+    this.released = false;
+    this.turnToolIds = carried;
+    this.carriedToolIds = new Set(carried);
     this.pendingAtTurnEnd = new Set();
     this.livePermissionToolIds = new Set();
     this.postTurnPendingSinceMs = new Map();
@@ -273,7 +283,6 @@ export class AntigravitySessionTracker {
     this.lastTextEndsWithNewline = true;
     this.needsBreakBeforeText = false;
     this.turnEndedAtMs = null;
-    this.asyncDispatched = false;
   }
 
   notifyLivePermissionRequest(toolCallId: string): void {
@@ -448,14 +457,16 @@ export class AntigravitySessionTracker {
 
   evaluate(nowMs: number): AntigravityMonitorState {
     const endedAtMs = this.turnEndedAtMs;
-    if (endedAtMs === null || nowMs - endedAtMs >= this.timings.maxDurationMs) {
-      return { settled: true, state: 'idle', backgroundTaskCount: 0 };
-    }
+    if (endedAtMs === null) return { settled: true, state: 'idle', backgroundTaskCount: 0 };
     const active = this.activeToolCount();
     const quietMs = this.asyncDispatched
       ? this.timings.asyncDispatchQuietMs
       : this.timings.settleQuietMs;
-    if (active === 0 && nowMs - this.lastChangeAtMs >= quietMs) {
+    if (
+      nowMs - endedAtMs >= this.timings.maxDurationMs ||
+      (active === 0 && nowMs - this.lastChangeAtMs >= quietMs)
+    ) {
+      this.released = true;
       return { settled: true, state: 'idle', backgroundTaskCount: 0 };
     }
     return {
@@ -476,15 +487,15 @@ export class AntigravitySessionTracker {
   }
 
   private activeToolCount(): number {
-    let count = 0;
-    for (const id of this.turnToolIds) {
+    return this.pendingToolIds().length;
+  }
+
+  private pendingToolIds(): string[] {
+    return [...this.turnToolIds].filter((id) => {
       const tool = this.tools.get(id);
-      if (!tool || this.orphanedToolIds.has(id) || isDaemonTool(tool.raw)) continue;
-      if (isActiveStatus(toolStatus(tool.raw)) || tool.raw._lodyBackgroundPlaceholder === true) {
-        count += 1;
-      }
-    }
-    return count;
+      if (!tool || this.orphanedToolIds.has(id) || isDaemonTool(tool.raw)) return false;
+      return isActiveStatus(toolStatus(tool.raw)) || tool.raw._lodyBackgroundPlaceholder === true;
+    });
   }
 
   /**
@@ -558,7 +569,7 @@ export class AntigravitySessionTracker {
     if (fingerprintOf(mergeToolRaw(prev.raw, replayRaw)) === prev.fingerprint) return null;
     const tool = this.recordTool(id, replayRaw, nowMs);
     if (!this.turnToolIds.has(id)) return null;
-    this.lastEmittedKind = 'tool';
+    if (!this.carriedToolIds.has(id)) this.lastEmittedKind = 'tool';
     this.markOutput(nowMs);
     return toolNotification(this.sessionId, stripInternal(tool.raw), 'tool_call_update');
   }
