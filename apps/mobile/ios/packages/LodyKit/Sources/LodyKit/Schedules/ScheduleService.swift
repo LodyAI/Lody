@@ -78,7 +78,14 @@ struct ScheduleService {
           return scoped
         }
       },
-      options: { workspaceId in try await CreateSessionService.live.options(workspaceId, nil) },
+      // A schedule runs later, so an offline computer is still a target (as on Web); the new-chat
+      // options offer only online agents.
+      options: { workspaceId in
+        let result = try await ScheduleService.runtime(workspaceId).workspaceCall(RuntimeContract.Calls.CreationOptions.self) { workspace, _ in
+          RuntimeContract.CreationOptionsParams(workspaceId: workspace, includeOffline: true)
+        }
+        return try JSONDecoder().decode(CreationOptions.self, from: JSONEncoder().encode(result))
+      },
       cachedList: { userId, workspaceId in
         guard !userId.isEmpty, !workspaceId.isEmpty else { return nil }
         let key = cacheKey(userId: userId, workspaceId: workspaceId)
