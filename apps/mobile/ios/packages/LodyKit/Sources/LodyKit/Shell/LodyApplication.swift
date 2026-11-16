@@ -17,6 +17,7 @@ public final class LodyApplication {
   public func pushToken(_ data: Data) { PushNotifications.shared.deviceToken(data) }
   public func pushRegistrationFailed() { DiagnosticsStore.shared.record("notification", "apns_registration_failed") }
   public func background() { push.applicationDidEnterBackground(.shared) }
+  public func geometryChanged(in scene: UIWindowScene) { HomeController.current?.geometryChanged(in: scene) }
 
   private let runtime = DataRuntime(localStore: .shared)
   private var observers: [NSObjectProtocol] = []

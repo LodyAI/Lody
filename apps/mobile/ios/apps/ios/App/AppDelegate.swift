@@ -33,6 +33,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
   func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
     for context in contexts { LodyApplication.shared.open(context.url) }
   }
+  func windowScene(_ windowScene: UIWindowScene, didUpdateEffectiveGeometry previousEffectiveGeometry: UIWindowScene.Geometry) {
+    LodyApplication.shared.geometryChanged(in: windowScene)
+  }
   func sceneDidBecomeActive(_ scene: UIScene) { LodyApplication.shared.active() }
   func sceneDidEnterBackground(_ scene: UIScene) { LodyApplication.shared.background() }
 }
