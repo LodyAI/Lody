@@ -116,6 +116,8 @@ final class LodyFormGroup: UIStackView {
       return LodyFormRow(label: field.accessibilityLabel ?? "", content: field)
     }
     if let button = view as? UIButton {
+      // A menu on its own line is still a choice: it carries the row picker's quiet chevron.
+      if button.showsMenuAsPrimaryAction { LodyFormRow.stylePicker(button, alignment: .leading) }
       button.contentHorizontalAlignment = .leading
       button.configuration?.contentInsets.leading = margin
       button.configuration?.contentInsets.trailing = margin
@@ -223,7 +225,9 @@ final class LodyFormRow: UIView {
     return view.subviews.flatMap(texts)
   }
 
-  private static func stylePicker(_ button: UIButton) {
+  /// A menu picker's face: the value in ink with a small tertiary ⌃⌄ after it, as system pop-up
+  /// buttons draw it. Only configured buttons (`UIButton.lodyFormPicker`) can carry it.
+  static func stylePicker(_ button: UIButton, alignment: UIControl.ContentHorizontalAlignment = .trailing) {
     guard var configuration = button.configuration else { return }
     configuration.baseForegroundColor = .lodyInk
     configuration.image = UIImage(systemName: "chevron.up.chevron.down")
@@ -232,10 +236,22 @@ final class LodyFormRow: UIView {
     configuration.imagePlacement = .trailing
     configuration.imagePadding = 6
     configuration.contentInsets = .zero
-    configuration.titleAlignment = .trailing
+    configuration.titleAlignment = alignment == .leading ? .leading : .trailing
     button.configuration = configuration
-    button.contentHorizontalAlignment = .trailing
+    button.contentHorizontalAlignment = alignment
     button.titleLabel?.numberOfLines = 0
+  }
+}
+
+extension UIButton {
+  /// A form menu picker. Set its value through `configuration?.title`.
+  static func lodyFormPicker(_ id: String) -> UIButton {
+    var configuration = UIButton.Configuration.plain()
+    configuration.titleLineBreakMode = .byTruncatingMiddle
+    let button = UIButton(configuration: configuration)
+    button.showsMenuAsPrimaryAction = true
+    button.accessibilityIdentifier = id
+    return button
   }
 }
 
