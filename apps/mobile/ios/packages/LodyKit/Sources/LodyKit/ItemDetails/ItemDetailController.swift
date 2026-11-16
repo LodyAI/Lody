@@ -18,7 +18,7 @@ class ItemDetailController: UIViewController {
     store = ItemDetailStore(sessionId: sessionId, entryId: entryId, itemIds: itemIds, generation: generation,
                             service: service ?? .live(sessionId: sessionId))
     super.init(nibName: nil, bundle: nil)
-    title = String(localized: "detail.title", bundle: .lody)
+    self.title = String(localized: "detail.title", bundle: .lody)
   }
 
   @available(*, unavailable)

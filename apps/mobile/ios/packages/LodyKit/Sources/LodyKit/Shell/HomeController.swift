@@ -8,6 +8,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   let source: SessionSource
   private let split = UISplitViewController(style: .doubleColumn)
   private let primary = UINavigationController()
+  private let compactChats = UINavigationController()
   private let secondary = UINavigationController()
   private let inspector = UINavigationController()
   private let inbox: InboxController
@@ -49,6 +50,14 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     LodyHomeLayout(size: view.bounds.size, regular: traitCollection.horizontalSizeClass == .regular, book: bookPosture)
   }
   private var wide: Bool { layout.sideBySide }
+  private var interactivelyResizing: Bool {
+    viewIfLoaded?.window?.windowScene?.effectiveGeometry.isInteractivelyResizing == true
+  }
+
+  func geometryChanged(in scene: UIWindowScene) {
+    guard viewIfLoaded?.window?.windowScene === scene else { return }
+    invalidateLayout()
+  }
 
   init(source: SessionSource = .live) {
     self.source = source; inbox = InboxController(source: source)
@@ -106,6 +115,9 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
+    // A size transition can finish while the resize handle is still held. Keep
+    // container ownership stable until the scene reports the end of the gesture.
+    guard !interactivelyResizing, !updatingTabContainer, !updatingLayout else { return }
     primary.traitOverrides.horizontalSizeClass = traitCollection.horizontalSizeClass
     (folded ? foldHost?.controller : split)?.view.frame = view.bounds
     view.accessibilityIdentifier = traitCollection.horizontalSizeClass == .regular ? "ipad-home" : "home"
@@ -170,7 +182,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   private func markListSelection() {
     let id = compactTabsInstalled ? "" : session?.sessionId ?? ""
     inbox.list.selectedSessionId = id
-    tabNavigations.values.flatMap(\.viewControllers).flatMap(\.children).compactMap { $0 as? ProjectController }.forEach { $0.list.selectedSessionId = id }
+    Set(tabNavigations.values).union([primary]).flatMap(\.viewControllers).flatMap(\.children).compactMap { $0 as? ProjectController }.forEach { $0.list.selectedSessionId = id }
   }
   func contains(_ controller: UIViewController) -> Bool {
     var ancestor: UIViewController? = controller
@@ -222,7 +234,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
   func splitViewController(_ svc: UISplitViewController, didHide column: UISplitViewController.Column) {
     guard column == .inspector, layout == .compact, svc.isCollapsed, panelOpen,
-          !inspectorInSheet, !adaptingInspector, !updatingLayout, !svc.isShowing(.inspector) else { return }
+          !inspectorInSheet, !adaptingInspector, !updatingLayout, !updatingTabContainer, !svc.isShowing(.inspector) else { return }
     panelOpen = false
     clearInspector()
     invalidateLayout()
@@ -261,7 +273,8 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       guard let self else { return }
       LodyShell.shared.openPage("debug", from: self.tabPages[.settings])
     }
-    tabNavigations[.chats] = primary
+    LodyShell.shared.configureNavigation(compactChats)
+    tabNavigations[.chats] = compactChats
     updateTabContainer()
   }
 
@@ -274,6 +287,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     if folded { setFolded(false) }
     split.setViewController(nil, for: .primary)
     if compact {
+      moveChatPages(from: primary, to: compactChats)
       // Schedules leaves the regular-width detail column for its tab; the selection stays.
       if schedulesInDetail {
         schedules?.inDetailColumn = false
@@ -289,7 +303,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       split.setViewController(compactNavigation, for: .primary)
     } else {
       compactNavigation.setViewControllers([], animated: false)
-      tabsHost.tabs = []
+      moveChatPages(from: compactChats, to: primary)
       split.setViewController(primary, for: .primary)
     }
     compactTabsInstalled = compact
@@ -298,6 +312,18 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       if selectedTab == .schedules, session == nil { showSchedulesInDetail() } else { selectedTab = .chats }
       inbox.setDestination(selectedTab)
     }
+  }
+
+  /// Each container keeps its own navigation host; only the retained pages move.
+  private func moveChatPages(from source: UINavigationController, to destination: UINavigationController) {
+    // During collapse UIKit may already have appended its detail columns to the
+    // primary stack. Those remain split-owned, not pages of the Chats tab.
+    let pages = source.viewControllers.filter { $0 !== secondary && $0 !== inspector }
+    let hosted = pages.compactMap { $0 as? LodyPageController }
+    hosted.forEach { $0.isTransferringNavigation = true }
+    source.setViewControllers([], animated: false)
+    destination.setViewControllers(pages, animated: false)
+    hosted.forEach { $0.isTransferringNavigation = false }
   }
 
   private func tabNavigation(_ destination: HomeTab) -> UINavigationController {
@@ -398,7 +424,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       headerShown: true, headerVariant: "transparent"), inSheet: false, content: content)
   }
   private func layoutColumns() {
-    guard isViewLoaded, !adaptingInspector, !updatingLayout else { return }
+    guard isViewLoaded, !interactivelyResizing, !adaptingInspector, !updatingLayout, !updatingTabContainer else { return }
     let mode = layout
     let key = "\(mode):\(panelOpen):\(split.isCollapsed):\(inspectorInSheet)"
     guard key != layoutKey else { return }
