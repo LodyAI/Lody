@@ -12,6 +12,10 @@ import { z } from 'zod';
 export const LODY_HELP_INSTRUCTIONS =
   'Before executing a Lody command, you MUST call lody_help({command: TOOL_NAME}) and read its successful command-specific response. The index and short summaries do not replace full help. Read help before issuing the command, never in parallel with it. Reuse full help already in the current context; after compaction or loss, fetch it again. lody_help itself is exempt.';
 
+/** Approved owner guidance: long work is resumed by an event rather than awaited in a turn. */
+export const LODY_LONG_RUN_GUIDANCE =
+  'An idle Session may be reclaimed, which ends background processes you started; run long commands with lody_automation `run`, which resumes this Session when they exit.';
+
 export const commandHelpReminder = (name: string): string =>
   `Before using this command, read lody_help({command:"${name}"}) and follow its parameter and retry rules.`;
 

@@ -138,7 +138,8 @@ when migration facts change.
   receipts, MCP descriptions and replies, skills, examples) carries the user's request
   and facts the agent cannot discover. Never add workflow steps or review, verify,
   re-check or commit instructions, or their negations, that the user did not ask for:
-  each delivery would steer or repeat agent work.
+  each delivery would steer or repeat agent work. Standing guidance the product owner
+  explicitly approves is the only exception, recorded in a note, one sentence per surface.
 
 ## Code Review Rules
 
