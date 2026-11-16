@@ -5805,6 +5805,8 @@
   "settings.memory.empty": "No memory identities yet.",
   "settings.memory.emptyRole": "Create or import a memory in Settings → Memory first.",
   "settings.memory.unlink": "Unlink memory",
+  "settings.memory.search": "Search memories",
+  "settings.memory.noSearchResults": "No memories match your search.",
   "settings.memory.install": "Get Nowledge Mem",
   "settings.memory.createError": "Could not create memory. Use an ID with letters, numbers, dots, underscores or hyphens (up to 128 characters), and check that Mem is running.",
   "settings.memory.status.not_installed": "Nowledge Mem CLI is not installed on this machine. Install it, then refresh.",

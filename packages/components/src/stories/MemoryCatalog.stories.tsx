@@ -50,8 +50,16 @@ const meta = {
       type: 'machine/memory',
       status: 'ready',
       memories: [
-        { id: 'reviewer', name: 'Reviewer' },
-        { id: 'designer', name: 'Designer' },
+        {
+          id: 'reviewer',
+          name: 'Code reviewer',
+          description: 'Architecture decisions and lessons from code reviews.',
+        },
+        {
+          id: 'designer',
+          name: 'Product designer',
+          description: 'Product language, interaction patterns and design decisions.',
+        },
       ],
     },
     onEdit: () => {},
@@ -84,6 +92,8 @@ export const AssignedRoles: Story = {
         description: 'Just a small dog.',
       },
     ],
+    // Without an inventory the rows show these saved snapshots, long text included.
+    inventory: undefined,
     getAssignedRoles: (entry) => (entry.memoryId === 'reviewer' ? [lodyRole] : [pauliRole]),
   },
 };
@@ -92,7 +102,7 @@ export const Missing: Story = {
     inventory: {
       type: 'machine/memory',
       status: 'ready',
-      memories: [{ id: 'designer', name: 'Designer' }],
+      memories: [{ id: 'designer', name: 'Product designer' }],
     },
   },
 };
