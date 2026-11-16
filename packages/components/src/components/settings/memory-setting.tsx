@@ -222,6 +222,37 @@ function displayedMemory(entry: MemoryAssociation, inventory?: MemoryProviderRes
   };
 }
 
+/** Matches the displayed name and description plus the Agent ID; an empty query keeps all. */
+function filterMemories(
+  entries: MemoryAssociation[],
+  inventory: MemoryProviderResponse | undefined,
+  query: string
+) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return entries;
+  return entries.filter((entry) => {
+    const { name, description } = displayedMemory(entry, inventory);
+    return [name, entry.memoryId, description ?? ''].some((text) =>
+      text.toLowerCase().includes(needle)
+    );
+  });
+}
+
+function MemorySearch({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <Input
+      size="small"
+      type="search"
+      leading={<Search size={14} aria-hidden="true" />}
+      aria-label={t('settings.memory.search')}
+      placeholder={t('settings.memory.search')}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
 /** The list is Lody's saved associations, never the complete external inventory. */
 export function MemoryAssociationList({
   entries,
@@ -483,6 +514,7 @@ export function MemorySetting() {
 }
 
 type Editor = { providerId: string; entry?: MemoryAssociation };
+const SETTINGS_MEMORY_SEARCH_THRESHOLD = 7;
 function MachineMemories({ machineId, supported }: { machineId: MachineId; supported: boolean }) {
   const { t } = useTranslation();
   const associations = useMemoryAssociations(machineId);
@@ -497,6 +529,8 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
   const [editor, setEditor] = useState<Editor | null>(null);
   const [error, setError] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [query, setQuery] = useState('');
+  const searchable = associations.entries.length > SETTINGS_MEMORY_SEARCH_THRESHOLD;
   const online = useMachineOnlineStatus(machineId) === 'online';
   const providers: ProviderDefinition[] = [...MEMORY_PROVIDERS];
   for (const entry of associations.entries)
@@ -527,12 +561,14 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
         </Button>
       </SettingsPageActions>
       {error ? <FormMessage tone="error">{t('settings.memory.saveError')}</FormMessage> : null}
+      {searchable ? <MemorySearch value={query} onChange={setQuery} /> : null}
       {providers.map((provider) => (
         <ProviderRecords
           key={provider.id}
           machineId={machineId}
           provider={provider}
           refreshToken={refreshToken}
+          query={searchable ? query : ''}
           getAssignedRoles={getAssignedRoles}
           onAssociateRole={synced ? () => openSettings('agent-roles', { machineId }) : undefined}
           supported={supported}
@@ -561,6 +597,7 @@ function ProviderRecords({
   provider,
   supported,
   refreshToken,
+  query,
   entries,
   editor,
   setEditor,
@@ -575,6 +612,7 @@ function ProviderRecords({
   provider: ProviderDefinition;
   supported: boolean;
   refreshToken: number;
+  query: string;
   entries: MemoryAssociation[];
   editor: Editor | null;
   setEditor: (editor: Editor | null) => void;
@@ -583,6 +621,8 @@ function ProviderRecords({
 }) {
   const online = useMachineOnlineStatus(machineId) === 'online';
   const state = useMemoryProvider(machineId, provider.id, online && supported, refreshToken);
+  const { t } = useTranslation();
+  const shown = filterMemories(entries, state.result, query);
   return (
     <div {...stylex.props(styles.stack)}>
       {!online || !supported || (state.result && state.result.status !== 'ready') ? (
@@ -594,14 +634,18 @@ function ProviderRecords({
           result={state.result}
         />
       ) : null}
-      <MemoryAssociationList
-        entries={entries}
-        inventory={state.result}
-        getAssignedRoles={getAssignedRoles}
-        onAssociateRole={onAssociateRole}
-        onEdit={(entry) => setEditor({ providerId: provider.id, entry })}
-        onRemove={(entry) => void remove(entry)}
-      />
+      {entries.length && !shown.length ? (
+        <p {...stylex.props(catalog.meta)}>{t('settings.memory.noSearchResults')}</p>
+      ) : (
+        <MemoryAssociationList
+          entries={shown}
+          inventory={state.result}
+          getAssignedRoles={getAssignedRoles}
+          onAssociateRole={onAssociateRole}
+          onEdit={(entry) => setEditor({ providerId: provider.id, entry })}
+          onRemove={(entry) => void remove(entry)}
+        />
+      )}
       {editor ? (
         <MemoryEditor
           key={editor.entry?.memoryId ?? 'new'}
@@ -1003,15 +1047,7 @@ export function RoleMemoryPicker({
         </div>
       ) : null}
       {entries.length > ROLE_MEMORY_SEARCH_THRESHOLD ? (
-        <Input
-          size="small"
-          type="search"
-          leading={<Search size={14} aria-hidden="true" />}
-          aria-label={t('settings.memory.search')}
-          placeholder={t('settings.memory.search')}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+        <MemorySearch value={query} onChange={setQuery} />
       ) : null}
       {!entries.length ? (
         <p {...stylex.props(catalog.meta)}>{t('settings.memory.emptyRole')}</p>
@@ -1052,15 +1088,7 @@ function RoleProviderMemories({
   const { t } = useTranslation();
   const online = useMachineOnlineStatus(machineId) === 'online';
   const state = useMemoryProvider(machineId, provider.id, online && supported);
-  const needle = query.trim().toLowerCase();
-  const shown = needle
-    ? entries.filter((entry) => {
-        const { name, description } = displayedMemory(entry, state.result);
-        return [name, entry.memoryId, description ?? ''].some((text) =>
-          text.toLowerCase().includes(needle)
-        );
-      })
-    : entries;
+  const shown = filterMemories(entries, state.result, query);
   return (
     <>
       {!online || !supported || (state.result && state.result.status !== 'ready') ? (

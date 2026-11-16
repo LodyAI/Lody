@@ -505,3 +505,19 @@ it('omits search for a short Role memory list', async () => {
   await renderPicker();
   expect(document.querySelector('[aria-label="Search memories"]')).toBeNull();
 });
+
+it('adds search to the Memory page only above seven imported memories on the machine', async () => {
+  manyMemories(7);
+  await renderSetting();
+  expect(document.querySelector('[aria-label="Search memories"]')).toBeNull();
+  manyMemories(8);
+  await renderSetting();
+  await fill('Search memories', 'ROOT CAUSE');
+  expect(container.textContent).toContain('Role 3');
+  expect(container.textContent).not.toContain('Role 7');
+  await fill('Search memories', 'role-7');
+  expect(container.textContent).toContain('Role 7');
+  expect(container.textContent).not.toContain('Role 3');
+  await fill('Search memories', 'nothing like this');
+  expect(container.textContent).toContain('No memories match');
+});
