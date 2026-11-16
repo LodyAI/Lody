@@ -1,7 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
-import { applyTextRewrites, type MessageTextSpan } from '@lody/shared';
+import {
+  MessageRowView,
+  SessionChatStreamView,
+  type ChatStreamItem,
+} from '@/components/ai-gui/view';
+import { applyTextRewrites, type MessageTextSpan, type SessionId } from '@lody/shared';
+import { SettingsStoryProviders } from './settings-story-shell';
 import { cn } from '@/lib/utils';
 import {
   conversationReadingFontSizeStyle,
@@ -245,4 +251,91 @@ export const PastedTextAlignment: Story = {
 export const PastedTextAlignmentDark: Story = {
   ...PastedTextAlignment,
   globals: { theme: 'dark' },
+};
+
+const rowsSessionId = 'message-text-chips-rows' as SessionId;
+const MIXED_SOURCE =
+  '先看 @src/ui/mention/mention-highlighter.tsx 里 `getComposerMentionChip()` 的实现，再对比 #482 ✅\n\n' +
+  'Then run $review-diff and summarise for @session:crdt-metadata-cleanup — 长中文段落和 English words 混排，'.repeat(
+    4
+  ) +
+  'https://example.com/a/very/long/url/' +
+  'segment'.repeat(30);
+const MIXED = applyTextRewrites(
+  MIXED_SOURCE,
+  (
+    [
+      [
+        '@src/ui/mention/mention-highlighter.tsx',
+        { kind: 'file', target: 'mention-highlighter.tsx' },
+      ],
+      ['#482', { kind: 'issue', target: '482' }],
+      ['$review-diff', { kind: 'skill', target: 'review-diff' }],
+      ['@session:crdt-metadata-cleanup', { kind: 'session', target: '9f2c-4a11' }],
+    ] as const
+  ).map(([token, span]) => {
+    const start = MIXED_SOURCE.indexOf(token);
+    return { start, end: start + token.length, span: { ...span, label: token } };
+  })
+);
+
+/** Sent user rows as the conversation renders them, one per bubble shape. */
+const SENT_ROWS: ChatStreamItem[] = (
+  [
+    { text: '好的' },
+    { text: SENT.text, spans: SENT.spans },
+    {
+      text: '@src/ui/mention/mention-highlighter.tsx',
+      spans: [
+        {
+          start: 0,
+          end: 39,
+          kind: 'file',
+          label: '@src/ui/mention/mention-highlighter.tsx',
+          target: 'a.tsx',
+        },
+      ],
+    },
+    { text: LONG.text, spans: LONG.spans },
+    { text: LONG_PATH.text, spans: LONG_PATH.spans },
+    { text: 'A long steering message that wraps across several lines. '.repeat(14) },
+    { text: '一条很长的中文引导消息，用来检查气泡在不同宽度下的位置。'.repeat(10) },
+    { text: `https://example.com/${'unbreakable'.repeat(40)}` },
+    { text: MIXED.text, spans: MIXED.spans },
+  ] satisfies { text: string; spans?: MessageTextSpan[] }[]
+).map((item, index) => ({
+  type: 'message',
+  sessionId: rowsSessionId,
+  turnIndex: index,
+  message: {
+    id: `layout-user-${index}`,
+    role: 'user',
+    timestamp: '2026-11-01T00:00:00Z',
+    items: [{ type: 'text', ...item }],
+  },
+}));
+
+/**
+ * The same chips inside real conversation rows: every bubble must hug the
+ * avatar's side of its column, at any column width, without touching the avatar.
+ */
+export const SentRows: Story = {
+  args: { withSpans: true },
+  render: () => (
+    <SettingsStoryProviders>
+      <div className="flex h-dvh flex-col bg-background">
+        <SessionChatStreamView
+          sessionId={rowsSessionId}
+          items={SENT_ROWS}
+          renderMessageRow={({ message, sessionId: id }) => (
+            <MessageRowView
+              message={message}
+              sessionId={id}
+              user={{ name: 'Story User', email: 'story@example.com' }}
+            />
+          )}
+        />
+      </div>
+    </SettingsStoryProviders>
+  ),
 };
