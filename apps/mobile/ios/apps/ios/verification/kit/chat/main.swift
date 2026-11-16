@@ -685,9 +685,9 @@ let localPendingJSON = """
 """
 let localPending = try! JSONDecoder().decode(ChatPendingSend.self, from: Data(localPendingJSON.utf8))
 let pendingRows = localPending.rows(entries: [])
-precondition(pendingRows.map(\.kind) == ["delivery", "attachments", "user"],
-  "Delivery belongs above text and attachments")
-precondition(pendingRows.first?.text == localPending.status)
+precondition(pendingRows.map(\.kind) == ["attachments", "user", "delivery"],
+  "Delivery belongs below text and attachments")
+precondition(pendingRows.last?.text == localPending.status)
 precondition(pendingRows.first { $0.kind == "attachments" }?.readState == "sending"
   && pendingRows.first { $0.kind == "user" }?.author.isEmpty == true,
   "A local send's header sits on its attachments, the first row of the message")
@@ -715,8 +715,8 @@ let uploadingRows = uploadingPending.rows(entries: [])
 precondition(uploadingRows.first(where: { $0.kind == "attachments" })?.uploadProgress["photo"]?.percent == 37 && uploadingRows.first(where: { $0.kind == "attachments" })?.running == true)
 precondition(uploadingRows.first(where: { $0.kind == "attachments" })?.attachments == pendingRows.first(where: { $0.kind == "attachments" })?.attachments,
   "Progress must not replace attachment identities or restart image loaders")
-precondition(uploadingRows.first?.text == localPending.status,
-  "Upload copy belongs above the message")
+precondition(uploadingRows.last?.text == localPending.status,
+  "Upload copy belongs below the message")
 uploadingPending.phase = "accepted"
 let acceptedRows = uploadingPending.rows(entries: [])
 precondition(acceptedRows.first?.running == false,
@@ -740,8 +740,8 @@ precondition(pendingRows.first(where: { $0.kind == "attachments" })?.running == 
 precondition(failedRows.first?.attachments == pendingRows.first(where: { $0.kind == "attachments" })?.attachments && failedRows.last?.actionable == true,
   "A definite failure must retain the attachment and offer explicit retry")
 let flying = ChatPendingSend.hidingStatus(pendingRows, inFlight: ["local-send"])
-precondition(flying.map(\.kind) == ["delivery", "attachments", "user"],
-  "Delivery above the bubble must reserve its space throughout the flight")
+precondition(flying.map(\.kind) == ["attachments", "user", "delivery"],
+  "Delivery below the bubble must reserve its space throughout the flight")
 precondition(ChatPendingSend.hidingStatus(pendingRows, inFlight: []).map(\.kind) == pendingRows.map(\.kind),
   "A send with no flight must show its duration immediately")
 precondition(ChatPendingSend.hidingStatus(failedRows, inFlight: ["local-send"]).last?.kind != "pending",
@@ -765,7 +765,7 @@ precondition(reconnectRows.first(where: { $0.kind == "attachments" })?.running =
   "Reconnection replaces tile loading")
 precondition(reconnectRows.firstIndex(where: { $0.kind == "duration" }) == pendingRows.firstIndex(where: { $0.kind == "duration" }),
   "Removing the reconnect row must not shift the reply header")
-precondition(reconnectRows.first?.text == localPending.status,
+precondition(reconnectRows.last?.text == localPending.status,
   "Reconnection must keep the delivery status")
 precondition(pendingRows.last?.actionable == false, "Ordinary pending status must not open the execution process")
 print("Pending reconnect: connection stays off the transcript passed")

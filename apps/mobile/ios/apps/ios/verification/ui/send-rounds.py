@@ -18,7 +18,7 @@ for index, message in enumerate(messages, 1):
     ui.type_into('session-input', message)
     assert ui.element('session-input')['AXValue'] == message
     ui.capture(f'round-{index}-draft')
-    # Keep delivery above long messages visible and leave measurable reply space.
+    # Leave measurable reply space beneath the user message and its delivery status.
     ui.axe('tap', '-x', '5', '-y', str(ui.element('chat-transcript')['frame']['y'] + 10), '--post-delay', '.6')
     ui.axe('tap', '--id', 'session-send')
     ui.wait(lambda items: any(i.get('AXLabel') == f'Calls: {index} · sending' for i in items), 'Turn did not dispatch')

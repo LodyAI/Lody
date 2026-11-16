@@ -99,9 +99,11 @@ final class SendPreviewController: SessionController {
     controls.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(controls)
     chat.translatesAutoresizingMaskIntoConstraints = false
+    // The production page pins the transcript to its edges; this fixture reserves
+    // a separate controls area below the page-owned header.
+    NSLayoutConstraint.deactivate(view.constraints.filter { $0.firstItem === chat })
     NSLayoutConstraint.activate([
-      // The transparent navigation bar's hit region extends past its title; keep fixture controls clear of it.
-      controls.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 18),
+      controls.topAnchor.constraint(equalTo: chat.titleButton.bottomAnchor, constant: 18),
       controls.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
       controls.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
       chat.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: 8),
