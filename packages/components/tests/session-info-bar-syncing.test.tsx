@@ -104,13 +104,13 @@ describe('SessionInfoBar ambient information', () => {
     }
   );
 
-  it('says Updating while a cached conversation catches up, and hides for a null status', () => {
+  it('says Syncing while a cached conversation catches up, and hides for a null status', () => {
     act(() => {
       root.render(
         withTestI18n(<SessionInfoBar {...CONTEXT_LESS_PROPS} syncStatus="updating" />, testI18n)
       );
     });
-    expect(container.querySelector('.ml-auto')?.textContent).toContain('Updating');
+    expect(container.querySelector('.ml-auto')?.textContent).toContain('Syncing');
 
     // An explicit null status wins over the legacy flag: nothing to announce.
     act(() => {
