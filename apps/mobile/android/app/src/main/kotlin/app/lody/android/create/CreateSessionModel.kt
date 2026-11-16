@@ -189,6 +189,18 @@ object CreateSessionModel {
     /** The reasoning option a Role pins; Android sends it as `effort` (runtime `reasoning_effort`). */
     const val EFFORT_OPTION = "reasoning_effort"
 
+    /**
+     * Option values a new chat sends beyond model / mode / effort: the applied Role's pins, then
+     * the Plan and Fast switches picked on the page ([plan] / [fast] null = untouched). A switch
+     * the agent or [modelId] does not offer is dropped, as web's run-config sheet.
+     */
+    fun optionValues(
+        capability: CreationCapability?, roleOptions: Map<String, Any>, modelId: String?, plan: Boolean?, fast: Boolean?,
+    ): Map<String, Any> = roleOptions + listOfNotNull(
+        plan?.let { capability?.planValue(it) },
+        fast?.let { capability?.fastValue(it, modelId) },
+    )
+
     /** Roles with a target on [machineId], by name; one whose agent is gone or offline says why. */
     fun roleItems(roles: List<AgentRole>, machineId: String?, onlineAgents: List<CreationAgent>): List<RoleItem> {
         if (machineId == null) return emptyList()
