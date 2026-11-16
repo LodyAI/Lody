@@ -275,6 +275,7 @@ export const startCommand = new Command('start')
     const cliDetectionStartedAt = Date.now();
     const cliAvailability = {
       kimi: hasBuiltinAgentCredentials('kimi') && 'configured',
+      antigravity: 'managed-runtime',
       pi: 'managed-runtime',
       grok: hasBuiltinAgentCredentials('grok') && 'configured',
       devin: 'managed-runtime',

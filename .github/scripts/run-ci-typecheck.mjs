@@ -4,7 +4,7 @@ import { execFileSync as defaultExecFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const EXCLUDED_FILTERS = ['!acp-extension-claude', '!acp-extension-codex'];
+const EXCLUDED_FILTERS = ['!{**/acp-extension-*}', '!acp-extension-claude', '!acp-extension-codex'];
 
 function loadScope(scopePath) {
   try {
@@ -42,10 +42,15 @@ export function runCiTypecheck({
     return 'skip';
   }
 
-  runPnpm(execFileSync, cwd, ['--filter', 'lody', 'prepare:acp-adapters']);
+  if (typecheckPackages.includes('lody')) {
+    runPnpm(execFileSync, cwd, ['--filter', 'lody', 'prepare:acp-adapters']);
+  } else {
+    runPnpm(execFileSync, cwd, ['--filter', 'acp-extension-dsh', 'build']);
+  }
   runPnpm(execFileSync, cwd, [
     '-r',
-    '--workspace-concurrency=1',
+    '--no-sort',
+    '--workspace-concurrency=4',
     ...EXCLUDED_FILTERS.flatMap((filter) => ['--filter', filter]),
     ...typecheckPackages.flatMap((name) => ['--filter', name]),
     'run',

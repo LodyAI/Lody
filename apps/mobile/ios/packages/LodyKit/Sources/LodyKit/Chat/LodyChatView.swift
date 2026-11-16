@@ -130,6 +130,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   let overlay = ChatOverlay()
   var localAttachments: [String: [ChatMessageAttachment]] = [:]
   var expandedPlans = Set<String>()
+  /// Plans already opened in full for a pending approval, so a reader's fold sticks.
+  var awaitingPlansOpened = Set<String>()
   var expandedMessages = Set<String>()
   /// Finished turns whose "Worked for …" fold the reader opened in place.
   var expandedWork = Set<String>()

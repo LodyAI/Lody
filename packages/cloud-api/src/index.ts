@@ -1,3 +1,6 @@
+export type { E2eeAccountPairingMailboxPreview } from './e2ee-account-pairing';
+import type { E2eeWorkspaceBatchReply } from './e2ee-workspaces';
+export type { E2eeWorkspaceBatchReply } from './e2ee-workspaces';
 export type WorkspaceDirectoryMember = {
   userId: string;
   name: string | null;
@@ -34,6 +37,9 @@ export type SubscriptionPaymentStatus = {
 import type {
   E2eeContentTokenRequest,
   E2eeContentToken,
+  E2eeDeviceAccess,
+  E2eeMailboxSlot,
+  E2eeMailboxStatus,
   E2eeMailboxRequests,
   E2eeMailboxReplies,
   E2eeAppendRecordRequest,
@@ -97,6 +103,7 @@ export type {
 } from './e2ee-recovery-vault';
 import type {
   StageEpochGroupRequest,
+  StageEpochGroupReply,
   ReadEpochGroupRequest,
   DeleteEpochGroupRequest,
   EpochStagedGroupDto,
@@ -106,6 +113,7 @@ export type {
   EpochStagedEnvelopeDto,
   EpochStagedGroupDto,
   StageEpochGroupRequest,
+  StageEpochGroupReply,
   ReadEpochGroupRequest,
   DeleteEpochGroupRequest,
 } from './e2ee-epoch-staging';
@@ -136,8 +144,19 @@ import type {
   WorktreeSetupScriptConfig,
 } from '@lody/shared';
 
-import type { E2eeMachinePairingRequests, E2eeMachinePairingStatus } from './e2ee-machine-pairing';
-export type { E2eeMachinePairingRequests, E2eeMachinePairingStatus } from './e2ee-machine-pairing';
+import type {
+  E2eeMachineBootstrapReply,
+  E2eeMachinePairingCompleteReply,
+  E2eeMachinePairingRequests,
+  E2eeMachinePairingStatus,
+} from './e2ee-machine-pairing';
+export type {
+  E2eeMachineBootstrapAuthorizedReply,
+  E2eeMachineBootstrapReply,
+  E2eeMachinePairingCompleteReply,
+  E2eeMachinePairingRequests,
+  E2eeMachinePairingStatus,
+} from './e2ee-machine-pairing';
 
 type Query<Args extends Record<string, unknown>, Result> = FunctionReference<
   'query',
@@ -500,6 +519,7 @@ export type CloudApi = {
     read: Query<E2eeMailboxRequests['read'], E2eeMailboxReplies['read']>;
     fetch: Query<E2eeMailboxRequests['fetch'], E2eeMailboxReplies['fetch']>;
     status: Query<E2eeMailboxRequests['status'], E2eeMailboxReplies['status']>;
+    batchStatus: Query<E2eeMailboxRequests['batchStatus'], E2eeMailboxReplies['batchStatus']>;
     report: Mutation<E2eeMailboxRequests['report'], E2eeMailboxReplies['report']>;
     repair: Mutation<E2eeMailboxRequests['repair'], E2eeMailboxReplies['repair']>;
   };
@@ -510,12 +530,7 @@ export type CloudApi = {
     authorizeExisting: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
     bootstrap: Query<
       { workspaceId: string; credential: string; machineId: string },
-      | {
-          status: 'authorized';
-          userId: string;
-          workspaces: (WorkspaceSummary & { contentMode: 'e2ee'; genesisHash: string })[];
-        }
-      | { status: 'unauthorized'; reason: string }
+      E2eeMachineBootstrapReply
     >;
     /** The paired machine's own workspace plan, authenticated by its device credential. */
     workspaceEntitlement: Query<
@@ -523,11 +538,15 @@ export type CloudApi = {
       | { valid: false; reason: string }
       | { valid: true; effectivePlanTier: PlanTier; checkoutPending: boolean }
     >;
-    complete: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+    complete: Mutation<E2eeMachinePairingRequests['complete'], E2eeMachinePairingCompleteReply>;
   };
   e2eeWorkspaces: {
     ledgerHead: Query<{ workspaceId: string }, E2eeWorkspaceLedgerHead>;
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
+    appendRecordsBatch: Action<
+      { items: E2eeAppendRecordRequest[] },
+      E2eeWorkspaceBatchReply<E2eeAppendRecordReply>
+    >;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
     reportDeviceProfile: Mutation<
@@ -537,6 +556,10 @@ export type CloudApi = {
     >;
     memberProfiles: Query<E2eeWorkspaceMemberProfilesRequest, E2eeWorkspaceMemberProfiles>;
     history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
+    historyBatch: Action<
+      { items: E2eeWorkspaceHistoryRequest[] },
+      E2eeWorkspaceBatchReply<E2eeWorkspaceHistoryPage>
+    >;
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
   accountSecurityEvents: {
@@ -561,7 +584,7 @@ export type CloudApi = {
     deleteUnreferenced: Mutation<RecoveryVaultDeleteRequest, { ok: true }>;
   };
   e2eeEpochStaging: {
-    stageGroup: Mutation<StageEpochGroupRequest, { ok: true }>;
+    stageGroup: Mutation<StageEpochGroupRequest, StageEpochGroupReply>;
     readGroup: Query<ReadEpochGroupRequest, EpochStagedGroupDto | null>;
     deleteGroup: Mutation<DeleteEpochGroupRequest, { ok: true; done: boolean }>;
   };
@@ -1268,6 +1291,267 @@ export type CloudApi = {
  * generated client would construct; `CloudApi` owns the public protocol types.
  */
 export const api = anyApi as unknown as CloudApi;
+
+/** Convex refuses an unknown argument with `ArgumentValidationError`, naming the field. */
+const rejectsOptionalField = (error: unknown, field: string) => {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return /ArgumentValidationError/.test(message) && message.includes(field);
+};
+/**
+ * Ask `e2eeMailbox.put` to inline `{ frameHex, slot }`, saving the separate `read` and `status`
+ * queries after each stored envelope. A backend that predates `includeReceipt` refuses it once;
+ * this client instance retries without the field and stops asking.
+ */
+export function makeInlineMailboxPut() {
+  let supported = true;
+  return async <A>(
+    input: E2eeMailboxRequests['put'],
+    call: (input: E2eeMailboxRequests['put']) => Promise<A>
+  ): Promise<A> => {
+    const { includeReceipt: _, ...plain } = input;
+    if (!supported) return call(plain);
+    try {
+      return await call({ ...plain, includeReceipt: true });
+    } catch (error) {
+      if (!rejectsOptionalField(error, 'includeReceipt')) throw error;
+      supported = false;
+      return call(plain);
+    }
+  };
+}
+/**
+ * Ask `e2eeEpochStaging.stageGroup` to inline the stored `group`, saving the post-stage
+ * `readGroup` query while keeping client-side `EpochPublisher` verification intact.
+ */
+export function makeInlineStageGroup() {
+  let supported = true;
+  return async <A>(
+    input: StageEpochGroupRequest,
+    call: (input: StageEpochGroupRequest) => Promise<A>
+  ): Promise<A> => {
+    const { includeReadback: _, ...plain } = input;
+    if (!supported) return call(plain);
+    try {
+      return await call({ ...plain, includeReadback: true });
+    } catch (error) {
+      if (!rejectsOptionalField(error, 'includeReadback')) throw error;
+      supported = false;
+      return call(plain);
+    }
+  };
+}
+/**
+ * Ask `e2eeMailbox.fetch` to inline the recipient's current `slot` status, saving
+ * repeated status queries when `KeyReceiver` installs and finishes an envelope.
+ */
+export function makeInlineMailboxFetch() {
+  let supported = true;
+  return async <A>(
+    input: E2eeMailboxRequests['fetch'],
+    call: (input: E2eeMailboxRequests['fetch']) => Promise<A>
+  ): Promise<A> => {
+    const { includeSlot: _, ...plain } = input;
+    if (!supported) return call(plain);
+    try {
+      return await call({ ...plain, includeSlot: true });
+    } catch (error) {
+      if (!rejectsOptionalField(error, 'includeSlot')) throw error;
+      supported = false;
+      return call(plain);
+    }
+  };
+}
+/**
+ * Ask `e2eeMachinePairing.complete` to inline the machine's `bootstrap` authorization
+ * snapshot so pairing completion followed by startup does not need a second query.
+ */
+export function makeInlineMachineComplete() {
+  let supported = true;
+  return async <A>(
+    input: E2eeMachinePairingRequests['complete'],
+    call: (input: E2eeMachinePairingRequests['complete']) => Promise<A>
+  ): Promise<A> => {
+    const { includeBootstrap: _, ...plain } = input;
+    if (!supported) return call(plain);
+    try {
+      return await call({ ...plain, includeBootstrap: true });
+    } catch (error) {
+      if (!rejectsOptionalField(error, 'includeBootstrap')) throw error;
+      supported = false;
+      return call(plain);
+    }
+  };
+}
+const BATCH_STATUS_MAX_SLOTS = 100;
+const rejectsBatchStatus = (error: unknown) => {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return /Could not find public function|ArgumentValidationError/.test(message);
+};
+export type BatchMailboxStatusCallbacks = {
+  single: (input: E2eeMailboxRequests['status']) => Promise<E2eeMailboxStatus>;
+  batch: (input: E2eeMailboxRequests['batchStatus']) => Promise<E2eeMailboxStatus[]>;
+};
+/**
+ * Microtask coalescer per `(workspaceId, credential)` that batches concurrent
+ * `e2eeMailbox.status` calls (such as `KeyDistributor` checking multiple recipients)
+ * into `e2eeMailbox.batchStatus`, while keeping a single status call on `status`.
+ */
+export function makeBatchMailboxStatus() {
+  let batchSupported = true;
+  type Waiter = {
+    resolve: (value: E2eeMailboxStatus) => void;
+    reject: (reason?: unknown) => void;
+  };
+  type Entry = {
+    slot: E2eeMailboxSlot;
+    waiters: Waiter[];
+    callbacks: BatchMailboxStatusCallbacks;
+  };
+  type Bucket = {
+    access: E2eeDeviceAccess;
+    slots: Map<string, Entry>;
+  };
+  const buckets = new Map<string, Bucket>();
+  const accessKey = (access: E2eeDeviceAccess) =>
+    `${access.workspaceId}\0${access.credential}\0${access.cliToken ?? ''}`;
+  const slotKey = (slot: E2eeMailboxSlot) => `${slot.genesis}\0${slot.epoch}\0${slot.recipient}`;
+  const runSingleEntry = (access: E2eeDeviceAccess, entry: Entry) =>
+    entry.callbacks.single({ ...access, slot: entry.slot }).then(
+      (result) => {
+        for (const waiter of entry.waiters) waiter.resolve(result);
+      },
+      (error) => {
+        for (const waiter of entry.waiters) waiter.reject(error);
+      }
+    );
+  const flushBucket = async (key: string) => {
+    const bucket = buckets.get(key);
+    if (!bucket) return;
+    buckets.delete(key);
+    const entries = [...bucket.slots.entries()];
+    if (entries.length === 0) return;
+    const { access } = bucket;
+    if (entries.length === 1 || !batchSupported) {
+      await Promise.all(entries.map(([, entry]) => runSingleEntry(access, entry)));
+      return;
+    }
+    const chunks: Array<Array<[string, Entry]>> = [];
+    for (let i = 0; i < entries.length; i += BATCH_STATUS_MAX_SLOTS) {
+      chunks.push(entries.slice(i, i + BATCH_STATUS_MAX_SLOTS));
+    }
+    try {
+      const results = await Promise.all(
+        chunks.map(async (chunk) => {
+          const reply = await chunk[0]![1].callbacks.batch({
+            ...access,
+            slots: chunk.map(([, entry]) => entry.slot),
+          });
+          return { chunk, reply };
+        })
+      );
+      for (const { chunk, reply } of results) {
+        const bySlot = new Map<string, E2eeMailboxStatus>();
+        for (const item of reply) bySlot.set(slotKey(item), item);
+        for (const [entryKey, entry] of chunk) {
+          const found = bySlot.get(entryKey);
+          if (found) {
+            for (const waiter of entry.waiters) waiter.resolve(found);
+          } else {
+            const missingError = new Error('e2ee_mailbox_batch_status_missing_slot');
+            for (const waiter of entry.waiters) waiter.reject(missingError);
+          }
+        }
+      }
+    } catch (error) {
+      if (!rejectsBatchStatus(error)) {
+        for (const [, entry] of entries) {
+          for (const waiter of entry.waiters) waiter.reject(error);
+        }
+        return;
+      }
+      batchSupported = false;
+      await Promise.all(entries.map(([, entry]) => runSingleEntry(access, entry)));
+    }
+  };
+  return (
+    input: E2eeMailboxRequests['status'],
+    callbacks: BatchMailboxStatusCallbacks
+  ): Promise<E2eeMailboxStatus> => {
+    const access: E2eeDeviceAccess = {
+      workspaceId: input.workspaceId,
+      credential: input.credential,
+      ...(input.cliToken === undefined ? {} : { cliToken: input.cliToken }),
+    };
+    const key = accessKey(access);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { access, slots: new Map() };
+      buckets.set(key, bucket);
+      queueMicrotask(() => {
+        void flushBucket(key);
+      });
+    }
+    const sKey = slotKey(input.slot);
+    let entry = bucket.slots.get(sKey);
+    if (!entry) {
+      entry = { slot: input.slot, waiters: [], callbacks };
+      bucket.slots.set(sKey, entry);
+    }
+    return new Promise<E2eeMailboxStatus>((resolve, reject) => {
+      entry.waiters.push({ resolve, reject });
+    });
+  };
+}
+/**
+ * Short-lived in-memory status cache for a mailbox adapter so consecutive
+ * `KeyReceiver.status(self)` reads within one operation avoid duplicate RTTs
+ * while immediately invalidating on `put`, `report`, and `repair`.
+ */
+export function makeMailboxStatusCache(options?: {
+  ttlMs?: number;
+  now?: () => number;
+  maxEntries?: number;
+}) {
+  const ttlMs = options?.ttlMs ?? 1000;
+  const now = options?.now ?? (() => performance.now());
+  const maxEntries = options?.maxEntries ?? 512;
+  const cache = new Map<string, { value: E2eeMailboxStatus; at: number }>();
+  const prefixOf = (access: E2eeDeviceAccess) =>
+    `${access.workspaceId}\0${access.credential}\0${access.cliToken ?? ''}\0`;
+  const keyOf = (access: E2eeDeviceAccess, slot: E2eeMailboxSlot) =>
+    `${prefixOf(access)}${slot.genesis}\0${slot.epoch}\0${slot.recipient}`;
+  return {
+    get: (access: E2eeDeviceAccess, slot: E2eeMailboxSlot): E2eeMailboxStatus | undefined => {
+      const key = keyOf(access, slot);
+      const entry = cache.get(key);
+      if (!entry) return undefined;
+      const age = now() - entry.at;
+      if (age >= 0 && age < ttlMs) return entry.value;
+      cache.delete(key);
+      return undefined;
+    },
+    set: (access: E2eeDeviceAccess, value: E2eeMailboxStatus) => {
+      const key = keyOf(access, value);
+      if (cache.size >= maxEntries && !cache.has(key)) {
+        const oldest = cache.keys().next().value;
+        if (oldest !== undefined) cache.delete(oldest);
+      }
+      cache.set(key, { value, at: now() });
+    },
+    invalidateSlot: (access: E2eeDeviceAccess, slot: E2eeMailboxSlot) => {
+      cache.delete(keyOf(access, slot));
+    },
+    invalidateAccess: (access: E2eeDeviceAccess) => {
+      const prefix = prefixOf(access);
+      for (const key of cache.keys()) {
+        if (key.startsWith(prefix)) cache.delete(key);
+      }
+    },
+    clear: () => {
+      cache.clear();
+    },
+  };
+}
 
 /** Server-selected display terms. Checkout remains authoritative. */
 export interface ReferralPolicy {

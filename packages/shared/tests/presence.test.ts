@@ -3,13 +3,16 @@ import { z } from 'zod';
 import {
   LODY_PRESENCE_TTL_MS,
   collectOnlineMachineIdsFromPresence,
+  collectViewedSessionIdsFromPresence,
   findFreshMachinePresenceState,
   findFreshSessionPresenceState,
   getLodyMachinePresenceKey,
   getLodySessionPresenceKey,
+  getLodySessionViewingPresenceKey,
   parseLodyPresenceStates,
   type LodyPresenceInstanceId,
   type LodyPresenceStateMap,
+  type LodySessionViewingPresenceState,
   type MachineId,
   type SessionId,
 } from '../src';
@@ -365,5 +368,42 @@ describe('presence helpers', () => {
     // Session presence alone must not mark a machine online; machine liveness
     // is only asserted by machine heartbeats.
     expect(online.size).toBe(1);
+  });
+
+  it('collectViewedSessionIdsFromPresence returns only fresh viewing entries', () => {
+    const viewerUserId = 'user-1';
+    const viewingState = (overrides: Partial<LodySessionViewingPresenceState> = {}) =>
+      ({
+        kind: 'session-viewing',
+        userId: viewerUserId,
+        instanceId,
+        sessionId,
+        since: 1_000,
+        updatedAt: 2_000,
+        ...overrides,
+      }) satisfies LodySessionViewingPresenceState;
+
+    const nowMs = 100_000;
+    const states = parseLodyPresenceStates({
+      [getLodySessionViewingPresenceKey(viewerUserId, instanceId)]: viewingState({
+        updatedAt: nowMs - 1_000,
+      }),
+      'viewing:user-2:instance-9': viewingState({
+        userId: 'user-2',
+        sessionId: 'session-2' as SessionId,
+        updatedAt: nowMs - LODY_PRESENCE_TTL_MS - 1,
+      }),
+      'session:session-3:instance-1': {
+        kind: 'session',
+        sessionId: 'session-3',
+        machineId: 'machine-1',
+        instanceId,
+        status: { type: 'running' },
+        updatedAt: nowMs - 1_000,
+      },
+    });
+
+    const viewed = collectViewedSessionIdsFromPresence(states, nowMs);
+    expect([...viewed]).toEqual([sessionId]);
   });
 });

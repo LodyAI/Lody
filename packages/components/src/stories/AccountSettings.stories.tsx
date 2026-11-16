@@ -1,4 +1,5 @@
 import { WorkspaceOwnershipTransfer } from '@/components/settings/workspace-ownership-transfer';
+import { E2eeSecurityPanel } from '@/components/settings/e2ee/security-panel';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Button } from '@lody/ui/button';
 import { CompactRow } from '@/components/settings/compact-layout';
@@ -423,6 +424,42 @@ export const DesktopPaneWorkspace: Story = {
   args: {
     surface: 'workspace',
     pendingInvitations: mockPendingInvitations,
+  },
+  render: (args) => <DesktopPane {...args} />,
+};
+
+/** Settings > General for a solo encrypted workspace in the desktop pane: the security
+ * entry is the page's first section, on the same column as Workspace and Members. */
+export const DesktopPaneEncryptedWorkspace: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    hasAdminPermission: false,
+    members: mockMembers.slice(0, 1),
+    workspaceSecuritySlot: (
+      <E2eeSecurityPanel
+        state={{
+          epoch: 1,
+          rotationRequired: false,
+          updatePending: false,
+          mayRotate: true,
+          devices: [],
+        }}
+        onUpdate={() => {}}
+        onRetry={() => {}}
+        onOpenConsole={() => {}}
+      />
+    ),
+    workspaceOwnershipSlot: (
+      <CompactRow
+        label="转移所有权"
+        helper="在加密控制台的成员页选择新所有者。转出后你会变成管理员，这次变更会记入变更记录。"
+      >
+        <Button variant="secondary" size="small" tone="destructive">
+          转移…
+        </Button>
+      </CompactRow>
+    ),
   },
   render: (args) => <DesktopPane {...args} />,
 };

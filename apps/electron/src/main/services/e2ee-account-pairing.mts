@@ -6,6 +6,7 @@ import {
   type AccountPairingApproverFilter,
   type AccountPairingApproverWorkspace,
   type AccountPairingRelay,
+  type AccountPairingRequesterFilter,
   type AccountPairingRequesterWorkspace,
   type AccountPairingStore
 } from '@lody/e2ee-client/account-pairing'
@@ -18,6 +19,7 @@ export type {
   AccountPairingPreview,
   AccountPairingRefusal,
   AccountPairingRelay,
+  AccountPairingRequesterFilter,
   AccountPairingRequesterWorkspace,
   AccountPairingState
 } from '@lody/e2ee-client/account-pairing'
@@ -199,7 +201,10 @@ export function makeDesktopAccountPairing(input: {
   approverWorkspaces: (
     filter?: AccountPairingApproverFilter
   ) => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>
-  requesterWorkspaces: () => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown>
+  requesterWorkspaces: (
+    hints?: unknown,
+    filter?: AccountPairingRequesterFilter
+  ) => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown>
   now?: () => number
   random?: (size: number) => Uint8Array
 }) {

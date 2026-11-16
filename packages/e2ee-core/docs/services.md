@@ -62,11 +62,16 @@ write the protocol relies on for authority.
 
 - `read(anchor)` returns every record from genesis and the checkpoint the log
   claims. The library re-verifies all of it.
+- Optional `readFrom(anchor, base)` returns only the untrusted suffix after a genuine
+  verified view. Submission verifies the suffix and its checkpoint; unsupported adapters,
+  older parents and pins before retained history use `read`. Server status never
+  establishes commitment.
 - `appendCas(anchor, expected, record)` appends **only if** the log still ends
   at `expected`. It must never append unconditionally. Appending the same bytes
   twice must be idempotent or rejected.
-- Failures are `LedgerLogError`. After any failure the library reads back to
-  learn the outcome, so a lost response is safe.
+- Failures are `LedgerLogError`. The library reads back to learn uncertain outcomes.
+  Only an explicitly qualified first-attempt self-service quota refusal can release
+  its unsent original; a lost response always retains the exact original for retry.
 
 ### LedgerFeedSource
 
@@ -238,6 +243,10 @@ record this device's own publication, and verifies it first. Typically a
 backwards scan of your local feed.
 
 ### LedgerSync
+
+Optional `ingest(page, checkpoint)` sends inline originals through the same feed
+verification and persistence as ordinary reads. The caller supplies the independent
+checkpoint and exact current request offset. It grants no authority or freshness.
 
 `refresh()` selects the target checkpoint independently and reads the local
 feed up to it; `current()` returns the stored state. `WorkspaceControl` and

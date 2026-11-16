@@ -1281,3 +1281,82 @@ describe('mergeLoginShellEnv', () => {
     expect(merged.LANG).toBe('en_US.UTF-8');
   });
 });
+
+describe('managed Antigravity', () => {
+  it('launches agy directly with HTTP MCP isolation and controlled updates', async () => {
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        action: 'status',
+      })
+    ).resolves.toBeNull();
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        action: 'login',
+      })
+    ).rejects.toThrow('ACP authentication');
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'antigravity',
+        version: '1.5.9',
+        targetVersion: '1.5.9',
+        platformArch: 'darwin-arm64',
+        command: '/managed/agy',
+        updateAvailable: false,
+      }),
+    } as never);
+    try {
+      expect(
+        await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'antigravity' })
+      ).toEqual({
+        command: '/managed/agy',
+        args: ['acp', '--process-per-session', '--disable-telemetry'],
+        env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+        capabilitySourceVersion: 'builtin-antigravity:1.5.9',
+      });
+      const overridden = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        runtimeOverrides: { antigravityPath: '/user/agy' },
+      });
+      expect(overridden.command).toBe('/user/agy');
+      expect(overridden.capabilitySourceVersion).toContain('+override:');
+      // Skipping permissions keeps the managed runtime and its capability cache.
+      expect(
+        await resolveACPProcessLaunchAsync({
+          cliType: 'builtin',
+          agentType: 'antigravity',
+          runtimeOverrides: { antigravitySkipPermissions: true },
+        })
+      ).toEqual({
+        command: '/managed/agy',
+        args: [
+          'acp',
+          '--process-per-session',
+          '--disable-telemetry',
+          '--dangerously-skip-permissions',
+        ],
+        env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+        capabilitySourceVersion: 'builtin-antigravity:1.5.9',
+      });
+      expect(
+        (
+          await resolveACPProcessLaunchAsync({
+            cliType: 'builtin',
+            agentType: 'antigravity',
+            runtimeOverrides: { antigravitySkipPermissions: false },
+          })
+        ).args
+      ).toEqual(['acp', '--process-per-session', '--disable-telemetry']);
+      expect(REGISTRY_ACP_AGENTS.some((a) => a.id === 'antigravity-acp')).toBe(false);
+      expect(
+        getAcpCapabilitySourceVersion({ cliType: 'registry', agentType: 'antigravity-acp' })
+      ).toBe('antigravity-acp@1.5.0');
+    } finally {
+      manager.mockRestore();
+    }
+  });
+});

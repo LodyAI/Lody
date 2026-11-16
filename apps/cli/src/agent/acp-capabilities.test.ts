@@ -113,6 +113,8 @@ describe('fetchAcpCapabilities', () => {
       'antigravity-acp',
       createSilentLogger()
     );
+    const builtin = await fetchAcpCapabilities('builtin', 'antigravity', createSilentLogger());
+    expect(builtin.rateLimits).toEqual({ version: 1, query: true });
     const custom = await fetchAcpCapabilities('custom', 'antigravity-acp', createSilentLogger());
     const other = await fetchAcpCapabilities('registry', 'another-agent', createSilentLogger());
     expect(official.rateLimits).toEqual({ version: 1, query: true });

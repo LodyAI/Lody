@@ -63,6 +63,12 @@ export function projectRunOf(
     const diff = object(member.diff);
     const add = count(diff.add),
       del = count(diff.del);
+    const files =
+      typeof diff.files === 'number' &&
+      Number.isInteger(diff.files) &&
+      diff.files >= 0
+        ? diff.files
+        : undefined;
     const pullRequest = repoFullName
       ? current.get(repoFullName.toLowerCase())
       : undefined;
@@ -77,7 +83,9 @@ export function projectRunOf(
         : {}),
       ...(repoFullName ? { repoFullName } : {}),
       ...(text(member.branch) ? { branch: text(member.branch) } : {}),
-      ...(add || del ? { diff: { add, del } } : {}),
+      ...(files !== undefined || add || del
+        ? { diff: { add, del, ...(files === undefined ? {} : { files }) } }
+        : {}),
       ...(member.dirty === true ? { dirty: true } : {}),
       ...(member.unpushed === true ? { unpushed: true } : {}),
       ...(pullRequest ? { pullRequest } : {}),

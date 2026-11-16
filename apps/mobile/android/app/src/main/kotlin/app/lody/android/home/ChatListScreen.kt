@@ -377,6 +377,10 @@ fun ChatListScreen(
                 onOpenSession = onOpenSession,
                 onNotice = notice,
             )
+            // First run (web `showChatOnboarding`): a loaded catalog with no computers and no chats at all,
+            // archived included, regardless of the view menu's scope. Never while loading, searching or archived.
+            tab == HomeTab.Chats && !searching && !archived && state.snapshot?.let { it.machineIds.isEmpty() && it.sessions.isEmpty() } == true ->
+                HomeOnboarding(padding)
             searching -> HomeList(
                 ChatListModel.searchTimeline(if (archived && tab == HomeTab.Chats) archivedTimeline else state.timeline, query).map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) },
                 details, padding, empty = stringResource(R.string.home_search_empty, query.trim()).takeIf { query.isNotBlank() },

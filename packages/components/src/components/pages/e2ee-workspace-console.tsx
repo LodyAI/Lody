@@ -18,15 +18,21 @@ import {
 } from '@/lib/e2ee-member-removal';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
-import { getIpcServices } from '@/lib/electron-ipc-client';
+import { useSetAtom } from 'jotai';
+import { useE2eeRecoverySection } from '@/components/settings/e2ee/recovery-host';
+import { useRecoveryPort } from '@/components/settings/e2ee/recovery-port';
+import { useWorkspaceRecoveryReady } from '@/components/settings/e2ee/recovery-vault-section';
+import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
+import type { E2eeWorkspaceRemoval } from './e2ee-workspace-removal';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeRuntimeStatus } from '@lody/platform';
+import type { WorkspaceId } from '@lody/shared';
 import { getPreferredOrdinaryWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
+import { mintAdmittedWorkspaceTicket } from '@/atoms/workspace-context';
+import { runtimeInitializingAtom } from '@/atoms/control-connection';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
 import {
@@ -76,7 +82,7 @@ type AccountPairingJoin = {
   automatic?: boolean;
   cancel?: () => void;
 };
-const ACCOUNT_PAIRING_KEY_RETRY_MS = [300, 600, 1200, 2000, 3000, 4000] as const;
+const ACCOUNT_PAIRING_KEY_RETRY_MS = [300, 600, 1200, 2000, 4000, 8000, 15000, 30000] as const;
 const accountPairingJoins = new Map<string, AccountPairingJoin>();
 let accountPairingAccount: string | null | undefined;
 
@@ -97,6 +103,9 @@ export interface E2eeWorkspaceConsoleProps {
   onCheckForUpdates?: () => void;
   /** Host-known recovery state for the getting-started list; see the control page. */
   recoveryReady?: boolean;
+  /** Ordinary account deletion/leave for a device with no approval; absent when the
+   * host has no account workspaces. The server decides who may use either. */
+  workspaceRemoval?: E2eeWorkspaceRemoval;
 }
 
 /** The encryption console. It owns its account/workspace control reader and the
@@ -110,6 +119,7 @@ export function E2eeWorkspaceConsole({
   sections,
   onCheckForUpdates,
   recoveryReady,
+  workspaceRemoval,
 }: E2eeWorkspaceConsoleProps) {
   const platform = usePlatform();
   const { t } = useTranslation();
@@ -119,14 +129,22 @@ export function E2eeWorkspaceConsole({
   const port = platform.e2eeWorkspaces;
   const navigate = useNavigate();
   const clearWorkspace = useSetAtom(setWorkspaceContextAtom);
-  // Restoring from a backup is a desktop capability while the recovery switch is on.
-  const recoveryEnabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
-  const [desktopE2ee] = useState(() => getIpcServices()?.e2ee);
+  const setRuntimeInitializing = useSetAtom(runtimeInitializingAtom);
+  // Restoring from a backup uses this host's recovery port (desktop main, Web or the
+  // mobile webview) while the recovery switch is on.
+  const recoveryPort = useRecoveryPort();
+  const DefaultRecoverySection = useE2eeRecoverySection();
+  const pageRecoveryReady = useWorkspaceRecoveryReady(
+    presentation === 'page' && recoveryReady === undefined ? workspaceId : undefined,
+    accountId
+  );
+  const resolvedRecoveryReady = recoveryReady === undefined ? pageRecoveryReady : recoveryReady;
   const [passkeyAvailable, setPasskeyAvailable] = useState(false);
   useEffect(() => {
-    if (!recoveryEnabled || !desktopE2ee) return undefined;
+    setPasskeyAvailable(false);
+    if (!recoveryPort) return undefined;
     let live = true;
-    void desktopE2ee.recoveryPasskeyAvailable().then(
+    void recoveryPort.passkeyAvailable().then(
       (available) => {
         if (live) setPasskeyAvailable(available);
       },
@@ -135,7 +153,7 @@ export function E2eeWorkspaceConsole({
     return () => {
       live = false;
     };
-  }, [recoveryEnabled, desktopE2ee]);
+  }, [recoveryPort]);
   useLayoutEffect(() => {
     // The standalone page has no workspace; the modal stays inside the open one.
     if (presentation === 'page') clearWorkspace({ slug: null, workspaceId: null });
@@ -320,8 +338,10 @@ export function E2eeWorkspaceConsole({
               genesisHash: status.genesisHash,
               cryptoOrgId: status.genesisHash,
             };
+            retainEncryptedWorkspaceMode(localStorage, accountId, descriptor);
             let publication = 0;
             let published = status;
+            let latestHistory: VerifiedLedgerHistory | undefined;
             const publish = async () => {
               if (!isCurrent()) return;
               const revision = ++publication;
@@ -329,7 +349,8 @@ export function E2eeWorkspaceConsole({
               if (!isCurrent() || revision !== publication) return;
               let history: VerifiedLedgerHistory;
               try {
-                history = hostLedgerHistory(exported);
+                history = hostLedgerHistory(exported, latestHistory);
+                latestHistory = history;
                 if (!history.continuityPending)
                   retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
               } catch (error) {
@@ -360,13 +381,30 @@ export function E2eeWorkspaceConsole({
             };
             owner.publish = publish;
             await publish();
-            const synchronize = async () => {
+            const synchronize = async (
+              targetHead?: import('@lody/cloud-api').E2eeWorkspaceLedgerHead
+            ) => {
               if (!isCurrent()) return;
-              const local = await runtime.ledgerView(workspaceId);
+              const local = await runtime.status(workspaceId);
               if (!isCurrent()) return;
+              if (
+                targetHead &&
+                local.genesisHash === targetHead.genesisHash &&
+                (local.length > targetHead.checkpoint.length ||
+                  (local.length === targetHead.checkpoint.length &&
+                    local.headHash === targetHead.checkpoint.headHash))
+              ) {
+                if (
+                  published.genesisHash !== local.genesisHash ||
+                  published.length !== local.length ||
+                  published.headHash !== local.headHash
+                )
+                  await publish();
+                return;
+              }
               let page = await port.history({
                 workspaceId,
-                ...(local.status.position ? { after: local.status.position } : {}),
+                ...(local.position ? { after: local.position } : {}),
               });
               for (;;) {
                 if (!isCurrent()) return;
@@ -417,7 +455,7 @@ export function E2eeWorkspaceConsole({
             // The first subscription value closes the gap after initial catch-up.
             // Only original, verified history advances the local checkpoint.
             let running = false;
-            let pending = false;
+            let pending: import('@lody/cloud-api').E2eeWorkspaceLedgerHead | null = null;
             const subscriptionFailed = () => {
               if (isCurrent()) console.warn('E2EE ledger live updates unavailable');
             };
@@ -434,14 +472,15 @@ export function E2eeWorkspaceConsole({
                         head.checkpoint.headHash === published.headHash)
                     )
                       return;
-                    pending = true;
+                    pending = head;
                     if (running) return;
                     running = true;
                     void (async () => {
                       try {
                         while (pending && isCurrent()) {
-                          pending = false;
-                          await synchronize();
+                          const target = pending;
+                          pending = null;
+                          await synchronize(target);
                           if (isCurrent()) setDirectoryRevision((value) => value + 1);
                         }
                       } catch (error) {
@@ -718,26 +757,26 @@ export function E2eeWorkspaceConsole({
       });
     join.failed = false;
     join.request = (async () => {
-      try {
-        const first = await runtime.refresh(workspaceId, { installKeys: true });
-        if (!first || first.hasCurrentKey) return true;
-        // Instant QR approval delivers mailbox keys asynchronously right after
-        // publishing the admission. Poll briefly while the mailbox catches up.
-        for (const delay of ACCOUNT_PAIRING_KEY_RETRY_MS) {
-          await wait(delay);
-          if (cancelled || accountPairingJoins.get(identity) !== join) return false;
-          const next = await runtime.refresh(workspaceId, { installKeys: true });
-          if (!next || next.hasCurrentKey) return true;
+      for (const delay of [0, ...ACCOUNT_PAIRING_KEY_RETRY_MS]) {
+        if (delay) await wait(delay);
+        if (cancelled || accountPairingJoins.get(identity) !== join) return false;
+        try {
+          const next = await runtime.refresh(workspaceId, {
+            installKeys: true,
+            keyMode: 'receive',
+          });
+          if (next?.hasCurrentKey) return true;
+        } catch (error: unknown) {
+          if (cancelled) return false;
+          const failure = classifyE2eeControlFailure(error);
+          console.error('E2EE account pairing key request failed', failure.kind, failure.code);
+          // Reader handoff, custody contention and transport failures can recover.
+          // Identity/authority failures still require their existing recovery path.
+          if (failure.kind !== 'network' && failure.kind !== 'server') break;
         }
-        join.failed = true;
-        return false;
-      } catch (error: unknown) {
-        if (cancelled) return false;
-        const failure = classifyE2eeControlFailure(error);
-        console.error('E2EE account pairing key request failed', failure.kind, failure.code);
-        join.failed = true;
-        return false;
       }
+      if (!cancelled && accountPairingJoins.get(identity) === join) join.failed = true;
+      return false;
     })();
     observeKeyRequest(join.request);
   };
@@ -768,12 +807,42 @@ export function E2eeWorkspaceConsole({
     if (joinedKey) {
       join.cancel?.();
       accountPairingJoins.delete(identity);
+      if (presentation === 'modal') {
+        onClose?.();
+        return;
+      }
+      const ticket =
+        accountId &&
+        mintAdmittedWorkspaceTicket({
+          accountId,
+          slug: workspaceSlug,
+          workspaceId: workspaceId as WorkspaceId,
+          hasDeviceCredential: true,
+          hasCurrentKey: true,
+        });
+      if (ticket) {
+        clearWorkspace(ticket);
+      }
+      setRuntimeInitializing(true);
       void navigate({ to: '/$workspaceName/chat', params: { workspaceName: workspaceSlug } });
       return;
     }
     if (!join.request) requestAccountPairingKey(join);
     else observeKeyRequest(join.request);
-  }, [identity, joinedCredential, joinedKey, workspaceSlug, navigate, port, workspaceId]);
+  }, [
+    accountId,
+    clearWorkspace,
+    identity,
+    joinedCredential,
+    joinedKey,
+    workspaceSlug,
+    navigate,
+    onClose,
+    port,
+    presentation,
+    setRuntimeInitializing,
+    workspaceId,
+  ]);
   const manageMember = async (work?: () => Promise<void>) => {
     const owner = readOwner.current;
     if (!owner?.publish || scopeRef.current !== scope) throw new Error('e2ee_not_open');
@@ -821,6 +890,28 @@ export function E2eeWorkspaceConsole({
     });
   };
   if (current?.removed) return <p role="status">{t('e2ee.members.removed')}</p>;
+  const listedWorkspace =
+    workspaces.status === 'ready'
+      ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)
+      : undefined;
+  const lostAccess: Omit<E2eeLostAccessProps, 'workspaceId'> = {
+    workspaceName: listedWorkspace?.name,
+    // Only a hint for which path to offer; the server checks it on submit.
+    accountRole: listedWorkspace?.role,
+    ...(recoveryPort
+      ? {
+          recovery: {
+            passkeyAvailable,
+            restore: recoveryPort.restore,
+            onRecovered: refresh,
+            onCheck: refresh,
+          },
+        }
+      : {}),
+    ...(workspaceRemoval ? { removal: workspaceRemoval } : {}),
+    onBackToWorkspaces: backToWorkspaces,
+    onRemoved: backToWorkspaces,
+  };
   // A signed-in device without an approved identity here sees the next step first;
   // the ledger, diagnostics and failures stay one click away in the full page.
   const awaitingApproval = Boolean(
@@ -849,7 +940,9 @@ export function E2eeWorkspaceConsole({
   )
     return (
       <E2eeAutomaticPairingPage
-        key={identity}
+        // A revocation found after this page joined (by scan or automatically) starts
+        // it over, so no local "joined" outlives the loss.
+        key={current?.failure?.code === 'device-revoked' ? `${identity}:revoked` : identity}
         runtime={port.runtime}
         workspaceId={workspaceId}
         onJoined={() => onAccountPairingJoined(true)}
@@ -857,21 +950,13 @@ export function E2eeWorkspaceConsole({
         onRetryKeys={retryAccountPairingKey}
         onBack={backToWorkspaces}
         onManual={() => setManualPairingFor(identity)}
-        {...(recoveryEnabled && desktopE2ee
-          ? {
-              lostAll: {
-                passkeyAvailable,
-                restore: (method: 'file' | 'passkey') =>
-                  desktopE2ee.restoreFromRecoveryFile(method),
-                onRecovered: refresh,
-              },
-            }
-          : {})}
+        lostAccess={lostAccess}
       />
     );
   if (awaitingApproval && !showDetails && port?.runtime && accountId)
     return (
       <E2eeDeviceApprovalGuide
+        lostAccess={<E2eeLostAccessEntry {...lostAccess} workspaceId={workspaceId} />}
         reason={current?.failure?.code === 'device-revoked' ? 'revoked' : 'new'}
         onRefresh={refresh}
         onShowDetails={() => setShowDetails(true)}
@@ -959,7 +1044,7 @@ export function E2eeWorkspaceConsole({
         presentation={presentation}
         initialTab={initialTab}
         {...(onCheckForUpdates ? { onCheckForUpdates } : {})}
-        {...(recoveryReady === undefined ? {} : { recoveryReady })}
+        {...(resolvedRecoveryReady === undefined ? {} : { recoveryReady: resolvedRecoveryReady })}
         memberRole={
           current?.scope === scope && !current.failure
             ? current.nativeStatus?.memberRole
@@ -993,11 +1078,25 @@ export function E2eeWorkspaceConsole({
             ? () => {
                 // Navigation is only an entry point. RuntimeProvider reopens this
                 // approved identity and acquires purpose-bound grants before content.
-                if (scopeRef.current === scope && readOwner.current && workspaceSlug)
+                if (scopeRef.current === scope && readOwner.current && workspaceSlug) {
+                  const ticket =
+                    accountId &&
+                    mintAdmittedWorkspaceTicket({
+                      accountId,
+                      slug: workspaceSlug,
+                      workspaceId: workspaceId as WorkspaceId,
+                      hasDeviceCredential: Boolean(current?.nativeStatus?.hasDeviceCredential),
+                      hasCurrentKey: Boolean(current?.nativeStatus?.hasCurrentKey),
+                    });
+                  if (ticket) {
+                    clearWorkspace(ticket);
+                  }
+                  setRuntimeInitializing(true);
                   void navigate({
                     to: '/$workspaceName/chat',
                     params: { workspaceName: workspaceSlug },
                   });
+                }
               }
             : undefined
         }
@@ -1047,7 +1146,12 @@ export function E2eeWorkspaceConsole({
             />
           </E2eeConsoleSection>
         )}
-        {sections}
+        {sections ??
+          (DefaultRecoverySection && (
+            <E2eeConsoleSection tab="recovery">
+              <DefaultRecoverySection key={accountId ?? ''} accountId={accountId} />
+            </E2eeConsoleSection>
+          ))}
         {port?.runtime?.beginRemoteMachinePairing && current?.history?.locallyPinned && (
           <E2eeConsoleSection tab="devices">
             <E2eeRemoteMachineDisclosure key={identity + ':remote-machine-disclosure'}>

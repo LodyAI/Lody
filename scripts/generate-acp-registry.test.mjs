@@ -68,7 +68,7 @@ void describe('ACP registry icon generation', () => {
 });
 
 void it('excludes builtin duplicates without reintroducing local Kimi fallbacks', () => {
-  const agents = ['devin', 'dimcode', 'kimi', 'kimi-code', 'third-party'].map((id) => ({
+  const agents = ['antigravity-acp', 'devin', 'dimcode', 'kimi', 'kimi-code', 'third-party'].map((id) => ({
     id,
     name: id,
     version: '1.0.0',
@@ -76,7 +76,7 @@ void it('excludes builtin duplicates without reintroducing local Kimi fallbacks'
   }));
   const ids = normalizeRegistryAgents(agents).map(({ id }) => id);
   assert.ok(ids.includes('third-party'));
-  for (const id of ['devin', 'dimcode', 'kimi', 'kimi-code']) assert.ok(!ids.includes(id));
+  for (const id of ['antigravity-acp', 'devin', 'dimcode', 'kimi', 'kimi-code']) assert.ok(!ids.includes(id));
   const fallbackIds = normalizeRegistryAgents([]).map(({ id }) => id);
   assert.ok(!fallbackIds.includes('kimi'));
   assert.ok(!fallbackIds.includes('kimi-code'));

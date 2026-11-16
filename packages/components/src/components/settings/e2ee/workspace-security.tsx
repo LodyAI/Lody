@@ -1,5 +1,5 @@
 import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notifications';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { Dialog } from '@lody/ui/dialog';
@@ -33,8 +33,11 @@ function SecuritySettings({
   consoleTab,
   setConsoleTab,
   addDevice,
+  children,
 }: {
   scope: ReturnType<typeof useSecurityState>;
+  /** Places the entry panel inside the page; the console dialog stays mounted here. */
+  children: (panel: ReactNode) => ReactNode;
   /** The console owns its own control reader; it exists only while open. */
   consoleTab: E2eeConsoleTab | null;
   setConsoleTab: (tab: E2eeConsoleTab | null, addDevice?: boolean) => void;
@@ -62,10 +65,10 @@ function SecuritySettings({
     if (busy) return;
     setBusy(true);
     setError(undefined);
+    let succeeded = false;
     try {
       await work();
-      if (scope.accountId && scope.workspaceId)
-        notifyE2eeLedgerChanged(scope.accountId, scope.workspaceId);
+      succeeded = true;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : '';
       setError(
@@ -73,8 +76,13 @@ function SecuritySettings({
           'e2ee_management_retry'
       );
     } finally {
-      await scope.state.refetch();
-      setBusy(false);
+      try {
+        await scope.state.refetch();
+        if (succeeded && scope.accountId && scope.workspaceId)
+          notifyE2eeLedgerChanged(scope.accountId, scope.workspaceId);
+      } finally {
+        setBusy(false);
+      }
     }
   };
   const panelState = {
@@ -95,17 +103,19 @@ function SecuritySettings({
   };
   return (
     <>
-      <E2eeSecurityPanel
-        {...panelState}
-        joinRequests={joinRequests}
-        onOpenConsole={
-          scope.workspaceId
-            ? (tab) => setConsoleTab(tab ?? 'overview', tab === 'devices')
-            : undefined
-        }
-        onRetry={retry}
-        onUpdate={update}
-      />
+      {children(
+        <E2eeSecurityPanel
+          {...panelState}
+          joinRequests={joinRequests}
+          onOpenConsole={
+            scope.workspaceId
+              ? (tab) => setConsoleTab(tab ?? 'overview', tab === 'devices')
+              : undefined
+          }
+          onRetry={retry}
+          onUpdate={update}
+        />
+      )}
       {scope.workspaceId && (
         <Dialog.Root
           open={consoleTab !== null}
@@ -192,20 +202,22 @@ export function WorkspaceSettings() {
   // An encrypted workspace keeps the ordinary General page (name, icon, members,
   // danger zone). Encryption management lives in the console the entry card opens.
   return scope.encrypted ? (
-    <>
-      <SecuritySettings
-        key={key}
-        scope={scope}
-        consoleTab={consoleTab}
-        setConsoleTab={setConsoleTab}
-        addDevice={open?.key === key && open.addDevice}
-      />
-      <AccountSettingsComponent
-        surface="workspace"
-        encryptedTeamManagement={false}
-        onOpenEncryptionConsole={scope.workspaceId ? () => setConsoleTab('members') : undefined}
-      />
-    </>
+    <SecuritySettings
+      key={key}
+      scope={scope}
+      consoleTab={consoleTab}
+      setConsoleTab={setConsoleTab}
+      addDevice={open?.key === key && open.addDevice}
+    >
+      {(panel) => (
+        <AccountSettingsComponent
+          surface="workspace"
+          encryptedTeamManagement={false}
+          onOpenEncryptionConsole={scope.workspaceId ? () => setConsoleTab('members') : undefined}
+          workspaceSecuritySlot={panel}
+        />
+      )}
+    </SecuritySettings>
   ) : (
     <AccountSettingsComponent surface="workspace" />
   );

@@ -31,6 +31,7 @@ final class LodyPageController: UIViewController {
   var onClose: (() -> Void)?
   private(set) var closed = false
   var isRehosting = false
+  var isTransferringNavigation = false
   private var headerHidden: Bool?
   private let content: UIViewController
   var ownsHeader: Bool { content is LodyPageOwnedHeader }
@@ -126,7 +127,8 @@ final class LodyPageController: UIViewController {
 
   override func viewDidDisappear(_ animated: Bool) {
     super.viewDidDisappear(animated)
-    if isMovingFromParent || (!isRehosting && (isBeingDismissed || navigationController?.isBeingDismissed == true)) {
+    if !isTransferringNavigation,
+       isMovingFromParent || (!isRehosting && (isBeingDismissed || navigationController?.isBeingDismissed == true)) {
       markClosed()
     }
   }

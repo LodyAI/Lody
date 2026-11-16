@@ -72,6 +72,8 @@ export function E2eeWorkspaceCreationOption(props: {
   disabled: boolean;
   paidRequired: boolean;
   onChange: (selected: boolean) => void;
+  /** Automation id of the encrypted choice; a host keeps its established id. */
+  encryptedChoiceTestId?: string;
   requests?: PendingE2eeWorkspace[];
   /** Saved requests the user archived: hidden from the default list, restorable. */
   archivedRequests?: PendingE2eeWorkspace[];
@@ -118,8 +120,8 @@ export function E2eeWorkspaceCreationOption(props: {
           type="button"
           role="radio"
           // Kept stable for automation that selects encryption by this id.
-          id="e2ee-workspace-create"
-          data-testid="e2ee-workspace-create"
+          id={props.encryptedChoiceTestId ?? 'e2ee-workspace-create'}
+          data-testid={props.encryptedChoiceTestId ?? 'e2ee-workspace-create'}
           aria-checked={props.selected}
           disabled={props.disabled || props.pending || !props.supported}
           onClick={() => props.onChange(true)}

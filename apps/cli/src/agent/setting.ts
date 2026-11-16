@@ -34,6 +34,7 @@ import {
   BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION,
   CLAUDE_ACP_ADAPTER_VERSION,
   CLAUDE_AGENT_SDK_VERSION,
+  ANTIGRAVITY_RUNTIME_VERSION,
   CODEX_ACP_ADAPTER_VERSION,
   getManagedAgentRuntimeManager,
   GROK_ACP_ADAPTER_VERSION,
@@ -132,6 +133,7 @@ export type ResolveBuiltinAuthenticationProcessLaunchInput = ResolveACPSettingIn
 };
 
 export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
+  antigravity: { packageName: 'antigravity', version: ANTIGRAVITY_RUNTIME_VERSION, binName: 'agy' },
   devin: {
     packageName: 'acp-extension-devin',
     version: DEVIN_ACP_ADAPTER_VERSION,
@@ -217,6 +219,49 @@ const registryAgentsById: Record<string, RegistryAcpAgent> = Object.fromEntries(
 );
 // Keep existing providers and stored turns runnable until their owner chooses
 // migration. This compatibility entry is deliberately absent from the catalog.
+registryAgentsById['antigravity-acp'] = {
+  id: 'antigravity-acp',
+  name: 'Antigravity ACP (Legacy)',
+  version: '1.5.0',
+  description: 'Google’s AI coding agent',
+  icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/antigravity-acp.svg',
+  distribution: {
+    binary: {
+      'darwin-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-arm64.zip',
+        cmd: './agy_acp_server.par',
+      },
+      'darwin-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-x86_64.zip',
+        cmd: './agy_acp_server.par',
+      },
+      'linux-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.5.0-linux-x86_64.zip',
+        cmd: './agy_acp_server.par',
+        args: ['--uid='],
+      },
+      'linux-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.5.0-linux-arm64.zip',
+        cmd: './agy_acp_server.par',
+        args: ['--uid='],
+      },
+      'windows-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.5.0-windows-x86_64.zip',
+        cmd: './agy_acp_server.exe',
+      },
+      'windows-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.5.0-windows-arm64.zip',
+        cmd: './agy_acp_server.exe',
+      },
+    },
+  },
+};
 registryAgentsById['pi-acp'] = {
   id: 'pi-acp',
   name: 'Pi ACP (legacy)',
@@ -321,6 +366,9 @@ export function getAcpCapabilitySourceVersion(
       const runtimeOverrideSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(
         input.runtimeOverrides
       );
+      if (input.agentType === 'antigravity') {
+        return `builtin-antigravity:${managedRuntimeVersion ?? ANTIGRAVITY_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
+      }
       if (input.agentType === 'codex') {
         return managedRuntimeVersion
           ? `builtin-codex-acp:${CODEX_ACP_ADAPTER_VERSION}+codex:${managedRuntimeVersion}`
@@ -384,6 +432,7 @@ export function getAcpCapabilitySourceVersion(
  * answering capability refreshes from the managed runtime's cached entry.
  */
 const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
+  antigravity: 'antigravityPath',
   kimi: 'kimiPath',
   grok: 'grokPath',
   devin: 'devinPath',
@@ -707,6 +756,26 @@ async function resolveBuiltinACPProcessLaunch(
   if (!isManagedBuiltinAgentType(input.agentType)) {
     throw new Error(`Unsupported managed builtin ACP type: ${input.agentType}`);
   }
+  if (input.agentType === 'antigravity') {
+    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.antigravityPath);
+    const runtime = overridePath
+      ? { command: overridePath, version: undefined }
+      : await resolveManagedRuntimeForLaunch('antigravity', input);
+    return {
+      command: runtime.command,
+      args: [
+        'acp',
+        '--process-per-session',
+        '--disable-telemetry',
+        ...(input.runtimeOverrides?.antigravitySkipPermissions === true
+          ? ['--dangerously-skip-permissions']
+          : []),
+        ...(input.extraArgs ?? []),
+      ],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
+    };
+  }
   if (input.agentType === 'pi') {
     const extensions = input.runtimeOverrides?.piExtensions ?? [];
     if (extensions.length && !PI_EXTENSIONS_SUPPORTED) {
@@ -795,9 +864,9 @@ export async function resolveBuiltinAuthenticationProcessLaunch(
     throw new Error(`Unsupported builtin authentication type: ${input.agentType}`);
   }
 
-  if (input.agentType === 'devin') {
+  if (input.agentType === 'devin' || input.agentType === 'antigravity') {
     if (input.action === 'status') return null;
-    throw new Error('Devin authentication uses the ACP authentication flow.');
+    throw new Error(`${input.agentType} authentication uses the ACP authentication flow.`);
   }
   if (input.agentType === 'pi') {
     if (input.action === 'status') return null;

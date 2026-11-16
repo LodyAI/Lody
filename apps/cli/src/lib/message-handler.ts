@@ -169,6 +169,8 @@ import {
   type LocalProjectControlRequest,
   type LocalProjectControlResponse,
   E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+  E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+  E2EE_SESSION_FORK_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
   SORBET_PROVIDERS_PROTOCOL_VERSION,
@@ -390,11 +392,6 @@ import {
   applyAcpSessionRunConfig,
   type AcpSessionRunConfig,
 } from '@/session/acp-session-config-applier';
-import {
-  readDiffStatsMetadata,
-  resolveCodeCollabAllChangesDiffStatsPatch,
-  resolveDiffStatsTarget,
-} from '@/session/session-diff-stats-target';
 import type { MachineAccessVerification } from '@/session/session-access-retry';
 import {
   CodeCollabV2Service,
@@ -2049,6 +2046,9 @@ export class MessageHandler {
     expectedMimeType: string;
     encryption?: EncryptedAttachment;
   }): Promise<DownloadedSessionImagePromptBlock> {
+    // Encrypted workspaces never read plaintext relay objects with the account token.
+    if (this.encryptedAttachments && !args.encryption)
+      throw new Error('e2ee_attachment_unavailable');
     return await downloadSessionImageForPrompt({
       ...args,
       serverBaseUrl: this.resolveServerBaseUrl(),
@@ -2364,6 +2364,8 @@ export class MessageHandler {
         return { ok: false, reason: 'error', message: formatErrorMessage(error) };
       }
     }
+    if (this.encryptedAttachments)
+      return { ok: false, reason: 'error', message: 'e2ee_attachment_unavailable' };
     const serverBaseUrl = this.resolveServerBaseUrl();
     const fileUrl = buildSessionFileApiUrl(
       serverBaseUrl,
@@ -3334,13 +3336,9 @@ export class MessageHandler {
           bumpDiffPaths: state.bumpDiffPaths,
         });
         state.signal?.throwIfAborted();
-        if (state.persistAllChangesDiffStats && state.allChangesDiffStats) {
+        if (state.persistAllChangesDiffStats) {
           try {
-            await this.persistCodeCollabAllChangesDiffStats(
-              state.ownerSessionId,
-              state.allChangesDiffStats,
-              state.signal
-            );
+            await workspaceGitService.publishDiffStats(state);
           } catch (error) {
             this.logger.debug(
               `[code-collab-v2] Failed to persist All Changes diffStats ownerSessionId=${
@@ -3420,7 +3418,6 @@ export class MessageHandler {
       logger: this.logger,
       workspaceDocument: this.workspaceDocument,
       workspaceId: this.workspaceId,
-      preferredBaseBranch: this.configuredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
     });
     this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
@@ -3480,8 +3477,6 @@ export class MessageHandler {
         persistCodeCollabTurnDiffs: async (sessionId, turnId, signal) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId, signal),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-        updateSessionDiffStats: async (sessionId, session, options) =>
-          await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
         refreshCodeCollabSharedState: async (sessionId, signal) => {
           await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId, signal });
         },
@@ -4351,7 +4346,11 @@ export class MessageHandler {
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
           ...(this.encryptedAttachments
-            ? { e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION }
+            ? {
+                e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+                e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
+                e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+              }
             : {}),
           ...(this.sorbetCredentials
             ? {
@@ -6803,7 +6802,11 @@ export class MessageHandler {
         protocolCapabilities: {
           ...getHostMachineProtocolCapabilities(),
           ...(this.encryptedAttachments
-            ? { e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION }
+            ? {
+                e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+                e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
+                e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+              }
             : {}),
           ...(this.sorbetCredentials
             ? {
@@ -7458,27 +7461,6 @@ export class MessageHandler {
       return undefined;
     }
     return metaRecord.meta as SessionMeta;
-  }
-
-  private async persistCodeCollabAllChangesDiffStats(
-    ownerSessionId: SessionId,
-    diffStats: NonNullable<SessionMeta['diffStats']>,
-    signal?: AbortSignal
-  ): Promise<void> {
-    const ownerRoomId = getSessionRoomId(ownerSessionId);
-    const metaRecord = await this.workspaceDocument.repo.getDocMeta(ownerRoomId);
-    if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
-      return;
-    }
-    signal?.throwIfAborted();
-    if ((metaRecord.meta as SessionMeta).projectRun) return;
-    const ownerMeta = readDiffStatsMetadata(metaRecord.meta);
-    const target = resolveDiffStatsTarget({ ownerRoomId, ownerMeta });
-    const patch = resolveCodeCollabAllChangesDiffStatsPatch({ target, ownerMeta, diffStats });
-    if (!patch) {
-      return;
-    }
-    await this.workspaceDocument.repo.upsertDocMeta(ownerRoomId, patch);
   }
 
   private canWriteCodeCollabOwnerSession(args: {
@@ -8466,6 +8448,42 @@ export class MessageHandler {
   }
 
   /** Synced ownership/containment is the accepted UI trust boundary, not a registry. */
+  /** Every local project this machine would run a session's work in (encrypted sharing). */
+  async resolveSessionExecutionScope(sessionId: SessionId): Promise<readonly string[]> {
+    return await this.executionService.encryptedSessionExecutionScope(sessionId);
+  }
+
+  /**
+   * Verified encrypted fork. `executionRequesterUserId` is the signer's execution identity
+   * (owner account or `e2ee-member:`); `spec.requestedByUserId` stays the display account.
+   */
+  async handleEncryptedSessionFork(
+    spec: SessionForkSpec,
+    executionRequesterUserId: string
+  ): Promise<LocalMachineRpcResponse> {
+    try {
+      const access = await this.verifySessionMachineAccess(
+        spec.sourceSessionId,
+        executionRequesterUserId
+      );
+      if (access.outcome !== 'allowed')
+        return {
+          ok: true,
+          result: sessionForkFailure(
+            spec,
+            'MACHINE_ACCESS_DENIED',
+            `Fork access verification ${access.outcome}.`
+          ),
+        };
+      return {
+        ok: true,
+        result: await this.sessionForkService.fork({ ...spec, executionRequesterUserId }),
+      };
+    } catch (error) {
+      return { ok: false, error: formatErrorMessage(error) };
+    }
+  }
+
   async resolveSessionHistoryAccessTarget(sessionId: SessionId) {
     await this.resolveSessionHistoryOwnerSessionId(sessionId);
     const entry = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));

@@ -1,6 +1,69 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {contractBridge} from '../src/contract-bridge.mjs';
+import {build} from 'esbuild';
+
+test('historical diff results cross the native bridge without substituting later workspace edits', async () => {
+ const bundle = await build({
+  stdin: {
+   contents: "export {turnDiff, fileDiff} from './files';",
+   resolveDir: new URL('../vendor/cloud-runtime/src/runtime/', import.meta.url).pathname,
+   loader: 'ts',
+  },
+  bundle: true, format: 'cjs', platform: 'browser', write: false,
+  plugins: [{name: 'machine-transport', setup(builder) {
+   builder.onResolve({filter: /^\.\/machine-rpc$/}, () => ({path: 'machine-rpc-fixture', external: true}));
+   builder.onResolve({filter: /^\.\/local-projects$/}, () => ({path: 'unused-project-control', external: true, sideEffects: false}));
+  }}],
+ });
+ const snapshot = text => ({kind: 'text', text: {encoding: 'plain', text, rawBytes: text.length}});
+ let available = false;
+ const module = {exports: {}};
+ new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(() => ({
+  async sealedRpc(workspace, machine, method, owner, params) {
+   assert.equal(workspace, 'workspace');
+   assert.equal(machine, 'machine');
+   assert.equal(owner, 'owner');
+   assert.equal(params.sessionId, 'child');
+   assert.equal(params.path, 'a.ts');
+   if (method === 'code-collab/open-turn-diff') {
+    assert.equal(params.turnId, 'e2');
+    if (!available) return {status: 'unavailable', path: 'a.ts', reason: 'turn_unavailable', message: 'Historical contents are unavailable'};
+    return {status: 'ok', path: 'a.ts', oldSnapshot: snapshot('value = 0\n'), newSnapshot: snapshot('value = 1\n')};
+   }
+   assert.equal(method, 'code-collab/open-current-diff');
+   return {status: 'ok', path: 'a.ts', oldSnapshot: snapshot('value = 0\n'), newSnapshot: snapshot('value = 2\n')};
+  },
+ }), module, module.exports);
+ const files = module.exports;
+ const context = {workspaceId: 'workspace', machineId: 'machine', ownerSessionId: 'owner', getGrant: async () => ({}), signal: new AbortController().signal};
+ const runtime = {async receive(text) {
+  const request = JSON.parse(text);
+  if (request.kind !== 'request') return;
+  try {
+   const payload = request.method === 'turnDiff' ? await files.turnDiff(context, request.payload) : {};
+   globalThis.androidRuntimeMessage({type: 'envelope', envelope: JSON.stringify({...request, kind: 'result', payload})});
+  } catch (error) {
+   globalThis.androidRuntimeMessage({type: 'envelope', envelope: JSON.stringify({...request, kind: 'error', error: {code: error.message}})});
+  }
+ }};
+ const bridge = contractBridge(runtime, () => {});
+ try {
+  await bridge.start('workspace', 'user', true);
+  const args = {sessionId: 'child', entryId: 'e2', path: 'a.ts'};
+  assert.deepEqual(await bridge.turnDiff(args), {
+   status: 'unavailable', base: 'turn', path: 'a.ts', reason: 'turn_unavailable', message: 'Historical contents are unavailable',
+  });
+  available = true;
+  const historical = await bridge.turnDiff(args);
+  assert.equal(historical.base, 'turn');
+  assert.deepEqual(historical.old, {kind: 'text', text: 'value = 0\n'});
+  assert.deepEqual(historical.new, {kind: 'text', text: 'value = 1\n'});
+  const current = await files.fileDiff(context, {sessionId: 'child', path: 'a.ts'});
+  assert.equal(current.base, 'current');
+  assert.deepEqual(current.new, {kind: 'text', text: 'value = 2\n'});
+ } finally {delete globalThis.androidRuntimeMessage;}
+});
 
 test('contract bridge translates requests, events and native grant replies',async()=>{
  const sent=[], events=[];

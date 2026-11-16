@@ -10,6 +10,7 @@ import {
 import type { SessionConfigOption, SessionConfigSelectGroup } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
 import { filterAcpConfigOptions } from '@/agent/acp-config-option-filter';
+import { getAntigravityQuotaCapability } from './antigravity-quota';
 
 export type AcpCapabilitiesResult = {
   modes: Array<{ id: string; name: string; description?: string }>;
@@ -195,7 +196,7 @@ export function readLodyModelReasoningEfforts(
 const usesCodexModelEffortIds = (agent?: { cliType: string; agentType: string }): boolean =>
   agent?.cliType === 'builtin' && agent.agentType === 'codex';
 
-/** Extract capabilities advertised by a real ACP new/load/resume session response. */
+/** Normalize probe and real-session capabilities, including Lody-owned compatibility readers. */
 export function normalizeAcpSessionCapabilities(
   sessionResponse: AcpSessionCapabilitiesResponse,
   lifecycleCapabilities: {
@@ -205,7 +206,7 @@ export function normalizeAcpSessionCapabilities(
     systemPrompt?: boolean;
     rateLimits?: LodyRateLimitsCapability;
     goalActions?: SessionGoalAction[];
-    /** The agent that answered; decides whether legacy `model[effort]` ids apply. */
+    /** The agent that answered; selects provider compatibility and legacy model effort ids. */
     agent?: { cliType: string; agentType: string };
   } = {}
 ): AcpCapabilitiesResult {
@@ -245,7 +246,9 @@ export function normalizeAcpSessionCapabilities(
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
     sessionTitle: lifecycleCapabilities.sessionTitle === true,
     systemPrompt: lifecycleCapabilities.systemPrompt === true,
-    rateLimits: lifecycleCapabilities.rateLimits,
+    rateLimits:
+      lifecycleCapabilities.rateLimits ??
+      getAntigravityQuotaCapability(lifecycleCapabilities.agent),
     ...(lifecycleCapabilities.goalActions?.length
       ? { goalActions: lifecycleCapabilities.goalActions }
       : {}),

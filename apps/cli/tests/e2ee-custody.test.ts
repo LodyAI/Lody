@@ -427,10 +427,62 @@ effectIt.effect(
   }
 );
 
+effectIt.effect('creates and reopens OS custody with one keyring helper process per open', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'machine-keyring-single-'));
+  const table = new FakeProcessTable('linux');
+  const stored = new Map<string, string>();
+  const operations: string[] = [];
+  const nodeProcess = {
+    ...table.api,
+    spawn: (...args: Parameters<typeof table.api.spawn>) => {
+      const child = table.api.spawn(...args);
+      let input = '';
+      child.stdin!.on('data', (bytes) => {
+        input += String(bytes);
+        let request: { account: string; operation: string; value?: string };
+        try {
+          request = JSON.parse(input);
+        } catch {
+          return;
+        }
+        operations.push(request.operation);
+        if (request.operation === 'get-or-create' && !stored.has(request.account))
+          stored.set(request.account, request.value!);
+        queueMicrotask(() => {
+          child.stdout!.write(JSON.stringify(stored.get(request.account) ?? null));
+          table.exitOnItsOwn(child.pid!);
+        });
+      });
+      return child;
+    },
+  };
+  const open = Effect.scoped(
+    Effect.gen(function* () {
+      const custody = yield* makeCliE2eeCustody({ directory, nodeProcess });
+      expect(custody.protection).toBe('os-keystore');
+      return (yield* custody
+        .openDevice(genesis)
+        .pipe(Effect.catch(() => custody.createDevice(genesis)))).publicKey.toBytes();
+    })
+  );
+  return Effect.gen(function* () {
+    const created = yield* open;
+    expect(operations).toEqual(['get-or-create']);
+    expect(readFileSync(join(directory, 'protection'), 'utf8')).toBe('os-keystore');
+    const reopened = yield* open;
+    expect(reopened).toEqual(created);
+    // The wrapped KEK exists, so a reopen only reads and never creates a replacement.
+    expect(operations).toEqual(['get-or-create', 'get']);
+    expect(stored.size).toBe(1);
+  }).pipe(Effect.ensuring(Effect.sync(() => rmSync(directory, { recursive: true, force: true }))));
+});
+
 effectIt.effect(
-  'creates and reopens OS custody with one keyring helper process per open',
+  'a daemon reopening OS custody reuses the KEK it read, yet a missing wrapped KEK still reports lost identity',
   () => {
-    const directory = mkdtempSync(join(tmpdir(), 'machine-keyring-single-'));
+    // One local agent activation opens the same custody several times; each extra
+    // helper process is a cold Node start plus a native keyring call.
+    const directory = mkdtempSync(join(tmpdir(), 'machine-keyring-remembered-'));
     const table = new FakeProcessTable('linux');
     const stored = new Map<string, string>();
     const operations: string[] = [];
@@ -460,22 +512,27 @@ effectIt.effect(
     };
     const open = Effect.scoped(
       Effect.gen(function* () {
-        const custody = yield* makeCliE2eeCustody({ directory, nodeProcess });
-        expect(custody.protection).toBe('os-keystore');
-        return (yield* custody.openDevice(genesis).pipe(
-          Effect.catch(() => custody.createDevice(genesis))
-        )).publicKey.toBytes();
+        const custody = yield* makeCliE2eeCustody({
+          directory,
+          nodeProcess,
+          rememberKeyring: true,
+        });
+        return (yield* custody
+          .openDevice(genesis)
+          .pipe(Effect.catch(() => custody.createDevice(genesis)))).publicKey.toBytes();
       })
     );
     return Effect.gen(function* () {
       const created = yield* open;
+      expect(yield* open).toEqual(created);
+      expect(yield* open).toEqual(created);
       expect(operations).toEqual(['get-or-create']);
-      expect(readFileSync(join(directory, 'protection'), 'utf8')).toBe('os-keystore');
-      const reopened = yield* open;
-      expect(reopened).toEqual(created);
-      // The wrapped KEK exists, so a reopen only reads and never creates a replacement.
-      expect(operations).toEqual(['get-or-create', 'get']);
-      expect(stored.size).toBe(1);
+      // The remembered KEK never stands in for the wrapped KEK on disk.
+      unlinkSync(join(directory, 'kek.safe-storage'));
+      const lost = yield* Effect.exit(open);
+      expect(Exit.isFailure(lost)).toBe(true);
+      expect(JSON.stringify(lost)).toContain('identity-lost');
+      expect(operations).toEqual(['get-or-create']);
     }).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(directory, { recursive: true, force: true })))
     );

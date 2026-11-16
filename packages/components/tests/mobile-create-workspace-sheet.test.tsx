@@ -97,7 +97,7 @@ vi.mock('../src/hooks/useWorkspaceSlugField', async () => {
         canReset: false,
         isChecking: false,
         isAvailable: !taken,
-        error: taken ? 'unavailable' : null,
+        error: taken ? 'unavailable' : slug ? null : 'required',
       };
     },
   };
@@ -146,9 +146,6 @@ vi.mock('@lody/ui/field', () => ({
       <label {...props}>{children}</label>
     ),
   },
-}));
-vi.mock('@lody/ui/switch', () => ({
-  Switch: () => <input type="checkbox" readOnly checked />,
 }));
 vi.mock('@lody/ui/alert', () => ({
   Alert: {
@@ -216,6 +213,27 @@ async function renderWithPending() {
 }
 
 describe('mobile encrypted workspace sheet', () => {
+  it('discloses the encrypted mode costs like desktop and holds "required" until a name is typed', async () => {
+    await renderSheet();
+    const encryptedChoice = container.querySelector<HTMLButtonElement>(
+      '[data-testid="mobile-create-workspace-encrypted"]'
+    )!;
+    expect(container.textContent).toContain('e2ee.create.encryptedPoint3');
+    expect(container.textContent).not.toContain('e2ee.create.lossWarning');
+    expect(container.textContent).not.toContain('organization.workspaceSlugError.required');
+
+    await act(async () => encryptedChoice.click());
+    expect(encryptedChoice.getAttribute('aria-checked')).toBe('true');
+    expect(container.textContent).toContain('e2ee.create.lossWarning');
+
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setValue.call(nameField(), '工作区');
+      nameField().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('organization.workspaceSlugError.required');
+  });
+
   it('unlocks and returns to Create after the server removed the pending request', async () => {
     state.createPrepared.mockImplementation(async () => {
       clearPendingE2eeWorkspace(localStorage, pending);

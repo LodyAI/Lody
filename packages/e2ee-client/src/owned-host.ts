@@ -193,11 +193,13 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         ledger: () => call(raw.ledger()),
         approvalOriginals: () => call(raw.approvalOriginals()),
         refresh: (...args: Parameters<RawSession['refresh']>) => call(raw.refresh(...args)),
-        keyRound: () => call(raw.keyRound()),
+        keyRound: (...args: Parameters<RawSession['keyRound']>) => call(raw.keyRound(...args)),
         setupRecovery: (...args: Parameters<RawSession['setupRecovery']>) =>
           call(raw.setupRecovery(...args)),
         keyDeliveryEvidence: (...args: Parameters<RawSession['keyDeliveryEvidence']>) =>
           call(raw.keyDeliveryEvidence(...args)),
+        keyPending: (...args: Parameters<RawSession['keyPending']>) =>
+          call(raw.keyPending(...args)),
         status: () => call(raw.status()),
         execute: (...args: Parameters<RawSession['execute']>) => call(raw.execute(...args)),
         resume: () => call(raw.resume()),
@@ -206,6 +208,7 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         removeMember: (...args: Parameters<RawSession['removeMember']>) =>
           call(raw.removeMember(...args)),
         rotate: () => call(raw.rotate()),
+        updateKeys: () => call(raw.updateKeys()),
         abandonEpoch: (baseEpoch: number) => call(raw.abandonEpoch(baseEpoch)),
         recoverHistory: () => call(raw.recoverHistory()),
         resumeRotation: () => call(raw.resumeRotation()),
@@ -217,7 +220,15 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         updateMachineSharing: (...args: Parameters<RawSession['updateMachineSharing']>) =>
           call(raw.updateMachineSharing(...args)),
         ledgerState: () => call(raw.ledgerState()),
+        ingest: (page: Parameters<RawSession['ingest']>[0]) => call(raw.ingest(page)),
+        activateAccountPairing: (...args: Parameters<RawSession['activateAccountPairing']>) =>
+          call(raw.activateAccountPairing(...args)),
         accountApproval: Object.freeze({
+          checkpoint: () => call(raw.accountApproval.checkpoint()),
+          ingest: (page: Parameters<RawSession['ingest']>[0]) =>
+            call(raw.accountApproval.ingest(page)),
+          prepareDelivery: (recipient: string) =>
+            call(raw.accountApproval.prepareDelivery(recipient)),
           sign: (...args: Parameters<RawSession['accountApproval']['sign']>) =>
             call(raw.accountApproval.sign(...args)),
           settle: (...args: Parameters<RawSession['accountApproval']['settle']>) =>

@@ -66,6 +66,7 @@ import {
   Copy,
   CornerLeftUp,
   Ellipsis,
+  FileText,
   Folder,
   GitBranch,
   GitBranchPlus,
@@ -73,6 +74,7 @@ import {
   Github,
   History,
   Image,
+  Link,
   LockKeyhole,
   MessageCircle,
   Monitor,
@@ -82,6 +84,7 @@ import {
   Plus,
   Search,
   Share2,
+  SquareArrowOutUpRight,
   Trash2,
   UserRoundCog,
   Users,
@@ -115,6 +118,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import type {
   LocalProjectId,
+  LineChange,
   MessageContent,
   MessageQueueItemInput,
   MessageQueueItem,
@@ -171,6 +175,7 @@ import {
   type ScheduleDocument,
   type SessionPullRequestView,
 } from '@lody/shared';
+import { encryptedRemoteEditAndResendAvailable } from '../../lib/encrypted-machine-controls';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useAppCapability } from '@/lib/app-platform';
@@ -1970,7 +1975,7 @@ export function SessionHeaderMenu({
                   trimmedWorkspacePath ||
                   t('sessions.copyPathUnavailable', 'Workspace path unavailable')
                 }
-                icon={Copy}
+                icon={Folder}
               >
                 {t('sessions.copyPath', 'Copy path')}
               </Menu.Item>
@@ -1988,7 +1993,7 @@ export function SessionHeaderMenu({
                         'Conversation history is unavailable for this tab'
                       ))
                 }
-                icon={Copy}
+                icon={FileText}
               >
                 {t('sessions.copyAsMarkdown', 'Copy as Markdown')}
               </Menu.Item>
@@ -1996,12 +2001,12 @@ export function SessionHeaderMenu({
                 onClick={() => {
                   void onCopyUrl();
                 }}
-                icon={Copy}
+                icon={Link}
               >
                 {t('sessions.copyUrl', 'Copy URL')}
               </Menu.Item>
               {onCopyDeepLink ? (
-                <Menu.Item onClick={() => void onCopyDeepLink()} icon={Copy}>
+                <Menu.Item onClick={() => void onCopyDeepLink()} icon={SquareArrowOutUpRight}>
                   {t('sessions.copyDeepLink', 'Copy deeplink')}
                 </Menu.Item>
               ) : null}
@@ -2343,7 +2348,7 @@ export interface SessionChatInterfaceProps {
    */
   paintSessionMentionOverlay?: boolean;
   /** All-Changes totals for the context strip; null/undefined hides the diffstat. */
-  changesDiffStat?: { add: number; del: number } | null;
+  changesDiffStat?: LineChange | null;
   /** Called when the context strip's diffstat is clicked. */
   onOpenAllChanges?: () => void;
   /** Native ACP fork action for the latest completed assistant turn. */
@@ -3263,7 +3268,7 @@ export const SessionChatInterface = memo(
     );
 
     // How current the shown conversation is: a skeleton while nothing is cached,
-    // "Updating" in the info bar while a cached copy catches up. "Caught up"
+    // "Syncing" in the info bar while a cached copy catches up. "Caught up"
     // is sticky per open, so later sync blips (live output) stay quiet.
     const contentCaughtUpRef = useRef({ sessionId: session.id, caughtUp: false });
     if (contentCaughtUpRef.current.sessionId !== session.id) {
@@ -3742,9 +3747,17 @@ export const SessionChatInterface = memo(
       t,
       workspaceId,
     ]);
+    // Encrypted remote machines cannot take ordinary RPC, but their owner reaches edit and
+    // resend through the signed feature channel once the machine supports it.
+    const encryptedRemoteEditAvailable = encryptedRemoteEditAndResendAvailable({
+      contentMode: runtime?.contentMode,
+      accountId: runtime?.accountId,
+      machine: sessionMachine,
+    });
+    const editRpcReason = encryptedRemoteEditAvailable ? undefined : rpcReason;
     const editableLastUserMessageId = useMemo(() => {
       if (
-        rpcReason ||
+        editRpcReason ||
         session.isArchived ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
@@ -3787,7 +3800,7 @@ export const SessionChatInterface = memo(
       return userMessage.id;
     }, [
       capabilityAuthority,
-      rpcReason,
+      editRpcReason,
       isGoalActive,
       session.agentConfigId,
       session.agentType,

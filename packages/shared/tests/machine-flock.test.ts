@@ -31,6 +31,8 @@ import {
   type SessionLegacyMetaFields,
   type SessionMeta,
 } from '../src';
+import { normalizePersistedRateLimit } from '../src/acp/lody-rate-limit-migration';
+import { isLegacyPiProvider, migratePiProvider } from '../src/pi-provider-migration';
 
 class FakeMachineFlock implements MachineFlockWritableFlock {
   readonly rows = new Map<string, { key: MachineFlockKey; value: unknown }>();
@@ -304,6 +306,31 @@ describe('machine Flock helpers', () => {
     expect(readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })).toEqual({});
   });
 
+  it('keeps the Antigravity skip-permissions launch choice only on Antigravity providers', () => {
+    const flock = new FakeMachineFlock();
+    const row = (id: string, agentType: string) => ({
+      id,
+      machineId: 'machine-1',
+      name: id,
+      cliType: 'builtin',
+      agentType,
+      env: {},
+      runtimeOverrides: { antigravitySkipPermissions: true },
+    });
+    flock.set(machineFlockKeys.agentConfig('agy' as AgentConfigId), row('agy', 'antigravity'));
+    flock.set(machineFlockKeys.agentConfig('kimi' as AgentConfigId), row('kimi', 'kimi'));
+
+    const configs = getMachineFlockAgentConfigs(
+      readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })
+    );
+    expect(configs['agy' as AgentConfigId]?.runtimeOverrides).toEqual({
+      antigravitySkipPermissions: true,
+    });
+    expect(
+      configs['kimi' as AgentConfigId]?.runtimeOverrides?.antigravitySkipPermissions
+    ).toBeUndefined();
+  });
+
   it('round-trips arbitrary ACP provider names through scoped quota rows', () => {
     const flock = new FakeMachineFlock();
     const configId = 'example-provider' as AgentConfigId;
@@ -470,4 +497,99 @@ it('reads, updates and deletes validated memory association rows without mixing 
   expect(
     getMachineFlockMemories(applyMachineFlockRowEvents(updated, [{ key }]), 'a' as MachineId)
   ).toEqual([]);
+});
+
+describe('rate limit entry keys and legacy persistence migrations', () => {
+  it('parses legacy rate limit keys and round-trips provider-scoped keys', () => {
+    expect(parseRateLimitEntryKey('codex')).toEqual({
+      agentConfigId: null,
+      cliType: 'codex',
+      limitId: null,
+    });
+    const agentConfigId = 'work::codex' as AgentConfigId;
+    const key = getRateLimitEntryKey('codex', 'codex::weekly', agentConfigId);
+    expect(parseRateLimitEntryKey(key)).toEqual({
+      agentConfigId,
+      cliType: 'codex',
+      limitId: 'codex::weekly',
+    });
+  });
+
+  it('normalizes legacy provider rate limit scales, durations, timestamps, and single-window Codex', () => {
+    const normalized = normalizePersistedRateLimit('claude', 'claude', {
+      planName: 'Claude Max',
+      fiveHour: 0.55,
+      sevenDay: 0.8,
+      fiveHourResetAt: 1_784_505_071_000,
+      sevenDayResetAt: 1_784_505_071,
+    });
+    expect(normalized).toMatchObject({
+      limitId: 'claude',
+      scope: { providerId: 'claude' },
+      planName: 'Claude Max',
+      windows: [
+        { windowDurationSeconds: 18_000, resetsAtEpochSeconds: 1_784_505_071 },
+        { windowDurationSeconds: 604_800, resetsAtEpochSeconds: 1_784_505_071 },
+      ],
+    });
+    expect(normalized?.windows[0]?.usedPercent).toBeCloseTo(55);
+    expect(normalized?.windows[1]?.usedPercent).toBeCloseTo(80);
+
+    expect(
+      normalizePersistedRateLimit('grok', 'grok', {
+        sevenDay: 0.5,
+        sevenDayResetAt: 1_784_505_071,
+      })?.windows
+    ).toEqual([
+      {
+        usedPercent: 0.5,
+        windowDurationSeconds: 604_800,
+        resetsAtEpochSeconds: 1_784_505_071,
+      },
+    ]);
+
+    expect(
+      normalizePersistedRateLimit('codex', 'codex', {
+        fiveHour: 29,
+        sevenDay: null,
+        fiveHourResetAt: 1_784_505_071,
+      })?.windows
+    ).toEqual([
+      {
+        usedPercent: 29,
+        windowDurationSeconds: 604_800,
+        resetsAtEpochSeconds: 1_784_505_071,
+      },
+    ]);
+  });
+
+  it('migrates legacy Pi providers while preserving unknown fields and skipping changed rows', () => {
+    const legacy = {
+      id: 'provider',
+      machineId: 'machine',
+      cliType: 'registry',
+      agentType: 'pi-acp',
+      name: 'My Pi',
+      env: { API_KEY: 'synthetic-secret' },
+      prompt: 'Instructions',
+      titleGeneration: { enabled: false },
+      futureField: 'preserved',
+    };
+
+    const upgraded = migratePiProvider(legacy);
+    expect(upgraded).toEqual({ ...legacy, cliType: 'builtin', agentType: 'pi' });
+    expect(legacy.cliType).toBe('registry');
+    expect(migratePiProvider(upgraded)).toBeUndefined();
+
+    for (const value of [
+      undefined,
+      null,
+      { ...legacy, agentType: 'codex-acp' },
+      { ...legacy, cliType: 'custom' },
+      { ...legacy, agentType: 'pi' },
+    ]) {
+      expect(isLegacyPiProvider(value)).toBe(false);
+      expect(migratePiProvider(value)).toBeUndefined();
+    }
+  });
 });

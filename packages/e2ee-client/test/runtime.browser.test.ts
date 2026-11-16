@@ -19,6 +19,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { KEY_DELIVERY_RETRY_DELAYS } from '../src/account-requester';
 
 type Fixture = typeof import('./browser/host-fixture');
 type Surface = typeof globalThis & { HostFixture: Fixture };
@@ -159,6 +160,14 @@ function bundleControlRoute() {
             builder.onResolve(
               { filter: /^react(?:-dom)?(?:\/.*)?$|^effect$|^@lody\/e2ee-core\/protocol$/ },
               ({ path }) => ({ path: testRequire.resolve(path) })
+            );
+            // Relatively imported lost-access display page and hosted workspace removal.
+            builder.onResolve(
+              {
+                filter:
+                  /^(?:\.\/|(?:\.\.\/)+components\/pages\/)e2ee-(?:lost-access|workspace-removal)$/,
+              },
+              () => ({ path: ports })
             );
             builder.onResolve(
               {
@@ -352,18 +361,30 @@ it.each(['chromium', 'webkit'] as const)(
       expect(iroh.targets).toEqual([iroh.machine]);
       await savesSignedSchedule(page);
       expect((await raw(page, 'rotateRemote')).ok).toBe(true);
+      // Another device's frame at an epoch this device's verified ledger does not hold
+      // yet (Streams ahead of the ledger feed) is retryable lag within the bounded
+      // lookahead; a forged far-future epoch keeps its original failure. Once the
+      // ledger holds the epoch, the read stays retryable until the key arrives.
+      expect(await good(page, 'sealRemoteRotated')).toEqual({ epoch: 1 });
+      expect((await call(page, 'openRemote')).reason).toBe('key-pending');
+      const farFuture = await call(page, 'openRemoteFarFuture');
+      expect(farFuture.ok).toBe(false);
+      expect(farFuture.reason).not.toBe('key-pending');
       expect(await good(page, 'refresh')).toMatchObject({
         epoch: 1,
         hasCurrentKey: false,
         writeEpoch: 0,
       });
+      expect((await call(page, 'openRemote')).reason).toBe('key-pending');
       expect((await raw(page, 'graceLastMillisecond')).ok).toBe(true);
       expect(await good(page, 'sealOldHint')).toEqual({ epoch: 0 });
       expect((await raw(page, 'graceExpired')).ok).toBe(true);
       expect((await call(page, 'seal')).reason).toBe('key-update-required');
       expect(await good(page, 'openBody')).toEqual([72, 105]);
       expect((await raw(page, 'stageCurrent')).ok).toBe(true);
-      expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
+      // The shared reader's reception round installs the key; the pending read succeeds.
+      expect(await good(page, 'receiveOnly')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
+      expect(await good(page, 'openRemote')).toEqual([72, 105]);
       expect(await good(page, 'sealOldHint')).toEqual({ epoch: 1 });
       expect(await good(page, 'openBody')).toEqual([72, 105]);
       // Team management on the portable runtime: invite, list, admit exactly the shown
@@ -598,6 +619,100 @@ it('an owner removes with the key update and an administrator removes plainly, t
 // The approval's first key round ends with the applicant's slot still NeedsEnvelope. The
 // runtime retries on its own after the injected backoff, without the approver pressing
 // retry, and the applicant's envelope is stored.
+// Another device's rotation wins this device's key-update CAS: acknowledging the lost
+// candidate first deletes its staged envelope group, now proven obsolete.
+it('a key update that loses its epoch to another rotation deletes its staged envelope group', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-rotation-conflict-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await openedOwnerRuntime(directory);
+    context = opened.context;
+    const page = opened.page;
+    expect((await raw(page, 'addMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 0, rotationRequired: true });
+    expect((await raw(page, 'raceNextRotation')).ok).toBe(true);
+    // The candidate settles as Conflict; its group goes before the acknowledgement.
+    expect((await call(page, 'updateKeys')).reason).toBe('conflict');
+    const { staged, deleted } = (await raw(page, 'stagingDeletes')).value as {
+      staged: string[];
+      deleted: { recordHash: string; occupiedEpoch: number }[];
+    };
+    expect(staged).toHaveLength(1);
+    expect(deleted).toEqual([{ recordHash: staged[0], occupiedEpoch: 1 }]);
+    // The acknowledged conflict no longer blocks key updates at the winning epoch.
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 1, rotationRequired: false });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('multi-epoch updateKeys skips historical key unwraps and redundant feed/log round-trips while keeping historical decrypts usable', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-update-keys-perf-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await openedOwnerRuntime(directory);
+    context = opened.context;
+    const page = opened.page;
+    expect(await good(page, 'seal')).toEqual({ epoch: 0 });
+    expect(await good(page, 'openBody')).toEqual([72, 105]);
+
+    // Advance from epoch 0 to epoch 2 so historical epochs 0 and 1 exist.
+    for (const expectedEpoch of [1, 2]) {
+      expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+      await good(page, 'refresh');
+      await good(page, 'revokeMachine');
+      await good(page, 'updateKeys');
+      expect(await good(page, 'refresh')).toMatchObject({
+        epoch: expectedEpoch,
+        rotationRequired: false,
+        hasCurrentKey: true,
+      });
+    }
+
+    // Prepare epoch 2 -> 3 rotation with current key already installed, then measure updateKeys.
+    expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    await good(page, 'resetTelemetry');
+    await good(page, 'updateKeys');
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: 3,
+      rotationRequired: false,
+      hasCurrentKey: true,
+    });
+    const metrics = (await good(page, 'telemetry')) as {
+      feedReadAfterCalls: number;
+      logReadFromCalls: number;
+      logReadCalls: number;
+      installedLoadEpochs: number[];
+    };
+    expect(metrics.logReadCalls).toBe(0);
+    expect(metrics.logReadFromCalls).toBeLessThanOrEqual(1);
+    expect(metrics.feedReadAfterCalls).toBeLessThanOrEqual(3);
+    expect(metrics.installedLoadEpochs.every((epoch) => epoch >= 2)).toBe(true);
+
+    // Historical decryption at epoch 0 still works on demand after skipping history during updateKeys.
+    expect(await good(page, 'openBody')).toEqual([72, 105]);
+
+    // Concurrent updateKeys + refresh serialize cleanly under the single session permit.
+    expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    await good(page, 'concurrentUpdateAndRefresh');
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: 4,
+      rotationRequired: false,
+      hasCurrentKey: true,
+    });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 it('a member key delivery that fails its first round is retried and delivered without user action', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-retry-'));
   let context: BrowserContext | undefined;
@@ -610,8 +725,8 @@ it('a member key delivery that fails its first round is retried and delivered wi
       })
       .toEqual([{ requestId: opened.requestId, state: 'delivered' }]);
     const settled = (await good(opened.page, 'memberDeliveries')) as Deliveries;
-    // One bounded backoff, the first step of the desktop schedule, then the stored envelope.
-    expect(settled.sleeps).toEqual([10_000]);
+    // One bounded backoff, the schedule's short first step, then the stored envelope.
+    expect(settled.sleeps).toEqual([KEY_DELIVERY_RETRY_DELAYS[0]]);
     expect(settled.envelopes[0]).toBe(false);
     expect(settled.envelopes.at(-1)).toBe(true);
   } finally {
@@ -1325,6 +1440,7 @@ it.each(['chromium', 'webkit'] as const)(
         format: 'iife',
         globalName: 'CustodyCacheFixture',
         target: 'safari16.4',
+        external: ['node:fs/promises'],
         write: false,
         logLevel: 'silent',
         alias: { '@': fileURLToPath(new URL('../../components/src', import.meta.url)) },
@@ -1725,7 +1841,7 @@ it('one key round sends every envelope waiting at the current epoch', async () =
       .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).sleeps, {
         timeout: 30_000,
       })
-      .toEqual([10_000, 10_000]);
+      .toEqual([KEY_DELIVERY_RETRY_DELAYS[0], KEY_DELIVERY_RETRY_DELAYS[0]]);
     await good(page, 'memberAcceptKeys');
     await good(page, 'receive');
     expect(((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept).toBe(2);

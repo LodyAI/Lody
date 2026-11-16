@@ -106,6 +106,7 @@ struct SessionInfoBar: Equatable {
   var pullRequest: SessionPullRequest?
   var added = 0
   var removed = 0
+  var files: Int?
   /// Priority order: the first is the bar's one text button, the rest hang off its menu.
   var actions: [Action] = []
 
@@ -116,6 +117,7 @@ struct SessionInfoBar: Equatable {
   init(session: SessionItem, repository: String, busy: Bool) {
     added = session.diff["add"] ?? 0
     removed = session.diff["del"] ?? 0
+    files = session.diff["files"]
     if let run = session.projectRun, !run.members.isEmpty {
       group = run
       actions = busy ? [] : Self.groupActions(session: session, run: run)
@@ -130,7 +132,14 @@ struct SessionInfoBar: Equatable {
     actions = Self.actions(session: session, pullRequest: pullRequest, repository: repository, busy: busy)
   }
 
-  var hasContext: Bool { group != nil || !repository.isEmpty || !branch.isEmpty || added + removed > 0 || pullRequest != nil }
+  var hasDiff: Bool { files.map { $0 > 0 } ?? (added + removed > 0) }
+
+  var hasContext: Bool { group != nil || !repository.isEmpty || !branch.isEmpty || hasDiff || pullRequest != nil }
+
+  static func hasChanges(_ diff: [String: Int]) -> Bool {
+    if let files = diff["files"] { return files > 0 }
+    return (diff["add"] ?? 0) + (diff["del"] ?? 0) > 0
+  }
 
   /// Web keeps Create PR and Commit & Push conversation-wide for a group (scoped by
   /// `withProjectGroupPrScope`); PR-bound actions (merge, ready, CI, conflicts) belong to one
@@ -144,10 +153,10 @@ struct SessionInfoBar: Equatable {
       ? run.members.contains { member in
         guard !member.inPlace, member.repoFullName != nil else { return false }
         let open = member.pullRequest.map { ["open", "draft"].contains($0.status) } ?? false
-        let changed = (member.diff.map { $0.add + $0.del } ?? 0) > 0 || member.dirty == true || member.unpushed == true
+        let changed = (member.diff.map { $0.files.map { $0 > 0 } ?? ($0.add + $0.del > 0) } ?? false) || member.dirty == true || member.unpushed == true
         return changed && !open
       }
-      : run.pullRequests.isEmpty && (unpublished || (session.diff["add"] ?? 0) + (session.diff["del"] ?? 0) > 0)
+      : run.pullRequests.isEmpty && (unpublished || hasChanges(session.diff))
     let create: [Action] = needsPullRequest ? [.createPr, .createDraftPr] : []
     let commit: [Action] = unpublished ? [.commitAndPush] : []
     // Without any PR, creating one leads as for a single repository; once PRs exist,
@@ -160,7 +169,7 @@ struct SessionInfoBar: Equatable {
     let dirty = session.workspaceDirty
     guard let pullRequest else {
       // Create PR needs anything to base a PR on, committed or not; Commit & Push needs uncommitted work.
-      let changed = dirty || (session.diff["add"] ?? 0) + (session.diff["del"] ?? 0) > 0
+      let changed = dirty || hasChanges(session.diff)
       return (changed ? [.createPr, .createDraftPr] : []) + (dirty ? [.commitAndPush] : [])
     }
     if ["merged", "closed"].contains(pullRequest.status) { return [] }

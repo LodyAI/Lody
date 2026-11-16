@@ -1,3 +1,4 @@
+import { getContextWindowUsageData } from '../../../packages/components/src/lib/session-usage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
 import { RequestError } from '@agentclientprotocol/sdk';
@@ -263,7 +264,6 @@ const createRecoveryHarness = async (
     },
     flushSessionUsage: async () => {},
     persistCodeCollabTurnDiffs: async () => false,
-    updateSessionDiffStats: async () => [],
     detectAndAssociatePR: async () => null,
     syncWorkspaceGitState: async () => {},
     notifySessionCompleted: async () => {},
@@ -1575,6 +1575,132 @@ describe('MessageHandler ACP batching', () => {
       }
     }
   );
+
+  it('persists native Antigravity tool identity through start, completion and reopen', async () => {
+    vi.useRealTimers();
+    const sessionId = 'agy-tools' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing tool doc');
+    const host = handler as unknown as {
+      beginConversationTurn(id: SessionId): string;
+      enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+    };
+    const client = new AgentClient({
+      sessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
+      onUpdateMessage: (update) => host.enqueueACPUpdate(sessionId, update),
+    });
+    (client as unknown as { acpSessionId: ACPSessionId }).acpSessionId = 'native' as ACPSessionId;
+    try {
+      const turnId = host.beginConversationTurn(sessionId);
+      for (const [name, kind, title] of [
+        ['search_web', 'search', 'Search public documentation'],
+        ['invoke_subagent', 'other', 'Run invoke_subagent'],
+      ] as const) {
+        const update = {
+          toolCallId: name,
+          name,
+          args: { query: 'synthetic example' },
+          rawInput: { query: 'synthetic example' },
+          kind,
+          title,
+        };
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { ...update, sessionUpdate: 'tool_call', status: 'in_progress' },
+        });
+        await host.flushACPUpdatesNow(sessionId);
+        expect(
+          readItems((await doc.sessionData.history.readAll()).find((t) => t.id === turnId))
+        ).toContainEqual(
+          expect.objectContaining({ toolCallId: name, toolName: name, status: 'in_progress' })
+        );
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { ...update, sessionUpdate: 'tool_call_update', status: 'completed' },
+        });
+      }
+      await host.flushACPUpdatesNow(sessionId);
+      const reopened = new SessionDocument(repo, sessionId, async () => {});
+      await reopened.initOffline({ history: [] });
+      const items = readItems(
+        (await reopened.sessionData.history.readAll()).find((t) => t.id === turnId)
+      );
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'tool_call',
+          toolName: 'search_web',
+          kind: 'search',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          type: 'tool_call',
+          toolName: 'invoke_subagent',
+          status: 'completed',
+        }),
+      ]);
+      expect(items.some((item) => item.type === 'subagent_task')).toBe(false);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('persists Antigravity context occupancy and capacity for the composer, including zero and compaction', async () => {
+    vi.useRealTimers();
+    const sessionId = 'agy-context' as SessionId;
+    const { repo, docs, handler, sessionManager } = await createHandlerHarness(
+      [sessionId],
+      (logger, document) =>
+        new SessionManager(logger, 't', 'm-1' as MachineId, 'ws-1' as WorkspaceId, document, {
+          cloudPort: createTestCloudPort(),
+        })
+    );
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing context doc');
+    const host = handler as unknown as {
+      setupSessionEventHandlers(): void;
+      flushSessionContextWindowUsage(id: SessionId): Promise<void>;
+    };
+    host.setupSessionEventHandlers();
+    const client = new AgentClient({
+      sessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
+      onUpdateMessage: () => {},
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      onContextWindowUsageUpdate: (usage) =>
+        sessionManager.emit('onContextWindowUsageUpdate', sessionId, usage),
+    });
+    try {
+      for (const context of [
+        { size: 1048576, used: 0 },
+        { size: 1048576, used: 12000 },
+        { size: 524288, used: 4000 },
+      ]) {
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { sessionUpdate: 'usage_update', ...context },
+        } as never);
+        await host.flushSessionContextWindowUsage(sessionId);
+        const meta = await doc.getMetaState();
+        expect(meta?.contextWindowUsage).toEqual(context);
+        const stored = await repo.getDocMeta(getSessionRoomId(sessionId));
+        expect(stored?.meta?.contextWindowUsage).toEqual(context);
+        expect(getContextWindowUsageData(meta?.contextWindowUsage)).toMatchObject({
+          usedTokens: context.used,
+          contextWindow: context.size,
+          remainingTokens: context.size - context.used,
+        });
+      }
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
 
   it('routes custom ACP usage with its accounting identity and user attribution', async () => {
     vi.useRealTimers();

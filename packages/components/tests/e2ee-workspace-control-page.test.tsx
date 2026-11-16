@@ -1,9 +1,8 @@
+// @vitest-environment jsdom
 import { ClientCustodyError } from '@lody/e2ee-core/services';
 import { classifyE2eeControlFailure } from '../src/lib/e2ee-control-failure';
 import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
-// @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -26,13 +25,9 @@ import {
 } from '../src/lib/e2ee-ledger-history';
 import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
 import { ledgerVerificationCode } from '../src/lib/e2ee-ledger-verification';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      options ? `${key} ${JSON.stringify(options)}` : key,
-  }),
-}));
+const testI18n = createTestI18n({ keyLabels: true, exposeValues: true });
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -59,7 +54,7 @@ function render(overrides: Partial<ComponentProps<typeof E2eeWorkspaceControlPag
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  act(() => root!.render(<E2eeWorkspaceControlPage {...props} />));
+  act(() => root!.render(withTestI18n(<E2eeWorkspaceControlPage {...props} />, testI18n)));
   return props;
 }
 
@@ -382,7 +377,7 @@ describe('encrypted workspace control page reading', () => {
       container = document.createElement('div');
       document.body.append(container);
       root = createRoot(container);
-      act(() => root!.render(<Console />));
+      act(() => root!.render(withTestI18n(<Console />, testI18n)));
       await act(async () =>
         (
           document.querySelector(
@@ -451,12 +446,15 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
   const show = (actorRole: 'owner' | 'admin', role: 'owner' | 'admin' | 'member') =>
     act(() =>
       root!.render(
-        <E2eeMemberActions
-          member={{ ...member, role }}
-          name="Jordan"
-          management={{ actorRole, remove, setRole }}
-          onRotationSettled={() => {}}
-        />
+        withTestI18n(
+          <E2eeMemberActions
+            member={{ ...member, role }}
+            name="Jordan"
+            management={{ actorRole, remove, setRole }}
+            onRotationSettled={() => {}}
+          />,
+          testI18n
+        )
       )
     );
   show('admin', 'admin');
@@ -515,12 +513,15 @@ it('lets only the owner transfer ownership, after a confirmation that states the
   const openMenu = async (actorRole: 'owner' | 'admin') => {
     act(() =>
       root!.render(
-        <E2eeMemberActions
-          member={member}
-          name="Jordan"
-          management={management(actorRole)}
-          onRotationSettled={() => {}}
-        />
+        withTestI18n(
+          <E2eeMemberActions
+            member={member}
+            name="Jordan"
+            management={management(actorRole)}
+            onRotationSettled={() => {}}
+          />,
+          testI18n
+        )
       )
     );
     const trigger = container!.querySelector('button');
@@ -572,7 +573,7 @@ describe('QR camera', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const probeRoot = createRoot(host);
-    await act(async () => probeRoot.render(<Probe />));
+    await act(async () => probeRoot.render(withTestI18n(<Probe />, testI18n)));
     for (let turn = 0; turn < 5; turn++) await act(async () => {});
     return {
       states,

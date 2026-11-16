@@ -3,7 +3,13 @@ import * as path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
-import type { MessageContent } from '../src/ai';
+import type { MessageContent, SubagentTaskPayload } from '../src/ai';
+import { mergeSubagentTaskPayload } from '../src/acp/claude-subagent-task';
+import { parseCodexCollabAgentTasks } from '../src/acp/codex-collab-agent-task';
+import {
+  getDevinSubagentContextId,
+  parseDevinSubagentTaskMeta,
+} from '../src/acp/devin-subagent-task';
 
 import {
   MAX_STORED_TERMINAL_COMMAND_BYTES,
@@ -932,6 +938,135 @@ describe('acp history apply', () => {
           taskId: 'agent-1',
           status: 'completed',
           summary: 'done',
+        }),
+      ]);
+    });
+  });
+
+  describe('subagent task payload helpers', () => {
+    it('mergeSubagentTaskPayload preserves earlier-event fields while later events win', () => {
+      const started: SubagentTaskPayload = {
+        taskId: 'task-1',
+        status: 'in_progress',
+        event: 'task_started',
+        subagentType: 'Explore',
+        description: 'Find codex refresh logic',
+      };
+      const notification: SubagentTaskPayload = {
+        taskId: 'task-1',
+        status: 'completed',
+        event: 'task_notification',
+        summary: 'All done',
+      };
+
+      expect(mergeSubagentTaskPayload(started, notification)).toEqual({
+        taskId: 'task-1',
+        status: 'completed',
+        event: 'task_notification',
+        summary: 'All done',
+        subagentType: 'Explore',
+        description: 'Find codex refresh logic',
+      });
+    });
+
+    it('parses Devin subagent failure metadata and subagent context scope', () => {
+      expect(
+        parseDevinSubagentTaskMeta({
+          'cognition.ai/subagent_completed': {
+            agentId: '1514ced7',
+            success: false,
+            summary: 'Exploration aborted',
+          },
+        })
+      ).toMatchObject({
+        status: 'failed',
+        summary: 'Exploration aborted',
+        error: 'Exploration aborted',
+      });
+
+      expect(
+        getDevinSubagentContextId({
+          'cognition.ai/subagent_context': { parentAgentId: '1514ced7' },
+        })
+      ).toBe('1514ced7');
+      expect(
+        getDevinSubagentContextId({
+          'cognition.ai/subagent_context': { parentAgentId: 'root' },
+        })
+      ).toBeNull();
+      expect(getDevinSubagentContextId({})).toBeNull();
+      expect(getDevinSubagentContextId(undefined)).toBeNull();
+      expect(getDevinSubagentContextId({ 'cognition.ai/subagent_context': 'nope' })).toBeNull();
+    });
+
+    it('maps Codex collab-agent tasks and merges start/completion by receiver thread id', () => {
+      const collabInput = (overrides: Record<string, unknown> = {}) => ({
+        prompt: 'Inspect the goal implementation.',
+        senderThreadId: 'thread-main',
+        receiverThreadIds: ['thread-worker'],
+        agentsStates: {
+          'thread-worker': { status: 'running', message: 'Reading files' },
+        },
+        status: 'inProgress',
+        ...overrides,
+      });
+
+      const tasks = parseCodexCollabAgentTasks(
+        'wait',
+        collabInput({
+          receiverThreadIds: ['thread-a'],
+          agentsStates: {
+            'thread-a': { status: 'completed', message: 'Done' },
+            'thread-b': { status: 'errored', message: 'Tests failed' },
+          },
+          status: 'completed',
+        })
+      );
+      expect(tasks).toHaveLength(2);
+      expect(tasks[0]).toMatchObject({ taskId: 'thread-a', status: 'completed' });
+      expect(tasks[1]).toMatchObject({
+        taskId: 'thread-b',
+        status: 'failed',
+        error: 'Tests failed',
+      });
+
+      const started = parseSessionNotification({
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'call-1',
+          kind: 'other',
+          title: 'spawnAgent',
+          status: 'in_progress',
+          rawInput: collabInput(),
+        },
+      });
+      const completed = parseSessionNotification({
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-1',
+          title: 'spawnAgent',
+          status: 'completed',
+          rawInput: collabInput({
+            agentsStates: {
+              'thread-worker': { status: 'completed', message: 'Goal code located' },
+            },
+            status: 'completed',
+          }),
+        },
+      });
+
+      const history = applyNotificationOnHistory([], [started, completed]);
+      const items = history.flatMap((entry) => entry.items ?? []);
+      expect(items.filter((item) => item.type === 'tool_call')).toHaveLength(0);
+      expect(items.filter((item) => item.type === 'subagent_task')).toEqual([
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'thread-worker',
+          status: 'completed',
+          description: 'Inspect the goal implementation.',
+          summary: 'Goal code located',
         }),
       ]);
     });

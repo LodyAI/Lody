@@ -65,6 +65,9 @@ export function makeE2eeFeatureRpcClient(options: {
   originals: E2eeRpcStore['Service'];
   authorizeRequest: (input: E2eeFeatureInput) => Effect.Effect<void, unknown>;
   targetSigner: (machineId: string, sharedTarget: boolean) => Effect.Effect<string, unknown>;
+  /** Shared execution preflight (`session/fork`): `false` only for a verified withdrawal
+   * on another member's machine. The receiving machine still decides. */
+  authorizeSharedExecution?: (machineId: string) => Effect.Effect<boolean, unknown>;
   binding: (resource: string) => Effect.Effect<Binding, unknown, Scope.Scope>;
 }) {
   options = Object.freeze({
@@ -270,8 +273,18 @@ export function makeE2eeFeatureRpcClient(options: {
     if (args.request.workspaceId !== options.workspaceId)
       return yield* Effect.fail(new Error('e2ee_feature_scope'));
     const machineId = args.request.machineId;
-    const sharedTarget = args.request.method === 'session/history-read';
+    // History reads and forks may target another member's machine; the receiver applies
+    // that machine's sharing policy. Every other feature stays same-member.
+    const sharedExecution = args.request.method === 'session/fork';
+    const sharedTarget = args.request.method === 'session/history-read' || sharedExecution;
     const signer = yield* options.targetSigner(machineId, sharedTarget);
+    if (
+      sharedExecution &&
+      !(yield* (options.authorizeSharedExecution?.(machineId) ?? Effect.succeed(true)).pipe(
+        Effect.catch(() => Effect.succeed(true))
+      ))
+    )
+      return yield* Effect.fail(new Error('e2ee_machine_not_shared'));
     let saved = yield* options.originals.read('sent', key(args));
     if (!saved) {
       yield* Effect.uninterruptible(

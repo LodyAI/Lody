@@ -437,11 +437,13 @@ export function labelForAgent(cliType: AgentConfigCliType, agentType: string): s
   if (cliType === 'builtin') {
     if (agentType === 'claude') return 'Claude';
     if (agentType === 'codex') return 'Codex';
+    if (agentType === 'antigravity') return 'Antigravity';
     return agentType;
   }
   if (cliType === 'custom') {
     return 'Custom';
   }
+  if (agentType === 'antigravity-acp') return 'Antigravity ACP (Legacy)';
   const registry = REGISTRY_ACP_AGENTS.find((a) => a.id === agentType);
   return registry?.name ?? agentType;
 }

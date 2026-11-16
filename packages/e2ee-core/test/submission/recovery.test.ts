@@ -69,6 +69,156 @@ const using = <A, E, R>(
   );
 
 describe('durable submission', () => {
+  it.each([false, true])(
+    'confirms an exact committed original when a ledger subscription advances before the append reply (later record=%s)',
+    async (later) => {
+      const f = fixture();
+      try {
+        const original = rotate();
+        let records = [genesis];
+        let local = Result.getOrThrow(
+          verifyLedger({ anchor, records, checkpoint: checkpoint(records) })
+        );
+        const remote = LedgerLog.of({
+          read: () => Effect.fail(new LedgerLogError({})),
+          readFrom: (_anchor, base) =>
+            Effect.sync(() => ({
+              records: records.slice(base.length),
+              checkpoint: checkpoint(records),
+            })),
+          appendCas: () =>
+            Effect.sync(() => {
+              records = later
+                ? [
+                    genesis,
+                    original,
+                    signed([hashRecordBytes(original).toBytes(), owner.pk, [9, [1]]]),
+                  ]
+                : [genesis, original];
+              local = Result.getOrThrow(
+                verifyLedger({ anchor, records, checkpoint: checkpoint(records) })
+              );
+            }),
+        });
+        await Effect.runPromise(
+          Effect.scoped(
+            using(
+              f,
+              Effect.gen(function* () {
+                const submission = yield* LedgerSubmission;
+                const result = yield* submission.submit(original);
+                expect(result.outcome).toBe('Committed');
+                yield* submission.acknowledge(result);
+                expect((yield* submission.pending()).record).toBeNull();
+              }).pipe(Effect.provide(submissionLayer(anchor))),
+              remote
+            ).pipe(
+              Effect.provideService(VerifiedLedger, {
+                current: () => Effect.sync(() => local),
+                ensureCurrent: () => Effect.void,
+              })
+            )
+          )
+        );
+      } finally {
+        f.close();
+      }
+    }
+  );
+
+  it.each(['committed', 'conflict', 'tampered', 'rollback', 'rate-limited', 'fallback'] as const)(
+    'verifies suffix submission at the owned prefix: %s',
+    async (mode) => {
+      const f = fixture();
+      try {
+        const base = Result.getOrThrow(
+          verifyLedger({ anchor, records: [genesis], checkpoint: checkpoint([genesis]) })
+        );
+        const original = mode === 'rate-limited' ? selfAdmission() : rotate();
+        const competing = rotate(undefined, 22);
+        let records = [genesis];
+        let fullReads = 0,
+          suffixReads = 0;
+        const remote = LedgerLog.of({
+          read: () =>
+            Effect.sync(() => {
+              fullReads++;
+              return { records, checkpoint: checkpoint(records) };
+            }),
+          readFrom: (_anchor, prefix) =>
+            Effect.sync(() => {
+              suffixReads++;
+              expect(prefix.head.equals(base.head)).toBe(true);
+              return { records: records.slice(prefix.length), checkpoint: checkpoint(records) };
+            }),
+          appendCas: () =>
+            Effect.suspend(() => {
+              if (mode === 'rate-limited')
+                return Effect.fail(
+                  new LedgerLogError({ reason: 'self-service-rate-limited', retryAt: 100 })
+                );
+              records = [genesis, mode === 'conflict' ? competing : original];
+              if (mode === 'tampered') {
+                records = records.map((r) => r.slice());
+                records[1]![records[1]!.length - 1] ^= 1;
+              }
+              return Effect.void;
+            }),
+        });
+        const ahead = Result.getOrThrow(
+          verifyLedger({
+            anchor,
+            records: [genesis, competing],
+            checkpoint: checkpoint([genesis, competing]),
+          })
+        );
+        const result = await Effect.runPromise(
+          Effect.scoped(
+            using(
+              f,
+              Effect.gen(function* () {
+                if (mode === 'rollback') {
+                  const journal = yield* SubmissionJournal;
+                  yield* journal.prepare(anchor, original);
+                  yield* journal.observe(anchor, original, null, checkpoint([genesis, competing]));
+                }
+                const submission = yield* LedgerSubmission;
+                const result = yield* Effect.result(submission.submit(original));
+                const pending = yield* submission.pending();
+                if (mode === 'rate-limited') expect(pending.record).toBeNull();
+                else expect(pending.record).toEqual(original);
+                return result;
+              }).pipe(Effect.provide(submissionLayer(anchor))),
+              remote
+            ).pipe(
+              Effect.provideService(VerifiedLedger, {
+                current: () => Effect.succeed(mode === 'fallback' ? ahead : base),
+                ensureCurrent: () => Effect.void,
+              })
+            )
+          )
+        );
+        if (mode === 'committed' || mode === 'fallback' || mode === 'conflict') {
+          expect(Result.isSuccess(result)).toBe(true);
+          if (Result.isSuccess(result))
+            expect(result.success.outcome).toBe(mode === 'conflict' ? 'Conflict' : 'Committed');
+        } else {
+          expect(Result.isFailure(result)).toBe(true);
+          if (mode === 'rollback') expect(errorCode(result)).toBe('rollback');
+          if (mode === 'tampered') expect(errorCode(result)).toBe('bad-signature');
+          if (mode === 'rate-limited') expect(errorCode(result)).toBe('self-service-rate-limited');
+        }
+        expect(fullReads).toBe(mode === 'fallback' ? 2 : 0);
+        expect(suffixReads).toBe(
+          mode === 'fallback' ? 0 : mode === 'rollback' || mode === 'rate-limited' ? 1 : 2
+        );
+      } finally {
+        f.remote.db.close();
+        rmSync(f.dir, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each(['displaced', 'registration', 'recoverable'] as const)(
     'recovers legacy setup at %s after history retention',
     async (stage) => {

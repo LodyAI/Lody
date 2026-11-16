@@ -2,6 +2,7 @@ import { E2eeIdentityRecovery } from './pages/e2ee-identity-recovery';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import type { ElectronCliState } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 // The product adapter mounts the window drag strip on the overlay, so the desktop
 // window stays movable while the confirmation is open.
@@ -50,11 +51,27 @@ const styles = stylex.create({
   message: { margin: 0 },
 });
 
-/** Each new local pairing session requires consent, including an already admitted machine. */
+/** Whether the local CLI currently runs this workspace, from its reported runtime state;
+ * `null` until the first snapshot. Only an activated identity starts an encrypted
+ * workspace, so a listed workspace already has a working local agent. */
+export function localAgentRunsWorkspace(
+  state: ElectronCliState | null,
+  workspaceId: string
+): boolean | null {
+  if (!state) return null;
+  // A stopped, failed or (re)starting process may still carry its last runtime snapshot.
+  if (!['running', 'degraded', 'reconnecting', 'offline'].includes(state.phase)) return false;
+  return state.runtime?.connectedWorkspaces?.some((item) => item.id === workspaceId) === true;
+}
+
+/** Each new local pairing session requires consent, including an already admitted machine.
+ * The offer is shown only while the local agent does not already run this workspace:
+ * component state is per mount, so the running workspace is the durable answer. */
 export function E2eeLocalAgentApproval(props: {
   workspaceId: string;
   runtime: Runtime | undefined;
   enabled: boolean;
+  localAgentRunning: boolean | null;
 }) {
   // No pairing, approval or phase crosses to another workspace.
   return <LocalAgentApproval key={props.workspaceId} {...props} />;
@@ -64,10 +81,12 @@ function LocalAgentApproval({
   workspaceId,
   runtime,
   enabled,
+  localAgentRunning,
 }: {
   workspaceId: string;
   runtime: Runtime | undefined;
   enabled: boolean;
+  localAgentRunning: boolean | null;
 }) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<
@@ -113,10 +132,14 @@ function LocalAgentApproval({
   const current = (owner: number) => active.current && attempt.current === owner;
   const [recheck, setRecheck] = useState(0);
   const prepareRef = useRef<(automatic: boolean) => Promise<void>>(async () => {});
+  // A running workspace answers an idle offer or a pending activation. An attempt the
+  // user is in the middle of (confirming, admitting, recovering) keeps its own phase.
+  const runningHere = localAgentRunning === true && (phase === 'idle' || phase === 'waiting');
   // While waiting, reconcile on a bounded backoff so a slow start completes without a
   // click. A hidden window waits until it is visible again; any other phase cancels.
   useEffect(() => {
-    if (phase !== 'waiting' || recheck >= LOCAL_AGENT_RECHECK_DELAYS_MS.length) return undefined;
+    if (phase !== 'waiting' || runningHere || recheck >= LOCAL_AGENT_RECHECK_DELAYS_MS.length)
+      return undefined;
     let visibilityWait: (() => void) | undefined;
     const run = () => void prepareRef.current(true);
     const timer = window.setTimeout(() => {
@@ -134,9 +157,11 @@ function LocalAgentApproval({
       window.clearTimeout(timer);
       visibilityWait?.();
     };
-  }, [phase, recheck]);
+  }, [phase, recheck, runningHere]);
   if (
     !enabled ||
+    localAgentRunning === null ||
+    runningHere ||
     available === false ||
     (available === null && phase !== 'error') ||
     !runtime?.prepareLocalAgent ||

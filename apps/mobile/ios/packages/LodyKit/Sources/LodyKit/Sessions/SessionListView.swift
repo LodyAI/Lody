@@ -8,6 +8,9 @@ final class SessionListView: UIView {
   private let retry = UIButton(type: .system)
   private var retryAction: (() -> Void)?
   private var hasRows = false
+  private var onboarding: HomeOnboardingView?
+  /// Presents the first-run guide's share sheet.
+  var shareOnboarding: (([Any], UIView) -> Void)?
   var forwarded: ((String, [String: Any]) -> Void)?
   var selectedSessionId: String {
     get { list.selectedRowId }
@@ -33,9 +36,27 @@ final class SessionListView: UIView {
     super.layoutSubviews()
     list.frame = bounds
     retry.frame = CGRect(x: 20, y: bounds.midY + 60, width: max(0, bounds.width - 40), height: 44)
+    onboarding?.frame = bounds
   }
 
-  var scrollView: UIScrollView { list.collection }
+  /// The visible scroll view: the first-run guide while it stands in for the empty list.
+  var scrollView: UIScrollView { onboarding?.scrollView ?? list.collection }
+  /// Replaces the empty Chats list with the first-run guide; returns whether the scroll view changed.
+  @discardableResult
+  func setOnboarding(_ shown: Bool) -> Bool {
+    guard shown != (onboarding != nil) else { return false }
+    if shown {
+      let guide = HomeOnboardingView(frame: bounds)
+      guide.share = { [weak self] items, source in self?.shareOnboarding?(items, source) }
+      addSubview(guide)
+      onboarding = guide
+    } else {
+      onboarding?.removeFromSuperview()
+      onboarding = nil
+    }
+    list.isHidden = shown
+    return true
+  }
   func setRetry(_ action: (() -> Void)?) {
     retryAction = action
     retry.isHidden = action == nil || hasRows

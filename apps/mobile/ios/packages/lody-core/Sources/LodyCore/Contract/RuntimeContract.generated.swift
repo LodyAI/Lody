@@ -2764,22 +2764,26 @@ extension RuntimeContract {
     public var workspaceId: String
     public var projectId: String?
     public var agentConfigId: String?
-    public init(workspaceId: String, projectId: String? = nil, agentConfigId: String? = nil) {
+    public var includeOffline: Bool?
+    public init(workspaceId: String, projectId: String? = nil, agentConfigId: String? = nil, includeOffline: Bool? = nil) {
       self.workspaceId = workspaceId
       self.projectId = projectId
       self.agentConfigId = agentConfigId
+      self.includeOffline = includeOffline
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
       self.projectId = try c.decodeIfPresent(String.self, forKey: Key("projectId"))
       self.agentConfigId = try c.decodeIfPresent(String.self, forKey: Key("agentConfigId"))
+      self.includeOffline = try c.decodeIfPresent(Bool.self, forKey: Key("includeOffline"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.workspaceId, forKey: Key("workspaceId"))
       try c.encodeIfPresent(self.projectId, forKey: Key("projectId"))
       try c.encodeIfPresent(self.agentConfigId, forKey: Key("agentConfigId"))
+      try c.encodeIfPresent(self.includeOffline, forKey: Key("includeOffline"))
     }
   }
 

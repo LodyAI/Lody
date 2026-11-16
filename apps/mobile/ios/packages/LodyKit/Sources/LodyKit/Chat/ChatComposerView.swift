@@ -198,6 +198,23 @@ private final class ComposerPasteJob: @unchecked Sendable {
 final class ChatComposerInput: TextView {
   var onPasteItems: (([NSItemProvider]) -> Bool)?
   var onPasteLongText: ((ComposerPaste) -> Bool)?
+  /// Return on a hardware keyboard sends, as on web; Shift-Return keeps inserting a line break.
+  /// Software keyboards never deliver key commands, so their Return still types a newline.
+  var onHardwareReturn: (() -> Void)?
+
+  private lazy var hardwareReturnCommand: UIKeyCommand = {
+    let command = UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(hardwareReturn(_:)))
+    command.wantsPriorityOverSystemBehavior = true
+    return command
+  }()
+
+  override var keyCommands: [UIKeyCommand]? {
+    (super.keyCommands ?? []) + [hardwareReturnCommand]
+  }
+
+  @objc private func hardwareReturn(_ sender: Any?) {
+    onHardwareReturn?()
+  }
 
   static func makeEditorView() -> LexicalView {
     let theme = Theme()
@@ -424,6 +441,8 @@ final class ChatComposerInput: TextView {
   }
 
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    // While an input method is composing (pinyin, kana…), Return commits the candidate.
+    if action == #selector(hardwareReturn(_:)) { return isEditable && markedTextRange == nil && onHardwareReturn != nil }
     if action == #selector(pastePlainText(_:)) { return isEditable && UIPasteboard.general.hasStrings }
     if action == #selector(paste(_:)), isEditable, UIPasteboard.general.numberOfItems > 0 { return true }
     return super.canPerformAction(action, withSender: sender)
@@ -870,6 +889,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     input.onPasteLongText = { [weak self] paste in
       self?.pasteLongText(paste) ?? false
     }
+    input.onHardwareReturn = { [weak self] in self?.submitFromKeyboard() }
     input.accessibilityIdentifier = "session-input"
     input.accessibilityLabel = String(localized: "native.chat.composer.input", bundle: .lody)
     hint.text = state.placeholder
@@ -1098,7 +1118,19 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
   }
   private func saveDraft() {
+    draftSave?.cancel()
+    draftSave = nil
     onDraftChange?(input.draftEnvelope)
+  }
+  /// Typing persists shortly after it pauses, so a draft survives the app being killed
+  /// while the page is open, not only leaving the page or the app.
+  private var draftSave: DispatchWorkItem?
+  private func scheduleDraftSave() {
+    guard onDraftChange != nil else { return }
+    draftSave?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.saveDraft() }
+    draftSave = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
   }
   @objc private func appDidEnterBackground() {
     saveDraft()
@@ -2010,7 +2042,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     guard activeMentionItems != nil else { return }
     updateComposer()
   }
-  func textViewDidChange(_ textView: UITextView) { updateComposer() }
+  func textViewDidChange(_ textView: UITextView) {
+    updateComposer()
+    scheduleDraftSave()
+  }
   func textViewDidBeginEditing(_ textView: UITextView) { updateComposer() }
   func textViewDidEndEditing(_ textView: UITextView) {
     setFullScreen(false)
@@ -2030,6 +2065,12 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
     !relaying && (textView.text as NSString).length - range.length + (text as NSString).length <= 32000
   }
+  /// Return never stops a running turn: with nothing to send, Send is Stop, and only a tap means it.
+  private func submitFromKeyboard() {
+    guard hasDraftText || !attachments.isEmpty else { return }
+    submit()
+  }
+
   @objc private func submit() {
     guard send.isEnabled else { return }
     if previewBeforeSubmit?() == true { return }

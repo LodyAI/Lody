@@ -466,12 +466,16 @@ describe('retained ledger feed', () => {
 
   it('accepts a bounded suffix beyond sequence 16384 from an independently verified retained origin', async () => {
     const f = envelopeFixture();
+    const checkpoint = () => ({
+      head: hashRecordBytes(f.records().at(-1)!),
+      length: f.records().length,
+    });
     for (let i = 0; i < 16384; i++) f.append([9, [1]]);
     const base = f.view(),
       saved = ok(exportVerifiedState(base));
     const dir = mkdtempSync(join(tmpdir(), 'long-retained-feed-'));
     f.append([5, f.phone.raw]);
-    const next = f.view();
+    const next = checkpoint();
     const scope = Layer.succeed(WorkspaceScope, { genesis: f.context.genesis });
     const stores = sqliteLedgerFeedStore({
       path: join(dir, 'feed.sqlite'),
@@ -503,7 +507,7 @@ describe('retained ledger feed', () => {
             );
             expect((yield* feed.current()).view.head.equals(next.head)).toBe(true);
             f.append([9, [1]]);
-            const overflow = f.view();
+            const overflow = checkpoint();
             expect(
               Result.isFailure(
                 yield* Effect.result(

@@ -3,6 +3,59 @@ import { isSubscriptionQuotaEligible } from '../src/subscription-quota';
 import { assertManagedCodexProfileConfig } from '../src/codex-auth-profile';
 
 describe('subscription quota account eligibility', () => {
+  it('allows only audited proxy and locale settings for builtin Antigravity', () => {
+    expect(
+      isSubscriptionQuotaEligible({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        env: {
+          https_proxy: 'http://localhost:8080',
+          NO_PROXY: 'localhost',
+          LANG: 'en_US.UTF-8',
+          LC_ALL: 'en_US.UTF-8',
+          TZ: 'UTC',
+        },
+      })
+    ).toBe(true);
+    for (const key of [
+      'GEMINI_API_KEY',
+      'GOOGLE_API_KEY',
+      'GOOGLE_APPLICATION_CREDENTIALS',
+      'GOOGLE_GENAI_USE_VERTEXAI',
+      'HOME',
+      'XDG_CONFIG_HOME',
+      'NODE_OPTIONS',
+      'UNRECOGNIZED_AUTH_SETTING',
+    ]) {
+      for (const env of [{ [key]: 'synthetic' }, { [key.toLowerCase()]: '' }]) {
+        expect(
+          isSubscriptionQuotaEligible({ cliType: 'builtin', agentType: 'antigravity', env })
+        ).toBe(false);
+      }
+    }
+    expect(
+      isSubscriptionQuotaEligible({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        env: { LANG: 'en_US.UTF-8', GOOGLE_API_KEY: 'synthetic' },
+      })
+    ).toBe(false);
+    expect(
+      isSubscriptionQuotaEligible({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        brandId: 'deepseek',
+      })
+    ).toBe(false);
+    expect(
+      isSubscriptionQuotaEligible({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        magpieGatewayUrl: 'http://localhost:8000',
+      })
+    ).toBe(false);
+  });
+
   it.each(['codex', 'claude', 'grok'])('allows ordinary tool settings for %s', (agentType) => {
     expect(
       isSubscriptionQuotaEligible({

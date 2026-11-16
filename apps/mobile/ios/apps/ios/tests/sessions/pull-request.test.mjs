@@ -132,3 +132,40 @@ test('a Project group conversation lists every member with its own current PR, s
   ).sessions[0];
   assert.equal(plain.projectRun, undefined);
 });
+
+test('catalog keeps changed-file counts for zero-line, mixed and legacy workspace summaries', async () => {
+  const { projectRows } =
+    await import('../../../../packages/cloud-runtime/src/protocol/catalog.ts');
+  const read = (diff) =>
+    projectRows(
+      [
+        { key: ['e', 'session-files'], value: true },
+        {
+          key: ['m', 'session-files'],
+          value: {
+            id: 'files',
+            machineId: 'm',
+            diffStats: { allChange: diff },
+          },
+        },
+      ],
+      'meta',
+    ).sessions[0];
+  assert.deepEqual(read({ add: 0, del: 0, files: 2 }).diff, {
+    add: 0,
+    del: 0,
+    files: 2,
+  });
+  assert.deepEqual(read({ add: 3, del: 1, files: 2 }).diff, {
+    add: 3,
+    del: 1,
+    files: 2,
+  });
+  assert.deepEqual(read({ add: 0, del: 0, files: 0 }).diff, {
+    add: 0,
+    del: 0,
+    files: 0,
+  });
+  assert.deepEqual(read({ add: 3, del: 1 }).diff, { add: 3, del: 1 });
+  assert.equal(read({ add: 0, del: 0 }).diff, undefined);
+});

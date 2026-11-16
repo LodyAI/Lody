@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, useState } from 'react';
 import { Provider, createStore } from 'jotai';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';

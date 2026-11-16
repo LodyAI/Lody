@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDeferredPostHogController, type DeferredPostHogScheduler } from '../src/lib/deferred-posthog';
+import {
+  createDeferredPostHogController,
+  type DeferredPostHogScheduler,
+} from '../src/lib/deferred-posthog';
 
 type PostHogClient = Parameters<typeof createDeferredPostHogController>[0];
 

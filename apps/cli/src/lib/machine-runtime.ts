@@ -61,6 +61,16 @@ export class MachineRuntime {
       request.machineId !== config.machineId
     )
       throw new Error('e2ee_feature_scope');
+    if (request.method === 'session/fork') {
+      // Owners and shared members fork; the request must name its verified signer.
+      const requester = context?.requester;
+      if (!requester || request.params.requestedByUserId !== requester.accountId)
+        throw new Error('e2ee_feature_requester');
+      return this.requireHandler().handleEncryptedSessionFork(
+        request.params,
+        requester.executionUserId
+      );
+    }
     if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
       throw new Error('e2ee_feature_requester');
     if (isE2eeReadQuery(request.method, request.params)) {
@@ -76,6 +86,9 @@ export class MachineRuntime {
   }
   resolveSessionHistoryAccessTarget(sessionId: string) {
     return this.requireHandler().resolveSessionHistoryAccessTarget(sessionId as SessionId);
+  }
+  resolveSessionExecutionScope(sessionId: string) {
+    return this.requireHandler().resolveSessionExecutionScope(sessionId as SessionId);
   }
   private handler: MessageHandler | null = null;
   private clientLossHandler: MessageHandler | null = null;

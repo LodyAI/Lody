@@ -109,8 +109,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Developer preview on: the encryption switch sits below the ordinary fields. */
+/** Developer preview on: the standard / encrypted choice sits below the ordinary fields. */
 export const EncryptionOffered: Story = {};
+
+/** Encrypted chosen: the same cost points and loss warning the desktop page shows. */
+export const EncryptedSelected: Story = {
+  play: async () => {
+    const body = within(document.body);
+    await userEvent.click(await body.findByTestId('mobile-create-workspace-encrypted'));
+  },
+};
 
 /** A saved request reopens locked to its original name and handle. */
 export const ResumeSaved: Story = {

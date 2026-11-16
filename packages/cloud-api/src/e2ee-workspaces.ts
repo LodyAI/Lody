@@ -98,3 +98,11 @@ export type E2eeWorkspaceMemberProfiles = {
   devices?: { signingPublicKey: string; profile: E2eeDeviceProfile }[];
   profiles: { cryptoUserId: string; name: string | null; image: string | null }[];
 };
+
+/** Bounded, ordered independent workspace results; an error never undoes a sibling CAS. */
+export type E2eeWorkspaceBatchReply<A> = {
+  items: Array<
+    | { workspaceId: string; status: 'ok'; result: A }
+    | { workspaceId: string; status: 'error'; code: string }
+  >;
+};

@@ -9,6 +9,7 @@ import type { SessionLocalAttachment } from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
+import { useSessionLinkNavigator } from './session-link-context';
 import * as stylex from '@stylexjs/stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -142,6 +143,7 @@ import {
   Circle,
   Clock3,
   Copy,
+  CornerLeftUp,
   FileText,
   Globe,
   Info,
@@ -2817,6 +2819,7 @@ export const MessageRowView = memo(function MessageRowView({
         timestampLabel={timestampLabel}
         hasWideContent={hasWideContent}
         conversationFontSize={conversationFontSize}
+        onNavigateSession={onNavigateSession}
         onEdit={onEdit}
         onResendUndelivered={onResendUndelivered}
         editMentionContext={editMentionContext}
@@ -3860,6 +3863,62 @@ function getDefaultOpenWorktreeScriptStepIndexes(
   return [];
 }
 
+const selectSourceSessionTitle = (session: SessionMeta | null | undefined): string | null =>
+  session?.title?.trim() || null;
+
+const MessageAuthorSourceLink = memo(function MessageAuthorSourceLink({
+  sourceSessionId,
+  isMobile,
+  onNavigate,
+}: {
+  sourceSessionId: SessionId;
+  isMobile: boolean;
+  onNavigate: (target: SessionNavigationTarget) => void;
+}) {
+  const { t } = useTranslation();
+  const titleAtom = useMemo(
+    () =>
+      selectAtom(
+        sessionMetaAtomFamily(getSessionRoomId(sourceSessionId)),
+        selectSourceSessionTitle
+      ),
+    [sourceSessionId]
+  );
+  const sourceTitle = useAtomValue(titleAtom);
+  const openSourceLabel = t('sessions.messageAuthor.source', 'Open source conversation');
+  const displayLabel = sourceTitle ?? openSourceLabel;
+  const accessibleLabel = sourceTitle ? `${openSourceLabel}: ${sourceTitle}` : openSourceLabel;
+
+  return (
+    <>
+      <span {...stylex.props(conversationSurface.metadataSeparator)} aria-hidden="true">
+        ·
+      </span>
+      <button
+        type="button"
+        {...stylex.props(
+          conversationSurface.metadataSourceLink,
+          isMobile && conversationSurface.mobileMetadataSourceLink
+        )}
+        onClick={(event) => {
+          event.stopPropagation();
+          onNavigate({ sessionId: sourceSessionId });
+        }}
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
+        data-testid="user-message-source-session-link"
+      >
+        <CornerLeftUp
+          {...stylex.props(conversationSurface.metadataSourceIcon)}
+          strokeWidth={2}
+          aria-hidden="true"
+        />
+        <span {...stylex.props(conversationSurface.metadataSourceTitle)}>{displayLabel}</span>
+      </button>
+    </>
+  );
+});
+
 const UserMessageRowView = ({
   message,
   sessionId,
@@ -3868,6 +3927,7 @@ const UserMessageRowView = ({
   timestampLabel,
   hasWideContent,
   conversationFontSize,
+  onNavigateSession,
   onEdit,
   onResendUndelivered,
   editMentionContext,
@@ -3879,6 +3939,7 @@ const UserMessageRowView = ({
   timestampLabel: string;
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEdit?: (message: SessionHistoryParsed, edit: UserMessageEditSubmission) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   /** Composer-equivalent mention wiring for the inline editor; absent on
@@ -3889,6 +3950,14 @@ const UserMessageRowView = ({
   const { copyContext } = useContext(SessionChatActionContext);
   const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
+  const sessionLinkNavigate = useSessionLinkNavigator();
+  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
+  const sourceSessionId =
+    message.author?.kind === 'agent' &&
+    message.author.sessionId &&
+    message.author.sessionId !== sessionId
+      ? (message.author.sessionId as SessionId)
+      : null;
   const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -4006,7 +4075,10 @@ const UserMessageRowView = ({
     >
       <div {...stylex.props(conversationSurface.author)}>
         {message.author?.kind === 'agent' ? (
-          <MessageAuthorIdentity author={message.author} />
+          <MessageAuthorIdentity
+            author={message.author}
+            onNavigateSession={navigateSourceSession}
+          />
         ) : (
           <UserMessageAuthorAvatar
             user={user}
@@ -4033,9 +4105,18 @@ const UserMessageRowView = ({
       >
         <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
           {message.author?.kind === 'agent' ? (
-            <span title={message.author.role?.name ?? message.author.name}>
-              {message.author.role?.name ?? message.author.name}
-            </span>
+            <>
+              <span title={message.author.role?.name ?? message.author.name}>
+                {message.author.role?.name ?? message.author.name}
+              </span>
+              {sourceSessionId && navigateSourceSession ? (
+                <MessageAuthorSourceLink
+                  sourceSessionId={sourceSessionId}
+                  isMobile={isMobile}
+                  onNavigate={navigateSourceSession}
+                />
+              ) : null}
+            </>
           ) : showSenderIdentity && user?.name ? (
             <span className="max-w-40 truncate font-medium" title={user.name}>
               {user.name}
@@ -4089,10 +4170,20 @@ const UserMessageRowView = ({
                 item's `min-width:auto` resolves to the content's min-content, which WebKit
                 (Safari / iOS Capacitor WebView) computes WITHOUT honoring the inner
                 `overflow-wrap:anywhere`. The item then refuses to shrink below a long
-                unbreakable line, the content grows to its `sm:max-w-[800px]` cap, and being
+                unbreakable line, the content grows to its 800px cap, and being
                 right-aligned (`justify-end`) it overflows the column on the left. Chromium
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
-            <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
+            {/* The 800px cap lives on this shrink-to-fit box, bounded by the column. On the
+                content below, a percentage cap is ignored when this box computes its
+                fit-content width, so a long message stretched it across the column and left
+                the capped bubble at its start, far from the avatar. A window breakpoint
+                (`sm:`) cannot bound it either: split panes narrow the column, not the window. */}
+            <div
+              className={cn(
+                'relative min-w-0 max-w-[min(100%,800px)]',
+                isEditing ? 'w-full' : 'w-fit'
+              )}
+            >
               {showSendingSpinner && (
                 <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
@@ -4102,8 +4193,7 @@ const UserMessageRowView = ({
                   cn(
                     'min-w-0 max-w-full text-foreground',
                     isEditing ? 'w-full' : 'w-fit',
-                    hasWideContent ? 'min-w-[480px]' : '',
-                    'sm:max-w-[800px]'
+                    hasWideContent ? 'min-w-[480px]' : ''
                   )
                 )}
                 data-native-selection-allow

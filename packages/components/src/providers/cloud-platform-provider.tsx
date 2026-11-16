@@ -4,6 +4,7 @@ import { makeAutomaticPairingRuntime } from '@lody/e2ee-client/automatic-pairing
 import { E2eeAutomaticPairingInbox } from '@/components/pages/e2ee-automatic-pairing';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { assertLegacyWorkspaceAccess } from '@/lib/legacy-workspace-admission';
+import { e2eeAccessLoss } from '@/lib/e2ee-member-removal';
 import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
 import {
   useCallback,
@@ -443,13 +444,15 @@ export function CloudPlatformProvider({
       runtime,
       account: () => {
         const state = sessionStore.get();
-        return state.status === 'authenticated' ? state.user.id : null;
+        if (state.status === 'authenticated') return state.user.id;
+        return session.data?.user?.id ?? atomStore.get(userAtom)?.id ?? null;
       },
       workspaces: () => accountPairingHints(workspacesStore.get()),
       deviceName: electron ? 'Lody desktop' : 'Lody mobile',
       // A visible but unfocused window (another app in front, a second screen) still
       // answers; only a hidden window falls back to the system notification.
       canPresent: () => document.visibilityState === 'visible',
+      accessLoss: e2eeAccessLoss,
       includePreparingReviews: Boolean(electron && runtime.accountPairingCode),
       notifyPending: (id) => {
         if (!electron) return;
@@ -465,6 +468,8 @@ export function CloudPlatformProvider({
       relay: {
         subscribe: (changed) =>
           cloudClient.subscribe(cloudOperations.e2eeAutomaticPairing.pending, {}, changed),
+        subscribeRead: (id, changed) =>
+          cloudClient.subscribe(cloudOperations.e2eeAutomaticPairing.read, { id }, changed),
         pending: () =>
           io(() => cloudClient.query(cloudOperations.e2eeAutomaticPairing.pending, {})),
         read: (id) =>
@@ -474,6 +479,7 @@ export function CloudPlatformProvider({
       },
     });
   }, [
+    atomStore,
     baseE2eeWorkspaces,
     cloudClient,
     electron,
@@ -485,9 +491,33 @@ export function CloudPlatformProvider({
   const e2eeWorkspaces = useMemo(
     () =>
       automaticPairing && baseE2eeWorkspaces.runtime
-        ? { ...baseE2eeWorkspaces, runtime: { ...baseE2eeWorkspaces.runtime, ...automaticPairing } }
+        ? {
+            ...baseE2eeWorkspaces,
+            runtime: {
+              ...baseE2eeWorkspaces.runtime,
+              ...automaticPairing,
+              // A hint only: the host still claims and verifies through its own relay.
+              subscribeAccountPairingRequest: (lookupId: string, changed: () => void) =>
+                /^[0-9a-f]{32}$/.test(lookupId)
+                  ? cloudClient.subscribe(
+                      cloudOperations.e2eeAccountPairing.claim,
+                      { lookupId },
+                      changed
+                    )
+                  : () => {},
+              // A hint only: the host still reads and verifies the request itself.
+              subscribeAccountPairingApproval: (lookupId: string, changed: () => void) =>
+                /^[0-9a-f]{32}$/.test(lookupId)
+                  ? cloudClient.subscribe(
+                      cloudOperations.e2eeAccountPairing.read,
+                      { lookupId },
+                      changed
+                    )
+                  : () => {},
+            },
+          }
         : baseE2eeWorkspaces,
-    [automaticPairing, baseE2eeWorkspaces]
+    [automaticPairing, baseE2eeWorkspaces, cloudClient]
   );
 
   const sessionAccess = useMemo(

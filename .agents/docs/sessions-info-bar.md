@@ -7,6 +7,21 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+## Composer contracts
+
+- Keep cluster order and one nonempty stage when items exist. Hide only without
+  items or ambient content. Machine (desktop name/mobile icon) stays unstaged;
+  ownership appears only in details. Scheduled drafts live in the composer, never the bar.
+- Stage icons stay inert; reserve colour for genuine status; no pulses.
+- Reported preview requests enable simulator actions. One platform opens directly;
+  iOS + Android share a chooser on desktop and mobile, targeting the main conversation.
+- Open preview stays gated on a real reported target; repository actions are
+  priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
+  below the reply.
+- Workspace diff presence follows the complete changed-file count when available,
+  with line-count fallback for older daemons. Display positive text totals normally
+  and file counts for zero-line changes.
+
 The execution-machine control sits before the canonical cluster and never
 takes the stage. `session-machine-info.tsx` shows a monitor icon and machine name
 on desktop, or a compact icon-only button on mobile (`compactMachineInfo`).
@@ -22,6 +37,13 @@ Mobile controls remain in the same 32px row. With only machine information the b
 is a transparent row; existing items and actions retain the raised bar surface. The
 [draft Spec](../../specs/composer-machine-owner.md) owns the presentation intent.
 The parent passes already-resolved metadata and presence without new subscriptions.
+The workspace diff entry uses the complete changed-path count (`diffStats.allChange.files`)
+when supplied, including binary, empty-file and permission changes. Positive text
+additions/deletions remain the visible summary for text-only and mixed comparisons;
+zero-line comparisons show the localized file count. Older daemons without `files`
+retain their positive-line-count behavior. Counts come from the complete comparison,
+not the bounded shared index; per-turn edited-file cards keep their independent scope.
+
 Scheduled-message drafts must not add an info-bar item. Their state is the
 composer's secondary action beside Send; the bar only carries machine, status,
 goal, schedule, and context. This is distinct from the pending Agent task countdown

@@ -327,6 +327,11 @@ describe('local E2EE pairing authority', () => {
     signingPublicKey: '56'.repeat(32),
   };
   const workspace = { id: 'workspace', contentMode: 'e2ee', genesisHash: request.genesisHash };
+  /** The activated owner Fleet hands to its runtime start; only its close is observable here. */
+  const promotedOwner = (onClose: () => void = () => {}) =>
+    ({ close: async () => onClose() }) as unknown as Awaited<
+      ReturnType<typeof encryptedWorkspace.activateAndPromoteCliE2eeWorkspaceLegacy>
+    >;
   const target = (overrides: Record<string, unknown> = {}) =>
     Object.assign(Object.create(LodyFleet.prototype), {
       stopped: false,
@@ -460,7 +465,7 @@ describe('local E2EE pairing authority', () => {
     expect(accepted).toBe(true);
   });
 
-  it('rejects partial-upgrade activation before dispatch and accepts the complete pinned context', async () => {
+  it('rejects partial-upgrade activation before dispatch and accepts the complete pinned context with a bounded ledger handoff', async () => {
     let accepted = false;
     const handler = new LocalControlHandler({
       machineId: 'machine',
@@ -491,6 +496,22 @@ describe('local E2EE pairing authority', () => {
       })
     ).toEqual({ status: 200, payload: { ok: true, type: 'activate' } });
     expect(accepted).toBe(true);
+    // The desktop's optional ledger handoff is accepted within its bound and refused past it.
+    const handoff = (records: number) =>
+      handler.handle({
+        path: LOCAL_E2EE_PAIRING_PATH,
+        rawBody: JSON.stringify({
+          ...request,
+          ledgerRecordsHex: Array.from({ length: records }, () => 'aa'),
+          ledgerPosition: `p1:workspace:${records}:offset:0`,
+        }),
+        requestId: 3,
+      });
+    expect((await handoff(2048)).status).toBe(200);
+    expect(await handoff(2049)).toEqual({
+      status: 400,
+      payload: { ok: false, error: 'e2ee_invalid_input' },
+    });
   });
   // The desktop must learn why pairing was refused; raw causes still never cross IPC.
   it('reports a fixed pairing refusal by its exact code and keeps raw failures generic', async () => {
@@ -542,11 +563,12 @@ describe('local E2EE pairing authority', () => {
       .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
       .mockResolvedValue();
     const activation = vi
-      .spyOn(encryptedWorkspace, 'activateCliE2eeWorkspaceLegacy')
+      .spyOn(encryptedWorkspace, 'activateAndPromoteCliE2eeWorkspaceLegacy')
       .mockImplementation(async (options) => {
         if (options.expectedSigningPublicKey !== request.signingPublicKey)
           throw new Error('wrong target');
         events.push('installed replacement');
+        return promotedOwner();
       });
     const instance = target({
       logger: { debug: () => {} },
@@ -576,6 +598,42 @@ describe('local E2EE pairing authority', () => {
       preflight.mockRestore();
     }
   });
+  it('answers a verified local activation without waiting for the workspace runtime to start', async () => {
+    // Same-machine pairing has no relay machine-pairing session to complete, and the
+    // desktop's pairing deadline must not include Loro room joins or agent startup.
+    const preflight = vi
+      .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
+      .mockResolvedValue();
+    const owner = promotedOwner();
+    const activation = vi
+      .spyOn(encryptedWorkspace, 'activateAndPromoteCliE2eeWorkspaceLegacy')
+      .mockResolvedValue(owner);
+    let handed: unknown;
+    const waitingForPairing = new Set(['workspace']);
+    const instance = target({
+      logger: { debug: () => {} },
+      waitingForPairing,
+      runtimes: new Map(),
+      // A start that never settles: the pairing answer must not depend on it.
+      startWorkspace: (_workspace: unknown, options?: { encryptedWorkspace?: unknown }) => {
+        handed = options?.encryptedWorkspace;
+        return new Promise<void>(() => {});
+      },
+      resolveWorkspaceRuntime: () => new Promise(() => {}),
+    });
+    try {
+      expect(await instance.dispatchLocalE2eePairing(request)).toEqual({
+        ok: true,
+        type: 'activate',
+      });
+      // The start owns the activated owner instead of reopening its custody and SQLite.
+      expect(handed).toBe(owner);
+      expect(waitingForPairing.has('workspace')).toBe(false);
+    } finally {
+      activation.mockRestore();
+      preflight.mockRestore();
+    }
+  });
   it('retries retained cleanup before replacing a device after a transient release failure', async () => {
     const events: string[] = [];
     const preflight = vi
@@ -586,9 +644,10 @@ describe('local E2EE pairing authority', () => {
       ['workspace', { lody: { confirmEncryptedWorkspacePairing: async () => false } }],
     ]);
     const activation = vi
-      .spyOn(encryptedWorkspace, 'activateCliE2eeWorkspaceLegacy')
+      .spyOn(encryptedWorkspace, 'activateAndPromoteCliE2eeWorkspaceLegacy')
       .mockImplementation(async () => {
         events.push('installed replacement');
+        return promotedOwner();
       });
     const instance = target({
       logger: { debug: () => {} },
@@ -655,17 +714,18 @@ describe('local E2EE pairing authority', () => {
     });
     preflight.mockRestore();
   });
-  it('joins only the exact activation intent and recovers after a different intent is rejected', async () => {
+  it('joins only the exact activation intent, with or without a ledger handoff, and recovers after a different intent is rejected', async () => {
     const entered = Promise.withResolvers<void>(),
       release = Promise.withResolvers<void>();
     const preflight = vi
       .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
       .mockResolvedValue();
     const activation = vi
-      .spyOn(encryptedWorkspace, 'activateCliE2eeWorkspaceLegacy')
+      .spyOn(encryptedWorkspace, 'activateAndPromoteCliE2eeWorkspaceLegacy')
       .mockImplementation(async () => {
         entered.resolve();
         await release.promise;
+        return promotedOwner();
       });
     const runtimes = new Map();
     const instance = target({
@@ -676,7 +736,12 @@ describe('local E2EE pairing authority', () => {
     try {
       const first = instance.dispatchLocalE2eePairing(request);
       await entered.promise;
-      const duplicate = instance.dispatchLocalE2eePairing({ ...request });
+      // The ledger handoff is a transport hint: a retry carrying it is the same intent.
+      const duplicate = instance.dispatchLocalE2eePairing({
+        ...request,
+        ledgerRecordsHex: ['00'],
+        ledgerPosition: 'p1:workspace:1:offset:0',
+      });
       await expect(
         instance.dispatchLocalE2eePairing({
           ...request,
@@ -687,6 +752,7 @@ describe('local E2EE pairing authority', () => {
       release.resolve();
       await expect(first).resolves.toEqual({ ok: true, type: 'activate' });
       await expect(duplicate).resolves.toEqual({ ok: true, type: 'activate' });
+      expect(activation).toHaveBeenCalledTimes(1);
       await expect(instance.dispatchLocalE2eePairing({ ...request })).resolves.toEqual({
         ok: true,
         type: 'activate',

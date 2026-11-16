@@ -106,10 +106,20 @@ export interface E2eeAccountPairingRuntime {
   }): Promise<E2eeAccountPairingRequestState>;
   /** The retained request and its latest verified progress; never creates one. */
   accountPairingRequest?(): Promise<E2eeAccountPairingRequestState | null>;
+  /** Optional push hint that the relay's approvals for one request changed. It grants
+   * nothing: callers still read `accountPairingRequest`, keep their poll as a fallback,
+   * and release the subscription when the request ends or the page unmounts. */
+  subscribeAccountPairingRequest?(lookupId: string, changed: () => void): () => void;
   /** Abandons and destroys the secret; a later request starts fresh. */
   cancelAccountPairing?(input?: { expectedLookupId: string }): Promise<void>;
-  /** Reverse direction: this approved device shows a code for a new device to scan. */
-  accountPairingCode?(): Promise<{ pairingString: string; expiresAt: number }>;
+  /** Reverse direction: this approved device shows a code for a new device to scan.
+   * `lookupId` is the code's public relay lookup key (never secret), for
+   * `subscribeAccountPairingApproval`; an older host may omit it. */
+  accountPairingCode?(): Promise<{ pairingString: string; expiresAt: number; lookupId?: string }>;
+  /** Optional push hint that a request arrived under this device's shown code. It grants
+   * nothing: callers still read `inspectAccountPairing`, keep their poll as a fallback,
+   * and release the subscription when they stop showing the code or the page unmounts. */
+  subscribeAccountPairingApproval?(lookupId: string, changed: () => void): () => void;
   /** Fetches and verifies the request for a code. `null` means no request has been
    * submitted under it yet (reverse direction). Refuses with a typed code. */
   inspectAccountPairing?(pairingString: string): Promise<E2eeAccountPairingPreview | null>;
@@ -130,7 +140,18 @@ export type E2eeAutomaticPairingState = {
   deviceName: string;
   expiresAt: number;
   comparisonCode: string | null;
-  phase: 'preparing' | 'waiting' | 'syncing' | 'joined' | 'declined' | 'expired' | 'cancelled';
+  /** `revoked` / `removed`: this device's exact access loss for this workspace ended the
+   * requester; only the device (`revoked`) can pair again. Never reported by approvers. */
+  phase:
+    | 'preparing'
+    | 'waiting'
+    | 'syncing'
+    | 'joined'
+    | 'declined'
+    | 'expired'
+    | 'cancelled'
+    | 'revoked'
+    | 'removed';
 };
 /** A host-authenticated, current-workspace-only approval preview. It carries no
  * comparison code: the person types the code the new device shows, and the host

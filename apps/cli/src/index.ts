@@ -29,7 +29,6 @@ import {
   WorkspacePresenceLegacyFailure,
 } from './lib/loro/presence-legacy';
 import { version } from '@/pkg';
-import { internalCommand } from './commands/internal';
 import { loadEnv } from './utils/const';
 import { getLogger } from './utils/logger';
 import { registerProcessErrorHandlers, reportError } from './utils/telemetry';
@@ -92,7 +91,7 @@ program
 if (registerUserCommands) {
   registerUserCommands(program);
 } else {
-  program.addCommand(internalCommand);
+  program.addCommand((await import('./commands/internal')).internalCommand);
 }
 // Configure commander to show help when no arguments provided
 program.configureHelp({

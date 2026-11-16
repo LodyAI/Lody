@@ -59,7 +59,7 @@ final class AgentProviderEditorController: LodyFormController {
   private var busy = false
   private var invalid = false
   private var uncertain = false
-  private let provider = UIButton(type: .system)
+  private let provider = UIButton.lodyFormPicker("provider-type")
   private var commandGroup: LodyFormGroup?
   private lazy var name = LodyFormField(id: "provider-name", label: text("name"), text: item?.name ?? "", limit: 200)
   private lazy var prompt = LodyFormTextView(id: "provider-prompt", label: text("prompt"), text: item?.prompt ?? "", limit: 32000, minHeight: 160)
@@ -99,8 +99,6 @@ final class AgentProviderEditorController: LodyFormController {
     }
     name.clearButtonMode = .whileEditing
     command.clearButtonMode = .whileEditing
-    provider.accessibilityIdentifier = "provider-type"
-    provider.showsMenuAsPrimaryAction = true
     provider.menu = UIMenu(children: catalog.map { option in
       UIAction(title: option.name, state: option.id == selected?.id ? .on : .off) { [weak self] _ in
         guard let self else { return }
@@ -209,7 +207,7 @@ final class AgentProviderEditorController: LodyFormController {
     command.isEnabled = editable
     args.isEditable = editable
     provider.isEnabled = editable && item == nil
-    provider.setTitle(selected?.name ?? text("provider"), for: .normal)
+    provider.configuration?.title = selected?.name ?? text("provider")
     providerHeader.update(
       name: name.trimmed.isEmpty ? (selected?.name ?? text("provider")) : name.trimmed,
       detail: [selected?.name ?? "", machine.name.isEmpty ? machine.id : machine.name].filter { !$0.isEmpty }.joined(separator: " · "),

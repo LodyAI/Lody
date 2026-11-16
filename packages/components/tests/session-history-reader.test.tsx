@@ -1,6 +1,6 @@
+// @vitest-environment jsdom
 import { chatLandingSessionStateAtomFamily } from '../src/atoms/local-storage-cache';
 import { buildChatLandingDraftKey } from '../src/atoms/chat-landing-draft';
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';

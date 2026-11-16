@@ -103,6 +103,7 @@ open class LodyApplication : Application() {
         }
         account = AccountController(CloudAuthHttp(WorkspaceModePins(java.io.File(noBackupFilesDir, "workspace-modes" + BackendEnvironment.storageSuffix + ".json")), OkHttpAuthTransport()), KeystoreCredentialStore(this), applicationScope, cache) {
             if (::notifications.isInitialized) notifications.clear()
+            app.lody.android.chat.ComposerDrafts.clear(this)
             scheduleCache.invalidate()
             prepared = null
             submissions.activate(null)

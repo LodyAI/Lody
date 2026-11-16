@@ -8,6 +8,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc';
+import { isE2eeFeatureMethod } from '@lody/shared/e2ee-rpc';
+import { encryptedRemoteEditAndResendAvailable } from '../src/lib/encrypted-machine-controls';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
 import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
@@ -1381,6 +1383,200 @@ describe('encrypted file and preview routing', () => {
       await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner')
     ).toMatchObject({ success: true, connection: { status: 'closed', closedReason: 'revoked' } });
     expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
+  it('forks an encrypted session through the protected feature channel, never ordinary RPC', async () => {
+    const spec = {
+      sourceSessionId: sessionId,
+      sourceTurnId: 'turn-1',
+      targetSessionId: '00000000-0000-4000-8000-0000000000f2' as SessionId,
+      requestedByUserId: 'owner',
+      targetContext: { kind: 'shared' as const },
+    };
+    const requests: unknown[] = [];
+    const facade = (
+      requestEncryptedFeature?: (request: never) => Promise<never>,
+      capabilities: Record<string, number> = {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionFork: 1,
+      }
+    ) =>
+      createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        getMachineProtocolCapabilities: async () => capabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('e2ee_rpc_unavailable');
+        },
+        ...(requestEncryptedFeature ? { requestEncryptedFeature } : {}),
+      });
+    const forked = await facade(async (request) => {
+      requests.push(request);
+      return {
+        ok: true,
+        result: {
+          type: 'session/fork_response',
+          sourceSessionId: spec.sourceSessionId,
+          targetSessionId: spec.targetSessionId,
+          success: true,
+          disposition: 'completed',
+          partial: false,
+          warnings: [],
+        },
+      } as never;
+    }).requestSessionFork(remoteMachineId, spec);
+    expect(forked).toMatchObject({ success: true, targetSessionId: spec.targetSessionId });
+    expect(requests).toEqual([
+      {
+        machineId: remoteMachineId,
+        workspaceId,
+        method: 'session/fork',
+        params: spec,
+        timeoutMs: 120_000,
+      },
+    ]);
+    expect(isE2eeFeatureMethod('session/fork')).toBe(true);
+
+    // The machine's sharing refusal is an access answer, not a transport error to retry.
+    expect(
+      await facade(
+        async () =>
+          ({
+            ok: false,
+            code: 'e2ee_machine_not_shared',
+            error: 'This machine or one of its projects is not shared with you.',
+          }) as never
+      ).requestSessionFork(remoteMachineId, spec)
+    ).toMatchObject({
+      success: false,
+      error: {
+        code: 'MACHINE_ACCESS_DENIED',
+        message: 'This machine or one of its projects is not shared with you.',
+      },
+    });
+    const rejected = await facade(
+      async () => ({ ok: false, error: 'Fork access verification denied.' }) as never
+    ).requestSessionFork(remoteMachineId, spec);
+    expect(rejected).toMatchObject({
+      success: false,
+      error: { message: 'Fork access verification denied.' },
+    });
+    expect(await facade().requestSessionFork(remoteMachineId, spec)).toMatchObject({
+      success: false,
+      error: { message: 'e2ee_feature_unavailable' },
+    });
+    // An older machine drops the unknown method without replying: refuse at once, unsigned.
+    const unsigned: unknown[] = [];
+    expect(
+      await facade(async (request) => {
+        unsigned.push(request);
+        return { ok: true } as never;
+      }, CURRENT_MACHINE_PROTOCOL_CAPABILITIES).requestSessionFork(remoteMachineId, spec)
+    ).toMatchObject({ success: false, error: { code: 'FORK_UNAVAILABLE' } });
+    expect(unsigned).toEqual([]);
+  });
+
+  it('offers remote encrypted edit and resend only to an updated machine owner', () => {
+    const machine = {
+      ownerUserId: 'owner-account',
+      protocolCapabilities: {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionEditAndResend: 1,
+      },
+    };
+    const available = (
+      overrides: Partial<Parameters<typeof encryptedRemoteEditAndResendAvailable>[0]>
+    ) =>
+      encryptedRemoteEditAndResendAvailable({
+        contentMode: 'e2ee',
+        accountId: 'owner-account',
+        machine,
+        ...overrides,
+      });
+    expect(available({})).toBe(true);
+    // A member's edit would be signed by the machine and could run only as its owner.
+    expect(available({ accountId: 'member-account' })).toBe(false);
+    // An older machine drops the method without answering.
+    expect(
+      available({
+        machine: { ...machine, protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+      })
+    ).toBe(false);
+    expect(available({ machine: undefined })).toBe(false);
+    expect(available({ accountId: null })).toBe(false);
+    // Ordinary workspaces keep their existing RPC gate.
+    expect(available({ contentMode: 'plaintext' })).toBe(false);
+  });
+
+  it('edits and resends an encrypted message through the protected feature channel, never ordinary RPC', async () => {
+    const spec = {
+      sessionId,
+      expectedUserTurnId: 'user-2',
+      replacementUserTurnId: 'user-3',
+      requestedByUserId: 'owner',
+      timestamp: '2026-11-13T00:00:00.000Z',
+      inputConfig: { prompt: 'edited' },
+    };
+    const requests: unknown[] = [];
+    const facade = (
+      requestEncryptedFeature?: (request: never) => Promise<never>,
+      capabilities: Record<string, number> = {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionEditAndResend: 1,
+      }
+    ) =>
+      createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        getMachineProtocolCapabilities: async () => capabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('e2ee_rpc_unavailable');
+        },
+        ...(requestEncryptedFeature ? { requestEncryptedFeature } : {}),
+      });
+    const resent = await facade(async (request) => {
+      requests.push(request);
+      return {
+        ok: true,
+        result: {
+          type: 'session/edit-and-resend_response',
+          sessionId,
+          replacementUserTurnId: spec.replacementUserTurnId,
+          success: true,
+        },
+      } as never;
+    }).requestSessionEditAndResend(remoteMachineId, spec);
+    expect(resent).toMatchObject({ success: true });
+    expect(requests).toEqual([
+      {
+        machineId: remoteMachineId,
+        workspaceId,
+        method: 'session/edit-and-resend',
+        params: spec,
+        timeoutMs: 120_000,
+      },
+    ]);
+    expect(isE2eeFeatureMethod('session/edit-and-resend')).toBe(true);
+    expect(await facade().requestSessionEditAndResend(remoteMachineId, spec)).toMatchObject({
+      success: false,
+      error: { message: 'e2ee_feature_unavailable' },
+    });
+    const unsigned: unknown[] = [];
+    expect(
+      await facade(async (request) => {
+        unsigned.push(request);
+        return { ok: true } as never;
+      }, CURRENT_MACHINE_PROTOCOL_CAPABILITIES).requestSessionEditAndResend(remoteMachineId, spec)
+    ).toMatchObject({ success: false });
+    expect(unsigned).toEqual([]);
   });
 
   it.each(['create', 'status', 'revoke'] as const)(

@@ -143,6 +143,105 @@ test('rejected sends preserve the narrow-screen quote draft', async ({ page }) =
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('a sent quote stays inside a narrow chat column in a wide window', async ({ page }) => {
+  // Desktop split panes narrow the chat column while the window stays wide, so
+  // window-width breakpoints must not lift the bubble's column bound.
+  await page.setViewportSize({ width: 1280, height: 780 });
+  await page.goto(story());
+  await selectPassage(page, 11);
+  await page.getByRole('button', { name: 'Quote', exact: true }).click();
+  await page.getByTestId('message-quote-add').click();
+  await expect.poll(() => composerText(input(page))).toContain('[Quote:');
+  await page.locator('#storybook-root').getByRole('button', { name: 'Send', exact: true }).click();
+  const bubble = page.locator('[data-user-message-bubble]').last();
+  await expect(bubble.getByRole('button').filter({ hasText: 'Quote:' })).toBeVisible();
+  await page.evaluate(() => {
+    document.body.style.width = '340px';
+  });
+  const metadata = page.getByTestId('user-message-metadata').last();
+  await expect
+    .poll(async () => {
+      const [bubbleBox, stackBox] = [
+        (await bubble.boundingBox())!,
+        (await metadata.boundingBox())!,
+      ];
+      return bubbleBox.x + bubbleBox.width - (stackBox.x + stackBox.width);
+    })
+    .toBeLessThanOrEqual(0.5);
+});
+
+// Short, mention-only, mixed chips, collapsed, long path, long English, long CJK,
+// an unbreakable URL, and mixed CJK/English/chips/URL — see `Chat/MessageTextChips`.
+const SENT_ROW_COUNT = 9;
+for (const wide of [false, true]) {
+  for (const [width, height] of [
+    [360, 780],
+    [600, 780],
+    [900, 780],
+    [1280, 780],
+    [1920, 1000],
+  ] as const) {
+    test(`sent bubbles hug the avatar without touching it at ${width}px${wide ? ' in wide mode' : ''}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await page.addInitScript(
+        (value) => localStorage.setItem('lody-conversation-wide-mode', value),
+        String(wide)
+      );
+      await page.goto('/iframe.html?id=chat-messagetextchips--sent-rows&viewMode=story');
+      await expect(page.locator('[data-user-message-bubble]').first()).toBeVisible({
+        timeout: 15_000,
+      });
+      const viewport = page.locator('.chat-scrollbar');
+      const scrollTop = () => viewport.evaluate((node) => node.scrollTop);
+      const box = (await viewport.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      // The list is virtualized and opens at the latest row: measure the mounted
+      // rows, then wheel up half a screen, until every row has been seen.
+      const measured = new Set<string>();
+      for (let step = 0; step < 40 && measured.size < SENT_ROW_COUNT; step += 1) {
+        const rows = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('[data-conversation-turn-id^="layout-user-"]')]
+            .map((row) => {
+              const bubble = row.querySelector('[data-user-message-bubble]');
+              const stack = row.querySelector(
+                '[data-testid="user-message-metadata"]'
+              )?.parentElement;
+              const avatar = stack?.previousElementSibling;
+              if (!bubble || !stack || !avatar) return null;
+              const rect = (node: Element) => node.getBoundingClientRect().toJSON() as DOMRect;
+              return {
+                id: row.dataset.conversationTurnId!,
+                bubble: rect(bubble),
+                stack: rect(stack),
+                avatar: rect(avatar),
+              };
+            })
+            .filter((row) => row !== null)
+        );
+        for (const { id, bubble: b, stack: s, avatar: a } of rows) {
+          measured.add(id);
+          expect(a.width, id).toBeGreaterThan(0);
+          expect(b.right, id).toBeLessThanOrEqual(a.left - 4);
+          expect(Math.abs(b.right - s.right), id).toBeLessThanOrEqual(0.5);
+          expect(b.left, id).toBeGreaterThanOrEqual(s.left - 0.5);
+          expect(b.width, id).toBeLessThanOrEqual(800.5);
+        }
+        const before = await scrollTop();
+        if (before === 0) break;
+        await page.mouse.wheel(0, -box.height / 2);
+        // Rows measured on mount can re-anchor the offset, so wait for movement only.
+        await expect.poll(scrollTop).not.toBe(before);
+      }
+      expect(measured.size).toBe(SENT_ROW_COUNT);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true
+      );
+    });
+  }
+}
+
 test('a continuous selection across text rows in one response is quoted in full', async ({
   page,
 }) => {

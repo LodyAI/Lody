@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -15,10 +14,10 @@ import {
   createFakeFileWorkspaceProvider,
   type FileWorkspaceOpenResult,
 } from '../src/lib/file-workspace-provider';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
-}));
+const testI18n = createTestI18n();
+
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,9 +45,12 @@ describe('PR remote images', () => {
   const render = (body: string) =>
     act(async () =>
       root.render(
-        <Provider store={store}>
-          <SessionCommentMarkdown body={body} allowHtml />
-        </Provider>
+        withTestI18n(
+          <Provider store={store}>
+            <SessionCommentMarkdown body={body} allowHtml />
+          </Provider>,
+          testI18n
+        )
       )
     );
 
@@ -120,11 +122,14 @@ describe('anonymous Markdown resource boundary', () => {
   const render = (text: string) =>
     act(async () =>
       root.render(
-        <SessionReadonlyContext.Provider
-          value={{ renderImage: () => null, renderFiles: () => null }}
-        >
-          <MarkdownRenderer text={text} />
-        </SessionReadonlyContext.Provider>
+        withTestI18n(
+          <SessionReadonlyContext.Provider
+            value={{ renderImage: () => null, renderFiles: () => null }}
+          >
+            <MarkdownRenderer text={text} />
+          </SessionReadonlyContext.Provider>,
+          testI18n
+        )
       )
     );
 
@@ -160,12 +165,12 @@ describe('conversation Markdown images across row remounts', () => {
   const remount = async (text: string) => {
     await act(async () => root.unmount());
     root = createRoot(container);
-    await act(async () => root.render(<MarkdownRenderer text={text} />));
+    await act(async () => root.render(withTestI18n(<MarkdownRenderer text={text} />, testI18n)));
   };
 
   it('shows an unreachable image as its alt text, and keeps it so on the next mount', async () => {
     const text = '![Local preview](/tmp/remount-unreachable.png)';
-    await act(async () => root.render(<MarkdownRenderer text={text} />));
+    await act(async () => root.render(withTestI18n(<MarkdownRenderer text={text} />, testI18n)));
     await act(async () => container.querySelector('img')!.dispatchEvent(new Event('error')));
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('[role="img"]')?.textContent).toBe('Local preview');
@@ -219,14 +224,17 @@ describe('file Markdown images', () => {
   ) =>
     act(async () =>
       root.render(
-        <MarkdownFileResources
-          provider={source}
-          documentPath={documentPath}
-          automatic={automatic}
-          active
-        >
-          <MarkdownRenderer text={text} />
-        </MarkdownFileResources>
+        withTestI18n(
+          <MarkdownFileResources
+            provider={source}
+            documentPath={documentPath}
+            automatic={automatic}
+            active
+          >
+            <MarkdownRenderer text={text} />
+          </MarkdownFileResources>,
+          testI18n
+        )
       )
     );
   const click = () =>
@@ -350,22 +358,25 @@ describe('file Markdown images', () => {
   it('cannot grant filesystem access to an anonymous share', async () => {
     await act(async () =>
       root.render(
-        <SessionReadonlyContext.Provider
-          value={{ renderImage: () => null, renderFiles: () => null }}
-        >
-          <MarkdownFileResources
-            provider={{
-              openFile: async () => {
-                throw new Error('Must not read');
-              },
-            }}
-            documentPath="docs/a.md"
-            automatic
-            active
+        withTestI18n(
+          <SessionReadonlyContext.Provider
+            value={{ renderImage: () => null, renderFiles: () => null }}
           >
-            <MarkdownRenderer text="![Private image](../images/plot.png) [Linked image](../images/plot.png)" />
-          </MarkdownFileResources>
-        </SessionReadonlyContext.Provider>
+            <MarkdownFileResources
+              provider={{
+                openFile: async () => {
+                  throw new Error('Must not read');
+                },
+              }}
+              documentPath="docs/a.md"
+              automatic
+              active
+            >
+              <MarkdownRenderer text="![Private image](../images/plot.png) [Linked image](../images/plot.png)" />
+            </MarkdownFileResources>
+          </SessionReadonlyContext.Provider>,
+          testI18n
+        )
       )
     );
     expect(container.querySelector('img')).toBeNull();
@@ -409,9 +420,12 @@ describe('Markdown session links', () => {
   ])('dispatches the exact target to the deep-link router: %s', async (text, url) => {
     await act(async () =>
       root.render(
-        <SessionLinkProvider enabled>
-          <MarkdownRenderer text={text} />
-        </SessionLinkProvider>
+        withTestI18n(
+          <SessionLinkProvider enabled>
+            <MarkdownRenderer text={text} />
+          </SessionLinkProvider>,
+          testI18n
+        )
       )
     );
     const chip = container.querySelector<HTMLButtonElement>('button[data-session-link]')!;
@@ -424,9 +438,12 @@ describe('Markdown session links', () => {
   it('stays inert without live navigation capability', async () => {
     await act(async () =>
       root.render(
-        <SessionLinkProvider enabled={false}>
-          <MarkdownRenderer text={legacyText} />
-        </SessionLinkProvider>
+        withTestI18n(
+          <SessionLinkProvider enabled={false}>
+            <MarkdownRenderer text={legacyText} />
+          </SessionLinkProvider>,
+          testI18n
+        )
       )
     );
     expect(container.querySelector('button')).toBeNull();
@@ -440,13 +457,16 @@ describe('Markdown session links', () => {
   ])('stays an inert chip on a read-only share: %s', async (text) => {
     await act(async () =>
       root.render(
-        <SessionReadonlyContext.Provider
-          value={{ renderImage: () => null, renderFiles: () => null }}
-        >
-          <SessionLinkProvider enabled>
-            <MarkdownRenderer text={text} />
-          </SessionLinkProvider>
-        </SessionReadonlyContext.Provider>
+        withTestI18n(
+          <SessionReadonlyContext.Provider
+            value={{ renderImage: () => null, renderFiles: () => null }}
+          >
+            <SessionLinkProvider enabled>
+              <MarkdownRenderer text={text} />
+            </SessionLinkProvider>
+          </SessionReadonlyContext.Provider>,
+          testI18n
+        )
       )
     );
     expect(container.querySelector('button')).toBeNull();

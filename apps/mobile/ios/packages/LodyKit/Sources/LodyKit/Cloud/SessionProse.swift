@@ -17,7 +17,17 @@ enum SessionProse {
       object["v"] as? Int == 1, let entries = object["entries"] as? [[String: Any]] else { return [] }
     return entries.flatMap { entry -> [Item] in
       guard let id = entry["id"] as? String, let items = entry["items"] as? [[String: Any]] else { return [] }
+      // A plan-approval card's carried plan reads as the turn's plan (`ChatEntry.showingCarriedPlans`).
+      let separatePlan = items.contains {
+        $0["type"] as? String == "proposed_plan" && ["delta", "completed"].contains($0["status"] as? String ?? "")
+          && !(($0["markdown"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      }
       return items.compactMap { item in
+        if !separatePlan, item["type"] as? String == "tool_call", item["kind"] as? String == "switch_mode",
+           let itemID = item["itemId"] as? String, let plan = item["plan"] as? String,
+           !plan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          return Item(entryID: id, itemID: ChatItem.carriedPlanID(itemID), text: text(plan.trimmingCharacters(in: .whitespacesAndNewlines), role: "assistant"))
+        }
         guard let type = item["type"] as? String, ["text", "thought", "proposed_plan"].contains(type),
           type != "proposed_plan" || ["delta", "completed"].contains(item["status"] as? String ?? ""),
           let itemID = item["itemId"] as? String, let source = item[type == "proposed_plan" ? "markdown" : "text"] as? String else { return nil }

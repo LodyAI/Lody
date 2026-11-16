@@ -16,7 +16,12 @@ import {
 } from '../../services/stores';
 import { DeviceIdentity, WorkspaceScope } from '../../services/workspace';
 import type { LocalStoreError } from '../../services/errors';
-import { deliverEpochEnvelope, epochDeliveryId, type DeliveryError } from './delivery';
+import {
+  deliverEpochEnvelope,
+  prepareEpochDelivery,
+  epochDeliveryId,
+  type DeliveryError,
+} from './delivery';
 import { InstalledEpochKeys } from './installed-keys';
 import { KeyReceiver, type ReceiveFailure } from './receiver';
 import { fromHex, isHash } from './reports';
@@ -145,10 +150,16 @@ export interface DistributionResult {
 export class KeyDistributor extends Context.Service<
   KeyDistributor,
   {
+    /** Prepare and retain the current authenticated envelope without mailbox I/O.
+     * A batch relay sends the returned original; retry uses the same outbox slot. */
+    prepareDelivery?(
+      recipient: string
+    ): Effect.Effect<{ readonly id: string; readonly frame: Uint8Array }, DistributionFailure>;
     /** Discover one page of current eligible devices (1–100, default 100) and durably schedule missing deliveries. */
     reconcileCurrentEpoch(
       limit?: number,
-      cursor?: string | null
+      cursor?: string | null,
+      recipients?: readonly string[]
     ): Effect.Effect<
       {
         readonly scheduled: number;
@@ -307,8 +318,18 @@ export class KeyDistributor extends Context.Service<
         if (inserted && !sameTask(stored, task)) return yield* fail('corrupt');
         return inserted;
       });
-      const reconcile = Effect.fnUntraced(function* (limit: number, cursor: string | null) {
-        if (!boundedPage(limit, cursor)) return yield* fail('invalid-input');
+      const reconcile = Effect.fnUntraced(function* (
+        limit: number,
+        cursor: string | null,
+        recipients?: readonly string[]
+      ) {
+        if (
+          !boundedPage(limit, cursor) ||
+          (recipients !== undefined &&
+            (!Array.isArray(recipients) ||
+              recipients.some((id) => typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id))))
+        )
+          return yield* fail('invalid-input');
         const view = yield* current(),
           epoch = view.inspectState().epoch.number;
         if (!senderEligible(view, self))
@@ -324,11 +345,13 @@ export class KeyDistributor extends Context.Service<
             yield* receiver.recordLocalInstallation(original);
         }
         const state = view.inspectState(),
+          allowed = recipients ? new Set(recipients) : null,
           targets = [...state.devices.entries()]
             .filter(
               ([id, device]) =>
                 id !== self &&
                 state.members.has(keyId(device.membershipId.toBytes())) &&
+                (!allowed || allowed.has(id)) &&
                 id > (cursor ?? '')
             )
             .map(([id]) => id)
@@ -415,9 +438,41 @@ export class KeyDistributor extends Context.Service<
       });
 
       return KeyDistributor.of({
+        prepareDelivery: Effect.fn('@lody/e2ee-core/KeyDistributor.prepareDelivery')(function* (
+          recipient: string
+        ) {
+          return yield* gate.run(
+            Effect.gen(function* () {
+              if (!/^[0-9a-f]{64}$/.test(recipient)) return yield* fail('invalid-input');
+              const view = yield* current();
+              const epoch = view.inspectState().epoch.number;
+              return yield* Effect.acquireUseRelease(
+                protection.withPermit(keys.read(epoch)),
+                (key) =>
+                  Effect.gen(function* () {
+                    const prepared = yield* prepareEpochDelivery({
+                      context: {
+                        genesis: anchor,
+                        epoch: Result.getOrThrow(Bytes.epochNumber(epoch)),
+                        sender: signer.publicKey,
+                        recipient: yield* Effect.fromResult(
+                          Bytes.signingPublicKey(fromHex(recipient))
+                        ),
+                      },
+                      ledger: current,
+                      prepare: { key, signer },
+                    }).pipe(Effect.provideService(DeliveryOutbox, outbox));
+                    return { id: prepared.slot, frame: prepared.frame };
+                  }),
+                (key) => Effect.sync(() => disposeEpochKey(key))
+              );
+            })
+          );
+        }),
+
         reconcileCurrentEpoch: Effect.fn('@lody/e2ee-core/KeyDistributor.reconcileCurrentEpoch')(
-          function* (limit = 100, cursor = null) {
-            return yield* gate.run(reconcile(limit, cursor));
+          function* (limit = 100, cursor = null, recipients?: readonly string[]) {
+            return yield* gate.run(reconcile(limit, cursor, recipients));
           }
         ),
         resumePendingDeliveries: Effect.fn(

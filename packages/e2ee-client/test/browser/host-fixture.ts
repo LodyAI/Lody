@@ -77,6 +77,7 @@ import {
   KeyMailbox,
   EpochStagingStore,
   EpochPublicationSource,
+  InstalledKeyStore,
 } from '@lody/e2ee-core/services';
 import {
   makeOwnedPersonalDeviceHost,
@@ -101,6 +102,8 @@ import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { LedgerFeedError } from '@lody/e2ee-core';
 import { toHex, fromHex } from '../../src/bytes';
+import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import { encryptedWorkspaceRoom } from '@lody/shared/workspace-streams-content';
 
 // Synthetic native iroh port: records what the portable host hands it.
 const irohFixture = {
@@ -342,6 +345,35 @@ const view = () =>
     })
   );
 const retain = () => localStorage.setItem('remote-records', JSON.stringify(records.map(toHex)));
+/** The owner's other device publishes epoch 1, the next key 0x72 sealed under epoch 0's. */
+const remoteRotation = () =>
+  Effect.gen(function* () {
+    const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72))),
+      genesis = Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash)));
+    const body = Result.getOrThrow(
+      encodeCbor([
+        view().head.toBytes(),
+        owner.publicKey.toBytes(),
+        [
+          7,
+          1,
+          Result.getOrThrow(commitEpochKey(genesis, 1, next)).toBytes(),
+          Result.getOrThrow(
+            sealHistoryPacket({ genesis, epoch: 1, currentKey: next, previousKey: key })
+          ),
+        ],
+      ])
+    );
+    return yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner);
+  });
+let raceNextAppend = false;
+const stagingDeletes: { recordHash: string; occupiedEpoch: number }[] = [],
+  stagedHashes: string[] = [];
+let feedReadAfterCalls = 0,
+  logReadFromCalls = 0,
+  logReadCalls = 0,
+  installedLoadEpochs: number[] = [],
+  extraMachineSeed = 40;
 export async function boot(
   input: typeof mode = 'create-or-open',
   controlledClose = false,
@@ -361,6 +393,11 @@ export async function boot(
   holdDeliveryRetry = false;
   putMark = 0;
   openRoundSleeps = [];
+  feedReadAfterCalls = 0;
+  logReadFromCalls = 0;
+  logReadCalls = 0;
+  installedLoadEpochs = [];
+  extraMachineSeed = 40;
   openRoundGate = new Promise((resolve) => {
     releaseOpenRound = resolve;
   });
@@ -618,6 +655,7 @@ export async function boot(
               const source = Layer.succeed(LedgerFeedSource, {
                 readAfter: (offset: string) =>
                   Effect.gen(function* () {
+                    feedReadAfterCalls++;
                     if (hang === 'feed') return yield* hung<never>();
                     if (localStorage.getItem('synthetic-offline'))
                       return yield* new LedgerFeedError({ code: 'native-unavailable' });
@@ -631,10 +669,21 @@ export async function boot(
                   }),
               });
               const log = Layer.succeed(LedgerLog, {
+                readFrom: (_anchor, base) =>
+                  Effect.sync(() => {
+                    logReadFromCalls++;
+                    return {
+                      records: records.slice(base.length).map((r) => new Uint8Array(r)),
+                      checkpoint: { head: view().head, length: records.length },
+                    };
+                  }),
                 read: () =>
-                  Effect.succeed({
-                    records: records.map((r) => new Uint8Array(r)),
-                    checkpoint: { head: view().head, length: records.length },
+                  Effect.sync(() => {
+                    logReadCalls++;
+                    return {
+                      records: records.map((r) => new Uint8Array(r)),
+                      checkpoint: { head: view().head, length: records.length },
+                    };
                   }),
                 appendCas: (_anchor, expected, record) =>
                   Effect.gen(function* () {
@@ -646,6 +695,12 @@ export async function boot(
                       });
                     }
                     if (hang === 'append') return yield* hung<never>();
+                    if (raceNextAppend) {
+                      raceNextAppend = false;
+                      records.push(yield* Effect.orDie(remoteRotation()));
+                      retain();
+                      return yield* new LedgerLogError({});
+                    }
                     if (expected.length !== records.length || !expected.head.equals(view().head))
                       return yield* new LedgerLogError({});
                     records.push(new Uint8Array(record));
@@ -679,8 +734,27 @@ export async function boot(
             failKeys = false;
             return Layer.effectContext(Effect.fail(new Error('synthetic key I/O')));
           }
+          const keyStores = Layer.effectContext(
+            Effect.gen(function* () {
+              const built = yield* Layer.build(
+                indexedDbClientKeyStores({
+                  databaseName: `${databasePrefix}-custody`,
+                  binding,
+                  mode,
+                })
+              );
+              const inner = Context.get(built, InstalledKeyStore);
+              return Context.add(built, InstalledKeyStore, {
+                ...inner,
+                load: (epoch) =>
+                  Effect.sync(() => {
+                    installedLoadEpochs.push(epoch);
+                  }).pipe(Effect.andThen(inner.load(epoch))),
+              });
+            })
+          );
           return Layer.mergeAll(
-            indexedDbClientKeyStores({ databaseName: `${databasePrefix}-custody`, binding, mode }),
+            keyStores,
             Layer.succeed(KeyMailbox, {
               // The watched device's slot holds an envelope only after this device stored one.
               status: (slot) =>
@@ -786,8 +860,9 @@ export async function boot(
               stageGroup: (group) =>
                 Effect.sync(() => {
                   stagedGroup = group;
+                  stagedHashes.push(group.recordHash);
                 }),
-              readGroup: () =>
+              readGroup: (key) =>
                 Effect.gen(function* () {
                   if (failStaging) {
                     failStaging = false;
@@ -798,9 +873,16 @@ export async function boot(
                       })
                     );
                   }
-                  return stagedGroup;
+                  return stagedGroup?.recordHash === key.recordHash ? stagedGroup : null;
                 }),
-              deleteGroup: () => Effect.void,
+              deleteGroup: (key, occupied) =>
+                Effect.sync(() => {
+                  stagingDeletes.push({
+                    recordHash: key.recordHash,
+                    occupiedEpoch: occupied.epoch,
+                  });
+                  if (stagedGroup?.recordHash === key.recordHash) stagedGroup = null;
+                }),
             }),
             Layer.succeed(EpochPublicationSource, {
               current: () => Effect.succeed(stagedGroup?.record ?? records[0]),
@@ -1621,6 +1703,37 @@ export async function invoke(action: string) {
               irohFixture.machine = toHex(machine.publicKey.toBytes());
             return true;
           }
+          case 'addFreshMachine': {
+            const seed = ++extraMachineSeed;
+            const machineId = `fixture-machine-${seed}`;
+            const machine = yield* importBrowserDevice({
+              signingPrivate: new Uint8Array(32).fill(seed),
+              encryptionPrivate: new Uint8Array(32).fill(seed + 40),
+            }).pipe(Scope.provide(scope));
+            const proof = yield* prepareDeviceAdmission({
+              genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+              membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
+              encryptionPublicKey: machine.enc,
+              kind: 'machine',
+              machineId,
+              signer: machine,
+            });
+            const proposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'machine',
+                machineId,
+                replaces: null,
+                signingPublicKey: machine.publicKey,
+                encryptionPublicKey: machine.enc,
+                possessionSignature: proof.possessionSignature,
+              })
+            );
+            records.push(yield* signLedgerRecord(proposal, owner));
+            retain();
+            irohFixture.machine = toHex(machine.publicKey.toBytes());
+            return true;
+          }
           case 'rpc':
           case 'rpcChanged':
             return yield* session!.prepareDispatch('fixture-machine', {
@@ -1646,29 +1759,16 @@ export async function invoke(action: string) {
           case 'graceExpired':
             graceElapsed = 900_000;
             return true;
-          case 'rotateRemote': {
-            const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72))),
-              genesis = Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash)));
-            const body = Result.getOrThrow(
-              encodeCbor([
-                view().head.toBytes(),
-                owner.publicKey.toBytes(),
-                [
-                  7,
-                  1,
-                  Result.getOrThrow(commitEpochKey(genesis, 1, next)).toBytes(),
-                  Result.getOrThrow(
-                    sealHistoryPacket({ genesis, epoch: 1, currentKey: next, previousKey: key })
-                  ),
-                ],
-              ])
-            );
-            records.push(
-              yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner)
-            );
+          case 'rotateRemote':
+            records.push(yield* remoteRotation());
             retain();
             return true;
-          }
+          // This device's next CAS loses to the owner's other device rotating the same epoch.
+          case 'raceNextRotation':
+            raceNextAppend = true;
+            return true;
+          case 'stagingDeletes':
+            return { staged: stagedHashes, deleted: stagingDeletes };
           case 'quotaThenGovern': {
             localStorage.setItem('quota-once', '1');
             const refused = yield* Effect.result(
@@ -2424,6 +2524,63 @@ export async function runtimeInvoke(action: string) {
         value = { epoch: Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch };
         break;
       }
+      // The owner's other device seals at its rotated epoch 1 with that epoch's key,
+      // which this device has not received.
+      case 'sealRemoteRotated': {
+        const room = { kind: 'doc' as const, docId: '1' };
+        const descriptor = encryptedWorkspaceRoom(offer.workspaceId, room);
+        const sealed = await Effect.runPromise(
+          Effect.gen(function* () {
+            const binding = yield* makeStreamsUpdateBinding({
+              genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+              resource: descriptor.resource,
+              model: descriptor.model,
+              writeEpoch: 1,
+              signer: owner,
+              ledger: () => Effect.succeed(view()),
+              readEpochKey: (epoch) =>
+                epoch === 1
+                  ? Effect.succeed(Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72))))
+                  : Effect.fail(new Error('fixture-missing-key')),
+            });
+            return yield* binding.seal({
+              context: runtimeContext,
+              plaintext: Uint8Array.of(72, 105),
+              additionalData: () => Uint8Array.of(9),
+            });
+          }).pipe(Effect.scoped)
+        );
+        localStorage.setItem(
+          'runtime-remote-sealed',
+          JSON.stringify({ header: toHex(sealed.header), sealed: toHex(sealed.sealed) })
+        );
+        value = { epoch: Result.getOrThrow(inspectContentFrame(sealed.sealed)).epoch };
+        break;
+      }
+      case 'openRemote':
+      case 'openRemoteFarFuture': {
+        const saved = JSON.parse(localStorage.getItem('runtime-remote-sealed')!);
+        const sealed = fromHex(saved.sealed);
+        // A forged epoch beyond the bounded ledger lookahead.
+        if (action === 'openRemoteFarFuture')
+          new DataView(sealed.buffer, sealed.byteOffset).setUint32(1, 999_999, false);
+        const bytes = await runtime.openContent(offer.workspaceId, {
+          room: { kind: 'doc', docId: '1' },
+          context: runtimeContext,
+          sealed,
+          header: fromHex(saved.header),
+          additionalData: Uint8Array.of(9),
+        });
+        try {
+          value = [...bytes];
+        } finally {
+          bytes.fill(0);
+        }
+        break;
+      }
+      case 'receiveOnly':
+        value = await runtime.refresh(offer.workspaceId, { installKeys: true, keyMode: 'receive' });
+        break;
       case 'openBody': {
         const saved = JSON.parse(localStorage.getItem('runtime-sealed')!);
         const bytes = await runtime.openContent(offer.workspaceId, {
@@ -2693,6 +2850,10 @@ export async function runtimeInvoke(action: string) {
       case 'revokeOwner':
         value = await runtime.revokeDevice!(offer.workspaceId, toHex(owner.publicKey.toBytes()));
         break;
+      case 'revokeMachine':
+        value = await runtime.revokeDevice!(offer.workspaceId, irohFixture.machine!);
+        break;
+
       case 'startReceive':
         runtimeWork = runtime.refresh(offer.workspaceId, { installKeys: true }).then(
           (v) => ({ ok: true, value: v }),
@@ -2761,6 +2922,29 @@ export async function runtimeInvoke(action: string) {
       case 'updateKeys':
         value = await runtime.updateKeys!(offer.workspaceId);
         break;
+      case 'resetTelemetry':
+        feedReadAfterCalls = 0;
+        logReadFromCalls = 0;
+        logReadCalls = 0;
+        installedLoadEpochs = [];
+        value = true;
+        break;
+      case 'telemetry':
+        value = {
+          feedReadAfterCalls,
+          logReadFromCalls,
+          logReadCalls,
+          installedLoadEpochs: [...installedLoadEpochs],
+        };
+        break;
+      case 'concurrentUpdateAndRefresh': {
+        await Promise.all([
+          runtime.updateKeys!(offer.workspaceId),
+          runtime.refresh(offer.workspaceId),
+        ]);
+        value = true;
+        break;
+      }
       case 'memberThirdApplicant':
         memberRelay.item = await Effect.runPromise(memberApplicant(75, 0x54));
         value = memberRelay.item.requestId;

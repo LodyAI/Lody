@@ -1,4 +1,14 @@
-import { Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
+import {
+  Context,
+  Effect,
+  HashMap,
+  HashSet,
+  Layer,
+  Option,
+  Result,
+  Schema,
+  Semaphore,
+} from 'effect';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as Bytes from '../foundation/bytes';
 import {
@@ -19,6 +29,7 @@ import {
   type LedgerView,
   type Operation,
 } from '../ledger';
+import { internalViewState } from '../ledger/replay';
 import { prepareLedgerRecord, signLedgerRecord } from '../ledger/signing';
 import { VerifiedLedger, type VerifiedLedgerError } from '../ledger/verified-ledger';
 import { makeAdmissionGate, own, ownIdentity } from '../lifecycle';
@@ -33,7 +44,7 @@ import { CandidateProtector, EpochStagingStore } from '../../services/keys';
 import type { SubmissionResult } from '../../services/ledger';
 import { EpochCandidateStore, type EpochCandidateRow } from '../../services/stores';
 import { DeviceIdentity, WorkspaceScope } from '../../services/workspace';
-import { prepareEpochEnvelope } from './envelope';
+import { prepareEpochEnvelope, verifiedEpochCandidate } from './envelope';
 import { commitEpochKey, openHistoryPacket, sealHistoryPacket } from './history';
 import { InstalledEpochKeys, type InstalledKeyError } from './installed-keys';
 import {
@@ -217,9 +228,12 @@ export class EpochPublisher extends Context.Service<
         return view;
       });
       const manager = (view: LedgerView, removing?: Bytes.MembershipId) => {
-        const state = view.inspectState(),
-          device = state.devices.get(publisher),
-          member = device && state.members.get(keyId(device.membershipId.toBytes()));
+        const state = internalViewState(view);
+        if (!state) return Effect.fail(fail('unauthorized'));
+        const device = Option.getOrUndefined(HashMap.get(state.devices, publisher)),
+          member =
+            device &&
+            Option.getOrUndefined(HashMap.get(state.members, keyId(device.membershipId.toBytes())));
         if (
           device?.kind !== 'personal' ||
           !member ||
@@ -230,7 +244,7 @@ export class EpochPublisher extends Context.Service<
           removing &&
           (member.role !== 'owner' ||
             removing.equals(state.owner) ||
-            !state.members.has(keyId(removing.toBytes())))
+            !HashMap.has(state.members, keyId(removing.toBytes())))
         )
           return Effect.fail(fail('unauthorized'));
         return Effect.void;
@@ -408,7 +422,9 @@ export class EpochPublisher extends Context.Service<
           !bytesEqual(packet.packet, record.body.operation.previousEpochKey)
         )
           throw fail('corrupt');
-        return view.inspectState().epoch.number === row.epoch ? 'current' : 'historical';
+        const state = internalViewState(view);
+        if (!state) throw fail('corrupt');
+        return state.epoch.number === row.epoch ? 'current' : 'historical';
       };
       const bindingOf = (view: LedgerView, row: EpochCandidateRow) =>
         Effect.try({
@@ -434,16 +450,9 @@ export class EpochPublisher extends Context.Service<
         const bound = yield* bindingOf(view, row);
         if (outcome === 'Committed') {
           if (!bound || !key) return yield* fail('context-changed');
+          const commitment = yield* Effect.fromResult(commitEpochKey(anchor, row.epoch, key));
+          if (!bytesEqual(commitment.toBytes(), row.commitment)) return yield* fail('corrupt');
           yield* installed.saveAndReload(row.epoch, key);
-          yield* Effect.acquireUseRelease(
-            installed.read(row.epoch),
-            Effect.fnUntraced(function* (copy) {
-              const commitment = yield* Effect.fromResult(commitEpochKey(anchor, row.epoch, copy));
-              if (!bytesEqual(commitment.toBytes(), row.commitment)) return yield* fail('corrupt');
-              return undefined;
-            }),
-            (copy) => Effect.sync(() => disposeEpochKey(copy))
-          );
         } else if (bound || view.length <= row.parentCount) return yield* fail('context-changed');
         if (row.outcome && row.outcome !== outcome) return yield* fail('corrupt');
         // Binding reports the first confirmed local installation. A later epoch must
@@ -464,7 +473,8 @@ export class EpochPublisher extends Context.Service<
             const bound = yield* bindingOf(view, row);
             const entry = yield* submit(submission.pending());
             if (entry.record && !bytesEqual(entry.record, row.record)) return yield* fail('busy');
-            if (row.outcome && !entry.record) return yield* confirm(row, row.outcome, key);
+            if (row.outcome && (!entry.record || entry.outcome === row.outcome))
+              return yield* confirm(row, row.outcome, key);
             // The immutable complete group is durable locally and remotely before the
             // first CAS may be attempted. A matching submission journal original
             // has already passed staging/readback; resume it without staging I/O.
@@ -482,7 +492,6 @@ export class EpochPublisher extends Context.Service<
               if (!stored) return yield* fail('stage-readback');
               const owned = yield* Effect.fromResult(ownEpochStagedGroup(stored));
               if (!sameEpochStagedGroup(original, owned)) return yield* fail('stage-readback');
-              yield* Effect.fromResult(authenticateEpochStagedGroup(proposed, owned, true));
             }
             const submitted = entry.record
               ? yield* submit(submission.resume())
@@ -558,7 +567,7 @@ export class EpochPublisher extends Context.Service<
           binding:
             done.outcome === 'Conflict'
               ? null
-              : view.inspectState().epoch.number === epoch
+              : internalViewState(view)?.epoch.number === epoch
                 ? ('current' as const)
                 : ('historical' as const),
         };
@@ -578,8 +587,9 @@ export class EpochPublisher extends Context.Service<
         key: Bytes.EpochKey,
         baseEpoch?: number
       ) {
-        const state = view.inspectState(),
-          epoch = yield* Effect.fromResult(Bytes.epochNumber(state.epoch.number + 1));
+        const state = internalViewState(view);
+        if (!state) return yield* fail('corrupt');
+        const epoch = yield* Effect.fromResult(Bytes.epochNumber(state.epoch.number + 1));
         const old = yield* Effect.fromResult(
           commitEpochKey(anchor, baseEpoch ?? state.epoch.number, previous)
         );
@@ -626,8 +636,11 @@ export class EpochPublisher extends Context.Service<
         const proposed = yield* Effect.fromResult(
           extendLedger(view, [record], { head: hashRecordBytes(record), length: view.length + 1 })
         );
+        const proposedState = internalViewState(proposed);
+        if (!proposedState) return yield* fail('corrupt');
+        const candidate = verifiedEpochCandidate(view, record, proposed);
         const envelopes: { recipient: string; frame: Uint8Array }[] = [];
-        for (const [recipient] of [...proposed.inspectState().devices].sort(([a], [b]) =>
+        for (const recipient of [...HashMap.keys(proposedState.devices)].sort((a, b) =>
           a.localeCompare(b)
         )) {
           envelopes.push({
@@ -642,7 +655,7 @@ export class EpochPublisher extends Context.Service<
               key,
               signer,
               ledger: current,
-              candidate: { before: view, record },
+              candidate,
             }),
           });
         }
@@ -735,24 +748,25 @@ export class EpochPublisher extends Context.Service<
           return recovered ?? (yield* fail('candidate-missing'));
         }
         yield* manager(view, target);
+        const viewState = internalViewState(view);
+        if (!viewState) return yield* fail('unauthorized');
         if (baseEpoch !== undefined) {
-          const state = view.inspectState();
-          const device = state.devices.get(publisher);
+          const device = Option.getOrUndefined(HashMap.get(viewState.devices, publisher));
           if (
-            !device?.membershipId.equals(state.owner) ||
-            !state.capabilities.includes(2) ||
+            !device?.membershipId.equals(viewState.owner) ||
+            !HashSet.has(viewState.capabilities, 2) ||
             !Number.isSafeInteger(baseEpoch) ||
             baseEpoch < 0 ||
-            baseEpoch >= state.epoch.number
+            baseEpoch >= viewState.epoch.number
           )
             return yield* fail('unauthorized');
           const prior = yield* Effect.fromResult(epochHistoryPacket(view, baseEpoch));
           if (prior.abandoned) return yield* fail('unauthorized');
         }
-        if (baseEpoch === undefined && !target && !view.inspectState().epoch.rotationRequired)
+        if (baseEpoch === undefined && !target && !viewState.epoch.rotationRequired)
           return yield* fail('rotation-not-required');
         const row = yield* Effect.acquireUseRelease(
-          installed.read(baseEpoch ?? view.inspectState().epoch.number),
+          installed.read(baseEpoch ?? viewState.epoch.number),
           (previous) =>
             Effect.acquireUseRelease(
               Effect.try({
@@ -810,12 +824,36 @@ export class EpochPublisher extends Context.Service<
         )
           return yield* fail('corrupt');
         if (row.consumed) return undefined;
-        const settled = yield* settle(row);
-        if (settled.outcome !== expected.outcome || settled.binding !== expected.binding)
-          return yield* fail('corrupt');
         const entry = yield* submit(submission.pending());
-        if (entry.record) {
-          if (!bytesEqual(entry.record, original) || entry.outcome !== expected.outcome)
+        if (entry.record && !bytesEqual(entry.record, original)) return yield* fail('busy');
+        // Fast path when `row` is already settled (`row.outcome !== null` and the submission
+        // journal either has no pending record or already recorded the matching outcome):
+        // verify ledger binding and installed key directly without re-opening the candidate
+        // protector or re-writing the installed key store. Fall back to `settle(row)` only
+        // when the submission is still unconfirmed or the installed key needs repair.
+        let verifiedAlreadySettled = false;
+        if (!entry.record || entry.outcome === row.outcome) {
+          const view = yield* current();
+          const bound = yield* bindingOf(view, row);
+          if (row.outcome === 'Committed') {
+            if (!bound) return yield* fail('context-changed');
+            const installedCheck = yield* Effect.result(installed.check(row.epoch));
+            if (Result.isSuccess(installedCheck)) verifiedAlreadySettled = true;
+            else if (installedCheck.failure.reason !== 'missing-key')
+              return yield* installedCheck.failure;
+          } else {
+            if (bound || view.length <= row.parentCount) return yield* fail('context-changed');
+            verifiedAlreadySettled = true;
+          }
+        }
+        if (!verifiedAlreadySettled) {
+          const settled = yield* settle(row);
+          if (settled.outcome !== expected.outcome || settled.binding !== expected.binding)
+            return yield* fail('corrupt');
+        }
+        const afterEntry = verifiedAlreadySettled ? entry : yield* submit(submission.pending());
+        if (afterEntry.record) {
+          if (!bytesEqual(afterEntry.record, original) || afterEntry.outcome !== expected.outcome)
             return yield* fail('busy');
           yield* submit(submission.acknowledge({ outcome: expected.outcome, record: original }));
         }

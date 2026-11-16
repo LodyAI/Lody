@@ -6,8 +6,8 @@ import {
 import type { E2eeAutomaticPairingRecord } from '@lody/cloud-api';
 import { makeAutomaticPairingExchange } from '../src/automatic-pairing-crypto';
 import { decodePairingRequest } from '@lody/e2ee-core/protocol';
-import { Effect } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { Deferred, Effect } from 'effect';
+import { describe, expect, it, vi } from 'vitest';
 import {
   makeAccountPairing,
   type AccountPairingAdmissionRecord,
@@ -15,6 +15,13 @@ import {
   type AccountPairingStore,
 } from '../src/account-pairing';
 import { accountPairingStoreChecks } from './account-pairing-store-contract';
+
+/** The product's exact access-loss results only, as `e2eeAccessLoss` recognizes them. */
+const exactAccessLoss = (error: unknown) =>
+  error instanceof Error &&
+  (error.message === 'e2ee_device_revoked' || error.message === 'e2ee_member_removed')
+    ? error.message
+    : null;
 
 /** Reference store for tests: the same semantics as the durable adapters. */
 function memoryStore(): AccountPairingStore {
@@ -73,7 +80,12 @@ describe('account pairing store contract (reference)', () => {
 });
 
 describe('portable account pairing workflow', () => {
-  it.each(['before-confirmation', 'during-cancellation', 'other-workspace'] as const)(
+  it.each([
+    'before-confirmation',
+    'during-cancellation',
+    'other-workspace',
+    'reader-handoff',
+  ] as const)(
     'preserves verified admission during explicit pairing recovery: %s',
     async (timing) => {
       const lookupId = 'a1'.repeat(16);
@@ -86,7 +98,7 @@ describe('portable account pairing workflow', () => {
         workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'pending' as const }],
       };
       let state: import('@lody/platform').E2eeAccountPairingRequestState =
-        timing === 'before-confirmation'
+        timing === 'before-confirmation' || timing === 'reader-handoff'
           ? {
               ...waiting,
               status: 'joined',
@@ -106,11 +118,13 @@ describe('portable account pairing workflow', () => {
       const resumed = new Promise<void>((resolve) => {
         release = resolve;
       });
+      let readers = 0;
       const recovered = makeAutomaticPairingRuntime({
         account: () => 'synthetic-account',
         workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
         deviceName: 'Phone',
         canPresent: () => true,
+        accessLoss: exactAccessLoss,
         crypto,
         now: () => 0,
         run: Effect.runPromise,
@@ -131,11 +145,25 @@ describe('portable account pairing workflow', () => {
             // Actual native cancellation preserves an already settled admission.
             if (state.status === 'waiting') state = { ...state, status: 'expired' };
           },
-          status: async () => ({
-            deviceKind: 'personal',
-            hasDeviceCredential: true,
-            hasCurrentKey: true,
-          }),
+          open: async () => {
+            readers++;
+            return { readerOwner: 'automatic-key-receive' };
+          },
+          close: async () => {
+            readers--;
+          },
+          status: async () => {
+            if (timing === 'reader-handoff' && readers === 0) throw new Error('e2ee_not_open');
+            return {
+              deviceKind: 'personal',
+              hasDeviceCredential: true,
+              hasCurrentKey: timing !== 'reader-handoff',
+            };
+          },
+          refresh: async () => {
+            expect(readers).toBe(1);
+            return { deviceKind: 'personal', hasDeviceCredential: true, hasCurrentKey: true };
+          },
         } as unknown as E2eeWorkspaceRuntime,
       });
       try {
@@ -152,6 +180,7 @@ describe('portable account pairing workflow', () => {
         expect((await result).phase).toBe(timing === 'other-workspace' ? 'preparing' : 'joined');
         expect(state.status).toBe('joined');
         expect(state.lookupId).toBe(lookupId);
+        expect(readers).toBe(0);
       } finally {
         release();
         recovered.disposeAutomaticPairing();
@@ -290,6 +319,7 @@ describe('portable account pairing workflow', () => {
         workspaces: () => hints,
         deviceName: 'Synthetic phone',
         canPresent: () => true,
+        accessLoss: exactAccessLoss,
         crypto,
         now: () => time,
         run: Effect.runPromise,
@@ -674,6 +704,7 @@ describe('portable account pairing workflow', () => {
           workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
           deviceName: 'Synthetic phone',
           canPresent: () => foreground,
+          accessLoss: exactAccessLoss,
           notifyPending: (id: string) => {
             notices.push(id);
           },
@@ -830,6 +861,268 @@ describe('portable account pairing workflow', () => {
   );
 });
 
+describe('automatic pairing requester wake-ups', () => {
+  it('watches its own live request row only while a page listens, and releases it when the request ends', async () => {
+    // A requester learns of approval from the relay hint instead of its next poll; the
+    // hint is held only for a live request and never outlives the page or the runtime.
+    const watched = new Map<string, () => void>();
+    let contexts = new Map<string, unknown>();
+    const relay = {
+      subscribeRead: (id: string, changed: () => void) => {
+        watched.set(id, changed);
+        return () => watched.delete(id);
+      },
+      pending: () => Effect.succeed([]),
+      read: () => Effect.succeed(null),
+      exchange: (command: { id: string; context?: unknown; terminal?: string }) => {
+        if (command.context) contexts.set(command.id, command.context);
+        return Effect.succeed({
+          id: command.id,
+          state: command.terminal ?? 'pending',
+          context: contexts.get(command.id),
+        } as unknown as E2eeAutomaticPairingRecord);
+      },
+    };
+    const make = () =>
+      makeAutomaticPairingRuntime({
+        relay,
+        runtime: {
+          requestAccountPairing: async () => {
+            throw new Error('unused');
+          },
+          accountPairingRequest: async () => null,
+          cancelAccountPairing: async () => {},
+        } as unknown as E2eeWorkspaceRuntime,
+        account: () => 'synthetic-account',
+        workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
+        deviceName: 'Synthetic phone',
+        canPresent: () => true,
+        accessLoss: exactAccessLoss,
+        crypto,
+        now: () => 1000,
+        run: Effect.runPromise,
+      });
+    const pairing = make();
+    let wakes = 0;
+    const unsubscribe = pairing.subscribeAutomaticPairing!(() => {
+      wakes += 1;
+    });
+    const started = await pairing.startAutomaticPairing('w1');
+    expect([...watched.keys()]).toEqual([started.id]);
+    watched.get(started.id)!();
+    expect(wakes).toBe(1);
+    await pairing.cancelAutomaticPairing('w1');
+    expect(watched.size).toBe(0);
+
+    await pairing.startAutomaticPairing('w1');
+    expect(watched.size).toBe(1);
+    unsubscribe();
+    expect(watched.size).toBe(0);
+
+    const disposed = make();
+    contexts = new Map();
+    disposed.subscribeAutomaticPairing!(() => {});
+    await disposed.startAutomaticPairing('w1');
+    expect(watched.size).toBe(1);
+    disposed.disposeAutomaticPairing();
+    expect(watched.size).toBe(0);
+  });
+});
+
+describe('automatic pairing requester after access loss', () => {
+  type Status = Awaited<ReturnType<E2eeWorkspaceRuntime['status']>>;
+  type Loss = 'e2ee_device_revoked' | 'e2ee_member_removed';
+  const genesisHash = '11'.repeat(32);
+  const retained = {
+    genesisHash,
+    deviceKind: 'personal',
+    hasDeviceCredential: true,
+    hasCurrentKey: false,
+  } as unknown as Status;
+  /** The product's exact access-loss result, as the runtime boundary projects it. */
+  const exactLoss = (code: Loss) => Object.assign(new Error(code), { code });
+  const setup = () => {
+    let time = 0;
+    const host = {
+      status: vi.fn<(workspaceId: string) => Promise<Status>>(async () => retained),
+      refresh: vi.fn<(workspaceId: string) => Promise<Status>>(async () => retained),
+    };
+    const relayed = new Map<string, unknown>();
+    const pairing = makeAutomaticPairingRuntime({
+      relay: {
+        pending: () => Effect.succeed([]),
+        read: () => Effect.succeed(null),
+        exchange: (command) => {
+          if (command.context) relayed.set(command.id, command.context);
+          return Effect.succeed({
+            id: command.id,
+            state: command.terminal ?? 'pending',
+            context: relayed.get(command.id),
+          } as unknown as E2eeAutomaticPairingRecord);
+        },
+      },
+      runtime: {
+        status: (workspaceId: string) => host.status(workspaceId),
+        refresh: (workspaceId: string) => host.refresh(workspaceId),
+        open: async () => {
+          throw new Error('unused');
+        },
+        close: async () => {},
+        requestAccountPairing: async () => {
+          throw new Error('e2ee_network');
+        },
+        accountPairingRequest: async () => null,
+        cancelAccountPairing: async () => {},
+      } as unknown as E2eeWorkspaceRuntime,
+      account: () => 'synthetic-account',
+      workspaces: () => [
+        { workspaceId: 'w1', name: 'Alpha', genesisHash },
+        { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+      ],
+      deviceName: 'Synthetic phone',
+      canPresent: () => true,
+      accessLoss: exactAccessLoss,
+      crypto,
+      now: () => time,
+      run: Effect.runPromise,
+    });
+    return { pairing, host, advance: (ms: number) => (time += ms) };
+  };
+
+  it.each([
+    ['status', 'e2ee_device_revoked', 'revoked'],
+    ['status', 'e2ee_member_removed', 'removed'],
+    ['receive', 'e2ee_device_revoked', 'revoked'],
+    ['receive', 'e2ee_member_removed', 'removed'],
+  ] as const)(
+    'ends a retained admission when %s reports the exact %s, and nothing revives it',
+    async (where, code, phase) => {
+      const { pairing, host, advance } = setup();
+      expect(await pairing.startAutomaticPairing('w1')).toMatchObject({ phase: 'syncing' });
+      if (where === 'status') host.status.mockRejectedValue(exactLoss(code));
+      else host.refresh.mockRejectedValue(exactLoss(code));
+      expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase });
+      // The loss is terminal for this request: polling, time and the device's retained
+      // credential coming back never turn it into an admission again.
+      host.status.mockResolvedValue(retained);
+      host.refresh.mockResolvedValue({ ...retained, hasCurrentKey: true } as Status);
+      advance(3_600_000);
+      expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase });
+      // Another workspace is not held back by this one's loss.
+      host.status.mockRejectedValueOnce(new Error('e2ee_network'));
+      expect(await pairing.startAutomaticPairing('w2')).toMatchObject({
+        workspaceId: 'w2',
+        phase: 'preparing',
+      });
+    }
+  );
+
+  it('pairs a revoked device again only on request, as a new pairing rather than its old credential', async () => {
+    const { pairing, host } = setup();
+    await pairing.startAutomaticPairing('w1');
+    host.refresh.mockRejectedValue(exactLoss('e2ee_device_revoked'));
+    const lost = await pairing.automaticPairingState('w1');
+    expect(lost).toMatchObject({ phase: 'revoked' });
+    // Reopening the page reads the same loss; it does not start a request by itself.
+    expect(await pairing.automaticPairingState('w1')).toMatchObject({
+      id: lost!.id,
+      phase: 'revoked',
+    });
+    // Its retained credential still reads as present; that is no current admission.
+    host.refresh.mockResolvedValue({ ...retained, hasCurrentKey: true } as Status);
+    const again = await pairing.startAutomaticPairing('w1');
+    expect(again).toMatchObject({ phase: 'preparing' });
+    expect(again.id).not.toBe(lost!.id);
+    expect(await pairing.automaticPairingState('w1')).toMatchObject({
+      id: again.id,
+      phase: 'preparing',
+    });
+  });
+
+  it.each([
+    ['e2ee_device_revoked', 'revoked'],
+    ['e2ee_member_removed', 'removed'],
+  ] as const)(
+    'reports a later exact %s over its earlier joined result when the page reads it again',
+    async (code, phase) => {
+      const { pairing, host } = setup();
+      try {
+        await pairing.startAutomaticPairing('w1');
+        host.refresh.mockResolvedValueOnce({ ...retained, hasCurrentKey: true } as Status);
+        const joined = await pairing.automaticPairingState('w1');
+        expect(joined).toMatchObject({ phase: 'joined' });
+        // While nothing has changed, reading the joined result asks the host once and
+        // starts nothing: no key round, no new request.
+        host.status.mockResolvedValue({ ...retained, hasCurrentKey: true } as Status);
+        const refreshes = host.refresh.mock.calls.length;
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'joined' });
+        // Offline or an ordinary refusal never takes the completed approval back.
+        host.status.mockRejectedValueOnce(new Error('e2ee_network'));
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'joined' });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+        host.status.mockRejectedValue(exactLoss(code));
+        host.refresh.mockRejectedValue(exactLoss(code));
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({
+          id: joined!.id,
+          phase,
+        });
+        // A remounted page reads the loss rather than "joined", and starts nothing.
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ id: joined!.id, phase });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+        // Only the person's explicit start acts: a revoked device asks as a new pairing,
+        // a removed member's start re-verifies and still finds the loss.
+        expect(await pairing.startAutomaticPairing('w1')).toMatchObject({
+          phase: phase === 'revoked' ? 'preparing' : 'removed',
+        });
+        expect(host.refresh.mock.calls.length).toBe(refreshes);
+      } finally {
+        pairing.disposeAutomaticPairing();
+      }
+    }
+  );
+
+  it.each([
+    ['e2ee_device_revoked', 'revoked'],
+    ['e2ee_member_removed', 'removed'],
+  ] as const)(
+    'shows an exact %s found on a fresh start instead of asking for approval by itself',
+    async (code, phase) => {
+      const { pairing, host } = setup();
+      try {
+        // A scanned join already ended this page's automatic request; the next mount
+        // starts fresh against a device whose access is gone.
+        host.status.mockRejectedValue(exactLoss(code));
+        const shown = await pairing.startAutomaticPairing('w1');
+        expect(shown).toMatchObject({ phase, comparisonCode: null });
+        expect(await pairing.automaticPairingState('w1')).toMatchObject({ id: shown.id, phase });
+        expect(host.refresh).not.toHaveBeenCalled();
+      } finally {
+        pairing.disposeAutomaticPairing();
+      }
+    }
+  );
+
+  it('keeps syncing through outages and ordinary failures, and finishes once they clear', async () => {
+    const { pairing, host, advance } = setup();
+    await pairing.startAutomaticPairing('w1');
+    for (const failure of [
+      new Error('e2ee_network'),
+      new Error('timeout'),
+      Object.assign(new Error('Unauthorized'), { code: 'e2ee_device_revoked_hint' }),
+    ]) {
+      host.status.mockRejectedValueOnce(failure);
+      expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'syncing' });
+      host.refresh.mockRejectedValueOnce(failure);
+      expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'syncing' });
+    }
+    // A slow key delivery is not an expiry.
+    advance(3_600_000);
+    expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'syncing' });
+    host.refresh.mockResolvedValueOnce({ ...retained, hasCurrentKey: true } as Status);
+    expect(await pairing.automaticPairingState('w1')).toMatchObject({ phase: 'joined' });
+  });
+});
+
 describe('automatic device verification before account admission', () => {
   const context = {
     version: 1 as const,
@@ -916,7 +1209,19 @@ describe('automatic device verification before account admission', () => {
 
 describe('approval coverage across workspaces', () => {
   const fill = (byte: number, size = 32) => new Uint8Array(size).fill(byte);
-  const setup = (options: { approverHas: string[]; invitationFails?: Set<string> }) => {
+  const setup = (options: {
+    approverHas: string[];
+    invitationFails?: Set<string>;
+    /** Records the order of key deliveries, invitations, accesses and publishes. */
+    log?: string[];
+    deliverKeys?: (
+      workspaceId: string
+    ) => Effect.Effect<Effect.Effect<void, never> | void, unknown>;
+    firstKeyDeliveryWaitMs?: number;
+    /** Wraps each per-workspace invitation and access call. */
+    around?: <A>(step: string, work: Effect.Effect<A, unknown>) => Effect.Effect<A, unknown>;
+  }) => {
+    const around = options.around ?? (<A>(_: string, work: Effect.Effect<A, unknown>) => work);
     const requests = new Map<string, Record<string, unknown>>();
     const approvals = new Map<string, unknown[]>();
     let publishes = 0;
@@ -944,6 +1249,7 @@ describe('approval coverage across workspaces', () => {
       publish: (args: { lookupId: string }) =>
         Effect.sync(() => {
           publishes += 1;
+          options.log?.push('publish');
           approvals.set(args.lookupId, [...(approvals.get(args.lookupId) ?? []), args]);
         }),
       claim: (lookupId: string) =>
@@ -997,6 +1303,9 @@ describe('approval coverage across workspaces', () => {
       deviceName: 'Synthetic desktop',
       relay: relay as never,
       requesterWorkspaces: () => Effect.succeed([]),
+      ...(options.firstKeyDeliveryWaitMs === undefined
+        ? {}
+        : { firstKeyDeliveryWaitMs: options.firstKeyDeliveryWaitMs }),
       approverWorkspaces: () =>
         Effect.succeed(
           options.approverHas.map((workspaceId) => ({
@@ -1008,10 +1317,20 @@ describe('approval coverage across workspaces', () => {
               Effect.succeed({ requestId: `admit-${workspaceId}`, record: new Uint8Array([9]) }),
             append: () => Effect.void,
             invitation: () =>
-              invitationFails.has(workspaceId)
-                ? Effect.fail(new Error('synthetic invitation outage'))
-                : Effect.succeed(new Uint8Array([7])),
-            access: () => Effect.succeed({ workspaceId, credential: '99'.repeat(32) }),
+              around(
+                `invitation:${workspaceId}`,
+                invitationFails.has(workspaceId)
+                  ? Effect.fail(new Error('synthetic invitation outage'))
+                  : Effect.succeed(new Uint8Array([7]))
+              ),
+            access: () =>
+              around(
+                `access:${workspaceId}`,
+                Effect.succeed({ workspaceId, credential: '99'.repeat(32) })
+              ),
+            ...(options.deliverKeys
+              ? { deliverKeys: () => options.deliverKeys!(workspaceId) }
+              : {}),
           }))
         ),
     });
@@ -1022,6 +1341,8 @@ describe('approval coverage across workspaces', () => {
       failingInstalls,
       invitationFails,
       publishes: () => publishes,
+      published: () =>
+        [...approvals.values()].flat() as { invitations: { genesisHash: string }[] }[],
     };
   };
   const coverageOf = (
@@ -1088,5 +1409,125 @@ describe('approval coverage across workspaces', () => {
       w1: 'joined/approved',
       w2: 'joined/approved',
     });
+  });
+
+  const approveAll = (harness: ReturnType<typeof setup>, pairingString: string) =>
+    Effect.runPromise(
+      harness.approver.approveAccountPairing({
+        pairingString,
+        requestId: 'request-1',
+        workspaceIds: ['w1', 'w2'],
+      })
+    );
+
+  it('publishes the approval only after the first key delivery attempt lands, so the new device finds its key on first activation', async () => {
+    vi.useFakeTimers();
+    try {
+      const log: string[] = [];
+      const harness = setup({
+        approverHas: ['w1', 'w2'],
+        log,
+        deliverKeys: (workspaceId) =>
+          Effect.gen(function* () {
+            const firstPass = yield* Deferred.make<void>();
+            Effect.runFork(
+              Effect.sleep(100).pipe(
+                Effect.andThen(Effect.sync(() => log.push(`delivered:${workspaceId}`))),
+                Effect.andThen(Deferred.succeed(firstPass, undefined))
+              )
+            );
+            return Deferred.await(firstPass);
+          }),
+      });
+      const state = await Effect.runPromise(harness.requester.requestAccountPairing({}));
+      const approved = approveAll(harness, state.pairingString!);
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await approved).workspaces.map((item) => item.outcome)).toEqual([
+        'admitted',
+        'admitted',
+      ]);
+      expect(log).toEqual(['delivered:w1', 'delivered:w2', 'publish']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('publishes after the bounded wait when a first key delivery attempt hangs, and leaves that delivery running', async () => {
+    vi.useFakeTimers();
+    try {
+      const log: string[] = [];
+      let interrupted = false;
+      const background = Effect.runSync(Deferred.make<void>());
+      const harness = setup({
+        approverHas: ['w1'],
+        log,
+        firstKeyDeliveryWaitMs: 50,
+        deliverKeys: () =>
+          Effect.sync(() => {
+            Effect.runFork(
+              Deferred.await(background).pipe(
+                Effect.andThen(Effect.sync(() => log.push('delivered:w1'))),
+                Effect.onInterrupt(() => Effect.sync(() => (interrupted = true)))
+              )
+            );
+            return Deferred.await(background);
+          }),
+      });
+      const state = await Effect.runPromise(harness.requester.requestAccountPairing({}));
+      const approved = Effect.runPromise(
+        harness.approver.approveAccountPairing({
+          pairingString: state.pairingString!,
+          requestId: 'request-1',
+          workspaceIds: ['w1'],
+        })
+      );
+      await vi.advanceTimersByTimeAsync(49);
+      expect(log).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await approved).workspaces.map((item) => item.outcome)).toEqual(['admitted']);
+      expect(log).toEqual(['publish']);
+      Effect.runSync(Deferred.succeed(background, undefined));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(log).toEqual(['publish', 'delivered:w1']);
+      expect(interrupted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks every admitted workspace for its invitation and access at once, and still publishes them in genesis order', async () => {
+    const inFlight = new Map<string, number>();
+    const peak = new Map<string, number>();
+    const harness = setup({
+      approverHas: ['w2', 'w1'],
+      around: (step, work) => {
+        const kind = step.split(':')[0]!;
+        return Effect.gen(function* () {
+          inFlight.set(kind, (inFlight.get(kind) ?? 0) + 1);
+          peak.set(kind, Math.max(peak.get(kind) ?? 0, inFlight.get(kind)!));
+          yield* Effect.yieldNow;
+          yield* Effect.yieldNow;
+          inFlight.set(kind, inFlight.get(kind)! - 1);
+          return yield* work;
+        });
+      },
+    });
+    const state = await Effect.runPromise(harness.requester.requestAccountPairing({}));
+    await approveAll(harness, state.pairingString!);
+    expect(Object.fromEntries(peak)).toEqual({ invitation: 2, access: 2 });
+    expect(harness.published()[0]!.invitations.map((item) => item.genesisHash)).toEqual([
+      '11'.repeat(32),
+      '12'.repeat(32),
+    ]);
+  });
+
+  it("names the shown code's relay lookup key, so the approver can watch for the request the new device submits under it", async () => {
+    const harness = setup({ approverHas: ['w1'] });
+    const code = await Effect.runPromise(harness.approver.accountPairingCode());
+    expect(code.lookupId).toMatch(/^[0-9a-f]{32}$/);
+    const state = await Effect.runPromise(
+      harness.requester.requestAccountPairing({ pairingString: code.pairingString })
+    );
+    expect(state.lookupId).toBe(code.lookupId);
   });
 });

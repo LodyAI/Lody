@@ -7,6 +7,7 @@ import {
   machineFlockKeys,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
+  getMachineFlockRateLimits,
   readMachineFlockRowsFromFlock,
   type AgentConfigMeta,
   type AgentConfigId,
@@ -17,6 +18,11 @@ import {
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 import { MachineDocument } from './doc';
+import { normalizeAcpSessionCapabilities } from '@/agent/acp-capability-normalization';
+import {
+  canShowSubscriptionRateLimits,
+  getAgentRateLimitEntries,
+} from '../../../../../packages/components/src/lib/session-usage';
 
 class FakeMachineFlock implements MachineFlockWritableFlock {
   readonly rows = new Map<string, { key: MachineFlockKey; value: unknown }>();
@@ -46,6 +52,81 @@ afterEach(() => {
 });
 
 describe('MachineDocument ACP capabilities', () => {
+  it.each([
+    { cliType: 'builtin' as const, agentType: 'antigravity' },
+    { cliType: 'registry' as const, agentType: 'antigravity-acp' },
+  ])(
+    'keeps all Antigravity quota windows visible after $cliType session snapshots',
+    async (agent) => {
+      const flock = new FakeMachineFlock();
+      const document = new MachineDocument(
+        {
+          openFlockDoc: async () => ({ flock, syncOnce: async () => {} }),
+          flush: async () => {},
+        } as unknown as LoroRepo,
+        'workspace-1' as WorkspaceId,
+        'machine-1' as MachineId
+      );
+      const configId = 'quota-provider' as AgentConfigId;
+      const windows = ['Gemini Models', 'Claude and GPT models'].flatMap((label) =>
+        [604_800, 18_000].map((windowDurationSeconds) => ({
+          label,
+          windowDurationSeconds,
+          usedPercent: 25,
+          resetsAtEpochSeconds: null,
+        }))
+      );
+      await document.updateRateLimits(configId, agent.agentType, {
+        limitId: agent.agentType,
+        scope: { providerId: 'antigravity' },
+        windows,
+      });
+      const write = async (rateLimits?: { version: 1; query?: boolean }) => {
+        await document.updateAcpCapabilities(
+          configId,
+          agent.cliType,
+          agent.agentType,
+          [],
+          [],
+          undefined,
+          undefined,
+          false,
+          'same-runtime',
+          undefined,
+          false,
+          undefined,
+          { rateLimits }
+        );
+        const rows = readMachineFlockRowsFromFlock(flock);
+        const capability = getMachineFlockAcpCapabilities(rows)[configId]?.rateLimits;
+        expect(capability).toEqual({ version: 1, query: true });
+        expect(
+          canShowSubscriptionRateLimits({
+            ...agent,
+            config: { env: { LANG: 'en_US.UTF-8', HTTPS_PROXY: 'http://localhost:8080' } },
+            capability,
+          })
+        ).toBe(true);
+        expect(
+          getAgentRateLimitEntries(getMachineFlockRateLimits(rows), agent.agentType, configId)[0]
+            ?.limits.windows
+        ).toEqual(windows);
+      };
+      // Capability probing first records Lody's compatibility reader.
+      await write({ version: 1, query: true });
+      // Both a new session and a resumed session report no native Core quota extension.
+      for (const modelId of ['model-a', 'model-b']) {
+        const session = normalizeAcpSessionCapabilities(
+          {
+            models: { currentModelId: modelId, availableModels: [{ modelId, name: modelId }] },
+          },
+          { agent }
+        );
+        await write(session.rateLimits);
+      }
+    }
+  );
+
   it('keeps advertised sign-in methods when the writer did not ask the agent again', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-15T00:00:00.000Z'));

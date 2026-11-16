@@ -105,7 +105,7 @@ internal data class PreviewMenu(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, context: ChatContext, onBack: () -> Unit, onSelectTab: (String) -> Unit = {}, creation: app.lody.android.create.CreationSubmissions.Submission? = null) {
+fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, context: ChatContext, onBack: () -> Unit, onSelectTab: (String) -> Unit = {}, creation: app.lody.android.create.CreationSubmissions.Submission? = null, persistDraft: Boolean = false) {
     BackHandler(onBack = onBack)
     var retry by remember(id, scope) { mutableIntStateOf(0) }
     var status by remember(id, scope) { mutableStateOf("syncing") }
@@ -124,7 +124,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     var outgoing by remember(id, scope) { mutableStateOf(emptyList<Outgoing>()) }
     var forgetId by remember(id, scope) { mutableStateOf<String?>(null) }
     var forgotten by remember(id, scope) { mutableStateOf(emptySet<String>()) }
-    var prompt by rememberSaveable(id) { mutableStateOf("") }
+    val draftContext = LocalContext.current.applicationContext
+    var prompt by rememberSaveable(id) { mutableStateOf(if (persistDraft) ComposerDrafts.read(draftContext, scope, ComposerDrafts.session(id)) else "") }
+    // Kept on the device until sent, so leaving the page or the app dying keeps the typed text.
+    LaunchedEffect(scope, id, prompt) { if (persistDraft) ComposerDrafts.write(draftContext, scope, ComposerDrafts.session(id), prompt) }
     // The field with its caret and IME composition; the @ panel reads the trigger at the caret.
     var field by remember(id) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(prompt, androidx.compose.ui.text.TextRange(prompt.length))) }
     LaunchedEffect(prompt) {
@@ -180,6 +183,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                                         is TurnItem.Text -> item.text
                                         is TurnItem.Thought -> item.text
                                         is TurnItem.ProposedPlan -> item.markdown
+                                        // The plan a plan-approval step carries (Claude, Kimi).
+                                        is TurnItem.Tool -> item.plan ?: return@mapNotNull null
                                         else -> return@mapNotNull null
                                     }
                                     val streaming = message.streaming && item.id == growing
@@ -813,6 +818,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
                         meId = context.me?.id,
                         decideProposal = { card, accept -> repository.decideProposal(scope, id, card.entryId, card.itemId, accept) },
+                        // Only a live, open conversation takes an answer; otherwise the approval just waits.
+                        respondPermission = if (status == "live" && context.session?.isTabClosed != true) ({ entryId, itemId, requestId, optionId, answers ->
+                            repository.respondPermission(scope, id, entryId, itemId, requestId, optionId, answers)
+                        }) else null,
                     ) }
                 }
                 ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine,
@@ -1467,7 +1476,7 @@ internal fun ChatActionBar(
     panelFor: ((CatalogPullRequest) -> PullRequestPanel)? = null,
 ) {
     val context = bar.group != null || bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
-    val diff = bar.added + bar.removed > 0
+    val diff = bar.hasDiff
     if (!context && !diff && bar.actions.isEmpty() && relations == null && devices == null) return
     @Composable fun Leading(diffDot: Boolean, labelMax: Dp, modifier: Modifier = Modifier) {
         Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
@@ -1591,6 +1600,24 @@ private fun MachineItem(name: String, online: Boolean?, load: suspend () -> Mach
     }
 }
 
+@Composable
+private fun workspaceDiffLabel(bar: SessionInfoBar): String = if (bar.hasTextDiff) {
+    "+${bar.added} −${bar.removed}"
+} else {
+    pluralStringResource(R.plurals.chat_files_count, bar.files ?: 0, bar.files ?: 0)
+}
+
+@Composable
+private fun WorkspaceDiffSummary(bar: SessionInfoBar, style: androidx.compose.ui.text.TextStyle) {
+    val colors = LodyTheme.colors
+    if (bar.hasTextDiff) {
+        Text("+${bar.added}", style = style, color = colors.diffAddedText, maxLines = 1)
+        Text("−${bar.removed}", style = style, color = colors.diffRemovedText, maxLines = 1)
+    } else {
+        Text(workspaceDiffLabel(bar), style = style, color = colors.textSecondary, maxLines = 1)
+    }
+}
+
 /**
  * PR number, else branch, else the repository name without its owner, with the ±diff in the same
  * capsule (a dot when space is short; the counts then lead the menu). CI trouble tints the glyph.
@@ -1613,8 +1640,8 @@ private fun ContextItem(
     val verdict = ciVerdict(pr?.ci)
     val label = pr?.let { "#${it.number}" } ?: bar.branch.ifEmpty { bar.repository.substringAfterLast('/') }
     val copied = stringResource(R.string.bar_branch_copied)
-    val diff = bar.added + bar.removed > 0
-    val counts = "+${bar.added} −${bar.removed}"
+    val diff = bar.hasDiff
+    val counts = workspaceDiffLabel(bar)
     val showsContext = pr != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val description = listOfNotNull(bar.repository, bar.branch, label, verdict, counts.takeIf { diff })
         .filter { it.isNotEmpty() }.distinct().joinToString(", ")
@@ -1638,8 +1665,7 @@ private fun ContextItem(
             }
             if (diff && (!diffDot || !showsContext)) {
                 val style = type.subhead.copy(fontFeatureSettings = "tnum")
-                Text("+${bar.added}", style = style, color = colors.diffAddedText, maxLines = 1)
-                Text("−${bar.removed}", style = style, color = colors.diffRemovedText, maxLines = 1)
+                WorkspaceDiffSummary(bar, style)
             }
             val optionCount = (if (pr != null) 1 else 0) + (if (diff) 1 else 0) + (if (bar.branch.isNotEmpty()) 1 else 0)
             if (optionCount > 1) {
@@ -1684,11 +1710,9 @@ private fun ContextItem(
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.bar_workspace_changes), style = type.body, modifier = Modifier.width(100.dp))
-                            Text(buildAnnotatedString {
-                                withStyle(SpanStyle(color = colors.diffAddedText)) { append("+${bar.added}") }
-                                append(" ")
-                                withStyle(SpanStyle(color = colors.diffRemovedText)) { append("−${bar.removed}") }
-                            }, style = type.body.copy(fontFeatureSettings = "tnum"), maxLines = 1)
+                            Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
+                                WorkspaceDiffSummary(bar, type.body.copy(fontFeatureSettings = "tnum"))
+                            }
                         }
                     },
                     leadingIcon = { Icon(LodyIcons.Diff, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md)) },
@@ -1728,8 +1752,8 @@ private fun GroupContextItem(
     val label = if (prs.isEmpty()) repositories else "$repositories · $prCount"
     // A failing check anywhere is the one thing worth colour on the capsule.
     val failing = prs.any { (it.status == "open" || it.status == "draft") && (it.ci == "f" || it.ci == "e") }
-    val diff = bar.added + bar.removed > 0
-    val description = listOf(run.name, label, if (diff) "+${bar.added} −${bar.removed}" else "").filter { it.isNotEmpty() }.joinToString(", ")
+    val diff = bar.hasDiff
+    val description = listOf(run.name, label, if (diff) workspaceDiffLabel(bar) else "").filter { it.isNotEmpty() }.joinToString(", ")
     val member = run.members.firstOrNull { it.id == memberId }
     val memberPr = member?.pullRequest
     if (member != null && memberPr != null) {
@@ -1747,8 +1771,7 @@ private fun GroupContextItem(
                 modifier = Modifier.widthIn(max = labelMax))
             if (diff && !diffDot) {
                 val style = type.subhead.copy(fontFeatureSettings = "tnum")
-                Text("+${bar.added}", style = style, color = colors.diffAddedText, maxLines = 1)
-                Text("−${bar.removed}", style = style, color = colors.diffRemovedText, maxLines = 1)
+                WorkspaceDiffSummary(bar, style)
             }
             Icon(LodyIcons.Expand, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
         }
@@ -1781,8 +1804,7 @@ private fun GroupContextItem(
                     Icon(LodyIcons.Diff, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
                     Text(stringResource(R.string.bar_group_all_changes), style = type.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
                     val style = type.body.copy(fontFeatureSettings = "tnum")
-                    Text("+${bar.added}", style = style, color = colors.diffAddedText)
-                    Text("−${bar.removed}", style = style, color = colors.diffRemovedText)
+                    WorkspaceDiffSummary(bar, style)
                 }
             }
         }

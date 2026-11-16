@@ -257,6 +257,7 @@ function presetShowcase(presetId: string, label: string, brandId: AgentBrandId):
  * prefill share one source of truth.
  */
 const FEATURED_SHOWCASE_AGENTS: ShowcaseAgent[] = [
+  builtinShowcase('antigravity', 'Antigravity'),
   builtinShowcase('kimi', 'Kimi'),
   builtinShowcase('grok', 'Grok'),
   builtinShowcase('devin', 'Devin'),

@@ -2,9 +2,9 @@
 
 `CLAUDE.md` links here; edit this file.
 
-The 1,320-word ceiling preserves complete dispatch identity and output-lifetime rules alongside
-existing authorization and execution boundaries, including encrypted starts that run
-only signed input; the default ceiling had no room for those rules.
+The 1,340-word ceiling preserves complete dispatch identity, commit identity precedence and
+output-lifetime rules alongside existing authorization and execution boundaries, including
+encrypted starts that run only signed input; the default ceiling had no room for those rules.
 
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
@@ -19,7 +19,8 @@ only signed input; the default ceiling had no room for those rules.
   never role/author. [Rules](../orchestration/AGENTS.md).
 - Host-scope Machine/Provider credentials. Use frozen Turn identity for attribution,
   authorization and commits; trusted conversation owner for GitHub network auth.
-- Git: owner uses local config, no profile query; others never read it.
+- Git: the owner's repository identity, an approved requester, the owner's native config,
+  then LodyAI. Only a decided identity is exported as env. Non-owners never read machine config.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
   Commit attribution never restarts ACP; owner changes retire the runtime.
 
@@ -59,7 +60,7 @@ only signed input; the default ceiling had no room for those rules.
   pre-owner awaits; sealed requests retain pending history and Inbox inputs without
   marking them handled, failed or canceled. Registered Turns block recovery even
   before presence publication.
-- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), including pre-open
+- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 60s), including pre-open
   writes, never status/meta. Timeout preserves live metadata creation; disposal aborts it and releases waiters.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before
@@ -87,8 +88,8 @@ only signed input; the default ceiling had no room for those rules.
 - Completion publication follows [notification ownership](../lib/notifications/AGENTS.md).
 - No content: `recordSilentTurnFailure`, not `setDispatchHandled`. Await
   `turnProducedVisibleOutput` before `finalizeTurn`; finalize, advance pointers, fail open.
-- Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
-  semantics; `session-diff-stats-target.ts` skips, never overwrites, a good total.
+- Turn summaries and diff content share CLI-local ACP evidence. Git statistics never populate turn history.
+  Workspace totals follow [Code Collab rules](../lib/code-collab/AGENTS.md#invariants).
 
 ## Lifecycle
 

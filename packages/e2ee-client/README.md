@@ -188,7 +188,27 @@ Core retains and verifies receive/report/distribution originals; the shared fini
 maintenance owner acknowledges only observed terminal results, including a
 successful sibling when another phase failed. There is no plaintext fallback.
 
+Management rotation checks the locally installed current key before receiving.
+It confirms and installs the staged publication before returning; mailbox distribution
+runs afterwards under the existing session, reports failures, and cannot reopen a
+closed reader. Automatic pairing borrows its own temporary reader when activation
+has already closed, then releases only that reader after checking or receiving keys.
+
 ## Account-wide pairing workflow
+
+Upgraded hosts use one batch ledger append, one relay publication with locally
+prepared outbox envelopes, and one claim with live mailbox previews. Member-only
+approvals also batch their required full-history reads. With stable heads and
+single-page histories, the approval-to-current-key path uses three requests for
+snapshot approvals, or four when full history is required, for 1–64 workspaces.
+Long histories, conflicts and retries retain ordinary pagination and may need more
+requests. Advisory checkpoint equality skips a refresh without advancing a pin.
+Verified request bytes are cached in memory, bounded and expiry-checked; every
+signature still rechecks their MAC. Inline admission originals must match the
+MAC-authenticated record hash and cached verified genesis/member before snapshot
+acceptance. KeyReceiver verifies each preview frame and installs the actual key.
+Absent capabilities, unusable previews and older relays retain ordinary reads and
+idempotent original delivery. No key material is added to the relay.
 
 `@lody/e2ee-client/account-pairing` is the shared account-wide personal device pairing
 workflow ([foundations Spec](../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)).
@@ -278,6 +298,21 @@ frozen for the attempt; use the help action to cancel and start again with anoth
 device if that responder quits. Transient errors retry exact originals. Approval
 means verified admission; the content route still opens its reader and installs the
 current key before use. Public relay terminal state cannot grant access.
+
+Syncing is not authority either. A request reaches `syncing` from verified admission
+or from a retained personal credential, and keeps retrying while key reception or
+status fails for ordinary reasons (offline, timeouts, other refusals); slow delivery
+never expires it. It ends as `revoked` or `removed` only when the application's
+injected `accessLoss` recognizer (the product's `e2eeAccessLoss`) classifies a
+`status`, `open` or receive `refresh` failure as this device's exact loss for that
+workspace. A completed (`joined`) request stays retained, but each page read or start
+asks the host's `status` once more, without a key round or a request, and an exact
+loss found there replaces `joined`; other failures keep it. A start whose first
+`status` reports the exact loss shows it instead of requesting approval. That outcome is terminal for the request: expiry, polling, a credential
+that still reads as present and a late key cannot turn it back into an admission,
+and other workspaces are unaffected. Only an explicit new start pairs a revoked
+device again, as a fresh request without the retained-credential shortcut; a
+removed member needs a new invitation, and a new start only re-verifies.
 
 A renderer reload can lose its automatic exchange while the native account owner
 still holds the previous request. Recovery shows that request's workspace names

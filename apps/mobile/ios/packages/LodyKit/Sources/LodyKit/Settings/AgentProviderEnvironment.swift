@@ -81,9 +81,7 @@ final class AgentProviderEnvironment: UIStackView {
   private func rebuild() {
     rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
     for name in Set(keys).union(patch.keys).sorted() where !protectedKeys.contains(name) {
-      let mode = UIButton(type: .system)
-      mode.showsMenuAsPrimaryAction = true
-      mode.accessibilityIdentifier = "provider-env-mode:\(name)"
+      let mode = UIButton.lodyFormPicker("provider-env-mode:\(name)")
       let field = LodyFormField(id: "provider-env:\(name)", label: AgentProviderSections.text("envValue"), text: (patch[name] ?? nil) ?? "", limit: 32000)
       field.isSecureTextEntry = true
       field.textContentType = nil
@@ -92,7 +90,7 @@ final class AgentProviderEnvironment: UIStackView {
       let action: String
       if let change = patch[name] { action = change == nil ? "envRemove" : "envReplace" }
       else { action = "envKeep" }
-      mode.setTitle(AgentProviderSections.text(action), for: .normal)
+      mode.configuration?.title = AgentProviderSections.text(action)
       field.isHidden = action != "envReplace"
       field.changed = { [weak self, weak field] in
         self?.patch.updateValue(field?.text ?? "", forKey: name)
@@ -112,7 +110,7 @@ final class AgentProviderEnvironment: UIStackView {
           self.changed?()
         }
       })
-      rows.addArrangedSubview(LodyFormGroup(LodyFormRow(label: name, content: mode), field))
+      rows.addArrangedSubview(LodyFormGroup(LodyFormRow(label: name, content: mode, picker: true), field))
     }
     setEditable(editable)
   }

@@ -28,9 +28,28 @@ export const useSetAtom = () => noop;
 export const useAtomValue = () => false;
 export const e2eeRecoveryVaultFeatureEnabledAtom = {};
 export const getIpcServices = () => undefined;
+// Matches the recovery switch above: no passkey recovery port.
+export const useRecoveryPort = () => null;
+export const useE2eeRecoverySection = () => undefined;
+export const useWorkspaceRecoveryReady = () => undefined;
 export const isElectronRenderer = () => false;
 export const isNativeAppShell = () => false;
 export const setWorkspaceContextAtom = {};
+export const mintAdmittedWorkspaceTicket = (input: {
+  accountId: string;
+  slug: string;
+  workspaceId: string;
+  hasDeviceCredential: boolean;
+  hasCurrentKey: boolean;
+}) =>
+  input.hasDeviceCredential && input.hasCurrentKey
+    ? {
+        accountId: input.accountId,
+        slug: input.slug,
+        workspaceId: input.workspaceId,
+      }
+    : null;
+export const runtimeInitializingAtom = {};
 export const useE2eeAccountId = () => fixture.accountId;
 export const usePlatform = () => ({ e2eeWorkspaces: fixture.port });
 export const usePlatformSession = () => ({
@@ -89,6 +108,10 @@ export const E2eeAutomaticPairingPage = () => null;
 export const E2eeAccountPairingRequest = () => null;
 export const E2eeAccountPairingApprove = () => null;
 export const E2eeAccountPairingKeyRetry = () => null;
+// The lost-access entry is a styled display page; this suite exercises the route.
+export const E2eeLostAccessEntry = () => null;
+// No hosted account here, so the lost-access page offers no workspace removal.
+export const useE2eeWorkspaceRemoval = () => undefined;
 // The approval guide replaces the full page only for devices that still need approval.
 export const E2eeDeviceApprovalGuide = () =>
   createElement('output', { 'data-approval-guide': true });

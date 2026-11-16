@@ -13,13 +13,17 @@ import app.lody.android.runtime.TurnItem
  *   run before the never-folded tail (plans, checklists, notices) — and folds the earlier work
  *   under one "Worked for …" row, but only when such an answer exists: a cancelled or tool-only
  *   turn stays expanded.
+ * - Plans (web `assistant-message-render-items.ts`): in a turn with a `proposed_plan`, the plans move
+ *   just before the plan-approval (`switch_mode`) step — read the plan, then the decision — or to
+ *   the turn's end without one, and the agent's images and files follow them at the end.
  */
 object TurnLayout {
     sealed interface Block { val key: String }
 
     data class Content(override val key: String, val item: TurnItem) : Block
 
-    data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary) : Block
+    /** [attention]: a step waits on the reader's answer, so the group stays open and never folds (web). */
+    data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary, val attention: Boolean = false) : Block
 
     data class Summary(
         val thought: Boolean = false,
@@ -41,6 +45,13 @@ object TurnLayout {
         val folded: Boolean,
         /** Background tasks and sub-agents: one panel after the turn, outside its blocks (web). */
         val tasks: List<TurnItem.Task> = emptyList(),
+        /**
+         * The turn shows its plan as its own `proposed_plan` row (Codex, web `hasSeparatePlanItem`), so
+         * a plan-approval step must not repeat the plan it carries.
+         */
+        val separatePlan: Boolean = false,
+        /** A plan approval in this turn still waits on the reader (web `hasUnansweredPlanApproval`). */
+        val planAwaiting: Boolean = false,
     ) {
         /** Only a final visible activity is live; tasks/footer bookkeeping is outside these blocks. */
         fun activeActivityKey(working: Boolean): String? =
@@ -52,21 +63,23 @@ object TurnLayout {
 
     fun build(turnId: String, items: List<TurnItem>, finished: Boolean, showThoughts: Boolean): Layout {
         val tasks = items.filterIsInstance<TurnItem.Task>()
-        val shown = items.filter { item ->
+        val shown = planOrder(items.filter { item ->
             when (item) {
                 is TurnItem.Thought -> showThoughts
                 is TurnItem.Tool -> item.kind != "think"
                 is TurnItem.Task -> false
                 else -> true
             }
-        }
+        })
+        val separatePlan = shown.any { it is TurnItem.ProposedPlan }
+        val planAwaiting = shown.any { it is TurnItem.Tool && it.kind == "switch_mode" && it.permission?.pending == true }
         val blocks = mutableListOf<Block>()
         var pending = mutableListOf<TurnItem>()
         // The image stack later images may still join: only activity blocks may follow it.
         var stack: Int? = null
         fun flush() {
             val first = pending.firstOrNull() ?: return
-            blocks += Activity("$turnId:activity:${first.id}", pending, summarize(pending))
+            blocks += Activity("$turnId:activity:${first.id}", pending, summarize(pending), pending.any(::awaitsAnswer))
             pending = mutableListOf()
         }
         for (item in shown) {
@@ -94,19 +107,37 @@ object TurnLayout {
             }
         }
         flush()
-        if (!finished) return Layout(blocks, emptySet(), folded = false, tasks)
+        if (!finished) return Layout(blocks, emptySet(), folded = false, tasks, separatePlan, planAwaiting)
 
         val answerStart = finalTextRunStart(shown)
         val collapsible = shown.withIndex().filter { (index, item) ->
             shown.size > 1 && index < shown.size - 1 && !(item is TurnItem.Text && index >= answerStart) && !neverFolded(item)
         }.map { it.value.id }.toSet()
         val work = blocks.filter { block ->
-            block is Activity || (block is Content && block.item.id in collapsible)
+            (block is Activity && !block.attention) || (block is Content && block.item.id in collapsible)
         }.map { it.key }.toSet()
         // Fold only when something stays visible below: otherwise nothing would answer the turn.
         val folded = work.isNotEmpty() && blocks.any { it.key !in work }
-        return Layout(blocks, if (folded) work else emptySet(), folded, tasks)
+        return Layout(blocks, if (folded) work else emptySet(), folded, tasks, separatePlan, planAwaiting)
     }
+
+    /**
+     * Web `buildAssistantMessageRenderItems`: without a `proposed_plan` the turn keeps its order;
+     * with one, plans go just before the first plan-approval step (else last) and images and
+     * files follow at the end.
+     */
+    internal fun planOrder(items: List<TurnItem>): List<TurnItem> {
+        if (items.none { it is TurnItem.ProposedPlan }) return items
+        val plans = items.filterIsInstance<TurnItem.ProposedPlan>()
+        val attachments = items.filter { it is TurnItem.Images || it is TurnItem.File }
+        val rest = items.filter { it !is TurnItem.ProposedPlan && it !is TurnItem.Images && it !is TurnItem.File }
+        val exit = rest.indexOfFirst { it is TurnItem.Tool && it.kind == "switch_mode" }
+        val ordered = if (exit < 0) rest + plans else rest.take(exit) + plans + rest.drop(exit)
+        return ordered + attachments
+    }
+
+    /** A step whose permission request still waits on the reader. */
+    internal fun awaitsAnswer(item: TurnItem): Boolean = item is TurnItem.Tool && item.permission?.pending == true
 
     /** Thought and tool steps fold into groups; a plan-approval (`switch_mode`) step stays content. */
     private fun isActivity(item: TurnItem): Boolean =

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { SessionChatActionContext } from '../src/components/ai-gui/view';
 import {
@@ -9,14 +10,12 @@ import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom } from '../src/atoms';
 import { LocalAttachmentCard } from '../src/components/ai-gui/view';
 import * as fileSaver from '../src/lib/download-file';
-// @vitest-environment jsdom
 
 // The card's second action exists for exactly one gap: an HTML attachment's
 // click opens the RENDERED page, so without it the uploaded source bytes have
 // no route at all. Every other previewable file downloads from inside the
 // preview dialog and must NOT grow a duplicate control.
 
-// @vitest-environment jsdom
 // The card's second action exists for exactly one gap: an HTML attachment's
 // click opens the RENDERED page, so without it the uploaded source bytes have
 // no route at all. Every other previewable file downloads from inside the

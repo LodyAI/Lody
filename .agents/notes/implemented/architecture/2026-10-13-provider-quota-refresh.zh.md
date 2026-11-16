@@ -8,11 +8,11 @@ PR: https://github.com/LodyAI/Lody/pull/1535
 
 ## 摘要
 
-Composer 和 Agent 设置原先只展示缓存额度，没有主动获取当前值。Lody 现在把 Core 已有的 `rateLimits` 能力投影到 Provider 缓存，在符合条件的界面可见时发起独立查询。daemon 拥有短生命周期 ACP 进程并独立查询；Core 查询不创建会话，官方 registry Antigravity 使用隔离的 `/usage` 会话。失败或语义含糊的空结果保留原额度；完整快照替换和更新时间仍留待后续实现。
+Composer 和 Agent 设置原先只展示缓存额度，没有主动获取当前值。Lody 现在把 Core 已有的 `rateLimits` 能力投影到 Provider 缓存，在符合条件的界面可见时发起独立查询。daemon 拥有短生命周期 ACP 进程并独立查询；Core 查询不创建会话，旧 registry Antigravity 使用隔离的 `/usage` 会话，内置 Antigravity 使用 agy 的零轮次 JSON 命令。失败或语义含糊的空结果保留原额度；完整快照替换和更新时间仍留待后续实现。
 
 ## 契约与职责
 
-Core 已定义 `_lody/rate_limits/get` 和 `{version: 1, query?: true}`，本次不修改 Core、adapter、托管产物或依赖版本。展示要求运行时能力声明或官方 registry Antigravity 兼容读取器；刷新额外要求 `query: true` 和 Machine 协议 `providerRateLimitsRefresh: 1`。仅支持推送的 Provider 可以展示缓存。builtin 的环境变量／品牌覆盖配置和 Codex API-key profile 仍不适用；自定义 ACP Provider 对自己声明的账户语义负责。
+Core 已定义 `_lody/rate_limits/get` 和 `{version: 1, query?: true}`，共享查询契约保持不变。展示要求运行时能力声明或官方 Antigravity 兼容读取器；刷新额外要求 `query: true` 和 Machine 协议 `providerRateLimitsRefresh: 1`。仅支持推送的 Provider 可以展示缓存。builtin 的凭据／账户覆盖配置、品牌路由和 Codex API-key profile 仍不适用；自定义 ACP Provider 对自己声明的账户语义负责。
 
 共享 UI hook 在 composer／Provider 激活、页面回到前台、popover 打开时刷新。workspace runtime 合并请求，使用已有本地控制或 Machine RPC 路由，随后协调已有 Flock handle。没有轮询、新订阅、猜测百分比或加载遮罩。
 
@@ -20,13 +20,19 @@ RPC 只接受已保存的 config ID 和路由标识。daemon 固定配置，复�
 
 请求按 Provider 和配置指纹共享所有者：成功缓存 15 秒，失败退避 5 秒，限制已完成元数据数量。并发启动沿用 ACP admission。配置变更等待前一个底层操作结束。UI 卸载不会终止共享工作。进程启动后查询超时为 20 秒，总体 signal 为 45 秒。
 
-## 官方 Antigravity 兼容
+## 旧版 Antigravity 兼容
 
 Google registry ACP server 1.4.5 声明 `/usage`，但未声明 Core `rateLimits` 扩展。Lody 为该 registry 条目投影自己的查询能力。查询检查服务端身份，创建独立临时目录和不带 MCP server 的 ACP 会话，等待该会话声明命令后才发送 `/usage`。缺失命令不会变成模型 prompt。同名自定义 agent 只有自行声明 Core 能力才支持查询。
 
 分块 Markdown 的额度章节转换为一个 Provider 级 bucket，每个周／五小时窗口保留模型组名称，让现有设置与 composer 读取器展示所有组，无需猜测模型与额度池的关系。剩余百分比转换为已用百分比；零仍代表耗尽，缺失或无法解析的 UTC 重置时间保持未知。输出有大小限制；未完成、不可用或格式错误的结果失败并保留缓存。不写入 Lody 历史；上游仍可能保留自己的临时会话元数据。
 
 所选 Provider 的官方可执行文件及账户环境保持权威。单独的 `agy` 可能选中不同登录；Google 私有接口则需要另一套凭据读取器和未公开协议。既有进程所有者、超时、清理隔离及配置／推送检查继续生效。确认进程清理后才移除临时目录；无法确认进程树结束时，隔离的 Provider 保留该目录。外部 ACP SDK 仍是 Promise 边界，此兼容查询不宣称完成原生 Effect 迁移。
+
+## 内置 Antigravity
+
+内置 Provider 运行官方 agy，额度查询使用与 ACP 会话相同的已选可执行文件和账户环境。它执行 `--print /usage --output-format json`，要求返回成功的 `usage` 命令且 `num_turns: 0`，严格验证每组 weekly／5h 的剩余比例和重置时间。Lody 不读取凭据。额外启动参数和 Magpie 路由暂不支持此读取器，避免查询到另一个账户。输出未知或格式错误时保留缓存额度。内置 Antigravity 允许经过核对的代理和语言环境设置，未知环境变量仍不适用。探测与真实会话快照投影相同的兼容能力，原生 Core 声明保持优先，避免缓存 writer 一概保留过时能力。
+
+这个有时限的只读子进程由原生 Effect 命令持有：Provider 刷新触发它，取消／超时终止进程树，完成和失败交回既有刷新所有者。不创建 ACP 会话或模型轮次。上层 Provider 缓存与 ACP 流程仍保留既有 Promise 边界。新 builtin 使用独立身份；弃用的 registry Provider 保留旧启动器和会话，不做静默改写。
 
 ## 持久化与顺序
 

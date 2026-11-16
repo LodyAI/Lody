@@ -1,5 +1,6 @@
 import type {
   E2eeWorkspaceCreateRequest,
+  E2eeAccountPairingMailboxPreview,
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest,
@@ -97,6 +98,15 @@ export interface PlatformE2eeWorkspaces {
 }
 
 /** Public status of a host-owned runtime. No secret key material crosses this port. */
+/** Scope of the key round after a ledger refresh; see {@link E2eeRuntimePort.refresh}. */
+export type E2eeRefreshKeyMode = 'none' | 'receive' | 'distribute' | 'full';
+export interface E2eeRefreshOptions {
+  /** Legacy switch: `false` skips the key round when `keyMode` is absent. */
+  readonly installKeys?: boolean;
+  readonly keyMode?: E2eeRefreshKeyMode;
+  /** Optional narrowing filter (device signing keys) for immediate post-admission distribution. */
+  readonly recipients?: readonly string[];
+}
 export interface E2eeRuntimeStatus {
   readonly workspaceId: string;
   readonly genesisHash: string;
@@ -165,7 +175,11 @@ export interface E2eeAccountApprovalSession {
     encryptionPublicKey: Uint8Array;
     possessionProof: Uint8Array;
   }): Promise<{ requestId: string; record: Uint8Array }>;
-  settle(record: Uint8Array): Promise<'committed' | 'lost' | 'unknown'>;
+  settle(record: Uint8Array, refresh?: boolean): Promise<'committed' | 'lost' | 'unknown'>;
+  /** Optional local transport optimizations; all originals pass the existing verifier. */
+  checkpoint?(): Promise<{headHash: string; length: number; position?: string}>;
+  ingest?(page: E2eeWorkspaceHistoryPage): Promise<void>;
+  prepareDelivery?(recipient: string): Promise<{id: string; frameHex: string} | null>;
   invitation(record: Uint8Array): Promise<Uint8Array | null>;
   access(): Promise<{ workspaceId: string; credential: string }>;
   refresh(): Promise<void>;
@@ -193,6 +207,8 @@ export interface E2eeWorkspaceRuntime
   /** Portable hosts that can sign an account-pairing admission from an already
    * approved workspace session. Absence keeps the approver surface hidden. */
   accountApproval?(workspaceId?: string): Promise<E2eeAccountApprovalSession>;
+  /** Receive after verified account admission, before requesting any new history. */
+  activateAccountPairing?(workspaceId: string, preview?: E2eeAccountPairingMailboxPreview): Promise<void>;
   readMachineSharing?(
     workspaceId: string,
     machineId: string
@@ -321,8 +337,14 @@ export interface E2eeWorkspaceRuntime
     workspaceId: string,
     pairingSessionId: string
   ): Promise<{ admitted: true; ready: boolean }>;
-  /** Ledger-only refresh separates discovery from retryable background key reception. */
-  refresh(workspaceId: string, options?: { installKeys?: boolean }): Promise<E2eeRuntimeStatus>;
+  /**
+   * Ledger refresh, then an optional key round. `keyMode` selects its scope: `none`
+   * skips it, `receive` only installs this device's current key, `distribute` only
+   * sends this device's deliveries, `full` runs every phase. Without `keyMode`,
+   * `installKeys: false` means `none` and `installKeys: true` means `full`; omitted
+   * options keep each host's prior default (desktop `full`, portable `none`).
+   */
+  refresh(workspaceId: string, options?: E2eeRefreshOptions): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,

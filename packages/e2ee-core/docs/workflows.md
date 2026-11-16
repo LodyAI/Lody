@@ -57,6 +57,11 @@ A record signed by a device that was revoked meanwhile ends as `Conflict`
 without re-signing. The journal keeps the newest observed log checkpoint and
 refuses a log that rolled back.
 
+If an independently verified local view already contains the exact signed original,
+submission confirms it locally, including when that view has advanced further.
+The journal checkpoint must still belong to that verified history. Push hints and
+append replies alone are never commitment proof.
+
 For an explicit pre-CAS `LedgerLogError.reason = self-service-rate-limited`, P09 releases only a newly created self-service slot at its unchanged first-attempt revision, preserves its checkpoint and returns `retryAt`. SQLite and IndexedDB atomically compare original/checkpoint/revision. Existing SQLite journals gain only revision metadata, preserving pending originals and checkpoints. Unknown outcomes, older pending entries, competing attempts and generic HTTP 429 retain their originals; a later refusal cannot erase an earlier possibly committed request.
 
 ## InstalledEpochKeys and InstalledEpochHistory
@@ -146,6 +151,11 @@ _Requires the receiver's ports plus `KeyReceiver`, `DeliveryOutbox`,
 `DistributionJournal`, `EpochPublicationSource`._
 
 Makes sure every current device can obtain the current key.
+
+Optional `prepareDelivery(recipient)` authenticates and retains the same immutable
+outbox original using the installed current key, without mailbox I/O. Account-wide
+batch relays send this `{ id, frame }`; its completion never claims recipient
+custody. Ordinary distribution reuses that exact original after retries or reopen.
 
 ```text
 reconcileCurrentEpoch()     recipients from the verified ledger (never the server)

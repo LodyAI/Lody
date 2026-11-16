@@ -61,6 +61,18 @@ semantic headings and the app process survive. Run it in light and dark with:
 pnpm verify:ui --case home-grouping-crash --require-video --app /absolute/path/to/Lody.app
 ```
 
+`pad-layout` checks rotation and size-class changes with a retained conversation,
+its draft and sheets, and returns to Chats to exercise a row after each compact
+handoff. Its width overrides preserve window bounds and do not simulate a held
+resize handle. For window-resize changes, also enable Windowed Apps on a leased
+iPad Simulator and record a physical corner drag across the compact/regular
+boundary: enlarge then shrink without lifting, shrink then enlarge, and enlarge
+then shrink with a release between them. Check Chats rows and Schedules after
+release, including gestures that end on either side of the boundary. A live
+process alone is insufficient: a detached list can leave an otherwise responsive
+tab bar above blank content. AXe 1.8 derives landscape touch mapping from the app
+window; use portrait hardware coordinates for this windowed check.
+
 The native boundaries are `LodyShell`, `AuthSession`, `CatalogSession`,
 `OutboxSession`, `LodyCore.AppRouting`, and feature preview controllers.
 Add checks to the runner inventory and exercise production controllers.

@@ -56,6 +56,7 @@ export function registerProjects(ctx: RuntimeContext) {
       ),
       refreshMissing.rows(state.workspace),
     );
+    if (args.includeOffline) return options as CreationOptionsWire;
     const available = availableCreationOptions(
       options,
       state.presence,

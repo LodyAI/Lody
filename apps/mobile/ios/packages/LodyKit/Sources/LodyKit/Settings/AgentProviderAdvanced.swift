@@ -16,7 +16,7 @@ final class AgentProviderAdvanced: UIStackView {
   private var codexSupported = false
   private var codexMode = "chatgpt"
   private let profileID = UUID().uuidString.lowercased()
-  private let codexChoice = UIButton(type: .system)
+  private let codexChoice = UIButton.lodyFormPicker("provider-codex-mode")
   private let codexEndpoint = LodyFormField(id: "provider-codex-endpoint", label: AgentProviderSections.text("endpoint"), text: "https://api.openai.com/v1", limit: 2048)
   private var codexGroup: LodyFormGroup!
   private let unavailable = LodyFormGroup.caption()
@@ -26,8 +26,8 @@ final class AgentProviderAdvanced: UIStackView {
   private let endpoint = LodyFormField(id: "provider-endpoint", label: AgentProviderSections.text("endpoint"), text: "", limit: 2048)
   private let descriptionField = LodyFormField(id: "provider-description", label: AgentProviderSections.text("description"), text: "", limit: 4096)
   private let runtimePath = LodyFormField(id: "provider-runtime-path", label: AgentProviderSections.text("runtimePath"), text: "", limit: 4096)
-  private let credentialMode = UIButton(type: .system)
-  private let endpointChoice = UIButton(type: .system)
+  private let credentialMode = UIButton.lodyFormPicker("provider-credential-mode")
+  private let endpointChoice = UIButton.lodyFormPicker("provider-endpoint-choice")
   private let titleRows = UIStackView()
   private let environment = AgentProviderEnvironment()
   private var credentialsGroup: LodyFormGroup!
@@ -54,10 +54,6 @@ final class AgentProviderAdvanced: UIStackView {
       self.runtimePatch[key] = self.runtimePath.trimmed.isEmpty ? .null : .string(self.runtimePath.trimmed)
       self.changed?()
     }
-    credentialMode.accessibilityIdentifier = "provider-credential-mode"
-    credentialMode.showsMenuAsPrimaryAction = true
-    endpointChoice.accessibilityIdentifier = "provider-endpoint-choice"
-    endpointChoice.showsMenuAsPrimaryAction = true
     titleRows.axis = .vertical
     titleRows.spacing = 8
     credentialsGroup = LodyFormGroup(header: text("credentials"), footer: text("credentialWriteOnly"),
@@ -66,8 +62,6 @@ final class AgentProviderAdvanced: UIStackView {
     titleGroup = LodyFormGroup(header: text("titleGeneration"), footer: text("titleHint"), titleRows)
     addArrangedSubview(LodyFormGroup(descriptionField))
     addArrangedSubview(credentialsGroup)
-    codexChoice.showsMenuAsPrimaryAction = true
-    codexChoice.accessibilityIdentifier = "provider-codex-mode"
     codexEndpoint.autocapitalizationType = .none
     codexEndpoint.autocorrectionType = .no
     codexGroup = LodyFormGroup(header: text("credentials"), footer: text("codexCredentials"), codexChoice, codexEndpoint)
@@ -146,7 +140,7 @@ final class AgentProviderAdvanced: UIStackView {
     unavailable.text = option?.agentType == "sorbet" ? text(reason) : nil
     unavailable.isHidden = option?.agentType != "sorbet"
     codexGroup.isHidden = option?.agentType != "codex" || option?.cliType != "builtin" || !codexSupported
-    codexChoice.setTitle(codexMode == "chatgpt" ? "ChatGPT" : text("customAPI"), for: .normal)
+    codexChoice.configuration?.title = codexMode == "chatgpt" ? "ChatGPT" : text("customAPI")
     codexChoice.menu = UIMenu(children: ["chatgpt", "api-key"].map { mode in
       UIAction(title: mode == "chatgpt" ? "ChatGPT" : text("customAPI"), state: mode == codexMode ? .on : .off) { [weak self] _ in
         self?.codexMode = mode
@@ -158,7 +152,7 @@ final class AgentProviderAdvanced: UIStackView {
 
     credentialsGroup.isHidden = preset == nil && !isDeepSeek
     credentialMode.isHidden = (preset?.modes.count ?? 0) < 2
-    credentialMode.setTitle(mode?.name, for: .normal)
+    credentialMode.configuration?.title = mode?.name
     credentialMode.menu = UIMenu(children: (preset?.modes ?? []).map { next in
       UIAction(title: next.name, state: next.id == mode?.id ? .on : .off) { [weak self] _ in
         self?.presetChanged = true
@@ -170,7 +164,7 @@ final class AgentProviderAdvanced: UIStackView {
       }
     })
     endpointChoice.isHidden = (mode?.endpoints.isEmpty ?? true)
-    endpointChoice.setTitle(text("chooseEndpoint"), for: .normal)
+    endpointChoice.configuration?.title = text("chooseEndpoint")
     endpointChoice.menu = UIMenu(children: (mode?.endpoints ?? []).map { next in
       UIAction(title: next.name) { [weak self] _ in
         self?.presetChanged = true
@@ -202,14 +196,12 @@ final class AgentProviderAdvanced: UIStackView {
       options.append(.init(id: "mode", name: text("mode"), type: "select", choices: capabilities.modes))
     }
     for option in options {
-      let button = UIButton(type: .system)
-      button.showsMenuAsPrimaryAction = true
-      button.accessibilityIdentifier = "provider-title:\(option.id)"
+      let button = UIButton.lodyFormPicker("provider-title:\(option.id)")
       let value = titleValues[option.id] ?? option.value
       var choices = option.choices.map { ($0.id, $0.name, ProviderJSON.string($0.id)) }
       if option.type == "boolean" { choices = [("true", text("enabled"), .bool(true)), ("false", text("disabled"), .bool(false))] }
       let label = choices.first { $0.2 == value }?.1 ?? text("default")
-      button.setTitle(label, for: .normal)
+      button.configuration?.title = label
       let reset = UIAction(title: text("default"), state: titleValues[option.id] == nil ? .on : .off) { [weak self] _ in
         self?.titleValues.removeValue(forKey: option.id)
         self?.titleChanged = true
@@ -224,7 +216,7 @@ final class AgentProviderAdvanced: UIStackView {
           self?.changed?()
         }
       })
-      titleRows.addArrangedSubview(LodyFormRow(label: option.name, content: button))
+      titleRows.addArrangedSubview(LodyFormRow(label: option.name, content: button, picker: true))
     }
   }
 

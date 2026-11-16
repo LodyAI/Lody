@@ -729,20 +729,43 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Kimi Code');
     expect(
       getOptionButtons()
-        .slice(0, 7)
+        .slice(0, 10)
         .map((option) => option.textContent)
     ).toEqual([
+      expect.stringContaining('Codex'),
+      expect.stringContaining('Claude'),
+      expect.stringContaining('Antigravity'),
+      expect.stringContaining('DeepSeek Harness'),
+      expect.stringContaining('Grok'),
+      expect.stringContaining('Pi'),
       expect.stringContaining('Kimi Code'),
       expect.stringContaining('Devin'),
-      expect.stringContaining('Grok'),
-      expect.stringContaining('Claude'),
-      expect.stringContaining('Codex'),
-      expect.stringContaining('DeepSeek Harness'),
-      expect.stringContaining('Pi'),
+      expect.stringContaining('Bub'),
+      expect.stringContaining('Dimcode'),
     ]);
     expect(getOptionButtons().some((option) => option.textContent?.includes('Lody Agent'))).toBe(
       false
     );
+    expect(
+      getOptionButtons().some((option) => option.textContent?.includes('DeepSeek over Claude Code'))
+    ).toBe(false);
+    expect(
+      getOptionButtons()
+        .slice(10, 14)
+        .map((option) => option.textContent)
+    ).toEqual([
+      expect.stringContaining('GLM over Claude Code'),
+      expect.stringContaining('MiMo over Claude Code'),
+      expect.stringContaining('MiniMax over Claude Code'),
+      expect.stringContaining('Custom command'),
+    ]);
+    expect(
+      listAddableProviders(i18next.t).some(
+        (provider) =>
+          provider.key === 'preset:deepseek-over-claude-code' ||
+          provider.key === 'preset:deepseek-reasonix'
+      )
+    ).toBe(false);
 
     await act(async () => {
       getOptionByText('Custom command').dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -754,6 +777,57 @@ describe('AgentConfigDialog', () => {
 
     expect(getSelectedOption()?.textContent).toContain('Custom command');
     expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
+  });
+
+  it('offers managed Antigravity without exposing its deprecated registry launcher', async () => {
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION })
+    );
+    const providers = listAddableProviders(i18next.t);
+    expect(providers.some((p) => p.cliType === 'builtin' && p.agentType === 'antigravity')).toBe(
+      true
+    );
+    expect(providers.some((p) => p.agentType === 'antigravity-acp')).toBe(false);
+    const option = getOptionButtons().find((b) => b.textContent?.includes('Antigravity'));
+    expect(option).toBeDefined();
+    await act(async () => option?.click());
+    expect(document.body.querySelector('#custom-acp-command')).toBeNull();
+    expect(getSelectedOption()?.textContent).toContain('Antigravity');
+  });
+
+  it('saves the Antigravity skip-permissions launch choice only on capable machines', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const mode: AgentConfigDialogMode = {
+      kind: 'edit',
+      config: createBuiltinConfig({
+        id: 'agy-config' as AgentConfigId,
+        name: 'Antigravity',
+        agentType: 'antigravity',
+      }),
+    };
+    const toggle = () =>
+      document.querySelector<HTMLButtonElement>('#antigravity-skip-permissions')!;
+
+    await renderDialog(mode, createMachine('Old daemon'));
+    expect(toggle().disabled).toBe(true);
+    expect(document.body.textContent).toContain('Update Lody on this machine');
+
+    await renderDialog(
+      mode,
+      createMachine('Workstation', { antigravitySkipPermissions: 1 }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      })
+    );
+    expect(toggle().disabled).toBe(false);
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    await act(async () => toggle().click());
+    await act(async () => getPrimaryAction('Save').click());
+    expect(saved.at(-1)?.runtimeOverrides).toEqual({ antigravitySkipPermissions: true });
+    await act(async () => toggle().click());
+    await act(async () => getPrimaryAction('Save').click());
+    expect(saved.at(-1)?.runtimeOverrides).toBeUndefined();
   });
 
   it('leaves Lody Agent to its own settings page even while its beta is on', async () => {

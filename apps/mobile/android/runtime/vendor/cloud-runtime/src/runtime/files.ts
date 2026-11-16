@@ -189,11 +189,6 @@ export async function turnDiff(
     ctx.getGrant,
     ctx.signal,
   )) as DiffResponse;
-  if (
-    response.status === 'unavailable' &&
-    response.reason === 'turn_unavailable'
-  )
-    return fileDiff(ctx, { sessionId: args.sessionId, path: args.path });
   return toDiffResult(response, 'turn');
 }
 

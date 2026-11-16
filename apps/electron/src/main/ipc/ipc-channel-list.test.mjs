@@ -5,38 +5,8 @@ import { isClientLossProbeChannel, isIpcInvokeChannel } from '../../preload/ipc-
 
 void test('invoke policy allows methods only within renderer-facing service groups', () => {
   assert.equal(isIpcInvokeChannel('auth.getSession'), true)
-  for (const method of [
-    'createMemberInvitation',
-    'pendingMemberJoin',
-    'prepareMemberJoin',
-    'memberJoinRequests',
-    'approveMemberJoin',
-    'memberKeyDeliveries',
-    'retryMemberKeyDelivery',
-    'rejectMemberJoin',
-    'revokeMemberInvitation',
-    'claimMemberJoin',
-    'personalPairingOffer',
-    'pendingPersonalJoin',
-    'preparePersonalJoin',
-    'inspectPersonalJoin',
-    'approvePersonalJoin',
-    'claimPersonalJoin',
-    'cancelPersonalJoin',
-    'prepareCreation',
-    'recordCreated',
-    'open',
-    'close',
-    'status',
-    'inspectCachedState',
-    'readIdentity',
-    'ingestLedgerRecords',
-    'ledgerView',
-    'managementState',
-    'updateKeys',
-    'revokeDevice'
-  ])
-    assert.equal(isIpcInvokeChannel(`e2ee.${method}`), true)
+  // Full @IpcMethod() parity for E2eeIpc is verified dynamically in e2ee-account-runtime.test.mjs.
+  assert.equal(isIpcInvokeChannel('e2ee.open'), true)
   for (const method of [
     'sign',
     'exportKey',

@@ -20,7 +20,7 @@ export type ProjectRunMember = {
   access?: 'worktree' | 'additional' | 'link';
   repoFullName?: string;
   branch?: string;
-  diff?: { add: number; del: number };
+  diff?: { add: number; del: number; files?: number };
   dirty?: boolean;
   unpushed?: boolean;
   /** The member repository's current PR: the last one recorded for it. */
@@ -73,7 +73,7 @@ export type Session = {
   iosSimulatorPreviewRequestId?: string;
   androidEmulatorPreviewRequestId?: string;
   pullRequests?: import('./pull-request').PullRequestReference[];
-  diff?: { add: number; del: number };
+  diff?: { add: number; del: number; files?: number };
   /** Uncommitted changes / local commits the remote lacks; drive the action bar's Commit & Push. */
   workspaceDirty?: boolean;
   workspaceUnpushed?: boolean;

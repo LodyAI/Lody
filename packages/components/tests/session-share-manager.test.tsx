@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,14 +6,10 @@ import {
   SessionShareManager,
   type SessionShareManagerProps,
 } from '../src/components/sharing/session-share-manager';
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback: string, values?: Record<string, unknown>) =>
-      values
-        ? fallback.replace(/{{(\w+)}}/g, (_match, name: string) => String(values[name] ?? ''))
-        : fallback,
-  }),
-}));
+import { createTestI18n, withTestI18n } from './test-i18n';
+
+const testI18n = createTestI18n();
+
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -83,7 +78,8 @@ describe('static share dialog steps', () => {
     container.remove();
     document.querySelectorAll('[role="alertdialog"]').forEach((node) => node.remove());
   });
-  const render = () => act(async () => root.render(<SessionShareManager {...props} />));
+  const render = () =>
+    act(async () => root.render(withTestI18n(<SessionShareManager {...props} />, testI18n)));
   const button = (name: string) =>
     [...document.querySelectorAll<HTMLButtonElement>('button')].find(
       (node) => node.textContent === name

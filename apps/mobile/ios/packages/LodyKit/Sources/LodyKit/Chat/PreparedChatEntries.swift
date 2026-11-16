@@ -17,6 +17,6 @@ final class PreparedChatEntries {
           entries.allSatisfy({ Set($0.items.map(\.itemId)).count == $0.items.count }) else {
       throw NSError(domain: "LodyChat", code: 1)
     }
-    return entries
+    return ChatEntry.showingCarriedPlans(entries)
   }
 }

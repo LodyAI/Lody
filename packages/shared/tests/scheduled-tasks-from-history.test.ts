@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MessageContent } from '../src/ai';
+import { nextCronFireMs } from '../src/cron-next-fire';
 import {
   collectPendingScheduledTasksFromHistory,
   resolveFireMs,
@@ -215,5 +216,59 @@ describe('collectPendingScheduledTasksFromHistory', () => {
       expect(tasks[0]?.createdAtMs).toBe(CALL_AT);
       expect(tasks[0]?.scheduledForMs).toBe(CALL_AT + 120_000);
     });
+  });
+
+  it('resolveFireMs handles wakeup, missing schedule, and same-minute one-shot creation', () => {
+    expect(
+      resolveFireMs(
+        { id: 'wakeup', kind: 'wakeup', createdAtMs: 1_000, scheduledForMs: 31_000 },
+        5_000
+      )
+    ).toBe(31_000);
+    expect(resolveFireMs({ id: 'wakeup', kind: 'wakeup', createdAtMs: 1_000 }, 5_000)).toBe(
+      undefined
+    );
+    expect(resolveFireMs({ id: 'cron-1', kind: 'cron', createdAtMs: 1_000 }, 5_000)).toBe(
+      undefined
+    );
+    const createdInTargetMinute = Date.parse('2026-07-03T16:25:15+08:00');
+    const sameMinuteFire = Date.parse('2026-07-03T16:25:00+08:00');
+    expect(
+      resolveFireMs(
+        {
+          id: 'cron-same-minute',
+          kind: 'cron',
+          createdAtMs: createdInTargetMinute,
+          humanSchedule: '25 16 3 7 *',
+          recurring: false,
+          timeZone: 'Asia/Shanghai',
+        },
+        Date.parse('2026-07-03T17:00:00+08:00')
+      )
+    ).toBe(sameMinuteFire);
+  });
+});
+
+describe('nextCronFireMs — timezone', () => {
+  const utc = (y: number, mo: number, d: number, h: number, mi: number) =>
+    Date.UTC(y, mo - 1, d, h, mi);
+  const localMs = (year: number, month1: number, day: number, hour: number, minute: number) =>
+    new Date(year, month1 - 1, day, hour, minute, 0, 0).getTime();
+
+  it('resolves the cron in the given zone, not the runner local zone', () => {
+    const from = utc(2026, 7, 1, 0, 0);
+    expect(nextCronFireMs('0 9 * * *', from, 'America/New_York')).toBe(utc(2026, 7, 1, 13, 0));
+    expect(nextCronFireMs('0 9 * * *', from, 'Asia/Shanghai')).toBe(utc(2026, 7, 1, 1, 0));
+  });
+
+  it('crosses a spring-forward DST boundary correctly', () => {
+    expect(nextCronFireMs('0 9 * * *', utc(2026, 3, 7, 15, 0), 'America/New_York')).toBe(
+      utc(2026, 3, 8, 13, 0)
+    );
+  });
+
+  it('falls back to the local zone for an unusable timezone', () => {
+    const from = localMs(2026, 7, 1, 8, 0);
+    expect(nextCronFireMs('0 9 * * *', from, 'Not/AZone')).toBe(nextCronFireMs('0 9 * * *', from));
   });
 });

@@ -23,12 +23,14 @@ import {
 import { useTranslation } from 'react-i18next';
 import {
   getSessionPullRequestLegacyFields,
+  hasWorkspaceChanges,
   isSessionGoalCleared,
   isSessionGoalResumable,
   parseGitHubPrNumber,
   sanitizeGoalObjective,
   type GitHubCheckRun,
   type GitHubMergeMethod,
+  type LineChange,
   type PendingScheduledTask,
   type PrStatus,
   type SessionGoalCommand,
@@ -597,7 +599,7 @@ export function ContextChip({
   actions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff. */
   onOpenAllChanges?: () => void;
-  diffStat?: { add: number; del: number } | null;
+  diffStat?: LineChange | null;
   prCiRuns?: readonly PrCiRun[];
   onOpenPrCiRun?: (run: PrCiRun) => void;
   /** CI verdict from session metadata, the same value the sidebar shows. Live
@@ -605,7 +607,7 @@ export function ContextChip({
   prCiState?: SessionPullRequestCiState | null;
 } & InfoBarItemMode) {
   const { t } = useTranslation();
-  const hasDiff = diffStat != null && diffStat.add + diffStat.del > 0;
+  const hasDiff = hasWorkspaceChanges(diffStat);
   const trimmedBranch = branch?.trim() || '';
   if (!pr && !projectName && !trimmedBranch && !hasDiff && !actions?.length) return null;
 
@@ -705,22 +707,31 @@ export function ContextChip({
   // like GitHub's (the PR's green and red), apart from the repo/branch text.
   // Under squeeze the action label truncates first; the totals clip last,
   // inside their own chip rather than past the bar.
-  const diffChip = hasDiff ? (
-    <button
-      type="button"
-      onClick={onOpenAllChanges}
-      disabled={!onOpenAllChanges}
-      aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
-      title={t('sessions.detailTabs.allChanges', 'All Changes')}
-      className={cn(
-        'flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none',
-        INFO_BAR_TEXT_CLASS
-      )}
-    >
-      <span className="text-github-addition">+{diffStat.add}</span>
-      <span className="text-github-deletion">−{diffStat.del}</span>
-    </button>
-  ) : null;
+  const diffChip =
+    hasDiff && diffStat ? (
+      <button
+        type="button"
+        onClick={onOpenAllChanges}
+        disabled={!onOpenAllChanges}
+        aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
+        title={t('sessions.detailTabs.allChanges', 'All Changes')}
+        className={cn(
+          'flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none',
+          INFO_BAR_TEXT_CLASS
+        )}
+      >
+        {diffStat.add + diffStat.del > 0 ? (
+          <>
+            <span className="text-github-addition">+{diffStat.add}</span>
+            <span className="text-github-deletion">−{diffStat.del}</span>
+          </>
+        ) : (
+          <span>
+            {t('sessions.fileProvider.fileCount', '{{count}} files', { count: diffStat.files })}
+          </span>
+        )}
+      </button>
+    ) : null;
   const trailing =
     diffChip || actions?.length ? (
       <>

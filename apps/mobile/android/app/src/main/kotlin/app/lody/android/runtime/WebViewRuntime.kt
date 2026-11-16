@@ -66,7 +66,7 @@ open class WebViewRuntime internal constructor(
             val value = call("createTab", JSONArray().put(command.parentId).put(command.id).put(command.title).put(backend.preferRoost).put(command.billing ?: JSONObject.NULL), CommandDeadline.WRITE) as JSONObject
             RuntimeResult.Created(CreationReceipt(command.id, value.getString("state"), value.optString("reason").ifBlank { null }))
         }
-        is RuntimeCommand.GetCreationOptions -> RuntimeResult.Options(CreationJson.options(call("creationOptions", JSONArray().put(command.projectId ?: JSONObject.NULL).put(command.agentConfigId ?: JSONObject.NULL), CommandDeadline.QUERY) as JSONObject))
+        is RuntimeCommand.GetCreationOptions -> RuntimeResult.Options(CreationJson.options(call("creationOptions", JSONArray().put(command.projectId ?: JSONObject.NULL).put(command.agentConfigId ?: JSONObject.NULL).put(command.includeOffline), CommandDeadline.QUERY) as JSONObject))
         RuntimeCommand.ListAgentRoles -> RuntimeResult.Roles(CreationJson.roles(call("agentRoles", deadline = CommandDeadline.QUERY) as JSONObject))
         RuntimeCommand.ListProjectGroups -> {
             val rows = (call("projectGroups", deadline = CommandDeadline.QUERY) as JSONObject).optJSONArray("groups") ?: JSONArray()
@@ -102,6 +102,16 @@ open class WebViewRuntime internal constructor(
             // Failures arrive in-band as `{error}` with the runtime's code, like schedule writes.
             val value = ScheduleJson.checked(call("decideProposal", JSONArray().put(request), CommandDeadline.WRITE))
             RuntimeResult.ProposalDecided(value.optString("outcome"), value.optString("scheduleId").ifEmpty { null })
+        }
+        is RuntimeCommand.RespondPermission -> {
+            val answers = command.answers?.let { values ->
+                JSONObject().apply { values.forEach { (key, value) -> put(key, if (value is List<*>) JSONArray(value) else value) } }
+            }
+            val args = JSONArray().put(command.sessionId).put(command.entryId).put(command.itemId).put(command.requestId).put(command.optionId)
+                .put(answers ?: JSONObject.NULL)
+            // Failures arrive in-band as `{error}` with the runtime's code, like proposal decisions.
+            val value = ScheduleJson.checked(call("respondPermission", args, CommandDeadline.WRITE))
+            RuntimeResult.PermissionAnswered(value.optString("state").ifEmpty { throw RuntimeException(runtimeFault("invalid_permission_reply")) })
         }
         is RuntimeCommand.ShortcutBody -> RuntimeResult.Shortcut(call("shortcutBody", JSONArray().put(command.id), CommandDeadline.QUERY) as JSONObject)
         is RuntimeCommand.LocalProjects -> {

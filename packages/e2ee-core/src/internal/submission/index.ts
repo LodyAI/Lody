@@ -1,5 +1,5 @@
 import { own } from '../lifecycle';
-import { Context, Effect, Layer, Schema, Result } from 'effect';
+import { Brand, Context, Effect, Layer, Ref, Schema, Semaphore, Result, Option } from 'effect';
 import type { GenesisHash } from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
 import {
@@ -7,11 +7,14 @@ import {
   extendLedger,
   extendLedgerEffect,
   hashRecordBytes,
+  hasVerifiedCheckpoint,
+  hasVerifiedRecordHash,
   verifyLedgerEffect,
   type LedgerCheckpoint,
   type LedgerError,
+  type LedgerView,
 } from '../ledger';
-import type { LedgerLogError, LocalStoreError } from '../../services/errors';
+import { LedgerLogError, type LocalStoreError } from '../../services/errors';
 import {
   LedgerLog,
   SubmissionJournal,
@@ -19,7 +22,20 @@ import {
   type SubmissionOutcome,
   type SubmissionResult,
 } from '../../services/ledger';
+import { VerifiedLedger } from '../ledger/verified-ledger';
 import { WorkspaceScope } from '../../services/workspace';
+
+/** Branded proof of a pre-CAS inspection for a specific submission turn. */
+export type PreCasInspection = {
+  readonly outcome: SubmissionOutcome | null;
+  readonly checkpoint: LedgerCheckpoint;
+} & Brand.Brand<'PreCasInspection'>;
+const PreCasInspection = Brand.nominal<PreCasInspection>();
+
+type VerifiedLedgerPrefix = {
+  readonly records: readonly Uint8Array[];
+  readonly view: LedgerView;
+};
 
 /**
  * A submission could not proceed.
@@ -86,35 +102,104 @@ export class LedgerSubmission extends Context.Service<
       const anchor: GenesisHash = (yield* WorkspaceScope).genesis;
       const journal = own(yield* SubmissionJournal);
       const log = own(yield* LedgerLog);
+      const verifiedOpt = yield* Effect.serviceOption(VerifiedLedger);
       const store = <A>(effect: Effect.Effect<A, LocalStoreError>) =>
         effect.pipe(Effect.mapError(fromStore));
+
+      const serial = Semaphore.makeUnsafe(1);
+      const cachedPrefixRef = yield* Ref.make<VerifiedLedgerPrefix | null>(null);
 
       const inspect = Effect.fnUntraced(function* (
         record: Uint8Array,
         pin: LedgerCheckpoint | null
       ) {
+        const decoded = yield* Effect.fromResult(decodeRecord(record));
+        if (decoded.body.type !== 'ordinary') return yield* fail('ordinary-only');
+        const parent = decoded.body.previousHash;
+        if (Option.isSome(verifiedOpt)) {
+          const base = yield* verifiedOpt.value
+            .current()
+            .pipe(Effect.mapError((cause) => new LedgerLogError({ cause })));
+          // A push subscriber can verify this exact original before appendCas returns.
+          // Its genuine view already proves commitment; another network read cannot
+          // improve that proof and must not turn a successful append into a retry.
+          if (
+            (!pin || pin.length >= base.historyStart) &&
+            (yield* Effect.fromResult(hasVerifiedRecordHash(base, hashRecordBytes(record))))
+          ) {
+            if (pin && !(yield* Effect.fromResult(hasVerifiedCheckpoint(base, pin))))
+              return yield* fail('rollback');
+            return PreCasInspection({
+              outcome: 'Committed',
+              checkpoint: { head: base.head, length: base.length },
+            });
+          }
+          if (
+            log.readFrom &&
+            base.head.equals(parent) &&
+            (!pin || pin.length >= base.historyStart)
+          ) {
+            const incoming = yield* log.readFrom(anchor, base);
+            const suffix: Uint8Array[] = [];
+            for (const bytes of incoming.records)
+              suffix.push((yield* Effect.fromResult(decodeRecord(bytes))).recordBytes);
+            const view = yield* extendLedgerEffect(base, suffix, incoming.checkpoint);
+            if (pin) {
+              const included = hasVerifiedCheckpoint(view, pin);
+              if (Result.isFailure(included) || !included.success) return yield* fail('rollback');
+            }
+            yield* Effect.fromResult(
+              extendLedger(base, [record], {
+                head: hashRecordBytes(record),
+                length: base.length + 1,
+              })
+            );
+            const outcome: SubmissionOutcome | null = suffix.some((bytes) =>
+              bytesEqual(bytes, record)
+            )
+              ? 'Committed'
+              : view.head.equals(parent)
+                ? null
+                : 'Conflict';
+            return PreCasInspection({
+              outcome,
+              checkpoint: { head: view.head, length: view.length },
+            });
+          }
+        }
         const incoming = yield* log.read(anchor);
         // Parsing bounds each copy and detaches arrays owned by an asynchronous host.
         const records: Uint8Array[] = [];
         for (const bytes of incoming.records)
           records.push((yield* Effect.fromResult(decodeRecord(bytes))).recordBytes);
-        const decoded = yield* Effect.fromResult(decodeRecord(record));
-        if (decoded.body.type !== 'ordinary') return yield* fail('ordinary-only');
-        const parent = decoded.body.previousHash;
         const parentIndex = records.findIndex((bytes) => hashRecordBytes(bytes).equals(parent));
         if (parentIndex < 0) return yield* fail('missing-parent');
         // Authenticate the predecessor once, then verify only the remote suffix.
         // The pending operation must still be valid at its original parent.
-        const predecessor = yield* verifyLedgerEffect({
-          anchor,
-          records: records.slice(0, parentIndex + 1),
-          checkpoint: { head: parent, length: parentIndex + 1 },
-        });
+        const cachedPrefix = yield* Ref.get(cachedPrefixRef);
+        const canExtendCached =
+          cachedPrefix !== null &&
+          cachedPrefix.records.length <= parentIndex + 1 &&
+          cachedPrefix.records.every((bytes, index) => bytesEqual(bytes, records[index]!));
+        const predecessor = canExtendCached
+          ? cachedPrefix.records.length === parentIndex + 1 && cachedPrefix.view.head.equals(parent)
+            ? cachedPrefix.view
+            : yield* extendLedgerEffect(
+                cachedPrefix.view,
+                records.slice(cachedPrefix.records.length, parentIndex + 1),
+                { head: parent, length: parentIndex + 1 }
+              )
+          : yield* verifyLedgerEffect({
+              anchor,
+              records: records.slice(0, parentIndex + 1),
+              checkpoint: { head: parent, length: parentIndex + 1 },
+            });
         const view = yield* extendLedgerEffect(
           predecessor,
           records.slice(parentIndex + 1),
           incoming.checkpoint
         );
+        yield* Ref.set(cachedPrefixRef, { records: records.slice(), view });
         if (
           pin &&
           (records.length < pin.length ||
@@ -133,19 +218,20 @@ export class LedgerSubmission extends Context.Service<
           : view.head.equals(parent)
             ? null
             : 'Conflict';
-        return { outcome, checkpoint: { head: view.head, length: view.length } };
+        return PreCasInspection({ outcome, checkpoint: { head: view.head, length: view.length } });
       });
 
       const recover = Effect.fnUntraced(function* (
         expectedRecord?: Uint8Array,
-        creationRevision?: number
+        creationRevision?: number,
+        prepared?: PreCasInspection
       ): Effect.fn.Return<SubmissionResult | null, SubmissionFailure> {
         const entry = yield* store(journal.load(anchor));
         if (expectedRecord && (!entry.record || !bytesEqual(entry.record, expectedRecord)))
           return yield* fail('busy');
         if (!entry.record) return null;
         const record = entry.record;
-        let checked = yield* inspect(record, entry.checkpoint);
+        let checked = prepared ?? (yield* inspect(record, entry.checkpoint));
         if (entry.outcome) {
           if (checked.outcome !== entry.outcome) return yield* fail('corrupt');
           yield* store(
@@ -195,25 +281,30 @@ export class LedgerSubmission extends Context.Service<
       const acknowledge = Effect.fn('@lody/e2ee-core/LedgerSubmission.acknowledge')(function* (
         result: SubmissionResult
       ) {
-        return yield* store(journal.acknowledge(anchor, result));
+        return yield* serial.withPermit(store(journal.acknowledge(anchor, result)));
       });
 
       return LedgerSubmission.of({
         submit: Effect.fn('@lody/e2ee-core/LedgerSubmission.submit')(function* (input: Uint8Array) {
-          const record = (yield* Effect.fromResult(decodeRecord(input))).recordBytes;
-          const entry = yield* store(journal.load(anchor));
-          if (entry.record && !bytesEqual(entry.record, record)) return yield* fail('busy');
-          let creationRevision: number | undefined;
-          if (!entry.record) {
-            yield* inspect(record, entry.checkpoint);
-            creationRevision = (yield* store(journal.prepare(anchor, record))) ?? undefined;
-          }
-          const result = yield* recover(record, creationRevision);
-          if (!result) return yield* fail('corrupt');
-          return result;
+          return yield* serial.withPermit(
+            Effect.gen(function* () {
+              const record = (yield* Effect.fromResult(decodeRecord(input))).recordBytes;
+              const entry = yield* store(journal.load(anchor));
+              if (entry.record && !bytesEqual(entry.record, record)) return yield* fail('busy');
+              let creationRevision: number | undefined;
+              let prepared: PreCasInspection | undefined;
+              if (!entry.record) {
+                prepared = yield* inspect(record, entry.checkpoint);
+                creationRevision = (yield* store(journal.prepare(anchor, record))) ?? undefined;
+              }
+              const result = yield* recover(record, creationRevision, prepared);
+              if (!result) return yield* fail('corrupt');
+              return result;
+            })
+          );
         }),
         resume: Effect.fn('@lody/e2ee-core/LedgerSubmission.resume')(function* () {
-          return yield* recover();
+          return yield* serial.withPermit(recover());
         }),
         // Keep the pre-tracing contract: detach input at invocation, before
         // Effect.fn's lazy body runs or the caller mutates the result.

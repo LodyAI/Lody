@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { Check, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Popover } from '@lody/ui/popover';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -207,6 +207,52 @@ function MemoryRoleAvatar({ role }: { role: AgentRole }) {
   );
 }
 
+/**
+ * A ready inventory is the provider's current record; the saved association is a
+ * snapshot from import or the last Lody edit, used while the provider is unreadable.
+ */
+function displayedMemory(entry: MemoryAssociation, inventory?: MemoryProviderResponse) {
+  const identity =
+    inventory?.status === 'ready'
+      ? inventory.memories.find((memory) => memory.id === entry.memoryId)
+      : undefined;
+  return {
+    name: identity?.name || entry.name,
+    description: identity ? identity.description : entry.description,
+  };
+}
+
+/** Matches the displayed name and description plus the Agent ID; an empty query keeps all. */
+function filterMemories(
+  entries: MemoryAssociation[],
+  inventory: MemoryProviderResponse | undefined,
+  query: string
+) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return entries;
+  return entries.filter((entry) => {
+    const { name, description } = displayedMemory(entry, inventory);
+    return [name, entry.memoryId, description ?? ''].some((text) =>
+      text.toLowerCase().includes(needle)
+    );
+  });
+}
+
+function MemorySearch({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <Input
+      size="small"
+      type="search"
+      leading={<Search size={14} aria-hidden="true" />}
+      aria-label={t('settings.memory.search')}
+      placeholder={t('settings.memory.search')}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
 /** The list is Lody's saved associations, never the complete external inventory. */
 export function MemoryAssociationList({
   entries,
@@ -236,6 +282,7 @@ export function MemoryAssociationList({
         const assignedRoles = getAssignedRoles?.(entry) ?? [];
         const Main = onSelect ? 'button' : 'div';
         const missing = isMemoryIdentityMissing(entry, inventory);
+        const shown = displayedMemory(entry, inventory);
         const linked =
           selected?.providerId === entry.providerId && selected.memoryId === entry.memoryId;
         return (
@@ -252,7 +299,7 @@ export function MemoryAssociationList({
           >
             <Main
               type={onSelect ? 'button' : undefined}
-              disabled={onSelect ? missing : undefined}
+              disabled={onSelect ? missing && !linked : undefined}
               onClick={onSelect ? () => onSelect(entry) : undefined}
               aria-pressed={onSelect ? linked : undefined}
               {...stylex.props(catalog.rowMain)}
@@ -262,10 +309,10 @@ export function MemoryAssociationList({
               </span>
               <div {...stylex.props(catalog.body)}>
                 <div {...stylex.props(catalog.titleLine)}>
-                  <span {...stylex.props(catalog.name)}>{entry.name}</span>
+                  <span {...stylex.props(catalog.name)}>{shown.name}</span>
                 </div>
-                {entry.description ? (
-                  <span {...stylex.props(styles.description)}>{entry.description}</span>
+                {shown.description ? (
+                  <span {...stylex.props(styles.description)}>{shown.description}</span>
                 ) : null}
                 {missing ? (
                   <FormMessage tone="warning">{t('settings.memory.missing')}</FormMessage>
@@ -297,7 +344,7 @@ export function MemoryAssociationList({
                   type="button"
                   size="small"
                   variant={linked ? 'secondary' : 'ghost'}
-                  disabled={missing}
+                  disabled={missing && !linked}
                   aria-pressed={linked}
                   onClick={() => onSelect(entry)}
                 >
@@ -311,7 +358,7 @@ export function MemoryAssociationList({
                     size="small"
                     variant="ghost"
                     icon
-                    aria-label={t('settings.memory.editName', { name: entry.name })}
+                    aria-label={t('settings.memory.editName', { name: shown.name })}
                     onClick={() => onEdit?.(entry)}
                   >
                     <Pencil size={14} />
@@ -321,7 +368,7 @@ export function MemoryAssociationList({
                     size="small"
                     variant="ghost"
                     icon
-                    aria-label={t('settings.memory.deleteName', { name: entry.name })}
+                    aria-label={t('settings.memory.deleteName', { name: shown.name })}
                     onClick={() => onRemove?.(entry)}
                   >
                     <Trash2 size={14} />
@@ -467,6 +514,7 @@ export function MemorySetting() {
 }
 
 type Editor = { providerId: string; entry?: MemoryAssociation };
+const SETTINGS_MEMORY_SEARCH_THRESHOLD = 7;
 function MachineMemories({ machineId, supported }: { machineId: MachineId; supported: boolean }) {
   const { t } = useTranslation();
   const associations = useMemoryAssociations(machineId);
@@ -481,6 +529,8 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
   const [editor, setEditor] = useState<Editor | null>(null);
   const [error, setError] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [query, setQuery] = useState('');
+  const searchable = associations.entries.length > SETTINGS_MEMORY_SEARCH_THRESHOLD;
   const online = useMachineOnlineStatus(machineId) === 'online';
   const providers: ProviderDefinition[] = [...MEMORY_PROVIDERS];
   for (const entry of associations.entries)
@@ -511,12 +561,14 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
         </Button>
       </SettingsPageActions>
       {error ? <FormMessage tone="error">{t('settings.memory.saveError')}</FormMessage> : null}
+      {searchable ? <MemorySearch value={query} onChange={setQuery} /> : null}
       {providers.map((provider) => (
         <ProviderRecords
           key={provider.id}
           machineId={machineId}
           provider={provider}
           refreshToken={refreshToken}
+          query={searchable ? query : ''}
           getAssignedRoles={getAssignedRoles}
           onAssociateRole={synced ? () => openSettings('agent-roles', { machineId }) : undefined}
           supported={supported}
@@ -545,6 +597,7 @@ function ProviderRecords({
   provider,
   supported,
   refreshToken,
+  query,
   entries,
   editor,
   setEditor,
@@ -559,6 +612,7 @@ function ProviderRecords({
   provider: ProviderDefinition;
   supported: boolean;
   refreshToken: number;
+  query: string;
   entries: MemoryAssociation[];
   editor: Editor | null;
   setEditor: (editor: Editor | null) => void;
@@ -567,6 +621,8 @@ function ProviderRecords({
 }) {
   const online = useMachineOnlineStatus(machineId) === 'online';
   const state = useMemoryProvider(machineId, provider.id, online && supported, refreshToken);
+  const { t } = useTranslation();
+  const shown = filterMemories(entries, state.result, query);
   return (
     <div {...stylex.props(styles.stack)}>
       {!online || !supported || (state.result && state.result.status !== 'ready') ? (
@@ -578,14 +634,18 @@ function ProviderRecords({
           result={state.result}
         />
       ) : null}
-      <MemoryAssociationList
-        entries={entries}
-        inventory={state.result}
-        getAssignedRoles={getAssignedRoles}
-        onAssociateRole={onAssociateRole}
-        onEdit={(entry) => setEditor({ providerId: provider.id, entry })}
-        onRemove={(entry) => void remove(entry)}
-      />
+      {entries.length && !shown.length ? (
+        <p {...stylex.props(catalog.meta)}>{t('settings.memory.noSearchResults')}</p>
+      ) : (
+        <MemoryAssociationList
+          entries={shown}
+          inventory={state.result}
+          getAssignedRoles={getAssignedRoles}
+          onAssociateRole={onAssociateRole}
+          onEdit={(entry) => setEditor({ providerId: provider.id, entry })}
+          onRemove={(entry) => void remove(entry)}
+        />
+      )}
       {editor ? (
         <MemoryEditor
           key={editor.entry?.memoryId ?? 'new'}
@@ -945,6 +1005,11 @@ export function MemoryEditor({
   );
 }
 
+const ROLE_MEMORY_SEARCH_THRESHOLD = 6;
+function isSameMemory(entry: MemoryBinding, value: MemoryBinding) {
+  return entry.providerId === value.providerId && entry.memoryId === value.memoryId;
+}
+
 export function RoleMemoryPicker({
   machineId,
   value,
@@ -955,9 +1020,22 @@ export function RoleMemoryPicker({
   onChange: (value?: MemoryBinding) => void;
 }) {
   const { t } = useTranslation();
-  const { entries } = useMemoryAssociations(machineId);
+  const { entries: saved } = useMemoryAssociations(machineId);
   const { machines } = useVisibleMachineMetas();
   const supported = machineSupportsMemoryProviders(machines.get(machineId));
+  const [query, setQuery] = useState('');
+  // The binding open when the editor appears is listed first; later clicks never reorder rows.
+  const [pinned] = useState(value);
+  const entries = useMemo(
+    () =>
+      pinned
+        ? [
+            ...saved.filter((entry) => isSameMemory(entry, pinned)),
+            ...saved.filter((entry) => !isSameMemory(entry, pinned)),
+          ]
+        : saved,
+    [saved, pinned]
+  );
   return (
     <div {...stylex.props(styles.stack)}>
       <span {...stylex.props(catalog.meta)}>{t('settings.memory.rolePromptHint')}</span>
@@ -967,6 +1045,9 @@ export function RoleMemoryPicker({
             {t('settings.memory.unlink')}
           </Button>
         </div>
+      ) : null}
+      {entries.length > ROLE_MEMORY_SEARCH_THRESHOLD ? (
+        <MemorySearch value={query} onChange={setQuery} />
       ) : null}
       {!entries.length ? (
         <p {...stylex.props(catalog.meta)}>{t('settings.memory.emptyRole')}</p>
@@ -978,6 +1059,7 @@ export function RoleMemoryPicker({
             provider={provider}
             entries={entries.filter((entry) => entry.providerId === provider.id)}
             supported={supported}
+            query={entries.length > ROLE_MEMORY_SEARCH_THRESHOLD ? query : ''}
             value={value}
             onChange={onChange}
           />
@@ -991,6 +1073,7 @@ function RoleProviderMemories({
   provider,
   entries,
   supported,
+  query,
   value,
   onChange,
 }: {
@@ -998,11 +1081,14 @@ function RoleProviderMemories({
   provider: ProviderDefinition;
   entries: MemoryAssociation[];
   supported: boolean;
+  query: string;
   value?: MemoryBinding;
-  onChange: (value: MemoryBinding) => void;
+  onChange: (value?: MemoryBinding) => void;
 }) {
+  const { t } = useTranslation();
   const online = useMachineOnlineStatus(machineId) === 'online';
   const state = useMemoryProvider(machineId, provider.id, online && supported);
+  const shown = filterMemories(entries, state.result, query);
   return (
     <>
       {!online || !supported || (state.result && state.result.status !== 'ready') ? (
@@ -1014,12 +1100,23 @@ function RoleProviderMemories({
           result={state.result}
         />
       ) : null}
-      <MemoryAssociationList
-        entries={entries}
-        inventory={state.result}
-        selected={value}
-        onSelect={(entry) => onChange({ providerId: entry.providerId, memoryId: entry.memoryId })}
-      />
+      {entries.length && !shown.length ? (
+        <p {...stylex.props(catalog.meta)}>{t('settings.memory.noSearchResults')}</p>
+      ) : (
+        <MemoryAssociationList
+          entries={shown}
+          inventory={state.result}
+          selected={value}
+          // Pressing the linked row again unlinks it, so no trip back to the top is needed.
+          onSelect={(entry) =>
+            onChange(
+              value && isSameMemory(entry, value)
+                ? undefined
+                : { providerId: entry.providerId, memoryId: entry.memoryId }
+            )
+          }
+        />
+      )}
     </>
   );
 }

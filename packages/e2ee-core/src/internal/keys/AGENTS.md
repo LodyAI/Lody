@@ -38,6 +38,7 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
 - `KeyDistributor` discovers targets from the genuine ledger, never a server list.
   The first outbox ciphertext per recipient/epoch is immutable and re-sent on every
   revision; Recovery devices never send. Capacity blocks new tasks, never deletes.
+  `prepareDelivery` authenticates and retains that same original locally without mailbox I/O.
   Recipients' round trips may overlap, but installed-key reads stay one at a time:
   the custody writer contract lets a busy writer fail conflict rather than queue.
 

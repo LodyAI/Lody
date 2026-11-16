@@ -400,6 +400,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
         ChatRowContent(
           row: entry.row, details: details, owner: owners[entry.row.id], muted: muted,
           expanded: entry.canToggle ? entry.expanded : nil,
+          onOpen: { [weak self] in self?.forwarded?("rowPress", ["id": entry.row.id]) },
           onToggle: { [weak self] in self?.toggleOpener(entry.row.id) }
         )
         .accessibilityAddTraits(current ? .isSelected : [])
@@ -620,6 +621,7 @@ private struct ChatRowContent: View {
   /// Set on a row with nested chats: whether they are shown. A "⌄ 4 opened chats" line below the
   /// row heads the family; both parent and child status marks stay trailing.
   var expanded: Bool?
+  let onOpen: () -> Void
   var onToggle: () -> Void = {}
 
   private var project: String { details.contains(.project) ? row.place : "" }
@@ -638,9 +640,20 @@ private struct ChatRowContent: View {
   }
 
   var body: some View {
+    // Reserve separate space for navigation and disclosure; the family target must not
+    // consume the opener's bottom padding.
     VStack(alignment: .leading, spacing: 0) {
-      content
-      if let expanded { familyToggle(expanded) }
+      if let expanded {
+        // Adjacent SwiftUI buttons arbitrate touch tolerance together. Leaving the
+        // opener to UIKit cell selection lets disclosure steal taps above its bounds.
+        Button(action: onOpen) {
+          content.contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        familyToggle(expanded)
+      } else {
+        content
+      }
     }
     .backgroundPreferenceValue(ChatRowTitleBounds.self) { anchor in
       GeometryReader { geometry in
@@ -669,6 +682,7 @@ private struct ChatRowContent: View {
       [row.badge, project, branch, pullRequest?.label ?? "", familyLabel, row.accessibilityValue].filter { !$0.isEmpty }.joined(separator: ", ")
     )
     .accessibilityAddTraits(.isButton)
+    .accessibilityAction { onOpen() }
     .accessibilityActions {
       if let expanded {
         Button(String(localized: String.LocalizationValue(expanded ? "home.tree.collapse" : "home.tree.expand"), bundle: .lody), action: onToggle)
@@ -755,7 +769,8 @@ private struct ChatRowContent: View {
         }
       }
       .padding(.horizontal, LodyLayout.listEdgeX)
-      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .padding(.vertical, LodySpacing.xs)
+      .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .topLeading)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)

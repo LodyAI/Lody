@@ -134,7 +134,7 @@ import androidx.compose.runtime.snapshotFlow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService, runtimeScope: RuntimeScope, onSubmit: (CreateRequest) -> Unit, onBack: () -> Unit) {
+fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService, runtimeScope: RuntimeScope, onSubmit: (CreateRequest) -> Unit, onBack: () -> Unit, persistDraft: Boolean = false) {
     val dismissKeyboard = rememberKeyboardDismissal()
     val colors = LodyTheme.colors
     // Multi-repository projects (web Project groups), read once; listed as projects pinned to
@@ -155,7 +155,13 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
     val base = snapshot ?: CatalogSnapshot(0, emptyList(), emptyList(), emptyList())
     val catalog = base.copy(projects = base.projects.filterNot { CreateSessionModel.isGroup(it.id) } + groupProjects)
     var target by remember(catalog.revision == 0L) { mutableStateOf(CreateSessionModel.initial(catalog)) }
-    var prompt by rememberSaveable { mutableStateOf("") }
+    val draftContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    var prompt by rememberSaveable { mutableStateOf(if (persistDraft) app.lody.android.chat.ComposerDrafts.read(draftContext, runtimeScope, app.lody.android.chat.ComposerDrafts.CREATE) else "") }
+    // The typed new-chat text stays on the device until a chat is started with it.
+    var draftSubmitted by remember { mutableStateOf(false) }
+    LaunchedEffect(runtimeScope, prompt, draftSubmitted) {
+        if (persistDraft && !draftSubmitted) app.lody.android.chat.ComposerDrafts.write(draftContext, runtimeScope, app.lody.android.chat.ComposerDrafts.CREATE, prompt)
+    }
     // The field with its caret and IME composition; the @ panel reads the trigger at the caret.
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(prompt, androidx.compose.ui.text.TextRange(prompt.length))) }
     LaunchedEffect(prompt) {
@@ -341,6 +347,8 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     snackbar.showSnackbar(uploadFailed)
                     return@launch
                 }
+                draftSubmitted = true
+                if (persistDraft) app.lody.android.chat.ComposerDrafts.write(draftContext, runtimeScope, app.lody.android.chat.ComposerDrafts.CREATE, "")
                 onSubmit(request.copy(attachments = blocks))
             }
         }

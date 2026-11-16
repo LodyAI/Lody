@@ -142,6 +142,9 @@ class PermissionController: UIViewController {
     render()
   }
 
+  /// Closes without an answer and without counting as the reader's dismissal.
+  func withdraw() { close() }
+
   func showInvalidRequest(_ message: String) {
     guard phase == .open else { return }
     resetTarget()

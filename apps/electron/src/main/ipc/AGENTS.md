@@ -23,8 +23,14 @@ not block their documents.
 
 ## Personal-device approval
 
-Confirm the signed admission through ledger-only refresh before publishing its
-invitation. Key distribution belongs to the existing account/workspace-bound main
+`E2eeIpc` keeps every `@IpcMethod()` with its input and sender/reader validation and
+public failure projection, then delegates. Key delivery lives in
+`services/e2ee-key-delivery.mts`; local-agent and remote-machine pairing orchestration
+lives in `services/e2ee-agent-pairing-service.mts`. Those modules receive the validated
+reader id and must not become renderer-facing.
+
+Confirm and persist the signed admission through the verified ledger feed, using
+inline originals or a ledger-only refresh, before publishing its invitation. Key distribution belongs to the existing account/workspace-bound main
 owner and must not block the approval response. Register that delivery before the
 publication await so reset or sign-out can stop it; a late publication result must
 never recreate a stopped task. Invitation publication is not key receipt or content

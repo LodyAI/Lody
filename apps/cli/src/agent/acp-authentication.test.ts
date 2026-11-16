@@ -644,7 +644,7 @@ describe('AcpAuthenticationManager', () => {
     }
   });
 
-  it.each(['custom', 'devin', 'sorbet'] as const)(
+  it.each(['custom', 'devin', 'sorbet', 'antigravity'] as const)(
     'bridges request-scoped ACP form elicitation for %s',
     async (provider) => {
       const child = createFakeChild();
@@ -705,7 +705,12 @@ describe('AcpAuthenticationManager', () => {
         requestId: 'auth-custom',
         cliType: provider === 'custom' ? 'custom' : 'builtin',
         agentType: provider === 'custom' ? 'custom-test' : provider,
-        runtimeOverrides: provider === 'devin' ? { devinPath: '/test/devin' } : undefined,
+        runtimeOverrides:
+          provider === 'devin'
+            ? { devinPath: '/test/devin' }
+            : provider === 'antigravity'
+              ? { antigravityPath: '/test/agy' }
+              : undefined,
         customAcp: { command: '/test/custom-acp', args: [] },
         onProgress: (event) => {
           if (event.status === 'input-required') {

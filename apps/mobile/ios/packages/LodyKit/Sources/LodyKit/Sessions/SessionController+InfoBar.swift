@@ -35,11 +35,16 @@ extension SessionController {
     } else if let context = contextItem(bar, projectName: project?.name) {
       result["context"] = context
     }
-    if bar.added + bar.removed > 0 {
-      result["diff"] = [
+    if bar.hasDiff {
+      let summary = bar.added + bar.removed > 0
+        ? "+\(bar.added) −\(bar.removed)"
+        : String.localizedStringWithFormat(String(localized: "changes.fileCount", bundle: .lody), bar.files ?? 0)
+      var diff: [String: Any] = [
         "added": bar.added, "removed": bar.removed, "tap": reviewable,
-        "accessibilityLabel": "\(String(localized: "workspaceChanges.title", bundle: .lody)), +\(bar.added) −\(bar.removed)",
+        "accessibilityLabel": "\(String(localized: "workspaceChanges.title", bundle: .lody)), \(summary)",
       ]
+      if let files = bar.files { diff["files"] = files }
+      result["diff"] = diff
     }
     if let first = bar.actions.first {
       result["primary"] = [

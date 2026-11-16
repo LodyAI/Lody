@@ -34,6 +34,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   weak var processPage: ProcessController?
   weak var tasksPage: TasksController?
   var permissionPage: PermissionController?
+  /// The page opened by itself (not from the transcript), so a plan approval can hand it back.
+  var permissionOpenedAutomatically = false
   var permissionScope: (userId: String, workspaceId: String)?
   var openingFiles: Set<String> = []
   /// PR pages open from this conversation (`owner/repo#number`, lowercased) until their page closes.
@@ -523,10 +525,13 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     ])
     chat.translatesAutoresizingMaskIntoConstraints = false
     pageHeader.translatesAutoresizingMaskIntoConstraints = false
+    // The header replaces the navigation bar, so it must clear the window controls of a windowed
+    // iPad app itself: the plain safe area does not include them, a navigation bar's layout does.
+    let headerArea = view.layoutGuide(for: .safeArea(cornerAdaptation: .horizontal))
     NSLayoutConstraint.activate([
       pageHeader.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-      pageHeader.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-      pageHeader.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+      pageHeader.leadingAnchor.constraint(equalTo: headerArea.leadingAnchor, constant: 16),
+      pageHeader.trailingAnchor.constraint(equalTo: headerArea.trailingAnchor, constant: -16),
       pageHeader.heightAnchor.constraint(equalToConstant: chat.pageHeaderHeight),
       chat.topAnchor.constraint(equalTo: view.topAnchor),
       chat.leadingAnchor.constraint(equalTo: view.leadingAnchor),

@@ -12,6 +12,8 @@ export class PersonalHostError extends Data.TaggedError('PersonalHostError')<{
     | 'corrupt'
     | 'protection-unavailable'
     | 'keys-unavailable'
+    /** Retryable: a verified-ledger epoch whose key this device has not received yet. */
+    | 'key-pending'
     | 'revoked'
     | 'unsupported'
     | 'storage'

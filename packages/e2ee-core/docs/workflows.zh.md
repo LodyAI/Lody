@@ -41,6 +41,9 @@ acknowledge(r):  释放已完成的结果
 
 签名设备在此期间被吊销时，记录以 `Conflict` 结束，不会重新签名。日志记住观察到的最新检查点，拒绝已回滚的日志。
 
+若独立验证的本地视图已包含同一签名原件，提交可直接确认，包括视图已继续前进的情况。
+日志检查点仍必须属于该已验证历史。推送提示和追加回复本身不能证明提交成功。
+
 自助设备记录若在 CAS 前明确收到 `LedgerLogError.reason = self-service-rate-limited`，P09 仅在本次新建槽位的首次尝试且修订号未被其他尝试推进时释放该原件，保留检查点并返回 `retryAt`。SQLite 与 IndexedDB 原子核对原件、检查点、修订号；SQLite 对既有日志只增补修订字段，保留待定原件与检查点。结果未知、旧 pending、并发尝试及普通 HTTP 429 都继续保留原件，不允许借后续拒绝抹掉先前可能生效的请求。
 
 ## InstalledEpochKeys 与 InstalledEpochHistory
@@ -93,6 +96,10 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyMailbox`、
 当本设备无法安装当前密钥时，请求发送者重新投递。`enqueue(id, rejectedDigest?)` 在发送任何内容之前，把调用方选定的稳定 ID 与当前纪元及可选的被拒帧持久绑定；以不同字段复用同一 ID 会以 `replay` 失败。`flush` 发送待处理请求（邮箱按 ID 去重），并以 `Repaired`、`Obsolete` 或 `Revoked` 结束。`Repaired` 只记录请求成功，绝不表示已安装。
 
 ## KeyDistributor
+
+可选 `prepareDelivery(recipient)` 使用已安装的当前密钥，认证并保存相同的不可变 outbox 原件，
+不访问远端信箱。账号级批量中继可发送返回的 `{ id, frame }`；准备完成不代表收件设备已安装密钥。
+重试或重开后的普通分发继续复用这份原件。
 
 _需要接收者的全部端口，外加 `KeyReceiver`、`DeliveryOutbox`、`DistributionJournal`、`EpochPublicationSource`。_
 

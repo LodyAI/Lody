@@ -17,6 +17,8 @@ import type {
   E2eeWorkspaceRuntime,
 } from '@lody/platform';
 import { Dialog } from '@/ui/dialog';
+import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { WINDOW_CAPTION_CLEAR_TOP, WindowDragStrip } from '@/ui/window-drag-region';
 import { Drawer } from '@lody/ui/drawer';
 import { E2eeAccountPairingRequest, failureKey, localCodeError } from './e2ee-account-pairing';
 import {
@@ -36,7 +38,7 @@ import {
   useE2eeDeviceRequests,
 } from './e2ee-device-requests';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
-import { E2eeLostAllRecovery, type E2eeLostAllRecoveryProps } from './e2ee-lost-all-recovery';
+import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
 
 /** Seconds left until `expiresAt`, ticking once a second; null without a deadline. */
 function useSecondsLeft(expiresAt: number | undefined) {
@@ -123,6 +125,29 @@ const ComparisonCode = ({ code, hint }: { code: string; hint: string }) => {
     </div>
   );
 };
+
+/**
+ * Full-window pairing surface. In a desktop window its top row belongs to the
+ * window chrome (macOS traffic lights or Windows caption buttons), so the back
+ * button starts below that row and the row stays draggable.
+ */
+function PairingPage({ children }: { children: ReactNode }) {
+  const fullscreen = useElectronFullscreen();
+  const clearTrafficLights = isMacOSElectronRenderer() && !fullscreen;
+  return (
+    <main
+      data-e2ee-pairing-surface=""
+      className="relative h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))]"
+      style={{
+        paddingTop: clearTrafficLights ? '2.75rem' : `max(1rem, ${WINDOW_CAPTION_CLEAR_TOP})`,
+      }}
+    >
+      <WindowDragStrip position="fixed" />
+      {children}
+    </main>
+  );
+}
+
 /** New native device: open once, retain its request, then progress without manual checks. */
 export function E2eeAutomaticPairingPage({
   runtime,
@@ -132,7 +157,7 @@ export function E2eeAutomaticPairingPage({
   onManual,
   keyFailure,
   onRetryKeys,
-  lostAll,
+  lostAccess,
 }: {
   runtime: E2eeWorkspaceRuntime;
   workspaceId: string;
@@ -141,8 +166,8 @@ export function E2eeAutomaticPairingPage({
   onManual?: () => void;
   keyFailure?: boolean;
   onRetryKeys?: () => void;
-  /** Present where this host can restore from a backup (desktop with recovery on). */
-  lostAll?: Omit<E2eeLostAllRecoveryProps, 'workspaceId'>;
+  /** The way out when no other device can approve: restore, go back, or remove. */
+  lostAccess?: Omit<E2eeLostAccessProps, 'workspaceId'>;
 }) {
   usePairingPrivacy();
   const { t, i18n } = useTranslation();
@@ -187,7 +212,11 @@ export function E2eeAutomaticPairingPage({
     handheld &&
     Boolean(runtime.requestAccountPairing && runtime.accountPairingRequest) &&
     cameraSupported();
-  const receiving = state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined';
+  // This device's exact access loss here ends any earlier approval, including a joined
+  // scan on this page: it is never shown as authorized again.
+  const lost = state?.phase === 'revoked' || state?.phase === 'removed';
+  const receiving =
+    !lost && (state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined');
   const linkGuardRef = useRef({ busy, canStart, lostAllOpen, receiving });
   linkGuardRef.current = { busy, canStart, lostAllOpen, receiving };
   useEffect(() => {
@@ -255,7 +284,7 @@ export function E2eeAutomaticPairingPage({
       }
     };
     const tick = async () => {
-      if (!alive || qrPaused.current) return;
+      if (!alive || qrPaused.current || completed.current) return;
       if (running) {
         queued = true;
         return;
@@ -266,7 +295,12 @@ export function E2eeAutomaticPairingPage({
           queued = false;
           const retained = await runtime.automaticPairingState!(workspaceId);
           if (!alive) return;
-          accept(retained ?? (await runtime.startAutomaticPairing!(workspaceId)));
+          accept(
+            retained ??
+              (completed.current || admitted.current
+                ? null
+                : await runtime.startAutomaticPairing!(workspaceId))
+          );
         } while (queued && alive && !qrPaused.current && !completed.current);
       } catch (cause) {
         if (alive) {
@@ -333,12 +367,13 @@ export function E2eeAutomaticPairingPage({
       void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
     }
     setQr('joined');
+    const wasCompleted = completed.current;
+    completed.current = true;
+    admitted.current = true;
     // Only now is the automatic request redundant; ending it earlier would close the
     // other device's dialog while it is still signing for the scanned code.
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
-    if (!completed.current) {
-      completed.current = true;
-      admitted.current = true;
+    if (!wasCompleted) {
       joinedRef.current();
     }
   };
@@ -513,10 +548,7 @@ export function E2eeAutomaticPairingPage({
   };
   if (!canStart)
     return (
-      <main
-        data-e2ee-pairing-surface=""
-        className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
-      >
+      <PairingPage>
         <Button
           variant="ghost"
           onClick={() => {
@@ -535,22 +567,26 @@ export function E2eeAutomaticPairingPage({
           onJoined={onJoined}
           onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })}
         />
-      </main>
+      </PairingPage>
     );
   const formatTime = (value: number) =>
     new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
       hour: '2-digit',
       minute: '2-digit',
     }).format(new Date(value));
+  const recovery = lostAccess?.recovery;
   const recovered = () => {
     setLostAllOpen(false);
     // Reached only when this workspace's own restore committed: its pending request is
     // no longer needed. Another workspace's success keeps this request.
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
-    lostAll?.onRecovered();
+    recovery?.onRecovered();
   };
   const terminal =
-    !receiving && !activeQr && state && ['declined', 'expired', 'cancelled'].includes(state.phase);
+    !receiving &&
+    !activeQr &&
+    state &&
+    ['declined', 'expired', 'cancelled', 'revoked', 'removed'].includes(state.phase);
   const scanButton = (label: string) =>
     qrSupported && (
       <Button
@@ -567,10 +603,7 @@ export function E2eeAutomaticPairingPage({
       </Button>
     );
   return (
-    <main
-      data-e2ee-pairing-surface=""
-      className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
-    >
+    <PairingPage>
       <Button
         variant="ghost"
         onClick={() => {
@@ -596,9 +629,17 @@ export function E2eeAutomaticPairingPage({
             <p className="mt-4 text-sm text-muted-foreground">
               {t(`e2ee.auto.${state.phase}.help`)}
             </p>
-            <Button className="mt-6" disabled={busy} onClick={() => void restart()}>
-              {t('e2ee.auto.restart')}
-            </Button>
+            {/* A removed member needs a new invitation; this device cannot ask for one. */}
+            {state.phase !== 'removed' && (
+              <Button
+                className="mt-6"
+                disabled={busy}
+                data-testid={state.phase === 'revoked' ? 'e2ee-auto-pair-again' : undefined}
+                onClick={() => void restart()}
+              >
+                {t(state.phase === 'revoked' ? 'e2ee.devices.pairAgain' : 'e2ee.auto.restart')}
+              </Button>
+            )}
           </>
         ) : receiving ? (
           <>
@@ -761,23 +802,31 @@ export function E2eeAutomaticPairingPage({
                 </Button>
               )}
             </details>
-            <details
-              className="mt-2 text-sm text-muted-foreground"
-              data-testid="e2ee-lost-all-entry"
-            >
-              <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-1.5 [&::-webkit-details-marker]:hidden">
-                {t('e2ee.auto.noOtherDevice')}
-                <ChevronDown size={14} />
-              </summary>
-              <p className="mt-3 text-left leading-relaxed">
-                {t(lostAll ? 'e2ee.auto.noOtherDevice.help' : 'e2ee.auto.noOtherDevice.elsewhere')}
-              </p>
-              {lostAll && (
-                <Button variant="link" disabled={busy} onClick={() => setLostAllOpen(true)}>
-                  {t('e2ee.auto.noOtherDevice.restore')}
-                </Button>
-              )}
-            </details>
+            {lostAccess ? (
+              <div className="mt-3" data-testid="e2ee-lost-all-entry">
+                <E2eeLostAccessEntry
+                  {...lostAccess}
+                  workspaceId={workspaceId}
+                  workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
+                  {...(recovery ? { recovery: { ...recovery, onRecovered: recovered } } : {})}
+                  disabled={busy}
+                  onOpenChange={setLostAllOpen}
+                />
+              </div>
+            ) : (
+              <details
+                className="mt-2 text-sm text-muted-foreground"
+                data-testid="e2ee-lost-all-entry"
+              >
+                <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-1.5 [&::-webkit-details-marker]:hidden">
+                  {t('e2ee.auto.noOtherDevice')}
+                  <ChevronDown size={14} />
+                </summary>
+                <p className="mt-3 text-left leading-relaxed">
+                  {t('e2ee.auto.noOtherDevice.elsewhere')}
+                </p>
+              </details>
+            )}
           </>
         )}
         {error && (
@@ -829,24 +878,7 @@ export function E2eeAutomaticPairingPage({
           </div>
         )}
       </section>
-      {lostAll && (
-        <Dialog.Root open={lostAllOpen} onOpenChange={setLostAllOpen}>
-          <Dialog.Content
-            width={480}
-            className="max-h-[90dvh] overflow-y-auto"
-            data-e2ee-pairing-surface=""
-          >
-            <Dialog.Title>{t('e2ee.lostAll.title')}</Dialog.Title>
-            <E2eeLostAllRecovery
-              workspaceId={workspaceId}
-              passkeyAvailable={lostAll.passkeyAvailable}
-              restore={lostAll.restore}
-              onRecovered={recovered}
-            />
-          </Dialog.Content>
-        </Dialog.Root>
-      )}
-    </main>
+    </PairingPage>
   );
 }
 
@@ -904,6 +936,9 @@ export function E2eeAutomaticPairingInbox({
   /** A request this device ended after too many wrong codes; shown until dismissed. */
   const [ended, setEnded] = useState<E2eeAutomaticPairingReview | null>(null);
   const deferred = useRef(new Set<string>());
+  /** Monotonic set of request IDs that have reached a terminal outcome in this session
+   * (approved, declined, code-locked, or joined by QR); never cleared by transient poll gaps. */
+  const settled = useRef(new Set<string>());
   const actionOwner = useRef({ runtime });
   if (actionOwner.current.runtime !== runtime) actionOwner.current = { runtime };
   useEffect(
@@ -951,6 +986,7 @@ export function E2eeAutomaticPairingInbox({
     selectedRef.current = null;
     setSelected(null);
     deferred.current.clear();
+    settled.current.clear();
     if (!runtime?.pendingAutomaticPairing) return;
     const tick = async () => {
       if (!alive) return;
@@ -963,11 +999,11 @@ export function E2eeAutomaticPairingInbox({
       try {
         do {
           queued = false;
-          const rows = await runtime.pendingAutomaticPairing!();
+          const rawRows = await runtime.pendingAutomaticPairing!();
           if (!alive) return;
+          const rows = rawRows.filter((row) => !settled.current.has(row.id));
           setRequests(rows);
           const ids = new Set(rows.map((row) => row.id));
-          for (const id of deferred.current) if (!ids.has(id)) deferred.current.delete(id);
           if (selectedRef.current && !ids.has(selectedRef.current)) {
             selectedRef.current = null;
             setSelected(null);
@@ -992,7 +1028,8 @@ export function E2eeAutomaticPairingInbox({
             const next = rows.find(
               (row) =>
                 (row.phase === 'waiting' || (canPresentPreparing && row.phase === 'preparing')) &&
-                !deferred.current.has(row.id)
+                !deferred.current.has(row.id) &&
+                !settled.current.has(row.id)
             );
             if (next) {
               selectedRef.current = next.id;
@@ -1042,6 +1079,7 @@ export function E2eeAutomaticPairingInbox({
   useEffect(() => () => clearTimeout(dismissTimer.current), []);
   const qrJoined = (id: string) => {
     clearTimeout(dismissTimer.current);
+    settled.current.add(id);
     // Show the result briefly, then close without resurfacing the request it answered.
     dismissTimer.current = setTimeout(() => {
       if (qrForRef.current !== id) return;
@@ -1100,11 +1138,15 @@ export function E2eeAutomaticPairingInbox({
       deferred.current.add(target.id);
       setSelected(null);
       setQrFor(null);
-      if (!approve) setRequests((rows) => rows.filter((row) => row.id !== target.id));
+      if (!approve) {
+        settled.current.add(target.id);
+        setRequests((rows) => rows.filter((row) => row.id !== target.id));
+      }
     } catch (cause) {
       if (owner !== actionOwner.current) return;
       const refusal = accountPairingErrorCode(cause);
       if (refusal === 'pairing-code-locked') {
+        settled.current.add(target.id);
         deferred.current.add(target.id);
         setRequests((rows) => rows.filter((row) => row.id !== target.id));
         setSelected(null);
@@ -1199,7 +1241,9 @@ export function E2eeAutomaticPairingInbox({
         // The device that just scanned also has an automatic request; closing Settings
         // or the console must not pop it up again.
         for (const row of requestsRef.current)
-          if (row.phase === 'waiting' || row.phase === 'preparing') deferred.current.add(row.id);
+          if (row.phase === 'waiting' || row.phase === 'preparing') {
+            deferred.current.add(row.id);
+          }
       },
     }),
     [requestCount, handheld, qrSupported]
@@ -1409,7 +1453,9 @@ export function E2eeAutomaticPairingInbox({
                     {t('e2ee.auto.notMine')}
                   </Button>
                   <Button
-                    className="flex-1"
+                    // Grow only beside "not mine": in the stacked phone layout a
+                    // zero flex-basis would override the button height and crush it.
+                    className="sm:flex-1"
                     data-testid="e2ee-approval-authorize"
                     disabled={
                       Boolean(busy) ||

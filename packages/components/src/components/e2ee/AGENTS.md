@@ -17,7 +17,7 @@ Parent instructions apply. `CLAUDE.md` is a symlink; edit `AGENTS.md` only.
 
 ## Local agent approval
 
-The sibling `../e2ee-local-agent-approval.tsx` requires explicit consent and file-custody disclosure. Hide approval without a local credential. Re-prepare on retry; retain consent only for the same session, and require fresh consent for a replacement session. Local status failures must remain retryable. Credentials stay in main; UI consumes availability only.
+The sibling `../e2ee-local-agent-approval.tsx` requires explicit consent and file-custody disclosure. Hide approval without a local credential. Re-prepare on retry; retain consent only for the same session, and require fresh consent for a replacement session. Local status failures must remain retryable. Credentials stay in main; UI consumes availability only. Hide the offer, and stop waiting rechecks, while the live local CLI reports this workspace in its runtime `connectedWorkspaces` (only an activated identity starts an encrypted workspace); approval phase is per mount, so this is what keeps a remount from offering enablement again. Render nothing until the first CLI state snapshot arrives.
 Each attempt is bounded: an unanswered preparation or admission becomes waiting, never a
 permanent busy button, and a late answer cannot overwrite a newer attempt. While waiting,
 the view re-prepares on a bounded backoff while visible; that continues only the approved

@@ -48,6 +48,14 @@ export class LedgerLog extends Context.Service<
       },
       LedgerLogError
     >;
+    /** Read only the untrusted suffix after a genuine base; callers verify its endpoint and continuation. Optional for older adapters. */
+    readFrom?(
+      anchor: GenesisHash,
+      base: LedgerView
+    ): Effect.Effect<
+      { readonly records: readonly Uint8Array[]; readonly checkpoint: LedgerCheckpoint },
+      LedgerLogError
+    >;
     /** Atomically append at `expected`; only an explicitly typed pre-CAS quota refusal establishes non-dispatch for this attempt. */
     appendCas(
       anchor: GenesisHash,
@@ -259,5 +267,10 @@ export class LedgerSync extends Context.Service<
     current(): Effect.Effect<LedgerFeedState, unknown>;
     /** Read and verify up to an independently chosen endpoint, then persist it; never trust a server-selected endpoint implicitly. */
     refresh(): Effect.Effect<LedgerFeedState, unknown>;
+    /** Verify and persist an inline raw page through the existing feed owner. */
+    ingest?(
+      page: LedgerReadPage,
+      checkpoint: LedgerCheckpoint
+    ): Effect.Effect<LedgerFeedState, unknown>;
   }
 >()('@lody/e2ee-core/LedgerSync') {}

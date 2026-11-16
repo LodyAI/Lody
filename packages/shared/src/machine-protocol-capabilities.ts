@@ -31,6 +31,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   subagentEvents: 'subagentEvents',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
   e2eeAcpInteraction: 'e2eeAcpInteraction',
+  e2eeSessionFork: 'e2eeSessionFork',
+  e2eeSessionEditAndResend: 'e2eeSessionEditAndResend',
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
@@ -54,6 +56,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   iosSimulatorControls: 'iosSimulatorControls',
   iosSimulatorExterior: 'iosSimulatorExterior',
   piExtensions: 'piExtensions',
+  antigravitySkipPermissions: 'antigravitySkipPermissions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
   acpModelOptionsRead: 'acpModelOptionsRead',
   providerRateLimitsRefresh: 'providerRateLimitsRefresh',
@@ -76,6 +79,10 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
+/** Encrypted feature RPC accepts `session/fork` from the owner and shared members. */
+export const E2EE_SESSION_FORK_PROTOCOL_VERSION = 1;
+/** Encrypted feature RPC accepts `session/edit-and-resend` from the machine owner. */
+export const E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION = 1;
 export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
@@ -111,6 +118,8 @@ export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
 export const IOS_SIMULATOR_PROTOCOL_VERSION = 1;
 export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
+/** `runtimeOverrides.antigravitySkipPermissions`; older strict schemas reject the field. */
+export const ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 /** `machine/acp-capabilities-refresh` accepts `readModelOptions` and reports `reading-model-options`. */
 export const ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION = 1;
@@ -240,6 +249,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead]: ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.antigravitySkipPermissions]:
+    ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope]:
     CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
@@ -456,6 +467,17 @@ export function machineSupportsPiExtensions(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.piExtensions,
     PI_EXTENSIONS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon launches builtin agy with `--dangerously-skip-permissions` on request. */
+export function machineSupportsAntigravitySkipPermissions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.antigravitySkipPermissions,
+    ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION
   );
 }
 

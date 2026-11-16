@@ -141,7 +141,7 @@ function StoryHarness({
   } | null;
   pr?: SessionPullRequestMeta | null;
   prHistory?: SessionInfoBarProps['prHistory'];
-  diffStat?: { add: number; del: number } | null;
+  diffStat?: SessionInfoBarProps['diffStat'];
   width?: number;
   initialStage?: 'status' | 'goal' | 'schedule' | 'context';
   withPreview?: boolean;
@@ -232,6 +232,20 @@ type Story = StoryObj<typeof meta>;
 /* ── Context / status matrix ─────────────────────────────────────────── */
 
 export const ContextOnly: Story = { args: {} };
+
+/** Binary, empty-file and permission changes retain the workspace review entry. */
+export const ZeroLineChanges: Story = {
+  args: { pr: null, projectName: null, branch: null, diffStat: { add: 0, del: 0, files: 2 } },
+};
+
+export const ZeroLineChangesMobile: Story = {
+  args: { ...ZeroLineChanges.args, compactMachineInfo: true, width: 375 },
+};
+
+/** Mixed comparisons keep the ordinary text line summary. */
+export const MixedTextAndBinaryChanges: Story = {
+  args: { pr: null, diffStat: { add: 12, del: 3, files: 3 } },
+};
 
 const LOCAL_MACHINE: SessionMachineInfo = {
   machineId: 'story-machine' as SessionMachineInfo['machineId'],

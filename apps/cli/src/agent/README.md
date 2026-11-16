@@ -255,6 +255,72 @@ ACP capabilities, without AIR, terminal-output deltas or session notices. Standa
 tool fields and text fallback remain authoritative. Consumer audit and limits:
 [compatibility decision](../../../../.agents/notes/implemented/bug-fix/2026-09-29-claude-acp-sparse-updates.md).
 
+### Managed Antigravity
+
+Builtin Antigravity launches the pinned official `agy acp --process-per-session
+--disable-telemetry` directly, with `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Its only
+version/archive pins are in `antigravity-runtime-manifest.json`; downloads use the
+same public runtime channel, cache and verification as other managed agents.
+`runtimeOverrides.antigravityPath` selects a user-managed binary.
+`runtimeOverrides.antigravitySkipPermissions: true` (Provider setting "Skip
+permission requests", off by default) appends `--dangerously-skip-permissions`,
+so agy approves every tool permission request itself; agy's Auto mode still asks
+for non-safe commands without it. The flag is a launch policy, not a runtime
+replacement: it keeps the managed runtime, static capabilities, title ownership
+and capability cache key, and takes effect when the next agy process starts.
+Older daemons reject the field in their strict session schema, so the dialog
+offers it only when the machine advertises `antigravitySkipPermissions` v1.
+Authentication
+uses methods returned by ACP initialize, not a native terminal login command.
+
+New Provider discovery omits `registry/antigravity-acp`. Persisted Providers retain
+the old fixed binary launch definition and show a Legacy label; neither Provider
+identity nor native session IDs are rewritten. Create a builtin Provider for new
+work. Compatibility of old server sessions with agy is not assumed.
+
+Quota refresh runs the selected agy executable with `--print /usage
+--output-format json` and its launch environment. This command reports zero model
+turns; its model-group weekly and five-hour fractions become the existing Provider
+quota windows. The ACP `/usage` prompt belongs only to the legacy server reader:
+agy does not advertise it and would send that text to the model.
+
+Capability probes and real new/load/resume session snapshots use the same
+normalizer to project the builtin and legacy Antigravity quota readers. Session
+startup must not erase that declaration while updating the Provider cache;
+native Core declarations remain authoritative. Builtin quota display accepts
+only audited proxy and locale environment overrides. Credential/home overrides,
+unknown environment keys, and Magpie routing remain ineligible.
+
+Native `ask_question` forms use each `qN.title` as the prompt, numbered option
+IDs with labels in `oneOf[].title` / `items.anyOf[].title`, and a `qN_other`
+custom-answer field. The shared bridge receives explicit builtin Antigravity
+provenance, persists readable Core questions/answers, and maps replies back to
+the original IDs or custom field. It does not reinterpret other providers'
+legacy forms or canonical Core forms.
+
+Native tool updates carry the tool identity in a top-level `name`; AgentClient
+projects that bounded value into `_meta.lody.toolName` for history. Existing
+canonical metadata takes precedence. In live 1.5.9 Hydrogen experiments,
+`search_web`, `invoke_subagent` and `manage_subagents` emitted ordinary tool
+start/completion updates without `content` or `rawOutput`. Child activity and
+results were reported in parent assistant text, not structured child events;
+no `subagentEvents` capability was advertised. Keep these as tool calls rather
+than inventing child lifecycle or treating spawn acknowledgement as child success.
+
+`antigravity-usage.ts` projects end-turn `PromptResponse.usage` into disjoint token
+buckets. Each submitted request has a fresh accounting scope and freezes its
+confirmed session model before dispatch, so later model changes and smaller next
+turns do not overwrite earlier totals. Cache reads/writes and reasoning retain
+separate buckets; provider cost stays unknown. Standard `usage_update` records
+both current occupancy (`used`) and capacity (`size`) in Session metadata for the
+composer, including zero occupancy and decreases after compaction. The latest
+reported positive capacity also accompanies aggregate token usage as
+`usage.contextWindow` for statistics persistence; it is neither summed across
+turns nor inferred from token totals. Model-level counters retain only token
+buckets. Standard context observations are not cumulative billable tokens. Optional malformed
+telemetry cannot fail the prompt. The existing delivery contract remains in
+[usage snapshots](../../../../specs/usage-delivery.md).
+
 ### Managed runtimes
 
 Codex version/archive pins come from `codex-runtime-manifest.json`, which the outer

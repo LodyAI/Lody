@@ -49,8 +49,11 @@
 保存工作区签名记录的只追加日志，是协议在权限上唯一依赖的远端写入。
 
 - `read(anchor)` 返回从创世开始的全部记录，以及日志自称的检查点。库会重新验证全部内容。
+- 可选的 `readFrom(anchor, base)` 只返回已验证视图之后的未可信后缀。提交工作流
+  验证后缀与检查点；适配器未实现、父记录不匹配或保留历史不覆盖旧 pin 时，
+  使用 `read`。服务端状态不能证明提交成功。
 - `appendCas(anchor, expected, record)` **仅当**日志仍以 `expected` 结尾时才追加，绝不能无条件追加。同样的字节追加两次必须是幂等的或被拒绝。
-- 失败为 `LedgerLogError`。任何失败之后库都会回读以确认结果，因此响应丢失是安全的。
+- 失败为 `LedgerLogError`。库会回读以确认不确定的结果。只有明确证明未发送的首次自助操作限流拒绝可以释放原始记录；响应丢失始终保留原始记录以供重试。
 
 ### LedgerFeedSource
 
@@ -155,6 +158,9 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 `current(view)` 返回发布当前纪元的那条记录的原始字节（纪元 0 为创世记录），或 `null`。分发器只用它记录本设备自己的发布，并会先验证。通常是对本地 feed 的逆向扫描。
 
 ### LedgerSync
+
+可选 `ingest(page, checkpoint)` 将内联原件交给普通读取所用的同一个 feed，验证后持久化。
+调用方提供独立检查点及当前精确请求位置；此入口不授予权限，也不证明新鲜度。
 
 `refresh()` 独立选择目标检查点，并把本地 feed 读到该检查点；`current()` 返回已存状态。`WorkspaceControl` 与 `E2eeWorkspace` 使用它，工作区由它派生 `LedgerViewSource`。
 

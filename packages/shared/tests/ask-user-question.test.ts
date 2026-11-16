@@ -867,3 +867,169 @@ describe('Droid AskUser form', () => {
     expect(parseDroid(duplicateLabels)).toBeNull();
   });
 });
+
+describe('Antigravity ask_question form', () => {
+  // Synthetic values follow the native agy 1.5.9 form contract.
+  const request = () => ({
+    mode: 'form' as const,
+    message: 'The agent has 2 questions.',
+    requestedSchema: {
+      type: 'object' as const,
+      properties: {
+        q1: {
+          type: 'string',
+          title: 'Which format?',
+          oneOf: [
+            { const: '1', title: 'JSON' },
+            { const: '2', title: 'CSV' },
+          ],
+        },
+        q1_other: { type: 'string', title: 'Other' },
+        q2: {
+          type: 'array',
+          title: 'Which features?',
+          items: {
+            anyOf: [
+              { const: '1', title: 'Search' },
+              { const: '2', title: 'Export' },
+            ],
+          },
+        },
+        q2_other: { type: 'string', title: 'Other' },
+      },
+    },
+  });
+  const parse = (value = request()) =>
+    parseAskUserQuestionElicitationRequest(
+      value as unknown as CreateElicitationRequest,
+      'antigravity'
+    );
+
+  it('displays prompts and labels and translates selections back to native IDs', () => {
+    const elicitation = parse()!;
+    expect(elicitation.meta.questions).toEqual([
+      {
+        id: 'q1',
+        header: '',
+        question: 'Which format?',
+        options: [{ label: 'JSON' }, { label: 'CSV' }],
+        multiSelect: false,
+        allowCustomAnswer: true,
+      },
+      {
+        id: 'q2',
+        header: '',
+        question: 'Which features?',
+        options: [{ label: 'Search' }, { label: 'Export' }],
+        multiSelect: true,
+        allowCustomAnswer: true,
+      },
+    ]);
+    const outcome = createAskUserQuestionPermissionOutcome(
+      'answer',
+      { q1: 'CSV', q2: ['Search', 'Export'] },
+      elicitation.meta
+    );
+    expect(buildAskUserQuestionElicitationResponse(elicitation, { outcome })).toEqual({
+      action: 'accept',
+      content: { q1: '2', q2: ['1', '2'] },
+    });
+  });
+
+  it('keeps custom answers separate from selected IDs and cancels incomplete answers', () => {
+    const elicitation = parse()!;
+    const reply = (answers: Record<string, string | string[]>) =>
+      buildAskUserQuestionElicitationResponse(elicitation, {
+        outcome: createAskUserQuestionPermissionOutcome('answer', answers, elicitation.meta),
+      });
+    expect(reply({ q1: 'XML', q2: ['Search', 'Import'] })).toEqual({
+      action: 'accept',
+      content: { q1_other: 'XML', q2: ['1'], q2_other: 'Import' },
+    });
+    expect(reply({ q1: 'JSON' })).toEqual({ action: 'cancel' });
+    expect(reply({ q1: 'JSON', q2: ['Search', 'Search'] })).toEqual({ action: 'cancel' });
+    expect(
+      buildAskUserQuestionElicitationResponse(elicitation, { outcome: { outcome: 'cancelled' } })
+    ).toEqual({ action: 'cancel' });
+  });
+
+  it('retains readable questions and answers across persisted document import', () => {
+    const elicitation = parse()!;
+    const open = (doc: Loro) =>
+      createSessionMirror({
+        doc,
+        initialState: {
+          session: { id: 'agy-question' as SessionId },
+          history: [],
+        },
+      });
+    const doc = new Loro();
+    const mirror = open(doc);
+    mirror.historyWriter.append({
+      id: 'turn',
+      role: 'assistant',
+      timestamp: '2026-11-15T00:00:00Z',
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'ask',
+          status: 'pending',
+          permissionRequest: {
+            requestId: 'request',
+            options: [],
+            _meta: { lody: { elicitation: { version: 1, questions: elicitation.meta.questions } } },
+          },
+        },
+      ],
+    });
+    const answers = { q1: 'CSV', q2: ['Export'] };
+    expect(
+      mirror.historyWriter.respondPermission(
+        'request',
+        createAskUserQuestionPermissionOutcome('answer', answers, elicitation.meta)
+      )
+    ).toBe(true);
+    const peer = new Loro();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    const item = open(peer).historyWriter.read('turn')?.items?.[0];
+    if (item?.type !== 'tool_call') throw new Error('Missing question');
+    const restored = parseAskUserQuestionPermissionMeta(item.permissionRequest?._meta)!;
+    expect(restored.questions).toEqual(elicitation.meta.questions);
+    expect(
+      extractAskUserQuestionAnswersFromOutcome(restored, item.permissionRequest?.outcome)
+    ).toEqual(answers);
+    expect(
+      buildAskUserQuestionElicitationResponse(elicitation, {
+        outcome: item.permissionRequest!.outcome!,
+      })
+    ).toEqual({ action: 'accept', content: { q1: '2', q2: ['2'] } });
+  });
+
+  it('declines ambiguous native forms without changing legacy or Core interpretation', () => {
+    const duplicate = request();
+    duplicate.requestedSchema.properties.q1.oneOf[1].title = 'JSON';
+    expect(parse(duplicate)).toBeNull();
+    const malformed = request();
+    malformed.requestedSchema.properties.q2_other.type = 'number';
+    expect(parse(malformed)).toBeNull();
+    const generic = parseAskUserQuestionElicitationRequest(
+      request() as unknown as CreateElicitationRequest
+    )!;
+    expect(generic.meta.questions[0]?.options[0]?.label).toBe('1');
+    const core = parseAskUserQuestionElicitationRequest(
+      {
+        mode: 'form',
+        message: 'Input requested',
+        _meta: { lody: { elicitation: { version: 1 } } },
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            pick: { type: 'string', description: 'Which path?', enum: ['Left', 'Right'] },
+          },
+        },
+      },
+      'antigravity'
+    );
+    expect(core?.meta.questions[0]?.question).toBe('Which path?');
+  });
+});

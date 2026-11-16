@@ -9,9 +9,10 @@ export function billingEntitlement(value) {
 export function createCommands(runtime, sendTurn, identity) {
  const attempted=new Set();
  const uuid=/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
- function options(projectId, agentConfigId) {
+ // `includeOffline` (schedule targets) also lists agents on offline computers; new chats omit it.
+ function options(projectId, agentConfigId, includeOffline) {
   const scope=identity();if(!scope?.userId)throw Error('not_connected');
-  return runtime.creationOptions({workspaceId:scope.workspaceId,...(projectId?{projectId}:{}),...(typeof agentConfigId==='string'?{agentConfigId}:{})});
+  return runtime.creationOptions({workspaceId:scope.workspaceId,...(projectId?{projectId}:{}),...(typeof agentConfigId==='string'?{agentConfigId}:{}),...(includeOffline===true?{includeOffline}:{})});
  }
  async function roles() {
   const scope=identity();if(!scope?.userId)throw Error('not_connected');

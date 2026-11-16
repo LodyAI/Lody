@@ -36,5 +36,10 @@ remain in cloud-api.
 - Reuse fresh cached grants. Before a cached machine/project sharing refusal, refresh
   the authenticated policy with per-binding concurrent sharing and a five-second
   read-start cooldown. Failed attempts never supply policy evidence or advance pins.
+- Concurrent cold reads of one binding share one authenticated read; a read started
+  before an invalidation is never joined after it. An original inlined in `readHead`
+  is used only for that exact revision and digest, is verified exactly like a
+  `readVersion` reply, and is never persisted as part of the head. Transports ask for it
+  with `makeInlineVersionReadHead`, which stops asking a backend that refuses the field.
 
 - Native session-read fences bind the returned view to the same verified cache object and freshness; ledger generation is fenced by the caller through response publication.

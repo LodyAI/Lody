@@ -224,11 +224,12 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "esbuild": "0.27.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/dockerode": "^3.3.47",
     "@types/node": "catalog:",
     "loro-repo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "5.0.2"
+    "vitest": "catalog:"
   }
 }

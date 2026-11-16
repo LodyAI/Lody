@@ -122,6 +122,11 @@ export interface AccountSettingsPureProps {
   pendingInvitations: Invitation[];
   workspaceJoinRequestsSlot?: ReactNode;
   workspaceOwnershipSlot?: ReactNode;
+  /**
+   * The encrypted workspace's security entry. It opens the workspace page inside
+   * the page column, so its heading and rows line up with the sections below.
+   */
+  workspaceSecuritySlot?: ReactNode;
   /** An end-to-end encrypted workspace: leaving and deletion state their encryption consequences. */
   encryptedWorkspace?: boolean;
   /** Account-only machine overview supplied by the runtime-aware container. */
@@ -189,6 +194,7 @@ export function AccountSettingsPure({
   pendingInvitations: initialPendingInvitations,
   workspaceJoinRequestsSlot,
   workspaceOwnershipSlot,
+  workspaceSecuritySlot,
   encryptedWorkspace = false,
   accountMachinesSlot,
   accountBillingSlot,
@@ -487,72 +493,83 @@ export function AccountSettingsPure({
     }
   };
 
+  const securitySlot = surface === 'workspace' ? workspaceSecuritySlot : undefined;
+
   if (loading) {
     return (
-      <div {...stylex.props(styles.loading)}>
-        <Spinner size="large" />
-      </div>
+      <>
+        {securitySlot ? (
+          <div {...stylex.props(settingsSurface.container)}>{securitySlot}</div>
+        ) : null}
+        <div {...stylex.props(styles.loading)}>
+          <Spinner size="large" />
+        </div>
+      </>
     );
   }
 
   if (isMobile) {
     return (
-      <MobileAccountSettings
-        surface={surface}
-        currentUser={currentUser}
-        organization={organization}
-        role={role}
-        hasAdminPermission={hasAdminPermission}
-        members={members}
-        pendingInvitations={initialPendingInvitations}
-        workspaceJoinRequestsSlot={workspaceJoinRequestsSlot}
-        workspaceOwnershipSlot={workspaceOwnershipSlot}
-        memberLimit={memberLimit}
-        memberLimitReached={memberLimitReached}
-        billingUiAvailable={billingUiAvailable}
-        seatPreview={seatPreview}
-        onSignOut={onSignOut}
-        onInviteMember={onInviteMember}
-        onRemoveMember={onRemoveMember}
-        onUpdateRole={onUpdateRole}
-        onCopyInviteLink={onCopyInviteLink}
-        onCancelInvitation={onCancelInvitation}
-        onLeaveOrganization={onLeaveOrganization}
-        onDeleteOrganization={onDeleteOrganization}
-        deleteBillingGuard={deleteBillingGuard}
-        onDeleteAccount={onDeleteAccount}
-        onRenameOrganization={onRenameOrganization}
-        getInviteLink={getInviteLink}
-        onUpdateUserName={onUpdateUserName}
-        onUploadAvatar={onUploadAvatar}
-        linkedAccounts={linkedAccounts}
-        isLoadingLinkedAccounts={isLoadingLinkedAccounts}
-        onConnectAccount={onConnectAccount}
-        showLinkedAccounts={showLinkedAccounts}
-        hasPasswordCredential={hasPasswordCredential}
-        onChangePassword={onChangePassword}
-        onVerifyCurrentPassword={onVerifyCurrentPassword}
-        onSetupPassword={onSetupPassword}
-        canGenerateCliApiKey={canGenerateCliApiKey}
-        cliApiKeys={cliApiKeys}
-        cliApiKeyMachineNames={cliApiKeyMachineNames}
-        currentMachineId={currentMachineId}
-        isLoadingCliApiKeys={isLoadingCliApiKeys}
-        isCreatingCliApiKey={isCreatingCliApiKey}
-        hasGeneratedCliApiKey={hasGeneratedCliApiKey}
-        revokingCliApiKeyId={revokingCliApiKeyId}
-        onGenerateCliApiKey={onGenerateCliApiKey}
-        onCopyGeneratedCliApiKey={onCopyGeneratedCliApiKey}
-        onClearGeneratedCliApiKey={onClearGeneratedCliApiKey}
-        onRevokeCliApiKey={onRevokeCliApiKey}
-        accountMachinesSlot={accountMachinesSlot}
-        accountBillingSlot={accountBillingSlot}
-      />
+      <>
+        {securitySlot}
+        <MobileAccountSettings
+          surface={surface}
+          currentUser={currentUser}
+          organization={organization}
+          role={role}
+          hasAdminPermission={hasAdminPermission}
+          members={members}
+          pendingInvitations={initialPendingInvitations}
+          workspaceJoinRequestsSlot={workspaceJoinRequestsSlot}
+          workspaceOwnershipSlot={workspaceOwnershipSlot}
+          memberLimit={memberLimit}
+          memberLimitReached={memberLimitReached}
+          billingUiAvailable={billingUiAvailable}
+          seatPreview={seatPreview}
+          onSignOut={onSignOut}
+          onInviteMember={onInviteMember}
+          onRemoveMember={onRemoveMember}
+          onUpdateRole={onUpdateRole}
+          onCopyInviteLink={onCopyInviteLink}
+          onCancelInvitation={onCancelInvitation}
+          onLeaveOrganization={onLeaveOrganization}
+          onDeleteOrganization={onDeleteOrganization}
+          deleteBillingGuard={deleteBillingGuard}
+          onDeleteAccount={onDeleteAccount}
+          onRenameOrganization={onRenameOrganization}
+          getInviteLink={getInviteLink}
+          onUpdateUserName={onUpdateUserName}
+          onUploadAvatar={onUploadAvatar}
+          linkedAccounts={linkedAccounts}
+          isLoadingLinkedAccounts={isLoadingLinkedAccounts}
+          onConnectAccount={onConnectAccount}
+          showLinkedAccounts={showLinkedAccounts}
+          hasPasswordCredential={hasPasswordCredential}
+          onChangePassword={onChangePassword}
+          onVerifyCurrentPassword={onVerifyCurrentPassword}
+          onSetupPassword={onSetupPassword}
+          canGenerateCliApiKey={canGenerateCliApiKey}
+          cliApiKeys={cliApiKeys}
+          cliApiKeyMachineNames={cliApiKeyMachineNames}
+          currentMachineId={currentMachineId}
+          isLoadingCliApiKeys={isLoadingCliApiKeys}
+          isCreatingCliApiKey={isCreatingCliApiKey}
+          hasGeneratedCliApiKey={hasGeneratedCliApiKey}
+          revokingCliApiKeyId={revokingCliApiKeyId}
+          onGenerateCliApiKey={onGenerateCliApiKey}
+          onCopyGeneratedCliApiKey={onCopyGeneratedCliApiKey}
+          onClearGeneratedCliApiKey={onClearGeneratedCliApiKey}
+          onRevokeCliApiKey={onRevokeCliApiKey}
+          accountMachinesSlot={accountMachinesSlot}
+          accountBillingSlot={accountBillingSlot}
+        />
+      </>
     );
   }
 
   return (
     <div {...stylex.props(settingsSurface.container)}>
+      {securitySlot}
       {/* Profile: who the person is — email, display name, avatar, connected accounts. */}
       {surface === 'account' ? (
         <CompactSection title={t('settings.profile.title')}>

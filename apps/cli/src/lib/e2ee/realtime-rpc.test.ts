@@ -490,6 +490,155 @@ effectIt.effect(
 );
 
 effectIt.effect(
+  'forks for a shared member under session-scoped authority and the verified signer identity',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver, makeEncryptedFeatureAuthorization } =
+        yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const streams = memoryStreams();
+      const spec = {
+        sourceSessionId: f.input.sessionId,
+        sourceTurnId: 'assistant-1',
+        targetSessionId: '00000000-0000-4000-8000-0000000000f3',
+        requestedByUserId: 'member-account',
+      };
+      const input = {
+        requestId: '66'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'session/fork' as const,
+          params: spec,
+        },
+      };
+      const original = yield* f.sender.prepareFeature(input);
+      const scopes: string[][] = [];
+      let projectAllowed = (project: string | undefined) => project !== 'unshared';
+      // The real scope authorizer, over a member grant that names no owner principal.
+      const authorization = makeEncryptedFeatureAuthorization({
+        authorization: {
+          authorizeOwnedExecution: () => Effect.die('fork used owner-only authority'),
+          authorizeRead: () => Effect.die('fork used read authority'),
+          authorizeExecution: (_workspace: string, _device: string, project?: string) =>
+            Effect.sync(() => {
+              scopes.at(-1)?.push(project ?? '<machine>');
+              return projectAllowed(project)
+                ? { _tag: 'Authorized' as const }
+                : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' };
+            }),
+          authorizeSessionRead: () => Effect.die('fork used session read authority'),
+          authoritySignal: new AbortController().signal,
+        },
+        executionAuthoritySignal: () => new AbortController().signal,
+        resolveSessionExecutionScope: async (sessionId) => {
+          expect(sessionId).toBe(spec.sourceSessionId);
+          scopes.push([]);
+          return ['shared-a', 'shared-b'];
+        },
+      });
+      const handled: unknown[] = [];
+      let identity: { accountId: string; executionUserId: string } | undefined = {
+        accountId: 'member-account',
+        executionUserId: 'e2ee-member:aa',
+      };
+      const receiveOptions = {
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () => Effect.die('fork used owner-only authority'),
+        authorizeRead: () => Effect.die('fork used read authority'),
+        authorizeSessionExecution: authorization.authorizeSessionExecution,
+        requesterIdentity: () => Effect.sync(() => identity),
+        isOpen: () => true,
+        client: streams.client,
+        handle: async (
+          request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+          context: import('./feature-rpc').EncryptedFeatureContext
+        ) => {
+          handled.push({ method: request.method, requester: context.requester });
+          return {
+            ok: true as const,
+            result: {
+              type: 'session/fork_response' as const,
+              sourceSessionId: spec.sourceSessionId,
+              targetSessionId: spec.targetSessionId,
+              success: true,
+              disposition: 'completed' as const,
+              partial: false,
+              warnings: [],
+            },
+          };
+        },
+      };
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+          yield* receive({ id: original.requestId, frame: original.frameHex });
+          yield* streams.waitResponse(original.requestId, 1);
+        })
+      );
+      expect(handled).toEqual([
+        {
+          method: 'session/fork',
+          requester: { accountId: 'member-account', executionUserId: 'e2ee-member:aa' },
+        },
+      ]);
+      expect(scopes[0]).toEqual(['shared-a', 'shared-b']);
+      const reply = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
+        ?.value as { frame: string };
+      expect(yield* f.sender.acceptFeatureResponse(input, reply.frame)).toMatchObject({
+        ok: true,
+      });
+
+      // One unshared project the session reaches refuses the fork before any work, and the
+      // sender gets that definite answer instead of waiting out its deadline.
+      projectAllowed = (project) => project !== 'shared-b';
+      const unshared = { ...input, requestId: '67'.repeat(16) };
+      const unsharedOriginal = yield* f.sender.prepareFeature(unshared);
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+          yield* receive({ id: unsharedOriginal.requestId, frame: unsharedOriginal.frameHex });
+          yield* streams.waitResponse(unsharedOriginal.requestId, 1);
+        })
+      );
+      expect(handled).toHaveLength(1);
+      const refusal = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
+        ?.value as { id: string; frame: string };
+      expect(refusal.id).toBe(unsharedOriginal.requestId);
+      expect(yield* f.sender.acceptFeatureResponse(unshared, refusal.frame)).toMatchObject({
+        ok: false,
+        code: 'e2ee_machine_not_shared',
+      });
+
+      // A signer without a ledger account is never attributed from the request, and it
+      // gets no answer at all.
+      projectAllowed = () => true;
+      identity = undefined;
+      const anonymous = yield* f.sender.prepareFeature({ ...input, requestId: '68'.repeat(16) });
+      const before = streams.writes.length;
+      const checked = yield* Deferred.make<void>();
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver({
+            ...receiveOptions,
+            requesterIdentity: () => Deferred.succeed(checked, undefined).pipe(Effect.as(identity)),
+          });
+          yield* receive({ id: anonymous.requestId, frame: anonymous.frameHex });
+          yield* Deferred.await(checked);
+        })
+      );
+      expect(handled).toHaveLength(1);
+      expect(
+        streams.writes.slice(before).filter((write) => write.stream.includes(':res:'))
+      ).toEqual([]);
+    })
+);
+
+effectIt.effect(
   'joins a live encrypted write across Iroh and Streams receivers without sealing uncertainty',
   () =>
     Effect.gen(function* () {

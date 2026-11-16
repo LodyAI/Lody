@@ -1,6 +1,3 @@
-// @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import { getMessageItemPrefix } from '../src/lib/session-chat-search';

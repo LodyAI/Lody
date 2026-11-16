@@ -24,6 +24,8 @@ import {
 } from '@lody/shared';
 import { createLogger } from '@/utils/logger';
 import { PreviewService } from './preview-service';
+import { encryptedRuntimeCloudPort } from '@/lib/e2ee/runtime-cloud-port';
+import { createLocalCloudPort } from '@lody/platform';
 import { ensureCloudflaredBinary } from './cloudflared-binary';
 import { CloudflaredError, startCloudflaredProcess } from './cloudflared-process';
 import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
@@ -52,7 +54,15 @@ const sessionId = 'session-preview' as SessionId;
 const userId = 'user-preview';
 const logger = createLogger({ level: 'silent', transports: 'console' });
 
-function fixture(workspace = workspaceId) {
+function fixture(
+  workspace = workspaceId,
+  remotePreview: ConstructorParameters<typeof PreviewService>[0]['remotePreview'] = {
+    verifyControl: async ({ intent }) => ({
+      requesterUserId: intent.requesterUserId,
+      expiresAt: Date.now() + 120_000,
+    }),
+  }
+) {
   let preview: SessionPreviewDocState = {};
   let meta: SessionMeta = {
     id: sessionId,
@@ -83,12 +93,7 @@ function fixture(workspace = workspaceId) {
     userId,
     now: () => Date.now(),
     runtimeBaseUrl: 'https://runtime.example.test',
-    remotePreview: {
-      verifyControl: async ({ intent }) => ({
-        requesterUserId: intent.requesterUserId,
-        expiresAt: Date.now() + 120_000,
-      }),
-    },
+    remotePreview,
     workspaceDocument: {
       getOrCreateSessionDoc: async () => sessionDoc,
       repo,
@@ -168,11 +173,30 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
     vi.clearAllMocks();
   });
 
-  function setup(workspace = workspaceId) {
-    const result = fixture(workspace);
+  function setup(workspace = workspaceId, remotePreview?: Parameters<typeof fixture>[1]) {
+    const result = fixture(workspace, remotePreview);
     services.push(result.service);
     return result;
   }
+
+  it('opens an encrypted workspace preview through the tunnel while ordinary cloud proofs stay closed', async () => {
+    const encryptedPort = encryptedRuntimeCloudPort(
+      createLocalCloudPort({ identity: { userId }, workspaces: [] })
+    );
+    const { service } = setup(workspaceId, encryptedPort.remotePreview);
+    const result = await service.createPreview(createRequest());
+    expect(result).toMatchObject({ success: true, connection: { status: 'active' } });
+    expect(
+      await (await fetch(proxyOrigin + new URL(result.connection?.publicUrl ?? '').search)).text()
+    ).toBe('development server');
+    await expect(
+      service.authorizeRemoteControl(sessionId, userId, 'status', {
+        runtimeNonce: service.controlAuthority.runtimeNonce,
+        requestId: '00000000-0000-4000-8000-0000000000a1',
+        requestToken: 'synthetic-token',
+      })
+    ).rejects.toThrow('Remote preview authorization is unavailable.');
+  });
 
   it('starts reported preparation in the background and joins same-origin reports and Browser clicks', async () => {
     const downloading = Promise.withResolvers<void>();

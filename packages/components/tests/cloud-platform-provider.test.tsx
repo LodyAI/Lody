@@ -1,8 +1,7 @@
+// @vitest-environment jsdom
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { createCloudSessionAccess } from '@/providers/cloud-session-access';
-// @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { getDefaultStore } from 'jotai';
 import type { WorkspaceId } from '@lody/shared';
 import { userAtom, currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';

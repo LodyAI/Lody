@@ -1,6 +1,6 @@
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
@@ -77,12 +77,15 @@ export function AccountSettingsComponent({
   surface = 'account',
   encryptedTeamManagement = true,
   onOpenEncryptionConsole,
+  workspaceSecuritySlot,
 }: {
   surface?: AccountSettingsSurface;
   /** Desktop General leaves encrypted invitations to the encryption console. */
   encryptedTeamManagement?: boolean;
   /** Opens the encryption console on its members page, where encrypted ownership moves. */
   onOpenEncryptionConsole?: () => void;
+  /** The encrypted workspace's security entry, laid out as the page's first section. */
+  workspaceSecuritySlot?: ReactNode;
 }) {
   // Personal account and workspace administration are cloud-account surfaces.
   // Registry-level gating hides their tabs without `cloudAccount`; this is the
@@ -96,6 +99,7 @@ export function AccountSettingsComponent({
       surface={surface}
       encryptedTeamManagement={encryptedTeamManagement}
       onOpenEncryptionConsole={onOpenEncryptionConsole}
+      workspaceSecuritySlot={workspaceSecuritySlot}
     />
   );
 }
@@ -104,10 +108,12 @@ function CloudAccountSettings({
   surface,
   encryptedTeamManagement,
   onOpenEncryptionConsole,
+  workspaceSecuritySlot,
 }: {
   surface: AccountSettingsSurface;
   encryptedTeamManagement: boolean;
   onOpenEncryptionConsole: (() => void) | undefined;
+  workspaceSecuritySlot: ReactNode;
 }) {
   const { t } = useTranslation();
   const authClient = useAuthClient();
@@ -752,6 +758,7 @@ function CloudAccountSettings({
         <AccountSettingsPure
           surface={surface}
           loading
+          workspaceSecuritySlot={workspaceSecuritySlot}
           currentUser={currentUser}
           organization={{ id: '', name: '' }}
           role="member"
@@ -837,6 +844,7 @@ function CloudAccountSettings({
           ) : undefined
         }
         encryptedWorkspace={encrypted}
+        workspaceSecuritySlot={workspaceSecuritySlot}
         workspaceJoinRequestsSlot={
           encrypted &&
           encryptedTeamManagement &&

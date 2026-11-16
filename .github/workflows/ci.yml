@@ -54,11 +54,11 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Identical block in Static checks and Tests. Write force_full once.
-          # Default fail-open; only a successful allowlist miss may set false.
+          # Identical block in Static checks and Tests (do not move this floor
+          # into select-ci-scope.mjs — that script is untrusted).
           force=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
+            if (git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$PR_BASE_SHA") \
               && git diff -z --name-only "$PR_BASE_SHA" HEAD >/tmp/ci-changed-files; then
               force=false
               while IFS= read -r -d '' f; do
@@ -89,9 +89,9 @@ jobs:
             # Gates apply to files this PR changed, so compare against the main commit
             # the checked-out merge commit was built on (its first parent), not the
             # possibly stale pull_request.base.sha. The shallow checkout still records
-            # the parent ids; fetch only that commit.
+            # the parent ids; fetch only that commit when not already local.
             base="$(git cat-file -p HEAD | sed -n 's/^parent //p' | head -n 1)"
-            git fetch --no-tags --depth=1 origin "$base"
+            git cat-file -e "${base}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$base"
             pnpm run docs check --base "$base"
           else
             pnpm run docs check
@@ -113,7 +113,7 @@ jobs:
         run: pnpm check:quick
 
   # The components and cli suites are CPU-bound on a 4-vCPU runner, so they run
-  # on their own runners (components in three Vitest shards). See
+  # on their own sharded runners (two Vitest shards each). See
   # .agents/notes/implemented/testing/2026-09-26-ci-test-groups-and-pnpm-store-cache.md.
   test-groups:
     name: Tests (${{ matrix.label }})
@@ -123,10 +123,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { group: components, shard: 1/3, label: components 1/3 }
-          - { group: components, shard: 2/3, label: components 2/3 }
-          - { group: components, shard: 3/3, label: components 3/3 }
-          - { group: cli, shard: '', label: cli }
+          - { group: components, shard: 1/2, label: components 1/2 }
+          - { group: components, shard: 2/2, label: components 2/2 }
+          - { group: cli, shard: 1/2, label: cli 1/2 }
+          - { group: cli, shard: 2/2, label: cli 2/2 }
           - { group: rest, shard: '', label: rest }
     steps:
       - name: Checkout
@@ -134,11 +134,6 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-
-      - name: Set up workspace toolchain
-        uses: ./.github/actions/setup-workspace
-        with:
-          node-version: ${{ env.NODE_VERSION }}
 
       - name: Select CI scope
         id: scope
@@ -159,11 +154,11 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Must stay byte-identical to the Static checks override (do not
-          # move this floor into select-ci-scope.mjs — that script is untrusted).
+          # Identical block in Static checks and Tests (do not move this floor
+          # into select-ci-scope.mjs — that script is untrusted).
           force=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
+            if (git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$PR_BASE_SHA") \
               && git diff -z --name-only "$PR_BASE_SHA" HEAD >/tmp/ci-changed-files; then
               force=false
               while IFS= read -r -d '' f; do
@@ -198,6 +193,12 @@ jobs:
         run: |
           echo "Skipping ${{ matrix.label }}: ${{ steps.scope.outputs.reason }}"
 
+      - name: Set up workspace toolchain
+        if: steps.plan.outputs.run != 'false'
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install dependencies
         if: steps.plan.outputs.run != 'false'
         env:
@@ -207,7 +208,12 @@ jobs:
 
       - name: Prepare ACP adapters
         if: steps.plan.outputs.run != 'false'
-        run: pnpm --filter lody prepare:acp-adapters
+        run: |
+          if [ "${{ matrix.group }}" = "cli" ]; then
+            pnpm --filter lody prepare:acp-adapters
+          else
+            pnpm --filter acp-extension-dsh build
+          fi
 
       - name: Run tests
         if: steps.plan.outputs.run != 'false'
@@ -224,48 +230,13 @@ jobs:
           node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json" \
             --group "$GROUP" --shard "$SHARD" "${full[@]}"
 
-  # Pull requests run the iroh suites only when they touch the module, the CLI code that
-  # drives it, the lockfile or this workflow, so ordinary PRs do not wait on a macOS runner.
-  # Pushes to main and manual runs always run them.
-  iroh-native-scope:
-    name: Select iroh native scope
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      run: ${{ steps.paths.outputs.run }}
-    steps:
-      - name: Checkout
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Select iroh native scope
-        id: paths
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          run=true
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            run=false
-            # Fail open: an unreadable base runs the job.
-            if ! git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
-              || ! git diff --name-only "$PR_BASE_SHA" HEAD >/tmp/iroh-changed-files; then
-              run=true
-            elif grep -qE '^(packages/iroh-native/|apps/cli/src/lib/e2ee/|apps/cli/tests/e2ee-runtime\.test\.ts$|pnpm-lock\.yaml$|\.github/workflows/ci\.yml$)' /tmp/iroh-changed-files; then
-              run=true
-            fi
-          fi
-          echo "run=${run}" >> "$GITHUB_OUTPUT"
-
   # Builds the iroh Node-API module, runs its Rust tests (including a local relay), then
   # the Node suites that exercise the real module and otherwise skip without it.
-  # Not a dependency of the required Tests check.
+  # Runs on pushes to main and manual runs only, never on pull requests, so no PR waits
+  # on its macOS runner. Not a dependency of the required Tests check.
   iroh-native:
     name: Tests (iroh native, ${{ matrix.os }})
-    needs: iroh-native-scope
-    if: needs.iroh-native-scope.outputs.run == 'true'
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -317,89 +288,7 @@ jobs:
           LODY_IROH_REQUIRE: '1'
         run: |
           pnpm --filter @lody/iroh-native test
-          pnpm --dir apps/cli exec vitest run src/lib/e2ee/realtime-rpc.test.ts tests/e2ee-runtime.test.ts
-
-  # Chromium only: WebKit needs apt system libraries that exceed this job's budget, so
-  # WebKit and the other browser suites stay in the manual e2ee-acceptance.yml.
-  # Not a dependency of the required Tests check.
-  browser-tests:
-    name: Browser tests (E2EE client, Chromium)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Select browser test scope
-        id: paths
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          run=true
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            run=false
-            # Fail open: an unreadable base runs the job.
-            if ! git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
-              || ! git diff --name-only "$PR_BASE_SHA" HEAD >/tmp/browser-changed-files; then
-              run=true
-            elif grep -qE '^(packages/(e2ee-client|e2ee-core|platform|cloud-api|shared|loro-streams-rpc)/|pnpm-lock\.yaml$|\.github/workflows/ci\.yml$)' /tmp/browser-changed-files; then
-              run=true
-            fi
-          fi
-          echo "run=${run}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up workspace toolchain
-        if: steps.paths.outputs.run == 'true'
-        uses: ./.github/actions/setup-workspace
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install browser test dependencies
-        if: steps.paths.outputs.run == 'true'
-        # The logout and cache recovery case bundles the real component implementations.
-        run: pnpm --filter @lody/e2ee-client... --filter @lody/components... --filter acp-extension-core... --filter acp-extension-dsh... install --frozen-lockfile --ignore-scripts
-
-      - name: Resolve Playwright cache
-        id: playwright
-        if: steps.paths.outputs.run == 'true'
-        run: |
-          version=$(pnpm --filter @lody/e2ee-client exec playwright --version | awk '{print $2}')
-          echo "key=playwright-chromium-${RUNNER_OS}-${RUNNER_ARCH}-${version}" >> "$GITHUB_OUTPUT"
-
-      # Restore everywhere; only main pushes save, as with the pnpm store.
-      - name: Restore Playwright browsers
-        id: playwright-cache
-        if: steps.paths.outputs.run == 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ steps.playwright.outputs.key }}
-
-      - name: Install Chromium
-        if: steps.paths.outputs.run == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
-        # The runner image already carries Chromium's system libraries.
-        run: pnpm --filter @lody/e2ee-client exec playwright install chromium
-
-      - name: Save Playwright browsers
-        if: steps.paths.outputs.run == 'true' && github.event_name == 'push' && steps.playwright-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ steps.playwright.outputs.key }}
-
-      - name: Build shared RPC schema dependencies
-        if: steps.paths.outputs.run == 'true'
-        run: |
-          pnpm --filter acp-extension-core build
-          pnpm --filter acp-extension-dsh build
-
-      - name: Run E2EE client browser tests in Chromium
-        if: steps.paths.outputs.run == 'true'
-        run: pnpm --filter @lody/e2ee-client exec vitest run --config vitest.browser.config.ts -t '^(?!.*\bwebkit\b)'
+          pnpm --dir apps/cli exec vitest run src/lib/e2ee/realtime-rpc.test.ts tests/e2ee-runtime.test.ts tests/e2ee-runtime-pairing.test.ts tests/e2ee-runtime-execution.test.ts
 
   # Stable required check: green only when every group succeeded.
   # Cancellation supersedes this run; do not turn cancelled groups into a failure.

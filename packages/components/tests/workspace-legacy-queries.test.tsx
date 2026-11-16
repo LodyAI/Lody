@@ -1,7 +1,6 @@
+// @vitest-environment jsdom
 import { usePersonalGitHubAuthorization } from '../src/hooks/use-personal-github-authorization';
 import { storePersonalGitHubProof } from '../src/components/settings/github-personal-authorization';
-// @vitest-environment jsdom
-// @vitest-environment jsdom
 import { ErrorBoundary } from '../src/components/error-boundary';
 import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

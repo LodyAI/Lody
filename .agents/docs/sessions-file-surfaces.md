@@ -57,6 +57,24 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
   unavailable state
   ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
+  Equal text does not establish that a Git file is unchanged: current-diff readers
+  also compare file state against that same repository and pinned base, preserving
+  mode-only changes. Binary placeholders carry no content identity. Git comparison
+  failures remain per-file retryable results instead of hiding the path as unchanged.
+  Historical turn diffs continue to use stored evidence exclusively.
+- Historical diff failures retain the requested turn on Web, Electron, and native
+  iOS/Android. The native runtime passes unavailable reasons/messages to its
+  existing notice UI instead of requesting the current workspace diff. A separate
+  current/All Changes request remains available; later workspace edits cannot
+  replace an unavailable turn. See the [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md).
+- The composer and session sidebar's `diffStats` describe the default workspace
+  comparison, including uncommitted edits, independently of PR association. Code
+  Collab summarizes the complete comparison before trimming the shared index and
+  publishes through `WorkspaceGitService.publishDiffStats`; Git branch/status
+  probes do not replace those totals. Turn summaries and their viewable before/after
+  contents come from the same stored Agent edit evidence. A turn without captured
+  edits has no new file card; terminal-only workspace changes still appear in
+  All Changes. The additive `allChange.files` counts complete changed paths independently of text-line availability. The composer shows text totals when positive and a file count for zero-line changes. See [statistics ownership](../notes/implemented/architecture/2026-11-14-workspace-diff-stat-ownership.md).
 - Diffs opened with a precise file focus open only that file by default; the other
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct

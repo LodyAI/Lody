@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { getFunctionName } from 'convex/server';
 import {
   createRouter,
@@ -7,9 +8,7 @@ import {
   Outlet,
   RouterProvider,
 } from '@tanstack/react-router';
-// @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';

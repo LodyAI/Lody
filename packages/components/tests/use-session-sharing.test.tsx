@@ -1,5 +1,5 @@
-import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 // @vitest-environment jsdom
+import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { act, useEffect, useSyncExternalStore } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';

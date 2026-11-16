@@ -8,13 +8,9 @@ import {
   E2eeOfflineSummaryText,
   e2eeOfflineWindow,
 } from '../src/components/e2ee-offline-window';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: Record<string, unknown>) =>
-      values ? `${key} ${JSON.stringify(values)}` : key,
-  }),
-}));
+const testI18n = createTestI18n({ keyLabels: true, exposeValues: true });
 
 const HOUR = 3_600_000;
 let root: Root, container: HTMLDivElement;
@@ -51,7 +47,9 @@ describe('encrypted workspace outage window', () => {
 
   it('says how long the server is out of reach and how long this machine keeps working', () => {
     const window = { executionUntilMs: 4 * HOUR, offlineSinceMs: HOUR - 48 * 60_000 };
-    act(() => root.render(<E2eeOfflineSummaryText window={window} now={HOUR} />));
+    act(() =>
+      root.render(withTestI18n(<E2eeOfflineSummaryText window={window} now={HOUR} />, testI18n))
+    );
     expect(container.textContent).toContain('e2ee.offline.since');
     expect(container.textContent).toContain('"duration":"e2ee.offline.minutes {\\"count\\":48}"');
     expect(container.textContent).toContain(
@@ -59,18 +57,28 @@ describe('encrypted workspace outage window', () => {
     );
 
     // Past the window the machine has paused; reconnecting resumes it.
-    act(() => root.render(<E2eeOfflineSummaryText window={window} now={5 * HOUR} />));
+    act(() =>
+      root.render(withTestI18n(<E2eeOfflineSummaryText window={window} now={5 * HOUR} />, testI18n))
+    );
     expect(container.textContent).toContain('e2ee.offline.machinePaused');
     expect(container.textContent).not.toContain('e2ee.offline.machineLeft');
   });
 
   it('marks this machine with the time left, then as paused', () => {
     const window = { executionUntilMs: 4 * HOUR };
-    act(() => root.render(<E2eeMachineWindowPillView window={window} now={48 * 60_000} />));
+    act(() =>
+      root.render(
+        withTestI18n(<E2eeMachineWindowPillView window={window} now={48 * 60_000} />, testI18n)
+      )
+    );
     const pill = () => container.querySelector('[data-e2ee-machine-window]');
     expect(pill()?.getAttribute('data-e2ee-machine-window')).toBe('active');
     expect(pill()?.textContent).toBe('e2ee.offline.machinePill {"time":"3:12"}');
-    act(() => root.render(<E2eeMachineWindowPillView window={window} now={4 * HOUR} />));
+    act(() =>
+      root.render(
+        withTestI18n(<E2eeMachineWindowPillView window={window} now={4 * HOUR} />, testI18n)
+      )
+    );
     expect(pill()?.getAttribute('data-e2ee-machine-window')).toBe('paused');
     expect(pill()?.textContent).toBe('e2ee.offline.machinePillPaused');
   });

@@ -81,7 +81,8 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   the session's own credential. A listed key package is pinned per session; approval
   signs only that pinned package through the session's ledger journal, never re-signs on
   a lost reply, and key delivery afterwards never holds or undoes the admission.
-  A delivery short of mailbox evidence retries on the desktop's bounded backoff, holding
+  The first attempt only distributes; a delivery short of mailbox evidence retries full
+  rounds on a bounded backoff, holding
   the reader only during an attempt and never opening one; only an exhausted schedule or
   an ineligible sender ends it `failed` for a manual retry. Its task stays in the core
   distribution journal, so any later key round on this device also sends it. An open on
@@ -119,6 +120,8 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   confirmation; showing it on a computer as a request arrives is an owner decision.
   An approver publishes only once every workspace it admitted has its invitation, so
   the requester's `omitted` coverage is exact.
+- Requester listings open only the workspaces a request names. Cached history saves
+  downloads, never verification.
 
 - Management exposes last-personal-device risk from the verified ledger and requires
   explicit recovery-only confirmation before signing its revocation. Restores report
