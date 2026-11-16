@@ -251,6 +251,9 @@ export interface LoroSidebarProps {
   /** Whether rows with a branch show the branch segment on their meta line. */
   showBranchNames?: boolean;
   onShowBranchNamesChange?: (next: boolean) => void;
+  /** Project view: whether projects without Session rows are hidden. */
+  hideEmptyProjects?: boolean;
+  onHideEmptyProjectsChange?: (next: boolean) => void;
   onOrganizeModeChange?: (mode: LoroSidebarOrganizeMode) => void;
   onChatScopeChange?: (scope: LoroSidebarChatScope) => void;
   onSelectUpdatedItem?: (id: string, tabSessionId?: string) => void;
@@ -421,6 +424,7 @@ const defaultLabels: LoroSidebarLabels = {
     organizeStatus: 'Status',
     updatedProjectNames: 'Show Project',
     showBranchNames: 'Show Branch',
+    hideEmptyProjects: 'Hide Empty Projects',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
     emptyMyTasks: 'No tasks match this view',
@@ -900,6 +904,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   onShowUpdatedProjectNamesChange,
   showBranchNames = false,
   onShowBranchNamesChange,
+  hideEmptyProjects = true,
+  onHideEmptyProjectsChange,
   onOrganizeModeChange,
   onChatScopeChange,
   onSelectUpdatedItem,
@@ -1100,6 +1106,8 @@ export const LoroSidebar = memo(function LoroSidebar({
           onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
           showBranchNames={showBranchNames}
           onShowBranchNamesChange={onShowBranchNamesChange}
+          hideEmptyProjects={hideEmptyProjects}
+          onHideEmptyProjectsChange={onHideEmptyProjectsChange}
           labels={mergedLabels.filter}
           side="right"
           align="start"
@@ -1906,6 +1914,8 @@ export const LoroSidebar = memo(function LoroSidebar({
               onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
               showBranchNames={showBranchNames}
               onShowBranchNamesChange={onShowBranchNamesChange}
+              hideEmptyProjects={hideEmptyProjects}
+              onHideEmptyProjectsChange={onHideEmptyProjectsChange}
               labels={mergedLabels.filter}
             />
           ) : null}
