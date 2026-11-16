@@ -495,6 +495,45 @@ describe('SessionExecutionService', () => {
     }
   );
 
+  it('withholds success until agent work that outlived the turn settles', async () => {
+    const turn = await runSilentPromptTurn({
+      sessionId: 'background-settles',
+      hasPromptEventsForTurn: true,
+      nativeWork: { current: 'background' },
+    });
+    expect(turn.notificationFacts).toEqual([]);
+    expect(turn.sessionDoc.setLastMessageAt).not.toHaveBeenCalled();
+
+    turn.changeNativeWork('running');
+    await turn.service.drainInboxExecutions();
+    expect(turn.notificationFacts).toEqual([]);
+
+    turn.changeNativeWork(null);
+    await vi.waitFor(() => expect(turn.notificationFacts).toHaveLength(1));
+    await turn.service.drainInboxExecutions();
+    expect(turn.notificationFacts[0]?.outcome).toEqual({ kind: 'succeeded' });
+    expect(turn.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
+    expect(turn.interruptedNotices).toEqual([]);
+  });
+
+  it('reports background work ended by the agent process as unknown, not success', async () => {
+    const turn = await runSilentPromptTurn({
+      sessionId: 'background-interrupted',
+      hasPromptEventsForTurn: true,
+      nativeWork: { current: 'background' },
+    });
+    turn.endAgentProcess();
+    await vi.waitFor(() => expect(turn.notificationFacts).toHaveLength(1));
+    await turn.service.drainInboxExecutions();
+    expect(turn.notificationFacts[0]?.outcome).toEqual({
+      kind: 'unknown',
+      code: 'native_work_interrupted',
+    });
+    expect(turn.interruptedNotices).toEqual(['assistant:turn-user-1']);
+    // The reader still sees the conversation as changed.
+    expect(turn.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
+  });
+
   it('preserves delegated audience on the terminal fact without substituting the host owner', async () => {
     const audience = {
       kind: 'agent',

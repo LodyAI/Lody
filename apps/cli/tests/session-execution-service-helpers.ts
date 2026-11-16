@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import { Lody } from '../src/lib/lody';
@@ -395,6 +396,8 @@ const runSilentPromptTurn = async (options: {
   liveConfig?: { project?: ProjectRef; parentSessionId?: SessionId };
   /** No live process: the turn restores one; started configurations are recorded. */
   restore?: SessionConfig[];
+  /** What the agent reports outside Lody's Turns (Core `sessionActivity`). */
+  nativeWork?: { current: 'running' | 'background' | null };
 }) => {
   let history: Array<Record<string, unknown>> = [
     ...(options.earlierInputAuthor
@@ -424,6 +427,7 @@ const runSilentPromptTurn = async (options: {
       return { stopReason: 'end_turn' };
     }),
     currentModel: undefined,
+    getNativeWork: () => options.nativeWork?.current ?? null,
   };
   const activeSession = {
     sessionId: options.sessionId as SessionId,
@@ -457,6 +461,10 @@ const runSilentPromptTurn = async (options: {
     }),
   });
   const failureMessages: string[] = [];
+  const interruptedNotices: string[] = [];
+  // Lifecycle events of the live agent, as SessionManager publishes them.
+  const sessionEvents = new EventEmitter();
+  let sessionEnded = false;
   const notificationFacts: TurnOutcomeFact[] = [];
   const onTurnOutcome = vi.fn(async (fact: TurnOutcomeFact) => {
     await options.onTurnOutcome?.(fact);
@@ -479,8 +487,10 @@ const runSilentPromptTurn = async (options: {
         ? history.map((item) => (item.id === turnId ? entry : item))
         : [...history, entry];
     }),
-    sessionManager: {
-      getSession: vi.fn(() => (options.restore && !restored ? null : activeSession)),
+    sessionManager: Object.assign(sessionEvents, {
+      getSession: vi.fn(() =>
+        (options.restore && !restored) || sessionEnded ? null : activeSession
+      ),
       getPendingSession: vi.fn(() => null),
       createSession: vi.fn(async (config: SessionConfig) => {
         // Like SessionManager, preparation rereads the Project group from synced metadata.
@@ -493,7 +503,10 @@ const runSilentPromptTurn = async (options: {
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
       validateSessionCredentials: vi.fn(async () => {}),
-    } as unknown as SessionManager,
+    }) as unknown as SessionManager,
+    recordNativeWorkInterrupted: vi.fn(async (_sessionId: SessionId, turnId: string) => {
+      interruptedNotices.push(turnId);
+    }),
     workspaceDocument: {
       repo: {
         upsertDocMeta,
@@ -580,6 +593,17 @@ const runSilentPromptTurn = async (options: {
     getStatus: () => status,
     finalizationOwners,
     service,
+    interruptedNotices,
+    /** Publishes a `sessionActivity` change of the live agent. */
+    changeNativeWork: (work: 'running' | 'background' | null) => {
+      if (options.nativeWork) options.nativeWork.current = work;
+      sessionEvents.emit('onNativeWorkChanged', options.sessionId, work);
+    },
+    /** The agent process exits, as idle GC or memory pressure ends it. */
+    endAgentProcess: () => {
+      sessionEnded = true;
+      sessionEvents.emit('terminated', { sessionId: options.sessionId });
+    },
   });
 };
 

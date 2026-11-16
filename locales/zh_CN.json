@@ -3426,6 +3426,8 @@
   "sessions.systemNotices.agentWarning.stopTimedOutGuidance": "当前任务尚未停止，Lody 正在尝试强制结束它。",
   "sessions.systemNotices.agentWarning.stopTerminationFailed": "无法停止当前任务",
   "sessions.systemNotices.agentWarning.stopTerminationFailedGuidance": "当前任务可能仍在运行。请尝试重启这台机器上的 Lody 后台服务。",
+  "sessions.systemNotices.agentWarning.nativeWorkInterrupted": "后台任务被中断",
+  "sessions.systemNotices.agentWarning.nativeWorkInterruptedGuidance": "Agent 在后台任务完成前就停止了，这些任务的结果可能缺失。",
   "sessions.tabs.archivedTabs": "已归档标签页",
   "sessions.tabs.archivedCount": "已归档（{{count}}）",
   "sessions.tabs.closeConfirm": "关闭此标签页？",

@@ -3426,6 +3426,8 @@
   "sessions.systemNotices.agentWarning.stopTimedOutGuidance": "The task has not stopped yet. Lody is trying to force it to end.",
   "sessions.systemNotices.agentWarning.stopTerminationFailed": "Could not stop the task",
   "sessions.systemNotices.agentWarning.stopTerminationFailedGuidance": "The task may still be running. Try restarting Lody’s background service on this machine.",
+  "sessions.systemNotices.agentWarning.nativeWorkInterrupted": "Background work was interrupted",
+  "sessions.systemNotices.agentWarning.nativeWorkInterruptedGuidance": "The agent stopped before its background tasks finished, so their results may be missing.",
   "sessions.tabs.archivedTabs": "Archived tabs",
   "sessions.tabs.archivedCount": "Archived ({{count}})",
   "sessions.tabs.closeConfirm": "Close this tab?",
