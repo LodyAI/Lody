@@ -4173,7 +4173,17 @@ const UserMessageRowView = ({
                 unbreakable line, the content grows to its 800px cap, and being
                 right-aligned (`justify-end`) it overflows the column on the left. Chromium
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
-            <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
+            {/* The 800px cap lives on this shrink-to-fit box, bounded by the column. On the
+                content below, a percentage cap is ignored when this box computes its
+                fit-content width, so a long message stretched it across the column and left
+                the capped bubble at its start, far from the avatar. A window breakpoint
+                (`sm:`) cannot bound it either: split panes narrow the column, not the window. */}
+            <div
+              className={cn(
+                'relative min-w-0 max-w-[min(100%,800px)]',
+                isEditing ? 'w-full' : 'w-fit'
+              )}
+            >
               {showSendingSpinner && (
                 <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
@@ -4181,11 +4191,7 @@ const UserMessageRowView = ({
                 {...withClassName(
                   stylex.props(isEditing ? conversationSurface.userEditContent : undefined),
                   cn(
-                    // The 800px cap must never lift the column bound: `sm:` follows the
-                    // window, not this column, so a wide window with a narrow chat panel
-                    // would let a `w-fit` bubble grow to an unbreakable chip's min-content
-                    // (a quote chip is one atomic inline-flex box) and spill onto the avatar.
-                    'min-w-0 max-w-[min(100%,800px)] text-foreground',
+                    'min-w-0 max-w-full text-foreground',
                     isEditing ? 'w-full' : 'w-fit',
                     hasWideContent ? 'min-w-[480px]' : ''
                   )
