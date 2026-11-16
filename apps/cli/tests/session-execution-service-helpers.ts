@@ -1691,6 +1691,10 @@ function inboxExecutionFixture(
     doc,
     session,
     client,
+    /** Replaces or ends the live Agent, as idle GC or a crash would. */
+    dropLiveSession: () => {
+      liveSession = undefined;
+    },
     deps,
     message,
     add,
