@@ -18,6 +18,8 @@ Read before changing any native UI: text, colour, canvases, touch targets, group
 
 - Reference Yohaku iOS for native UI boundaries. System grouped rows use `LodyGroupedList` / `UICollectionViewListCell` in LodyKit; navigation uses UIKit automatic scroll edges through the existing native stack. Register native collection views with UIKit directly; do not simulate native effects with decorative overlays.
 
+- A choice reads as a choice without a border or fill: its value carries a small tertiary chevron right after it. Form menus use `UIButton.lodyFormPicker`, styled `⌃⌄` by `LodyFormRow(picker: true)` and, on a line of its own, by `LodyFormGroup`; run-config rows that expand in place use `chevron.down`, turned while open. A fixed value (the conversation's locked Agent) has no chevron and reads in secondary ink.
+
 - `LodyGroupedList` system-row pages default to flat rail rows; CreateSession and its pickers opt back into inset-grouped rows with `setGrouped(true)`.
 
 - Navigating native list rows retain selection until the owning controller returns. Deselect alongside the navigation transition and restore selection when an interactive return is cancelled; ordinary action rows deselect immediately. Diffable snapshots preserve selection themselves; never reselect a captured row in snapshot completion, which can run after return-time deselection.

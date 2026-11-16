@@ -676,7 +676,16 @@ struct CreateRunConfigSheet: View {
             GlyphView(glyph: row.glyph, size: LodyIconSize.sm)
           }
           Text(row.title).lodyTextStyle(.body).lineLimit(1)
-            .foregroundStyle(row.placeholder ? LodyColor.textTertiary : LodyColor.textPrimary)
+            .foregroundStyle(valueColor(row))
+          // The value is a choice only with options: a quiet disclosure says so, turning while its
+          // list is open in place; a fixed line (the conversation's locked Agent) has none.
+          if !row.options.isEmpty {
+            Image(systemName: "chevron.down")
+              .font(.system(size: 12, weight: .semibold))
+              .foregroundStyle(LodyColor.iconTertiary)
+              .rotationEffect(.degrees(state.openInSheet == row.id ? 180 : 0))
+              .accessibilityHidden(true)
+          }
           Spacer(minLength: 0)
         }
         .frame(minHeight: LodySize.controlMd)
@@ -688,5 +697,10 @@ struct CreateRunConfigSheet: View {
       .accessibilityValue(row.title)
     }
     .padding(.vertical, LodySpacing.xs)
+  }
+
+  private func valueColor(_ row: CreatePicker) -> Color {
+    if row.placeholder { return LodyColor.textTertiary }
+    return row.options.isEmpty ? LodyColor.textSecondary : LodyColor.textPrimary
   }
 }
