@@ -33,7 +33,6 @@ import {
   ManagedAgentRuntimeManager,
   ManagedRuntimeIncompatibleHostError,
   ManagedRuntimeError,
-  type ManagedRuntimeName,
   type FetchImpl,
   type ManagedRuntimeProgressEvent,
 } from './managed-agent-runtime';
@@ -130,7 +129,6 @@ describe('ManagedAgentRuntimeManager', () => {
   async function installCachedCodex(options: {
     version: string;
     installedAt: string;
-    metadataFormat?: 'current' | 'legacy';
     archiveSha256?: string;
     archiveSize?: number;
   }): Promise<string> {
@@ -142,61 +140,19 @@ describe('ManagedAgentRuntimeManager', () => {
     const archiveSize = options.archiveSize ?? 1;
     await writeFile(
       join(dir, 'metadata.json'),
-      JSON.stringify(
-        options.metadataFormat === 'legacy'
-          ? {
-              name: 'codex',
-              version: options.version,
-              platform: 'linux-x64',
-              archiveSha256,
-              archiveSize,
-              installedAt: options.installedAt,
-            }
-          : {
-              schemaVersion: 1,
-              runtimeName: 'codex',
-              runtimeVersion: options.version,
-              platformArch: 'linux-x64',
-              command: 'bin/codex',
-              archiveSha256,
-              archiveSize,
-              installedAt: options.installedAt,
-            }
-      )
-    );
-    await writeFile(join(dir, '.lody-complete'), '');
-    return command;
-  }
-
-  async function installLegacyCachedRuntime(options: {
-    manager: ManagedAgentRuntimeManager;
-    name: ManagedRuntimeName;
-    platformArch: string;
-  }): Promise<{ command: string; version: string }> {
-    const definition = options.manager.getDefinition(options.name);
-    const archive = definition.platforms[options.platformArch];
-    if (!archive) {
-      throw new Error(`Missing ${options.name}/${options.platformArch} test archive`);
-    }
-    const dir = join(rootDir, options.name, definition.version, options.platformArch);
-    const command = join(dir, archive.cmd);
-    await mkdir(dirname(command), { recursive: true });
-    await writeFile(command, `cached-${options.name}`);
-    await writeFile(
-      join(dir, 'metadata.json'),
       JSON.stringify({
-        name: options.name,
-        version: definition.version,
-        platform: options.platformArch,
-        archiveSha256: archive.sha256,
-        archiveSize: archive.size,
-        executableSha256: archive.executableSha256,
-        executableSize: archive.executableSize,
-        installedAt: '2026-08-01T00:00:00.000Z',
+        schemaVersion: 1,
+        runtimeName: 'codex',
+        runtimeVersion: options.version,
+        platformArch: 'linux-x64',
+        command: 'bin/codex',
+        archiveSha256,
+        archiveSize,
+        installedAt: options.installedAt,
       })
     );
     await writeFile(join(dir, '.lody-complete'), '');
-    return { command, version: definition.version };
+    return command;
   }
 
   it('launches the newest reusable installed runtime without downloading the target', async () => {
@@ -207,7 +163,6 @@ describe('ManagedAgentRuntimeManager', () => {
     const newestCommand = await installCachedCodex({
       version: '0.2.0',
       installedAt: '2026-02-01T00:00:00.000Z',
-      metadataFormat: 'legacy',
     });
     const fetchImpl = vi.fn<FetchImpl>();
     const manager = new ManagedAgentRuntimeManager({
@@ -231,41 +186,6 @@ describe('ManagedAgentRuntimeManager', () => {
     expect(existsSync(newestCommand)).toBe(true);
     expect(existsSync(olderCommand)).toBe(false);
   });
-
-  it.each([
-    ['codex', 'linux', 'x64', 'linux-x64'],
-    ['claude-code', 'linux', 'x64', 'linux-x64'],
-    ['kimi-code', 'linux', 'x64', 'node'],
-    ['pi', 'linux', 'x64', 'node'],
-    ['grok-build', 'linux', 'x64', 'linux-x64'],
-    ['grok-build', 'win32', 'x64', 'win32-x64'],
-  ] as const)(
-    'reuses a completed %s/%s runtime written with legacy metadata',
-    async (name, platform, arch, platformArch) => {
-      const manager = new ManagedAgentRuntimeManager({
-        rootDir,
-        platform,
-        arch,
-        nodeVersion: KIMI_CODE_MIN_NODE_VERSION,
-        runtimeBaseUrl: 'https://runtime.example.test',
-        fetchImpl: vi.fn(),
-      });
-      const cached = await installLegacyCachedRuntime({
-        manager,
-        name,
-        platformArch,
-      });
-
-      await expect(manager.getRuntimeStatus(name)).resolves.toMatchObject({
-        kind: 'installed',
-        version: cached.version,
-        command: cached.command,
-        updateAvailable: false,
-      });
-      await expect(manager.prepareCache()).resolves.toBeUndefined();
-      expect(existsSync(cached.command)).toBe(true);
-    }
-  );
 
   it.each(['archiveSha256', 'archiveSize', 'command', 'minNodeVersion'] as const)(
     'reinstalls a same-version runtime when %s changes',

@@ -186,7 +186,9 @@ envelope through the mailbox. The new device runs `KeyReceiver.fetchAndInstall`.
 
 **How do I rotate the key or remove a member?** `EpochPublisher.publish()` /
 `publishRemoving(membershipId)`. Removal and rotation are one signed record, so
-there is no window where a removed member can read new content.
+there is no window where a removed member can read new content. An unknown CAS
+resumes a matching retained submission instead of staging again
+([pending publication recovery](../../.agents/notes/implemented/bug-fix/2026-10-28-e2ee-pending-publication-recovery.md)).
 
 **What if a device crashes mid-operation?** Every workflow saves its exact
 originals before any network step. Call `resume` / `flush…` after restart; the

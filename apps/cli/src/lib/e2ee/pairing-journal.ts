@@ -312,7 +312,6 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           missing = true;
         }
       }
-      let openedCustody: NodeE2eeCustody | undefined;
       if (missing && original.creating) {
         const published = yield* sql(() =>
           db
@@ -344,32 +343,6 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           )
         )
           return yield* failure('conflict');
-        if (names.includes(`device-credential-${expected.genesisHash}.sealed`)) {
-          // A legacy location has no key in its name. Authenticate it against a
-          // published identity; never guess that an unfinished original is old.
-          openedCustody = yield* acquireCustody;
-          let authenticated = false;
-          for (const prior of published) {
-            // Avoid a keyed original shadowing the legacy file under validation.
-            if (names.includes(scopedName(prior.signingPublicKey))) continue;
-            const credential = yield* Effect.result(
-              openedCustody.deviceCredential(
-                genesis,
-                Result.getOrThrow(Bytes.signingPublicKey(raw(prior.signingPublicKey)))
-              )
-            );
-            if (Result.isFailure(credential)) {
-              if (credential.failure.code !== 'corrupt') return yield* credential.failure;
-            } else if (
-              createHash('sha256').update(raw(credential.success)).digest('hex') ===
-              prior.credentialHash
-            ) {
-              authenticated = true;
-              break;
-            }
-          }
-          if (!authenticated) return yield* failure('conflict');
-        }
       }
       const reopen = Boolean(original.retained && !missing && !original.creating);
       if (!reopen) {
@@ -393,7 +366,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
             throw failure('corrupt');
         });
       }
-      const custody = openedCustody ?? (yield* acquireCustody);
+      const custody = yield* acquireCustody;
       const device = yield* reopen ? custody.openDevice(genesis) : custody.createDevice(genesis);
       const credential = yield* reopen
         ? custody.deviceCredential(genesis, device.publicKey).pipe(

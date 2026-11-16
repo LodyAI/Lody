@@ -188,5 +188,11 @@
       "src/runtime/handlers/schedules.ts"
     ],
     "note": "creationOptions accepts includeOffline for schedule targets: every readable machine's agents, online or not, as on Web; new chats keep online-only agents. The schedules list reads ownedMachineIds and clocks from workspace metadata as well as synced machine streams. Mirrored verbatim from the reviewed iOS source commit; transcript windowing in project.ts and session.ts stays out of the snapshot, and dependencies and licenses are unchanged."
+  },
+  "archiveWithoutMachineQueue": {
+    "files": [
+      "src/runtime/archive-session.ts"
+    ],
+    "note": "Archiving no longer writes the machine meta needToArchiveSessions queue, which daemons have discarded since #620 reconciled archived worktrees from session state. Mirrored verbatim from the iOS source in the same change; dependencies and licenses are unchanged."
   }
 }

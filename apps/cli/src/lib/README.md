@@ -242,6 +242,9 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   waiting for causal dependencies through the existing SQLite journal. A durable
   save does not establish complete synchronization or advance another replica's
   cursor. See the [persistence decision](../../../../.agents/notes/implemented/bug-fix/2026-10-22-loro-pending-persistence.md).
+  Released streams-crdt and LoroRepo builds own storage-failure recovery: a failed save no
+  longer spins the live-read loop ([read-loop decision](../../../../.agents/notes/implemented/bug-fix/2026-10-19-streams-read-loop-spin.md))
+  or re-downloads applied updates ([release adoption](../../../../.agents/notes/implemented/bug-fix/2026-10-23-storage-recovery-release-adoption.md)).
   `sqlite-lock-diagnostics.ts` logs, at most once a minute, which processes hold a
   workspace `repo.sqlite3` open when loro-repo or streams-crdt reports
   `database is locked`; it only observes (`lsof`) and never retries or blocks.

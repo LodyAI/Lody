@@ -148,7 +148,6 @@ import {
   type ChatFailedCode,
   type ChatFailedReason,
   type ProjectRef,
-  type SessionPreparationCancelSpec,
   getProjectRefBranch,
   resolveBaseBranchPreference,
   MachineStatusRequestValidated,
@@ -161,8 +160,6 @@ import {
   MachineAcpCapabilitiesRefreshResponse,
   type MachineAcpAuthenticateRequestValidated,
   type MachineAcpAuthenticateResponse,
-  SessionCodeCollabHostStartRequestValidated,
-  SessionCodeCollabHostStartResponse,
   type MachineAcpBinaryStatusRequestValidated,
   type MachineAcpBinaryInstallRequestValidated,
   type LocalProjectControlErrorCode,
@@ -184,9 +181,6 @@ import {
   sessionForkFailure,
   type SessionEditAndResendResponse,
   sessionEditAndResendFailure,
-  type SessionPreparationSpec,
-  type SessionPrepareCancelResponse,
-  type SessionPrepareResponse,
   type MachineLifecycleCapability,
   PreviewCandidateReportRequestValidated,
   SessionPreviewCreateRequestValidated,
@@ -2964,35 +2958,6 @@ export class MessageHandler {
     });
   }
 
-  /**
-   * Draft session preparation is retired. Desktops that predate its removal
-   * still ask for it, so both requests answer at once without doing any work.
-   * Prepare reports an accepted duplicate: an older desktop then holds that one
-   * lease until the draft idles or is sent. A rejection would make it ask again,
-   * and cancel, after every pause in typing.
-   */
-  private declineSessionPreparation(spec: SessionPreparationSpec): SessionPrepareResponse {
-    return {
-      type: 'session/prepare_response',
-      preparationId: spec.preparationId,
-      sessionId: spec.sessionId,
-      accepted: true,
-      disposition: 'duplicate',
-    };
-  }
-
-  private declineSessionPreparationCancel(
-    args: SessionPreparationCancelSpec
-  ): SessionPrepareCancelResponse {
-    return {
-      type: 'session/prepare-cancel_response',
-      preparationId: args.preparationId,
-      sessionId: args.sessionId,
-      cancelled: false,
-      disposition: 'not-found',
-    };
-  }
-
   // Single access choke point for prompt-handoff steer: both RPC arrival paths
   // (Loro Streams deps callback and local Machine RPC switch) route through here
   // so neither can bypass machine/local-project verification.
@@ -3994,8 +3959,6 @@ export class MessageHandler {
             disposition,
           };
         },
-        prepareSession: async (spec) => this.declineSessionPreparation(spec),
-        cancelSessionPreparation: async (args) => this.declineSessionPreparationCancel(args),
         resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
         authorizeSessionHistoryRead: async ({ sessionId, readProof }) => {
           if (!readProof || !this.cloudPort.access.verifySessionHistoryRead) return false;
@@ -8108,10 +8071,6 @@ export class MessageHandler {
           disposition,
         };
       }
-      case 'session/prepare':
-        return this.declineSessionPreparation(request.params);
-      case 'session/prepare-cancel':
-        return this.declineSessionPreparationCancel(request.params);
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
@@ -8246,24 +8205,6 @@ export class MessageHandler {
     }
   }
 
-  private async respondToLegacyCodeCollabHostStart(
-    message: SessionCodeCollabHostStartRequestValidated
-  ): Promise<SessionCodeCollabHostStartResponse> {
-    const sessionId = message.sessionId;
-    this.touchSession(sessionId);
-    this.logger.debug(
-      `[${sessionId}] Ignoring legacy Code Collab host-start request; v1 session-specific host has been removed.`
-    );
-    return {
-      type: 'session/code-collab-host-start_response',
-      sessionId,
-      success: false,
-      status: 'disabled',
-      error: 'unsupported',
-      message: 'Code Collab v1 session-specific host is no longer supported.',
-    };
-  }
-
   /**
    * Handles a validated local control message.
    */
@@ -8315,9 +8256,6 @@ export class MessageHandler {
         break;
       case 'machine/acp-binary-install':
         await this.handleMachineAcpBinaryInstall(message, context);
-        break;
-      case 'session/code-collab-host-start':
-        await this.handleCodeCollabHostStart(message, context);
         break;
       case 'session/image-upload':
         await this.handleSessionImageUpload(message, context);
@@ -8985,14 +8923,6 @@ export class MessageHandler {
         message.payload as Record<string, unknown>
       )
     );
-  }
-
-  private async handleCodeCollabHostStart(
-    message: SessionCodeCollabHostStartRequestValidated,
-    dispatchContext: MessageDispatchContext
-  ): Promise<void> {
-    const response = await this.respondToLegacyCodeCollabHostStart(message);
-    dispatchContext.send(response);
   }
 
   private async handlePreviewCandidateReport(

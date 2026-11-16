@@ -62,7 +62,6 @@ interface AgentSelectorProps {
   className?: string;
   showIcon?: boolean;
   align?: 'left' | 'center';
-  tone?: 'light' | 'dark';
   /** Restrict selectable agents to these machine IDs. */
   allowedMachineIds?: MachineId[];
   /** Hide machine name from options (useful when machine is selected separately). */
@@ -89,7 +88,6 @@ export function AgentSelector({
   className,
   showIcon = true,
   align = 'left',
-  tone = 'light',
   allowedMachineIds,
   hideMachineDescription = false,
   validateItem,
@@ -149,7 +147,6 @@ export function AgentSelector({
       searchable={!loading && agentOptions.length > 5}
       searchPlaceholder={t('sessions.filter.selectAgent')}
       emptyText={t('agents.noAgents')}
-      tone={tone}
       open={open}
       onOpenChange={onOpenChange}
       renderTriggerValue={(option) => (

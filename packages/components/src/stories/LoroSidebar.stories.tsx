@@ -1276,7 +1276,6 @@ function ProductionLikeTopContent({
               <SidebarSectionHeader
                 label={group.label}
                 collapsed={groupCollapsed}
-                count={group.projects.length}
                 isMobile={isMobile}
                 toggleLabel="Toggle"
                 onToggleCollapsed={() =>
@@ -1363,7 +1362,6 @@ function ProductionLikeTopContent({
         <SidebarSectionHeader
           label="GitHub Worktrees"
           collapsed={githubCollapsed}
-          count={githubWorktreeCount}
           isMobile={isMobile}
           toggleLabel="Toggle"
           onToggleCollapsed={() => setGithubCollapsed((v) => !v)}

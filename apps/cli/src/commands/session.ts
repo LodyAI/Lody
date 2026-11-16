@@ -457,9 +457,6 @@ type SessionActivityTimestampManager = {
   };
 };
 
-// Re-export for backward compatibility with tests
-export { normalizeCliValue, selectWorkspaceSummary };
-
 export function resolvePromptCandidate(input: {
   prompt?: string;
   promptFileContent?: string;

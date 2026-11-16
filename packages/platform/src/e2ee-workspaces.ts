@@ -101,8 +101,6 @@ export interface PlatformE2eeWorkspaces {
 /** Scope of the key round after a ledger refresh; see {@link E2eeRuntimePort.refresh}. */
 export type E2eeRefreshKeyMode = 'none' | 'receive' | 'distribute' | 'full';
 export interface E2eeRefreshOptions {
-  /** Legacy switch: `false` skips the key round when `keyMode` is absent. */
-  readonly installKeys?: boolean;
   readonly keyMode?: E2eeRefreshKeyMode;
   /** Optional narrowing filter (device signing keys) for immediate post-admission distribution. */
   readonly recipients?: readonly string[];
@@ -177,9 +175,9 @@ export interface E2eeAccountApprovalSession {
   }): Promise<{ requestId: string; record: Uint8Array }>;
   settle(record: Uint8Array, refresh?: boolean): Promise<'committed' | 'lost' | 'unknown'>;
   /** Optional local transport optimizations; all originals pass the existing verifier. */
-  checkpoint?(): Promise<{headHash: string; length: number; position?: string}>;
+  checkpoint?(): Promise<{ headHash: string; length: number; position?: string }>;
   ingest?(page: E2eeWorkspaceHistoryPage): Promise<void>;
-  prepareDelivery?(recipient: string): Promise<{id: string; frameHex: string} | null>;
+  prepareDelivery?(recipient: string): Promise<{ id: string; frameHex: string } | null>;
   invitation(record: Uint8Array): Promise<Uint8Array | null>;
   access(): Promise<{ workspaceId: string; credential: string }>;
   refresh(): Promise<void>;
@@ -208,7 +206,10 @@ export interface E2eeWorkspaceRuntime
    * approved workspace session. Absence keeps the approver surface hidden. */
   accountApproval?(workspaceId?: string): Promise<E2eeAccountApprovalSession>;
   /** Receive after verified account admission, before requesting any new history. */
-  activateAccountPairing?(workspaceId: string, preview?: E2eeAccountPairingMailboxPreview): Promise<void>;
+  activateAccountPairing?(
+    workspaceId: string,
+    preview?: E2eeAccountPairingMailboxPreview
+  ): Promise<void>;
   readMachineSharing?(
     workspaceId: string,
     machineId: string
@@ -340,15 +341,13 @@ export interface E2eeWorkspaceRuntime
   /**
    * Ledger refresh, then an optional key round. `keyMode` selects its scope: `none`
    * skips it, `receive` only installs this device's current key, `distribute` only
-   * sends this device's deliveries, `full` runs every phase. Without `keyMode`,
-   * `installKeys: false` means `none` and `installKeys: true` means `full`; omitted
-   * options keep each host's prior default (desktop `full`, portable `none`).
+   * sends this device's deliveries, `full` runs every phase. Without `keyMode`, each host keeps its
+   * default (desktop `full`, portable `none`).
    */
   refresh(workspaceId: string, options?: E2eeRefreshOptions): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string,
     rpcOnly?: true
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(

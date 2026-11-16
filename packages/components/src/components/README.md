@@ -262,14 +262,3 @@ and the "…" menu open. Rationale:
 `terminal/terminal-theme.ts` resolves CSS colors synchronously through a disposable
 probe with transitions disabled, so the global reduced-motion rule cannot blank a
 terminal. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-terminal-reduced-motion-colors.md).
-
-## PR auto-archive
-
-`auto-archive-pr-watcher.tsx` keeps observed PR transitions separate from unfinished
-archive attempts. Its owning window retries the existing Session action with capped
-backoff and drops superseded work on scope changes. The action's automatic-only
-progress receipt records accepted targets; its cancellation check uses the
-authoritative snapshot before retry side effects, so restoring a partially archived
-Session or Tab supersedes the unfinished operation. Startup and restore still only
-establish the PR baseline.
-See the [retry decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-pr-auto-archive-retry.md).

@@ -4,7 +4,6 @@ import type {
 } from './local-loro-data-plane';
 import type { TerminalDataEvent, TerminalExitEvent, TerminalTitleEvent } from './terminal-protocol';
 import type {
-  CliOutputEvent,
   ElectronCliState,
   ElectronLoginState,
   ElectronLocalSessionControlResponseEvent,
@@ -26,7 +25,6 @@ export type IpcPushMap = {
     | { type: 'error'; code: string; message: string };
   'loro.event': LocalLoroDataPlaneServerMessage;
   'loro.status': boolean;
-  'cli.output': CliOutputEvent;
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
   'storageGuard.state': ElectronStorageGuardState;
@@ -65,7 +63,6 @@ export const IPC_PUSH_CHANNELS = {
   terminalEvent: 'terminal.event',
   loroEvent: 'loro.event',
   loroStatus: 'loro.status',
-  cliOutput: 'cli.output',
   cliState: 'cli.state',
   updaterState: 'updater.state',
   storageGuardState: 'storageGuard.state',

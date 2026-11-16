@@ -60,7 +60,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
   Never modify JSONL; mixed roots fail naming both paths.
 - `managed-agent-runtime.ts`: native pins live only in `<name>-runtime-manifest.json`.
-  Reject version mismatches and unknown legacy fields; do not duplicate pins or weaken the schema.
+  Treat version mismatches and metadata failing the current schema as misses; never weaken the schema.
   Read Claude metadata from the adapter's installed SDK; the CLI dev SDK may differ.
   Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from

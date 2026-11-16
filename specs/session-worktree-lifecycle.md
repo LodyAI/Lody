@@ -143,11 +143,12 @@ their disk, and no other machine may try.
 
 ## Public retention contract
 
-Manual archive and PR auto-archive use the same cleanup contract. Public documentation
-and auto-archive settings must distinguish retained conversation history and local branches
+Archive is an explicit user action; a PR status change never archives a Session
+(automatic PR archive was removed in [#1772](https://github.com/LodyAI/Lody/pull/1772)).
+Public documentation must distinguish retained conversation history and local branches
 from a managed working directory that can be removed before permanent Session deletion.
-They must identify the ignored-file and cleanup-script boundaries and tell users to save
-needed files outside the worktree before archive or enabling auto-archive.
+It must identify the ignored-file and cleanup-script boundaries and tell users to save
+needed files outside the worktree before archive.
 
 Restore recreates a missing worktree from the preserved branch when execution resumes;
 setup runs again for that new directory. It does not recover discarded ignored files or
@@ -155,11 +156,8 @@ files removed by cleanup scripts. Recovery requires the owning repository and br
 remain available; a removed local project must be registered again. Deleting a Session
 deletes its conversation, but does not delete its local Git branch or backup commits.
 
-PR auto-archive settings are under Settings → Preferences. They are device-local and
-apply to Sessions owned by the current user when that device observes a PR status
-transition into an enabled terminal state. An already terminal PR observed at app startup
-does not retroactively archive its Session. The resulting archived state can trigger
-worktree cleanup on the owning machine, including when archive was initiated elsewhere.
+An archived state can trigger worktree cleanup on the owning machine, including when
+archive was initiated on another device.
 
 ## What this replaces
 

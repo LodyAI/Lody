@@ -11,11 +11,11 @@ builtin Claude 任务生命周期事件通过标准 ACP `session/update` 发送�
 
 ## 责任归属与决策
 
-`packages/acp-extension-claude/src/acp-agent.ts` 中的 `createClaudeTaskLifecycleUpdate` 负责生成生命周期通知。未协商 async-task 事件的后台任务会进入 `emitTaskLifecycle`，再由 `sendUpdate` 发送标准 ACP 更新。`AgentClient.sessionUpdate` 将这些更新转交 CLI 历史；旧版 `_claude/taskLifecycle` handler 是另一条兼容输入路径，不会接收当前 builtin producer 的标准消息。
+`packages/acp-extension-claude/src/acp-agent.ts` 中的 `createClaudeTaskLifecycleUpdate` 负责生成生命周期通知。未协商 async-task 事件的后台任务会进入 `emitTaskLifecycle`，再由 `sendUpdate` 发送标准 ACP 更新。`AgentClient.sessionUpdate` 将这些更新转交 CLI 历史。
 
 仅当 `subagent_type`、`workflow_name` 或 `task_type` 提供身份时，adapter 才写入 `_meta.lody.task.actor`。ACP tool-call 标题仍回退为 `Claude task`。因此共享历史按 task id 合并完成与迟到进度字段时，会保留更早的 `local_bash` actor 和 `toolUseId`；无需新增 task-type schema 或历史分支。
 
-CLI 仍接收较旧 adapter 发出的 `_claude/taskLifecycle`，因此 converter 作为旧兼容路径保留并继续测试。共享 converter 的 `taskMetaFallbackActor` 可选项也继续保留：Kimi 测试验证既有 `Kimi task` 回退，显式事件类型仍会更新 actor。
+更正（2026-11-16）：CLI 不再接收旧版 `_claude/taskLifecycle` 与 `_kimi/taskLifecycle` 扩展方法。当前固定版本的 Claude 和 Kimi adapter 都不再发出它们，因此其 converter（`claude-task-lifecycle.ts` 及 Kimi 的 `taskMetaFallbackActor` 变体）已删除；上文的标准更新路径是唯一来源。
 
 ## 验证与消融
 

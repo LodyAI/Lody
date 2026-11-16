@@ -5,10 +5,8 @@ import { Flock } from '@loro-dev/flock-wasm/base64';
 
 const bundle = await build({
   entryPoints: [
-    new URL(
-      '../../../../packages/cloud-runtime/src/runtime/archive-session.ts',
-      import.meta.url,
-    ).pathname,
+    new URL('../../../../packages/cloud-runtime/src/runtime/archive-session.ts', import.meta.url)
+      .pathname,
   ],
   bundle: true,
   format: 'esm',
@@ -41,8 +39,7 @@ const {
 } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
 );
-const unframe = (body) =>
-  JSON.parse(new TextDecoder().decode(body.subarray(4)));
+const unframe = (body) => JSON.parse(new TextDecoder().decode(body.subarray(4)));
 
 test('delete commits root and contained tabs only after acknowledgement, preserving independently opened sessions', async () => {
   const flock = new Flock('delete-source'),
@@ -76,10 +73,7 @@ test('delete commits root and contained tabs only after acknowledgement, preserv
   const args = { sessionId: 'root', sessionIds: ['root', 'tab'] };
   await assert.rejects(deleteSession(args, meta), /offline/);
   assert.equal(flock.get(['e', 'session-root']), true);
-  await assert.rejects(
-    deleteSession({ ...args, sessionIds: ['root'] }, meta),
-    /targets_changed/,
-  );
+  await assert.rejects(deleteSession({ ...args, sessionIds: ['root'] }, meta), /targets_changed/);
   flock.set(['m', 'session-tab', 'status'], { type: 'running' });
   await assert.rejects(deleteSession(args, meta), /session_busy/);
   flock.set(['m', 'session-tab', 'status'], { type: 'completed' });
@@ -132,15 +126,15 @@ test('archive writes the machine command after the session meta; restore clears 
       { workspaceId: 'w1', sessionId: 'missing', archived: true },
       replica,
       machines,
-      grant,
+      grant
     ),
-    /session_not_found/,
+    /session_not_found/
   );
   await archiveSession(
     { workspaceId: 'w1', sessionId: 's1', archived: true },
     replica,
     machines,
-    grant,
+    grant
   );
   assert.deepEqual(urls, ['meta', 'https://x/ds/lody/w1:mf:m1']);
   assert.equal(remoteMeta.get(['m', 'session-s1', 'isArchived']), true);
@@ -154,7 +148,7 @@ test('archive writes the machine command after the session meta; restore clears 
     { workspaceId: 'w1', sessionId: 's1', archived: false },
     replica,
     machines,
-    grant,
+    grant
   );
   assert.equal(meta.get(['m', 'session-s1', 'isArchived']), false);
   assert.equal(machine.get(['cmd', 'archiveSession', 's1']), undefined);
@@ -163,7 +157,7 @@ test('archive writes the machine command after the session meta; restore clears 
   assert.equal(remoteMeta.get(['m', 'session-s1', 'isPinned']), true);
   await assert.rejects(
     pinSession({ sessionId: 'missing', pinned: true }, replica),
-    /session_not_found/,
+    /session_not_found/
   );
 });
 
@@ -192,11 +186,11 @@ test('mark read writes lastReadAt onto the session meta', async () => {
   assert.equal(meta.get(['m', 'session-s1', 'lastReadAt']), 250);
   await assert.rejects(
     markSessionRead({ sessionId: 'missing', lastReadAt: 1 }, replica),
-    /session_not_found/,
+    /session_not_found/
   );
   await assert.rejects(
     markSessionRead({ sessionId: 's1', lastReadAt: Number.NaN }, replica),
-    /invalid_session/,
+    /invalid_session/
   );
 });
 
@@ -227,7 +221,7 @@ test('archive lands on the session even when the machine flock is unavailable', 
     { workspaceId: 'w1', sessionId: 's2', archived: true },
     replica,
     new Map(),
-    grant,
+    grant
   );
   assert.equal(remoteMeta.get(['m', 'session-s2', 'isArchived']), true);
   const machine = new Flock('machine');
@@ -235,7 +229,7 @@ test('archive lands on the session even when the machine flock is unavailable', 
     { workspaceId: 'w1', sessionId: 's2', archived: false },
     replica,
     new Map([['gone', machine]]),
-    grant,
+    grant
   );
   assert.equal(remoteMeta.get(['m', 'session-s2', 'isArchived']), false);
   assert.equal(machine.get(['cmd', 'archiveSession', 's2']), undefined);
@@ -279,7 +273,7 @@ test('archive and pin accept field-level session metadata', async () => {
     { workspaceId: 'w1', sessionId: 's3', archived: true },
     replica,
     new Map([['m1', machine]]),
-    grant,
+    grant
   );
   assert.equal(remoteMeta.get(['m', 'session-s3', 'isArchived']), true);
   assert.deepEqual(remoteMeta.get(['m', 'session-s3', 'status']), {
@@ -297,14 +291,10 @@ test('archive cascades to child sessions and only queues the root machine comman
     remoteMachine = new Flock('remote-machine');
   for (const [room, fields] of [
     ['session-root', { id: 'root', machineId: 'm1' }],
-    [
-      'session-child',
-      { id: 'child', machineId: 'm1', parentSessionId: 'root' },
-    ],
+    ['session-child', { id: 'child', machineId: 'm1', parentSessionId: 'root' }],
   ]) {
     meta.put(['e', room], true);
-    for (const [key, value] of Object.entries(fields))
-      meta.put(['m', room, key], value);
+    for (const [key, value] of Object.entries(fields)) meta.put(['m', room, key], value);
   }
   meta.commit();
   remoteMeta.importFile(meta.exportFile());
@@ -328,7 +318,7 @@ test('archive cascades to child sessions and only queues the root machine comman
     { workspaceId: 'w1', sessionId: 'root', archived: true },
     replica,
     new Map([['m1', machine]]),
-    grant,
+    grant
   );
   assert.equal(remoteMeta.get(['m', 'session-root', 'isArchived']), true);
   assert.equal(remoteMeta.get(['m', 'session-child', 'isArchived']), true);
@@ -338,14 +328,14 @@ test('archive cascades to child sessions and only queues the root machine comman
     { workspaceId: 'w1', sessionId: 'root', archived: false },
     replica,
     new Map([['m1', machine]]),
-    grant,
+    grant
   );
   assert.equal(remoteMeta.get(['m', 'session-root', 'isArchived']), false);
   assert.equal(remoteMeta.get(['m', 'session-child', 'isArchived']), false);
   assert.equal(machine.get(['cmd', 'archiveSession', 'root']), undefined);
 });
 
-test('archive records needToArchiveSessions on machine meta', async () => {
+test('archive stores the flag on the session, never a machine meta queue', async () => {
   const meta = new Flock('meta'),
     remoteMeta = new Flock('remote-meta');
   meta.put(['e', 'session-s4'], true);
@@ -368,22 +358,18 @@ test('archive records needToArchiveSessions on machine meta', async () => {
     { workspaceId: 'w1', sessionId: 's4', archived: true },
     replica,
     new Map(),
-    grant,
+    grant
   );
-  assert.deepEqual(
-    remoteMeta.get(['m', 'machine-m1', 'needToArchiveSessions']),
-    { s4: true },
-  );
+  assert.equal(remoteMeta.get(['m', 'session-s4', 'isArchived']), true);
+  assert.equal(remoteMeta.get(['m', 'machine-m1', 'needToArchiveSessions']), undefined);
   await archiveSession(
     { workspaceId: 'w1', sessionId: 's4', archived: false },
     replica,
     new Map(),
-    grant,
+    grant
   );
-  assert.deepEqual(
-    remoteMeta.get(['m', 'machine-m1', 'needToArchiveSessions']),
-    {},
-  );
+  assert.equal(remoteMeta.get(['m', 'session-s4', 'isArchived']), false);
+  assert.equal(remoteMeta.get(['m', 'machine-m1', 'needToArchiveSessions']), undefined);
 });
 
 test('rename writes a user-directed title onto the session meta', async () => {
@@ -411,15 +397,15 @@ test('rename writes a user-directed title onto the session meta', async () => {
   assert.equal(meta.get(['m', 'session-s1']).id, 's1');
   await assert.rejects(
     renameSession({ sessionId: 'missing', title: 'X' }, replica),
-    /session_not_found/,
+    /session_not_found/
   );
   await assert.rejects(
     renameSession({ sessionId: 's1', title: '   ' }, replica),
-    /invalid_session/,
+    /invalid_session/
   );
   await assert.rejects(
     renameSession({ sessionId: 's1', title: 'x'.repeat(201) }, replica),
-    /invalid_session/,
+    /invalid_session/
   );
 });
 
@@ -444,21 +430,18 @@ test('changing the owner rewrites only SessionMeta.userId, never sharing', async
       },
     },
   };
-  await assert.rejects(
-    setSessionOwner({ sessionId: 's1', userId: 'bob' }, replica),
-    /offline/,
-  );
+  await assert.rejects(setSessionOwner({ sessionId: 's1', userId: 'bob' }, replica), /offline/);
   fail = false;
   await setSessionOwner({ sessionId: 's1', userId: ' carol ' }, replica);
   assert.equal(remoteMeta.get(['m', 'session-s1', 'userId']), 'carol');
   assert.equal(remoteMeta.get(['m', 'session-s1']).visibility, 'private');
   await assert.rejects(
     setSessionOwner({ sessionId: 'missing', userId: 'bob' }, replica),
-    /session_not_found/,
+    /session_not_found/
   );
   await assert.rejects(
     setSessionOwner({ sessionId: 's1', userId: '  ' }, replica),
-    /invalid_session/,
+    /invalid_session/
   );
 });
 
@@ -488,10 +471,7 @@ test('closing and reopening a Tab changes only that shared flag after acknowledg
       },
     },
   };
-  await assert.rejects(
-    setTabClosed({ sessionId: 'root', closed: true }, meta),
-    /offline/,
-  );
+  await assert.rejects(setTabClosed({ sessionId: 'root', closed: true }, meta), /offline/);
   assert.equal(flock.get(['m', 'session-root', 'isTabClosed']), undefined);
   fail = false;
   await setTabClosed({ sessionId: 'root', closed: true }, meta);
@@ -506,6 +486,6 @@ test('closing and reopening a Tab changes only that shared flag after acknowledg
   assert.equal(remote.get(['m', 'session-root', 'isTabClosed']), false);
   await assert.rejects(
     setTabClosed({ sessionId: 'missing', closed: true }, meta),
-    /session_not_found/,
+    /session_not_found/
   );
 });

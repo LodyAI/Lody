@@ -126,17 +126,6 @@ export const makeSqliteKeyMailbox = Effect.fnUntraced(function* (input: {
     },
     error: (code) => new MailboxError({ code }),
   });
-  // Serialize the additive migration with other openers. Legacy rows have no
-  // delivery-round evidence: retain them at revision zero, including rejections.
-  yield* sql(() =>
-    db
-      .transaction(() => {
-        const columns = db.pragma('table_info(mailbox_envelopes)') as { name: string }[];
-        if (!columns.some((column) => column.name === 'revision'))
-          db.exec('ALTER TABLE mailbox_envelopes ADD COLUMN revision INTEGER NOT NULL DEFAULT 0');
-      })
-      .immediate()
-  );
   let closed = false;
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {

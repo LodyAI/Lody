@@ -30,7 +30,7 @@ access without a new capability/security decision in the owning
 The disk-full guard (`storage-guard.ts`) requires a failed Lody write AND low space
 on a Lody data volume. Space alone never blocks. Only relaunch/quit clears it;
 background agents keep running
-([decision](../../../../../.agents/notes/proposed/feature/2026-10-22-desktop-disk-full-guard.md)).
+([decision](../../../../../.agents/notes/implemented/feature/2026-10-22-desktop-disk-full-guard.md)).
 
 ## Public browser
 

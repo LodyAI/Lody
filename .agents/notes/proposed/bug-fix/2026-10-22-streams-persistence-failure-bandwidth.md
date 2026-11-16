@@ -6,7 +6,7 @@ Translation: current
 
 [中文](2026-10-22-streams-persistence-failure-bandwidth.zh.md)
 
-Release update (2026-10-23): [official SDK adoption](2026-10-23-storage-recovery-release-adoption.md) uses streams-crdt 0.19.2 and Repo 0.25.0, replacing the unreleased-dependency and temporary-patch limitations described below.
+Release update (2026-10-23): [official SDK adoption](../../implemented/bug-fix/2026-10-23-storage-recovery-release-adoption.md) uses streams-crdt 0.19.2 and Repo 0.25.0, replacing the unreleased-dependency and temporary-patch limitations described below.
 
 ## Abstract
 
@@ -20,7 +20,7 @@ bump. This change fixes the Lody-side companion: a CLI whose parent pipe closed 
 2.46 GB of daily log in five minutes and never exited. The upstream fixes are not
 released yet, so the bandwidth loop is still unfixed in Lody.
 
-Related: [live-read spin after a persistence failure](2026-10-19-streams-read-loop-spin.md),
+Related: [live-read spin after a persistence failure](../../implemented/bug-fix/2026-10-19-streams-read-loop-spin.md),
 the earlier loop with the same trigger that never sent a request.
 
 ## Evidence from the report

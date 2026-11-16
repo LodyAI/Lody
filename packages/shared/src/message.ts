@@ -696,39 +696,6 @@ export interface MachineBugReportResponse {
   error?: string;
 }
 
-/**
- * @deprecated Legacy compatibility only. Code Collab v1's session-scoped host
- * runtime has been removed; v2 file operations use machine RPC methods under
- * `code-collab/*`.
- */
-export interface SessionCodeCollabHostStartRequest {
-  type: 'session/code-collab-host-start';
-  machineId: MachineId;
-  workspaceId: WorkspaceId;
-  sessionId: SessionId;
-  requestedByUserId: string;
-}
-
-export type SessionCodeCollabHostStartStatus =
-  | 'started'
-  | 'already-running'
-  | 'disabled'
-  | 'failed'
-  | 'stopped';
-
-/**
- * @deprecated Legacy compatibility response for `session/code-collab-host-start`.
- * Current CLIs return `success: false` / `status: 'disabled'`.
- */
-export interface SessionCodeCollabHostStartResponse {
-  type: 'session/code-collab-host-start_response';
-  sessionId: SessionId;
-  success: boolean;
-  status?: SessionCodeCollabHostStartStatus;
-  error?: string;
-  message?: string;
-}
-
 export interface SessionImageUploadRequest {
   type: 'session/image-upload';
   machineId: MachineId;
@@ -1017,7 +984,6 @@ export type LocalSessionControlRequest =
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
   | MachineAcpBinaryInstallRequest
-  | SessionCodeCollabHostStartRequest
   | SessionImageUploadRequest
   | SessionFileUploadRequest
   | SessionFileSendLocalRequest
@@ -1051,7 +1017,6 @@ export type LocalSessionControlResponse =
   | MachineAcpBinaryStatusResponse
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage
-  | SessionCodeCollabHostStartResponse
   | SessionImageUploadResponse
   | SessionFileUploadResponse
   | SessionFileSendLocalResponse

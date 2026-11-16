@@ -159,10 +159,10 @@ export function createE2eeContent(input: {
       try {
         // Both hosts receive and install only this device's key; omitted options would
         // skip the key round on a portable host.
-        await untilAborted(
-          input.runtime.refresh(input.workspaceId, { installKeys: true, keyMode: 'receive' }),
-          [stopped.signal, deadline.signal]
-        );
+        await untilAborted(input.runtime.refresh(input.workspaceId, { keyMode: 'receive' }), [
+          stopped.signal,
+          deadline.signal,
+        ]);
       } catch (error) {
         if (observeRemoval(error) || stopped.signal.aborted || deadline.signal.aborted) throw error;
         // A failed round can still have installed the key (e.g. from a staged
@@ -326,12 +326,7 @@ export function createE2eeContent(input: {
           throw new Error('e2ee_content_configuration');
         const response = await untilAborted(
           (rpcOnly
-            ? input.runtime.contentStreamsToken(
-                input.workspaceId,
-                request.rejectedToken,
-                undefined,
-                true
-              )
+            ? input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken, true)
             : input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken)
           ).catch((error) => {
             // Access loss stays observed even when this request was abandoned.

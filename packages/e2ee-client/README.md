@@ -91,7 +91,7 @@ relay pages can only confirm the existing verified feed, never replace its curso
 
 `PersonalHostPlatform.contentToken` runs inside the approved session with its
 captured device credential and full binding. Product callers receive only dedicated
-short-lived content/attachment grants. Rejected tokens, snapshot repair hints and
+short-lived content/attachment grants. Rejected tokens and
 RPC-only requests are forwarded exactly. RPC methods exist only with the real RPC
 original store. Optional `machineSharing` builds a `PersonalMachineSharing` policy
 Layer with the fixed identity/scope, verified ledger source and installed-key history;

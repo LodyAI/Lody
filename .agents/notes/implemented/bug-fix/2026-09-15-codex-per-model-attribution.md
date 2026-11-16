@@ -38,7 +38,7 @@ when unavailable, the first snapshot only anchors and may omit a new response.
 
 Fact correction: [usage accounting scopes](2026-09-25-usage-accounting-scopes.md) later
 replaced the Codex-only turn marker with Core `usageScopeId` for every provider, so the
-key is `:scope:`; the CLI reads legacy `codex.usageTurnId` only as Codex compatibility.
+key is `:scope:`; the CLI no longer reads the legacy `codex.usageTurnId`.
 The accounting identity is separate from the real ACP session ID and never changes
 session routing or metadata.
 Separate turn keys allow A=10000 followed by B=2000 to total 12000 instead of

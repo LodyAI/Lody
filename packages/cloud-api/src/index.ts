@@ -368,7 +368,6 @@ type BillingOverview = {
     | 'early_bird_yearly_6000_forever'
     | 'promo_yearly_6000_limited'
     | null;
-  yearlyEarlyBirdEligible: boolean;
   effectivePlanTier: PlanTier;
   entitlementSource: BillingEntitlementSource;
   promotionalEntitlementEndsAt: number | null;

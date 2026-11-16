@@ -628,7 +628,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
       environment.e2eeWorkspaces!.runtime = {
         open: async () => status,
         refresh: (_workspaceId, options) =>
-          options?.installKeys === false
+          options?.keyMode === 'none'
             ? new Promise((resolve, reject) => {
                 finishRefresh = resolve;
                 failRefresh = () => reject(new Error('temporary network failure'));
@@ -714,12 +714,12 @@ describe('RuntimeProvider warm workspace preparation', () => {
       rotationRequired: false,
     });
     environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
-    // The portable host's contract: without `keyMode`, only `installKeys: true` runs a key round.
+    // The portable host's contract: without `keyMode`, no key round runs.
     environment.e2eeWorkspaces!.runtime = {
       open: async () => status(),
       status: async () => status(),
       refresh: async (_workspace: string, options?: E2eeRefreshOptions) => {
-        const mode = options?.keyMode ?? (options?.installKeys ? 'full' : 'none');
+        const mode = options?.keyMode ?? 'none';
         if (mode === 'receive' || mode === 'full') installed = epoch;
         return status();
       },
@@ -1314,7 +1314,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
         open: async () => status(),
         status: async () => status(),
         refresh: async (_id, options) => {
-          if (options?.installKeys) {
+          if (options?.keyMode && options.keyMode !== 'none') {
             receiving.resolve();
             await received.promise;
             if (outcome === 'failure') throw new Error('mailbox unavailable');
@@ -1400,7 +1400,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
       open: async () => status(),
       status: async () => status(),
       refresh: async (_id, options) => {
-        if (options?.installKeys) {
+        if (options?.keyMode && options.keyMode !== 'none') {
           receiving.resolve();
           await received.promise;
           installed = true;

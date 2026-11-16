@@ -90,8 +90,7 @@ describe('AgentClient session title updates', () => {
   it.each([
     ['claude', false, undefined, 'Accepted'],
     ['grok', false, undefined, 'Accepted'],
-    ['codex', false, { codex: { titleSource: 'explicit' } }, 'Accepted'],
-    ['codex', false, { codex: { titleSource: 'fallback' } }, undefined],
+    ['codex', false, { codex: { titleSource: 'explicit' } }, undefined],
     ['codex', false, undefined, undefined],
     ['kimi', false, undefined, undefined],
     ['custom', true, { lody: { titleSource: 'generated' } }, 'Accepted'],
@@ -142,14 +141,15 @@ describe('AgentClient session title updates', () => {
 });
 
 describe('AgentClient agent warning updates', () => {
-  it('forwards Codex session warnings from structured _meta', async () => {
+  it('forwards Core notices from structured _meta', async () => {
     const { client, onUpdateMessage, onAgentWarning } = createTestClient('codex');
 
     await client.sessionUpdate(
       sessionInfoNotification({
         _meta: {
-          codex: {
-            warning: {
+          lody: {
+            notice: {
+              level: 'warning',
               source: 'warning',
               message: 'Skill descriptions were shortened to fit the 2% skills context budget.',
             },
@@ -166,8 +166,8 @@ describe('AgentClient agent warning updates', () => {
     expect(onUpdateMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores warning metadata from non-Codex agents', async () => {
-    const { client, onAgentWarning } = createTestClient('claude');
+  it('ignores provider-namespaced warning metadata', async () => {
+    const { client, onAgentWarning } = createTestClient('codex');
 
     await client.sessionUpdate(
       sessionInfoNotification({ _meta: { codex: { warning: { message: 'something' } } } })

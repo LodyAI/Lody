@@ -99,8 +99,7 @@ verifies real signatures from a document and its snapshot, each refusal reason a
 unknown-signer read. `apps/cli/tests/e2ee-runtime.test.ts` covers queued inputs (late, removed,
 replayed, edited, machine-signed, rewritten items, dropped blocks), rotation, scheduled runs and declarations, and background
 retries. `apps/cli/src/lib/e2ee/realtime-journal.test.ts` covers one start and retirement;
-`apps/cli/tests/session-dispatch-watcher.test.ts` covers wake-ups and the capped fallback;
-`packages/components/tests/legacy-session-send-migration.test.ts` covers client ordering.
+`apps/cli/tests/session-dispatch-watcher.test.ts` covers wake-ups and the capped fallback.
 `packages/e2ee-client/test/runtime.browser.test.ts` saves an encrypted schedule through the
 real portable host and verifies the stored declaration.
 No real backend, device or mobile run was made.

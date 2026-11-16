@@ -11,8 +11,9 @@ A turn's task panel listed agent runs and background shell commands in one list,
 
 ## Classification
 
-`taskKind` does not mark agent versus command: the Claude lifecycle adapter
-(`apps/cli/src/agent/claude-task-lifecycle.ts`) publishes `background` for any
+`taskKind` does not mark agent versus command: the Claude adapter's
+`_meta.lody.task.kind` (`packages/acp-extension-claude/src/acp-agent.ts`, read by
+`parseLodyTaskMeta`) publishes `background` for any
 backgrounded run, a backgrounded agent included, and `subagent` for everything
 else, a foreground shell task included. `groupOf` in `subagent-task-state.tsx`
 therefore puts a task under Tasks when its `taskKind` is `scheduled` or its

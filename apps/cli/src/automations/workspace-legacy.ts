@@ -60,7 +60,6 @@ export type AutomationWorkspaceHandle = Awaited<ReturnType<typeof createAutomati
 /** Workspace/Fleet application boundary. Dispose before Session owners or their repo. */
 export async function createAutomationWorkspaceLegacy(options: {
   lody: Lody;
-  hasUncertainLegacyQuota(sessionId: SessionId): boolean;
   auth: AuthContext;
   workspace: WorkspaceSummary;
   logger: Logger;
@@ -402,12 +401,6 @@ export async function createAutomationWorkspaceLegacy(options: {
           return false;
         const record = await lody.documentManager.repo.getDocMeta(getSessionRoomId(sessionId));
         const meta = record?.meta as SessionMeta | undefined;
-        if (
-          meta?.agentType === 'claude' &&
-          ledger.receipt(origin.invocationId)?.event.type === 'provider.quota.exhausted' &&
-          options.hasUncertainLegacyQuota(sessionId)
-        )
-          return false;
         return (
           !!record &&
           !!meta &&

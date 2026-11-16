@@ -481,7 +481,6 @@ function WorkspaceLandingHarness({
               value={localBranch}
               onChange={setLocalBranch}
               options={localBranches}
-              tone={composerTone}
               placeholder="Branch"
               searchPlaceholder="Search branches"
               emptyText="No branches found"

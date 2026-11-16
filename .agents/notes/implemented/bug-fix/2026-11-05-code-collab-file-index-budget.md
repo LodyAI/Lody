@@ -9,7 +9,7 @@ Translation: current
 
 A Nightly CLI kept its main thread at about 100% CPU and the local Supervisor
 kept reconnecting. A Code Collab file-index rewrite had issued thousands of
-individual Flock commits, and patched-in `@loro-dev/streams-crdt` queued one full
+individual Flock commits, and `@loro-dev/streams-crdt` queued one full
 Wasm `exportJson` per commit even after the first export had covered everything.
 The index itself had grown to an uncompressed 5.3 MB update: an in-project
 `.pnpm-store` was not gitignored, All Changes had no budget, and paths the scan
@@ -51,16 +51,16 @@ length are inferred, not observed.
 
 ## Decision
 
-- **Export coalescing (dependency patch).** `patches/@loro-dev__streams-crdt@0.19.2.patch`
-  changes `createFlockAdapter().subscribeLocalUpdates`. A subscription has at most
+- **Export coalescing (dependency).** `createFlockAdapter().subscribeLocalUpdates` in
+  `@loro-dev/streams-crdt` 0.20.0 coalesces local exports; Lody first shipped this as a
+  patch on 0.19.2 and removed it when [#2747](https://github.com/LodyAI/Lody/pull/2747)
+  adopted the release. A subscription has at most
   one export pending. Before exporting, it yields one macrotask (`setTimeout`),
   because a Promise-only yield cannot let IPC or timers run. The pending flag clears
   just before the synchronous Wasm export, so a commit made during the export
   schedules exactly one more. The frontier advances only from bundles that were
   actually exported. A failed export leaves the range for the next commit, and
-  unsubscribing stops delivery without advancing the frontier. This patch is
-  temporary: remove it when an upstream streams-crdt release coalesces local
-  exports, and port its test to that version.
+  unsubscribing stops delivery without advancing the frontier.
 - **Cache policy.** `.pnpm-store` joins `CODE_COLLAB_IGNORED_DIRECTORY_NAMES`, used by
   the watcher, the FS fallback, and the untracked half of Git listings. Git listing
   now lists tracked and untracked paths separately, so a tracked file under a
@@ -134,7 +134,7 @@ length are inferred, not observed.
 
 - `apps/cli/tests/streams-crdt-flock-local-export.test.ts` uses a real Flock to test
   coalescing, timer fairness, writes during a pending export, failure retry, and
-  unsubscribe. It fails against the unpatched adapter.
+  unsubscribe against the released adapter. It fails against streams-crdt 0.19.2 without the former patch.
 - `apps/cli/src/lib/code-collab/file-index-scan-worker.test.ts` tests the cache
   policy versus tracked files, a 1,500-file untracked flood that stays within the
   budget without deletions, and the bounded line-count reads.
