@@ -8,9 +8,12 @@ Translation: current
 Lody 每轮依据请求者的批准和机器所有权选择 host Session 的 Git identity，而不是 workspace
 成员数或共享状态。优先级为：
 
-1. 请求者本人的 Lody/GitHub 身份，仅当该请求者批准了 "Act as you"；
-2. 由机器 owner 发起的轮次，使用 Git 自身在 session workdir 中解析出的身份；
-3. 中性的 `LodyAI <agent@lody.ai>` 身份。
+1. 由机器 owner 发起的轮次，session workdir 所在仓库自身配置的身份（仓库或 worktree 配置）；
+2. 请求者本人的 Lody/GitHub 身份，仅当该请求者批准了 "Act as you"；
+3. 由机器 owner 发起的轮次，Git 自身在 session workdir 中解析出的其他身份；
+4. 中性的 `LodyAI <agent@lody.ai>` 身份。
+
+仓库身份是 owner 针对该项目最具体的选择，因此也优先于 owner 自己的 "Act as you" 批准。
 
 只有 Lody 已经确定身份时（已批准的请求者、LodyAI，或下文所述的替换），才会把它导出为
 Git author 与 committer 环境变量。这些变量会覆盖所有 Git 配置层级，因此除此之外 owner

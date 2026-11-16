@@ -15,10 +15,15 @@ const machine = { name: 'Owner Machine', email: 'owner@example.com' };
 
 const machineSource = (
   effective: { name?: string; email?: string },
-  options: { untrusted?: boolean; userLevel?: { name?: string; email?: string } } = {}
+  options: {
+    untrusted?: boolean;
+    repository?: boolean;
+    userLevel?: { name?: string; email?: string };
+  } = {}
 ) => ({
   effective,
   untrustedRepositoryIdentity: options.untrusted ?? false,
+  repositoryIdentity: options.repository ?? false,
   userLevel: () => options.userLevel ?? {},
 });
 const neutral = { name: 'LodyAI', email: DEFAULT_AI_GIT_AUTHOR_EMAIL, inject: true };
@@ -30,6 +35,25 @@ describe('resolveSessionGitIdentity', () => {
         preferMachineIdentity: true,
         personalIdentityEnabled: true,
         machine: machineSource(machine),
+      })
+    ).toEqual({ ...requester, inject: true });
+  });
+
+  it('lets the owner repository identity win over an approved account identity', () => {
+    const repository = machineSource(machine, { repository: true });
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: true,
+        personalIdentityEnabled: true,
+        machine: repository,
+      })
+    ).toEqual({ ...machine, inject: false });
+    // The owner's repository config never applies to someone else's turn.
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: false,
+        personalIdentityEnabled: true,
+        machine: repository,
       })
     ).toEqual({ ...requester, inject: true });
   });
@@ -250,6 +274,14 @@ describe('readHostDefaultGitIdentity', () => {
     const probed = probeMachineGitIdentity(dir);
     expect(probed.effective).toEqual({ name: machine.name, email: 'repo@example.com' });
     expect(probed.untrustedRepositoryIdentity).toBe(false);
+    expect(probed.repositoryIdentity).toBe(true);
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: true,
+        personalIdentityEnabled: true,
+        workdir: dir,
+      })
+    ).toEqual({ name: machine.name, email: 'repo@example.com', inject: false });
     expect(
       resolveSessionGitIdentity(requester, { preferMachineIdentity: true, workdir: dir })
     ).toEqual({ name: machine.name, email: 'repo@example.com', inject: false });
@@ -282,7 +314,10 @@ describe('readHostDefaultGitIdentity', () => {
     execFileSync('git', ['-C', dir, 'push', '-q', bare, 'HEAD:refs/heads/main']);
     execFileSync('git', ['-C', bare, 'worktree', 'add', '-q', worktree, 'main']);
 
-    expect(probeMachineGitIdentity(worktree).untrustedRepositoryIdentity).toBe(true);
+    expect(probeMachineGitIdentity(worktree)).toMatchObject({
+      untrustedRepositoryIdentity: true,
+      repositoryIdentity: false,
+    });
     expect(
       resolveSessionGitIdentity(requester, { preferMachineIdentity: true, workdir: worktree })
     ).toEqual({ ...machine, inject: true });

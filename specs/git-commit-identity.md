@@ -8,10 +8,14 @@ Translation: current
 Lody resolves the host Session Git identity for every turn from the requester's approval and
 machine ownership, rather than workspace size or sharing state. The precedence is:
 
-1. the requester's own Lody/GitHub identity, only when that requester approved "Act as you";
-2. for a turn requested by the machine owner, the identity Git itself resolves in the session
-   workdir;
-3. the neutral `LodyAI <agent@lody.ai>` identity.
+1. for a turn requested by the machine owner, an identity configured in the session workdir's
+   own repository (repository or worktree config);
+2. the requester's own Lody/GitHub identity, only when that requester approved "Act as you";
+3. for a machine-owner turn, any other identity Git itself resolves in the session workdir;
+4. the neutral `LodyAI <agent@lody.ai>` identity.
+
+A repository identity is the owner's most specific choice for that project, so it also wins
+over the owner's "Act as you" approval.
 
 Lody exports an identity as Git author and committer environment variables only when it has
 decided one: an approved requester, LodyAI, or a replacement described below. Those variables

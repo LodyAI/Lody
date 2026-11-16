@@ -445,8 +445,8 @@ retries once, and returns personal identity disabled after two failures. Startup
 and agent launch. Late policy results have no side effects. This deadline also covers
 per-turn identity refresh; it is separate from network credential fallback.
 
-Precedence: an approved ("Act as you") requester, then the machine owner's own Git identity,
-then neutral LodyAI (`session.ts` `updateGitIdentity`, re-applied per turn via the execution
+Precedence: for owner turns, the workdir repository's own configured identity; then an approved
+("Act as you") requester; then the owner's other native Git identity; then neutral LodyAI (`session.ts` `updateGitIdentity`, re-applied per turn via the execution
 service's `bindReadySession`). Only a decided identity is exported as
 `GIT_AUTHOR_*`/`GIT_COMMITTER_*`; the owner's identity is otherwise left to Git, so repository
 config and conditional includes apply. Repository identity of a Lody-managed shared GitHub clone

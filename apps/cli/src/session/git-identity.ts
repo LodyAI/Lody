@@ -29,6 +29,11 @@ export type MachineGitIdentity = {
    * shared clone. Agents can write that config, so it is not the owner's choice.
    */
   untrustedRepositoryIdentity: boolean;
+  /**
+   * The effective name or email comes from repository/worktree config the owner set (not a
+   * Lody-managed shared clone). It is the most specific choice and wins over "Act as you".
+   */
+  repositoryIdentity: boolean;
   /** Process env and user-level config only, read lazily when the effective value is untrusted. */
   userLevel: () => PartialGitIdentity;
 };
@@ -247,9 +252,11 @@ export const probeMachineGitIdentity = (workdir: string): MachineGitIdentity => 
   const repositoryScoped =
     (name !== undefined && REPOSITORY_SCOPES.has(name.scope)) ||
     (email !== undefined && REPOSITORY_SCOPES.has(email.scope));
+  const untrusted = repositoryScoped && isLodyManagedSharedClone(workdir);
   return {
     effective: { name: env.name ?? name?.value, email: env.email ?? email?.value },
-    untrustedRepositoryIdentity: repositoryScoped && isLodyManagedSharedClone(workdir),
+    untrustedRepositoryIdentity: untrusted,
+    repositoryIdentity: repositoryScoped && !untrusted,
     userLevel: () => readHostDefaultGitIdentity(workdir),
   };
 };
@@ -281,9 +288,10 @@ const resolveMachineIdentity = (machine: MachineGitIdentity): SessionGitIdentity
 
 /**
  * Commit identity precedence:
- * 1. the requester's own identity, only when they approved it ("Act as you");
- * 2. for the machine owner, whatever Git resolves in the workdir (left to Git itself);
- * 3. the neutral LodyAI identity.
+ * 1. for the machine owner, an identity configured in the workdir's own repository;
+ * 2. the requester's own identity, only when they approved it ("Act as you");
+ * 3. for the machine owner, whatever else Git resolves in the workdir (left to Git itself);
+ * 4. the neutral LodyAI identity.
  * A non-owner never reaches the machine's identity, and an unapproved requester's account
  * email never enters a commit.
  */
@@ -291,25 +299,25 @@ export const resolveSessionGitIdentity = (
   requested: PartialGitIdentity,
   options: GitIdentityResolutionOptions
 ): SessionGitIdentity => {
+  const machine = options.preferMachineIdentity
+    ? (options.machine ??
+      (options.workdir !== undefined
+        ? probeMachineGitIdentity(options.workdir)
+        : {
+            effective: readHostDefaultGitIdentity(),
+            untrustedRepositoryIdentity: false,
+            repositoryIdentity: false,
+            userLevel: () => readHostDefaultGitIdentity(),
+          }))
+    : undefined;
+  const machineIdentity = machine ? resolveMachineIdentity(machine) : undefined;
+  if (machine?.repositoryIdentity && machineIdentity) return machineIdentity;
+
   // Missing-email addresses are auth placeholders, not commit identities.
   const requestedIdentity = usableIdentity(requested);
   if (options.personalIdentityEnabled && requestedIdentity) {
     return { ...requestedIdentity, inject: true };
   }
 
-  if (options.preferMachineIdentity) {
-    const machine =
-      options.machine ??
-      (options.workdir !== undefined
-        ? probeMachineGitIdentity(options.workdir)
-        : {
-            effective: readHostDefaultGitIdentity(),
-            untrustedRepositoryIdentity: false,
-            userLevel: () => readHostDefaultGitIdentity(),
-          });
-    const identity = resolveMachineIdentity(machine);
-    if (identity) return identity;
-  }
-
-  return NEUTRAL_IDENTITY;
+  return machineIdentity ?? NEUTRAL_IDENTITY;
 };

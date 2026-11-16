@@ -19,6 +19,7 @@ const testLogger = (): Logger =>
 const machineSource = (effective: { name?: string; email?: string }) => ({
   effective,
   untrustedRepositoryIdentity: false,
+  repositoryIdentity: false,
   userLevel: () => ({}),
 });
 

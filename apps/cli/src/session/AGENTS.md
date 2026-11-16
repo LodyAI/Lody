@@ -19,8 +19,8 @@ encrypted starts that run only signed input; the default ceiling had no room for
   never role/author. [Rules](../orchestration/AGENTS.md).
 - Host-scope Machine/Provider credentials. Use frozen Turn identity for attribution,
   authorization and commits; trusted conversation owner for GitHub network auth.
-- Git: an approved requester, then the owner's native Git config, then LodyAI. Only a
-  decided identity is exported as env. Non-owners never read machine config.
+- Git: the owner's repository identity, an approved requester, the owner's native config,
+  then LodyAI. Only a decided identity is exported as env. Non-owners never read machine config.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
   Commit attribution never restarts ACP; owner changes retire the runtime.
 
