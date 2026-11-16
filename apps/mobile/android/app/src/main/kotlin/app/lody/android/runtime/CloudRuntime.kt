@@ -33,7 +33,8 @@ sealed interface RuntimeCommand {
     data class ArchiveSession(val id: String, val archived: Boolean) : RuntimeCommand
     /** [billing]: a Tab is a session, so the free-plan session quota applies (null fails open). */
     data class CreateTab(val parentId: String, val id: String, val title: String, val billing: org.json.JSONObject? = null) : RuntimeCommand
-    data class GetCreationOptions(val projectId: String?, val agentConfigId: String? = null) : RuntimeCommand
+    /** [includeOffline]: schedule targets, every readable computer's agents; new chats keep online agents. */
+    data class GetCreationOptions(val projectId: String?, val agentConfigId: String? = null, val includeOffline: Boolean = false) : RuntimeCommand
     /** The workspace's Agent Roles readable by this user. Read only. */
     data object ListAgentRoles : RuntimeCommand
     /** [billing]: the workspace plan projection the cloud runtime reads per write (null fails open). */

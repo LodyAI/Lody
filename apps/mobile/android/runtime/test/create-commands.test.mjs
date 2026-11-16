@@ -132,3 +132,10 @@ test('a failed read of the creation options is rejected before any write',async(
  const disconnected=createCommands(runtime,async()=>calls.push('send'),()=>undefined);
  assert.equal((await disconnected.createAndSend(input)).state,'rejected');assert.deepEqual(calls,[]);
 });
+test('schedule targets ask for offline computers; new chats and the trailing signal never do',async()=>{
+ const seen=[];const runtime={creationOptions:a=>{seen.push(a);return {agents:[],capabilities:[]}}};
+ const c=createCommands(runtime,async()=>({}),()=>({workspaceId:'w',userId:'u'}));
+ const signal=new AbortController().signal;
+ await c.creationOptions(null,null,true,signal);await c.creationOptions(null,null,signal);await c.creationOptions(null,null,false,signal);
+ assert.deepEqual(seen,[{workspaceId:'w',includeOffline:true},{workspaceId:'w'},{workspaceId:'w'}]);
+});

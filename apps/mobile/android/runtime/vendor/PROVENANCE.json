@@ -178,5 +178,15 @@
       "src/runtime/files.ts"
     ],
     "note": "Historical diff reads retain unavailable results and never substitute the current workspace diff, matching Web. Mirrored verbatim from the reviewed iOS source commit; dependencies, protocol and licenses are unchanged."
+  },
+  "scheduleOfflineTargets": {
+    "commit": "387b643ce1a2a40ad01d06b40c16a46cfa237611",
+    "files": [
+      "contract/runtime-contract.json",
+      "src/contract/projects.ts",
+      "src/runtime/handlers/projects.ts",
+      "src/runtime/handlers/schedules.ts"
+    ],
+    "note": "creationOptions accepts includeOffline for schedule targets: every readable machine's agents, online or not, as on Web; new chats keep online-only agents. The schedules list reads ownedMachineIds and clocks from workspace metadata as well as synced machine streams. Mirrored verbatim from the reviewed iOS source commit; transcript windowing in project.ts and session.ts stays out of the snapshot, and dependencies and licenses are unchanged."
   }
 }

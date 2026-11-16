@@ -291,7 +291,10 @@ export function registerSchedules(ctx: RuntimeContext) {
     const agentList = agents(meta);
     const machineTimeZones: Record<string, string> = {};
     const ownedMachineIds: string[] = [];
+    // Ownership and clocks are metadata: a machine whose own stream is still
+    // syncing is already listed, so an early list cannot hide owned computers.
     for (const id of new Set([
+      ...(state.catalogs.get('meta')?.machineIds ?? []),
       ...state.machineReplicas.keys(),
       ...rows.map((row) => row.machineId),
     ])) {

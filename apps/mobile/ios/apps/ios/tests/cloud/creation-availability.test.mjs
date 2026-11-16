@@ -83,6 +83,33 @@ test('creation lists a healthy online machine while another machine cannot sync'
     /metadata_not_ready/,
   );
 });
+test('schedule targets keep an offline computer that new chats cannot use', () => {
+  const { state } = fixture(),
+    handlers = new Map();
+  registerProjects({
+    state,
+    channel: { handle: (name, fn) => handlers.set(name, fn) },
+    getGrant: () => assert.fail('listing must not request a grant'),
+    publish() {},
+  });
+  const options = (args) =>
+    handlers.get('creationOptions')({ workspaceId: 'w', ...args });
+  for (const presence of [
+    { state: 'live', onlineMachineIds: [] },
+    { state: 'syncing', onlineMachineIds: [] },
+  ]) {
+    state.presence = presence;
+    assert.deepEqual(options({}).agents, []);
+    const schedule = options({ includeOffline: true });
+    assert.deepEqual(
+      schedule.agents.map((a) => [a.machineId, a.id]),
+      [['online', 'coder']],
+    );
+    assert.equal(schedule.availability, undefined);
+  }
+  state.unhealthy.add('online');
+  assert.deepEqual(options({ includeOffline: true }).agents, []);
+});
 test('creation uses matching per-model declarations instead of the probed model snapshot', () => {
   const { meta, machine, state } = fixture();
   machine.set(['acpCapability', 'coder'], {

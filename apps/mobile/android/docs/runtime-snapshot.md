@@ -97,6 +97,12 @@ for 30 s, grants, bodies; forgotten when the account or workspace changes): Sett
 `fresh`, while the composer's `shortcutBody` may use the recent directory. The unused
 `publishedShares` call is gone.
 
+The `scheduleOfflineTargets` update mirrors only the schedule-target files: `creationOptions`
+accepts `includeOffline`, which skips the online filter for schedule targets (new chats keep
+online-only agents), and `schedules` derives `ownedMachineIds` and clocks from workspace
+metadata as well as synced machine streams. The transcript windowing hunks in `project.ts` and
+`session.ts` remain outside the snapshot.
+
 ## Catalog read recovery
 
 Catalog transport, authorization and rate-limit failures retry from the last

@@ -38,6 +38,8 @@ interface CreationService {
     /** A prompt shortcut's body ({prompt, mentions}) for the composer; none without a runtime. */
     suspend fun shortcut(scope: RuntimeScope, id: String): org.json.JSONObject = throw IllegalStateException("shortcut_unavailable")
     suspend fun options(scope: RuntimeScope, projectId: String?): CreationOptions
+    /** Schedule targets: the agents of every readable computer, online or not (a schedule runs later, as on Web). */
+    suspend fun scheduleOptions(scope: RuntimeScope): CreationOptions = options(scope, null)
     suspend fun create(scope: RuntimeScope, request: CreateRequest): CreationReceipt
 }
 
@@ -97,6 +99,9 @@ class CreateSessionRepository(private val owner: RuntimeOwner, private val store
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* Disk failure must not hide live choices. */ }
         value
+    }
+    override suspend fun scheduleOptions(scope: RuntimeScope): CreationOptions = owner.use(scope) {
+        (it.execute(RuntimeCommand.GetCreationOptions(null, includeOffline = true)) as RuntimeResult.Options).value
     }
     override suspend fun create(scope: RuntimeScope, request: CreateRequest): CreationReceipt = owner.use(scope) {
         (it.execute(RuntimeCommand.CreateAndSend(request)) as RuntimeResult.Created).value
