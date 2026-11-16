@@ -261,7 +261,16 @@ Builtin Antigravity launches the pinned official `agy acp --process-per-session
 --disable-telemetry` directly, with `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Its only
 version/archive pins are in `antigravity-runtime-manifest.json`; downloads use the
 same public runtime channel, cache and verification as other managed agents.
-`runtimeOverrides.antigravityPath` selects a user-managed binary. Authentication
+`runtimeOverrides.antigravityPath` selects a user-managed binary.
+`runtimeOverrides.antigravitySkipPermissions: true` (Provider setting "Skip
+permission requests", off by default) appends `--dangerously-skip-permissions`,
+so agy approves every tool permission request itself; agy's Auto mode still asks
+for non-safe commands without it. The flag is a launch policy, not a runtime
+replacement: it keeps the managed runtime, static capabilities, title ownership
+and capability cache key, and takes effect when the next agy process starts.
+Older daemons reject the field in their strict session schema, so the dialog
+offers it only when the machine advertises `antigravitySkipPermissions` v1.
+Authentication
 uses methods returned by ACP initialize, not a native terminal login command.
 
 New Provider discovery omits `registry/antigravity-acp`. Persisted Providers retain

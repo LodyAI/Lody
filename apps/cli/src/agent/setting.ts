@@ -763,7 +763,15 @@ async function resolveBuiltinACPProcessLaunch(
       : await resolveManagedRuntimeForLaunch('antigravity', input);
     return {
       command: runtime.command,
-      args: ['acp', '--process-per-session', '--disable-telemetry', ...(input.extraArgs ?? [])],
+      args: [
+        'acp',
+        '--process-per-session',
+        '--disable-telemetry',
+        ...(input.runtimeOverrides?.antigravitySkipPermissions === true
+          ? ['--dangerously-skip-permissions']
+          : []),
+        ...(input.extraArgs ?? []),
+      ],
       env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
     };

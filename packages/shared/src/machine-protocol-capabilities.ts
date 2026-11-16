@@ -56,6 +56,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   iosSimulatorControls: 'iosSimulatorControls',
   iosSimulatorExterior: 'iosSimulatorExterior',
   piExtensions: 'piExtensions',
+  antigravitySkipPermissions: 'antigravitySkipPermissions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
   acpModelOptionsRead: 'acpModelOptionsRead',
   providerRateLimitsRefresh: 'providerRateLimitsRefresh',
@@ -116,6 +117,8 @@ export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
 export const IOS_SIMULATOR_PROTOCOL_VERSION = 1;
 export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
+/** `runtimeOverrides.antigravitySkipPermissions`; older strict schemas reject the field. */
+export const ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 /** `machine/acp-capabilities-refresh` accepts `readModelOptions` and reports `reading-model-options`. */
 export const ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION = 1;
@@ -243,6 +246,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead]: ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.antigravitySkipPermissions]:
+    ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope]:
     CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
@@ -443,6 +448,17 @@ export function machineSupportsPiExtensions(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.piExtensions,
     PI_EXTENSIONS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon launches builtin agy with `--dangerously-skip-permissions` on request. */
+export function machineSupportsAntigravitySkipPermissions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.antigravitySkipPermissions,
+    ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION
   );
 }
 

@@ -36,6 +36,7 @@ import {
   CodexAuthProfileSchema,
   type CodexAuthProfile,
   machineSupportsPiExtensions,
+  machineSupportsAntigravitySkipPermissions,
   type MachinePiExtensionsResponse,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
@@ -83,6 +84,7 @@ import {
   Lock,
   RefreshCw,
   Search,
+  ShieldOff,
   Sparkles,
   SquareTerminal,
   X,
@@ -101,6 +103,7 @@ import { Collapsible } from '@lody/ui/collapsible';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
+import { Switch } from '@lody/ui/switch';
 import { Select } from '@lody/ui/select';
 import { Tabs } from '@lody/ui/tabs';
 import { OptionSelector } from '@/components/shared/option-selector';
@@ -378,6 +381,17 @@ const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
   stackTight: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
   actionRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  /** A setting named on the left with its switch on the right. */
+  switchRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minWidth: 0,
+  },
+  switchText: { display: 'flex', flexDirection: 'column', gap: space[1], minWidth: 0 },
+  switchControl: { flexShrink: 0 },
+  switchWarning: { margin: 0, fontSize: '11px', lineHeight: 1.375, color: colors.warning },
   /** A field and the one button that checks it, on one row. */
   inputWithTest: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   /** Two glyphs in one box, cross-faded: the button changes what it says, not where. */
@@ -2449,6 +2463,24 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     });
   };
 
+  const isAntigravityBuiltin =
+    formData.cliType === 'builtin' && formData.agentType === 'antigravity';
+  const antigravitySkipPermissionsSupported = machineSupportsAntigravitySkipPermissions(machine);
+  const antigravitySkipPermissions = formData.runtimeOverrides?.antigravitySkipPermissions === true;
+  // A launch policy, not a runtime replacement: the managed runtime and its
+  // capabilities stay valid, so toggling it never invalidates verification.
+  const updateAntigravitySkipPermissions = (enabled: boolean) => {
+    setFormData((prev) => {
+      const nextOverrides = { ...(prev.runtimeOverrides ?? {}) };
+      if (enabled) nextOverrides.antigravitySkipPermissions = true;
+      else delete nextOverrides.antigravitySkipPermissions;
+      return {
+        ...prev,
+        runtimeOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
+      };
+    });
+  };
+
   const disableReason: string | null = (() => {
     if (!formData.name.trim()) return t('agents.disableReason.missingName', 'Please enter a name');
     if (!formData.agentType.trim())
@@ -3117,6 +3149,43 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   />
                 </div>
               </Field>
+            </div>
+          ) : null}
+
+          {isAntigravityBuiltin && !activePreset ? (
+            <div {...stylex.props(styles.switchRow)}>
+              <div {...stylex.props(styles.switchText)}>
+                <Field
+                  htmlFor="antigravity-skip-permissions"
+                  label={t(
+                    'settings.agent.dialog.antigravitySkipPermissions.label',
+                    'Skip permission requests'
+                  )}
+                  icon={<ShieldOff aria-hidden="true" {...stylex.props(catalog.icon)} />}
+                  hint={t(
+                    'settings.agent.dialog.antigravitySkipPermissions.hint',
+                    'Starts agy with --dangerously-skip-permissions, so it approves file edits, commands and MCP tool calls without asking. Applies when the next agy process starts.'
+                  )}
+                >
+                  {null}
+                </Field>
+                {!antigravitySkipPermissionsSupported ? (
+                  <p {...stylex.props(styles.switchWarning)}>
+                    {t(
+                      'settings.agent.dialog.antigravitySkipPermissions.unsupported',
+                      'Update Lody on this machine to use this option.'
+                    )}
+                  </p>
+                ) : null}
+              </div>
+              <span {...stylex.props(styles.switchControl)}>
+                <Switch
+                  id="antigravity-skip-permissions"
+                  checked={antigravitySkipPermissions}
+                  disabled={!antigravitySkipPermissionsSupported && !antigravitySkipPermissions}
+                  onCheckedChange={(checked) => updateAntigravitySkipPermissions(checked)}
+                />
+              </span>
             </div>
           ) : null}
 

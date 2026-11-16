@@ -149,6 +149,13 @@ export type BuiltinRuntimeOverrides = {
   devinPath?: string;
   piPath?: string;
   piExtensions?: string[];
+  /**
+   * Builtin Antigravity only: launch `agy acp --dangerously-skip-permissions`,
+   * which approves every tool permission request inside agy. This is a launch
+   * policy, not a runtime replacement, so it does not count as an override in
+   * {@link hasBuiltinRuntimeOverrideValues}.
+   */
+  antigravitySkipPermissions?: boolean;
 };
 
 export const PI_EXTENSIONS_MAX_SELECTIONS = 32;
@@ -167,8 +174,11 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     devinPath?: unknown;
     piPath?: unknown;
     piExtensions?: unknown;
+    antigravitySkipPermissions?: unknown;
   };
   return (
+    (record.antigravitySkipPermissions === undefined ||
+      typeof record.antigravitySkipPermissions === 'boolean') &&
     (record.antigravityPath === undefined || typeof record.antigravityPath === 'string') &&
     (record.codexPath === undefined || typeof record.codexPath === 'string') &&
     (record.claudeCodeExecutable === undefined ||
@@ -189,6 +199,13 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
   );
 };
 
+/**
+ * Whether a runtime path or Pi extension selection replaces what Lody would
+ * launch by default. Launch policies such as `antigravitySkipPermissions` are
+ * excluded: they keep the managed runtime, static capabilities, title ownership
+ * and Provider setup. Use {@link hasPersistedBuiltinRuntimeOverrides} to decide
+ * whether the field is worth persisting.
+ */
 export const hasBuiltinRuntimeOverrideValues = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
 ): boolean =>
@@ -196,6 +213,13 @@ export const hasBuiltinRuntimeOverrideValues = (
   Object.values(runtimeOverrides).some((value) =>
     Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim().length > 0
   );
+
+/** Whether `runtimeOverrides` carries anything a stored Provider must keep. */
+export const hasPersistedBuiltinRuntimeOverrides = (
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+): boolean =>
+  hasBuiltinRuntimeOverrideValues(runtimeOverrides) ||
+  runtimeOverrides?.antigravitySkipPermissions === true;
 
 export const getBuiltinRuntimeOverrideSourceVersionSuffix = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined

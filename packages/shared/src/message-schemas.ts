@@ -111,6 +111,7 @@ export const BuiltinRuntimeOverridesSchema = z
       .array(z.string().trim().min(1).max(PI_EXTENSION_PATH_MAX_LENGTH))
       .max(PI_EXTENSIONS_MAX_SELECTIONS)
       .optional(),
+    antigravitySkipPermissions: z.boolean().optional(),
   })
   .strict();
 

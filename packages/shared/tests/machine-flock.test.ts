@@ -306,6 +306,31 @@ describe('machine Flock helpers', () => {
     expect(readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })).toEqual({});
   });
 
+  it('keeps the Antigravity skip-permissions launch choice only on Antigravity providers', () => {
+    const flock = new FakeMachineFlock();
+    const row = (id: string, agentType: string) => ({
+      id,
+      machineId: 'machine-1',
+      name: id,
+      cliType: 'builtin',
+      agentType,
+      env: {},
+      runtimeOverrides: { antigravitySkipPermissions: true },
+    });
+    flock.set(machineFlockKeys.agentConfig('agy' as AgentConfigId), row('agy', 'antigravity'));
+    flock.set(machineFlockKeys.agentConfig('kimi' as AgentConfigId), row('kimi', 'kimi'));
+
+    const configs = getMachineFlockAgentConfigs(
+      readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })
+    );
+    expect(configs['agy' as AgentConfigId]?.runtimeOverrides).toEqual({
+      antigravitySkipPermissions: true,
+    });
+    expect(
+      configs['kimi' as AgentConfigId]?.runtimeOverrides?.antigravitySkipPermissions
+    ).toBeUndefined();
+  });
+
   it('round-trips arbitrary ACP provider names through scoped quota rows', () => {
     const flock = new FakeMachineFlock();
     const configId = 'example-provider' as AgentConfigId;
