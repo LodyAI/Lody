@@ -104,29 +104,49 @@ describe('project board', () => {
     expect(Object.values(result).flat()).toEqual([]);
   });
 
-  it('opens the user’s most recent coordinator of the project', () => {
-    const older = session('older', { coordinator: { version: 1 }, lastMessageAt: 1 });
+  it('binds the project to the newest coordinator the user created, regardless of activity', () => {
+    const created = (minute: number) => `2026-11-12T00:${String(minute).padStart(2, '0')}:00.000Z`;
+    const original = session('original', {
+      coordinator: { version: 1 },
+      createdAt: created(1),
+      lastMessageAt: 999,
+    });
+    const replacement = session('replacement', {
+      coordinator: { version: 1 },
+      createdAt: created(5),
+      lastMessageAt: 1,
+    });
     const theirs = session('theirs', {
       coordinator: { version: 1 },
-      lastMessageAt: 99,
+      createdAt: created(9),
       userId: 'user-2',
     });
     const archived = session('archived', {
       coordinator: { version: 1 },
-      lastMessageAt: 50,
+      createdAt: created(8),
       isArchived: true,
     });
-    const sessions = [
-      older,
-      coordinator,
-      theirs,
-      archived,
-      session('plain', { lastMessageAt: 80 }),
-    ];
+    const plain = session('plain', { createdAt: created(7) });
 
-    expect(findProjectCoordinatorSession(sessions, project, 'user-1')?.id).toBe('coordinator');
+    // Activity in the older coordinator does not move the binding.
     expect(
-      findProjectCoordinatorSession(sessions, { kind: 'github', repoFullName: 'acme/x' }, 'user-1')
+      findProjectCoordinatorSession(
+        [original, replacement, theirs, archived, plain],
+        project,
+        'user-1'
+      )?.id
+    ).toBe('replacement');
+    // Until "Change coordinator" creates the replacement, the original stays bound.
+    expect(findProjectCoordinatorSession([original, theirs], project, 'user-1')?.id).toBe(
+      'original'
+    );
+    expect(
+      findProjectCoordinatorSession(
+        [original],
+        { kind: 'github', repoFullName: 'acme/x' },
+        'user-1'
+      )
     ).toBeNull();
+    expect(findProjectCoordinatorSession([original], project, null)).toBeNull();
   });
 });

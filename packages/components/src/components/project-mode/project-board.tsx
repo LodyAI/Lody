@@ -16,6 +16,7 @@ import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import {
   buildProjectBoard,
+  findProjectCoordinatorSession,
   PROJECT_BOARD_BUCKETS,
   type CoordinatorProjectKey,
   type ProjectBoard as ProjectBoardData,
@@ -161,7 +162,12 @@ export function ProjectBoard({
         sessions: allActiveSessions,
         childSessionsByParent,
         project,
-        coordinatorSessionId,
+        // The start page has no coordinator of its own; it shows the one the project is still bound to.
+        coordinatorSessionId:
+          coordinatorSessionId ??
+          (project
+            ? (findProjectCoordinatorSession(allActiveSessions, project, currentUserId)?.id ?? null)
+            : null),
         currentUserId,
         liveSessionStatuses,
         sendStates,

@@ -6810,5 +6810,6 @@
   "projectMode.sidebar.projects": "项目",
   "projectMode.sidebar.conversations": "对话",
   "projectMode.sidebar.allProjects": "所有项目",
-  "projectMode.sidebar.noProjects": "还没有项目。先添加一个文件夹或关联一个仓库。"
+  "projectMode.sidebar.noProjects": "还没有项目。先添加一个文件夹或关联一个仓库。",
+  "projectMode.changeCoordinator": "更换协调者"
 }

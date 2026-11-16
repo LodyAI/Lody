@@ -6823,5 +6823,6 @@
   "projectMode.sidebar.projects": "Projects",
   "projectMode.sidebar.conversations": "Conversations",
   "projectMode.sidebar.allProjects": "All projects",
-  "projectMode.sidebar.noProjects": "No projects yet. Add a folder or link a repository."
+  "projectMode.sidebar.noProjects": "No projects yet. Add a folder or link a repository.",
+  "projectMode.changeCoordinator": "Change coordinator"
 }

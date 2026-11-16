@@ -58,6 +58,7 @@ import { createPortal } from 'react-dom';
 import { useOpenSettings } from '../../hooks/use-open-settings';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  Network,
   ArrowDown,
   ArrowUp,
   Archive,
@@ -90,6 +91,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { useChangeCoordinatorAction } from '@/components/project-mode/use-change-coordinator';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
@@ -1367,6 +1369,7 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
   onRename,
+  onChangeCoordinator,
   owner,
   openedByRelations,
   onArchive,
@@ -1398,6 +1401,8 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkMenuOpen?: () => void;
   onRename?: () => void | Promise<void>;
+  /** Project mode (Developer mode): leave this coordinator and start a new one for the project. */
+  onChangeCoordinator?: () => void;
   /** Multi-member workspaces only; omitted elsewhere. */
   owner?: SessionOwnerMenuState;
   /** Omitted when this Session neither opened nor was opened by another. */
@@ -1858,6 +1863,12 @@ export function SessionHeaderMenu({
               {t('sidebar.renameChat.title', 'Rename Chat')}
             </Menu.Item>
           )}
+
+          {onChangeCoordinator && !isArchived ? (
+            <Menu.Item icon={Network} onClick={onChangeCoordinator}>
+              {t('projectMode.changeCoordinator', 'Change coordinator')}
+            </Menu.Item>
+          ) : null}
 
           {owner && !isArchived ? (
             <Menu.Submenu>
@@ -3159,6 +3170,7 @@ export const SessionChatInterface = memo(
       [session.id, t, transferSessionOwner, workspaceMembers]
     );
     const getOwnerAccessReason = useSessionOwnerAccess();
+    const changeCoordinator = useChangeCoordinatorAction(session);
     const ownerMenuState = useMemo<SessionOwnerMenuState | undefined>(
       () =>
         isMultiMember
@@ -7252,6 +7264,7 @@ export const SessionChatInterface = memo(
                   });
                 }
         }
+        onChangeCoordinator={changeCoordinator}
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
         onArchive={toolbarActions ? toolbarActions.onArchiveSession : onArchiveSession}

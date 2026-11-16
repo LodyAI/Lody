@@ -47,8 +47,10 @@ export function isSessionInCoordinatorProject(
 }
 
 /**
- * The project's coordinator: one per person per project, so the most recently
- * active unarchived coordinator conversation this user owns in that project.
+ * The conversation a project is bound to: one per person per project. The
+ * binding is the newest unarchived coordinator this user created there, so it
+ * does not move with activity; it changes only when the user starts another
+ * coordinator for the project ("Change coordinator").
  */
 export function findProjectCoordinatorSession(
   sessions: readonly SessionMeta[],
@@ -59,15 +61,14 @@ export function findProjectCoordinatorSession(
   for (const session of sessions) {
     if (session.isArchived || session.parentSessionId) continue;
     if (!isCoordinatorSession(session)) continue;
-    if (userId && session.userId !== userId) continue;
+    if (!userId || session.userId !== userId) continue;
     if (!isSessionInCoordinatorProject(session, key)) continue;
-    if (!best || activityTime(session) > activityTime(best)) best = session;
+    if (!best || createdTime(session) > createdTime(best)) best = session;
   }
   return best;
 }
 
-const activityTime = (session: SessionMeta): number =>
-  session.lastMessageAt ?? (Date.parse(session.createdAt) || 0);
+const createdTime = (session: SessionMeta): number => Date.parse(session.createdAt) || 0;
 
 /**
  * Board columns, in the order the user should look at them. "Needs you" is a
