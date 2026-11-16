@@ -23,6 +23,9 @@ identity。这样既保留 owner 明确配置的仓库身份，也避免团队�
 - 机器 owner：机器/仓库生效的 Git identity、Lody/GitHub 解析身份、中性 LodyAI 身份；
 - 非 owner 请求者：Lody/GitHub 解析身份、中性 LodyAI 身份。
 
+所有权边界仍然有效。顺序后来调整为：已批准的请求者优先，owner 身份交给 Git 解析，未批准的
+非 owner 使用 LodyAI（[原生身份说明](../bug-fix/2026-11-16-native-owner-git-identity.zh.md)）。
+
 非 owner 路径不会读取机器 Git 配置。GitHub PR、评论、合并和 push 的鉴权仍由独立的、
 绑定请求者的 GitHub token 控制。
 

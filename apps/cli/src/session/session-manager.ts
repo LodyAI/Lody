@@ -8,7 +8,11 @@ import {
   projectGroupDirectory,
   resolveProjectGroupRepositories,
 } from './worktree/project-worktrees';
-import { resolveGitIdentityPolicyLegacy } from './git-identity-policy';
+import {
+  resolveApprovedOwnerIdentityLegacy,
+  resolveGitIdentityPolicyLegacy,
+} from './git-identity-policy';
+import { sessionUserProfileFromCloud } from './session-user-resolver';
 import {
   acquireSessionCredentialsLegacy,
   nativeSessionCredentials,
@@ -47,6 +51,7 @@ import {
   isLoroRepoDocDeleted,
   type SessionMeta,
   encodeProjectPreparationProgress,
+  isMissingEmail,
 } from '@lody/shared';
 import { Logger } from '@/utils/logger';
 import { SessionConfig, SessionOutputEvent, SessionErrorEvent, SessionExitEvent } from './types';
@@ -198,6 +203,13 @@ const tryDeriveGitHubRepoFromUrl = (rawUrl?: string): string | null => {
 const PENDING_CREATE_TERMINATE_TIMEOUT_MS = 300_000;
 const PENDING_CREATE_TERMINATE_TIMED_OUT = Symbol('pending-create-terminate-timed-out');
 
+export type GitIdentityOptions = {
+  preferMachineIdentity: boolean;
+  personalIdentityEnabled: boolean;
+  /** The approved owner's account identity; owner dispatch profiles are placeholders. */
+  personalIdentity?: { name: string; email: string };
+};
+
 type SessionWorktreeTarget = {
   manager: WorktreeManager;
   managerConfig: Omit<WorktreeManagerConfig, 'logger'>;
@@ -239,7 +251,7 @@ export interface ISession {
     userName: string,
     userEmail: string,
     userId: string | undefined,
-    options: { preferMachineIdentity: boolean }
+    options: GitIdentityOptions
   ): void;
   /**
    * Return the already-resolved effective git identity only when it belongs to
@@ -1130,26 +1142,45 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /**
    * Commit identity follows the same precedence as GitHub credentials: a
-   * requester who enabled "Act as you" commits as themselves; otherwise the
-   * machine owner may use the machine's global Git identity. Policy lookup
-   * failures degrade to "not enabled" rather than blocking the turn.
+   * requester who approved "Act as you" commits as themselves; otherwise the
+   * machine owner keeps the machine's Git configuration, and everyone else
+   * commits as LodyAI. Lookup failures degrade to "not approved" rather than
+   * blocking the turn.
    */
   async resolveGitIdentityOptions(
     requesterUserId: string,
     signal?: AbortSignal,
     sessionId?: SessionId
-  ): Promise<{ preferMachineIdentity: boolean; personalIdentityEnabled: boolean }> {
+  ): Promise<GitIdentityOptions> {
     signal?.throwIfAborted();
     const preferMachineIdentity = requesterUserId === this.cloudPort.identity.userId;
     const tokenManager = this.getGitHubTokenManager();
     if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
+    const context = sessionId ?? 'git-identity';
     const policy = await resolveGitIdentityPolicyLegacy(
       () => tokenManager.getCredentialPolicy({ requesterUserId, machineId: this.machineId }),
       this.logger,
-      sessionId ?? 'git-identity',
+      context,
       signal
     );
-    return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
+    if (!policy.personalEnabled || !preferMachineIdentity) {
+      return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
+    }
+    const personalIdentity = await resolveApprovedOwnerIdentityLegacy(
+      async () => {
+        const profile = await this.cloudPort.access.resolveWorkspaceUser({
+          workspaceId: this.workspaceId,
+          userId: requesterUserId,
+        });
+        if (!profile) return null;
+        const { name, email } = sessionUserProfileFromCloud(requesterUserId, profile);
+        return isMissingEmail(email) ? null : { name, email };
+      },
+      this.logger,
+      context,
+      signal
+    );
+    return { preferMachineIdentity, personalIdentityEnabled: true, personalIdentity };
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials> {
