@@ -474,6 +474,40 @@ function PiExtensionsWrapper({
   );
 }
 
+function AntigravitySkipPermissionsWrapper({
+  supported = true,
+  enabled = false,
+}: {
+  supported?: boolean;
+  enabled?: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'edit',
+        config: {
+          ...existingConfig,
+          name: 'Antigravity',
+          agentType: 'antigravity',
+          ...(enabled ? { runtimeOverrides: { antigravitySkipPermissions: true } } : {}),
+        },
+      }}
+      machine={{
+        ...makeMachineWithClaudeCaps(),
+        protocolCapabilities: supported ? { antigravitySkipPermissions: 1 } : {},
+      }}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        ...(await refreshCapabilities(args)),
+        agentType: 'antigravity',
+      })}
+    />
+  );
+}
+
 const meta = {
   title: 'Settings/AgentConfigDialog',
   parameters: { layout: 'fullscreen' },
@@ -488,6 +522,13 @@ export const PiExtensionsUnsupported: Story = {
   render: () => <PiExtensionsWrapper supported={false} />,
 };
 export const PiExtensionsScanError: Story = { render: () => <PiExtensionsWrapper scanError /> };
+
+export const AntigravitySkipPermissions: Story = {
+  render: () => <AntigravitySkipPermissionsWrapper enabled />,
+};
+export const AntigravitySkipPermissionsUnsupported: Story = {
+  render: () => <AntigravitySkipPermissionsWrapper supported={false} />,
+};
 
 export const Create: Story = {
   render: () => <CreateWrapper />,

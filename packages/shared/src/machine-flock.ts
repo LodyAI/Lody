@@ -5,6 +5,7 @@ import { CodexAuthProfileSchema, assertManagedCodexProfileConfig } from './codex
 import {
   getAcpCapabilityCacheKey,
   hasBuiltinRuntimeOverrideValues,
+  hasPersistedBuiltinRuntimeOverrides,
   isBuiltinRuntimeOverrides,
   isBuiltinAgentType,
   isCustomAcpLaunchSpec,
@@ -1214,7 +1215,7 @@ export function buildSessionLaunchConfig(
   if (input.customAcp) {
     config.customAcp = input.customAcp;
   }
-  if (hasBuiltinRuntimeOverrideValues(input.runtimeOverrides)) {
+  if (hasPersistedBuiltinRuntimeOverrides(input.runtimeOverrides)) {
     config.runtimeOverrides = input.runtimeOverrides;
   }
   if (input.env && Object.keys(input.env).length > 0) {
@@ -1587,7 +1588,7 @@ const normalizeSessionLaunchConfig = (value: unknown): SessionLaunchConfig | und
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) {
       return undefined;
     }
-    if (hasBuiltinRuntimeOverrideValues(value.runtimeOverrides)) {
+    if (hasPersistedBuiltinRuntimeOverrides(value.runtimeOverrides)) {
       config.runtimeOverrides = value.runtimeOverrides;
     }
   }
@@ -1839,6 +1840,9 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
     if (config.agentType !== 'pi') {
       delete runtimeOverrides.piExtensions;
       delete runtimeOverrides.piPath;
+    }
+    if (config.agentType !== 'antigravity') {
+      delete runtimeOverrides.antigravitySkipPermissions;
     }
     config.runtimeOverrides = runtimeOverrides;
   }

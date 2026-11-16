@@ -1324,6 +1324,33 @@ describe('managed Antigravity', () => {
       });
       expect(overridden.command).toBe('/user/agy');
       expect(overridden.capabilitySourceVersion).toContain('+override:');
+      // Skipping permissions keeps the managed runtime and its capability cache.
+      expect(
+        await resolveACPProcessLaunchAsync({
+          cliType: 'builtin',
+          agentType: 'antigravity',
+          runtimeOverrides: { antigravitySkipPermissions: true },
+        })
+      ).toEqual({
+        command: '/managed/agy',
+        args: [
+          'acp',
+          '--process-per-session',
+          '--disable-telemetry',
+          '--dangerously-skip-permissions',
+        ],
+        env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+        capabilitySourceVersion: 'builtin-antigravity:1.5.9',
+      });
+      expect(
+        (
+          await resolveACPProcessLaunchAsync({
+            cliType: 'builtin',
+            agentType: 'antigravity',
+            runtimeOverrides: { antigravitySkipPermissions: false },
+          })
+        ).args
+      ).toEqual(['acp', '--process-per-session', '--disable-telemetry']);
       expect(REGISTRY_ACP_AGENTS.some((a) => a.id === 'antigravity-acp')).toBe(false);
       expect(
         getAcpCapabilitySourceVersion({ cliType: 'registry', agentType: 'antigravity-acp' })

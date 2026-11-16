@@ -796,6 +796,40 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Antigravity');
   });
 
+  it('saves the Antigravity skip-permissions launch choice only on capable machines', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const mode: AgentConfigDialogMode = {
+      kind: 'edit',
+      config: createBuiltinConfig({
+        id: 'agy-config' as AgentConfigId,
+        name: 'Antigravity',
+        agentType: 'antigravity',
+      }),
+    };
+    const toggle = () =>
+      document.querySelector<HTMLButtonElement>('#antigravity-skip-permissions')!;
+
+    await renderDialog(mode, createMachine('Old daemon'));
+    expect(toggle().disabled).toBe(true);
+    expect(document.body.textContent).toContain('Update Lody on this machine');
+
+    await renderDialog(
+      mode,
+      createMachine('Workstation', { antigravitySkipPermissions: 1 }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      })
+    );
+    expect(toggle().disabled).toBe(false);
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    await act(async () => toggle().click());
+    await act(async () => getPrimaryAction('Save').click());
+    expect(saved.at(-1)?.runtimeOverrides).toEqual({ antigravitySkipPermissions: true });
+    await act(async () => toggle().click());
+    await act(async () => getPrimaryAction('Save').click());
+    expect(saved.at(-1)?.runtimeOverrides).toBeUndefined();
+  });
+
   it('leaves Lody Agent to its own settings page even while its beta is on', async () => {
     store.set(developerModeEnabledAtom, true);
     store.set(lodyAgentBetaEnabledAtom, true);
