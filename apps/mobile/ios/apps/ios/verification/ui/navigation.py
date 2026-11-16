@@ -78,7 +78,7 @@ home('initial-home')
 for index in range(2 if embedded else 3):
     subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'ai.lody.mobile'], check=True, timeout=30)
     ui.invalidate_axe()
-    launch = ['xcrun', 'simctl', 'launch', udid, 'ai.lody.mobile', '--ui-verify', '--ui-verify-home',
+    launch = ['xcrun', 'simctl', 'launch', udid, 'ai.lody.mobile', '--ui-verify', '--ui-verify-home', '--ui-verify-session-tabs',
               '-AppleLanguages', f'({catalog.LANGUAGE})',
               '-AppleLocale', 'en_US' if catalog.LANGUAGE == 'en' else 'zh_CN']
     subprocess.run(launch, check=True, timeout=30)
@@ -172,6 +172,20 @@ ui.wait(lambda items: not any(i.get('AXUniqueId') == file_row for i in items), '
 session('首页交互设计')
 assert all(abs(before - after) < 1 for before, after in zip(header_before_cancel, conversation_header_geometry()))
 ui.capture('detail-returned')
+
+# Switching the selected Tab must not change the open group's running status.
+group_status = ui.element('chat-directory-tabs').get('AXValue')
+assert group_status == catalog.text('session.operation.status.running'), group_status
+ui.axe('tap', '--id', 'chat-directory-tabs', '--post-delay', '.3')
+ui.axe('tap', '--id', 'tab:ui-history-tab', '--post-delay', '.3')
+session('Waiting for tab history')
+assert ui.element('chat-directory-tabs').get('AXValue') == group_status, 'Selecting the running Tab changed its group status'
+ui.capture('tab-group-running-selected')
+ui.axe('tap', '--id', 'chat-directory-tabs', '--post-delay', '.3')
+ui.axe('tap', '--id', 'tab:ui-design', '--post-delay', '.3')
+session('首页交互设计')
+assert ui.element('chat-directory-tabs').get('AXValue') == group_status
+ui.capture('tab-group-running-returned')
 
 swipe_back()
 home('toolbar-returned')

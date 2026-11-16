@@ -255,6 +255,14 @@ final class DirectoryTabsButton: UIButton {
     status.frame = CGRect(x: bounds.maxX - 11 - size / 2, y: bounds.maxY - 11 - size / 2, width: size, height: size)
   }
   func setStatus(_ symbol: String) {
+    let statusKey: String? = switch symbol {
+    case "square.grid.2x2.fill": "session.operation.status.running"
+    case "hand.raised": "session.state.attention"
+    case "exclamationmark.circle": "session.state.failed"
+    case "circle.fill": "session.relations.unread"
+    default: nil
+    }
+    accessibilityValue = statusKey.map { String(localized: String.LocalizationValue($0), bundle: .lody) }
     isUnread = symbol == "circle.fill"
     setNeedsLayout()
     status.isHidden = symbol.isEmpty
