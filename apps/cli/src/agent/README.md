@@ -32,7 +32,7 @@ context/message-flow.md "Upstream".
   Claude single-question forms retain their request-message prompt. The shared bridge
   maps recognized Droid AskUser labels and custom answers back to its option IDs and
   companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
-- `antigravity-background.ts` — post-`end_turn` background task tracking, silent `session/load` delta extraction, and Tier 1 hold / Tier 2 `sessionActivity` GC protection for `Antigravity ACP Server`.
+- `antigravity-background.ts` — keeps Antigravity background work visible after `end_turn`: synthesized `sessionActivity` and `session/load` delta replay.
 - `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
   updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
   Claude reports no actor, so later events preserve an earlier identity. Providers that
@@ -299,7 +299,18 @@ results were reported in parent assistant text, not structured child events;
 no `subagentEvents` capability was advertised. Keep these as tool calls rather
 than inventing child lifecycle or treating spawn acknowledgement as child success.
 
-Custom `Antigravity ACP Server` configurations receive the same Antigravity v1 compatibility behavior as builtin Antigravity (tool normalization, question elicitation bridging, usage projection, canonical `realpath` `cwd` negotiation, and background task tracking), while legacy `antigravity-acp` remains untouched. `AgentClient` resolves the Antigravity ACP `cwd` through `fs.realpath` (falling back to the raw workdir when absent, while keeping `LODY_MCP_WORKDIR` and client path resolution unchanged) so symlinked workspaces such as macOS `/tmp` or `/var/folders` do not trip false out-of-workspace edit permissions. Because `agy acp` (ACP v1) resolves `session/prompt` immediately with `end_turn` whenever background `run_command`, `invoke_subagent`, `send_message`, `run_workflow`, `schedule`, or `swarm` tasks are left running and stops streaming stdout notifications afterward (including post-`end_turn` `session/request_permission` prompts), `antigravity-background.ts` polls read-only `session/list` (`updatedAt`, repeating `sameSecondLoadCheckMs` every 6 seconds while inside a `wakeupPlannerGraceMs` active window and performing a final pre-settle `session/load` verification so responses completed in the same `created_at` second as their trigger `SYSTEM_MESSAGE` are never dropped, while staying silent during multi-hour idle waits) and silently captures `session/load` snapshots to extract only unseen deltas without synthetic prompts or duplicate history items, inserting paragraph separators only across real turn/wakeup boundaries so multi-chunk replays stay intact. Any active (`pending`/`in_progress`) non-daemon tool other than `schedule`/`swarm`, background task placeholder output (`"Tool is running as a background task with task id: ..."`), or `invoke_subagent`/`send_message` wait holds `AgentClient.prompt()` open with a 25-second quiet grace window (up to 30 minutes before handing off, and handing coalesced multi-subagent or remaining `schedule`/`swarm` tasks to Tier 2 after the first wakeup), while `schedule`/`swarm` tasks (even while reported `in_progress` by `agy acp`) and longer waits transition immediately to a bounded 24-hour Tier 2 monitor that publishes `sessionActivity` (`onNativeWorkChanged`) so idle GC protects running wakeups until completion or cancellation; post-`end_turn` tools stuck in `status: "pending"` without a forwarded `requestPermission` call expire after a 4-second grace window (`orphanedPendingToolGraceMs`) by emitting a failed `tool_call_update` and sending `session/cancel` to unwedge the session; `IsDaemon: true` background processes and daemon crons remain intentionally excluded. See the [background wakeup decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-antigravity-background-wakeup.md).
+A custom Provider whose `initialize` reports `Antigravity ACP Server` gets the same
+compatibility as builtin Antigravity; legacy `antigravity-acp` does not. AgentClient
+negotiates the `realpath` of the workdir as the ACP `cwd`, because agy compares edit
+targets by realpath and would otherwise ask permission for in-workspace edits under a
+symlinked path such as macOS `/tmp`.
+
+agy ends `session/prompt` with `end_turn` while background work (commands, timers,
+subagents, swarms) is still running, then stops writing to stdout, permission requests
+included. Lody ends the turn normally. `antigravity-background.ts` then reports
+`sessionActivity` so idle GC keeps the process, and polls read-only `session/list` and
+`session/load` to replay unseen output into the finished turn. See the
+[background wakeup decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-antigravity-background-wakeup.md).
 
 `antigravity-usage.ts` projects end-turn `PromptResponse.usage` into disjoint token
 buckets. Each submitted request has a fresh accounting scope and freezes its

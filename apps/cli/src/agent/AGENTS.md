@@ -9,7 +9,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 ## `agent-client.ts`
 
 - Consume Core extensions via `agentCapabilities._meta.lody`, session `_meta.lody`, and
-  `_lody/...`. Provider compatibility stays in `lody-acp-extension.ts`, `antigravity-quota.ts`, `antigravity-usage.ts`, and `antigravity-background.ts`; consumers stay neutral.
+  `_lody/...`. Provider compatibility stays in `lody-acp-extension.ts` and `antigravity-*.ts`; consumers stay neutral.
 - Grok Always Approve uses `allow_once`, never lasting grants; pending calls drain through
   the durable permission flow on accepted config changes. Questions remain interactive.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
@@ -79,7 +79,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   to the shared abort signal; ZIP cancellation destroys the yauzl endpoint, awaits the
   relay/output pipeline, and fences cleanup on the reader's real close/error event — never await
   the yauzl endpoint, whose `destroy()` does not settle.
-- `Antigravity ACP Server` (builtin and custom, excluding legacy `antigravity-acp`) follows its [runtime contract](README.md#managed-antigravity) and bridges post-`end_turn` background tasks via read-only `session/list` + silent `session/load` delta extraction without synthetic prompts.
+- Antigravity follows its [runtime contract](README.md#managed-antigravity).
 - Builtin Dimcode is user-installed.
 - `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
   profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned

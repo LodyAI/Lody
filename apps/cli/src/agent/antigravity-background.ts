@@ -30,15 +30,27 @@ export const ORPHANED_POST_TURN_PERMISSION_MESSAGE =
   'Antigravity ACP Server did not forward a permission request after end_turn; tool call was cancelled so the session does not hang.';
 
 export interface AntigravityPollTimings {
+  /** `session/list` interval while monitoring. */
   listPollIntervalMs: number;
+  /** `session/load` interval when the server lacks `session/list`. */
   loadFallbackPollIntervalMs: number;
-  sameSecondLoadCheckMs: number;
+  /**
+   * Forced `session/load` interval while output changed recently: `updatedAt` is the
+   * second the latest step started, so a slow reply can finish without changing it.
+   */
+  activeLoadIntervalMs: number;
+  /** How long "recently" lasts for {@link activeLoadIntervalMs}. */
+  activeWindowMs: number;
+  /** Quiet time, with no tool still running, before the monitor releases. */
   settleQuietMs: number;
-  failedWakeupToolGraceMs: number;
+  /** Quiet time used instead when the turn dispatched work that reports only by waking the model. */
+  asyncDispatchQuietMs: number;
+  /** A snapshot change within this window reports `running` instead of `background`. */
+  runningGraceMs: number;
+  /** A post-turn tool stuck in `pending` without a forwarded permission request is failed after this. */
   orphanedPendingToolGraceMs: number;
-  wakeupPlannerGraceMs: number;
-  promptHoldMaxMs: number;
-  detachedMaxDurationMs: number;
+  /** Hard bound for one monitor, matching the Core `background` protection cap. */
+  maxDurationMs: number;
   rpcTimeoutMs: number;
   maxConsecutiveFailures: number;
 }
@@ -46,199 +58,110 @@ export interface AntigravityPollTimings {
 export const DEFAULT_ANTIGRAVITY_POLL_TIMINGS: AntigravityPollTimings = {
   listPollIntervalMs: 2_000,
   loadFallbackPollIntervalMs: 10_000,
-  sameSecondLoadCheckMs: 6_000,
-  settleQuietMs: 25_000,
-  failedWakeupToolGraceMs: 25_000,
+  activeLoadIntervalMs: 6_000,
+  activeWindowMs: 90_000,
+  settleQuietMs: 30_000,
+  asyncDispatchQuietMs: 10 * 60_000,
+  runningGraceMs: 10_000,
   orphanedPendingToolGraceMs: 4_000,
-  wakeupPlannerGraceMs: 90_000,
-  promptHoldMaxMs: 30 * 60_000,
-  detachedMaxDurationMs: 24 * 60 * 60_000,
+  maxDurationMs: 24 * 60 * 60_000,
   rpcTimeoutMs: 15_000,
   maxConsecutiveFailures: 5,
 };
 
-export type AntigravityTurnEndClassification =
-  | { mode: 'none'; backgroundTaskCount: 0 }
-  | { mode: 'hold'; backgroundTaskCount: number }
-  | { mode: 'background'; backgroundTaskCount: number };
-
-export type AntigravityHoldEvaluation = 'waiting' | 'settled' | 'handoff_to_background';
-
-export interface AntigravityBackgroundEvaluation {
+export interface AntigravityMonitorState {
   settled: boolean;
   state: 'idle' | 'running';
   backgroundTaskCount: number;
 }
 
-export type PostTurnSchedule =
-  | { kind: 'timer'; expectedFireAtMs: number }
-  | { kind: 'cron'; remainingRuns: number | null }
-  | { kind: 'swarm' };
-
-interface KnownToolCallEntry {
-  status: string;
-  hasOutput: boolean;
-  hasBgPlaceholder: boolean;
-  name?: string;
-  isDaemon: boolean;
-}
+/**
+ * Tools whose completion only acknowledges dispatch; their result arrives later by waking
+ * the model, so there is no tool status to wait on.
+ */
+const ASYNC_DISPATCH_TOOL_NAMES = new Set(['invoke_subagent', 'send_message', 'swarm']);
 
 const IGNORED_REPLAY_UPDATES = new Set([
   'user_message_chunk',
   'available_commands_update',
   'config_option_update',
   'session_info_update',
+  'current_mode_update',
 ]);
+
+const BG_TASK_PLACEHOLDER_PATTERN = /Tool is running as a background task with task id:\s*\S+/i;
+
+interface KnownTool {
+  /** Merged raw update fields, newest last. */
+  raw: Record<string, unknown>;
+  fingerprint: string;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function asRawUpdate(update: acp.SessionUpdate): Record<string, unknown> {
+function asRaw(update: acp.SessionUpdate): Record<string, unknown> {
   return update as unknown as Record<string, unknown>;
 }
 
-function isToolUpdateKind(kind: unknown): kind is 'tool_call' | 'tool_call_update' {
-  return kind === 'tool_call' || kind === 'tool_call_update';
+function toolCallIdOf(raw: Record<string, unknown>): string | null {
+  return (raw.sessionUpdate === 'tool_call' || raw.sessionUpdate === 'tool_call_update') &&
+    typeof raw.toolCallId === 'string'
+    ? raw.toolCallId
+    : null;
 }
 
-function extractToolName(update: Record<string, unknown>): string | undefined {
-  const meta = update._meta;
+function mergeToolRaw(
+  prev: Record<string, unknown> | undefined,
+  next: Record<string, unknown>
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...prev };
+  for (const [key, value] of Object.entries(next)) {
+    if (value !== undefined && value !== null) merged[key] = value;
+  }
+  return merged;
+}
+
+function fingerprintOf(raw: Record<string, unknown>): string {
+  return JSON.stringify([raw.status ?? null, raw.rawOutput ?? null, raw.content ?? null]);
+}
+
+function toolName(raw: Record<string, unknown>): string | undefined {
+  const meta = raw._meta;
   if (isRecord(meta) && isRecord(meta.lody) && typeof meta.lody.toolName === 'string') {
-    const lodyName = meta.lody.toolName.trim();
-    if (lodyName.length > 0) return lodyName;
+    return meta.lody.toolName;
   }
-  if (typeof update.name === 'string') {
-    const rawName = update.name.trim();
-    if (rawName.length > 0) return rawName;
-  }
-  return undefined;
+  return typeof raw.name === 'string' ? raw.name : undefined;
 }
 
-function extractToolArgs(update: Record<string, unknown>): Record<string, unknown> | undefined {
-  if (isRecord(update.rawInput)) return update.rawInput;
-  if (isRecord(update.args)) return update.args;
-  return undefined;
+function toolStatus(raw: Record<string, unknown>): string {
+  return typeof raw.status === 'string' ? raw.status : '';
 }
 
-function hasNonEmptyRawOutput(rawOutput: unknown): boolean {
-  if (typeof rawOutput === 'string') return rawOutput.length > 0;
-  if (Array.isArray(rawOutput)) return rawOutput.length > 0;
-  if (isRecord(rawOutput)) return Object.keys(rawOutput).length > 0;
-  return rawOutput !== undefined && rawOutput !== null;
-}
-
-function extractToolHasOutput(update: Record<string, unknown>): boolean {
-  if (hasNonEmptyRawOutput(update.rawOutput)) return true;
-  return Array.isArray(update.content) && update.content.length > 0;
-}
-
-const BG_TASK_PLACEHOLDER_PATTERN = /Tool is running as a background task with task id:\s*\S+/i;
-
-function hasBackgroundTaskPlaceholderOutput(raw: Record<string, unknown>): boolean {
-  const rawOutput = raw.rawOutput;
-  if (typeof rawOutput === 'string' && BG_TASK_PLACEHOLDER_PATTERN.test(rawOutput)) {
-    return true;
-  }
-  if (
-    isRecord(rawOutput) &&
-    typeof rawOutput.output === 'string' &&
-    BG_TASK_PLACEHOLDER_PATTERN.test(rawOutput.output)
-  ) {
-    return true;
-  }
-  if (Array.isArray(raw.content)) {
-    for (const item of raw.content) {
-      if (!isRecord(item)) continue;
-      if (typeof item.text === 'string' && BG_TASK_PLACEHOLDER_PATTERN.test(item.text)) {
-        return true;
-      }
-      if (
-        isRecord(item.content) &&
-        typeof item.content.text === 'string' &&
-        BG_TASK_PLACEHOLDER_PATTERN.test(item.content.text)
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function isActiveToolStatus(status: string): boolean {
+function isActiveStatus(status: string): boolean {
   return status === 'pending' || status === 'in_progress';
 }
 
-function isTier2DetachedToolName(name: string | undefined): boolean {
-  return name === 'schedule' || name === 'swarm';
+function isDaemonTool(raw: Record<string, unknown>): boolean {
+  const input = isRecord(raw.rawInput) ? raw.rawInput : isRecord(raw.args) ? raw.args : undefined;
+  return input?.IsDaemon === true;
 }
 
-function isToolRunningOrBackgrounded(entry: KnownToolCallEntry): boolean {
-  if (entry.isDaemon || entry.status === 'failed' || isTier2DetachedToolName(entry.name)) {
-    return false;
-  }
-  if (isActiveToolStatus(entry.status)) return true;
-  return entry.hasBgPlaceholder && (entry.name === 'run_command' || entry.name === 'run_workflow');
-}
-
-function extractUsageKey(update: Record<string, unknown>): string | null {
-  if (update.sessionUpdate !== 'usage_update') return null;
-  const used = update.used;
-  const size = update.size;
-  if (typeof used !== 'number' || typeof size !== 'number') return null;
-  if (!Number.isFinite(used) || !Number.isFinite(size)) return null;
-  return `${used}:${size}`;
-}
-
-function cloneTextChunkWithPrefix(
-  params: acp.SessionNotification,
-  text: string
-): acp.SessionNotification {
-  if (
-    params.update.sessionUpdate !== 'agent_message_chunk' &&
-    params.update.sessionUpdate !== 'agent_thought_chunk'
-  ) {
-    return params;
-  }
-  const update = params.update;
-  if (update.content.type !== 'text') {
-    return params;
-  }
-  return {
-    ...params,
-    update: {
-      ...update,
-      content: {
-        ...update.content,
-        text,
-      },
-    },
-  };
-}
-
-function cloneToolNotification(
-  params: acp.SessionNotification,
-  sessionUpdate: 'tool_call' | 'tool_call_update'
-): acp.SessionNotification {
-  return {
-    ...params,
-    update: {
-      ...params.update,
-      sessionUpdate,
-    } as acp.SessionUpdate,
-  };
-}
-
-function findLastUserChunkIndex(notifications: readonly acp.SessionNotification[]): number {
-  for (let i = notifications.length - 1; i >= 0; i -= 1) {
-    if (notifications[i]?.update.sessionUpdate === 'user_message_chunk') {
-      return i;
+function hasBackgroundPlaceholder(raw: Record<string, unknown>): boolean {
+  const texts: unknown[] = [raw.rawOutput];
+  if (isRecord(raw.rawOutput)) texts.push(raw.rawOutput.output);
+  if (Array.isArray(raw.content)) {
+    for (const item of raw.content) {
+      if (!isRecord(item)) continue;
+      texts.push(item.text);
+      if (isRecord(item.content)) texts.push(item.content.text);
     }
   }
-  return -1;
+  return texts.some((text) => typeof text === 'string' && BG_TASK_PLACEHOLDER_PATTERN.test(text));
 }
 
-function extractTextContent(update: acp.SessionUpdate): string | null {
+function textOf(update: acp.SessionUpdate): string | null {
   if (
     update.sessionUpdate !== 'agent_message_chunk' &&
     update.sessionUpdate !== 'agent_thought_chunk'
@@ -246,67 +169,77 @@ function extractTextContent(update: acp.SessionUpdate): string | null {
     return null;
   }
   const content = (update as { content?: unknown }).content;
-  if (!isRecord(content) || content.type !== 'text' || typeof content.text !== 'string') {
-    return null;
-  }
-  return content.text;
+  return isRecord(content) && content.type === 'text' && typeof content.text === 'string'
+    ? content.text
+    : null;
+}
+
+function withText(notification: acp.SessionNotification, text: string): acp.SessionNotification {
+  const update = asRaw(notification.update);
+  const content = isRecord(update.content) ? update.content : {};
+  return {
+    ...notification,
+    update: { ...update, content: { ...content, text } } as unknown as acp.SessionUpdate,
+  };
+}
+
+function hasOutput(raw: Record<string, unknown>): boolean {
+  const output = raw.rawOutput;
+  const hasRaw =
+    typeof output === 'string' || Array.isArray(output)
+      ? output.length > 0
+      : isRecord(output)
+        ? Object.keys(output).length > 0
+        : output !== undefined && output !== null;
+  return hasRaw || (Array.isArray(raw.content) && raw.content.length > 0);
+}
+
+function toolNotification(
+  sessionId: acp.SessionId,
+  raw: Record<string, unknown>,
+  sessionUpdate: 'tool_call' | 'tool_call_update'
+): acp.SessionNotification {
+  return { sessionId, update: { ...raw, sessionUpdate } as unknown as acp.SessionUpdate };
 }
 
 export function isMethodNotFoundError(error: unknown): boolean {
   if (!isRecord(error)) return false;
   if (error.code === -32601) return true;
-  if (typeof error.message === 'string' && /method not found|-32601/i.test(error.message)) {
-    return true;
-  }
-  return false;
+  return typeof error.message === 'string' && /method not found|-32601/i.test(error.message);
 }
 
 /**
- * Tracks Antigravity ACP v1 session tool calls, streamed character offsets, and wakeup schedules
- * so post-`end_turn` `session/load` snapshots emit strictly deduplicated deltas.
+ * Tracks what Lody has already shown for one Antigravity ACP v1 session so post-`end_turn`
+ * `session/load` snapshots yield only unseen deltas, and decides whether background work
+ * is still pending.
  */
 export class AntigravitySessionTracker {
   private readonly timings: AntigravityPollTimings;
-  private readonly knownToolCalls = new Map<string, KnownToolCallEntry>();
-
-  private activeTurnToolIds = new Set<string>();
-  private inProgressHoldToolIds = new Set<string>();
-  private preTurnEndPendingToolIds = new Set<string>();
+  private readonly tools = new Map<string, KnownTool>();
+  /** Tools first seen in the current turn or its wakeups; only these may emit snapshot deltas. */
+  private turnToolIds = new Set<string>();
+  private pendingAtTurnEnd = new Set<string>();
   private livePermissionToolIds = new Set<string>();
   private postTurnPendingSinceMs = new Map<string, number>();
-  private orphanedPendingToolIds = new Set<string>();
-  private lastToolNotificationById = new Map<string, acp.SessionNotification>();
-  private registeredSubagentToolIds = new Set<string>();
-  private registeredSendMessageToolIds = new Set<string>();
-  private registeredSubagentCancelToolIds = new Set<string>();
-  private registeredWorkflowToolIds = new Set<string>();
-  private registeredScheduleToolIds = new Set<string>();
-  private registeredManageTaskToolIds = new Set<string>();
+  private orphanedToolIds = new Set<string>();
 
   private emittedAssistantChars = 0;
   private emittedThoughtChars = 0;
-  private lastEmittedContentKind: 'text' | 'tool' | 'other' = 'other';
-  private lastEmittedTextEndsWithNewline = true;
-  private needsBreakBeforeNextWakeupText = false;
-
-  private pendingSubagents = 0;
-  private pendingAsyncWorkflows = 0;
-  private postTurnSchedules: PostTurnSchedule[] = [];
-
-  private endedPromptAtMs: number | null = null;
-  private holdStartedAtMs: number | null = null;
-  private allHoldToolsTerminalAtMs: number | null = null;
-  private sawWakeupPlannerActivity = false;
-  private sawWakeupFailedTool = false;
-  private wakeupStepAccountedSinceIdle = false;
-  private abortedOrphanedPendingWakeup = false;
-  private lastWakeupChangeAtMs: number | null = null;
-  private backgroundMonitorStartedAtMs: number | null = null;
-  private lastBackgroundDeltaAtMs: number | null = null;
-  private wakeupToolsDuringBackground = new Set<string>();
+  private lastEmittedKind: 'text' | 'tool' | 'other' = 'other';
+  private lastTextEndsWithNewline = true;
+  private needsBreakBeforeText = false;
   private lastUsageKey: string | null = null;
 
-  constructor(timings?: Partial<AntigravityPollTimings>) {
+  private turnEndedAtMs: number | null = null;
+  private lastChangeAtMs = 0;
+  private lastOutputAtMs = 0;
+  private lastTextAtMs = 0;
+  private asyncDispatched = false;
+
+  constructor(
+    private readonly sessionId: acp.SessionId,
+    timings?: Partial<AntigravityPollTimings>
+  ) {
     this.timings = { ...DEFAULT_ANTIGRAVITY_POLL_TIMINGS, ...timings };
   }
 
@@ -314,1045 +247,445 @@ export class AntigravitySessionTracker {
     return this.timings;
   }
 
-  /**
-   * Seed session-lifetime known tool calls from `session/load` replay during initial resume so
-   * historical turns never emit duplicate updates or trigger holds on later polls.
-   */
+  /** Record a resumed session's `session/load` replay so its history never re-emits. */
   seedBaseline(notifications: readonly acp.SessionNotification[]): void {
     for (const notification of notifications) {
-      const raw = asRawUpdate(notification.update);
-      if (isToolUpdateKind(raw.sessionUpdate) && typeof raw.toolCallId === 'string') {
-        const prev = this.knownToolCalls.get(raw.toolCallId);
-        const name = extractToolName(raw) ?? prev?.name;
-        const args = extractToolArgs(raw);
-        const isDaemon = prev ? prev.isDaemon || args?.IsDaemon === true : args?.IsDaemon === true;
-        const status = typeof raw.status === 'string' ? raw.status : (prev?.status ?? '');
-        const hasOutputInUpdate = extractToolHasOutput(raw);
-        const hasOutput = Boolean(prev?.hasOutput || hasOutputInUpdate);
-        const hasBgPlaceholder = hasOutputInUpdate
-          ? hasBackgroundTaskPlaceholderOutput(raw)
-          : Boolean(prev?.hasBgPlaceholder);
-        this.knownToolCalls.set(raw.toolCallId, {
-          status,
-          hasOutput,
-          hasBgPlaceholder,
-          name,
-          isDaemon,
-        });
-        continue;
-      }
-      const usageKey = extractUsageKey(raw);
-      if (usageKey) {
-        this.lastUsageKey = usageKey;
+      const raw = asRaw(notification.update);
+      const id = toolCallIdOf(raw);
+      if (id) {
+        this.recordTool(id, raw, 0);
+      } else if (raw.sessionUpdate === 'usage_update') {
+        this.lastUsageKey = JSON.stringify(raw);
       }
     }
   }
 
-  /** Reset per-turn tracking right before dispatching `connection.prompt`. */
+  /** Reset per-turn state right before dispatching `session/prompt`. */
   beginTurn(): void {
-    this.activeTurnToolIds = new Set();
-    this.inProgressHoldToolIds = new Set();
-    this.preTurnEndPendingToolIds = new Set();
+    this.turnToolIds = new Set();
+    this.pendingAtTurnEnd = new Set();
     this.livePermissionToolIds = new Set();
     this.postTurnPendingSinceMs = new Map();
-    this.orphanedPendingToolIds = new Set();
-    this.lastToolNotificationById = new Map();
-    this.registeredSubagentToolIds = new Set();
-    this.registeredSendMessageToolIds = new Set();
-    this.registeredSubagentCancelToolIds = new Set();
-    this.registeredWorkflowToolIds = new Set();
-    this.registeredScheduleToolIds = new Set();
-    this.registeredManageTaskToolIds = new Set();
-
+    this.orphanedToolIds = new Set();
     this.emittedAssistantChars = 0;
     this.emittedThoughtChars = 0;
-    this.lastEmittedContentKind = 'other';
-    this.lastEmittedTextEndsWithNewline = true;
-    this.needsBreakBeforeNextWakeupText = false;
-
-    this.pendingSubagents = 0;
-    this.pendingAsyncWorkflows = 0;
-    this.postTurnSchedules = [];
-
-    this.endedPromptAtMs = null;
-    this.holdStartedAtMs = null;
-    this.allHoldToolsTerminalAtMs = null;
-    this.sawWakeupPlannerActivity = false;
-    this.sawWakeupFailedTool = false;
-    this.wakeupStepAccountedSinceIdle = false;
-    this.abortedOrphanedPendingWakeup = false;
-    this.lastWakeupChangeAtMs = null;
-    this.backgroundMonitorStartedAtMs = null;
-    this.lastBackgroundDeltaAtMs = null;
-    this.wakeupToolsDuringBackground = new Set();
+    this.lastEmittedKind = 'other';
+    this.lastTextEndsWithNewline = true;
+    this.needsBreakBeforeText = false;
+    this.turnEndedAtMs = null;
+    this.asyncDispatched = false;
   }
 
-  /** Record that the agent delivered a live permission request for `toolCallId`. */
   notifyLivePermissionRequest(toolCallId: string): void {
     this.livePermissionToolIds.add(toolCallId);
     this.postTurnPendingSinceMs.delete(toolCallId);
   }
 
-  /** Record a live `session/update` notification streamed by ACP stdout. */
-  observeLiveNotification(params: acp.SessionNotification, nowMs: number): void {
-    const update = params.update;
-    const raw = asRawUpdate(update);
-    const isAfterPromptEnd = this.endedPromptAtMs !== null;
-
-    if (isToolUpdateKind(raw.sessionUpdate) && typeof raw.toolCallId === 'string') {
-      this.lastToolNotificationById.set(raw.toolCallId, params);
-      const entry = this.recordToolObservation(raw, nowMs);
-      this.lastEmittedContentKind = 'tool';
-      this.needsBreakBeforeNextWakeupText = false;
-      if (isAfterPromptEnd) {
-        this.sawWakeupPlannerActivity = true;
-        this.lastWakeupChangeAtMs = nowMs;
-        if (entry.status === 'failed') {
-          this.sawWakeupFailedTool = true;
-        }
-        if (this.backgroundMonitorStartedAtMs !== null) {
-          this.lastBackgroundDeltaAtMs = nowMs;
-        }
-      }
+  /** Record a notification Lody received live on stdout. */
+  observeLive(notification: acp.SessionNotification, nowMs: number): void {
+    const update = notification.update;
+    const raw = asRaw(update);
+    const id = toolCallIdOf(raw);
+    if (id) {
+      this.recordTool(id, raw, nowMs);
+      this.turnToolIds.add(id);
+      this.lastEmittedKind = 'tool';
       return;
     }
-
+    const text = textOf(update);
+    if (text === null) {
+      if (raw.sessionUpdate === 'usage_update') this.lastUsageKey = JSON.stringify(raw);
+      return;
+    }
     if (update.sessionUpdate === 'agent_thought_chunk') {
-      const text = extractTextContent(update);
-      if (text !== null) {
-        this.emittedThoughtChars += text.length;
-        if (isAfterPromptEnd && text.length > 0) {
-          this.markWakeupTextObserved(nowMs, false);
-        }
-      }
+      this.emittedThoughtChars += text.length;
       return;
     }
-
-    if (update.sessionUpdate === 'agent_message_chunk') {
-      const text = extractTextContent(update);
-      if (text !== null) {
-        this.emittedAssistantChars += text.length;
-        this.lastEmittedContentKind = 'text';
-        if (text.length > 0) {
-          this.lastEmittedTextEndsWithNewline = text.endsWith('\n');
-        }
-        if (isAfterPromptEnd && text.length > 0) {
-          this.markWakeupTextObserved(nowMs, true);
-        }
-      }
-      return;
+    this.emittedAssistantChars += text.length;
+    if (text.length > 0) {
+      this.lastEmittedKind = 'text';
+      this.lastTextEndsWithNewline = text.endsWith('\n');
     }
-
-    const usageKey = extractUsageKey(raw);
-    if (usageKey) {
-      this.lastUsageKey = usageKey;
-    }
-  }
-
-  classifyTurnEnd(stopReason: string | undefined, nowMs: number): AntigravityTurnEndClassification {
-    if (stopReason !== 'end_turn') {
-      return { mode: 'none', backgroundTaskCount: 0 };
-    }
-
-    this.endedPromptAtMs = nowMs;
-    this.wakeupStepAccountedSinceIdle = false;
-    this.abortedOrphanedPendingWakeup = false;
-    this.preTurnEndPendingToolIds = new Set();
-    for (const toolCallId of this.activeTurnToolIds) {
-      if (this.knownToolCalls.get(toolCallId)?.status === 'pending') {
-        this.preTurnEndPendingToolIds.add(toolCallId);
-      }
-    }
-    if (this.inProgressHoldToolIds.size === 0) {
-      this.allHoldToolsTerminalAtMs = nowMs;
-    }
-
-    const holdableCount =
-      this.inProgressHoldToolIds.size + this.pendingSubagents + this.pendingAsyncWorkflows;
-    if (holdableCount > 0) {
-      this.holdStartedAtMs = nowMs;
-      this.needsBreakBeforeNextWakeupText =
-        this.lastEmittedContentKind === 'text' && !this.lastEmittedTextEndsWithNewline;
-      return {
-        mode: 'hold',
-        backgroundTaskCount: holdableCount + this.postTurnSchedules.length,
-      };
-    }
-
-    if (this.postTurnSchedules.length > 0) {
-      this.backgroundMonitorStartedAtMs = nowMs;
-      this.needsBreakBeforeNextWakeupText =
-        this.lastEmittedContentKind === 'text' && !this.lastEmittedTextEndsWithNewline;
-      return {
-        mode: 'background',
-        backgroundTaskCount: this.postTurnSchedules.length,
-      };
-    }
-
-    return { mode: 'none', backgroundTaskCount: 0 };
-  }
-
-  /** Switch a long-running hold into non-blocking Tier 2 background monitoring. */
-  promoteHoldToBackground(nowMs: number): number {
-    if (this.backgroundMonitorStartedAtMs === null) {
-      this.backgroundMonitorStartedAtMs = nowMs;
-    }
-    this.lastBackgroundDeltaAtMs = null;
-    this.wakeupStepAccountedSinceIdle = false;
-    this.abortedOrphanedPendingWakeup = false;
-    this.needsBreakBeforeNextWakeupText =
-      this.lastEmittedContentKind === 'text' && !this.lastEmittedTextEndsWithNewline;
-    this.wakeupToolsDuringBackground.clear();
-    return this.getActiveBackgroundCount();
-  }
-
-  getActiveBackgroundCount(): number {
-    return (
-      this.inProgressHoldToolIds.size +
-      this.pendingSubagents +
-      this.pendingAsyncWorkflows +
-      this.postTurnSchedules.length
-    );
-  }
-
-  /** Extract strictly unseen delta notifications from a `session/load` snapshot replay. */
-  consumeSnapshot(
-    notifications: readonly acp.SessionNotification[],
-    nowMs: number
-  ): { deltas: acp.SessionNotification[]; hasChanges: boolean } {
-    const lastUserChunkIndex = findLastUserChunkIndex(notifications);
-    const deltas: acp.SessionNotification[] = [];
-    let seenAssistantChars = 0;
-    let seenThoughtChars = 0;
-    let latestUsage: { key: string; notification: acp.SessionNotification } | null = null;
-    let accountedWakeupStepInSnapshot = false;
-    let hasContentChanges = false;
-
-    for (let i = 0; i < notifications.length; i += 1) {
-      const notification = notifications[i];
-      if (!notification) continue;
-      const update = notification.update;
-      const raw = asRawUpdate(update);
-      const isAfterLastUser = lastUserChunkIndex === -1 || i > lastUserChunkIndex;
-
-      if (IGNORED_REPLAY_UPDATES.has(update.sessionUpdate)) {
-        continue;
-      }
-
-      if (update.sessionUpdate === 'usage_update') {
-        const key = extractUsageKey(raw);
-        if (key) {
-          latestUsage = { key, notification };
-        }
-        continue;
-      }
-
-      if (isToolUpdateKind(raw.sessionUpdate) && typeof raw.toolCallId === 'string') {
-        const toolDelta = this.reconcileSnapshotTool(notification, raw, isAfterLastUser, nowMs);
-        if (toolDelta) {
-          deltas.push(toolDelta);
-          hasContentChanges = true;
-        }
-        continue;
-      }
-
-      if (!isAfterLastUser) {
-        continue;
-      }
-
-      if (update.sessionUpdate === 'agent_thought_chunk') {
-        const text = extractTextContent(update);
-        if (text === null) continue;
-        const chunkStart = seenThoughtChars;
-        const chunkEnd = chunkStart + text.length;
-        seenThoughtChars = chunkEnd;
-        if (chunkEnd <= this.emittedThoughtChars) continue;
-
-        const slice = text.slice(Math.max(0, this.emittedThoughtChars - chunkStart));
-        this.emittedThoughtChars = chunkEnd;
-        if (slice.length > 0) {
-          this.markWakeupTextObserved(nowMs, false);
-          hasContentChanges = true;
-          deltas.push(
-            slice.length === text.length
-              ? notification
-              : cloneTextChunkWithPrefix(notification, slice)
-          );
-        }
-        continue;
-      }
-
-      if (update.sessionUpdate === 'agent_message_chunk') {
-        const text = extractTextContent(update);
-        if (text === null) continue;
-        const chunkStart = seenAssistantChars;
-        const chunkEnd = chunkStart + text.length;
-        seenAssistantChars = chunkEnd;
-        if (chunkEnd <= this.emittedAssistantChars) continue;
-
-        const rawSlice = text.slice(Math.max(0, this.emittedAssistantChars - chunkStart));
-        this.emittedAssistantChars = chunkEnd;
-
-        if (rawSlice.length > 0) {
-          const needsParagraphBreak =
-            this.needsBreakBeforeNextWakeupText &&
-            this.lastEmittedContentKind === 'text' &&
-            !this.lastEmittedTextEndsWithNewline &&
-            !rawSlice.startsWith('\n');
-          this.needsBreakBeforeNextWakeupText = false;
-          const emittedText = needsParagraphBreak ? `\n\n${rawSlice}` : rawSlice;
-
-          this.lastEmittedContentKind = 'text';
-          this.lastEmittedTextEndsWithNewline = rawSlice.endsWith('\n');
-          this.markWakeupTextObserved(nowMs, !accountedWakeupStepInSnapshot);
-          accountedWakeupStepInSnapshot = true;
-          hasContentChanges = true;
-          deltas.push(
-            emittedText === text
-              ? notification
-              : cloneTextChunkWithPrefix(notification, emittedText)
-          );
-        }
-      }
-    }
-
-    if (latestUsage && latestUsage.key !== this.lastUsageKey) {
-      this.lastUsageKey = latestUsage.key;
-      deltas.push(latestUsage.notification);
-    }
-
-    return { deltas, hasChanges: hasContentChanges || deltas.length > 0 };
-  }
-
-  evaluateHoldState(nowMs: number): AntigravityHoldEvaluation {
-    if (this.endedPromptAtMs === null) {
-      return 'settled';
-    }
-
-    if (this.abortedOrphanedPendingWakeup) {
-      return this.postTurnSchedules.length > 0 ? 'handoff_to_background' : 'settled';
-    }
-
-    const holdStartedAtMs = this.holdStartedAtMs ?? this.endedPromptAtMs;
-    if (nowMs - holdStartedAtMs >= this.timings.promptHoldMaxMs) {
-      return 'handoff_to_background';
-    }
-
-    if (this.inProgressHoldToolIds.size > 0 || this.pendingAsyncWorkflows > 0) {
-      return 'waiting';
-    }
-
-    if (this.pendingSubagents > 0 && !this.sawWakeupPlannerActivity) {
-      return 'waiting';
-    }
-
-    if (this.sawWakeupPlannerActivity) {
-      const graceMs = this.sawWakeupFailedTool
-        ? this.timings.failedWakeupToolGraceMs
-        : this.timings.settleQuietMs;
-      const lastChangeMs = this.lastWakeupChangeAtMs ?? holdStartedAtMs;
-      if (nowMs - lastChangeMs < graceMs) {
-        return 'waiting';
-      }
-      return this.pendingSubagents > 0 || this.postTurnSchedules.length > 0
-        ? 'handoff_to_background'
-        : 'settled';
-    }
-
-    const baselineMs = this.allHoldToolsTerminalAtMs ?? holdStartedAtMs;
-    if (nowMs - baselineMs < this.timings.wakeupPlannerGraceMs) {
-      return 'waiting';
-    }
-    return this.pendingSubagents > 0 || this.postTurnSchedules.length > 0
-      ? 'handoff_to_background'
-      : 'settled';
-  }
-
-  evaluateBackgroundState(nowMs: number): AntigravityBackgroundEvaluation {
-    const startedAtMs = this.backgroundMonitorStartedAtMs ?? this.endedPromptAtMs ?? nowMs;
-    const remainingCount = this.getActiveBackgroundCount();
-
-    if (nowMs - startedAtMs >= this.timings.detachedMaxDurationMs) {
-      return { settled: true, state: 'idle', backgroundTaskCount: 0 };
-    }
-
-    const hasActiveWakeupTool = this.wakeupToolsDuringBackground.size > 0;
-    const isDrainingWakeup =
-      this.lastBackgroundDeltaAtMs !== null &&
-      nowMs - this.lastBackgroundDeltaAtMs < this.timings.settleQuietMs;
-
-    if (hasActiveWakeupTool || isDrainingWakeup) {
-      return {
-        settled: false,
-        state: 'running',
-        backgroundTaskCount: Math.max(1, remainingCount),
-      };
-    }
-
-    if (this.lastBackgroundDeltaAtMs !== null) {
-      this.lastBackgroundDeltaAtMs = null;
-      this.wakeupStepAccountedSinceIdle = false;
-      this.needsBreakBeforeNextWakeupText =
-        this.lastEmittedContentKind === 'text' && !this.lastEmittedTextEndsWithNewline;
-    }
-
-    if (remainingCount > 0) {
-      return {
-        settled: false,
-        state: 'idle',
-        backgroundTaskCount: remainingCount,
-      };
-    }
-
-    const waitingForWakeupAfterHoldTool =
-      !this.abortedOrphanedPendingWakeup &&
-      !this.sawWakeupPlannerActivity &&
-      this.allHoldToolsTerminalAtMs !== null &&
-      nowMs - this.allHoldToolsTerminalAtMs < this.timings.wakeupPlannerGraceMs;
-    if (waitingForWakeupAfterHoldTool) {
-      return {
-        settled: false,
-        state: 'idle',
-        backgroundTaskCount: 1,
-      };
-    }
-
-    return {
-      settled: true,
-      state: 'idle',
-      backgroundTaskCount: 0,
-    };
   }
 
   /**
-   * Fail and request cancellation for post-`end_turn` tool calls stuck in `pending` without
-   * a forwarded `session/request_permission` request so Tier 1/Tier 2 monitoring cannot wedge.
+   * Called when `session/prompt` resolves. Returns whether background work may still report
+   * through the session transcript, in which case the caller starts a monitor.
+   */
+  turnEnded(stopReason: string | undefined, nowMs: number): boolean {
+    if (stopReason !== 'end_turn') return false;
+    this.turnEndedAtMs = nowMs;
+    this.lastChangeAtMs = nowMs;
+    this.needsBreakBeforeText = true;
+    for (const id of this.turnToolIds) {
+      const tool = this.tools.get(id);
+      if (tool && toolStatus(tool.raw) === 'pending') this.pendingAtTurnEnd.add(id);
+    }
+    return this.asyncDispatched || this.activeToolCount() > 0;
+  }
+
+  /** Extract unseen deltas from a full `session/load` replay. */
+  consumeSnapshot(
+    notifications: readonly acp.SessionNotification[],
+    nowMs: number
+  ): acp.SessionNotification[] {
+    if (nowMs - this.lastTextAtMs >= this.timings.runningGraceMs) {
+      // A pause this long separates wakeups; consecutive chunks of one reply stay joined.
+      this.needsBreakBeforeText = true;
+    }
+    let lastUserIndex = -1;
+    const finalToolState = new Map<string, { raw: Record<string, unknown>; lastIndex: number }>();
+    notifications.forEach((notification, index) => {
+      const raw = asRaw(notification.update);
+      if (raw.sessionUpdate === 'user_message_chunk') lastUserIndex = index;
+      const id = toolCallIdOf(raw);
+      if (id) {
+        // Fold every replayed state first so intermediate states never re-emit.
+        const prev = finalToolState.get(id);
+        finalToolState.set(id, { raw: mergeToolRaw(prev?.raw, raw), lastIndex: index });
+      }
+    });
+
+    const deltas: acp.SessionNotification[] = [];
+    let seenAssistantChars = 0;
+    let seenThoughtChars = 0;
+    let latestUsage: acp.SessionNotification | null = null;
+
+    notifications.forEach((notification, index) => {
+      const update = notification.update;
+      const raw = asRaw(update);
+      if (IGNORED_REPLAY_UPDATES.has(update.sessionUpdate)) return;
+
+      const id = toolCallIdOf(raw);
+      if (id) {
+        const folded = finalToolState.get(id);
+        if (!folded || folded.lastIndex !== index) return;
+        const delta = this.reconcileTool(id, folded.raw, index > lastUserIndex, nowMs);
+        if (delta) deltas.push(delta);
+        return;
+      }
+      if (update.sessionUpdate === 'usage_update') {
+        latestUsage = notification;
+        return;
+      }
+      if (index < lastUserIndex) return;
+
+      const text = textOf(update);
+      if (text === null) return;
+      const isThought = update.sessionUpdate === 'agent_thought_chunk';
+      const chunkStart = isThought ? seenThoughtChars : seenAssistantChars;
+      const chunkEnd = chunkStart + text.length;
+      const emitted = isThought ? this.emittedThoughtChars : this.emittedAssistantChars;
+      if (isThought) seenThoughtChars = chunkEnd;
+      else seenAssistantChars = chunkEnd;
+      if (chunkEnd <= emitted) return;
+
+      let slice = text.slice(Math.max(0, emitted - chunkStart));
+      if (isThought) {
+        this.emittedThoughtChars = chunkEnd;
+      } else {
+        this.emittedAssistantChars = chunkEnd;
+        if (
+          this.needsBreakBeforeText &&
+          this.lastEmittedKind === 'text' &&
+          !this.lastTextEndsWithNewline &&
+          !slice.startsWith('\n')
+        ) {
+          slice = `\n\n${slice}`;
+        }
+        this.needsBreakBeforeText = false;
+        this.lastEmittedKind = 'text';
+        this.lastTextEndsWithNewline = slice.endsWith('\n');
+        this.resolvePlaceholderTools();
+      }
+      this.lastTextAtMs = nowMs;
+      this.markOutput(nowMs);
+      deltas.push(slice === text ? notification : withText(notification, slice));
+    });
+
+    if (latestUsage) {
+      const key = JSON.stringify(asRaw((latestUsage as acp.SessionNotification).update));
+      if (key !== this.lastUsageKey) {
+        this.lastUsageKey = key;
+        deltas.push(latestUsage);
+      }
+    }
+    return deltas;
+  }
+
+  /**
+   * Fail post-turn tools stuck in `pending` with no forwarded permission request: `agy acp`
+   * stops forwarding `session/request_permission` after `end_turn`, so they would never resolve.
    */
   expireOrphanedPendingTools(nowMs: number): {
     deltas: acp.SessionNotification[];
     shouldCancelSession: boolean;
   } {
     const deltas: acp.SessionNotification[] = [];
-
-    for (const [toolCallId, sinceMs] of [...this.postTurnPendingSinceMs.entries()]) {
-      if (this.livePermissionToolIds.has(toolCallId)) {
-        this.postTurnPendingSinceMs.delete(toolCallId);
-        continue;
-      }
-      if (nowMs - sinceMs < this.timings.orphanedPendingToolGraceMs) {
-        continue;
-      }
-
-      this.postTurnPendingSinceMs.delete(toolCallId);
-      this.orphanedPendingToolIds.add(toolCallId);
-      this.inProgressHoldToolIds.delete(toolCallId);
-      this.wakeupToolsDuringBackground.delete(toolCallId);
-
-      const prev = this.knownToolCalls.get(toolCallId);
-      if (prev) {
-        this.knownToolCalls.set(toolCallId, {
-          ...prev,
-          status: 'failed',
-          hasOutput: true,
-          hasBgPlaceholder: false,
-        });
-      }
-
-      const baseNotification = this.lastToolNotificationById.get(toolCallId);
-      const baseUpdate = baseNotification ? asRawUpdate(baseNotification.update) : undefined;
-      const synthesized: acp.SessionNotification = {
-        sessionId: baseNotification?.sessionId ?? ('' as acp.SessionId),
-        update: {
-          ...(baseUpdate ?? {}),
-          sessionUpdate: 'tool_call_update',
-          toolCallId,
-          status: 'failed',
-          rawOutput: { error: ORPHANED_POST_TURN_PERMISSION_MESSAGE },
-          content: [
-            {
-              type: 'content',
-              content: {
-                type: 'text',
-                text: ORPHANED_POST_TURN_PERMISSION_MESSAGE,
-              },
-            },
-          ],
-        } as unknown as acp.SessionUpdate,
-      };
-      this.lastToolNotificationById.set(toolCallId, synthesized);
-      this.lastEmittedContentKind = 'tool';
-      this.needsBreakBeforeNextWakeupText = false;
-      deltas.push(synthesized);
+    for (const [id, sinceMs] of this.postTurnPendingSinceMs) {
+      if (nowMs - sinceMs < this.timings.orphanedPendingToolGraceMs) continue;
+      this.postTurnPendingSinceMs.delete(id);
+      this.orphanedToolIds.add(id);
+      const tool = this.tools.get(id);
+      const raw = mergeToolRaw(tool?.raw, {
+        toolCallId: id,
+        status: 'failed',
+        rawOutput: { error: ORPHANED_POST_TURN_PERMISSION_MESSAGE },
+        content: [
+          {
+            type: 'content',
+            content: { type: 'text', text: ORPHANED_POST_TURN_PERMISSION_MESSAGE },
+          },
+        ],
+      });
+      this.tools.set(id, { raw, fingerprint: fingerprintOf(raw) });
+      deltas.push(toolNotification(this.sessionId, stripInternal(raw), 'tool_call_update'));
+      this.lastEmittedKind = 'tool';
+      this.markOutput(nowMs);
     }
-
-    if (deltas.length === 0) {
-      return { deltas: [], shouldCancelSession: false };
-    }
-
-    this.inProgressHoldToolIds.clear();
-    this.wakeupToolsDuringBackground.clear();
-    this.pendingSubagents = 0;
-    this.pendingAsyncWorkflows = 0;
-    if (!this.wakeupStepAccountedSinceIdle) {
-      this.accountWakeupStep(nowMs);
-      this.wakeupStepAccountedSinceIdle = true;
-    }
-    this.abortedOrphanedPendingWakeup = true;
-    this.lastBackgroundDeltaAtMs = null;
-    if (this.allHoldToolsTerminalAtMs === null) {
-      this.allHoldToolsTerminalAtMs = nowMs;
-    }
-
-    return { deltas, shouldCancelSession: true };
+    return { deltas, shouldCancelSession: deltas.length > 0 };
   }
 
-  hasAbortedOrphanedPendingWakeup(): boolean {
-    return this.abortedOrphanedPendingWakeup;
+  evaluate(nowMs: number): AntigravityMonitorState {
+    const endedAtMs = this.turnEndedAtMs;
+    if (endedAtMs === null || nowMs - endedAtMs >= this.timings.maxDurationMs) {
+      return { settled: true, state: 'idle', backgroundTaskCount: 0 };
+    }
+    const active = this.activeToolCount();
+    const quietMs = this.asyncDispatched
+      ? this.timings.asyncDispatchQuietMs
+      : this.timings.settleQuietMs;
+    if (active === 0 && nowMs - this.lastChangeAtMs >= quietMs) {
+      return { settled: true, state: 'idle', backgroundTaskCount: 0 };
+    }
+    return {
+      settled: false,
+      state: nowMs - this.lastOutputAtMs < this.timings.runningGraceMs ? 'running' : 'idle',
+      backgroundTaskCount: Math.max(1, active),
+    };
   }
 
-  private markWakeupTextObserved(nowMs: number, consumePendingWakeup: boolean): void {
-    this.sawWakeupPlannerActivity = true;
-    this.lastWakeupChangeAtMs = nowMs;
-    if (this.backgroundMonitorStartedAtMs !== null) {
-      this.lastBackgroundDeltaAtMs = nowMs;
+  /** Whether output changed recently enough that `updatedAt` may be frozen mid-reply. */
+  isRecentlyActive(nowMs: number): boolean {
+    return nowMs - this.lastChangeAtMs < this.timings.activeWindowMs;
+  }
+
+  private markOutput(nowMs: number): void {
+    this.lastChangeAtMs = nowMs;
+    this.lastOutputAtMs = nowMs;
+  }
+
+  private activeToolCount(): number {
+    let count = 0;
+    for (const id of this.turnToolIds) {
+      const tool = this.tools.get(id);
+      if (!tool || this.orphanedToolIds.has(id) || isDaemonTool(tool.raw)) continue;
+      if (isActiveStatus(toolStatus(tool.raw)) || tool.raw._lodyBackgroundPlaceholder === true) {
+        count += 1;
+      }
     }
-    if (consumePendingWakeup) {
-      this.clearCompletedPlaceholderHoldTools(nowMs);
-      this.accountWakeupStep(nowMs);
-      this.wakeupStepAccountedSinceIdle = true;
+    return count;
+  }
+
+  /**
+   * `agy` may never rewrite a placeholder output once the task finishes; the wakeup reply is
+   * the completion signal. The async quiet window still covers any sibling task.
+   */
+  private resolvePlaceholderTools(): void {
+    for (const id of this.turnToolIds) {
+      const tool = this.tools.get(id);
+      if (tool?.raw._lodyBackgroundPlaceholder === true && !isActiveStatus(toolStatus(tool.raw))) {
+        delete tool.raw._lodyBackgroundPlaceholder;
+      }
     }
   }
 
-  private clearCompletedPlaceholderHoldTools(nowMs: number): void {
-    for (const id of [...this.inProgressHoldToolIds]) {
-      const entry = this.knownToolCalls.get(id);
-      if (entry && !isActiveToolStatus(entry.status) && entry.hasBgPlaceholder) {
-        this.inProgressHoldToolIds.delete(id);
-        this.wakeupToolsDuringBackground.delete(id);
+  private recordTool(id: string, raw: Record<string, unknown>, nowMs: number): KnownTool {
+    const prev = this.tools.get(id);
+    const merged = mergeToolRaw(prev?.raw, raw);
+    const placeholder =
+      raw.rawOutput !== undefined || raw.content !== undefined
+        ? hasBackgroundPlaceholder(merged)
+        : prev?.raw._lodyBackgroundPlaceholder === true;
+    if (placeholder) merged._lodyBackgroundPlaceholder = true;
+    else delete merged._lodyBackgroundPlaceholder;
+    const tool: KnownTool = { raw: merged, fingerprint: fingerprintOf(merged) };
+    this.tools.set(id, tool);
+
+    const name = toolName(merged);
+    const status = toolStatus(merged);
+    const silentWorkflow = name === 'run_workflow' && status === 'completed' && !hasOutput(merged);
+    if (
+      status !== 'failed' &&
+      !isDaemonTool(merged) &&
+      (placeholder || silentWorkflow || (name !== undefined && ASYNC_DISPATCH_TOOL_NAMES.has(name)))
+    ) {
+      this.asyncDispatched = true;
+    }
+    if (this.turnEndedAtMs !== null) {
+      if (status !== 'pending') {
+        this.postTurnPendingSinceMs.delete(id);
+      } else if (
+        !this.pendingAtTurnEnd.has(id) &&
+        !this.livePermissionToolIds.has(id) &&
+        !this.orphanedToolIds.has(id) &&
+        !this.postTurnPendingSinceMs.has(id)
+      ) {
+        this.postTurnPendingSinceMs.set(id, nowMs);
       }
     }
-    if (this.inProgressHoldToolIds.size === 0 && this.allHoldToolsTerminalAtMs === null) {
-      this.allHoldToolsTerminalAtMs = nowMs;
-    }
+    return tool;
   }
 
-  private accountWakeupStep(nowMs: number): void {
-    if (this.pendingSubagents > 0) {
-      this.pendingSubagents -= 1;
-      return;
-    }
-    if (this.pendingAsyncWorkflows > 0) {
-      this.pendingAsyncWorkflows -= 1;
-      return;
-    }
-    if (this.postTurnSchedules.length === 0) return;
-
-    const dueTimerIdx = this.postTurnSchedules.findIndex(
-      (schedule) => schedule.kind === 'timer' && nowMs + 2_000 >= schedule.expectedFireAtMs
-    );
-    if (dueTimerIdx !== -1) {
-      this.postTurnSchedules.splice(dueTimerIdx, 1);
-      return;
-    }
-
-    const recurringOrSwarmIdx = this.postTurnSchedules.findIndex(
-      (schedule) => schedule.kind === 'cron' || schedule.kind === 'swarm'
-    );
-    if (recurringOrSwarmIdx !== -1) {
-      const target = this.postTurnSchedules[recurringOrSwarmIdx];
-      if (target?.kind === 'cron') {
-        if (target.remainingRuns === null) {
-          return;
-        }
-        if (target.remainingRuns > 1) {
-          this.postTurnSchedules[recurringOrSwarmIdx] = {
-            kind: 'cron',
-            remainingRuns: target.remainingRuns - 1,
-          };
-          return;
-        }
-      }
-      this.postTurnSchedules.splice(recurringOrSwarmIdx, 1);
-      return;
-    }
-
-    let earliestTimerIdx = -1;
-    let earliestFireAtMs = Infinity;
-    for (let i = 0; i < this.postTurnSchedules.length; i += 1) {
-      const schedule = this.postTurnSchedules[i];
-      if (schedule?.kind === 'timer' && schedule.expectedFireAtMs < earliestFireAtMs) {
-        earliestFireAtMs = schedule.expectedFireAtMs;
-        earliestTimerIdx = i;
-      }
-    }
-    if (earliestTimerIdx !== -1) {
-      this.postTurnSchedules.splice(earliestTimerIdx, 1);
-    }
-  }
-
-  private reconcileSnapshotTool(
-    notification: acp.SessionNotification,
-    raw: Record<string, unknown>,
-    isAfterLastUser: boolean,
+  private reconcileTool(
+    id: string,
+    replayRaw: Record<string, unknown>,
+    afterLastUser: boolean,
     nowMs: number
   ): acp.SessionNotification | null {
-    const toolCallId = raw.toolCallId as string;
-    const prev = this.knownToolCalls.get(toolCallId);
-
-    if (prev) {
-      if (!this.activeTurnToolIds.has(toolCallId)) {
-        return null;
-      }
-      if (this.orphanedPendingToolIds.has(toolCallId) && raw.status === 'pending') {
-        return null;
-      }
-      const nextStatus = typeof raw.status === 'string' ? raw.status : prev.status;
-      const nextHasOutput = extractToolHasOutput(raw);
-      const nextHasBgPlaceholder = nextHasOutput
-        ? hasBackgroundTaskPlaceholderOutput(raw)
-        : prev.hasBgPlaceholder;
-      const placeholderCleared = prev.hasBgPlaceholder && !nextHasBgPlaceholder;
-      if (
-        nextStatus === prev.status &&
-        !(!prev.hasOutput && nextHasOutput) &&
-        !placeholderCleared
-      ) {
-        return null;
-      }
-
-      this.lastToolNotificationById.set(toolCallId, notification);
-      const entry = this.recordToolObservation(raw, nowMs);
-      this.lastEmittedContentKind = 'tool';
-      this.needsBreakBeforeNextWakeupText = false;
-      this.lastWakeupChangeAtMs = nowMs;
-      if (entry.status === 'failed') {
-        this.sawWakeupFailedTool = true;
-      }
-      if (this.backgroundMonitorStartedAtMs !== null) {
-        this.lastBackgroundDeltaAtMs = nowMs;
-      }
-      return cloneToolNotification(notification, 'tool_call_update');
+    const prev = this.tools.get(id);
+    if (!prev) {
+      // Tools before the last user message belong to history Lody did not stream
+      // (for example a forked session's earlier turns); record them silently.
+      if (afterLastUser) this.turnToolIds.add(id);
+      const tool = this.recordTool(id, replayRaw, nowMs);
+      if (!afterLastUser) return null;
+      this.lastEmittedKind = 'tool';
+      this.markOutput(nowMs);
+      return toolNotification(this.sessionId, stripInternal(tool.raw), 'tool_call');
     }
-
-    const status = typeof raw.status === 'string' ? raw.status : '';
-    if (!isAfterLastUser && !isActiveToolStatus(status)) {
-      const name = extractToolName(raw);
-      const args = extractToolArgs(raw);
-      const hasOutput = extractToolHasOutput(raw);
-      this.knownToolCalls.set(toolCallId, {
-        status,
-        hasOutput,
-        hasBgPlaceholder: hasOutput ? hasBackgroundTaskPlaceholderOutput(raw) : false,
-        name,
-        isDaemon: args?.IsDaemon === true,
-      });
-      return null;
-    }
-
-    this.lastToolNotificationById.set(toolCallId, notification);
-    const entry = this.recordToolObservation(raw, nowMs);
-    this.lastEmittedContentKind = 'tool';
-    this.needsBreakBeforeNextWakeupText = false;
-    this.sawWakeupPlannerActivity = true;
-    this.lastWakeupChangeAtMs = nowMs;
-    if (entry.status === 'failed') {
-      this.sawWakeupFailedTool = true;
-    }
-    if (this.backgroundMonitorStartedAtMs !== null) {
-      this.lastBackgroundDeltaAtMs = nowMs;
-      if (isToolRunningOrBackgrounded(entry)) {
-        this.wakeupToolsDuringBackground.add(toolCallId);
-      }
-    }
-    return cloneToolNotification(notification, 'tool_call');
+    if (this.orphanedToolIds.has(id) && isActiveStatus(toolStatus(replayRaw))) return null;
+    if (fingerprintOf(mergeToolRaw(prev.raw, replayRaw)) === prev.fingerprint) return null;
+    const tool = this.recordTool(id, replayRaw, nowMs);
+    if (!this.turnToolIds.has(id)) return null;
+    this.lastEmittedKind = 'tool';
+    this.markOutput(nowMs);
+    return toolNotification(this.sessionId, stripInternal(tool.raw), 'tool_call_update');
   }
+}
 
-  private recordToolObservation(raw: Record<string, unknown>, nowMs: number): KnownToolCallEntry {
-    const toolCallId = raw.toolCallId as string;
-    const prev = this.knownToolCalls.get(toolCallId);
-    const name = extractToolName(raw) ?? prev?.name;
-    const args = extractToolArgs(raw);
-    const isDaemon = prev ? prev.isDaemon || args?.IsDaemon === true : args?.IsDaemon === true;
-    const status = typeof raw.status === 'string' ? raw.status : (prev?.status ?? '');
-    const hasOutputInUpdate = extractToolHasOutput(raw);
-    const hasOutput = Boolean(prev?.hasOutput || hasOutputInUpdate);
-    const hasBgPlaceholder = hasOutputInUpdate
-      ? hasBackgroundTaskPlaceholderOutput(raw)
-      : Boolean(prev?.hasBgPlaceholder);
-    const entry: KnownToolCallEntry = { status, hasOutput, hasBgPlaceholder, name, isDaemon };
-
-    this.knownToolCalls.set(toolCallId, entry);
-    this.activeTurnToolIds.add(toolCallId);
-
-    if (this.endedPromptAtMs !== null) {
-      if (
-        entry.status === 'pending' &&
-        !this.preTurnEndPendingToolIds.has(toolCallId) &&
-        !this.livePermissionToolIds.has(toolCallId) &&
-        !this.orphanedPendingToolIds.has(toolCallId)
-      ) {
-        if (!this.postTurnPendingSinceMs.has(toolCallId)) {
-          this.postTurnPendingSinceMs.set(toolCallId, nowMs);
-        }
-      } else if (entry.status !== 'pending') {
-        this.postTurnPendingSinceMs.delete(toolCallId);
-      }
-    }
-
-    this.updateHoldToolSet(toolCallId, entry, nowMs);
-    this.updateSideEffectTrackers(toolCallId, entry, args, nowMs);
-
-    return entry;
-  }
-
-  private updateHoldToolSet(toolCallId: string, entry: KnownToolCallEntry, nowMs: number): void {
-    if (isToolRunningOrBackgrounded(entry)) {
-      this.inProgressHoldToolIds.add(toolCallId);
-      this.allHoldToolsTerminalAtMs = null;
-      return;
-    }
-
-    if (this.inProgressHoldToolIds.delete(toolCallId) && this.inProgressHoldToolIds.size === 0) {
-      this.allHoldToolsTerminalAtMs = nowMs;
-    }
-    this.wakeupToolsDuringBackground.delete(toolCallId);
-  }
-
-  private updateSideEffectTrackers(
-    toolCallId: string,
-    entry: KnownToolCallEntry,
-    args: Record<string, unknown> | undefined,
-    nowMs: number
-  ): void {
-    const failed = entry.status === 'failed';
-
-    if (entry.name === 'invoke_subagent') {
-      if (failed) {
-        if (this.registeredSubagentToolIds.delete(toolCallId)) {
-          this.pendingSubagents = Math.max(0, this.pendingSubagents - 1);
-        }
-      } else if (!this.registeredSubagentToolIds.has(toolCallId)) {
-        this.registeredSubagentToolIds.add(toolCallId);
-        this.pendingSubagents += 1;
-      }
-      return;
-    }
-
-    if (entry.name === 'send_message' && !failed) {
-      if (!this.registeredSendMessageToolIds.has(toolCallId)) {
-        this.registeredSendMessageToolIds.add(toolCallId);
-        this.pendingSubagents = Math.max(1, this.pendingSubagents);
-      }
-      return;
-    }
-
-    if (entry.name === 'manage_subagents' && !failed && args) {
-      if (this.registeredSubagentCancelToolIds.has(toolCallId)) return;
-      if (args.Action === 'kill_all') {
-        this.registeredSubagentCancelToolIds.add(toolCallId);
-        this.pendingSubagents = 0;
-      } else if (args.Action === 'kill') {
-        this.registeredSubagentCancelToolIds.add(toolCallId);
-        const count = Array.isArray(args.ConversationIds) ? args.ConversationIds.length : 1;
-        this.pendingSubagents = Math.max(0, this.pendingSubagents - count);
-      }
-      return;
-    }
-
-    if (entry.name === 'run_workflow') {
-      if (!failed && entry.status === 'completed') {
-        if (entry.hasOutput && !entry.hasBgPlaceholder) {
-          if (this.registeredWorkflowToolIds.delete(toolCallId)) {
-            this.pendingAsyncWorkflows = Math.max(0, this.pendingAsyncWorkflows - 1);
-          }
-        } else if (
-          !entry.hasOutput &&
-          !entry.hasBgPlaceholder &&
-          (args?.WaitMsBeforeAsync === undefined || args?.WaitMsBeforeAsync === 0) &&
-          !this.registeredWorkflowToolIds.has(toolCallId)
-        ) {
-          this.registeredWorkflowToolIds.add(toolCallId);
-          this.pendingAsyncWorkflows += 1;
-        }
-      }
-      return;
-    }
-
-    if (entry.name === 'schedule' && !failed && !entry.isDaemon && args) {
-      if (this.registeredScheduleToolIds.has(toolCallId)) return;
-      if (typeof args.DurationSeconds === 'number' && args.DurationSeconds > 0) {
-        this.registeredScheduleToolIds.add(toolCallId);
-        this.postTurnSchedules.push({
-          kind: 'timer',
-          expectedFireAtMs: nowMs + args.DurationSeconds * 1000,
-        });
-      } else if (typeof args.CronExpression === 'string' && args.CronExpression.trim().length > 0) {
-        this.registeredScheduleToolIds.add(toolCallId);
-        const maxRuns =
-          typeof args.MaxIterations === 'number' && args.MaxIterations > 0
-            ? args.MaxIterations
-            : null;
-        this.postTurnSchedules.push({ kind: 'cron', remainingRuns: maxRuns });
-      }
-      return;
-    }
-
-    if (entry.name === 'swarm' && !failed && args) {
-      if (this.registeredScheduleToolIds.has(toolCallId)) return;
-      if (args.action === 'add') {
-        this.registeredScheduleToolIds.add(toolCallId);
-        const count = Math.min(
-          20,
-          Array.isArray(args.tasks) && args.tasks.length > 0
-            ? args.tasks.length
-            : typeof args.n === 'number' && args.n > 1
-              ? Math.floor(args.n)
-              : 1
-        );
-        for (let i = 0; i < count; i += 1) {
-          this.postTurnSchedules.push({ kind: 'swarm' });
-        }
-      } else if (args.action === 'kill') {
-        this.registeredScheduleToolIds.add(toolCallId);
-        const swarmIdx = this.postTurnSchedules.findIndex((s) => s.kind === 'swarm');
-        if (swarmIdx !== -1) this.postTurnSchedules.splice(swarmIdx, 1);
-      }
-      return;
-    }
-
-    if (entry.name === 'manage_task' && !failed && args?.Action === 'kill') {
-      if (this.registeredManageTaskToolIds.has(toolCallId)) return;
-      this.registeredManageTaskToolIds.add(toolCallId);
-      const scheduleIdx = this.postTurnSchedules.findIndex(
-        (s) => s.kind === 'timer' || s.kind === 'cron'
-      );
-      if (scheduleIdx !== -1) {
-        this.postTurnSchedules.splice(scheduleIdx, 1);
-      }
-    }
-  }
+function stripInternal(raw: Record<string, unknown>): Record<string, unknown> {
+  const { _lodyBackgroundPlaceholder: _ignored, ...rest } = raw;
+  return rest;
 }
 
 export interface AntigravityPollLoopOptions {
+  /** Returns the session's `updatedAt`; omitted when the server lacks `session/list`. */
   listSessionUpdatedAt?: (signal: AbortSignal) => Promise<string | null | undefined>;
-  loadSessionSnapshot: (signal: AbortSignal) => Promise<acp.SessionNotification[]>;
-  consumeSnapshot: (
-    notifications: readonly acp.SessionNotification[],
-    nowMs: number
-  ) => { deltas: acp.SessionNotification[]; hasChanges: boolean };
-  onDeltas: (deltas: readonly acp.SessionNotification[]) => void;
-  shouldStop: (nowMs: number) => boolean;
-  onStep?: (nowMs: number) => void;
-  skipPreStopVerify?: () => boolean;
-  signal?: AbortSignal;
-  timings?: Partial<AntigravityPollTimings>;
+  /** Loads a full snapshot and applies its deltas; returns nothing the loop needs. */
+  loadSnapshot: (signal: AbortSignal) => Promise<void>;
+  /** Whether output changed recently; drives forced reloads while `updatedAt` may be frozen. */
+  isRecentlyActive: (nowMs: number) => boolean;
+  /** Runs after every tick; returns true to stop. */
+  step: (nowMs: number) => boolean;
+  signal: AbortSignal;
+  timings: AntigravityPollTimings;
   onError?: (error: unknown) => void;
 }
 
-class RpcTimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(`Antigravity RPC timed out after ${timeoutMs}ms`);
-    this.name = 'RpcTimeoutError';
-  }
-}
-
-async function runWithTimeoutAndAbort<T>(
+async function withRpcBounds<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
-  parentSignal?: AbortSignal
+  parent: AbortSignal
 ): Promise<T> {
-  if (parentSignal?.aborted) {
-    throw new DOMException('Aborted', 'AbortError');
-  }
-
   const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  parent.addEventListener('abort', onAbort, { once: true });
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let removeParentAbort: (() => void) | undefined;
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new RpcTimeoutError(timeoutMs));
-    }, timeoutMs);
-  });
-
-  const abortPromise = parentSignal
-    ? new Promise<never>((_, reject) => {
-        const onParentAbort = () => {
-          controller.abort();
-          reject(new DOMException('Aborted', 'AbortError'));
-        };
-        parentSignal.addEventListener('abort', onParentAbort, { once: true });
-        removeParentAbort = () => parentSignal.removeEventListener('abort', onParentAbort);
-      })
-    : null;
-
-  const operationPromise = Promise.resolve().then(() => operation(controller.signal));
-  // Suppress late rejections if timeout/abort already won the race.
-  operationPromise.catch(() => {});
-
   try {
+    const operationPromise = operation(controller.signal);
+    operationPromise.catch(() => {});
     return await Promise.race([
       operationPromise,
-      timeoutPromise,
-      ...(abortPromise ? [abortPromise] : []),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`Antigravity RPC timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true }
+        );
+      }),
     ]);
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    removeParentAbort?.();
+    clearTimeout(timer);
+    parent.removeEventListener('abort', onAbort);
   }
 }
 
-async function sleepInterruptible(ms: number, signal?: AbortSignal): Promise<boolean> {
-  if (signal?.aborted) return false;
-  if (ms <= 0) return true;
-
-  return await new Promise<boolean>((resolve) => {
-    let settled = false;
-    const finish = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
       clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      resolve(ok);
-    };
-    const onAbort = () => finish(false);
-    const timer = setTimeout(() => finish(true), ms);
-    signal?.addEventListener('abort', onAbort, { once: true });
+      signal.removeEventListener('abort', done);
+      resolve();
+    }
+    signal.addEventListener('abort', done, { once: true });
   });
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
 }
 
 /**
- * Bound `session/list` + silent `session/load` polling loop for Antigravity post-`end_turn` wakeups.
+ * Bounded read-only poll: `session/list` detects transcript changes, `session/load` fetches them.
+ * Before settling it always loads once more, so a reply finishing within the same `updatedAt`
+ * second as its trigger is not lost.
  */
 export async function runAntigravityPollLoop(options: AntigravityPollLoopOptions): Promise<void> {
-  const timings = { ...DEFAULT_ANTIGRAVITY_POLL_TIMINGS, ...options.timings };
-  const loopStartedAtMs = Date.now();
-
-  let useList = Boolean(options.listSessionUpdatedAt);
-  let lastSeenUpdatedAt: string | null | undefined = undefined;
+  const { signal, timings } = options;
+  let list = options.listSessionUpdatedAt;
+  let lastUpdatedAt: string | null | undefined;
   let baselineCaptured = false;
-  let lastActivityAtMs = loopStartedAtMs;
-  let lastLoadAtMs = loopStartedAtMs;
-  let preStopLoadVerified = false;
-  let consecutiveFailures = 0;
+  let lastLoadAtMs = Date.now();
+  let failures = 0;
 
-  const performSnapshotLoad = async (
-    pendingUpdatedAt: { value: string } | null
-  ): Promise<'loaded' | 'abort' | 'error'> => {
+  const attempt = async (operation: () => Promise<void>): Promise<boolean> => {
     try {
-      const snapshot = await runWithTimeoutAndAbort(
-        options.loadSessionSnapshot,
-        timings.rpcTimeoutMs,
-        options.signal
-      );
-      const loadDoneMs = Date.now();
-      consecutiveFailures = 0;
-      lastLoadAtMs = loadDoneMs;
-      if (pendingUpdatedAt) {
-        lastSeenUpdatedAt = pendingUpdatedAt.value;
-        lastActivityAtMs = loadDoneMs;
-      }
-
-      const { deltas, hasChanges } = options.consumeSnapshot(snapshot, loadDoneMs);
-      if (hasChanges) {
-        lastActivityAtMs = loadDoneMs;
-        preStopLoadVerified = false;
-      }
-      if (deltas.length > 0) {
-        options.onDeltas(deltas);
-      }
-      return 'loaded';
+      await operation();
+      failures = 0;
+      return true;
     } catch (error) {
-      if (isAbortError(error) || options.signal?.aborted) return 'abort';
-      consecutiveFailures += 1;
+      if (signal.aborted) return false;
+      if (list && isMethodNotFoundError(error)) {
+        list = undefined;
+        return true;
+      }
+      failures += 1;
       options.onError?.(error);
-      return 'error';
+      return failures < timings.maxConsecutiveFailures;
     }
   };
+  const load = async () => {
+    await withRpcBounds(options.loadSnapshot, timings.rpcTimeoutMs, signal);
+    lastLoadAtMs = Date.now();
+  };
 
-  while (!options.signal?.aborted && !options.shouldStop(Date.now())) {
-    const nowMs = Date.now();
-    let shouldLoad = !useList;
-    let loadedThisTick = false;
-    let pendingUpdatedAt: { value: string } | null = null;
-
-    if (useList && options.listSessionUpdatedAt) {
-      try {
-        const updatedAt = await runWithTimeoutAndAbort(
-          options.listSessionUpdatedAt,
-          timings.rpcTimeoutMs,
-          options.signal
-        );
-
-        if (!baselineCaptured) {
-          baselineCaptured = true;
-          lastSeenUpdatedAt = updatedAt;
-        } else if (updatedAt != null && updatedAt !== lastSeenUpdatedAt) {
-          pendingUpdatedAt = { value: updatedAt };
-          preStopLoadVerified = false;
-          shouldLoad = true;
-        } else if (
-          nowMs - lastActivityAtMs <= timings.wakeupPlannerGraceMs &&
-          nowMs - lastLoadAtMs >= timings.sameSecondLoadCheckMs
-        ) {
-          shouldLoad = true;
-        }
-
-        if (!shouldLoad) {
-          consecutiveFailures = 0;
-        }
-      } catch (error) {
-        if (isAbortError(error) || options.signal?.aborted) break;
-        if (isMethodNotFoundError(error)) {
-          useList = false;
-          shouldLoad = true;
-        } else {
-          consecutiveFailures += 1;
-          options.onError?.(error);
-          if (consecutiveFailures >= timings.maxConsecutiveFailures) break;
-        }
+  while (!signal.aborted) {
+    await sleep(list ? timings.listPollIntervalMs : timings.loadFallbackPollIntervalMs, signal);
+    if (signal.aborted) break;
+    const continued = await attempt(async () => {
+      const listFn = list;
+      if (!listFn) {
+        await load();
+        return;
       }
-    }
-
-    if (shouldLoad && !options.signal?.aborted) {
-      const outcome = await performSnapshotLoad(pendingUpdatedAt);
-      if (outcome === 'abort') break;
-      if (outcome === 'error' && consecutiveFailures >= timings.maxConsecutiveFailures) break;
-      if (outcome === 'loaded') loadedThisTick = true;
-    }
-
-    const postStepNowMs = Date.now();
-    options.onStep?.(postStepNowMs);
-    if (options.signal?.aborted) {
-      break;
-    }
-    if (options.shouldStop(postStepNowMs)) {
-      if (!loadedThisTick && !preStopLoadVerified && useList && !options.skipPreStopVerify?.()) {
-        preStopLoadVerified = true;
-        const verifyOutcome = await performSnapshotLoad(null);
-        if (verifyOutcome === 'abort' || options.signal?.aborted) {
-          break;
-        }
-        if (verifyOutcome === 'error' && consecutiveFailures >= timings.maxConsecutiveFailures) {
-          break;
-        }
-        const postVerifyNowMs = Date.now();
-        options.onStep?.(postVerifyNowMs);
-        if (options.signal?.aborted || options.shouldStop(postVerifyNowMs)) {
-          break;
-        }
-      } else {
-        break;
+      const updatedAt = await withRpcBounds(listFn, timings.rpcTimeoutMs, signal);
+      const changed = baselineCaptured ? updatedAt != null && updatedAt !== lastUpdatedAt : true;
+      baselineCaptured = true;
+      const nowMs = Date.now();
+      if (
+        changed ||
+        (options.isRecentlyActive(nowMs) && nowMs - lastLoadAtMs >= timings.activeLoadIntervalMs)
+      ) {
+        await load();
       }
+      lastUpdatedAt = updatedAt;
+    });
+    if (!continued || signal.aborted) break;
+    if (options.step(Date.now())) {
+      if (!(await attempt(load)) || signal.aborted || options.step(Date.now())) break;
     }
-
-    const intervalMs = useList ? timings.listPollIntervalMs : timings.loadFallbackPollIntervalMs;
-    const wokeNormally = await sleepInterruptible(intervalMs, options.signal);
-    if (!wokeNormally) break;
   }
 }
