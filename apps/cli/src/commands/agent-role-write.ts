@@ -60,7 +60,8 @@ export function agentRoleWriteCommand(action: 'create' | 'update'): Command {
   } else {
     command
       .argument('<role-id>')
-      .option('--machine <id>', 'Machine target whose memory --memory or --no-memory changes')
+      .option('--machine <id>', 'Machine target to add or whose memory to change')
+      .option('--agent-config-id <id>', 'Agent config on --machine; adds that machine to the Role')
       .option('--memory <provider:id>', 'Memory identity on that machine (see lody memory list)')
       .option('--no-memory', 'Unlink the memory of that machine target');
   }
@@ -73,17 +74,36 @@ export function agentRoleWriteCommand(action: 'create' | 'update'): Command {
           'Pass --session or set LODY_SESSION_ID; a proposal needs an active conversation'
         );
       const fields: Record<string, unknown> = Object.fromEntries(
-        (['name', 'description', 'promptPrefix', 'machineId', 'agentConfigId'] as const)
+        (
+          [
+            'name',
+            'description',
+            'promptPrefix',
+            'machineId',
+            ...(action === 'create' ? (['agentConfigId'] as const) : []),
+          ] as const
+        )
           .filter((key) => options[key] !== undefined)
           .map((key) => [key, options[key]])
       );
       const memory = options.memory === undefined ? undefined : parseMemoryOption(options.memory);
       if (action === 'create' && memory) fields.memory = memory;
       if (action === 'update') {
-        if ((options.machine === undefined) !== (memory === undefined))
-          throw new Error('Pass --machine together with --memory or --no-memory');
+        const change = memory !== undefined || options.agentConfigId !== undefined;
+        if ((options.machine === undefined) === change)
+          throw new Error(
+            'Pass --machine together with --agent-config-id, --memory or --no-memory'
+          );
         if (options.machine !== undefined)
-          fields.targets = [{ machineId: options.machine, memory }];
+          fields.targets = [
+            {
+              machineId: options.machine,
+              ...(options.agentConfigId !== undefined
+                ? { agentConfigId: options.agentConfigId }
+                : {}),
+              ...(memory !== undefined ? { memory } : {}),
+            },
+          ];
       }
       if (options.file !== undefined && Object.keys(fields).length > 0)
         throw new Error('Use either --file or direct Role field options, not both');

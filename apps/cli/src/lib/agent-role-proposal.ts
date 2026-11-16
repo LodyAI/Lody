@@ -121,6 +121,13 @@ export async function proposeAgentRole(args: {
     const roleId = command.action === 'update' ? command.roleId : randomUUID();
     // Ownership, existence, names and targets fail before any provider probe.
     applyAgentRoleProposal({ command, requesterUserId: userId, roleId }, roles, userId, 0);
+    for (const target of targetPatches ?? [])
+      if (
+        target.agentConfigId &&
+        existing &&
+        !getAgentRoleTarget(existing, target.machineId as MachineId)
+      )
+        await args.validateTarget(target.machineId, target.agentConfigId);
     const memoryImports: MemoryAssociation[] = [];
     for (const binding of bindings) {
       const pending = await args.validateMemory(binding.machineId, binding.memory);
@@ -143,9 +150,13 @@ export async function proposeAgentRole(args: {
               ...(targetPatches
                 ? {
                     targets: targetPatches.map(({ machineId }) => {
-                      const memory = getAgentRoleTarget(existing, machineId as MachineId)?.runConfig
-                        .memory;
-                      return { machineId, ...(memory ? { memory } : {}) };
+                      const current = getAgentRoleTarget(existing, machineId as MachineId);
+                      const memory = current?.runConfig.memory;
+                      return {
+                        machineId,
+                        ...(current ? { agentConfigId: current.agentConfigId } : {}),
+                        ...(memory ? { memory } : {}),
+                      };
                     }),
                   }
                 : {}),

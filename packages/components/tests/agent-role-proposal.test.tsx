@@ -17,6 +17,7 @@ vi.mock('@/atoms', async () => ({ userAtom: (await import('jotai')).atom({ id: '
 vi.mock('@/atoms/agents', async () => ({
   getAllAgentConfigAtom: (await import('jotai')).atom([
     { id: 'agent', machineId: 'machine', name: 'Code Agent' },
+    { id: 'build-agent', machineId: 'build', name: 'Build Agent' },
   ]),
 }));
 vi.mock('@/atoms/runtime', async () => ({
@@ -244,9 +245,9 @@ describe('Role proposal confirmation', () => {
     };
     await render();
     expect(container.textContent).toContain(
-      'Build box: Not linked → Scout · imported into Lody on Save'
+      'Build box: Memory Not linked → Scout · imported into Lody on Save'
     );
-    expect(container.textContent).toContain('This Mac: reviewer → Not linked');
+    expect(container.textContent).toContain('This Mac: Memory reviewer → Not linked');
     expect(state.rows.size).toBe(1);
     await click('Save');
     expect(container.querySelector('[role="alert"]')).toBeNull();
@@ -265,6 +266,56 @@ describe('Role proposal confirmation', () => {
       targets: [
         { machineId: 'machine', runConfig: {} },
         { machineId: 'build', runConfig: { memory: scout } },
+      ],
+    });
+    expect(state.meta.outcome).toBe('saved');
+  });
+  it('adds a machine target only when its Agent config is on that machine', async () => {
+    state.rows.set(JSON.stringify(['agentRole', 'role']), {
+      v: 1,
+      id: 'role',
+      ownerUserId: 'user',
+      visibility: 'private',
+      name: 'Reviewer',
+      machineId: 'machine',
+      agentConfigId: 'agent',
+      runConfig: {},
+      revision: 1,
+      createdAt: 0,
+      updatedAt: 1,
+    });
+    const propose = (agentConfigId: string): AgentRoleProposalMeta => ({
+      roleId: 'role',
+      requesterUserId: 'user',
+      before: { name: 'Reviewer', targets: [{ machineId: 'build' }] },
+      command: {
+        action: 'update',
+        requestId: 'request',
+        roleId: 'role',
+        patch: { targets: [{ machineId: 'build', agentConfigId }] },
+      },
+    });
+    // `agent` exists, but on another machine.
+    state.meta = propose('agent');
+    await render();
+    expect(container.textContent).toContain('Build box: Added · Code Agent · Memory unchanged');
+    await click('Save');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'The selected Agent configuration is unavailable'
+    );
+    expect(state.meta.outcome).toBeUndefined();
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    state.meta = propose('build-agent');
+    await render();
+    expect(container.textContent).toContain('Build box: Added · Build Agent · Memory unchanged');
+    await click('Save');
+    expect(state.rows.get(JSON.stringify(['agentRole', 'role']))).toMatchObject({
+      v: 2,
+      revision: 2,
+      targets: [
+        { machineId: 'machine', agentConfigId: 'agent', runConfig: {} },
+        { machineId: 'build', agentConfigId: 'build-agent', runConfig: {} },
       ],
     });
     expect(state.meta.outcome).toBe('saved');

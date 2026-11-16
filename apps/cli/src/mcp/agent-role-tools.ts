@@ -45,8 +45,8 @@ export function registerAgentRoleTools(
     'lody_agent_role_update',
     {
       summary:
-        'Propose name, instruction or per-machine memory edits to a saved agent Role; user Save is required.',
-      description: `Propose changes to a Role you manage. Read it with lody_agent_role_get first. Omitted patch fields stay unchanged; empty description or promptPrefix clears that field. patch.targets names machines the Role already runs on: memory binds an identity on that machine, null unlinks it. Other Role configuration is preserved. ${memory} ${consent}`,
+        'Propose name, instruction, machine or per-machine memory edits to a saved agent Role; user Save is required.',
+      description: `Propose changes to a Role you manage. Read it with lody_agent_role_get first. Omitted patch fields stay unchanged; empty description or promptPrefix clears that field. patch.targets entries name a machine: agentConfigId adds a machine the Role does not run on yet, using that Agent's defaults (an existing target keeps its Agent config); memory binds an identity on that machine, null unlinks it. Other Role configuration is preserved. ${memory} ${consent}`,
       inputSchema: AgentRoleUpdateProposalSchema,
     },
     (args) => call({ action: 'update', ...args })

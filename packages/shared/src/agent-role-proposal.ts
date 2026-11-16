@@ -9,6 +9,7 @@ import {
   normalizeAgentRoleMentionSlug,
   withAgentRoleTargets,
   type AgentRole,
+  type AgentRoleTarget,
 } from './agent-role';
 import type { AgentConfigId, AgentRoleId, MachineId } from './ids';
 import { MemoryAssociationSchema, MemoryBindingSchema } from './memory-provider';
@@ -36,10 +37,22 @@ export const AgentRoleCreateProposalSchema = z
     memory: MemoryBindingSchema.optional(),
   })
   .strict();
-/** One existing machine target of the Role; `memory: null` unlinks it. */
+/**
+ * One machine target. A machine the Role does not run on yet is added with
+ * `agentConfigId` and that Agent's defaults; an existing target keeps its Agent
+ * config. `memory` binds an identity on that machine and `null` unlinks it.
+ */
 export const AgentRoleTargetPatchSchema = z
-  .object({ machineId: id, memory: MemoryBindingSchema.nullable() })
-  .strict();
+  .object({
+    machineId: id,
+    agentConfigId: id.optional(),
+    memory: MemoryBindingSchema.nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (target) => target.agentConfigId !== undefined || target.memory !== undefined,
+    'A target change needs agentConfigId or memory'
+  );
 export type AgentRoleTargetPatch = z.infer<typeof AgentRoleTargetPatchSchema>;
 export const AGENT_ROLE_PROPOSAL_MAX_TARGETS = 16;
 export const AgentRoleUpdateProposalSchema = z
@@ -79,9 +92,18 @@ export const AgentRoleProposalMetaSchema = z.object({
       name: fields.name,
       description: fields.description.optional(),
       promptPrefix: fields.promptPrefix.optional(),
-      /** Each patched target's memory before the proposal; absent memory means unlinked. */
+      /**
+       * Each patched target before the proposal. A missing agentConfigId means the
+       * machine is being added; absent memory means unlinked.
+       */
       targets: z
-        .array(z.object({ machineId: id, memory: MemoryBindingSchema.optional() }))
+        .array(
+          z.object({
+            machineId: id,
+            agentConfigId: id.optional(),
+            memory: MemoryBindingSchema.optional(),
+          })
+        )
         .max(AGENT_ROLE_PROPOSAL_MAX_TARGETS)
         .optional(),
     })
@@ -149,17 +171,34 @@ function patchAgentRole(
   const next = { ...role, ...fields };
   if (!changes) return next;
   const targets = getAgentRoleTargets(next);
-  for (const change of changes)
-    if (!targets.some((target) => target.machineId === change.machineId))
-      throw new Error(`Agent Role does not run on machine ${change.machineId}`);
+  const added: AgentRoleTarget[] = [];
+  for (const change of changes) {
+    const current = targets.find((target) => target.machineId === change.machineId);
+    if (current) {
+      if (change.agentConfigId !== undefined && change.agentConfigId !== current.agentConfigId)
+        throw new Error(
+          `Agent Role already runs on machine ${change.machineId}; change its Agent configuration in Settings`
+        );
+      continue;
+    }
+    if (change.agentConfigId === undefined)
+      throw new Error(
+        `Agent Role does not run on machine ${change.machineId}; pass agentConfigId to add it`
+      );
+    added.push({
+      machineId: change.machineId as MachineId,
+      agentConfigId: change.agentConfigId as AgentConfigId,
+      runConfig: change.memory ? { memory: change.memory } : {},
+    });
+  }
   const [first, ...rest] = targets.map((target) => {
     const change = changes.find((candidate) => candidate.machineId === target.machineId);
-    if (!change) return target;
+    if (!change || change.memory === undefined) return target;
     const { memory: _memory, ...runConfig } = target.runConfig;
     return {
       ...target,
       runConfig: change.memory ? { ...runConfig, memory: change.memory } : runConfig,
     };
   });
-  return withAgentRoleTargets(next, [first!, ...rest]);
+  return withAgentRoleTargets(next, [first!, ...rest, ...added]);
 }

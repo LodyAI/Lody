@@ -391,8 +391,10 @@ recreated. New Roles are private, bind explicit machineId + agentConfigId, and u
 defaults plus an optional memory binding.
 
 Memory is a `{ providerId, memoryId }` reference on one machine target
-([memory contract](../../../../specs/agent-role-memory.md#agent-proposals)). `patch.targets`
-names machines the Role already runs on; `memory: null` unlinks. Preparation checks
+([memory contract](../../../../specs/agent-role-memory.md#agent-proposals)). Each
+`patch.targets` entry names a machine. `agentConfigId` adds a machine the Role does not run
+on yet, with that Agent's defaults ([targets](../../../../specs/agent-role-machine-targets.md#agent-proposals));
+an existing target keeps its Agent config. `memory: null` unlinks. Preparation checks
 ownership and targets first, then that each identity is imported on its machine or listed
 by that machine's provider. A listed identity that is not imported travels as
 `memoryImports` in the card, and Save imports it before writing the Role.
@@ -415,12 +417,14 @@ lody agent-role update ROLE_ID --name "Reviewer" --description "" \
   --prompt-prefix "Focus on correctness"
 lody agent-role update ROLE_ID --machine MACHINE_ID --memory nowledge-mem:reviewer
 lody agent-role update ROLE_ID --machine MACHINE_ID --no-memory
+lody agent-role update ROLE_ID --machine MACHINE_ID --agent-config-id CONFIG_ID \
+  --memory nowledge-mem:reviewer
 ```
 
 Creation requires `--name`, `--machine-id`, and `--agent-config-id`; description,
 prompt prefix and `--memory` are optional. Updates accept `--name`, `--description`,
-`--prompt-prefix`, and `--machine` with `--memory` or `--no-memory`, and require at
-least one field. Several machines in one update use a file with `targets`. Omitted fields stay unchanged;
+`--prompt-prefix`, and `--machine` with `--agent-config-id` (to add that machine),
+`--memory` or `--no-memory`, and require at least one field. Several machines in one update use a file with `targets`. Omitted fields stay unchanged;
 `--description ""` and `--prompt-prefix ""` clear the corresponding text.
 For multiline instructions, the shell can supply `--prompt-prefix "$(cat reviewer.md)"`.
 
