@@ -597,6 +597,7 @@ private fun MarkdownText(text: String, modifier: Modifier, secondary: Boolean) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
     val state = rememberMarkdownState(content = text, retainState = true)
+    val (fileLinks, fileLinkIcons) = rememberFileLinkMarkdown()
     Markdown(
         markdownState = state,
         modifier = modifier.fillMaxWidth(),
@@ -627,5 +628,7 @@ private fun MarkdownText(text: String, modifier: Modifier, secondary: Boolean) {
             table = type.bodySmall,
         ),
         components = markdownComponents(codeBlock = highlightedCodeBlock, codeFence = highlightedCodeFence),
+        annotator = fileLinks,
+        inlineContent = fileLinkIcons,
     )
 }
