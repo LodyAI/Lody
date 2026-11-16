@@ -46,7 +46,8 @@ Session metadata rather than model name, and updates the
 [rendering rule](../../../../packages/components/src/components/ai-gui/AGENTS.md) and
 [draft Spec](../../../../specs/deepseek-thought-visibility.md). The provider flag
 participates in row-cache identity. Thought-only groups receive a disclosure
-label; expanded groups preserve thought/tool ordering. Folding
+label; expanded groups preserve thought/tool ordering. Since 2026-11-16 every
+provider shows thoughts and the provider flag is removed. Folding
 and removing rows are different behaviors; expanding a group cannot restore rows
 that were never constructed. This filter is provider-independent.
 
