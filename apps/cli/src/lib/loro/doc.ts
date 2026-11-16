@@ -2104,19 +2104,6 @@ export class LoroDocumentManager {
     return agentConfigId;
   }
 
-  /**
-   * Historical hook kept for startup flow compatibility. Title generation defaults are
-   * now runtime-only and are not persisted into agent config meta.
-   */
-  async applyTitleGenerationDefaults(
-    _cliType: AgentConfigCliType,
-    _agentType: string,
-    _configOptions: AcpConfigOptionSummary[]
-  ): Promise<void> {
-    // Intentionally no-op. New builtin agent configs no longer persist title defaults;
-    // runtime generation computes least-privilege defaults from current ACP configOptions.
-  }
-
   async registerMachine(machineId: MachineId, machine: MachineMetaPatch): Promise<void> {
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);

@@ -1379,7 +1379,6 @@ describe('machine E2EE local runtime', () => {
     ['activated', 'custody'],
     ['staged', 'device'],
     ['activated', 'device'],
-    ['activated', 'legacy-device'],
   ] as const)(
     'pairs again after %s machine %s loss only in a new explicit session, retaining old evidence',
     async (phase, loss) => {
@@ -1530,15 +1529,6 @@ describe('machine E2EE local runtime', () => {
           await pending.close();
         }
         const oldRuntime = await readdir(join(root, 'runtime'));
-        if (loss === 'legacy-device')
-          await fs.rename(
-            join(
-              root,
-              'custody',
-              `device-credential-${hex(fixture.genesis.toBytes())}-${original.signingPublicKey}.sealed`
-            ),
-            join(root, 'custody', `device-credential-${hex(fixture.genesis.toBytes())}.sealed`)
-          );
         const journal = new DatabaseSync(join(root, 'pairings.sqlite'));
         const retainedMaterial = journal
           .prepare('SELECT material FROM pairings WHERE session=?')
@@ -1602,17 +1592,13 @@ describe('machine E2EE local runtime', () => {
   );
 
   it.each([
-    ['scoped', 'acquire', 'same'],
-    ['scoped', 'acquire', 'successor'],
-    ['scoped', 'device', 'same'],
-    ['scoped', 'device', 'successor'],
-    ['legacy', 'acquire', 'same'],
-    ['legacy', 'acquire', 'successor'],
-    ['legacy', 'device', 'same'],
-    ['legacy', 'device', 'successor'],
+    ['acquire', 'same'],
+    ['acquire', 'successor'],
+    ['device', 'same'],
+    ['device', 'successor'],
   ] as const)(
-    'retries replacement with old %s evidence after %s failure through %s session',
-    async (location, phase, retry) => {
+    'retries replacement with old evidence after %s failure through %s session',
+    async (phase, retry) => {
       const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-old-evidence-'));
       try {
         const fixture = await execute(setup(directory));
@@ -1642,16 +1628,11 @@ describe('machine E2EE local runtime', () => {
             })
           );
         const original = await prepare('01');
-        const scoped = join(
+        const credentialPath = join(
           root,
           'custody',
           `device-credential-${context.genesisHash}-${original.signingPublicKey}.sealed`
         );
-        const credentialPath =
-          location === 'legacy'
-            ? join(root, 'custody', `device-credential-${context.genesisHash}.sealed`)
-            : scoped;
-        if (location === 'legacy') await fs.rename(scoped, credentialPath);
         const protectedCredential = await readFile(credentialPath);
         await fs.unlink(join(root, 'custody', `${context.genesisHash}.machine.device`));
         const failure = new Error('synthetic transient failure before device publication');
@@ -1788,108 +1769,98 @@ describe('machine E2EE local runtime', () => {
     }
   );
 
-  it.each(['scoped', 'legacy'] as const)(
-    'takes over an unfinished generation with %s credential after custody failure without replacing originals or letting the old session publish',
-    async (location) => {
-      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-generation-takeover-'));
+  it('takes over an unfinished generation after custody failure without replacing originals or letting the old session publish', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-generation-takeover-'));
+    try {
+      const fixture = await execute(setup(directory));
+      const root = join(directory, 'journal');
+      await fs.mkdir(root);
+      const context = {
+        accountId: 'account',
+        machineId: 'machine',
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesisRecord),
+        membershipId: '0a'.repeat(16),
+        frontendSigningPublicKey: fixture.sender,
+      };
+      let fail = false;
+      let original: { signingPublicKey: string; credentialHash: string } | undefined;
+      const custody = makeCliE2eeCustody({
+        directory: join(root, 'custody'),
+        keyring: noKeyring,
+      }).pipe(
+        Effect.map((owner) => ({
+          ...owner,
+          prepareDeviceCredential: (genesis, key) =>
+            owner.prepareDeviceCredential(genesis, key).pipe(
+              Effect.flatMap((credential) => {
+                if (fail) {
+                  fail = false;
+                  original = {
+                    signingPublicKey: hex(key.toBytes()),
+                    credentialHash: credential.credentialHash,
+                  };
+                  return Effect.fail(new Error('synthetic custody result lost'));
+                }
+                return Effect.succeed(credential);
+              })
+            ),
+        }))
+      );
+      const prepare = (session: string) =>
+        execute(
+          Effect.gen(function* () {
+            const journal = yield* openMachinePairingJournal(root);
+            return yield* journal.prepare({ ...context, pairingSessionId: session }, custody);
+          })
+        );
+      const previous = await prepare('01'.repeat(16));
+      const originalDb = new DatabaseSync(join(root, 'pairings.sqlite'));
+      const originalMaterial = originalDb
+        .prepare('SELECT material FROM pairings WHERE session=?')
+        .get(previous.pairingSessionId)?.material;
+      originalDb.close();
+      await rm(join(root, 'custody'), { recursive: true });
+      fail = true;
+      await expect(prepare('02'.repeat(16))).rejects.toThrow();
+      if (!original) throw new Error('failed preparation did not retain originals');
+      const devicePath = join(root, 'custody', context.genesisHash + '.machine.device');
+      const credentialPath = join(
+        root,
+        'custody',
+        `device-credential-${context.genesisHash}-${original.signingPublicKey}.sealed`
+      );
+      const protectedCredential = await readFile(credentialPath);
+      await fs.rename(devicePath, devicePath + '.retained');
+      await expect(prepare('03'.repeat(16))).rejects.toMatchObject({ code: 'conflict' });
+      await expect(readFile(devicePath)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(credentialPath)).toEqual(protectedCredential);
+      await fs.rename(devicePath + '.retained', devicePath);
+      const recovered = await prepare('03'.repeat(16));
+      expect(recovered).toMatchObject(original);
+      expect(recovered.signingPublicKey).not.toBe(previous.signingPublicKey);
+      await expect(prepare('02'.repeat(16))).rejects.toThrow();
+      expect(await prepare('03'.repeat(16))).toEqual(recovered);
+      const db = new DatabaseSync(join(root, 'pairings.sqlite'));
       try {
-        const fixture = await execute(setup(directory));
-        const root = join(directory, 'journal');
-        await fs.mkdir(root);
-        const context = {
-          accountId: 'account',
-          machineId: 'machine',
-          workspaceId: 'workspace',
-          genesisHash: hex(fixture.genesis.toBytes()),
-          genesisRecordHex: hex(fixture.genesisRecord),
-          membershipId: '0a'.repeat(16),
-          frontendSigningPublicKey: fixture.sender,
-        };
-        let fail = false;
-        let original: { signingPublicKey: string; credentialHash: string } | undefined;
-        const custody = makeCliE2eeCustody({
-          directory: join(root, 'custody'),
-          keyring: noKeyring,
-        }).pipe(
-          Effect.map((owner) => ({
-            ...owner,
-            prepareDeviceCredential: (genesis, key) =>
-              owner.prepareDeviceCredential(genesis, key).pipe(
-                Effect.flatMap((credential) => {
-                  if (fail) {
-                    fail = false;
-                    original = {
-                      signingPublicKey: hex(key.toBytes()),
-                      credentialHash: credential.credentialHash,
-                    };
-                    return Effect.fail(new Error('synthetic custody result lost'));
-                  }
-                  return Effect.succeed(credential);
-                })
-              ),
-          }))
-        );
-        const prepare = (session: string) =>
-          execute(
-            Effect.gen(function* () {
-              const journal = yield* openMachinePairingJournal(root);
-              return yield* journal.prepare({ ...context, pairingSessionId: session }, custody);
-            })
-          );
-        const previous = await prepare('01'.repeat(16));
-        const originalDb = new DatabaseSync(join(root, 'pairings.sqlite'));
-        const originalMaterial = originalDb
-          .prepare('SELECT material FROM pairings WHERE session=?')
-          .get(previous.pairingSessionId)?.material;
-        originalDb.close();
-        await rm(join(root, 'custody'), { recursive: true });
-        fail = true;
-        await expect(prepare('02'.repeat(16))).rejects.toThrow();
-        if (!original) throw new Error('failed preparation did not retain originals');
-        const devicePath = join(root, 'custody', context.genesisHash + '.machine.device');
-        const scopedCredential = join(
-          root,
-          'custody',
-          `device-credential-${context.genesisHash}-${original.signingPublicKey}.sealed`
-        );
-        const credentialPath =
-          location === 'legacy'
-            ? join(root, 'custody', `device-credential-${context.genesisHash}.sealed`)
-            : scopedCredential;
-        if (location === 'legacy') await fs.rename(scopedCredential, credentialPath);
-        const protectedCredential = await readFile(credentialPath);
-        await fs.rename(devicePath, devicePath + '.retained');
-        await expect(prepare('03'.repeat(16))).rejects.toMatchObject({ code: 'conflict' });
-        await expect(readFile(devicePath)).rejects.toMatchObject({ code: 'ENOENT' });
-        expect(await readFile(credentialPath)).toEqual(protectedCredential);
-        await fs.rename(devicePath + '.retained', devicePath);
-        const recovered = await prepare('03'.repeat(16));
-        expect(recovered).toMatchObject(original);
-        expect(recovered.signingPublicKey).not.toBe(previous.signingPublicKey);
-        await expect(prepare('02'.repeat(16))).rejects.toThrow();
-        expect(await prepare('03'.repeat(16))).toEqual(recovered);
-        const db = new DatabaseSync(join(root, 'pairings.sqlite'));
-        try {
-          expect(
-            db.prepare('SELECT material FROM pairings WHERE session=?').get('02'.repeat(16))
-              ?.material
-          ).toBeNull();
-          expect(
-            db
-              .prepare('SELECT material FROM pairings WHERE session=?')
-              .get(previous.pairingSessionId)?.material
-          ).toBe(originalMaterial);
-          expect(
-            db.prepare('SELECT session FROM current_identity WHERE singleton=1').get()?.session
-          ).toBe(recovered.pairingSessionId);
-        } finally {
-          db.close();
-        }
+        expect(
+          db.prepare('SELECT material FROM pairings WHERE session=?').get('02'.repeat(16))?.material
+        ).toBeNull();
+        expect(
+          db.prepare('SELECT material FROM pairings WHERE session=?').get(previous.pairingSessionId)
+            ?.material
+        ).toBe(originalMaterial);
+        expect(
+          db.prepare('SELECT session FROM current_identity WHERE singleton=1').get()?.session
+        ).toBe(recovered.pairingSessionId);
       } finally {
-        await rm(directory, { recursive: true, force: true });
+        db.close();
       }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
-  );
+  });
 
   it('allows a first generation to recover in another session after custody acquisition fails', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-first-takeover-'));

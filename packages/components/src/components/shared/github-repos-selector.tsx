@@ -27,7 +27,6 @@ interface GitHubReposSelectorProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
-  tone?: 'light' | 'dark';
   latestMessageAtByRepo?: ReadonlyMap<string, number>;
   autoSelectSingle?: boolean; // 是否在只有一个仓库时自动选中
   onConnectGitRepo?: () => void;
@@ -42,7 +41,6 @@ export function GitHubReposSelector({
   placeholder,
   className,
   disabled = false,
-  tone = 'light',
   latestMessageAtByRepo,
   autoSelectSingle = false,
   onConnectGitRepo,
@@ -151,7 +149,6 @@ export function GitHubReposSelector({
       }}
       placeholder={placeholder || t('chat.repoPlaceholder', { defaultValue: 'Select repository' })}
       placeholderIcon={Github}
-      tone={tone}
       appearance="field"
       className={className}
       // Nothing to pick (no repos, and no "Connect repositories" affordance) → keep the

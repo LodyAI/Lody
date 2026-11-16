@@ -263,8 +263,6 @@ export interface ChatComposerProps {
   visualAnnotationReferenceItems?: VisualAnnotationReferenceChipItem[];
   /** Remove a visual annotation reference by localId */
   onVisualAnnotationReferenceRemove?: (localId: string) => void;
-  /** @deprecated Use footerSelector instead */
-  selector?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, agent) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -378,7 +376,6 @@ export function ChatComposer({
   revealCommentReferenceRemoveOnClick = false,
   visualAnnotationReferenceItems = [],
   onVisualAnnotationReferenceRemove,
-  selector,
   topSelector,
   footerSelector,
   bottomBar,
@@ -1403,7 +1400,7 @@ export function ChatComposer({
                     the run-config face rather than wrapping config chips onto a
                     second line (especially on mobile). */}
                 <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
-                  {footerSelector ?? selector}
+                  {footerSelector}
                 </div>
 
                 <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -1474,7 +1471,7 @@ export function ChatComposer({
             ) : null}
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex w-full flex-wrap select-none items-end gap-2">{selector}</div>
+              <div className="flex w-full flex-wrap select-none items-end gap-2" />
 
               <div className="flex w-full flex-col select-none gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:justify-end">
                 {secondaryAction ? (

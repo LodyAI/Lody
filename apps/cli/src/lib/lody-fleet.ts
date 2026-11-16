@@ -1345,7 +1345,6 @@ export class LodyFleet {
           ? {
               evaluate: async () => {},
               dispose: async () => {},
-              hasUncertainLegacyQuota: () => false,
             }
           : await createScheduleWorkspace({
               manager: startedLody.documentManager,
@@ -1382,7 +1381,6 @@ export class LodyFleet {
           ? undefined
           : await createAutomationWorkspaceLegacy({
               lody: startedLody,
-              hasUncertainLegacyQuota: schedules.hasUncertainLegacyQuota,
               workspace,
               logger: workspaceLogger,
               verifyRemoteControl: this.remoteAutomationVerifier(workspace),
@@ -1570,7 +1568,6 @@ export class LodyFleet {
     if (state.automationsStart) return state.automationsStart;
     const pending = createAutomationWorkspaceLegacy({
       lody: state.lody,
-      hasUncertainLegacyQuota: state.schedules.hasUncertainLegacyQuota,
       workspace: state.workspace,
       logger: this.logger,
       verifyRemoteControl: this.remoteAutomationVerifier(state.workspace),

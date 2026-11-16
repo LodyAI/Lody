@@ -59,10 +59,6 @@ import {
   SessionForkSpecSchema,
   SessionIdSchema,
   AgentConfigIdSchema,
-  SessionPreparationCancelSpecSchema,
-  SessionPreparationSpecSchema,
-  SessionPrepareCancelResponseSchema,
-  SessionPrepareResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewCreateRequestSchema,
   SessionPreviewCreateResponseSchema,
@@ -502,14 +498,6 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('session/prepare'),
-    params: SessionPreparationSpecSchema,
-  }).strict(),
-  BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('session/prepare-cancel'),
-    params: SessionPreparationCancelSpecSchema,
-  }).strict(),
-  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/steer'),
     params: z
       .object({
@@ -707,8 +695,6 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
   SessionForkResponseSchema,
-  SessionPrepareResponseSchema,
-  SessionPrepareCancelResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   SessionSteerResponseSchema,

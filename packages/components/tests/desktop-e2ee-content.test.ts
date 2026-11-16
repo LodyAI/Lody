@@ -518,7 +518,7 @@ describe('reading an epoch whose key this device has not received yet', () => {
       expect(await second).toEqual(Uint8Array.of(42));
       expect(refresh).toHaveBeenCalledTimes(1);
       // Explicit reception: a portable host's bare refresh would skip the key round.
-      expect(refresh).toHaveBeenCalledWith('rotated', { installKeys: true, keyMode: 'receive' });
+      expect(refresh).toHaveBeenCalledWith('rotated', { keyMode: 'receive' });
       expect(opens).toEqual([false, false, true, true]);
     } finally {
       await access.close();
@@ -541,7 +541,7 @@ describe('reading an epoch whose key this device has not received yet', () => {
       refresh,
     } as unknown as Partial<E2eeWorkspaceRuntime>);
     expect(await pending.open()).toEqual(Uint8Array.of(7));
-    expect(refresh).toHaveBeenCalledWith('rotated', { installKeys: true, keyMode: 'receive' });
+    expect(refresh).toHaveBeenCalledWith('rotated', { keyMode: 'receive' });
     await pending.access.close();
 
     const other = vi.fn();

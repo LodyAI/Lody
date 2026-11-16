@@ -71,7 +71,7 @@
   "src/protocol/subscription-quota.ts": "72ee9b64fd6f965f8b1b62130cc39993d63da76836e00029b9fe2af8ca48cf13",
   "src/protocol/turnMetadata.ts": "4b10f831fbafd4efb67fc80f1c3b3f0b9ccf71ea62c53dddc711fa620c479f68",
   "src/runtime/agent-roles.ts": "fc6bed1f13968fae8aea3ed8d922a10c685d7a0e895dc80187dcf96735adb0b3",
-  "src/runtime/archive-session.ts": "e957d71b5de1ae9fb5c12d00ea95480ea2b6947129dcd877f40e1ba35f0e6677",
+  "src/runtime/archive-session.ts": "57015f7fb909c729c0ef48c02daa25518a883bae6cc26820067d713d715ce401",
   "src/runtime/billing.ts": "ff5be1b77b0bfff615a8d8be3774c8ec605ef7ea98eb7925e56e151936ab78a7",
   "src/runtime/capability-refresh.ts": "3157a41aefae0a6b16ea8f202247956143e6260dfd1c0a6f750ab56b8663bc00",
   "src/runtime/channel.ts": "0586f8f92471e58bd607399117ee89552eb5fd3c03f1fee72b0cd84791746320",

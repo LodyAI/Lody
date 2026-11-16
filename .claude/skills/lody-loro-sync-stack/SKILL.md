@@ -10,7 +10,7 @@ description: The Lody Loro sync stack — how durable document synchronization a
 Lody moves state over Loro Streams on planes with different guarantees. Mixing them
 is the source of the worst bugs in this subsystem.
 
-**Durable documents** — session history, workspace meta, tasks, preview comments.
+**Durable documents** — session history, workspace meta, preview comments (plus legacy task documents from the removed Tasks product).
 Ordered, persisted, replayed from an offset, and never dropped. Owned by
 `StreamsTransportAdapter` (`apps/cli/src/lib/loro/streams-transport.ts`). If a
 reader must receive something, it goes here.
@@ -129,8 +129,8 @@ exactly `lody`.
 | --- | --- |
 | Workspace meta | `<workspaceId>:meta` |
 | Session | `<workspaceId>:s:<sessionId>` |
-| Task | `<workspaceId>:tk:<taskId>` |
-| Task index Flock | `<workspaceId>:ti` |
+| Task (legacy, read only for account deletion) | `<workspaceId>:tk:<taskId>` |
+| Task index Flock (legacy, read only for account deletion) | `<workspaceId>:ti` |
 | Preview comments | `<workspaceId>:pc:<sessionId>` |
 | Code Collab file index | `<workspaceId>:fi:<masterSessionId>` |
 

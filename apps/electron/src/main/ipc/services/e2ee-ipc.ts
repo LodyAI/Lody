@@ -878,7 +878,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     // A lost ACK is reconciled from genuine ledger history, never by signing again.
     // Ledger ingest only: key delivery must not hold the admission result.
     try {
-      await this.refresh(workspaceId, { installKeys: false })
+      await this.refresh(workspaceId, { keyMode: 'none' })
     } catch (cause) {
       this.pairingFailure = cause
     }
@@ -1487,7 +1487,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       try {
         // Admission must be verified locally before publishing its invitation. Own-key
         // receive/repair and unrelated deliveries do not belong to this approval wait.
-        await this.refresh(workspaceId, { installKeys: false })
+        await this.refresh(workspaceId, { keyMode: 'none' })
       } catch (error) {
         this.pairingFailure = error
       }
@@ -1831,7 +1831,6 @@ export class E2eeIpc extends ProductWindowIpcService {
       options !== undefined &&
       (typeof options !== 'object' ||
         options === null ||
-        (options.installKeys !== undefined && typeof options.installKeys !== 'boolean') ||
         (options.keyMode !== undefined && !REFRESH_KEY_MODES.has(options.keyMode)) ||
         (options.recipients !== undefined &&
           (!Array.isArray(options.recipients) ||
@@ -1841,8 +1840,7 @@ export class E2eeIpc extends ProductWindowIpcService {
             ))))
     )
       throw new Error('e2ee_invalid-input')
-    // Without `keyMode`, only `installKeys: false` skips the key round, as before.
-    const keyMode = options?.keyMode ?? (options?.installKeys === false ? 'none' : 'full')
+    const keyMode = options?.keyMode ?? 'full'
     const id = sender()
     const access = await withDesktopE2eeAccount(
       (owner) =>
@@ -2083,22 +2081,16 @@ export class E2eeIpc extends ProductWindowIpcService {
     await this.manage(workspaceId, { type: 'transferOwner', membershipId })
   }
   @IpcMethod()
-  async contentStreamsToken(
-    workspaceId: string,
-    rejectedToken?: string,
-    requestSnapshotFor?: string,
-    rpcOnly?: true
-  ) {
+  async contentStreamsToken(workspaceId: string, rejectedToken?: string, rpcOnly?: true) {
     const id = sender()
     return observeClientLossOperation('token', workspaceId, id, () =>
-      this.contentStreamsTokenFor(id, workspaceId, rejectedToken, requestSnapshotFor, rpcOnly)
+      this.contentStreamsTokenFor(id, workspaceId, rejectedToken, rpcOnly)
     )
   }
   private async contentStreamsTokenFor(
     id: number,
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string,
     rpcOnly?: true
   ) {
     const access = await withDesktopE2eeAccount(
@@ -2122,7 +2114,6 @@ export class E2eeIpc extends ProductWindowIpcService {
         workspaceId,
         credential: access.credential,
         ...(rejectedToken ? { rejectedToken } : {}),
-        ...(requestSnapshotFor ? { requestSnapshotFor } : {}),
         ...(rpcOnly ? { rpcOnly } : {})
       })
     ).catch((error) => {

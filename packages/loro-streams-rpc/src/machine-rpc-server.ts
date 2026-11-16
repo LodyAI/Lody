@@ -85,10 +85,6 @@ import type {
   PreviewTarget,
   PreviewTargetApproval,
   SessionCancelResponse,
-  SessionPreparationCancelSpec,
-  SessionPreparationSpec,
-  SessionPrepareCancelResponse,
-  SessionPrepareResponse,
   SessionTerminateResponse,
   SessionDispatchTurnResponse,
   SessionHistoryReadResponse,
@@ -196,8 +192,6 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'session/goal',
   'session/terminate',
   'session/dispatch-turn',
-  'session/prepare',
-  'session/prepare-cancel',
 ]);
 const REQUEST_LOOP_RETRY_DELAY_MS = 1000;
 const REQUEST_LOOP_REPEAT_WARN_INTERVAL_MS = 30_000;
@@ -533,10 +527,6 @@ type RpcServerDeps = {
     inputOrigin?: 'human' | 'agent';
     inputConfig: SessionTurnInputConfig;
   }) => Promise<SessionDispatchTurnResponse>;
-  prepareSession?: (args: SessionPreparationSpec) => Promise<SessionPrepareResponse>;
-  cancelSessionPreparation?: (
-    args: SessionPreparationCancelSpec
-  ) => Promise<SessionPrepareCancelResponse>;
   /** Encrypted Roost-backed logical history access for remote renderers. */
   /** Ordinary cloud reads need an online, operation-bound control-plane verdict. */
   authorizeSessionHistoryRead?: (args: {
@@ -1806,30 +1796,6 @@ export class LoroStreamsMachineRpcServer {
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
-        case 'session/prepare': {
-          if (!this.deps.prepareSession) {
-            await appendErrorResponse(request.replyTo, request.id, request.method, {
-              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
-              message: 'Session preparation is not available on this machine.',
-            });
-            return;
-          }
-          const response = await this.deps.prepareSession(request.params);
-          await appendResultResponse(request.replyTo, request.id, request.method, response);
-          return;
-        }
-        case 'session/prepare-cancel': {
-          if (!this.deps.cancelSessionPreparation) {
-            await appendErrorResponse(request.replyTo, request.id, request.method, {
-              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
-              message: 'Session preparation cancellation is not available on this machine.',
-            });
-            return;
-          }
-          const response = await this.deps.cancelSessionPreparation(request.params);
-          await appendResultResponse(request.replyTo, request.id, request.method, response);
-          return;
-        }
         case 'session/history-read':
         case 'session/history-watch': {
           const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
@@ -2645,8 +2611,6 @@ export class LoroStreamsMachineRpcServer {
       | SessionForkResponse
       | SessionEditAndResendResponse
       | SessionDispatchTurnResponse
-      | SessionPrepareResponse
-      | SessionPrepareCancelResponse
       | SessionHistoryReadResponse
       | SessionHistoryWriteResponse
       | CodeCollabV2Error

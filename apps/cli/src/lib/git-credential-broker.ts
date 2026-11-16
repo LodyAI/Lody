@@ -90,7 +90,6 @@ export const createGitCredentialBrokerHandler = (options: {
             '/github-token',
             '/git-credential/reject',
             '/github-token/reject',
-            '/github-auth-context',
           ].includes(req.url ?? ''))
       ) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -121,7 +120,7 @@ export const createGitCredentialBrokerHandler = (options: {
       const obj = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
       const repoFullName = obj && typeof obj.repoFullName === 'string' ? obj.repoFullName : null;
       const contextToken = obj && typeof obj.contextToken === 'string' ? obj.contextToken : null;
-      if (!repoFullName && req.url !== '/github-auth-context') {
+      if (!repoFullName) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({ error: 'bad_request', message: 'Missing required field: repoFullName.' })
@@ -157,25 +156,6 @@ export const createGitCredentialBrokerHandler = (options: {
         );
         return false;
       };
-      if (req.url === '/github-auth-context') {
-        if (!context) {
-          res.writeHead(403);
-          res.end(JSON.stringify({ error: 'invalid_context' }));
-          return;
-        }
-        // Compatibility for older helpers: local eligibility never needs cloud policy.
-        const policy = { personalEnabled: true };
-        if (!isContextCurrent()) return;
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            ...policy,
-            allowLocalAuth: context.requesterUserId === options.ownerUserId,
-          })
-        );
-        return;
-      }
-      if (!repoFullName) return;
       const source = obj?.source;
       if (source !== undefined && source !== 'personal' && source !== 'app') {
         res.writeHead(400);

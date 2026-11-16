@@ -32,10 +32,6 @@ context/message-flow.md "Upstream".
   Claude single-question forms retain their request-message prompt. The shared bridge
   maps recognized Droid AskUser labels and custom answers back to its option IDs and
   companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
-- `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
-  updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
-  Claude reports no actor, so later events preserve an earlier identity. Providers that
-  rely on an unknown-actor label can configure a separate metadata fallback.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
@@ -53,6 +49,9 @@ context/message-flow.md "Upstream".
   upstream auto-update in its child process and never downloads a fallback. Credentials
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
+  Builtin Devin is a bundled proxy over the pinned official runtime; discovery hides duplicate
+  registry Devin, Dimcode and Kimi entries while saved configurations keep their launch
+  contracts ([decision and ablations](../../../../.agents/notes/implemented/feature/2026-09-30-builtin-devin.md)).
   [Sorbet authentication](../../../../.agents/notes/proposed/feature/2026-11-02-sorbet-acp-authentication.md)
   uses the existing protected ACP interaction path. Its `sorbet.dev` credentials v1
   extension runs in a separate bounded builtin Sorbet ACP process, with no session or
@@ -350,9 +349,8 @@ then rank eligible candidates by installedAt and command. Best-effort cleanup co
 because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
 progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 
-Completed caches written before metadata schema v1 remain reusable through a separate strict
-legacy schema; their old `name`/`version`/`platform` fields are normalized in memory and only
-the trusted runtime definition's command and host requirement are inferred. Repacked Node
+Completed caches must match metadata schema v1; a pre-v1 cache is invalid and the runtime is
+installed again. Repacked Node
 packages intentionally publish no convenience link because non-ACP subcommands may be
 omitted. A fully validated install that has already crossed the final complete-marker commit
 may remain a safe cache hit even though that caller observes cancellation, and network

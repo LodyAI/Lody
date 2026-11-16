@@ -679,41 +679,17 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
     preparing = false
   ) => {
     let blob: Uint8Array;
-    let legacy = false;
     try {
       blob = await readOwned(credentialPath(genesis, key), 1024);
     } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
-      legacy = true;
-      try {
-        blob = await readOwned(
-          join(
-            directory,
-            `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`
-          ),
-          1024
-        );
-      } catch (legacyCause) {
-        if (preparing && (legacyCause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-        throw legacyCause;
-      }
+      if (preparing && (cause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw cause;
     }
     const opened = unseal(blob);
     try {
       const expected = credentialContext(genesis, key);
       if (opened.body.length !== 32) throw fail('corrupt');
-      if (!equal(opened.aad, expected)) {
-        // The old location is read-only. A genuine other identity's credential
-        // is retained evidence, never the replacement identity's credential.
-        if (
-          legacy &&
-          preparing &&
-          opened.aad.length === expected.length &&
-          equal(opened.aad.subarray(0, -32), expected.subarray(0, -32))
-        )
-          return undefined;
-        throw fail('corrupt');
-      }
+      if (!equal(opened.aad, expected)) throw fail('corrupt');
       return Buffer.from(
         opened.body.buffer,
         opened.body.byteOffset,

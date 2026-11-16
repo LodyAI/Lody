@@ -350,16 +350,11 @@ describe('One-time complete messages', () => {
     d.message = { inputBlocks: [{ type: 'text', text: 'Frozen message' }], mcpServerIds: [] };
     return d;
   }
-  function legacyQuotaMessage(version = 1) {
+  function continuationMessage() {
     const d = message();
     const reset = 59_000;
     d.definition.scheduleId = uuidv5(
-      JSON.stringify([
-        version === 1 ? 'claude-quota-continue' : 'claude-quota-continue-v2',
-        'workspace',
-        'chat',
-        reset,
-      ]),
+      JSON.stringify(['continuation', 'workspace', 'chat', reset]),
       uuidv5.URL
     );
     d.definition.activationId = uuidv5('activation', d.definition.scheduleId);
@@ -368,28 +363,8 @@ describe('One-time complete messages', () => {
     d.message = { inputBlocks: [{ type: 'text', text: 'continue' }] };
     return d;
   }
-  it.each([1, 2])(
-    'drops a version %s unassociated quota reservation without delivering it',
-    async (version) => {
-      const d = legacyQuotaMessage(version);
-      const h = harness(d);
-      await h.engine.evaluate();
-      expect(h.store.history('workspace', d.definition.scheduleId)).toMatchObject([
-        { state: 'skipped', errorCode: 'LEGACY_QUOTA_UNASSOCIATED' },
-      ]);
-      expect(h.ports.dispatch).not.toHaveBeenCalled();
-      expect(h.ports.publish).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          messageState: 'failed',
-          blockedCode: 'LEGACY_QUOTA_UNASSOCIATED',
-        })
-      );
-      await new ScheduleEngine(h.ports).evaluate();
-      expect(h.ports.dispatch).not.toHaveBeenCalled();
-    }
-  );
-  it('preserves a legacy reservation with an already prepared or delivered input', async () => {
-    const d = legacyQuotaMessage();
+  it('dispatches an already prepared continuation input', async () => {
+    const d = continuationMessage();
     const h = harness(d);
     h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
     const run = h.store.unfinished('workspace')[0];
@@ -404,8 +379,8 @@ describe('One-time complete messages', () => {
     expect(h.store.history('workspace', d.definition.scheduleId)[0]?.state).toBe('dispatched');
     expect(h.ports.dispatch).toHaveBeenCalledOnce();
   });
-  it('reconciles an already delivered legacy input without dispatching again', async () => {
-    const d = legacyQuotaMessage();
+  it('reconciles an already delivered continuation input without dispatching again', async () => {
+    const d = continuationMessage();
     const h = harness(d);
     h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
     const run = h.store.unfinished('workspace')[0];
@@ -420,7 +395,7 @@ describe('One-time complete messages', () => {
     expect(h.ports.dispatch).not.toHaveBeenCalled();
   });
   it('keeps ordinary and edited scheduled messages', async () => {
-    const d = legacyQuotaMessage();
+    const d = continuationMessage();
     d.prompt = 'different message';
     d.message = { inputBlocks: [{ type: 'text', text: 'different message' }] };
     const h = harness(d);

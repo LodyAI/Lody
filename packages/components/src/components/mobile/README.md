@@ -119,9 +119,7 @@ relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
 - Provider-defined pickers have a separate coordinator ID namespace, so an ACP
   option named `permission` or `model` cannot open or dismiss a built-in row.
   [Collision fix and builtin audit](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-dimcode-mobile-permission-picker.md).
-- `mobile-session-composer-footer.tsx` still exports the legacy
-  `MobileModelPickerLabel` helpers for any remaining chip faces;
-  `mobile-fast-plan-toggles.tsx` survives for the in-session composer only.
+- `mobile-fast-plan-toggles.tsx` survives for the in-session composer only.
 
 ## Settings
 

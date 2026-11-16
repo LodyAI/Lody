@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';
 import type { Logger } from '@/utils/logger';
@@ -65,36 +65,27 @@ export function getDefaultPrPollerStateDbPath(): string {
   return path.join(getLodyDataDir(), 'pr-poller-state.sqlite3');
 }
 
-/** Legacy JSON state file (pre-SQLite); imported once, then deleted. */
-export function getLegacyPrPollerStateJsonPath(): string {
-  return path.join(getLodyDataDir(), 'pr-poller-state.json');
-}
-
 export class PrPollerStateStore {
   private readonly logger: Logger;
   readonly dbPath: string;
-  private readonly legacyJsonPath: string;
   private db: Database.Database | null = null;
   /** Set when the database cannot be opened; the store degrades to memory-only. */
   private disabled = false;
 
-  constructor(options: { logger: Logger; dbPath?: string; legacyJsonPath?: string }) {
+  constructor(options: { logger: Logger; dbPath?: string }) {
     this.logger = options.logger;
     this.dbPath = options.dbPath ?? getDefaultPrPollerStateDbPath();
-    this.legacyJsonPath = options.legacyJsonPath ?? getLegacyPrPollerStateJsonPath();
   }
 
   /**
    * Load the full state into the in-memory shape. Opens the database lazily
-   * (a disabled poller never creates the file) and imports the legacy JSON
-   * state exactly once so a restart never re-mints spent quota.
+   * (a disabled poller never creates the file).
    */
   load(): PrPollerState {
     const db = this.ensureDb();
     if (!db) {
       return emptyPrPollerState();
     }
-    this.importLegacyJsonOnce(db);
     const state = emptyPrPollerState();
     try {
       for (const row of db
@@ -276,84 +267,5 @@ export class PrPollerStateStore {
       );
     `);
     return db;
-  }
-
-  /**
-   * One-shot import of the legacy JSON state file (quota + cooldowns must
-   * survive the storage migration — a restart must never re-mint budget).
-   * Tolerant parsing; the JSON file is deleted afterwards either way.
-   */
-  private importLegacyJsonOnce(db: Database.Database): void {
-    let raw: string;
-    try {
-      if (!existsSync(this.legacyJsonPath)) {
-        return;
-      }
-      raw = readFileSync(this.legacyJsonPath, 'utf-8');
-    } catch {
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as {
-        scopes?: Record<string, PrPollScopeQuotaState>;
-        repoCooldowns?: Record<string, PrPollRepoCooldownState>;
-        targets?: Record<string, PrPollTargetState>;
-        discoveryFingerprints?: Record<string, string>;
-      };
-      const importAll = db.transaction(() => {
-        for (const [scope, quota] of Object.entries(parsed.scopes ?? {})) {
-          if (typeof quota?.tokens !== 'number' || typeof quota.updatedAtMs !== 'number') continue;
-          db.prepare(
-            'INSERT OR IGNORE INTO scopes (scope, tokens, updated_at_ms, frozen_until_ms) VALUES (?, ?, ?, ?)'
-          ).run(
-            scope,
-            quota.tokens,
-            quota.updatedAtMs,
-            typeof quota.frozenUntilMs === 'number' ? quota.frozenUntilMs : null
-          );
-        }
-        for (const [key, cooldown] of Object.entries(parsed.repoCooldowns ?? {})) {
-          if (
-            typeof cooldown?.consecutiveFailures !== 'number' ||
-            typeof cooldown.nextRetryAtMs !== 'number'
-          ) {
-            continue;
-          }
-          db.prepare(
-            'INSERT OR IGNORE INTO repo_cooldowns (key, consecutive_failures, next_retry_at_ms, last_error_kind) VALUES (?, ?, ?, ?)'
-          ).run(
-            key,
-            cooldown.consecutiveFailures,
-            cooldown.nextRetryAtMs,
-            typeof cooldown.lastErrorKind === 'string' ? cooldown.lastErrorKind : 'unknown'
-          );
-        }
-        for (const [key, target] of Object.entries(parsed.targets ?? {})) {
-          if (typeof target?.lastSuccessAtMs !== 'number') continue;
-          db.prepare('INSERT OR IGNORE INTO targets (key, last_success_at_ms) VALUES (?, ?)').run(
-            key,
-            target.lastSuccessAtMs
-          );
-        }
-        for (const [key, fingerprint] of Object.entries(parsed.discoveryFingerprints ?? {})) {
-          if (typeof fingerprint !== 'string') continue;
-          db.prepare(
-            'INSERT OR IGNORE INTO discovery_fingerprints (key, fingerprint) VALUES (?, ?)'
-          ).run(key, fingerprint);
-        }
-      });
-      importAll();
-      this.logger.debug('[pr-poller] Imported legacy JSON scheduling state into SQLite');
-    } catch (error) {
-      this.logger.debug(
-        `[pr-poller] Legacy JSON state import skipped: ${formatErrorMessage(error)}`
-      );
-    } finally {
-      try {
-        unlinkSync(this.legacyJsonPath);
-      } catch {
-        // Best-effort cleanup.
-      }
-    }
   }
 }

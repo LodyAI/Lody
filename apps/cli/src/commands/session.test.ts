@@ -83,7 +83,6 @@ import {
   resolveLocalProjectRefOrThrow,
   selectTargetMachineForCreate,
   shouldWaitForSessionCompletion,
-  selectWorkspaceSummary,
   sortSessionMetas,
   toSessionTranscriptEntries,
   updateSessionActivityTimestamps,
@@ -243,7 +242,7 @@ describe('session command helpers', () => {
 
   it('throws when workspace selection is ambiguous', () => {
     expect(() =>
-      selectWorkspaceSummary([
+      commandRuntime.selectWorkspaceSummary([
         { id: 'ws-1', slug: 'alpha', name: 'Alpha', role: 'member' },
         { id: 'ws-2', slug: 'beta', name: 'Beta', role: 'member' },
       ])

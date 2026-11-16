@@ -2,7 +2,7 @@ import type { SessionId, SessionMeta } from '@lody/shared';
 import { getSessionRoomId, isLoroRepoDocDeleted } from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { PreparedSessionInput } from '@/lib/prepared-session-input';
-import { matchesQuotaReservation } from '@/lib/schedules/legacy-quota-reservation';
+import { matchesQuotaReservation } from '@/lib/schedules/quota-reservation';
 import type { ScheduleRun } from '@/lib/schedules/schedule-store';
 import type { SessionAutomationAuthority } from '@/session/session-automation-authority';
 import type { AutomationLedger } from '../storage/ledger';

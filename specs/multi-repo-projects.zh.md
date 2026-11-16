@@ -183,7 +183,6 @@ Daemon 在执行机器上为每个 Git Member 创建一个 worktree 和新分支
   diff 与 PR；未选择时仍默认使用第一个 Member 的投影。没有 GitHub remote 的 Member
   不会借用其他 Member 的仓库或 PR。Create PR 为每个有改动的 Member 各创建一个 PR，
   各 PR 正文互相链接。
-- 只有当前 PR 全部进入已启用的终态时，才触发 PR 自动归档；其中一个进入终态不算。
 - 兼容性：`project`、`branchName`、`repoFullName` 保留为第一个 Member 的投影，供旧
   客户端使用。只有声明了该协议能力的 daemon 才能创建多 Member 对话。
   含仓库 Member 的 Project 只能在声明了仓库 Member 能力的 daemon 上开始；旧 daemon

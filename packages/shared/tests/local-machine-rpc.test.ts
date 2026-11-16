@@ -147,66 +147,6 @@ describe('local Machine RPC', () => {
     };
     expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
   });
-
-  it('rejects draft content and environment variables in session preparation', () => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          prompt: 'private draft',
-          env: { API_KEY: 'secret' },
-        },
-      })
-    );
-
-    expect(result.success).toBe(false);
-  });
-
-  it('drops sensitive ACP option values from session preparation', () => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          runConfig: {
-            configOptionValues: {
-              effort: 'high',
-              api_key: 'private',
-              authToken: 'private',
-            },
-          },
-        },
-      })
-    );
-
-    expect(result).toMatchObject({
-      success: true,
-      data: {
-        params: {
-          runConfig: {
-            configOptionValues: {
-              effort: 'high',
-            },
-          },
-        },
-      },
-    });
-  });
 });
 
 it('accepts typed memory operations and rejects caller-provided commands', () => {

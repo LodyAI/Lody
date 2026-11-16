@@ -80,8 +80,6 @@ import {
   readSessionAvailableCommands,
   type LegacySessionModelState,
 } from './acp-capability-normalization';
-import { convertClaudeTaskLifecycleNotification } from './claude-task-lifecycle';
-import { convertKimiTaskLifecycleNotification } from './kimi-task-lifecycle';
 import {
   buildSteerRequestMeta,
   findActiveSteerConfigMismatch,
@@ -351,24 +349,6 @@ export type AcpStartupTimeoutOptions = {
   resumeSessionTimeoutMs?: number;
 };
 
-const LegacyCodexGoalStatusSchema = z.enum([
-  'active',
-  'paused',
-  'blocked',
-  'usageLimited',
-  'budgetLimited',
-  'complete',
-  'cleared',
-]);
-const LegacyCodexGoalSnapshotSchema = z.object({
-  objective: z.string(),
-  status: LegacyCodexGoalStatusSchema,
-  tokenBudget: z.number().nullable().optional(),
-  tokensUsed: z.number().optional(),
-  timeUsedSeconds: z.number().optional(),
-  createdAt: z.number().optional(),
-  updatedAt: z.number().optional(),
-});
 const LodyGoalSnapshotSchema = z.object({
   objective: z.string(),
   status: z.enum(['active', 'paused', 'blocked', 'limited', 'complete']),
@@ -378,17 +358,6 @@ const LodyGoalSnapshotSchema = z.object({
   createdAtEpochSeconds: z.number().nonnegative().optional(),
   updatedAtEpochSeconds: z.number().nonnegative().optional(),
 });
-const LegacyNeutralGoalSnapshotSchema = z.object({
-  objective: z.string(),
-  status: z.enum(['active', 'paused', 'blocked', 'limited', 'complete']),
-  controlMethod: z.literal('_session/goal'),
-  tokenBudget: z.number().nullable().optional(),
-  tokensUsed: z.number().optional(),
-  timeUsedSeconds: z.number().optional(),
-  createdAt: z.number().optional(),
-  updatedAt: z.number().optional(),
-});
-
 const CodexRetryErrorSchema = z.object({
   error: z.object({
     message: z.string(),
@@ -402,13 +371,6 @@ const LodyNoticeSchema = z.object({
     level: z.enum(['info', 'warning', 'error']),
     message: z.string(),
     source: z.string().optional(),
-  }),
-});
-
-const LegacyCodexSessionWarningSchema = z.object({
-  warning: z.object({
-    message: z.string(),
-    source: z.enum(['warning', 'configWarning']).optional(),
   }),
 });
 
@@ -1062,39 +1024,14 @@ export class AgentClient implements acp.Client {
       return;
     }
 
-    let goalContainer: unknown;
-    let source: 'Lody' | 'legacy ACP' | 'legacy Codex';
     const lodyMeta = meta.lody;
-    if (typeof lodyMeta === 'object' && lodyMeta !== null && 'goal' in lodyMeta) {
-      goalContainer = lodyMeta;
-      source = 'Lody';
-    } else if ('goal' in meta) {
-      goalContainer = meta;
-      source = 'legacy ACP';
-    } else {
-      const codexMeta = meta.codex;
-      if (
-        !this.isCodexAgent() ||
-        typeof codexMeta !== 'object' ||
-        codexMeta === null ||
-        !('goal' in codexMeta)
-      ) {
-        return;
-      }
-      goalContainer = codexMeta;
-      source = 'legacy Codex';
+    if (typeof lodyMeta !== 'object' || lodyMeta === null || !('goal' in lodyMeta)) {
+      return;
     }
-
-    const goalSchema =
-      source === 'Lody'
-        ? LodyGoalSnapshotSchema
-        : source === 'legacy ACP'
-          ? LegacyNeutralGoalSnapshotSchema
-          : LegacyCodexGoalSnapshotSchema;
-    const parsed = z.object({ goal: goalSchema.nullable() }).safeParse(goalContainer);
+    const parsed = z.object({ goal: LodyGoalSnapshotSchema.nullable() }).safeParse(lodyMeta);
     if (!parsed.success) {
       this.logger.debug(
-        `[${this.options.sessionId}] Dropping invalid ${source} goal session info: ${parsed.error.message}`
+        `[${this.options.sessionId}] Dropping invalid Lody goal session info: ${parsed.error.message}`
       );
       return;
     }
@@ -1118,16 +1055,12 @@ export class AgentClient implements acp.Client {
       tokenBudget: goal.tokenBudget ?? null,
       ...(goal.tokensUsed !== undefined ? { tokensUsed: goal.tokensUsed } : {}),
       ...(goal.timeUsedSeconds !== undefined ? { timeUsedSeconds: goal.timeUsedSeconds } : {}),
-      ...('createdAtEpochSeconds' in goal && goal.createdAtEpochSeconds !== undefined
+      ...(goal.createdAtEpochSeconds !== undefined
         ? { createdAt: goal.createdAtEpochSeconds * 1_000 }
-        : 'createdAt' in goal && goal.createdAt !== undefined
-          ? { createdAt: goal.createdAt }
-          : {}),
-      ...('updatedAtEpochSeconds' in goal && goal.updatedAtEpochSeconds !== undefined
+        : {}),
+      ...(goal.updatedAtEpochSeconds !== undefined
         ? { updatedAt: goal.updatedAtEpochSeconds * 1_000 }
-        : 'updatedAt' in goal && goal.updatedAt !== undefined
-          ? { updatedAt: goal.updatedAt }
-          : {}),
+        : {}),
     });
   }
 
@@ -1148,15 +1081,7 @@ export class AgentClient implements acp.Client {
           ...(canonical.data.notice.source ? { source: canonical.data.notice.source } : {}),
         });
       }
-      return;
     }
-
-    if (!this.isCodexAgent()) return;
-    const parsed = LegacyCodexSessionWarningSchema.safeParse(notification.update._meta?.codex);
-    if (!parsed.success) {
-      return;
-    }
-    this.options.onAgentWarning?.(parsed.data.warning);
   }
 
   private handleCodexRetrySessionInfoUpdate(notification: AcpSessionNotification): boolean {
@@ -1229,10 +1154,9 @@ export class AgentClient implements acp.Client {
     const isBegin = update.sessionUpdate === 'tool_call';
     const lodyMeta = isRecord(update._meta?.lody) ? update._meta.lody : undefined;
     const isCanonicalImageGeneration = lodyMeta?.toolName === LODY_TOOL_NAMES.imageGeneration;
-    const isLegacyCodexImageGeneration = this.isCodexAgent() && update.title === 'Image generation';
     const isTracked = this.imageGenerationToolCallIds.has(callId);
     if (isBegin) {
-      if (!isCanonicalImageGeneration && !isLegacyCodexImageGeneration) return false;
+      if (!isCanonicalImageGeneration) return false;
     } else if (!isTracked) {
       return false;
     }
@@ -1613,7 +1537,6 @@ export class AgentClient implements acp.Client {
       method,
       params,
       sessionId: this.acpSessionId ?? this.options.sessionId,
-      provider: this.options.agentConfig?.agentType ?? 'unknown',
     });
     if (!event) {
       this.logger.debug(`[${this.options.sessionId}] Ignoring extension message ${logicalMethod}`);
@@ -1687,31 +1610,6 @@ export class AgentClient implements acp.Client {
         this.latestCapacityObservation = event.snapshot;
         if (event.snapshot.rateLimits.length) this.options.onRateLimitUpdate?.(event.snapshot);
         return;
-      case 'legacyProposedPlan':
-        this.options.onUpdateMessage(
-          parseSessionNotification({
-            sessionId: event.plan.sessionId,
-            update:
-              event.plan.status === 'cleared'
-                ? { sessionUpdate: 'plan_removed', planId: event.plan.turnId }
-                : {
-                    sessionUpdate: 'plan_update',
-                    plan: {
-                      type: 'markdown',
-                      planId: event.plan.turnId,
-                      content: event.plan.markdown,
-                    },
-                  },
-          })
-        );
-        return;
-      case 'legacyTaskLifecycle':
-        if (event.provider === 'claude') {
-          this.tryHandleClaudeTaskLifecycleExtension(logicalMethod, event.params);
-        } else {
-          this.tryHandleKimiTaskLifecycleExtension(logicalMethod, event.params);
-        }
-        return;
     }
   }
 
@@ -1751,49 +1649,6 @@ export class AgentClient implements acp.Client {
     }
   }
 
-  private tryHandleClaudeTaskLifecycleExtension(
-    method: string,
-    params: Record<string, unknown>
-  ): void {
-    const result = convertClaudeTaskLifecycleNotification(params);
-    if (!result.ok) {
-      this.logger.debug(
-        `[${this.options.sessionId}] Dropping invalid Claude task lifecycle update from ${method}: ${result.reason}`
-      );
-      return;
-    }
-
-    const acpSessionId = result.notification.sessionId;
-    if (!this.isCurrentAcpSession(acpSessionId)) {
-      this.logger.debug(
-        `[${this.options.sessionId}] Dropping Claude task lifecycle update for mismatched ACP session: ${acpSessionId}`
-      );
-      return;
-    }
-
-    this.options.onUpdateMessage(result.notification);
-  }
-
-  private tryHandleKimiTaskLifecycleExtension(
-    method: string,
-    params: Record<string, unknown>
-  ): void {
-    const result = convertKimiTaskLifecycleNotification(params);
-    if (!result.ok) {
-      this.logger.debug(
-        `[${this.options.sessionId}] Dropping invalid Kimi task lifecycle update from ${method}: ${result.reason}`
-      );
-      return;
-    }
-    if (!this.isCurrentAcpSession(result.notification.sessionId)) {
-      this.logger.debug(
-        `[${this.options.sessionId}] Dropping Kimi task lifecycle update for mismatched ACP session: ${result.notification.sessionId}`
-      );
-      return;
-    }
-    this.options.onUpdateMessage(result.notification);
-  }
-
   /** The live process, rather than its provider identity, advertised title ownership. */
   supportsSessionTitleGeneration(): boolean {
     return this.lodyExtensionCapabilities.sessionTitle?.version === 1;
@@ -1809,12 +1664,7 @@ export class AgentClient implements acp.Client {
       this.options.agentConfig?.agentType
     );
     const lodyTitleMeta = LodySessionTitleSchema.safeParse(notification.update._meta?.lody);
-    const legacyCodexTitleMeta = this.isCodexAgent()
-      ? z
-          .object({ titleSource: z.enum(['explicit', 'fallback', 'unset', 'unknown']) })
-          .safeParse(notification.update._meta?.codex)
-      : null;
-    // Canonical tags win over legacy metadata and identity-based untagged trust.
+    // Canonical tags win over identity-based untagged trust.
     const titleMeta = notification.update._meta?.lody;
     const hasTitleSource =
       typeof titleMeta === 'object' && titleMeta !== null && 'titleSource' in titleMeta;
@@ -1823,9 +1673,7 @@ export class AgentClient implements acp.Client {
       ? lodyTitleMeta.success &&
         (lodyTitleMeta.data.titleSource === 'explicit' ||
           (ownsTitle && lodyTitleMeta.data.titleSource === 'generated'))
-      : (legacyCodexTitleMeta?.success === true &&
-          legacyCodexTitleMeta.data.titleSource === 'explicit') ||
-        (!ownsTitle && trustsUntaggedTitle);
+      : !ownsTitle && trustsUntaggedTitle;
     if (!isAuthoritativeTitle) {
       return;
     }
@@ -1900,8 +1748,7 @@ export class AgentClient implements acp.Client {
     this.availableCommands =
       readSessionAvailableCommands(sessionResponse) ?? this.availableCommands;
     // Drop config options the current version intentionally skips (e.g. the
-    // `agent` option from acp-extension-claude). See backward-compatibility doc
-    // entry BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
+    // `agent` option from acp-extension-claude); see acp-config-option-filter.ts.
     this.currentModel = undefined;
     this.latestCapacityObservation = undefined;
     this.latestContextObservation = undefined;

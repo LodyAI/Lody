@@ -39,7 +39,7 @@ Translation: current
 
 Chromium 将 `ERR_CONNECTION_CLOSED` 定义为 TCP FIN，将 `ERR_PROXY_CONNECTION_FAILED` 定义为解析或连接代理本身失败，明确不包括 HTTP CONNECT 阶段失败。参见 [Chromium 错误定义](https://chromium.googlesource.com/chromium/src/+/main/net/base/net_error_list.h)。API、presence、control 多类流一起失败，支持优先检查共用代理路径；它不能定位此前是谁关闭连接，也不能证明反复传输了大数据。
 
-锁定 SDK 的同房间 `rejoin()` 保留 cursor，普通 live read 失败会退避。合成实验先从 100000 完成 bootstrap，再将 100123 写入注入的内存 cursor store，随后注入网络失败。下一次 SSE 从 100123 读取，bootstrap 总数仍为一次；实验没有验证磁盘持久化。缺少 cursor、服务端返回 410、恢复未完整导入等是另外的 bootstrap 路径。历史上的 [read-loop spin](2026-10-19-streams-read-loop-spin.zh.md)可能不再发出请求，不能用它解释大流量。
+锁定 SDK 的同房间 `rejoin()` 保留 cursor，普通 live read 失败会退避。合成实验先从 100000 完成 bootstrap，再将 100123 写入注入的内存 cursor store，随后注入网络失败。下一次 SSE 从 100123 读取，bootstrap 总数仍为一次；实验没有验证磁盘持久化。缺少 cursor、服务端返回 410、恢复未完整导入等是另外的 bootstrap 路径。历史上的 [read-loop spin](../../implemented/bug-fix/2026-10-19-streams-read-loop-spin.zh.md)可能不再发出请求，不能用它解释大流量。
 
 renderer 的 Chromium 网络与 daemon 的 Node 网络也分别管理代理。[`system-proxy-env.ts`](../../../../apps/electron/src/main/services/system-proxy-env.ts) 在启动子进程时，从 Chromium 解析出的系统代理补齐缺失的代理环境变量，已有环境变量优先。子进程环境是启动时的快照，而 renderer 使用 Chromium 的代理配置；关闭环境补齐并不会关闭 renderer 代理。
 

@@ -496,7 +496,6 @@ function readMachineIdFromCliCredentials(): string | null {
 
 export class CliService {
   private readonly trackedCliChildren = new Map<ChildProcess, ProcessHandleLegacy>()
-  private autoStartSender: WebContents | undefined
   private readonly cliOutputBuffer: CliOutputEvent[] = []
   private readonly cliStateSenders = new Set<WebContents>()
   private cliState: ElectronCliState = {
@@ -654,8 +653,7 @@ export class CliService {
   }
 
   private async buildLaunchPreparation(signal: AbortSignal): Promise<PreparedLaunch> {
-    const sender = this.autoStartSender
-    this.sendCliMeta(sender, '[electron] Preparing CLI autostart\n')
+    this.recordCliMeta('[electron] Preparing CLI autostart\n')
     throwIfAborted(signal)
 
     let bootstrapSession: BootstrapSession | null
@@ -663,8 +661,7 @@ export class CliService {
       bootstrapSession = await this.resolveBootstrapSessionForAutoStart()
       throwIfAborted(signal)
     } catch (error) {
-      this.sendCliMeta(
-        sender,
+      this.recordCliMeta(
         `[electron] Failed to prepare CLI autostart: ${formatUnknownError(error)}\n`
       )
       throw error
@@ -686,7 +683,7 @@ export class CliService {
       envOverrides[CLI_ELECTRON_SESSION_USER_ID_ENV] = bootstrapSession.userId
     }
 
-    const prepared = await this.prepareBundledCli(finalArgs, sender, {
+    const prepared = await this.prepareBundledCli(finalArgs, {
       envOverrides,
       maxOldSpaceMiB: calculateWorkerMaxOldSpaceMiB(totalmem()),
       signal,
@@ -777,7 +774,7 @@ export class CliService {
     }
 
     try {
-      this.sendCliMeta(this.autoStartSender, '[electron] CLI terminate requested\n')
+      this.recordCliMeta('[electron] CLI terminate requested\n')
       await supervisor.stop()
       // Manual termination keeps observing an external CLI only while local
       // agents remain enabled. Disabling the setting is an explicit
@@ -1073,7 +1070,6 @@ export class CliService {
   }
 
   autoStart(sender: WebContents | undefined): void {
-    this.autoStartSender = sender
     this.attachCliStateSender(sender)
 
     // Control-only mode deliberately ignores even an externally started CLI.
@@ -1091,40 +1087,33 @@ export class CliService {
     void supervisor.start()
   }
 
-  async run(
-    args: string[],
-    sender: WebContents | undefined,
-    options?: CliRunOptions
-  ): Promise<CliRunResult> {
-    const prepared = await this.prepareBundledCli(args, sender, options)
+  async run(args: string[], options?: CliRunOptions): Promise<CliRunResult> {
+    const prepared = await this.prepareBundledCli(args, options)
     throwIfAborted(options?.signal)
     return await prepared.spawn().result
   }
 
-  private sendCliOutput(sender: WebContents | undefined, event: CliOutputEvent): void {
+  /** Retained only for `getOutputBacklog`; no renderer subscribes to CLI output. */
+  private recordCliOutput(event: CliOutputEvent): void {
     this.cliOutputBuffer.push(event)
     if (this.cliOutputBuffer.length > CLI_OUTPUT_BUFFER_MAX_EVENTS) {
       this.cliOutputBuffer.splice(0, this.cliOutputBuffer.length - CLI_OUTPUT_BUFFER_MAX_EVENTS)
     }
-
-    if (!sender || sender.isDestroyed()) return
-    sender.send('cli.output', event)
   }
 
-  private sendCliMeta(sender: WebContents | undefined, chunk: string): void {
-    this.sendCliOutput(sender, { runId: randomUUID(), stream: 'meta', chunk })
+  private recordCliMeta(chunk: string): void {
+    this.recordCliOutput({ runId: randomUUID(), stream: 'meta', chunk })
   }
 
   private spawnCli(
     command: string,
     args: string[],
     spawnOptions: SpawnOptions,
-    sender: WebContents | undefined,
     options?: CliRunOptions
   ): LaunchHandle {
     throwIfAborted(options?.signal)
     const runId = randomUUID()
-    this.sendCliOutput(sender, {
+    this.recordCliOutput({
       runId,
       stream: 'meta',
       chunk: `$ ${formatCommandForDisplay(command, args)}\n`
@@ -1151,13 +1140,13 @@ export class CliService {
       child.stdout?.on('data', (chunk) => {
         const text = String(chunk)
         stdout = appendOutputTail(stdout, text)
-        this.sendCliOutput(sender, { runId, stream: 'stdout', chunk: text })
+        this.recordCliOutput({ runId, stream: 'stdout', chunk: text })
       })
 
       child.stderr?.on('data', (chunk) => {
         const text = String(chunk)
         stderr = appendOutputTail(stderr, text)
-        this.sendCliOutput(sender, { runId, stream: 'stderr', chunk: text })
+        this.recordCliOutput({ runId, stream: 'stderr', chunk: text })
       })
 
       child.once('error', (error) => {
@@ -1165,7 +1154,7 @@ export class CliService {
       })
       child.once('close', (code, signal) => {
         this.trackedCliChildren.delete(child)
-        this.sendCliOutput(sender, {
+        this.recordCliOutput({
           runId,
           stream: 'meta',
           chunk: `\n[cli exited: ${code ?? 'null'}]\n`
@@ -1224,7 +1213,6 @@ export class CliService {
 
   private async prepareBundledCli(
     args: string[],
-    sender: WebContents | undefined,
     options?: CliRunOptions
   ): Promise<PreparedLaunch> {
     throwIfAborted(options?.signal)
@@ -1264,7 +1252,6 @@ export class CliService {
               windowsHide: true,
               ...(options?.supervisorControl ? { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] } : {})
             },
-            sender,
             options
           ),
           // Only the subcommand: renderer-supplied arguments may carry credentials.

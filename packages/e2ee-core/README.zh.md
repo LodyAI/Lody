@@ -140,7 +140,7 @@ docs/                      架构、服务、流程、公开接口、后端指�
 
 **如何加密文档？** 通过 Streams 同步 Loro 时，把 `streamsDocumentBinding` 作为文档的载荷保护；其他情况使用 `sealDocument` / `openDocument`。见[流程](docs/workflows.zh.md#文档)。
 
-**如何换代密钥或移除成员？** `EpochPublisher.publish()` / `publishRemoving(membershipId)`。移除与换代在同一条签名记录中完成，被移除的成员不存在能读取新内容的时间窗口。
+**如何换代密钥或移除成员？** `EpochPublisher.publish()` / `publishRemoving(membershipId)`。移除与换代在同一条签名记录中完成，被移除的成员不存在能读取新内容的时间窗口。CAS 结果未知时，会直接续用匹配的已保留提交，而不是重新 staging（[待发布恢复](../../.agents/notes/implemented/bug-fix/2026-10-28-e2ee-pending-publication-recovery.zh.md)）。
 
 **设备在操作中途崩溃怎么办？** 每个流程在任何网络步骤之前保存原始字节。重启后调用 `resume` / `flush…`，会重试同样的字节，不会重新签名。
 

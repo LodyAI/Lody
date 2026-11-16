@@ -22,7 +22,6 @@ import {
 import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
-import { migrateLegacySessionSends } from '../lib/legacy-session-send-migration';
 import { createSessionSendResources } from '@/lib/session-send-resources';
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
 import {
@@ -684,8 +683,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let localPresenceUnsubscribe: (() => void) | null = null;
   let transportAttached = false;
   let authToken: string | null = null;
-  // Assigned once the send resources exist; runs after the first meta sync.
-  let startLegacySendMigration: (() => void) | null = null;
   let resumePendingInputs: (() => void) | null = null;
   let cloudTransportAttached = false;
   let cloudTransportAttachPromise: Promise<void> | null = null;
@@ -4095,7 +4092,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           }
           initialMetaSyncCompleted = true;
           initialMetaSyncFailed = false;
-          startLegacySendMigration?.();
           resumePendingInputs?.();
           currentMetaTracker.markFirstSynced();
           // Dual watches its local binding here; its marker is cleared by the
@@ -6119,30 +6115,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       });
   };
   if (initialMetaSyncCompleted) resumePendingInputs();
-  if (deps.accountId && !protectedContent) {
-    const accountId = deps.accountId;
-    let migrationStarted = false;
-    startLegacySendMigration = () => {
-      if (migrationStarted || disposePromise) return;
-      migrationStarted = true;
-      void migrateLegacySessionSends({
-        accountId,
-        workspaceId,
-        runtime: {
-          repo,
-          writer: workspaceWriter,
-          sendResources,
-          requestSessionDispatchTurn,
-          requestSessionSteer,
-          contentMode: protectedContent ? 'e2ee' : 'plaintext',
-          attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
-        },
-      }).catch((error: unknown) => {
-        console.warn('Legacy pending messages could not be migrated', error);
-      });
-    };
-    if (initialMetaSyncCompleted) startLegacySendMigration();
-  }
   // All acquired connection resources have a close path before startup can fail.
   const abortInitialization = () => {
     void dispose().catch(() => {});

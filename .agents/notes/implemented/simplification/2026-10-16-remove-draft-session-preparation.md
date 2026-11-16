@@ -13,9 +13,9 @@ them. On one machine over three days, the daemon prepared 64 drafts and adopted 
 cases the turn arrived, found the preparation incompatible, deleted it, and
 rebuilt everything from scratch. That rebuild was slower than an ordinary cold
 start and sometimes failed the turn. Preparation is removed. A Session now
-starts its agent and worktree only when its first turn is dispatched. Daemons
-still answer the old request so older desktops keep working, and worktrees that
-older daemons prepared are either claimed safely by their Session or removed.
+starts its agent and worktree only when its first turn is dispatched. The
+transitional answers for older desktops and the recovery of worktrees older
+daemons prepared were removed by the [compatibility cut](2026-11-16-drop-pre-october-compatibility.md) on 2026-11-16.
 
 ## Problem
 
@@ -64,12 +64,12 @@ after 75 s because releasing a missed preparation timed out.
   through the ordinary Session creation path at dispatch. The preparation
   service, its TTL control, adoption, the claim gate in `AgentClient` startup
   and the speculative worktree materialize/claim/complete steps are deleted.
-- The two RPC methods and their schemas stay. Older desktops still send them,
-  and the daemon answers both at once without an access check or any work.
+- Until the [compatibility cut](2026-11-16-drop-pre-october-compatibility.md), the two RPC methods and their schemas stayed for older desktops,
+  and the daemon answered both at once without an access check or any work.
   Prepare reports an accepted `duplicate`, so an older desktop holds that one
   lease until the draft idles or is sent. A rejection would make it send a new
   prepare and a cancel after every pause in typing. Cancel reports `not-found`.
-- `legacy-speculative-worktrees.ts` handles the markers older daemons left.
+- Until the same cut, `legacy-speculative-worktrees.ts` handled the markers older daemons left.
   Session creation claims the Session's marker before it probes the directory
   and reruns setup on the worktree, because a preparation never completed it;
   the marker is dropped only after setup succeeds. A worktree no Session ever
@@ -105,8 +105,8 @@ after 75 s because releasing a missed preparation timed out.
 - The first turn of a new Session now always pays a cold start. On this machine
   that start has a median of 6.6 s. Most of it is `git fetch` and its GitHub
   token requests, which is separate follow-up work.
-- Delete `legacy-speculative-worktrees.ts`, and the decline handlers and request
-  schemas, once no supported daemon or desktop can still produce them.
+- `legacy-speculative-worktrees.ts` and the decline handlers were deleted on
+  2026-11-16 ([decision](2026-11-16-drop-pre-october-compatibility.md)); orphaned pre-2026-10-16 worktrees are no longer swept.
 
 ## Verification
 

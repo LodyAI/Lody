@@ -13,7 +13,6 @@ import {
   MachineAcpCapabilitiesRefreshResponseSchema,
   ServerToClientSchema,
   SessionCreateRequestSchema,
-  SessionPreparationRunConfigSchema,
 } from '../src/message-schemas';
 
 import { ACP_AUTHENTICATION_FORM_MAX_BYTES } from '../src/acp-authentication-limits';
@@ -714,16 +713,6 @@ describe('safeParseServerToMachine legacy acpSessionConfig compatibility', () =>
       expect(result.data.acpSessionConfig.cliType).toBe('builtin');
       expect(result.data.acpSessionConfig.agentType).toBe('codex');
     }
-  });
-});
-
-describe('ACP config option sensitivity', () => {
-  it('strips secret-shaped values from a retained run config payload', () => {
-    expect(
-      SessionPreparationRunConfigSchema.parse({
-        configOptionValues: { effort: 'high', fast: true, API_KEY: 'private', bearerToken: 'x' },
-      })
-    ).toEqual({ configOptionValues: { effort: 'high', fast: true } });
   });
 });
 

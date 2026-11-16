@@ -11,7 +11,7 @@
 - Failed delivery retains the exact payload ahead of newer updates. Concurrent flushes
   share one drain; rejection waits for a later flush instead of spinning.
 - Scoped snapshots carry notification-local Core `_meta.lody.usageScopeId`
-  (legacy Codex: `_meta.codex.usageTurnId`). The parser passes a stable
+. The parser passes a stable
   `nativeSession:scope:id` accounting identity to delivery; never overwrite the
   real ACP session ID or session metadata. Coalesce within a scope, never across
   scopes. Unmarked adapters retain their existing cumulative identity, which

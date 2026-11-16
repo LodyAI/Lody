@@ -464,7 +464,7 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
       ])
       // The window's own re-read after the hint is classified as terminal loss.
       await assert.rejects(
-        ipc.refresh('workspace', { installKeys: false }),
+        ipc.refresh('workspace', { keyMode: 'none' }),
         new RegExp(`^Error: e2ee_${reason}$`)
       )
       assert.equal(
