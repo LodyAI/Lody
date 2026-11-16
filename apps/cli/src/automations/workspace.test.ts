@@ -228,6 +228,23 @@ describe('Automation control authority', () => {
     await refreshed.promise;
     expect(host.ledger.receipt(receipt.id)?.state).not.toBe('settled');
   });
+  it('clears a finished Auto delivery status when it is dismissed after the merge', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      // Delivery already turned itself off when the PR merged; only the status remains.
+      autoDelivery: { state: 'merged', updatedAt: 1 } as Record<string, unknown> | null,
+    };
+    const host = await workspaceFixture(meta);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: false },
+    });
+    expect(meta.autoDelivery).toBeNull();
+  });
   it('enables recovery for the current confirmed failure without replaying a later input', async () => {
     const meta = {
       id: 'session-a',

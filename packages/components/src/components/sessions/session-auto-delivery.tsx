@@ -2,10 +2,10 @@ import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Rocket } from 'lucide-react';
+import { Rocket, X } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { Checkbox } from '@lody/ui/checkbox';
 import { Dialog } from '@lody/ui/dialog';
+import { Toggle } from '@lody/ui/toggle';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import type { SessionAutoDelivery } from '@lody/shared';
@@ -19,13 +19,13 @@ export const DEFAULT_AUTO_DELIVER_OPTIONS: AutoDeliverOptions = {
 };
 
 const OPTION_ROWS = [
-  { key: 'fixCi', labelKey: 'sessions.autoDelivery.option.fixCi', label: '自动修复 CI' },
+  { key: 'fixCi', labelKey: 'sessions.autoDelivery.option.fixCi', label: 'Fix CI' },
   {
     key: 'resolveConflicts',
     labelKey: 'sessions.autoDelivery.option.resolveConflicts',
-    label: '自动解决冲突',
+    label: 'Resolve conflicts',
   },
-  { key: 'merge', labelKey: 'sessions.autoDelivery.option.merge', label: 'CI 通过后合入' },
+  { key: 'merge', labelKey: 'sessions.autoDelivery.option.merge', label: 'Merge when green' },
 ] as const satisfies ReadonlyArray<{
   key: keyof AutoDeliverOptions;
   labelKey: string;
@@ -35,17 +35,8 @@ const OPTION_ROWS = [
 const styles = stylex.create({
   options: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: space[1.5],
-  },
-  option: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    color: colors.label,
-    fontSize: text.footnoteSize,
-    lineHeight: text.footnoteLeading,
-    cursor: 'pointer',
+    flexWrap: 'wrap',
+    gap: space[1],
   },
   note: {
     display: 'flex',
@@ -63,7 +54,6 @@ const styles = stylex.create({
   },
   noteText: {
     minWidth: 0,
-    flex: 1,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -73,28 +63,34 @@ const styles = stylex.create({
   },
 });
 
-/** The three steps a user can hand to Auto delivery. */
+/** The three steps a user can hand to Auto delivery, as one row of pills. */
 export function AutoDeliveryOptionsFields({
   value,
   onChange,
   disabled,
+  size = 'small',
 }: {
   value: AutoDeliverOptions;
   onChange: (value: AutoDeliverOptions) => void;
   disabled?: boolean;
+  /** `mini` where the pills sit under a menu row rather than in a dialog. */
+  size?: 'mini' | 'small';
 }) {
   const { t } = useTranslation();
   return (
     <div {...stylex.props(styles.options)}>
       {OPTION_ROWS.map((row) => (
-        <label key={row.key} {...stylex.props(styles.option)} data-auto-delivery-option={row.key}>
-          <Checkbox
-            checked={value[row.key]}
-            disabled={disabled}
-            onCheckedChange={(checked) => onChange({ ...value, [row.key]: checked === true })}
-          />
+        <Toggle
+          key={row.key}
+          size={size}
+          shape="pill"
+          data-auto-delivery-option={row.key}
+          pressed={value[row.key]}
+          disabled={disabled}
+          onPressedChange={(pressed) => onChange({ ...value, [row.key]: pressed })}
+        >
           {t(row.labelKey, row.label)}
-        </label>
+        </Toggle>
       ))}
     </div>
   );
@@ -118,11 +114,11 @@ export function AutoDeliveryDialog({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content width="24rem">
         <Dialog.Header>
-          <Dialog.Title>{t('sessions.autoDelivery.title', '自动交付')}</Dialog.Title>
+          <Dialog.Title>{t('sessions.autoDelivery.title', 'Auto delivery')}</Dialog.Title>
           <Dialog.Description>
             {t(
               'sessions.autoDelivery.description',
-              'Lody 会在需要时让 agent 开 PR、修 CI、解冲突，并按你的选择合入。只对这个会话当前的 PR 生效，合入后自动关闭。'
+              'The agent keeps this PR moving. Turns off after the merge.'
             )}
           </Dialog.Description>
         </Dialog.Header>
@@ -132,7 +128,7 @@ export function AutoDeliveryDialog({
             {t('common.cancel', 'Cancel')}
           </Dialog.Close>
           <Button disabled={busy} onClick={() => onStart(options)}>
-            {t('sessions.autoDelivery.start', '开始')}
+            {t('sessions.autoDelivery.start', 'Start')}
           </Button>
         </Dialog.Footer>
       </Dialog.Content>
@@ -172,18 +168,25 @@ export function autoDeliveryStatusLabel(status: SessionAutoDelivery, t: TFunctio
   }
 }
 
-/** A quiet in-conversation line while Auto delivery is on, with a way to turn it off. */
+/**
+ * A quiet in-conversation line while Auto delivery is on. Its action sits right after
+ * the text; once the PR merged, the line can be dismissed instead.
+ */
 export function SessionAutoDeliveryNote({
   status,
   onTurnOff,
+  onDismiss,
   busy,
 }: {
   status: SessionAutoDelivery;
   onTurnOff?: () => void;
+  /** Clears a finished status for every device; offered only after the merge. */
+  onDismiss?: () => void;
   busy?: boolean;
 }) {
   const { t } = useTranslation();
   const stalled = status.state === 'stalled';
+  const merged = status.state === 'merged';
   return (
     <div
       {...stylex.props(styles.note, stalled && styles.stalled)}
@@ -192,11 +195,24 @@ export function SessionAutoDeliveryNote({
     >
       <Rocket size={14} strokeWidth={1.8} {...stylex.props(styles.noteIcon)} aria-hidden="true" />
       <span {...stylex.props(styles.noteText)}>
-        {t('sessions.autoDelivery.title', '自动交付')} · {autoDeliveryStatusLabel(status, t)}
+        {t('sessions.autoDelivery.title', 'Auto delivery')} · {autoDeliveryStatusLabel(status, t)}
       </span>
-      {onTurnOff && status.state !== 'merged' ? (
+      {merged ? (
+        onDismiss ? (
+          <Button
+            size="small"
+            variant="ghost"
+            icon
+            disabled={busy}
+            onClick={onDismiss}
+            aria-label={t('common.dismiss', 'Dismiss')}
+          >
+            <X size={14} aria-hidden="true" />
+          </Button>
+        ) : null
+      ) : onTurnOff ? (
         <Button size="small" variant="ghost" disabled={busy} onClick={onTurnOff}>
-          {t('sessions.autoDelivery.turnOff', '关闭')}
+          {t('sessions.autoDelivery.turnOff', 'Turn off')}
         </Button>
       ) : null}
     </div>

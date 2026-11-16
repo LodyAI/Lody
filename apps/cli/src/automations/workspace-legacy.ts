@@ -585,9 +585,6 @@ export async function createAutomationWorkspaceLegacy(options: {
                 const enablesDelivery =
                   typeof command.settings.autoDeliver === 'object' &&
                   typeof previous.autoDeliver !== 'object';
-                const disablesDelivery =
-                  command.settings.autoDeliver === false &&
-                  typeof previous.autoDeliver === 'object';
                 // Encrypted workspaces do not run the PR poller that Auto delivery reads.
                 if (enablesDelivery && workspace.contentMode === 'e2ee')
                   throw new Error('AUTOMATION_AUTO_DELIVER_UNAVAILABLE_ENCRYPTED');
@@ -601,7 +598,8 @@ export async function createAutomationWorkspaceLegacy(options: {
                   !wasEnabled ? currentTurn : undefined,
                   now
                 );
-                if (disablesDelivery)
+                // Turning it off, or dismissing a finished status, clears the shown status.
+                if (command.settings.autoDeliver === false)
                   await lody.documentManager.repo.upsertDocMeta(
                     getSessionRoomId(sessionId as SessionId),
                     { autoDelivery: null }

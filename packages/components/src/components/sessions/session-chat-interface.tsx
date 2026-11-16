@@ -7560,6 +7560,7 @@ export const SessionChatInterface = memo(
                                                 ? () => continuation.setAutoDeliver(false)
                                                 : undefined
                                             }
+                                            onDismiss={() => continuation.setAutoDeliver(false)}
                                           />
                                         </ConversationColumn>
                                       ) : null}

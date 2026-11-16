@@ -94,7 +94,7 @@ const STATES: SessionAutoDelivery[] = (
   ] as const
 ).map((status) => ({ ...status, updatedAt: 0 }));
 
-/** The in-conversation line for every state, with its Turn off action. */
+/** The in-conversation line for every state: Turn off follows the text; a merge can be dismissed. */
 export const ConversationStatusLine: Story = {
   parameters: { layout: 'fullscreen' },
   render: () => (
@@ -105,6 +105,7 @@ export const ConversationStatusLine: Story = {
             key={`${status.state}-${status.reason ?? ''}`}
             status={status}
             onTurnOff={fn()}
+            onDismiss={fn()}
           />
         ))}
       </ConversationColumn>

@@ -151,7 +151,7 @@ const ROWS = [
     titleKey: 'sessions.continuation.tweaks.autoDeliver',
     title: '自动交付',
     descriptionKey: 'sessions.continuation.tweaks.autoDeliverDescription',
-    description: '为当前 PR 开 PR、修 CI、解冲突，合入后关闭',
+    description: 'Keeps the current PR moving; off after merge',
   },
 ] as const satisfies ReadonlyArray<{
   key: keyof SessionContinuationTweaksValue;
@@ -200,6 +200,7 @@ export function SessionContinuationTweaks({
           row.key === 'autoDeliver' && value.autoDeliver && autoDeliverOptions ? (
             <div {...stylex.props(styles.suboptions)}>
               <AutoDeliveryOptionsFields
+                size="mini"
                 value={autoDeliverOptions}
                 disabled={disabled}
                 onChange={(next) => onAutoDeliverOptionsChange?.(next)}
@@ -208,30 +209,27 @@ export function SessionContinuationTweaks({
           ) : null;
         return (
           <div key={row.key}>
-          <div
-            {...stylex.props(styles.row)}
-            data-session-continuation-tweak={row.key}
-          >
-            <span {...stylex.props(styles.icon)} aria-hidden="true">
-              <Icon size={14} strokeWidth={1.8} />
-            </span>
-            <span {...stylex.props(styles.copy)}>
-              <span {...stylex.props(styles.title)}>{t(row.titleKey, row.title)}</span>
-              <span {...stylex.props(styles.description, !supported && styles.unsupported)}>
-                {supported
-                  ? t(row.descriptionKey, row.description)
-                  : (availability?.reason ??
-                    t('sessions.continuation.tweaks.unsupported', '当前会话不支持'))}
+            <div {...stylex.props(styles.row)} data-session-continuation-tweak={row.key}>
+              <span {...stylex.props(styles.icon)} aria-hidden="true">
+                <Icon size={14} strokeWidth={1.8} />
               </span>
-            </span>
-            <Switch
-              checked={value[row.key]}
-              disabled={disabled || !supported}
-              onCheckedChange={(checked) => onChange(row.key, checked)}
-              aria-label={t(row.titleKey, row.title)}
-            />
-          </div>
-          {options}
+              <span {...stylex.props(styles.copy)}>
+                <span {...stylex.props(styles.title)}>{t(row.titleKey, row.title)}</span>
+                <span {...stylex.props(styles.description, !supported && styles.unsupported)}>
+                  {supported
+                    ? t(row.descriptionKey, row.description)
+                    : (availability?.reason ??
+                      t('sessions.continuation.tweaks.unsupported', '当前会话不支持'))}
+                </span>
+              </span>
+              <Switch
+                checked={value[row.key]}
+                disabled={disabled || !supported}
+                onCheckedChange={(checked) => onChange(row.key, checked)}
+                aria-label={t(row.titleKey, row.title)}
+              />
+            </div>
+            {options}
           </div>
         );
       })}

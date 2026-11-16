@@ -22,7 +22,9 @@ settings, and the agent itself through `lody_automation configure` when the user
 asks for it in conversation. Turning it on chooses which steps Lody may request:
 fix CI, resolve conflicts, and merge after CI passes. Merge is off unless chosen.
 The setting covers the Session's current pull request and turns itself off when
-that pull request is merged.
+that pull request is merged. A one-line status stays in the conversation until the
+user turns delivery off or, after the merge, dismisses it; either clears it for
+every device.
 
 The local Host decides each step from the PR poller's observations of the current
 pull request. It sends the agent the same request the matching Info Bar button
