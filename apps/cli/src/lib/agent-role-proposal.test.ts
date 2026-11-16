@@ -7,6 +7,7 @@ import {
   getWorkspaceFlockDocId,
   withAgentRoleTargets,
   writeWorkspaceAgentRoleToFlock,
+  type AgentRoleTargetPatch,
   type MachineId,
   type MemoryBinding,
   type WorkspaceId,
@@ -201,14 +202,78 @@ describe('Role proposal history', () => {
         (read.turn.items?.[0] as { meta: unknown }).meta
       );
       expect(meta.before?.targets).toEqual([
-        { machineId: 'build' },
-        { machineId: 'machine', memory: reviewer },
+        { machineId: 'build', agentConfigId: 'agent' },
+        { machineId: 'machine', agentConfigId: 'agent', memory: reviewer },
       ]);
       expect(meta.memoryImports).toEqual([{ machineId: 'build', ...scout, name: 'Scout' }]);
       const saved = applyAgentRoleProposal(meta, [role], 'user', 5);
       expect(getAgentRoleTarget(saved, 'build' as MachineId)?.runConfig).toEqual({ memory: scout });
       expect(getAgentRoleTarget(saved, 'machine' as MachineId)?.runConfig).toEqual({});
       expect(saved.revision).toBe(role.revision + 1);
+    } finally {
+      await doc.destroy();
+      await repo.destroy();
+    }
+  });
+
+  it('adds a machine only after its Agent config and memory are confirmed there', async () => {
+    const repo = await LoroRepo.create({});
+    const sessionId = 'role-proposal-add-target' as SessionId;
+    const workspaceId = 'workspace' as WorkspaceId;
+    const doc = new SessionDocument(repo, sessionId, async () => undefined);
+    await doc.initOffline(undefined, { historyBackend: 'loro' });
+    const backend = await createSessionBackend(doc, { historyBackend: 'loro' });
+    const manager = {
+      repo,
+      getOrCreateSessionDoc: async () => doc,
+    } as unknown as LoroDocumentManager;
+    const checks: string[] = [];
+    const scout = { providerId: 'nowledge-mem', memoryId: 'scout' };
+    try {
+      const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+      const role = applyAgentRoleProposal(
+        { command, requesterUserId: 'user', roleId: 'role' },
+        [],
+        'user',
+        0
+      );
+      writeWorkspaceAgentRoleToFlock(handle.flock, role);
+      const propose = (requestId: string, targets: AgentRoleTargetPatch[]) =>
+        proposeAgentRole({
+          manager,
+          workspaceId,
+          sessionId,
+          userId: 'user',
+          localOnly: true,
+          command: { action: 'update', requestId, roleId: 'role', patch: { targets } },
+          validateTarget: async (machineId, agentConfigId) => {
+            checks.push(`config ${machineId}/${agentConfigId}`);
+            if (agentConfigId === 'missing') throw new Error('Agent configuration not found');
+          },
+          validateMemory: async (machineId, memory) => {
+            checks.push(`memory ${machineId}/${memory.memoryId}`);
+            return undefined;
+          },
+        });
+      await expect(
+        propose('missing-config', [{ machineId: 'build', agentConfigId: 'missing', memory: scout }])
+      ).rejects.toThrow('Agent configuration not found');
+      expect(checks).toEqual(['config build/missing']);
+      checks.length = 0;
+      await propose('add', [
+        { machineId: 'build', agentConfigId: 'build-agent', memory: scout },
+        { machineId: 'machine', agentConfigId: 'agent' },
+      ]);
+      expect(checks).toEqual(['config build/build-agent', 'memory build/scout']);
+      const read = await backend.readTurn('agent-role-proposal-add');
+      if (read.state !== 'ready') throw new Error('missing card');
+      const meta = AgentRoleProposalMetaSchema.parse(
+        (read.turn.items?.[0] as { meta: unknown }).meta
+      );
+      expect(meta.before?.targets).toEqual([
+        { machineId: 'build' },
+        { machineId: 'machine', agentConfigId: 'agent' },
+      ]);
     } finally {
       await doc.destroy();
       await repo.destroy();

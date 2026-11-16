@@ -84,7 +84,8 @@ installation/configuration of agent-side Mem plugins are outside this change.
 
 Agents and the CLI bind memory through the existing Role proposal card, never by
 writing a Role or association directly. A create proposal may bind its one target; an
-update names machines the Role already runs on and binds or unlinks each one's memory.
+update binds or unlinks memory per machine target, including a machine it
+[adds](agent-role-machine-targets.md#agent-proposals).
 `lody_memory_list` / `lody memory list` show imported identities as `providerId:memoryId`.
 
 An identity the user created with the provider's own tools need not be imported first.

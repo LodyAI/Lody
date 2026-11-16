@@ -242,6 +242,7 @@ describe('CLI Role proposal tools', () => {
     ]);
     await run('update', undefined, ['--machine', 'build', '--memory', 'nowledge-mem:gate:v2']);
     await run('update', undefined, ['--machine', 'build', '--no-memory']);
+    await run('update', undefined, ['--machine', 'build', '--agent-config-id', 'build-agent']);
     expect(state.proposed).toEqual([
       {
         action: 'create',
@@ -267,14 +268,20 @@ describe('CLI Role proposal tools', () => {
         roleId: 'role',
         patch: { targets: [{ machineId: 'build', memory: null }] },
       },
+      {
+        action: 'update',
+        requestId: 'request',
+        roleId: 'role',
+        patch: { targets: [{ machineId: 'build', agentConfigId: 'build-agent' }] },
+      },
     ]);
   });
   it('rejects memory options without a machine or a provider before publishing', async () => {
     await expect(run('update', undefined, ['--memory', 'nowledge-mem:reviewer'])).rejects.toThrow(
-      'Pass --machine together with --memory'
+      'Pass --machine together with'
     );
     await expect(run('update', undefined, ['--machine', 'build'])).rejects.toThrow(
-      'Pass --machine together with --memory'
+      'Pass --machine together with'
     );
     await expect(
       run('update', undefined, ['--machine', 'build', '--memory', 'reviewer'])

@@ -25,18 +25,41 @@ import { writeWorkspaceAgentRole } from '@/lib/workspace-catalog-write';
 import { linkMemoryAssociation } from '@/lib/memory-association-write';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 
-type MemoryChange = { machineId: string; before?: MemoryBinding; after?: MemoryBinding };
+type TargetChange = {
+  machineId: string;
+  /** The Agent config of a machine this proposal adds to the Role. */
+  addedAgentConfigId?: string;
+  /** Undefined when the proposal leaves this target's memory unchanged. */
+  memory?: { before?: MemoryBinding; after?: MemoryBinding };
+};
 
-/** One row per machine whose memory the proposal sets or unlinks. */
-function memoryChanges(meta: AgentRoleProposalMeta): MemoryChange[] {
+/** One row per machine the proposal adds or whose memory it sets or unlinks. */
+function targetChanges(meta: AgentRoleProposalMeta): TargetChange[] {
   const command = meta.command;
   if (command.action === 'create')
-    return command.memory ? [{ machineId: command.machineId, after: command.memory }] : [];
-  return (command.patch.targets ?? []).map((target) => ({
-    machineId: target.machineId,
-    before: meta.before?.targets?.find((entry) => entry.machineId === target.machineId)?.memory,
-    after: target.memory ?? undefined,
-  }));
+    return command.memory
+      ? [{ machineId: command.machineId, memory: { after: command.memory } }]
+      : [];
+  return (command.patch.targets ?? []).map((target) => {
+    const before = meta.before?.targets?.find((entry) => entry.machineId === target.machineId);
+    const added = target.agentConfigId !== undefined && !before?.agentConfigId;
+    return {
+      machineId: target.machineId,
+      ...(added ? { addedAgentConfigId: target.agentConfigId } : {}),
+      ...(target.memory !== undefined
+        ? { memory: { before: before?.memory, after: target.memory ?? undefined } }
+        : {}),
+    };
+  });
+}
+
+/** Machines a proposal adds, whose Agent configs Save must find on that machine. */
+function addedTargets(meta: AgentRoleProposalMeta) {
+  return targetChanges(meta).flatMap((change) =>
+    change.addedAgentConfigId
+      ? [{ machineId: change.machineId, agentConfigId: change.addedAgentConfigId }]
+      : []
+  );
 }
 
 const styles = stylex.create({
@@ -62,6 +85,7 @@ export function AgentRoleProposalCard({
   meta,
   target,
   machineNames,
+  agentNames,
   busy,
   disabled,
   error,
@@ -72,6 +96,8 @@ export function AgentRoleProposalCard({
   target?: string;
   /** Display names by machine id; ids are shown for machines it omits. */
   machineNames?: Readonly<Record<string, string>>;
+  /** Display names by Agent config id; ids are shown for configs it omits. */
+  agentNames?: Readonly<Record<string, string>>;
   busy?: boolean;
   disabled?: boolean;
   error?: string;
@@ -79,7 +105,7 @@ export function AgentRoleProposalCard({
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
-  const changes = memoryChanges(meta);
+  const changes = targetChanges(meta);
   const memoryLabel = (machineId: string, memory?: MemoryBinding) => {
     if (!memory) return t('agentRoleProposal.memoryNone', 'Not linked');
     const pending = meta.memoryImports?.find(
@@ -143,16 +169,34 @@ export function AgentRoleProposalCard({
       )}
       {changes.length ? (
         <div {...stylex.props(styles.field)}>
-          <strong>{t('agentRoleProposal.memory', 'Memory')}</strong>
+          <strong>
+            {meta.command.action === 'create'
+              ? t('agentRoleProposal.memory', 'Memory')
+              : t('agentRoleProposal.machines', 'Machines')}
+          </strong>
           {changes.map((change) => (
             <p key={change.machineId} {...stylex.props(styles.text)}>
               {`${machineNames?.[change.machineId] ?? change.machineId}: `}
-              {meta.command.action === 'update' ? (
-                <span {...stylex.props(styles.before)}>
-                  {`${memoryLabel(change.machineId, change.before)} → `}
-                </span>
-              ) : null}
-              {memoryLabel(change.machineId, change.after)}
+              {change.addedAgentConfigId
+                ? `${t('agentRoleProposal.added', 'Added · {{agent}}', {
+                    agent: agentNames?.[change.addedAgentConfigId] ?? change.addedAgentConfigId,
+                  })} · `
+                : null}
+              {change.memory ? (
+                <>
+                  {meta.command.action === 'update'
+                    ? `${t('agentRoleProposal.memory', 'Memory')} `
+                    : null}
+                  {meta.command.action === 'update' && !change.addedAgentConfigId ? (
+                    <span {...stylex.props(styles.before)}>
+                      {`${memoryLabel(change.machineId, change.memory.before)} → `}
+                    </span>
+                  ) : null}
+                  {memoryLabel(change.machineId, change.memory.after)}
+                </>
+              ) : (
+                t('agentRoleProposal.memoryUnchanged', 'Memory unchanged')
+              )}
             </p>
           ))}
         </div>
@@ -203,10 +247,14 @@ export function AgentRoleProposalNotice({
   const { t } = useTranslation();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const user = useAtomValue(userAtom);
-  const targetMachineId = meta.command.action === 'create' ? meta.command.machineId : undefined;
+  const targetMachineKey = (
+    meta.command.action === 'create'
+      ? [meta.command.machineId]
+      : addedTargets(meta).map((target) => target.machineId)
+  ).join('\n');
   const targetMachineIds = useMemo(
-    () => (targetMachineId ? [targetMachineId] : []),
-    [targetMachineId]
+    () => (targetMachineKey ? targetMachineKey.split('\n') : []),
+    [targetMachineKey]
   );
   useMachineFlockAgentConfigsForMachineIds(targetMachineIds);
   const agents = useAtomValue(getAllAgentConfigAtom);
@@ -219,6 +267,10 @@ export function AgentRoleProposalNotice({
         )
       ),
     [machines]
+  );
+  const agentNames = useMemo(
+    () => Object.fromEntries(agents.map((agent) => [agent.id, agent.name])),
+    [agents]
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -251,10 +303,17 @@ export function AgentRoleProposalNotice({
         }
         if (decision === 'saved') {
           const command = current.command;
+          const bound =
+            command.action === 'create'
+              ? [{ machineId: command.machineId, agentConfigId: command.agentConfigId }]
+              : addedTargets(current);
           if (
-            command.action === 'create' &&
-            !agents.some(
-              (agent) => agent.id === command.agentConfigId && agent.machineId === command.machineId
+            bound.some(
+              (target) =>
+                !agents.some(
+                  (agent) =>
+                    agent.id === target.agentConfigId && agent.machineId === target.machineId
+                )
             )
           )
             throw new Error(
@@ -298,6 +357,7 @@ export function AgentRoleProposalNotice({
       meta={{ ...meta, outcome: meta.outcome ?? outcome }}
       target={target}
       machineNames={machineNames}
+      agentNames={agentNames}
       busy={busy}
       disabled={!runtime || user?.id !== meta.requesterUserId}
       error={error}

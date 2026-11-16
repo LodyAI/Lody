@@ -75,6 +75,32 @@ export const MemoryUpdate: Story = {
     },
   },
 };
+/** Adds the Role to another machine with that machine's Agent and a memory. */
+export const AddMachine: Story = {
+  args: {
+    machineNames: { build: 'Build box' },
+    agentNames: { 'build-agent': 'Claude Code' },
+    meta: {
+      requesterUserId: 'user',
+      roleId: 'role',
+      before: { name: 'Reviewer', targets: [{ machineId: 'build' }] },
+      command: {
+        action: 'update',
+        requestId: 'request',
+        roleId: 'role',
+        patch: {
+          targets: [
+            {
+              machineId: 'build',
+              agentConfigId: 'build-agent',
+              memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
+            },
+          ],
+        },
+      },
+    },
+  },
+};
 export const Saved: Story = {
   args: { ...Update.args, meta: { ...Update.args.meta, outcome: 'saved' } },
 };

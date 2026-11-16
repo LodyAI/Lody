@@ -63,7 +63,7 @@ Fork 和恢复读取冻结的历史配置，不重新查询可变 Role。未知 
 ## Agent 提案
 
 Agent 和 CLI 通过现有的 Role 提案卡片绑定记忆，从不直接写 Role 或记忆关联。创建提案可以
-为它唯一的机器目标绑定记忆；修改提案指定 Role 已在运行的机器，为每台机器绑定或取消记忆。
+为它唯一的机器目标绑定记忆；修改提案为每个机器目标绑定或取消记忆，包括它[新增](agent-role-machine-targets.zh.md#agent-提案)的机器。
 `lody_memory_list` / `lody memory list` 以 `providerId:memoryId` 列出已导入的身份。
 
 用户用 Provider 自带工具创建的身份不必先导入。准备提案时接受两种身份：已导入该机器的，
