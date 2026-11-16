@@ -3,8 +3,8 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
-Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
-start open, tools closed, and explicit toggles remain respected. DSH thought prose
+Every provider shows thoughts in disclosures separate from tool groups.
+Explicit toggles remain respected. Thought prose
 uses the same Markdown typography as ordinary answers, aligned with its disclosure
 label and shown in secondary text color; tool
 labels and details retain their compact process styling. While streaming,

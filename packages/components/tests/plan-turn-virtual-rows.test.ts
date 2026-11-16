@@ -233,6 +233,8 @@ describe('plan-turn-virtual-rows', () => {
         'activity_group_header',
         'content:tool_call',
         'worked_group_header',
+        // The post-plan thought and edit keep separate disclosures.
+        'activity_group_header',
         'activity_group_header',
         'content:text',
       ]);

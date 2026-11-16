@@ -1,4 +1,4 @@
-# DeepSeek Harness thought visibility
+# Thought visibility
 
 Status: draft
 Translation: current
@@ -7,7 +7,7 @@ Translation: current
 
 ## Behavior
 
-Builtin DeepSeek Harness conversations show thoughts in independent default-closed
+Conversations with every provider show thoughts in independent default-closed
 disclosures and tools in separate default-closed groups, preserving their order.
 Explicit toggles remain respected and search can reveal matching thoughts. Tool
 arrival must not change the reader’s choice for preceding thoughts. During streaming, prose stays
@@ -17,9 +17,8 @@ Users can expand the whole process again; search reveals matching folded prose.
 Interrupted turns without a final answer remain expanded. These rules apply to incoming output and saved history.
 
 Thoughts retain their label and stored type; rendering does not turn them into
-ordinary assistant text or rewrite history. Provider identity comes from Session
-metadata, not the model name. Other providers retain their existing visibility
-and folding, including when using a DeepSeek model.
+ordinary assistant text or rewrite history. Visibility does not depend on the
+provider, its executable or the model name.
 
 ## Evidence
 

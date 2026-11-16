@@ -1131,32 +1131,21 @@ type AssistantTurnLayout = ReturnType<typeof buildAssistantTurnRenderLayout> & {
 const EMPTY_SUBAGENT_TASKS: ReturnType<typeof collectSubagentTasks> = [];
 
 // Assistant-turn layout (block grouping + subagent-task collection) is derived
-// from the message and provider display policy. `buildChatStreamItems`
+// from the message alone. `buildChatStreamItems`
 // hands back a stable parsed-message object for unchanged turns and a fresh one
 // whenever the turn changes. Keying the cache by that reference lets only the
 // streaming turn recompute; without it, each streamed token re-runs these
 // O(items) passes for every turn in the whole conversation.
-const assistantTurnLayoutCache = new WeakMap<
-  SessionHistoryParsed,
-  { showThoughts: boolean; layout: AssistantTurnLayout }
->();
+const assistantTurnLayoutCache = new WeakMap<SessionHistoryParsed, AssistantTurnLayout>();
 
-const getAssistantTurnLayout = (
-  message: SessionHistoryParsed,
-  showThoughts: boolean
-): AssistantTurnLayout => {
+const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLayout => {
   const cached = assistantTurnLayoutCache.get(message);
-  if (cached?.showThoughts === showThoughts) return cached.layout;
+  if (cached) return cached;
   const layout: AssistantTurnLayout = {
-    ...buildAssistantTurnRenderLayout(
-      message.id,
-      message.items,
-      message.finished === true,
-      showThoughts
-    ),
+    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true, true),
     subagentTasks: collectSubagentTasks(message.items),
   };
-  assistantTurnLayoutCache.set(message, { showThoughts, layout });
+  assistantTurnLayoutCache.set(message, layout);
   return layout;
 };
 
@@ -1177,7 +1166,6 @@ type AssistantTurnRowsCacheEntry = {
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
   copyContextAvailable: boolean;
-  showThoughts: boolean;
   nextIsUser: boolean;
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
@@ -1193,7 +1181,6 @@ export const buildChatVirtualRows = ({
   expansionVersion,
   copyContextAvailable = false,
   groupCreatedSessions = true,
-  showThoughts = false,
   selectionLayouts,
 }: {
   selectionLayouts?: ReadonlyMap<string, SelectionTurnLayout>;
@@ -1206,7 +1193,6 @@ export const buildChatVirtualRows = ({
   expansionVersion: number;
   copyContextAvailable?: boolean;
   groupCreatedSessions?: boolean;
-  showThoughts?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
@@ -1294,7 +1280,6 @@ export const buildChatVirtualRows = ({
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
       cachedRows.copyContextAvailable === copyContextAvailable &&
-      cachedRows.showThoughts === showThoughts &&
       cachedRows.nextIsUser === nextIsUser &&
       cachedRows.expansionVersion === expansionVersion
     ) {
@@ -1302,10 +1287,7 @@ export const buildChatVirtualRows = ({
       continue;
     }
 
-    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(
-      message,
-      showThoughts
-    );
+    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
     const cachedState = selectionLayout?.expandState ?? getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
@@ -1373,7 +1355,7 @@ export const buildChatVirtualRows = ({
       );
 
       const visibleEntries = block.entries.filter((entry) =>
-        entry.content.type === 'thought' ? showThoughts : entry.content.kind !== 'think'
+        entry.content.type === 'thought' || entry.content.kind !== 'think'
       );
       if (visibleEntries.length === 0) return;
 
@@ -1576,7 +1558,6 @@ export const buildChatVirtualRows = ({
       activeSearchBlockId,
       expansionVersion,
       copyContextAvailable,
-      showThoughts,
       nextIsUser,
     });
     rows.push(...assistantRows);
@@ -1815,15 +1796,6 @@ export const SessionChatStreamView = forwardRef<
     },
     ref
   ) => {
-    const thoughtVisibilityAtom = useMemo(
-      () =>
-        selectAtom(
-          sessionMetaAtomFamily(getSessionRoomId(sessionId)),
-          (meta) => meta?.cliType === 'builtin' && meta.agentType === 'deepseek'
-        ),
-      [sessionId]
-    );
-    const showThoughts = useAtomValue(thoughtVisibilityAtom);
     const listRef = useRef<ConversationListHandle>(null);
     const messageSelection = useContext(MessageSelectionContext);
     const nativeTextSelectionActiveRef = useRef(false);
@@ -1926,7 +1898,6 @@ export const SessionChatStreamView = forwardRef<
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
         copyContextAvailable,
-        showThoughts,
         selectionLayouts,
         groupCreatedSessions: messageSelection === null,
       });
@@ -1957,7 +1928,6 @@ export const SessionChatStreamView = forwardRef<
       return merged;
     }, [
       messageSelection,
-      showThoughts,
       selectionLayouts,
       activeSearchBlockId,
       assistantActions,

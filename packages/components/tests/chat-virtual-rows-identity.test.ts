@@ -74,14 +74,13 @@ const makeConversation = () => {
   return { finishedTurn, streamingTurn, items: [finishedTurn, streamingTurn] };
 };
 
-describe('DSH thought visibility', () => {
+describe('Thought visibility', () => {
   const thought: MessageContent = { type: 'thought', text: 'Synthetic reasoning.' };
   const nextThought: MessageContent = { type: 'thought', text: 'Continue after the command.' };
   const fixture = (id: string, content: MessageContent[], finished = false) => ({
     items: [wrap(makeMessage(id, 'assistant', content, finished))],
     lastAssistantMessageId: id,
     expansionVersion: 0,
-    showThoughts: true,
   });
   const visibleContents = (rows: ReturnType<typeof buildChatVirtualRows>) =>
     rows.flatMap((row) => {
@@ -204,39 +203,9 @@ describe('DSH thought visibility', () => {
     ]);
   });
 
-  it('invalidates both caches on provider changes and preserves other providers folding', () => {
-    const args = fixture(
-      'dsh-provider-switch',
-      [thought, toolCall(), text('progress'), toolCall(), text('answer')],
-      true
-    );
-    const expandedArgs = {
-      ...args,
-      selectionLayouts: expansion(
-        'dsh-provider-switch',
-        {},
-        { 'segment:dsh-provider-switch:0': true }
-      ),
-    };
-    const dsh = buildChatVirtualRows(expandedArgs);
-    expect(visibleContents(dsh)).toEqual([text('progress'), text('answer')]);
-    const other = buildChatVirtualRows({ ...expandedArgs, showThoughts: false });
-    expect(visibleContents(other)).toEqual([text('progress'), text('answer')]);
-    expect(
-      other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
-    ).toBe(true);
-    expect(buildChatVirtualRows(expandedArgs)).toEqual(dsh);
-  });
-
-  it('keeps interrupted thoughts available without exposing them for other providers', () => {
-    const args = fixture('dsh-interrupted', [thought, toolCall(), nextThought], true);
+  it('keeps interrupted thoughts in their own closed groups', () => {
+    const args = fixture('interrupted', [thought, toolCall(), nextThought], true);
     expect(visibleContents(buildChatVirtualRows(args))).toEqual([]);
     expect(headers(buildChatVirtualRows(args))).toHaveLength(3);
-    const other = buildChatVirtualRows({ ...args, showThoughts: false });
-    expect(visibleContents(other)).toEqual([]);
-    expect(headers(other)).toHaveLength(1);
-    expect(
-      other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
-    ).toBe(false);
   });
 });

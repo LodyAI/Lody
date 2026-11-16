@@ -36,7 +36,8 @@ DSH 显示工具而不显示思考，是因为对话渲染器在构建活动行�
 后续改动根据 Session 元数据而非模型名称，仅为内置 DeepSeek Harness 恢复思考行，
 并更新[渲染规则](../../../../packages/components/src/components/ai-gui/AGENTS.md)与
 [draft Spec](../../../../specs/deepseek-thought-visibility.zh.md)。Provider 开关参与行缓存
-身份判断；纯思考组显示展开标签，展开分组保持思考与工具顺序。折叠与删除行是不同操作；展开分组无法恢复根本没有
+身份判断；纯思考组显示展开标签，展开分组保持思考与工具顺序。2026-11-16 起所有 provider
+都显示思考，provider 开关已删除。折叠与删除行是不同操作；展开分组无法恢复根本没有
 构建的行。该过滤逻辑不区分 provider。
 
 仅凭这个共享过滤器，不能解释另一个 provider 为什么看起来正常。可见的过程说明
