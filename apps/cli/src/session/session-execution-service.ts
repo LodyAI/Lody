@@ -1350,9 +1350,9 @@ export class SessionExecutionService {
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
   /**
-   * The last cleanly released turn per Session. While its own Agent keeps working by
-   * itself (woken by a background task, a scheduled wake-up or a cron), that work
-   * still acts for this turn's frozen invocation. See `readInvokingRuntime`.
+   * The last cleanly released turn per Session. Work its own Agent continues by itself
+   * (woken by a background task, a scheduled wake-up or a cron) still acts for this
+   * turn's frozen invocation. See `readInvokingRuntime`.
    */
   private readonly releasedTurnBySession = new Map<SessionId, TurnRuntimeState>();
   /** Admission ownership outlives replaceable turn runtime registrations. */
@@ -3272,8 +3272,9 @@ export class SessionExecutionService {
   /**
    * The runtime whose invocation the Session's Agent currently acts for: the
    * registered turn, else the last cleanly released turn while that same Agent
-   * reports it is running by itself. An idle Agent, one only waiting on background
-   * tasks, one that reports no activity, or a replaced Agent acts for nobody.
+   * process is still live. Only that Agent holds the Session's tool binding, so a
+   * call proves it is working; whether it reports its own activity does not
+   * matter (Codex reports none to Lody). A replaced or exited Agent acts for nobody.
    */
   private readInvokingRuntime(sessionId: SessionId): TurnRuntimeState | undefined {
     const live = this.turnRuntimeBySession.get(sessionId);
@@ -3285,7 +3286,7 @@ export class SessionExecutionService {
       this.releasedTurnBySession.delete(sessionId);
       return undefined;
     }
-    return session.agentClient?.getNativeActivityObservation() === 'running' ? released : undefined;
+    return released;
   }
 
   /** The Agent process ended or was replaced; its self-started work ends with it. */

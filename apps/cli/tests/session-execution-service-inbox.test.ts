@@ -44,7 +44,7 @@ vi.hoisted(() => {
   process.env.LODY_E2E = '1';
 });
 describe('Operation Inbox execution boundary', () => {
-  it('lets an Agent running by itself after its turn act for that turn until Stop', async () => {
+  it('lets the Agent continuing after its turn act for that turn until Stop', async () => {
     const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
     const sessionId = f.message.sessionId;
     try {
@@ -52,13 +52,8 @@ describe('Operation Inbox execution boundary', () => {
       await f.service.continueSession(f.message);
       expect(f.service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
 
-      // Idle, or only waiting on background tasks: nothing acts for the turn.
-      expect(f.service.getActiveInvocationContext(sessionId)).toBeUndefined();
-      f.setNativeActivity('background');
-      expect(f.service.getActiveInvocationContext(sessionId)).toBeUndefined();
-
-      // A background task woke the model: its tool calls act for the finished turn.
-      f.setNativeActivity('running');
+      // Woken by its own background task, the Agent's tool calls act for the finished
+      // turn without reporting any activity of its own (Codex reports none).
       expect(f.service.getActiveInvocationContext(sessionId)).toMatchObject({
         requesterUserId: 'user-1',
         sourceTurnId: 'human-input',
@@ -82,7 +77,6 @@ describe('Operation Inbox execution boundary', () => {
     try {
       await finished.accept();
       await finished.service.continueSession(finished.message);
-      finished.setNativeActivity('running');
       finished.dropLiveSession();
       expect(
         finished.service.getActiveInvocationContext(finished.message.sessionId)
@@ -113,7 +107,6 @@ describe('Operation Inbox execution boundary', () => {
       });
       answer.resolve({ stopReason: 'cancelled' });
       await Promise.all([stop, run]);
-      cancelled.setNativeActivity('running');
       expect(cancelled.service.getActiveInvocationContext(sessionId)).toBeUndefined();
     } finally {
       await cancelled.close();

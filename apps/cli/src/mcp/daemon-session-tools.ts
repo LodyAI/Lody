@@ -39,7 +39,7 @@ export async function executeDaemonSessionTool(
   )
     throw new Error('Session tool scope mismatch');
   // Only the Turn driving this Session may invoke its tools: the registered Turn,
-  // or the last uncancelled one while the same Agent runs by itself after it
+  // or the last uncancelled one while the same Agent keeps working after it
   // (background-task wake-up, ScheduleWakeup, cron). The local platform has one
   // user; on a shared cloud machine a collaborator may drive it.
   const invocation = daemon.readInvocation(context.sessionId);
