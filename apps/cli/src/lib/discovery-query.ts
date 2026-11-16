@@ -25,6 +25,7 @@ export const ResourceListSchemas = {
   project: DiscoveryQuerySchema.pick({ ...pageKeys, machineId: true, kind: true }),
   agent_config: machineScopedListSchema,
   agent_role: machineScopedListSchema,
+  memory: machineScopedListSchema,
   mcp: DiscoveryQuerySchema.pick(pageKeys),
 };
 export type DiscoveryPage<T> = { items: T[]; hasMore: boolean; nextCursor?: string };

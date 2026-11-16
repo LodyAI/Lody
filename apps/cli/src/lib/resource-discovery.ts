@@ -7,6 +7,7 @@ import {
   summarizeAgentRunConfigCapabilities,
   normalizeAgentRoleRunConfig,
   getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
+  machineSupportsMemoryProviders,
   parseRateLimitEntryKey,
   type AcpCapabilityCacheEntry,
   type AgentConfigMeta,
@@ -14,6 +15,9 @@ import {
   type LocalProjectMeta,
   type MachineId,
   type MachineMeta,
+  type MemoryAssociation,
+  type MemoryBinding,
+  type MemoryProviderResponse,
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import type { RateLimit } from 'acp-extension-core';
@@ -26,7 +30,13 @@ import {
   type DiscoveryQuery,
 } from './discovery-query';
 
-export type DiscoveryResource = 'machine' | 'project' | 'agent_config' | 'agent_role' | 'mcp';
+export type DiscoveryResource =
+  | 'machine'
+  | 'project'
+  | 'agent_config'
+  | 'agent_role'
+  | 'memory'
+  | 'mcp';
 export type DiscoveryAvailability = {
   state: 'available' | 'unavailable' | 'unknown';
   reason?: string;
@@ -72,6 +82,13 @@ export type DiscoverySource = {
   /** Live memory/disk from the Machine itself; undefined when it cannot answer. */
   machineResources?(machine: MachineMeta): Promise<Record<string, unknown> | undefined>;
   projects(machineId: MachineId): Promise<LocalProjectMeta[]>;
+  /** Memory identities imported into Lody on one machine. */
+  memories(machineId: MachineId): Promise<MemoryAssociation[]>;
+  /** The machine's live provider inventory; undefined when it cannot answer. */
+  memoryInventory?(
+    machineId: MachineId,
+    providerId: string
+  ): Promise<MemoryProviderResponse | undefined>;
   roles(): Promise<AgentRole[]>;
   mcpServers(): Promise<WorkspaceMcpServerMeta[]>;
   repositories(): Promise<Array<{ fullName: string }>>;
@@ -200,6 +217,24 @@ export class ResourceDiscovery {
         availability: availability(machine.id),
         protocolCapabilities: machine.protocolCapabilities ?? {},
       }));
+    if (resource === 'memory') {
+      const rows: DiscoveryRow[] = [];
+      for (const machine of authorized)
+        for (const memory of await source.memories(machine.id))
+          rows.push({
+            // The same `providerId:memoryId` form the CLI's --memory option takes.
+            id: `${memory.providerId}:${memory.memoryId}`,
+            name: memory.name,
+            ...(memory.description ? { description: memory.description } : {}),
+            machineId: machine.id,
+            providerId: memory.providerId,
+            memoryId: memory.memoryId,
+            availability: machineSupportsMemoryProviders(machine)
+              ? availability(machine.id)
+              : { state: 'unavailable', reason: 'memory_unsupported' },
+          });
+      return rows;
+    }
     if (resource === 'project') {
       const rows: DiscoveryRow[] = [];
       for (const machine of authorized) {
@@ -377,6 +412,51 @@ export class ResourceDiscovery {
         ...(includeResources ? { resources: resources ?? 'unavailable' } : {}),
       };
     });
+  }
+
+  /**
+   * Whether a Role target on `machineId` may bind `binding`. An identity already
+   * imported there returns undefined. Otherwise the machine's live provider
+   * inventory must list it, and the association to import on Save is returned.
+   */
+  async resolveMemoryBinding(
+    machineId: string,
+    binding: MemoryBinding
+  ): Promise<MemoryAssociation | undefined> {
+    const machine = (await this.source.machines()).find((candidate) => candidate.id === machineId);
+    if (!machine || !(await this.source.canAccess(machine.id)))
+      throw new Error('Machine not found or not readable.');
+    if (!machineSupportsMemoryProviders(machine))
+      throw new Error(`Machine ${machineId} runs a Lody version without memory provider support.`);
+    const label = `${binding.providerId}:${binding.memoryId}`;
+    if (
+      (await this.source.memories(machine.id)).some(
+        (memory) => memory.providerId === binding.providerId && memory.memoryId === binding.memoryId
+      )
+    )
+      return undefined;
+    const inventory = await this.source
+      .memoryInventory?.(machine.id, binding.providerId)
+      .catch(() => undefined);
+    if (!inventory)
+      throw new Error(
+        `Memory ${label} is not imported on machine ${machineId}, and the machine could not be asked for its provider identities. Retry while it is online.`
+      );
+    if (inventory.status !== 'ready')
+      throw new Error(
+        `Memory ${label} is not imported on machine ${machineId}, and its provider reports ${inventory.status}.`
+      );
+    const identity = inventory.memories.find((memory) => memory.id === binding.memoryId);
+    if (!identity)
+      throw new Error(`Memory ${label} does not exist in its provider on machine ${machineId}.`);
+    return {
+      machineId: machine.id,
+      providerId: binding.providerId,
+      memoryId: identity.id,
+      // Bounded like associations imported from Settings.
+      name: (identity.name.trim() || identity.id).slice(0, 200),
+      ...(identity.description ? { description: identity.description.slice(0, 2000) } : {}),
+    };
   }
 
   async get(resource: 'agent_config' | 'agent_role', id: string, machineId?: string) {

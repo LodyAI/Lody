@@ -5,12 +5,16 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   AgentRoleProposalMetaSchema,
   applyAgentRoleProposal,
+  getAgentRoleTarget,
   getServerNow,
   getWorkspaceFlockDocId,
   listWorkspaceAgentRoles,
   readWorkspaceFlockRowsFromFlock,
   type AgentRoleProposalCommand,
   type AgentRoleProposalMeta,
+  type MachineId,
+  type MemoryAssociation,
+  type MemoryBinding,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -66,6 +70,14 @@ export async function proposeAgentRole(args: {
   command: AgentRoleProposalCommand;
   localOnly: boolean;
   validateTarget: (machineId: string, agentConfigId: string) => Promise<void>;
+  /**
+   * Confirms the identity can serve `machineId`. Returns the association to import
+   * on Save when it is not imported there yet; throws when it cannot be confirmed.
+   */
+  validateMemory: (
+    machineId: string,
+    memory: MemoryBinding
+  ) => Promise<MemoryAssociation | undefined>;
 }) {
   const { manager, workspaceId, sessionId, userId, command } = args;
   const session = await manager.getOrCreateSessionDoc(sessionId);
@@ -97,10 +109,27 @@ export async function proposeAgentRole(args: {
       command.action === 'update' ? roles.find((role) => role.id === command.roleId) : undefined;
     if (command.action === 'create')
       await args.validateTarget(command.machineId, command.agentConfigId);
+    const bindings =
+      command.action === 'create'
+        ? command.memory
+          ? [{ machineId: command.machineId, memory: command.memory }]
+          : []
+        : (command.patch.targets ?? []).flatMap((target) =>
+            target.memory ? [{ machineId: target.machineId, memory: target.memory }] : []
+          );
+    const targetPatches = command.action === 'update' ? command.patch.targets : undefined;
+    const roleId = command.action === 'update' ? command.roleId : randomUUID();
+    // Ownership, existence, names and targets fail before any provider probe.
+    applyAgentRoleProposal({ command, requesterUserId: userId, roleId }, roles, userId, 0);
+    const memoryImports: MemoryAssociation[] = [];
+    for (const binding of bindings) {
+      const pending = await args.validateMemory(binding.machineId, binding.memory);
+      if (pending) memoryImports.push(pending);
+    }
     const meta: AgentRoleProposalMeta = {
       command,
       requesterUserId: userId,
-      roleId: command.action === 'update' ? command.roleId : randomUUID(),
+      roleId,
       ...(existing && command.action === 'update'
         ? {
             before: {
@@ -111,9 +140,19 @@ export async function proposeAgentRole(args: {
               ...(command.patch.promptPrefix !== undefined
                 ? { promptPrefix: existing.promptPrefix }
                 : {}),
+              ...(targetPatches
+                ? {
+                    targets: targetPatches.map(({ machineId }) => {
+                      const memory = getAgentRoleTarget(existing, machineId as MachineId)?.runConfig
+                        .memory;
+                      return { machineId, ...(memory ? { memory } : {}) };
+                    }),
+                  }
+                : {}),
             },
           }
         : {}),
+      ...(memoryImports.length ? { memoryImports } : {}),
     };
     applyAgentRoleProposal(meta, roles, userId, getServerNow());
     return meta;

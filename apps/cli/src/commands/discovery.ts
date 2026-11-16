@@ -77,6 +77,7 @@ export async function runDiscoveryList(
         project: 'projects',
         agent_config: 'agentConfigs',
         agent_role: 'roles',
+        memory: 'memories',
         mcp: 'servers',
       }[resource];
       if (options.json) printJson({ ...page, items, [legacyKey]: items });
@@ -103,7 +104,9 @@ export async function runDiscoveryList(
   });
 }
 
-export function discoveryListCommand(resource: 'agent_config' | 'agent_role' | 'mcp'): Command {
+export function discoveryListCommand(
+  resource: 'agent_config' | 'agent_role' | 'memory' | 'mcp'
+): Command {
   const command = addDiscoveryOptions(
     new Command('list')
       .description(`List readable ${resource} resources`)
@@ -148,3 +151,7 @@ export const agentRoleCommand = new Command('agent-role')
   .addCommand(discoveryGetCommand('agent_role'))
   .addCommand(agentRoleWriteCommand('create'))
   .addCommand(agentRoleWriteCommand('update'));
+
+export const memoryCommand = new Command('memory')
+  .description('List memory identities imported into Lody on each machine')
+  .addCommand(discoveryListCommand('memory'));

@@ -44,7 +44,7 @@ Parent instructions apply. Background: [README.md](README.md).
 - With `agentRoleId`, create tools require `agentRoleMachineId` for multi-machine
   Roles. Strip manual target/run-config before resolution,
   validation, identity, recovery or dispatch; the Role is authoritative.
-- Role create/update only propose. Save checks ownership, patches latest text;
+- Role create/update only propose. Save checks ownership, patches proposed fields;
   replicas may overwrite. CLI shares [flow](README.md#agent-role-proposals).
 
 ## Session tool contracts

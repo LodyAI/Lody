@@ -15,12 +15,29 @@ import {
   listWorkspaceAgentRoles,
   readWorkspaceFlockRowsFromFlock,
   type AgentRoleProposalMeta,
+  type MemoryBinding,
   type SessionId,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { writeWorkspaceAgentRole } from '@/lib/workspace-catalog-write';
+import { linkMemoryAssociation } from '@/lib/memory-association-write';
+import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+
+type MemoryChange = { machineId: string; before?: MemoryBinding; after?: MemoryBinding };
+
+/** One row per machine whose memory the proposal sets or unlinks. */
+function memoryChanges(meta: AgentRoleProposalMeta): MemoryChange[] {
+  const command = meta.command;
+  if (command.action === 'create')
+    return command.memory ? [{ machineId: command.machineId, after: command.memory }] : [];
+  return (command.patch.targets ?? []).map((target) => ({
+    machineId: target.machineId,
+    before: meta.before?.targets?.find((entry) => entry.machineId === target.machineId)?.memory,
+    after: target.memory ?? undefined,
+  }));
+}
 
 const styles = stylex.create({
   card: {
@@ -44,6 +61,7 @@ const styles = stylex.create({
 export function AgentRoleProposalCard({
   meta,
   target,
+  machineNames,
   busy,
   disabled,
   error,
@@ -52,6 +70,8 @@ export function AgentRoleProposalCard({
 }: {
   meta: AgentRoleProposalMeta;
   target?: string;
+  /** Display names by machine id; ids are shown for machines it omits. */
+  machineNames?: Readonly<Record<string, string>>;
   busy?: boolean;
   disabled?: boolean;
   error?: string;
@@ -59,6 +79,21 @@ export function AgentRoleProposalCard({
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
+  const changes = memoryChanges(meta);
+  const memoryLabel = (machineId: string, memory?: MemoryBinding) => {
+    if (!memory) return t('agentRoleProposal.memoryNone', 'Not linked');
+    const pending = meta.memoryImports?.find(
+      (entry) =>
+        entry.machineId === machineId &&
+        entry.providerId === memory.providerId &&
+        entry.memoryId === memory.memoryId
+    );
+    return pending
+      ? t('agentRoleProposal.memoryImport', '{{name}} · imported into Lody on Save', {
+          name: pending.name,
+        })
+      : memory.memoryId;
+  };
   const fields = meta.command.action === 'create' ? meta.command : meta.command.patch;
   const labels = {
     name: t('agentRoleProposal.name', 'Name'),
@@ -106,6 +141,22 @@ export function AgentRoleProposalCard({
           </div>
         )
       )}
+      {changes.length ? (
+        <div {...stylex.props(styles.field)}>
+          <strong>{t('agentRoleProposal.memory', 'Memory')}</strong>
+          {changes.map((change) => (
+            <p key={change.machineId} {...stylex.props(styles.text)}>
+              {`${machineNames?.[change.machineId] ?? change.machineId}: `}
+              {meta.command.action === 'update' ? (
+                <span {...stylex.props(styles.before)}>
+                  {`${memoryLabel(change.machineId, change.before)} → `}
+                </span>
+              ) : null}
+              {memoryLabel(change.machineId, change.after)}
+            </p>
+          ))}
+        </div>
+      ) : null}
       {error ? (
         <p role="alert" {...stylex.props(styles.error)}>
           {error}
@@ -159,6 +210,16 @@ export function AgentRoleProposalNotice({
   );
   useMachineFlockAgentConfigsForMachineIds(targetMachineIds);
   const agents = useAtomValue(getAllAgentConfigAtom);
+  const { machines } = useVisibleMachineMetas();
+  const machineNames = useMemo(
+    () =>
+      Object.fromEntries(
+        [...machines.values()].flatMap((machine) =>
+          machine.name ? [[machine.id, machine.name]] : []
+        )
+      ),
+    [machines]
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [outcome, setOutcome] = useState(meta.outcome);
@@ -207,6 +268,9 @@ export function AgentRoleProposalNotice({
           );
           const roles = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock));
           const role = applyAgentRoleProposal(current, roles, user.id, getServerNow());
+          // Imports are idempotent links, so a failed Role write may retry them safely.
+          for (const association of current.memoryImports ?? [])
+            await linkMemoryAssociation(runtime, association);
           await writeWorkspaceAgentRole(runtime, role);
         }
         const items = [...(read.turn.items ?? [])];
@@ -233,6 +297,7 @@ export function AgentRoleProposalNotice({
     <AgentRoleProposalCard
       meta={{ ...meta, outcome: meta.outcome ?? outcome }}
       target={target}
+      machineNames={machineNames}
       busy={busy}
       disabled={!runtime || user?.id !== meta.requesterUserId}
       error={error}

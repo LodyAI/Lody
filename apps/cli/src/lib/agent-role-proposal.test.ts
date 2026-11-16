@@ -3,8 +3,12 @@ import { LoroRepo } from 'loro-repo';
 import {
   AgentRoleProposalMetaSchema,
   applyAgentRoleProposal,
+  getAgentRoleTarget,
   getWorkspaceFlockDocId,
+  withAgentRoleTargets,
   writeWorkspaceAgentRoleToFlock,
+  type MachineId,
+  type MemoryBinding,
   type WorkspaceId,
   type AgentRoleProposalCommand,
   type SessionId,
@@ -109,6 +113,9 @@ describe('Role proposal history', () => {
           validateTarget: async () => {
             throw new Error('Update must preserve binding');
           },
+          validateMemory: async () => {
+            throw new Error('Update must not probe memory');
+          },
         });
       await expect(propose('missing', 'user', 'missing')).rejects.toThrow();
       await expect(propose('role', 'other', 'unauthorized')).rejects.toThrow();
@@ -125,6 +132,83 @@ describe('Role proposal history', () => {
         },
       });
       expect(await backend.history.count()).toBe(1);
+    } finally {
+      await doc.destroy();
+      await repo.destroy();
+    }
+  });
+
+  it('binds per-machine memory, records the before state and carries identities to import', async () => {
+    const repo = await LoroRepo.create({});
+    const sessionId = 'role-proposal-memory' as SessionId;
+    const workspaceId = 'workspace' as WorkspaceId;
+    const doc = new SessionDocument(repo, sessionId, async () => undefined);
+    await doc.initOffline(undefined, { historyBackend: 'loro' });
+    const backend = await createSessionBackend(doc, { historyBackend: 'loro' });
+    const manager = {
+      repo,
+      getOrCreateSessionDoc: async () => doc,
+    } as unknown as LoroDocumentManager;
+    const reviewer = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+    const scout = { providerId: 'nowledge-mem', memoryId: 'scout' };
+    const probed: string[] = [];
+    try {
+      const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+      const single = applyAgentRoleProposal(
+        { command, requesterUserId: 'user', roleId: 'role' },
+        [],
+        'user',
+        0
+      );
+      const role = withAgentRoleTargets(single, [
+        { ...getAgentRoleTarget(single, 'machine' as MachineId)!, runConfig: { memory: reviewer } },
+        { machineId: 'build' as MachineId, agentConfigId: single.agentConfigId, runConfig: {} },
+      ]);
+      writeWorkspaceAgentRoleToFlock(handle.flock, role);
+      const propose = (
+        requestId: string,
+        targets: { machineId: string; memory: MemoryBinding | null }[]
+      ) =>
+        proposeAgentRole({
+          manager,
+          workspaceId,
+          sessionId,
+          userId: 'user',
+          localOnly: true,
+          command: { action: 'update', requestId, roleId: 'role', patch: { targets } },
+          validateTarget: async () => {
+            throw new Error('Update must preserve binding');
+          },
+          validateMemory: async (machineId, memory) => {
+            probed.push(`${machineId}/${memory.memoryId}`);
+            return memory.memoryId === 'scout'
+              ? { machineId, ...memory, name: 'Scout' }
+              : undefined;
+          },
+        });
+      await expect(propose('elsewhere', [{ machineId: 'laptop', memory: scout }])).rejects.toThrow(
+        'does not run on machine laptop'
+      );
+      expect(probed).toEqual([]);
+      await propose('bind', [
+        { machineId: 'build', memory: scout },
+        { machineId: 'machine', memory: null },
+      ]);
+      expect(probed).toEqual(['build/scout']);
+      const read = await backend.readTurn('agent-role-proposal-bind');
+      if (read.state !== 'ready') throw new Error('missing card');
+      const meta = AgentRoleProposalMetaSchema.parse(
+        (read.turn.items?.[0] as { meta: unknown }).meta
+      );
+      expect(meta.before?.targets).toEqual([
+        { machineId: 'build' },
+        { machineId: 'machine', memory: reviewer },
+      ]);
+      expect(meta.memoryImports).toEqual([{ machineId: 'build', ...scout, name: 'Scout' }]);
+      const saved = applyAgentRoleProposal(meta, [role], 'user', 5);
+      expect(getAgentRoleTarget(saved, 'build' as MachineId)?.runConfig).toEqual({ memory: scout });
+      expect(getAgentRoleTarget(saved, 'machine' as MachineId)?.runConfig).toEqual({});
+      expect(saved.revision).toBe(role.revision + 1);
     } finally {
       await doc.destroy();
       await repo.destroy();

@@ -193,6 +193,45 @@ it('preserves memory references, revises identity changes, and gates older machi
   ).toBeUndefined();
 });
 
+it('creates a Role bound to memory and refuses ambiguous per-machine memory patches', () => {
+  const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const created = applyAgentRoleProposal(
+    {
+      command: {
+        action: 'create',
+        requestId: 'request',
+        name: 'Reviewer',
+        machineId: 'machine',
+        agentConfigId: 'agent',
+        memory,
+      },
+      requesterUserId: 'user',
+      roleId: 'role',
+    },
+    [],
+    'user',
+    0
+  );
+  expect(created.runConfig).toEqual({ memory });
+  const update = (targets: unknown) =>
+    AgentRoleProposalCommandSchema.safeParse({
+      action: 'update',
+      requestId: 'request',
+      roleId: 'role',
+      patch: { targets },
+    }).success;
+  expect(update([{ machineId: 'machine', memory: null }])).toBe(true);
+  expect(update([])).toBe(false);
+  expect(update([{ machineId: 'machine' }])).toBe(false);
+  expect(
+    update([
+      { machineId: 'machine', memory },
+      { machineId: 'machine', memory: null },
+    ])
+  ).toBe(false);
+  expect(update([{ machineId: 'machine', memory: null, agentConfigId: 'other' }])).toBe(false);
+});
+
 describe('agent role run config availability', () => {
   const capability = (overrides: Partial<AcpCapabilityCacheEntry> = {}) =>
     ({

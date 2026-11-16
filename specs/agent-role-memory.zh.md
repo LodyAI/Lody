@@ -16,7 +16,7 @@ Agent Config 一致的双栏编辑器，左侧选择 Provider，右侧提供创�
 `['memory', providerId, memoryId]` 保存机器 ID、名称和可选描述。写入使用现有
 workspace writer，本地持久化完成即成功，远程上传为尽力而为。稳定键保证重复关联
 不会覆盖已自定义的元数据。编辑通过适配器修改 Provider 档案，并将返回的名称和描述同步到 Lody；删除仅移除关联，不删除 Provider
-数据。登记成功但本地保存失败时，可以重试关联而不重复登记。不会自动导入已有身份。
+数据。登记成功但本地保存失败时，可以重试关联而不重复登记。不会自动导入已有身份；已保存的 Role 提案只导入它绑定的身份（见 [Agent 提案](#agent-提案)）。
 
 卡片最左侧显示垂直居中的灰度 Provider logo，右侧显示名称及第二行描述；悬停或键盘聚焦显示编辑与
 删除操作。页面右上角提供添加和刷新。只有成功取得的 Provider 列表缺少已关联身份时
@@ -60,12 +60,29 @@ ACP 启动在环境组装完成后解析适配器，Nowledge Mem 注入 `NMEM_AG
 Fork 和恢复读取冻结的历史配置，不重新查询可变 Role。未知 Provider 明确失败。
 其他 Provider、自动安装或配置 Agent 端 Mem 插件不在本次范围内。
 
+## Agent 提案
+
+Agent 和 CLI 通过现有的 Role 提案卡片绑定记忆，从不直接写 Role 或记忆关联。创建提案可以
+为它唯一的机器目标绑定记忆；修改提案指定 Role 已在运行的机器，为每台机器绑定或取消记忆。
+`lody_memory_list` / `lody memory list` 以 `providerId:memoryId` 列出已导入的身份。
+
+用户用 Provider 自带工具创建的身份不必先导入。准备提案时接受两种身份：已导入该机器的，
+或该机器 Provider 实时清单中存在的；后者随卡片保存，用户点保存时先按 Provider 报告的名称和
+描述导入，再写入 Role。这是唯一不经“导入”Tab 导入已有身份的路径，且只在用户保存卡片之后
+发生。既未导入、又无法确认的身份（机器离线、Provider 未就绪或不存在该身份）会使提案失败。
+保存时不再探测 Provider：提案与保存之间被移除的关联不阻止 Role 写入。
+
 ## 证据
 
 - [Provider 契约](../packages/shared/src/memory-provider.ts)
 - [Daemon 适配器](../apps/cli/src/lib/memory-providers.ts)
 - [设置界面](../packages/components/src/components/settings/memory-setting.tsx)
 - [进程边界](../apps/cli/src/session/session.ts)
+- [提案契约](../packages/shared/src/agent-role-proposal.ts)、
+  [提案准备](../apps/cli/src/lib/agent-role-proposal.ts)和
+  [绑定校验](../apps/cli/src/lib/resource-discovery.ts)；测试见
+  `apps/cli/src/lib/agent-role-proposal.test.ts`、`apps/cli/src/lib/resource-discovery.test.ts`
+  和 `packages/components/tests/agent-role-proposal.test.tsx`
 
 记忆编辑器在整个窗口居中，桌面尺寸为紧凑的 900 × 600 px，并限制在 96dvw × 92dvh 内。
 创建表单要求名称非空，并将名称和 Agent ID 按顺序放在同一行，未手动修改 ID 时随名称转为全小写。

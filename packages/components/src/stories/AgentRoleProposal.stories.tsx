@@ -44,6 +44,37 @@ export const Update: Story = {
     },
   },
 };
+/** Per-machine memory: one identity is imported on Save, another target is unlinked. */
+export const MemoryUpdate: Story = {
+  args: {
+    machineNames: { machine: 'Workstation', build: 'Build box' },
+    meta: {
+      requesterUserId: 'user',
+      roleId: 'role',
+      before: {
+        name: 'Reviewer',
+        targets: [
+          { machineId: 'build' },
+          { machineId: 'machine', memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' } },
+        ],
+      },
+      memoryImports: [
+        { machineId: 'build', providerId: 'nowledge-mem', memoryId: 'scout', name: 'Scout' },
+      ],
+      command: {
+        action: 'update',
+        requestId: 'request',
+        roleId: 'role',
+        patch: {
+          targets: [
+            { machineId: 'build', memory: { providerId: 'nowledge-mem', memoryId: 'scout' } },
+            { machineId: 'machine', memory: null },
+          ],
+        },
+      },
+    },
+  },
+};
 export const Saved: Story = {
   args: { ...Update.args, meta: { ...Update.args.meta, outcome: 'saved' } },
 };

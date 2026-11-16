@@ -25,6 +25,9 @@ type Options = {
   promptPrefix?: string;
   machineId?: string;
   agentConfigId?: string;
+  machine?: string;
+  /** `providerId:memoryId`, or false from --no-memory. */
+  memory?: string | false;
   session?: string;
   workspace?: string;
   requestId?: string;
@@ -38,8 +41,8 @@ export function agentRoleWriteCommand(action: 'create' | 'update'): Command {
     .option(
       '--file <path>',
       action === 'create'
-        ? 'JSON: name, description, promptPrefix, machineId, agentConfigId'
-        : 'JSON patch: name, description, promptPrefix; empty strings clear optional fields'
+        ? 'JSON: name, description, promptPrefix, machineId, agentConfigId, memory'
+        : 'JSON patch: name, description, promptPrefix, targets; empty strings clear optional fields'
     )
     .option('--name <name>', 'Role name')
     .option('--description <text>', 'Role description; empty string clears it')
@@ -52,9 +55,14 @@ export function agentRoleWriteCommand(action: 'create' | 'update'): Command {
   if (action === 'create') {
     command
       .option('--machine-id <id>', 'Machine hosting the Agent config')
-      .option('--agent-config-id <id>', 'Agent config to bind');
+      .option('--agent-config-id <id>', 'Agent config to bind')
+      .option('--memory <provider:id>', 'Memory identity on that machine (see lody memory list)');
   } else {
-    command.argument('<role-id>');
+    command
+      .argument('<role-id>')
+      .option('--machine <id>', 'Machine target whose memory --memory or --no-memory changes')
+      .option('--memory <provider:id>', 'Memory identity on that machine (see lody memory list)')
+      .option('--no-memory', 'Unlink the memory of that machine target');
   }
   command.action(async (...values: unknown[]) => {
     const options = values[action === 'update' ? 1 : 0] as Options;
@@ -64,11 +72,19 @@ export function agentRoleWriteCommand(action: 'create' | 'update'): Command {
         throw new Error(
           'Pass --session or set LODY_SESSION_ID; a proposal needs an active conversation'
         );
-      const fields = Object.fromEntries(
+      const fields: Record<string, unknown> = Object.fromEntries(
         (['name', 'description', 'promptPrefix', 'machineId', 'agentConfigId'] as const)
           .filter((key) => options[key] !== undefined)
           .map((key) => [key, options[key]])
       );
+      const memory = options.memory === undefined ? undefined : parseMemoryOption(options.memory);
+      if (action === 'create' && memory) fields.memory = memory;
+      if (action === 'update') {
+        if ((options.machine === undefined) !== (memory === undefined))
+          throw new Error('Pass --machine together with --memory or --no-memory');
+        if (options.machine !== undefined)
+          fields.targets = [{ machineId: options.machine, memory }];
+      }
       if (options.file !== undefined && Object.keys(fields).length > 0)
         throw new Error('Use either --file or direct Role field options, not both');
       const data: unknown =
@@ -128,4 +144,13 @@ export function agentRoleWriteCommand(action: 'create' | 'update'): Command {
     });
   });
   return command;
+}
+
+/** `providerId:memoryId`, the id `lody memory list` prints; false unlinks (null). */
+function parseMemoryOption(value: string | false) {
+  if (value === false) return null;
+  const separator = value.indexOf(':');
+  if (separator <= 0 || separator === value.length - 1)
+    throw new Error('--memory takes providerId:memoryId, for example nowledge-mem:reviewer');
+  return { providerId: value.slice(0, separator), memoryId: value.slice(separator + 1) };
 }

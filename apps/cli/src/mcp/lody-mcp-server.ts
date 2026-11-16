@@ -4801,8 +4801,17 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       const source = await resolveInvokingTurnSource();
       const auth = getCliAuthContextOrThrow('mcp');
       const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-      return withWorkspaceManager(auth, workspace, 'agent-role-proposal', async (manager) =>
-        proposeAgentRole({
+      return withWorkspaceManager(auth, workspace, 'agent-role-proposal', async (manager) => {
+        let discovery: ReturnType<typeof createResourceDiscovery> | undefined;
+        const readDiscovery = () =>
+          (discovery ??= createResourceDiscovery({
+            manager,
+            auth,
+            workspaceId: workspace.id as WorkspaceId,
+            delegatedRequester: { userId: source.userId },
+            requireFreshCatalogs: true,
+          }));
+        return proposeAgentRole({
           manager,
           workspaceId: workspace.id as WorkspaceId,
           sessionId: ctx.sessionId,
@@ -4810,19 +4819,16 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           command,
           localOnly: !!getSessionCommandEnvironment(),
           validateTarget: async (machineId, agentConfigId) => {
-            const discovery = await createResourceDiscovery({
-              manager,
-              auth,
-              workspaceId: workspace.id as WorkspaceId,
-              delegatedRequester: { userId: source.userId },
-              requireFreshCatalogs: true,
-            });
-            const config = await discovery.get('agent_config', agentConfigId, machineId);
+            const config = await (
+              await readDiscovery()
+            ).get('agent_config', agentConfigId, machineId);
             if (config.item.machineId !== machineId)
               throw new Error('Agent configuration does not belong to the selected machine');
           },
-        })
-      );
+          validateMemory: async (machineId, memory) =>
+            (await readDiscovery()).resolveMemoryBinding(machineId, memory),
+        });
+      });
     },
     mcpErrorResult
   );

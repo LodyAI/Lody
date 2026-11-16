@@ -88,6 +88,12 @@ const commands = [
     load: async () => (await import('./discovery')).agentRoleCommand,
   },
   {
+    name: 'memory',
+    description: 'List memory identities imported into Lody on each machine',
+    usage: '[options] [command]',
+    load: async () => (await import('./discovery')).memoryCommand,
+  },
+  {
     name: 'operation',
     description: 'Inspect Operations on this machine',
     usage: '[options] [command]',

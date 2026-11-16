@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   rows: new Map<string, unknown>(),
   meta: {} as AgentRoleProposalMeta,
   failSave: false,
+  writes: [] as string[],
 }));
 vi.mock('@/atoms', async () => ({ userAtom: (await import('jotai')).atom({ id: 'user' }) }));
 vi.mock('@/atoms/agents', async () => ({
@@ -23,6 +24,14 @@ vi.mock('@/atoms/runtime', async () => ({
 }));
 vi.mock('@/hooks/use-machine-flock-agent-configs', () => ({
   useMachineFlockAgentConfigsForMachineIds: () => undefined,
+}));
+vi.mock('@/hooks/use-visible-machine-metas', () => ({
+  useVisibleMachineMetas: () => ({
+    machines: new Map([
+      ['machine', { id: 'machine', name: 'This Mac' }],
+      ['build', { id: 'build', name: 'Build box' }],
+    ]),
+  }),
 }));
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -53,6 +62,7 @@ const click = async (label: string) => {
 beforeEach(async () => {
   await initI18n('en');
   state.rows.clear();
+  state.writes = [];
   state.failSave = false;
   state.meta = {
     roleId: 'role',
@@ -79,7 +89,14 @@ beforeEach(async () => {
     writer: {
       flockRowPut: async (_doc: string, key: unknown, value: unknown) => {
         if (state.failSave) throw new Error('Storage unavailable');
+        state.writes.push(`${_doc} ${JSON.stringify(key)}`);
         state.rows.set(JSON.stringify(key), value);
+      },
+      flockRowPutIfAbsent: async (doc: string, key: unknown, value: unknown) => {
+        state.writes.push(`${doc} ${JSON.stringify(key)}`);
+        const id = JSON.stringify(key);
+        if (!state.rows.has(id)) state.rows.set(id, value);
+        return { value: state.rows.get(id) };
       },
     },
     withSessionStore: async (_sessionId: string, run: (store: unknown) => Promise<void>) =>
@@ -185,6 +202,70 @@ describe('Role proposal confirmation', () => {
       promptPrefix: 'New instruction',
       revision: 8,
       updatedAt: expect.any(Number),
+    });
+    expect(state.meta.outcome).toBe('saved');
+  });
+  it('shows per-machine memory changes and imports a new identity before binding it', async () => {
+    const reviewer = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+    const scout = { providerId: 'nowledge-mem', memoryId: 'scout' };
+    state.rows.set(JSON.stringify(['agentRole', 'role']), {
+      v: 2,
+      id: 'role',
+      ownerUserId: 'user',
+      visibility: 'private',
+      name: 'Reviewer',
+      targets: [
+        { machineId: 'machine', agentConfigId: 'agent', runConfig: { memory: reviewer } },
+        { machineId: 'build', agentConfigId: 'agent', runConfig: {} },
+      ],
+      revision: 3,
+      createdAt: 0,
+      updatedAt: 1,
+    });
+    state.meta = {
+      roleId: 'role',
+      requesterUserId: 'user',
+      before: {
+        name: 'Reviewer',
+        targets: [{ machineId: 'build' }, { machineId: 'machine', memory: reviewer }],
+      },
+      memoryImports: [{ machineId: 'build', ...scout, name: 'Scout' }],
+      command: {
+        action: 'update',
+        requestId: 'request',
+        roleId: 'role',
+        patch: {
+          targets: [
+            { machineId: 'build', memory: scout },
+            { machineId: 'machine', memory: null },
+          ],
+        },
+      },
+    };
+    await render();
+    expect(container.textContent).toContain(
+      'Build box: Not linked → Scout · imported into Lody on Save'
+    );
+    expect(container.textContent).toContain('This Mac: reviewer → Not linked');
+    expect(state.rows.size).toBe(1);
+    await click('Save');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(state.writes.map((write) => write.split(' ')[1])).toEqual([
+      JSON.stringify(['memory', 'nowledge-mem', 'scout']),
+      JSON.stringify(['agentRole', 'role']),
+    ]);
+    expect(state.rows.get(JSON.stringify(['memory', 'nowledge-mem', 'scout']))).toEqual({
+      machineId: 'build',
+      ...scout,
+      name: 'Scout',
+    });
+    expect(state.rows.get(JSON.stringify(['agentRole', 'role']))).toMatchObject({
+      v: 2,
+      revision: 4,
+      targets: [
+        { machineId: 'machine', runConfig: {} },
+        { machineId: 'build', runConfig: { memory: scout } },
+      ],
     });
     expect(state.meta.outcome).toBe('saved');
   });
