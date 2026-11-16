@@ -68,6 +68,16 @@ export const automationProgramContextSchema = z
   .strict();
 export type AutomationProgramContext = z.infer<typeof automationProgramContextSchema>;
 
+/** Which Auto delivery steps the Host may request; merge stays off unless chosen. */
+export const autoDeliverOptionsSchema = z
+  .object({
+    fixCi: z.boolean().default(true),
+    resolveConflicts: z.boolean().default(true),
+    merge: z.boolean().default(false),
+  })
+  .strict();
+export type AutoDeliverOptions = z.infer<typeof autoDeliverOptionsSchema>;
+
 /** Ordinary Session feature settings; event/action mapping remains internal. */
 export const automationSettingsSchema = z
   .object({
@@ -92,6 +102,13 @@ export const automationSettingsSchema = z
             'Lead time must be shorter than estimated cache lifetime'
           ),
       ])
+      .optional(),
+    /**
+     * Auto delivery for this Session's current pull request. Off unless enabled;
+     * it ends when that pull request is merged. The Host owns the steps and limits.
+     */
+    autoDeliver: z
+      .union([z.literal(false), autoDeliverOptionsSchema])
       .optional(),
   })
   .strict();

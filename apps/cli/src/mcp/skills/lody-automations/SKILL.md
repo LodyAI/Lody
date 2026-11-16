@@ -1,6 +1,6 @@
 ---
 name: lody-automations
-description: Register a background condition that resumes this Session when ready, inspect or cancel waits, and configure quota recovery, idle compaction or archive after merge.
+description: Register a background condition that resumes this Session when ready, inspect or cancel waits, and configure quota recovery, idle compaction, archive after merge or Auto delivery of the current pull request.
 ---
 
 # Lody Automations
@@ -13,6 +13,7 @@ Use `lody_automation` for future behavior the user requested. A registration def
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Wait for data to satisfy a custom condition                            | [Context](references/context.md), then the relevant data reference |
 | Recover after quota limits, compact while idle, or archive after merge | [Session settings](references/settings.md); no condition JS needed |
+| Hand the current PR's CI fixes, conflicts or merge to Lody            | [Session settings](references/settings.md), Auto delivery          |
 | Inspect, cancel, or diagnose existing work                             | The inspection section below                                       |
 | Exact command fields, defaults and limits                              | `references/commands.schema.json`, generated from the running API  |
 

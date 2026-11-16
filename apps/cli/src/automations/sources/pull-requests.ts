@@ -26,7 +26,8 @@ export function observePullRequests(
     ledger.observe(
       checkpointId,
       {
-        revision: `${observation.updatedAt}:${observation.status}`,
+        // CI and mergeability change without a provider `updatedAt` bump.
+        revision: `${observation.updatedAt}:${observation.status}:${observation.headSha ?? ''}:${observation.ciState ?? ''}:${observation.mergeState ?? ''}`,
         observedAt: now,
         data: {
           status: observation.status,
@@ -37,6 +38,8 @@ export function observePullRequests(
           branch: observation.headRefName,
           headSha: observation.headSha ?? null,
           headRepository: observation.headRepository ?? null,
+          ciState: observation.ciState,
+          mergeState: observation.mergeState,
         },
       },
       changed

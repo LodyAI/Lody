@@ -232,7 +232,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
 /**
  * ③ The 14px status mark, rendered at the row's TRAILING edge inside
  * {@link SidebarRowEndSlot}. Single-mark priority:
- * `sendFailed > waitingPermission > isWorking > sending > hasUnread`. A failed
+ * `sendFailed > waitingPermission > needsAttention > isWorking > sending > hasUnread`. A failed
  * local send outranks everything because nothing else will retry it; an upload
  * in progress yields to the agent's own activity. Returns `null` when the
  * session is idle and read, which is what lets the end slot fall back to its
@@ -246,6 +246,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
  */
 export function SessionRowStatusIndicator({
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   sendState,
@@ -253,6 +254,8 @@ export function SessionRowStatusIndicator({
   sendLabel,
 }: {
   isWaitingPermission?: boolean;
+  /** Something Lody ran for this session stopped and needs the person (Auto delivery). */
+  needsAttention?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   /** Renderer-local state of this session's held (in-memory) sends. */
@@ -270,6 +273,8 @@ export function SessionRowStatusIndicator({
     label = sendLabel;
   } else if (isWaitingPermission === true) {
     icon = <Hand className="h-3 w-3 text-primary" />;
+  } else if (needsAttention === true && isWorking !== true) {
+    icon = <CircleAlert className="h-3 w-3 text-status-warning" strokeWidth={2.25} />;
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
@@ -303,11 +308,14 @@ export function SessionRowStatusIndicator({
 /** True when {@link SessionRowStatusIndicator} would draw a mark for this row. */
 function hasSessionRowStatus({
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   sendState,
-}: SessionRowStatusFlags): boolean {
-  return Boolean(isWaitingPermission || isWorking || hasUnreadMessages || sendState);
+}: SessionRowStatusFlags & { needsAttention?: boolean }): boolean {
+  return Boolean(
+    isWaitingPermission || needsAttention || isWorking || hasUnreadMessages || sendState
+  );
 }
 
 /**
@@ -805,6 +813,7 @@ export function SidebarRowEndSlot({
   sessionId,
   selected = false,
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   restIcon,
@@ -822,6 +831,7 @@ export function SidebarRowEndSlot({
   /** Whether the hosting row is currently selected, used to tune pill contrast. */
   selected?: boolean;
   isWaitingPermission?: boolean;
+  needsAttention?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   restIcon?: ReactNode;
@@ -846,12 +856,14 @@ export function SidebarRowEndSlot({
     <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
   ) : hasSessionRowStatus({
       isWaitingPermission,
+      needsAttention,
       isWorking: drawWorking,
       hasUnreadMessages,
       sendState: sendStatus?.state,
     }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
+      needsAttention={needsAttention}
       isWorking={drawWorking}
       hasUnreadMessages={hasUnreadMessages}
       sendState={sendStatus?.state}

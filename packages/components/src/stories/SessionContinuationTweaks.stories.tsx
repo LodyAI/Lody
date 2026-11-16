@@ -49,6 +49,7 @@ const meta = {
       recoverCapacity: false,
       archiveAfterMerge: true,
       compactWhenIdle: false,
+      autoDeliver: false,
     },
     onChange: fn(),
   },

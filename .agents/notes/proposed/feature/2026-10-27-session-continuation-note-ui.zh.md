@@ -30,6 +30,8 @@ UI 绝不能把“送达未知”说成成功；只有被 Stop 挡住的接续�
   权限、不可用和失败状态同样不伪装成成功。
 - 三个行为是会话菜单里的 per-session 开关，不是设置页：额度恢复、合并后归档、
   空闲压缩。当前 Provider 不支持时，Host 可以禁用某一项并给出原因。
+  更新（2026-11-16）：自动交付是第四个开关，也可从信息栏开启；它在对话里只占一行
+  进度，停下时在侧边栏标为需要处理。见[自动交付笔记](2026-11-16-session-auto-delivery.zh.md)。
 - 视图模型刻意很小：阶段、下次检查、上次检查、过期时间、送达状态和阻塞原因。
   原始程序、ledger receipt、binding 和 evidence 不进入 renderer。
 
@@ -47,8 +49,7 @@ UI 绝不能把“送达未知”说成成功；只有被 Stop 挡住的接续�
   轮询 Host；读取失败显示不可用，切换会话时丢弃迟到的结果。返回 renderer 前过滤
   Host 数据。远程机器、Web 和能力发现仍未接入。针对 Stop 的显式恢复现已复用
   已有协作控制，见[可靠性修正](../../implemented/bug-fix/2026-10-30-automation-pending-observations-and-stop.zh.md)。
-- 这个 worktree 没有安装 `node_modules`。三个新套件借用同仓库另一个 worktree 的
-  已安装工具链跑过：18 个测试通过。package 级 typecheck 仍有跨 worktree 的既有错误，
-  但新文件没有错误；Storybook 没有在这里启动。人工视觉审查仍然待做。
+- 便签、开关和状态折叠的测试套件固定了这些行为。最初的改动没有启动 Storybook，
+  人工视觉审查仍然待做。
 - 后端契约和策略仍由
   [automation coordinator 笔记](../architecture/2026-10-25-session-automation-coordinator.md)拥有。
