@@ -18,9 +18,19 @@ final class FileMarkdownView: MarkdownTextView {
     let blocks = rendered.rewrite { (node: MarkdownInlineNode) -> [MarkdownInlineNode] in
       if case let .image(source, _) = node { return [.text(imageMarker + source)] }
       if case let .html(source) = node { return [.text(htmlMarker + source)] }
-      guard case let .link(destination, children) = node,
-        ChatFileLink(destination) != nil else { return [node] }
-      return [.link(destination: destination, children: [.text(marker + destination)] + children)]
+      // Inline code that is exactly one Markdown file path reads as a file link, as on Web.
+      if case let .code(code) = node, let path = ChatFileLink.markdownCode(code) {
+        return [.link(destination: path, children: [.text(marker + path), .text(code)])]
+      }
+      guard case let .link(destination, children) = node else { return [node] }
+      // Children are rewritten first: an inline-code path inside an authored link stays its label.
+      let label = children.flatMap { child -> [MarkdownInlineNode] in
+        if case let .link(_, inner) = child, inner.count == 2, case let .text(tag) = inner[0], tag.hasPrefix(marker),
+          case let .text(code) = inner[1] { return [.code(code)] }
+        return [child]
+      }
+      guard ChatFileLink(destination) != nil else { return [.link(destination: destination, children: label)] }
+      return [.link(destination: destination, children: [.text(marker + destination)] + label)]
     }
     return MarkdownContent(blocks: blocks, rendered: source.rendered, highlightMaps: source.highlightMaps, locale: source.locale)
   }

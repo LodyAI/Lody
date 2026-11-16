@@ -23,6 +23,22 @@ struct ChatFileLink {
     line = start
   }
 
+  private static let bareDomainTLDs: Set<String> = ["com", "org", "net", "io", "dev", "app", "co", "ai", "gov", "edu", "info"]
+
+  /// Web `matchWholeFilePath` for inline code, narrowed to Markdown, the only type the native
+  /// preview opens: the whole span must be one file path. Native clients have no session file
+  /// index to confirm relative paths, so a missing file shows the preview's not-found state.
+  static func markdownCode(_ code: String) -> String? {
+    let value = code.trimmingCharacters(in: .whitespaces)
+    guard !value.isEmpty, value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+      let link = ChatFileLink(value), iconName(for: link.path) == "markdown" else { return nil }
+    // `example.com/readme.md` is an unschemed URL, not a file.
+    let first = link.path.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+    if link.path.contains("/"), first.contains("."), let tld = first.split(separator: ".").last,
+      bareDomainTLDs.contains(tld.lowercased()) { return nil }
+    return value
+  }
+
   static func iconName(for path: String) -> String {
     let name = (path as NSString).lastPathComponent.lowercased()
     if name == "dockerfile" { return "docker" }

@@ -21,6 +21,7 @@ import com.mikepenz.markdown.model.MarkdownInlineContent
 import com.mikepenz.markdown.model.markdownAnnotator
 import com.mikepenz.markdown.model.markdownInlineContent
 import org.intellij.markdown.MarkdownElementTypes
+import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.findChildOfType
 import org.intellij.markdown.ast.getTextInNode
 
@@ -39,6 +40,23 @@ internal data class ChatFileLink(val path: String, val line: Int?) {
             Regex("""(?:#L([1-9][0-9]*)(?:C[0-9]+)?(?:-L?[0-9]+(?:C[0-9]+)?)?|:L([1-9][0-9]*)(?:C[0-9]+)?|:([1-9][0-9]*)(?::[0-9]+)?)$""")
         private val windowsDrive = Regex("^[A-Za-z]:/")
         private val scheme = Regex("^[A-Za-z][A-Za-z0-9+.-]*:")
+
+        private val bareDomainTlds = setOf("com", "org", "net", "io", "dev", "app", "co", "ai", "gov", "edu", "info")
+
+        /**
+         * Web `matchWholeFilePath` for inline code, narrowed to Markdown, the only type the native
+         * preview opens: the whole span must be one file path. Native clients have no session file
+         * index to confirm relative paths, so a missing file shows the preview's not-found state.
+         */
+        fun markdownCode(code: String): String? {
+            val value = code.trim()
+            if (value.isEmpty() || value.any { it.isWhitespace() }) return null
+            val link = parse(value)?.takeIf { it.isMarkdown } ?: return null
+            // `example.com/readme.md` is an unschemed URL, not a file.
+            val first = link.path.substringBefore('/')
+            if ('/' in link.path && '.' in first && first.substringAfterLast('.').lowercase() in bareDomainTlds) return null
+            return value
+        }
 
         fun parse(href: String): ChatFileLink? {
             var value = href.trim().replace('\\', '/')
@@ -63,6 +81,10 @@ internal data class ChatFileLink(val path: String, val line: Int?) {
 
 private const val FILE_ICON = "lody-file-link-icon"
 
+private fun ASTNode.insideLink(): Boolean = generateSequence(parent) { it.parent }.any {
+    it.type == MarkdownElementTypes.INLINE_LINK || it.type == MarkdownElementTypes.FULL_REFERENCE_LINK || it.type == MarkdownElementTypes.SHORT_REFERENCE_LINK
+}
+
 /**
  * Transcript Markdown draws a file link like web `AgentFileLink`: a file glyph and the link
  * text as plain link-coloured prose (an inline-code label loses its code chrome), both inside
@@ -74,6 +96,18 @@ internal fun rememberFileLinkMarkdown(): Pair<MarkdownAnnotator, MarkdownInlineC
     return remember(colors.textLink) {
         val style = TextLinkStyles(style = SpanStyle(color = colors.textLink))
         val annotator = markdownAnnotator { content, child ->
+            // Inline code that is exactly one Markdown file path reads as a file link, as on Web;
+            // inside an authored link it stays that link's label.
+            if (child.type == MarkdownElementTypes.CODE_SPAN && !child.insideLink()) {
+                val code = child.getTextInNode(content).toString().trim('`')
+                val path = ChatFileLink.markdownCode(code) ?: return@markdownAnnotator false
+                withLink(LinkAnnotation.Url(path, style)) {
+                    appendInlineContent(FILE_ICON, "\uD83D\uDCC4")
+                    append(" ")
+                    append(code.trim())
+                }
+                return@markdownAnnotator true
+            }
             if (child.type != MarkdownElementTypes.INLINE_LINK) return@markdownAnnotator false
             val destination = child.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content)?.toString()
                 ?.removePrefix("<")?.removeSuffix(">") ?: return@markdownAnnotator false
@@ -82,7 +116,7 @@ internal fun rememberFileLinkMarkdown(): Pair<MarkdownAnnotator, MarkdownInlineC
                 ?.removePrefix("[")?.removeSuffix("]")?.replace("`", "")?.trim()
                 .orEmpty().ifEmpty { target.name }
             withLink(LinkAnnotation.Url(destination, style)) {
-                appendInlineContent(FILE_ICON, "📄")
+                appendInlineContent(FILE_ICON, "\uD83D\uDCC4")
                 append(" ")
                 append(label)
             }
