@@ -4490,6 +4490,7 @@ export class MessageHandler {
 
     // Session exit: flush ACP updates before marking idle.
     this.sessionManager.on('exit', (exit) => {
+      this.executionService.forgetReleasedTurn(exit.sessionId);
       void (async () => {
         const sessionId = exit.sessionId;
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
@@ -4509,6 +4510,7 @@ export class MessageHandler {
     // Session termination can race with exit/error; always flush ACP updates first.
     // Skip if session was already cleaned by GC to avoid re-creating transient state.
     this.sessionManager.on('terminated', (event) => {
+      this.executionService.forgetReleasedTurn(event.sessionId);
       this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
       void (async () => {
         const sessionId = event.sessionId;

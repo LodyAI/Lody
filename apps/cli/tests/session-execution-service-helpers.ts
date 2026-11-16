@@ -1531,12 +1531,14 @@ function inboxExecutionFixture(
   });
   doc.waitUntilSynced = async () => {};
   let created = true;
+  let nativeActivity: 'idle' | 'running' | 'background' | 'unknown' = 'idle';
   const client = {
     isCreated: () => created,
     cancel: async () => {},
     prompt: async (_id: unknown, blocks: ContentBlock[]) => prompt(blocks),
     currentModel: undefined,
     getAutomationObservations: () => ({}),
+    getNativeActivityObservation: () => nativeActivity,
   };
   const session = {
     sessionId,
@@ -1691,6 +1693,14 @@ function inboxExecutionFixture(
     doc,
     session,
     client,
+    /** What the Agent reports doing by itself between Lody turns. */
+    setNativeActivity: (activity: typeof nativeActivity) => {
+      nativeActivity = activity;
+    },
+    /** Replaces or ends the live Agent, as idle GC or a crash would. */
+    dropLiveSession: () => {
+      liveSession = undefined;
+    },
     deps,
     message,
     add,

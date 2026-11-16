@@ -226,6 +226,13 @@ machine and project, and executes the same Role resolution and durable Operation
 state machine used by cloud. Hosted repository contexts remain unavailable;
 registered local projects and plain chat are supported.
 
+An Agent may keep working after its Turn ends, woken by its own background task,
+scheduled wake-up or cron. While that same Agent reports it is running, its calls
+act for the last Turn that ended without Stop or cancellation, with that Turn's
+frozen identity. Stop, the Agent's exit or replacement, a collaboration stop and
+the next Turn end this. An idle Agent, one only waiting on background tasks, or
+one that does not report its activity acts for nobody.
+
 Recovery uses the frozen prompt, Role revision and dispatch configuration. Before
 replaying a missing target input, cloud confirms remote document catch-up; OSS
 confirms the authoritative daemon repo and rechecks the fixed Turn under the

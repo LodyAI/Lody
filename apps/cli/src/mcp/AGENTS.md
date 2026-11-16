@@ -6,7 +6,9 @@ Parent instructions apply. Background: [README.md](README.md).
   composition, never a second replica or child `lody` CLI. Reuse SDK-parsed arguments
   and validate daemon inputs in `session-tool-router.ts`; scope replica/identity with
   ALS in `session-command-environment.ts`. Require exact workspace/machine scope
-  and an active Turn (local: its user). Cloud keeps authenticated commands/recovery.
+  and an active Turn (local: its user). After a clean release, the same Agent running
+  by itself still acts for that Turn until Stop, its exit or the next Turn.
+  Cloud keeps authenticated commands/recovery.
 
 - MCP sharing requires the active Turn user to equal the CLI authenticated account.
   Fail closed on shared-machine account mismatch; never substitute the machine owner.

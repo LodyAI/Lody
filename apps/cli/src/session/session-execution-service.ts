@@ -1349,6 +1349,12 @@ export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
+  /**
+   * The last cleanly released turn per Session. While its own Agent keeps working by
+   * itself (woken by a background task, a scheduled wake-up or a cron), that work
+   * still acts for this turn's frozen invocation. See `readInvokingRuntime`.
+   */
+  private readonly releasedTurnBySession = new Map<SessionId, TurnRuntimeState>();
   /** Admission ownership outlives replaceable turn runtime registrations. */
   private readonly liveInboxExecutionIds = new Set<string>();
   /** Start times of recent start retries, shared by every Session this service runs. */
@@ -3259,7 +3265,47 @@ export class SessionExecutionService {
   }
 
   private registerTurnRuntime(runtime: TurnRuntimeState): void {
+    this.releasedTurnBySession.delete(runtime.sessionId);
     this.turnRuntimeBySession.set(runtime.sessionId, runtime);
+  }
+
+  /**
+   * The runtime whose invocation the Session's Agent currently acts for: the
+   * registered turn, else the last cleanly released turn while that same Agent
+   * reports it is running by itself. An idle Agent, one only waiting on background
+   * tasks, one that reports no activity, or a replaced Agent acts for nobody.
+   */
+  private readInvokingRuntime(sessionId: SessionId): TurnRuntimeState | undefined {
+    const live = this.turnRuntimeBySession.get(sessionId);
+    if (live) return live;
+    const released = this.releasedTurnBySession.get(sessionId);
+    if (!released) return undefined;
+    const session = released.session;
+    if (!session || this.deps.sessionManager.getSession(sessionId) !== session) {
+      this.releasedTurnBySession.delete(sessionId);
+      return undefined;
+    }
+    return session.agentClient?.getNativeActivityObservation() === 'running' ? released : undefined;
+  }
+
+  /** The Agent process ended or was replaced; its self-started work ends with it. */
+  forgetReleasedTurn(sessionId: SessionId): void {
+    this.releasedTurnBySession.delete(sessionId);
+  }
+
+  private canContinueAfterRelease(runtime: TurnRuntimeState): boolean {
+    return (
+      runtime.promptStarted &&
+      Boolean(runtime.session) &&
+      !runtime.cancelRequested &&
+      !runtime.releaseFailure &&
+      !runtime.disconnectedTransport &&
+      !runtime.initializationStalled &&
+      !(
+        runtime.inboxOwner?.input &&
+        this.isInboxInputCanceled(runtime.sessionId, runtime.inboxOwner.input.inputId)
+      )
+    );
   }
 
   /**
@@ -3300,6 +3346,8 @@ export class SessionExecutionService {
         this.releaseParentAdmission(runtime);
       }
       this.turnRuntimeBySession.delete(sessionId);
+      if (this.canContinueAfterRelease(runtime)) this.releasedTurnBySession.set(sessionId, runtime);
+      else this.releasedTurnBySession.delete(sessionId);
       daemonLossObserver.changed();
     }
     // Safety net: drop per-turn analytics state if the turn ended without a
@@ -6100,7 +6148,7 @@ export class SessionExecutionService {
     sourceTurnId: string,
     requestId: string
   ): { kind: 'owner' } | { kind: 'member' } | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (!runtime || runtime.cancelRequested || runtime.invocation?.sourceTurnId !== sourceTurnId)
       return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
@@ -6123,7 +6171,7 @@ export class SessionExecutionService {
     | { kind: 'owner' }
     | { kind: 'member'; requesterDevice: string; localProjectIds: readonly string[] }
     | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (!runtime || runtime.cancelRequested) return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
     if (
@@ -6144,7 +6192,7 @@ export class SessionExecutionService {
         sender?: { kind: 'user' } | { kind: 'agent'; sessionId: SessionId };
       }
     | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (
       !runtime ||
       runtime.cancelRequested ||
@@ -8389,6 +8437,10 @@ export class SessionExecutionService {
 
   /** Metadata stop barriers also cover descendants created after the UI snapshot. */
   async reconcileCollaborationStops(): Promise<void> {
+    for (const sessionId of [...this.releasedTurnBySession.keys()]) {
+      if (await isSessionCollaborationStopped(this.deps.workspaceDocument.repo, sessionId))
+        this.releasedTurnBySession.delete(sessionId);
+    }
     for (const [sessionId, runtime] of this.turnRuntimeBySession) {
       if (await isSessionCollaborationStopped(this.deps.workspaceDocument.repo, sessionId)) {
         await this.cancelSession(
@@ -8528,6 +8580,8 @@ export class SessionExecutionService {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
+    // Stop also ends the authority of work the Agent continues by itself.
+    this.releasedTurnBySession.delete(sessionId);
     this.deps.logger.info(`Session stop requested: ${sessionId}`);
     this.deps.logger.debug(`[${sessionId}] Received stop request for turn ${turnId}`);
     const activeTurnId = this.deps.getActiveTurnId(sessionId);
