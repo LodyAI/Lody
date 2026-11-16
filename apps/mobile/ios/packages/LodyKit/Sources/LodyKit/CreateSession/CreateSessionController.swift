@@ -185,7 +185,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   }
 
   /// Web's run-config sheet from the composer chip: Agent (when there is a choice), Model,
-  /// Reasoning and Mode rows that expand in place.
+  /// Reasoning and Mode rows that expand in place, then the Plan and Fast switches when offered.
   private func presentRunConfig() {
     guard !sending, runConfigSheet == nil, !panelState.runConfig.isEmpty else { return }
     view.endEditing(true)
@@ -234,6 +234,11 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       composerOptionChanged(["modelId": form.current.choice.modelId ?? "", "effort": option])
     case ("permission", _):
       composerOptionChanged(["permissionId": option])
+    case ("fast", _):
+      composerOptionChanged(["fast": option == CreateSessionContext.toggleOn])
+    case ("plan", _):
+      form.updateChoice(CreateLogic.withPlanMode(form.current.capability, form.current.choice, enabled: option == CreateSessionContext.toggleOn))
+      changed()
     case ("project", _):
       guard let project = form.projects.first(where: { $0.id == option }) else { return pickProject() }
       apply(project)

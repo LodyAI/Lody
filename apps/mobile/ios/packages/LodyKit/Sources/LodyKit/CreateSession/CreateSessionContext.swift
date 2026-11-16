@@ -274,6 +274,12 @@ enum CreateSessionContext {
         id: "permission", glyph: .symbol("checkmark.shield"), title: current?.name ?? text("model.default"), placeholder: current == nil,
         options: permission.options.map { CreateOption(id: $0.id, title: $0.name, subtitle: $0.description ?? "", selected: $0.id == permission.value) }))
     }
+    if let plan = CreateLogic.planMode(capability, page.choice) {
+      rows.append(CreatePicker(id: "plan", glyph: .symbol("checklist"), title: "", toggle: plan.enabled))
+    }
+    if let fast = CreateLogic.fastMode(capability, page.choice) {
+      rows.append(CreatePicker(id: "fast", glyph: .symbol("bolt"), title: "", toggle: fast.enabled))
+    }
     return rows
   }
 
