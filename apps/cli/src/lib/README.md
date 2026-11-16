@@ -48,6 +48,9 @@ embedded clients pass them at startup, while local builds do not require them.
   cleanup. Authorization scopes stay separate; a failed cleanup is reported once
   and never blocks later commands. Daemon-executed commands borrow the daemon's
   replica through `session-command-environment.ts` instead.
+  Workspace cleanup errors identify failed stages and recognized safe causes;
+  document failures also report unconfirmed persistence. Unknown raw error text
+  is not copied into messages that may reach MCP or synced history.
 - `discovery-query.ts` — strict query schemas, scope-bound keyset pagination and
   shared Session title/Machine/Agent/Role filters.
 - `resource-discovery.ts` — readable directory projections, Role availability,

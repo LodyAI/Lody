@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Cause, Effect } from 'effect';
 import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
@@ -105,7 +105,11 @@ import {
   type RepoRoomSubscription,
   type RepoTransportRoomStatus,
 } from 'loro-repo';
-import { createCliPresenceRuntimeLegacy, type CliPresenceRuntimeLegacy } from './presence-legacy';
+import {
+  createCliPresenceRuntimeLegacy,
+  WorkspacePresenceLegacyFailure,
+  type CliPresenceRuntimeLegacy,
+} from './presence-legacy';
 import { CliMachineMonitorRuntime } from './machine-monitor';
 import { CliPromptSuggestions } from './prompt-suggestions';
 import type { LodyPromptSuggestion } from 'acp-extension-core';
@@ -149,6 +153,50 @@ import {
 } from '@/lib/agent-config-machine-flock';
 import { installCliHttpGlobalDispatcher } from '@/utils/http-transport';
 import { createCliStreamsTransport } from './streams-transport';
+
+// Cleanup failures can reach MCP and synced history. Project known causes instead
+// of copying arbitrary SDK messages, URLs, credentials, or Effect owner state.
+const cleanupFailureReasons = (error: unknown): string[] => {
+  const reasons = new Set<string>();
+  const seen = new Set<unknown>();
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 8 || seen.has(value)) return;
+    seen.add(value);
+    if (Cause.isTimeoutError(value)) reasons.add('timed out');
+    if (Cause.isCause(value)) {
+      for (const reason of value.reasons) {
+        if (Cause.isFailReason(reason)) visit(reason.error, depth + 1);
+        else if (Cause.isDieReason(reason)) visit(reason.defect, depth + 1);
+      }
+      return;
+    }
+    if (!(value instanceof Error)) return;
+    const code = (value as { code?: unknown }).code;
+    const message = typeof value.message === 'string' ? value.message.trim() : '';
+    if (code === 'ENOSPC' || /^disk (?:is )?full[.!]?$/i.test(message)) reasons.add('disk is full');
+    else if (code === 'EACCES' || code === 'EPERM') reasons.add('permission denied');
+    else if (code === 'EROFS' || code === 'SQLITE_READONLY') reasons.add('storage is read-only');
+    else if (code === 'SQLITE_FULL') reasons.add('database storage is full');
+    else if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') reasons.add('database is locked');
+    else if (code === 'ETIMEDOUT' || /^(?:operation )?(?:timed out|timeout)[.!]?$/i.test(message))
+      reasons.add('timed out');
+    else if (
+      code === 'ECONNRESET' ||
+      code === 'ECONNREFUSED' ||
+      code === 'ENETUNREACH' ||
+      code === 'ENOTFOUND' ||
+      code === 'EAI_AGAIN'
+    )
+      reasons.add('network connection failed');
+    if (value instanceof WorkspacePresenceLegacyFailure) visit(value.effectCause, depth + 1);
+    if (value instanceof AggregateError) {
+      for (const nested of value.errors.slice(0, 16)) visit(nested, depth + 1);
+    }
+    visit(value.cause, depth + 1);
+  };
+  visit(error, 0);
+  return [...reasons];
+};
 
 const isValidDaemonLaunchConfig = (
   config: AgentConfigMeta,
@@ -2243,11 +2291,21 @@ export class LoroDocumentManager {
 
   async cleanUp(options: { fast?: boolean; preserveSessionStatus?: boolean } = {}) {
     this.cleaningUp = true;
-    let presenceCleanupFailure: unknown;
+    const failures: Error[] = [];
+    const recordFailure = (scope: string, cause: unknown, persistenceUnconfirmed = false) => {
+      const reasons = cleanupFailureReasons(cause);
+      const detail = reasons.length ? reasons.join(', ') : 'underlying reason unavailable';
+      failures.push(
+        new Error(
+          `${scope}: ${detail}${persistenceUnconfirmed ? '; persistence unconfirmed' : ''}`,
+          { cause }
+        )
+      );
+    };
     try {
       await this.catalogSync?.close();
     } catch (error) {
-      presenceCleanupFailure = error;
+      recordFailure('Catalog subscriptions', error);
     }
     this.localDocRoomBridgeGeneration += 1;
     for (const docId of [...this.localDocRoomBridges.keys()]) {
@@ -2272,19 +2330,13 @@ export class LoroDocumentManager {
       try {
         await this.detachRemoteStreamsTransport();
       } catch (error) {
-        presenceCleanupFailure = presenceCleanupFailure
-          ? new AggregateError([presenceCleanupFailure, error], 'Workspace cleanup failed')
-          : error;
+        recordFailure('Remote sync transport', error);
       }
     }
     try {
       await this.presenceRuntime?.stop();
     } catch (error) {
-      presenceCleanupFailure = presenceCleanupFailure
-        ? new AggregateError([presenceCleanupFailure, error], 'Workspace cleanup failed', {
-            cause: error,
-          })
-        : error;
+      recordFailure('Presence release', error);
       this.logger.debug(
         `[${this.workspaceId}] Failed to stop Loro presence runtime: ${formatErrorMessage(error)}`
       );
@@ -2293,12 +2345,11 @@ export class LoroDocumentManager {
     this.detachMachineFlockMetaRoomSyncedListener = null;
     await this.machineFlockSync.cleanUp();
     await this.connectionRecovery.cleanUp();
-    const failures: unknown[] = presenceCleanupFailure ? [presenceCleanupFailure] : [];
     const attempt = async (scope: string, close: () => Promise<unknown>) => {
       try {
         await close();
       } catch (cause) {
-        failures.push(new Error(`${scope}: cleanup failed; persistence unconfirmed`, { cause }));
+        recordFailure(scope, cause, true);
       }
     };
     // An init rejection has no registered doc. A destroy rejection must be reported.
@@ -2323,15 +2374,22 @@ export class LoroDocumentManager {
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
+    let cleanupFailure: AggregateError | undefined;
     if (failures.length) {
-      presenceCleanupFailure = new AggregateError(failures, 'Workspace cleanup failed');
+      const details = failures.slice(0, 16).map((error) => error.message);
+      if (failures.length > details.length)
+        details.push(`${failures.length - details.length} more failures`);
+      cleanupFailure = new AggregateError(
+        failures,
+        `Workspace cleanup failed: ${details.join('; ')}`
+      );
       this.logger.warn(
         `[${this.workspaceId}] ${failures.map((error) => formatErrorMessage(error)).join('; ')}`
       );
     }
     await this.destroyRepo({ fast: options.fast });
     await this.encryptedWorkspace?.close();
-    if (presenceCleanupFailure) throw presenceCleanupFailure;
+    if (cleanupFailure) throw cleanupFailure;
   }
 
   publishPromptSuggestion(
