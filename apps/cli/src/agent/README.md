@@ -32,7 +32,7 @@ context/message-flow.md "Upstream".
   Claude single-question forms retain their request-message prompt. The shared bridge
   maps recognized Droid AskUser labels and custom answers back to its option IDs and
   companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
-- `antigravity-background.ts` — keeps Antigravity background work visible after `end_turn`: synthesized `sessionActivity` and `session/load` delta replay.
+- `antigravity-background.ts` — keeps Antigravity background work after `end_turn` safe from idle GC with synthesized `sessionActivity`.
 - `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
   updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
   Claude reports no actor, so later events preserve an earlier identity. Providers that
@@ -306,13 +306,12 @@ targets by realpath and would otherwise ask permission for in-workspace edits un
 symlinked path such as macOS `/tmp`.
 
 agy ends `session/prompt` with `end_turn` while background work (commands, timers,
-subagents, swarms) is still running, then stops writing to stdout, permission requests
-included. Lody ends the turn normally. `antigravity-background.ts` then reports
-`sessionActivity` so idle GC keeps the process, polls `session/list` for activity, and
-replays unseen output into the finished turn from `session/load`. agy restarts the
-session's MCP servers on every load, so loads run at most about once a minute, between
-agy's steps. See the
-[background wakeup decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-antigravity-background-wakeup.md).
+subagents, swarms) is still running, then stops writing to stdout. Lody ends the turn
+normally, and `antigravity-background.ts` reports `sessionActivity` from side-effect-free
+`session/list` activity so idle GC keeps the process until that work has woken the model
+and gone quiet. Output from those wakeups is not replayed: `session/load` restarts the
+session's MCP servers. See the
+[background work decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-antigravity-background-wakeup.md).
 
 `antigravity-usage.ts` projects end-turn `PromptResponse.usage` into disjoint token
 buckets. Each submitted request has a fresh accounting scope and freezes its
