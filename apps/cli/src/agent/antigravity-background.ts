@@ -35,12 +35,17 @@ export interface AntigravityPollTimings {
   /** `session/load` interval when the server lacks `session/list`. */
   loadFallbackPollIntervalMs: number;
   /**
-   * Forced `session/load` interval while output changed recently: `updatedAt` is the
-   * second the latest step started, so a slow reply can finish without changing it.
+   * Minimum time between `session/load` calls. agy restarts the session's MCP servers on
+   * every load, so a load is spent only on unread activity and at most this often.
    */
-  activeLoadIntervalMs: number;
-  /** How long "recently" lasts for {@link activeLoadIntervalMs}. */
-  activeWindowMs: number;
+  minLoadIntervalMs: number;
+  /**
+   * A load waits until `updatedAt` has been still this long, so it lands between agy's steps
+   * rather than as one starts, when the MCP restart could hit a tool call.
+   */
+  loadQuietMs: number;
+  /** Bound for the catch-up load that runs before the user's next prompt. */
+  flushTimeoutMs: number;
   /** Quiet time, with no tool still running, before the monitor releases. */
   settleQuietMs: number;
   /** Quiet time used instead when the turn dispatched work that reports only by waking the model. */
@@ -57,9 +62,10 @@ export interface AntigravityPollTimings {
 
 export const DEFAULT_ANTIGRAVITY_POLL_TIMINGS: AntigravityPollTimings = {
   listPollIntervalMs: 2_000,
-  loadFallbackPollIntervalMs: 10_000,
-  activeLoadIntervalMs: 6_000,
-  activeWindowMs: 90_000,
+  loadFallbackPollIntervalMs: 60_000,
+  minLoadIntervalMs: 60_000,
+  loadQuietMs: 10_000,
+  flushTimeoutMs: 5_000,
   settleQuietMs: 30_000,
   asyncDispatchQuietMs: 10 * 60_000,
   runningGraceMs: 10_000,
@@ -234,8 +240,9 @@ export class AntigravitySessionTracker {
 
   private turnEndedAtMs: number | null = null;
   private lastChangeAtMs = 0;
+  /** `updatedAt` moved, or the last load found changes, since the last load. */
+  private unloadedActivity = false;
   private lastOutputAtMs = 0;
-  private lastTextAtMs = 0;
   private asyncDispatched = false;
   /** Set once a monitor saw this work settle; until then a new turn inherits it. */
   private released = true;
@@ -283,6 +290,7 @@ export class AntigravitySessionTracker {
     this.lastTextEndsWithNewline = true;
     this.needsBreakBeforeText = false;
     this.turnEndedAtMs = null;
+    this.unloadedActivity = false;
   }
 
   notifyLivePermissionRequest(toolCallId: string): void {
@@ -338,10 +346,6 @@ export class AntigravitySessionTracker {
     notifications: readonly acp.SessionNotification[],
     nowMs: number
   ): acp.SessionNotification[] {
-    if (nowMs - this.lastTextAtMs >= this.timings.runningGraceMs) {
-      // A pause this long separates wakeups; consecutive chunks of one reply stay joined.
-      this.needsBreakBeforeText = true;
-    }
     let lastUserIndex = -1;
     const finalToolState = new Map<string, { raw: Record<string, unknown>; lastIndex: number }>();
     notifications.forEach((notification, index) => {
@@ -407,7 +411,6 @@ export class AntigravitySessionTracker {
         this.lastTextEndsWithNewline = slice.endsWith('\n');
         this.resolvePlaceholderTools();
       }
-      this.lastTextAtMs = nowMs;
       this.markOutput(nowMs);
       deltas.push(slice === text ? notification : withText(notification, slice));
     });
@@ -419,6 +422,9 @@ export class AntigravitySessionTracker {
         deltas.push(latestUsage);
       }
     }
+    // `updatedAt` is the second the latest step started, so a reply still being written
+    // during this load may finish without moving it. Check once more after changes.
+    this.unloadedActivity = deltas.length > 0;
     return deltas;
   }
 
@@ -476,9 +482,14 @@ export class AntigravitySessionTracker {
     };
   }
 
-  /** Whether output changed recently enough that `updatedAt` may be frozen mid-reply. */
-  isRecentlyActive(nowMs: number): boolean {
-    return nowMs - this.lastChangeAtMs < this.timings.activeWindowMs;
+  /** `session/list` reported a new `updatedAt`; the transcript has unread changes. */
+  noteTranscriptActivity(nowMs: number): void {
+    this.unloadedActivity = true;
+    this.markOutput(nowMs);
+  }
+
+  hasUnloadedActivity(): boolean {
+    return this.unloadedActivity;
   }
 
   private markOutput(nowMs: number): void {
@@ -585,8 +596,10 @@ export interface AntigravityPollLoopOptions {
   listSessionUpdatedAt?: (signal: AbortSignal) => Promise<string | null | undefined>;
   /** Loads a full snapshot and applies its deltas; returns nothing the loop needs. */
   loadSnapshot: (signal: AbortSignal) => Promise<void>;
-  /** Whether output changed recently; drives forced reloads while `updatedAt` may be frozen. */
-  isRecentlyActive: (nowMs: number) => boolean;
+  /** Records a new `updatedAt`. */
+  onActivity: (nowMs: number) => void;
+  /** Whether a load could find something new. */
+  hasUnloadedActivity: () => boolean;
   /** Runs after every tick; returns true to stop. */
   step: (nowMs: number) => boolean;
   signal: AbortSignal;
@@ -594,7 +607,7 @@ export interface AntigravityPollLoopOptions {
   onError?: (error: unknown) => void;
 }
 
-async function withRpcBounds<T>(
+export async function withRpcBounds<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   parent: AbortSignal
@@ -640,7 +653,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Bounded read-only poll: `session/list` detects transcript changes, `session/load` fetches them.
+ * Bounded poll: cheap `session/list` detects transcript changes; `session/load`, which restarts
+ * agy's MCP servers, fetches them at most once per {@link AntigravityPollTimings.minLoadIntervalMs}.
  * Before settling it always loads once more, so a reply finishing within the same `updatedAt`
  * second as its trigger is not lost.
  */
@@ -650,6 +664,7 @@ export async function runAntigravityPollLoop(options: AntigravityPollLoopOptions
   let lastUpdatedAt: string | null | undefined;
   let baselineCaptured = false;
   let lastLoadAtMs = Date.now();
+  let lastActivityAtMs = 0;
   let failures = 0;
 
   const attempt = async (operation: () => Promise<void>): Promise<boolean> => {
@@ -673,26 +688,37 @@ export async function runAntigravityPollLoop(options: AntigravityPollLoopOptions
     lastLoadAtMs = Date.now();
   };
 
+  // The first tick runs at once: it takes the `updatedAt` baseline right after `end_turn`,
+  // so a change in the first poll interval is still seen as activity.
+  let first = true;
   while (!signal.aborted) {
-    await sleep(list ? timings.listPollIntervalMs : timings.loadFallbackPollIntervalMs, signal);
+    if (!first) {
+      await sleep(list ? timings.listPollIntervalMs : timings.loadFallbackPollIntervalMs, signal);
+    }
     if (signal.aborted) break;
     const continued = await attempt(async () => {
       const listFn = list;
+      const isFirst = first;
+      first = false;
       if (!listFn) {
-        await load();
+        if (!isFirst) await load();
         return;
       }
       const updatedAt = await withRpcBounds(listFn, timings.rpcTimeoutMs, signal);
-      const changed = baselineCaptured ? updatedAt != null && updatedAt !== lastUpdatedAt : true;
+      if (baselineCaptured && updatedAt != null && updatedAt !== lastUpdatedAt) {
+        lastActivityAtMs = Date.now();
+        options.onActivity(lastActivityAtMs);
+      }
       baselineCaptured = true;
+      lastUpdatedAt = updatedAt;
       const nowMs = Date.now();
       if (
-        changed ||
-        (options.isRecentlyActive(nowMs) && nowMs - lastLoadAtMs >= timings.activeLoadIntervalMs)
+        options.hasUnloadedActivity() &&
+        nowMs - lastLoadAtMs >= timings.minLoadIntervalMs &&
+        nowMs - lastActivityAtMs >= timings.loadQuietMs
       ) {
         await load();
       }
-      lastUpdatedAt = updatedAt;
     });
     if (!continued || signal.aborted) break;
     if (options.step(Date.now())) {

@@ -2,6 +2,7 @@ import {
   AntigravitySessionTracker,
   isAntigravityServer,
   runAntigravityPollLoop,
+  withRpcBounds,
   type AntigravityPollTimings,
 } from './antigravity-background';
 import { readAntigravityPromptUsage } from './antigravity-usage';
@@ -667,7 +668,12 @@ export class AgentClient implements acp.Client {
     sessionId: string;
     notifications: acp.SessionNotification[];
   } | null = null;
-  private antigravityMonitor: { controller: AbortController; done: Promise<void> } | null = null;
+  private antigravityMonitor: {
+    controller: AbortController;
+    done: Promise<void>;
+    /** One catch-up `session/load` after the loop stopped; used before the next prompt. */
+    flush: (signal: AbortSignal) => Promise<void>;
+  } | null = null;
   private readonly devinSubagentTaskIds = new Set<string>();
   private worktreeProject?: LodyWorktreeProject;
   private additionalDirectories: string[] = [];
@@ -2865,15 +2871,29 @@ export class AgentClient implements acp.Client {
 
   /**
    * Stop the post-turn monitor and wait until its in-flight `session/load` has ended, so a
-   * following RPC's live notifications are never captured as snapshot replay. Returns whether
-   * a monitor was running.
+   * following RPC's live notifications are never captured as snapshot replay. With `flush`,
+   * unread transcript activity is loaded once first: after the next user message the replay
+   * slices from that message, so earlier unread output would otherwise be lost. Returns
+   * whether a monitor was running.
    */
-  private async stopAntigravityMonitor(): Promise<boolean> {
+  private async stopAntigravityMonitor(flush = false): Promise<boolean> {
     const monitor = this.antigravityMonitor;
     if (!monitor) return false;
     this.antigravityMonitor = null;
     monitor.controller.abort();
     await monitor.done;
+    const tracker = this.antigravityTracker;
+    if (flush && tracker?.hasUnloadedActivity()) {
+      await withRpcBounds(
+        monitor.flush,
+        tracker.getTimings().flushTimeoutMs,
+        new AbortController().signal
+      ).catch((error: unknown) => {
+        this.logger.debug(
+          `[${this.options.sessionId}] Antigravity catch-up load failed: ${formatErrorMessage(error)}`
+        );
+      });
+    }
     return true;
   }
 
@@ -2906,13 +2926,13 @@ export class AgentClient implements acp.Client {
     const controller = new AbortController();
     const onConnectionAbort = () => controller.abort();
     connection.signal.addEventListener('abort', onConnectionAbort, { once: true });
-    const isCurrent = () =>
-      !controller.signal.aborted &&
+    const isLive = () =>
       this.connection === connection &&
       this.acpSessionId === sessionId &&
       this.antigravityTracker === tracker;
-    const emit = (deltas: readonly acp.SessionNotification[]) => {
-      if (!isCurrent()) return;
+    const isCurrent = () => !controller.signal.aborted && isLive();
+    const emit = (deltas: readonly acp.SessionNotification[], live = isCurrent) => {
+      if (!live()) return;
       for (const delta of deltas) this.processSessionUpdate(delta);
     };
     const acpSessionId = sessionId as unknown as acp.SessionId;
@@ -2931,8 +2951,8 @@ export class AgentClient implements acp.Client {
         }
       : undefined;
 
-    const loadSnapshot = async (signal: AbortSignal): Promise<void> => {
-      if (!isCurrent()) return;
+    const loadSnapshot = async (signal: AbortSignal, live = isCurrent): Promise<void> => {
+      if (!live()) return;
       const capture = { sessionId, notifications: [] as acp.SessionNotification[] };
       this.antigravityLoadCapture = capture;
       const release = () => {
@@ -2949,7 +2969,7 @@ export class AgentClient implements acp.Client {
         signal.removeEventListener('abort', release);
         release();
       }
-      if (isCurrent()) emit(tracker.consumeSnapshot(capture.notifications, Date.now()));
+      if (live()) emit(tracker.consumeSnapshot(capture.notifications, Date.now()), live);
     };
 
     const step = (nowMs: number): boolean => {
@@ -2978,10 +2998,12 @@ export class AgentClient implements acp.Client {
     step(Date.now());
     const monitor = {
       controller,
+      flush: (signal: AbortSignal) => loadSnapshot(signal, isLive),
       done: runAntigravityPollLoop({
         listSessionUpdatedAt,
-        loadSnapshot,
-        isRecentlyActive: (nowMs) => tracker.isRecentlyActive(nowMs),
+        loadSnapshot: (signal) => loadSnapshot(signal),
+        onActivity: (nowMs) => tracker.noteTranscriptActivity(nowMs),
+        hasUnloadedActivity: () => tracker.hasUnloadedActivity(),
         step,
         signal: controller.signal,
         timings: tracker.getTimings(),
@@ -3088,7 +3110,7 @@ export class AgentClient implements acp.Client {
         throw new Error('Agent prompt aborted');
       }
       if (this.antigravityMonitor) {
-        await this.stopAntigravityMonitor();
+        await this.stopAntigravityMonitor(true);
         if (abortSignal?.aborted) {
           throw new Error('Agent prompt aborted');
         }

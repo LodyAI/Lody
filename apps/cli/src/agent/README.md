@@ -308,8 +308,10 @@ symlinked path such as macOS `/tmp`.
 agy ends `session/prompt` with `end_turn` while background work (commands, timers,
 subagents, swarms) is still running, then stops writing to stdout, permission requests
 included. Lody ends the turn normally. `antigravity-background.ts` then reports
-`sessionActivity` so idle GC keeps the process, and polls read-only `session/list` and
-`session/load` to replay unseen output into the finished turn. See the
+`sessionActivity` so idle GC keeps the process, polls `session/list` for activity, and
+replays unseen output into the finished turn from `session/load`. agy restarts the
+session's MCP servers on every load, so loads run at most about once a minute, between
+agy's steps. See the
 [background wakeup decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-antigravity-background-wakeup.md).
 
 `antigravity-usage.ts` projects end-turn `PromptResponse.usage` into disjoint token

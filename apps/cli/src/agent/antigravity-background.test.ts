@@ -344,6 +344,12 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     );
   }
 
+  /** Long enough after an `updatedAt` change for the throttled `session/load` to run. */
+  const UNTIL_LOAD =
+    DEFAULT_ANTIGRAVITY_POLL_TIMINGS.minLoadIntervalMs +
+    DEFAULT_ANTIGRAVITY_POLL_TIMINGS.loadQuietMs +
+    4_000;
+
   it('ends the turn at end_turn, protects a background command from GC, and replays its wakeup once', async () => {
     const harness = createHarness();
     const transcript = installTranscript();
@@ -404,8 +410,7 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
       n({ sessionUpdate: 'session_info_update', title: 'not replayed' }),
     ];
     transcript.updatedAt = '2026-01-01T00:01:00Z';
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(harness.client.getNativeWork()).toBe('running');
+    await vi.advanceTimersByTimeAsync(UNTIL_LOAD);
     expect(texts(harness.updates.slice(2))).toEqual(['All 42 tests ', 'passed.']);
     expect(harness.contextUpdates).toEqual([{ used: 4200, size: 1_000_000 }]);
     expect(harness.updates.some((u) => u.update.sessionUpdate === 'session_info_update')).toBe(
@@ -418,7 +423,9 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     const listCalls = mockState.listSessions.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(mockState.listSessions.mock.calls.length).toBe(listCalls);
-    expect(harness.workChanges).toEqual(['background', 'running', 'background', null]);
+    expect(harness.workChanges[0]).toBe('background');
+    expect(harness.workChanges).toContain('running');
+    expect(harness.workChanges.at(-1)).toBeNull();
 
     apply();
     expect(history).toHaveLength(4);
@@ -429,26 +436,70 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     ]);
   });
 
-  it('finds a wakeup reply even when agy leaves updatedAt at the second its step started', async () => {
+  it('loads at most once a minute, and re-checks a reply that finished without moving updatedAt', async () => {
     const harness = createHarness();
     const transcript = installTranscript();
     await harness.client.startSession({} as never, '/synthetic/project');
+    const { minLoadIntervalMs } = DEFAULT_ANTIGRAVITY_POLL_TIMINGS;
 
     const running = tool('cmd-1', 'run_command', 'in_progress');
     transcript.items = [user('Go'), running];
     promptOnce([running]);
     await send(harness, 'Go');
-    await vi.advanceTimersByTimeAsync(2_000);
 
+    // No activity: agy restarts its MCP servers on every load, so none is spent.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(mockState.loadSession).not.toHaveBeenCalled();
+    expect(harness.client.getNativeWork()).toBe('background');
+
+    // The wakeup step starts (updatedAt moves once) and its reply is still being written.
     transcript.items = [
       user('Go'),
       tool('cmd-1', 'run_command', 'completed', { rawOutput: { Stdout: 'ok' } }),
-      say('Done.'),
+      say('Do'),
     ];
-    await vi.advanceTimersByTimeAsync(
-      DEFAULT_ANTIGRAVITY_POLL_TIMINGS.activeLoadIntervalMs + 2_000
-    );
-    expect(texts(harness.updates)).toEqual(['Done.']);
+    transcript.updatedAt = '2026-01-01T00:05:00Z';
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(harness.client.getNativeWork()).toBe('running');
+    // The load waits until updatedAt has been still for loadQuietMs.
+    expect(mockState.loadSession).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(DEFAULT_ANTIGRAVITY_POLL_TIMINGS.loadQuietMs + 2_000);
+    expect(mockState.loadSession).toHaveBeenCalledTimes(1);
+    expect(texts(harness.updates)).toEqual(['Do']);
+
+    // The reply finishes in the same second, so updatedAt does not move again.
+    transcript.items = [...transcript.items, say('ne.')];
+    await vi.advanceTimersByTimeAsync(minLoadIntervalMs);
+    expect(texts(harness.updates)).toEqual(['Do', 'ne.']);
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_ANTIGRAVITY_POLL_TIMINGS.settleQuietMs + 60_000);
+    expect(harness.client.getNativeWork()).toBeNull();
+    expect(mockState.loadSession.mock.calls.length).toBeLessThanOrEqual(4);
+  });
+
+  it('loads unread output once before the next user message so it is not lost', async () => {
+    const harness = createHarness();
+    const transcript = installTranscript();
+    await harness.client.startSession({} as never, '/synthetic/project');
+
+    const timer = tool('sched-1', 'schedule', 'in_progress');
+    transcript.items = [user('Remind me'), timer];
+    promptOnce([timer]);
+    await send(harness, 'Remind me');
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    transcript.items = [
+      user('Remind me'),
+      tool('sched-1', 'schedule', 'completed'),
+      say('Time is up.'),
+    ];
+    transcript.updatedAt = '2026-01-01T00:00:20Z';
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(texts(harness.updates)).toEqual([]);
+
+    promptOnce([say('Hello')]);
+    await send(harness, 'Hi');
+    expect(texts(harness.updates)).toEqual(['Time is up.', 'Hello']);
   });
 
   it('keeps a pending schedule protected until it fires, then joins its reply chunks', async () => {
@@ -474,7 +525,7 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
       say('E_9921'),
     ];
     transcript.updatedAt = '2026-01-01T00:10:00Z';
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(UNTIL_LOAD);
     expect(texts(harness.updates).join('')).toBe('Timer set.TIMER_WAKE_9921');
   });
 
@@ -493,7 +544,7 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
 
     transcript.items = [...transcript.items, say('The answer is 42.')];
     transcript.updatedAt = '2026-01-01T00:05:00Z';
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(UNTIL_LOAD);
     expect(texts(harness.updates)).toEqual(['Dispatched.', '\n\nThe answer is 42.']);
 
     await vi.advanceTimersByTimeAsync(
@@ -574,7 +625,7 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
       say('Tests finished: 42 passed.'),
     ];
     transcript.updatedAt = '2026-01-01T00:02:00Z';
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(UNTIL_LOAD);
     const replayed = harness.updates.slice(before);
     expect(replayed.map((u) => u.update.sessionUpdate)).toEqual([
       'tool_call_update',
@@ -619,7 +670,7 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
       say('Lint passed.'),
     ];
     transcript.updatedAt = '2026-01-01T00:00:05Z';
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(UNTIL_LOAD);
 
     const toolIds = harness.updates.flatMap((u) => {
       const id = (u.update as { toolCallId?: unknown }).toolCallId;
@@ -647,14 +698,13 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
       tool('write-2', 'write_file', 'pending'),
     ];
     transcript.updatedAt = '2026-01-01T00:00:03Z';
-    await vi.advanceTimersByTimeAsync(2_000);
     await harness.client.requestPermission({
       sessionId: 'agy-sess-1',
       toolCall: { toolCallId: 'write-2' },
       options: [],
     } as unknown as acp.RequestPermissionRequest);
     await vi.advanceTimersByTimeAsync(
-      DEFAULT_ANTIGRAVITY_POLL_TIMINGS.orphanedPendingToolGraceMs + 2_000
+      UNTIL_LOAD + DEFAULT_ANTIGRAVITY_POLL_TIMINGS.orphanedPendingToolGraceMs + 2_000
     );
 
     const failed = harness.updates.filter(
@@ -679,7 +729,9 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     });
     mockState.listSessions.mockImplementation(async (params: { cwd: string }) => {
       cwds.list.push(params.cwd);
-      return { sessions: [{ sessionId: 'agy-sess-1', cwd: params.cwd, updatedAt: 'x' }] };
+      // The first poll is the baseline; every later poll sees one change.
+      const updatedAt = cwds.list.length === 1 ? 'before' : 'after';
+      return { sessions: [{ sessionId: 'agy-sess-1', cwd: params.cwd, updatedAt }] };
     });
     mockState.loadSession.mockImplementation(async (params: { cwd: string }) => {
       cwds.load.push(params.cwd);
@@ -691,7 +743,7 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
       await agy.client.startSession({} as never, symlinkWs);
       promptOnce([tool('sched-1', 'schedule', 'in_progress')]);
       await send(agy, 'Schedule');
-      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.advanceTimersByTimeAsync(UNTIL_LOAD);
       expect(cwds.new[0]).toBe(canonicalWs);
       expect(cwds.list[0]).toBe(canonicalWs);
       expect(cwds.load[0]).toBe(canonicalWs);
