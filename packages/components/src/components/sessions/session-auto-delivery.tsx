@@ -2,7 +2,7 @@ import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Rocket, X } from 'lucide-react';
+import { Check, Plus, Rocket, X } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@lody/ui/dialog';
 import { Toggle } from '@lody/ui/toggle';
@@ -23,9 +23,9 @@ const OPTION_ROWS = [
   {
     key: 'resolveConflicts',
     labelKey: 'sessions.autoDelivery.option.resolveConflicts',
-    label: 'Resolve conflicts',
+    label: 'Fix conflicts',
   },
-  { key: 'merge', labelKey: 'sessions.autoDelivery.option.merge', label: 'Merge when green' },
+  { key: 'merge', labelKey: 'sessions.autoDelivery.option.merge', label: 'Merge' },
 ] as const satisfies ReadonlyArray<{
   key: keyof AutoDeliverOptions;
   labelKey: string;
@@ -89,6 +89,12 @@ export function AutoDeliveryOptionsFields({
           disabled={disabled}
           onPressedChange={(pressed) => onChange({ ...value, [row.key]: pressed })}
         >
+          {/* The glyph says what a press does: add the step, or show it is on. */}
+          {value[row.key] ? (
+            <Check size={12} strokeWidth={2.25} aria-hidden="true" />
+          ) : (
+            <Plus size={12} strokeWidth={2.25} aria-hidden="true" />
+          )}
           {t(row.labelKey, row.label)}
         </Toggle>
       ))}

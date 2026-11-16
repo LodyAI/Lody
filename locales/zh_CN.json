@@ -2721,7 +2721,7 @@
   "sessions.autoDelivery.encryptedUnavailable": "加密工作区暂不观察 PR 状态。",
   "sessions.autoDelivery.option.fixCi": "修 CI",
   "sessions.autoDelivery.option.resolveConflicts": "解冲突",
-  "sessions.autoDelivery.option.merge": "通过后合入",
+  "sessions.autoDelivery.option.merge": "合入",
   "sessions.autoDelivery.state.pr": "等待创建 PR",
   "sessions.autoDelivery.state.ci": "等待 CI",
   "sessions.autoDelivery.state.fix": "修复 CI 中（第 {{attempt}} 次）",
