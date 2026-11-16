@@ -4651,6 +4651,7 @@
   "workspace.usage.skyline.asciiPreview": "ASCII loading preview",
   "workspace.usage.skyline.clickForDetails": "Click for details",
   "workspace.usage.skyline.clickHint": "Click a day to open its breakdown",
+  "workspace.usage.skyline.hourClickHint": "Select an hour to see its UTC day breakdown",
   "workspace.usage.skyline.copyAscii": "Copy ASCII skyline",
   "workspace.usage.skyline.copyFailed": "Could not copy ASCII skyline",
   "workspace.usage.skyline.currentStreak": "Current streak",
