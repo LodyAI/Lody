@@ -412,6 +412,20 @@ export const archivedSessionListAtom = atom((get) => {
 
 // All active sessions (including children) — used for child status aggregation
 let _prevAllActiveSessions: SessionMeta[] = [];
+/**
+ * Every visible session, archived ones included. Project mode numbers a
+ * coordinator's tasks over this list so accepted (archived) tasks keep theirs.
+ */
+let _prevAllSessionsIncludingArchived: SessionMeta[] = [];
+export const allSessionsIncludingArchivedAtom = atom((get) => {
+  const next = Object.values(get(visibleSessionMetaCacheAtom));
+  if (sessionMetaArrayEqual(_prevAllSessionsIncludingArchived, next)) {
+    return _prevAllSessionsIncludingArchived;
+  }
+  _prevAllSessionsIncludingArchived = next;
+  return next;
+});
+
 export const allActiveSessionsAtom = atom((get) => {
   const cache = get(visibleSessionMetaCacheAtom);
   const next = Object.values(cache).filter((session) => !session.isArchived);

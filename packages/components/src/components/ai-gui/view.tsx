@@ -239,6 +239,7 @@ import {
 import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { conversationSurface } from './surface';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   isMessageActionsToggleTap,
   toggleMobileMessageActions,
@@ -442,6 +443,8 @@ export type ChatStreamItem = SessionMessageItem | EmptySessionItem | Placeholder
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
+  /** Project mode: the whole turn as one reply bubble of its text output. */
+  | { kind: 'coordinator_bubble' }
   | {
       kind: 'worked_group_header';
       segmentKey: string;
@@ -1199,6 +1202,7 @@ export const buildChatVirtualRows = ({
   copyContextAvailable = false,
   groupCreatedSessions = true,
   showThoughts = false,
+  coordinatorBubbles = false,
   selectionLayouts,
 }: {
   selectionLayouts?: ReadonlyMap<string, SelectionTurnLayout>;
@@ -1212,6 +1216,8 @@ export const buildChatVirtualRows = ({
   copyContextAvailable?: boolean;
   groupCreatedSessions?: boolean;
   showThoughts?: boolean;
+  /** Project mode: one reply bubble per assistant turn, without work or duration. */
+  coordinatorBubbles?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
@@ -1289,6 +1295,17 @@ export const buildChatVirtualRows = ({
     const selectionSearchBlockId = selectionLayout
       ? selectionLayout.activeSearchBlockId
       : activeSearchBlockId;
+    if (coordinatorBubbles) {
+      rows.push({
+        type: 'assistant',
+        key: `assistant:${message.id}:bubble`,
+        messageIndex,
+        item,
+        content: { kind: 'coordinator_bubble' },
+        isLastRowForMessage: true,
+      });
+      continue;
+    }
     const cachedRows = assistantTurnRowsCache.get(item);
     if (
       cachedRows &&
@@ -1918,6 +1935,8 @@ export const SessionChatStreamView = forwardRef<
 
     const copyContextAvailable = onCopyContext !== undefined;
     const selectionLayouts = selectionLayoutsRef.current;
+    // Project mode: a coordinator's own conversation shows its turns as reply bubbles.
+    const coordinatorBubbles = useCoordinatorConversation() !== null;
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -1934,6 +1953,7 @@ export const SessionChatStreamView = forwardRef<
         showThoughts,
         selectionLayouts,
         groupCreatedSessions: messageSelection === null,
+        coordinatorBubbles,
       });
       if (!localUserMessages?.length) return rows;
       const local = new Map(localUserMessages.map((message) => [message.id, message]));
@@ -1961,6 +1981,7 @@ export const SessionChatStreamView = forwardRef<
       }
       return merged;
     }, [
+      coordinatorBubbles,
       messageSelection,
       showThoughts,
       selectionLayouts,
@@ -6126,6 +6147,15 @@ const AssistantChatItem = memo(function AssistantChatItem({
   const isWorkedDetail = row.isWorkedDetail === true;
   const rowBody = (() => {
     switch (content.kind) {
+      case 'coordinator_bubble':
+        return (
+          <CoordinatorReplyBubble
+            message={message}
+            sessionId={row.item.sessionId}
+            onFilePathClick={onFilePathClick}
+            conversationFontSize={conversationFontSize}
+          />
+        );
       case 'plan':
         return message.plan ? (
           <AssistantPlanVirtualRow messageId={message.id} entries={message.plan} />
@@ -6496,6 +6526,62 @@ const formatJsonValue = (value: unknown) => {
     return String(value);
   }
 };
+
+/**
+ * Project mode: a coordinator turn reads as a reply, like the user's bubble on
+ * the other side. Only its text output shows; thoughts, tool calls and the
+ * duration stay in history, out of the way. A turn that has said nothing yet
+ * shows an ellipsis while it runs and nothing once it ends.
+ */
+function CoordinatorReplyBubble({
+  message,
+  sessionId,
+  onFilePathClick,
+  conversationFontSize,
+}: {
+  message: SessionHistoryParsed;
+  sessionId: SessionId;
+  onFilePathClick?: (filePath: string) => void;
+  conversationFontSize: ConversationFontSize;
+}) {
+  const isStreaming = message.finished !== true;
+  const textItems = message.items.flatMap((item, itemIndex) =>
+    item.type === 'text' && item.text.trim() ? [{ item, itemIndex }] : []
+  );
+  if (textItems.length === 0 && !isStreaming) return null;
+  return (
+    <div {...stylex.props(coordinatorBubbleStyles.row)} data-coordinator-reply-bubble="">
+      <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
+        {textItems.length === 0 ? (
+          <span {...stylex.props(coordinatorBubbleStyles.pending)}>…</span>
+        ) : (
+          textItems.map(({ item, itemIndex }) => (
+            <div key={itemIndex}>
+              {renderAssistantContent(item, sessionId, {
+                messageId: message.id,
+                itemIndex,
+                isStreaming,
+                onFilePathClick,
+                conversationFontSize,
+              })}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+const coordinatorBubbleStyles = stylex.create({
+  row: {
+    display: 'flex',
+    justifyContent: 'flex-start',
+    maxWidth: '100%',
+    paddingBlock: 6,
+  },
+  bubble: { display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '88%' },
+  pending: { color: colors.secondaryLabel },
+});
 
 const renderAssistantContent = (
   content: MessageContent,

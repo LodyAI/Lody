@@ -16,6 +16,7 @@ import { memo, useCallback, useMemo, useRef, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { sessionSendStatesAtom } from '@/atoms/session-send-status';
+import { allSessionsIncludingArchivedAtom } from '@/atoms/doc-meta';
 import { SessionRowStatusIndicator } from '@/components/sidebar-row-shared';
 import { buildChildSessionsByParent } from '@/components/sessions/session-list-rows';
 import { useMySessionScope, useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
@@ -142,22 +143,27 @@ const BUCKET_LABELS: Record<ProjectBoardBucket, [key: string, fallback: string]>
 export const formatTaskNumber = (taskNumber: number | null): string | null =>
   taskNumber === null ? null : `T${taskNumber}`;
 
-/** Accepting writes the conversation's own metadata, so it syncs like any session field. */
+/**
+ * Accepting records the time on the task's own metadata, then archives the
+ * task (the owner's choice): an accepted task is finished, so its conversation
+ * and worktree are released like any archived conversation.
+ */
 export function useAcceptCoordinatorTasks(): (sessionIds: readonly string[]) => void {
-  const { updateSessionMetadata } = useSessionActions();
+  const { updateSessionMetadata, archiveSession } = useSessionActions();
   const { t } = useTranslation();
   return useCallback(
     (sessionIds) => {
       const acceptedAt = getServerNow();
       void Promise.all(
-        sessionIds.map((id) =>
-          updateSessionMetadata(id as SessionId, { coordinatorTaskAcceptedAt: acceptedAt })
-        )
+        sessionIds.map(async (id) => {
+          await updateSessionMetadata(id as SessionId, { coordinatorTaskAcceptedAt: acceptedAt });
+          await archiveSession(id as SessionId);
+        })
       ).catch(() => {
         toast.error(t('projectMode.board.acceptFailed', 'Could not accept the task'));
       });
     },
-    [t, updateSessionMetadata]
+    [archiveSession, t, updateSessionMetadata]
   );
 }
 
@@ -175,6 +181,7 @@ export function useProjectBoardData(
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
   const sendStates = useAtomValue(sessionSendStatesAtom);
+  const allSessionsIncludingArchived = useAtomValue(allSessionsIncludingArchivedAtom);
 
   // Rebuilt on each presence tick; keep the previous map while no status changed.
   const liveRef = useRef<Map<string, SessionStatus> | null>(null);
@@ -219,6 +226,7 @@ export function useProjectBoardData(
         currentUserId,
         liveSessionStatuses,
         sendStates,
+        numberingSessions: allSessionsIncludingArchived,
       }),
     [
       allActiveSessions,
@@ -228,6 +236,7 @@ export function useProjectBoardData(
       liveSessionStatuses,
       project,
       sendStates,
+      allSessionsIncludingArchived,
     ]
   );
 
@@ -308,8 +317,9 @@ export function ProjectBoardView({
       )}
       {PROJECT_BOARD_BUCKETS.map((bucket) => {
         const rows = board[bucket];
-        // "In progress" is not one of the three columns the user watches; it shows only when busy.
-        if (bucket === 'working' && rows.length === 0) return null;
+        // "In progress" shows only when busy; "Accepted" only while an accepted task
+        // is still unarchived (accepting archives it).
+        if ((bucket === 'working' || bucket === 'accepted') && rows.length === 0) return null;
         const [key, fallback] = BUCKET_LABELS[bucket];
         return (
           <section

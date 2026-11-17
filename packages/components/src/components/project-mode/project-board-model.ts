@@ -130,8 +130,8 @@ export function isCoordinatorTaskAccepted(
 }
 
 /**
- * Every conversation the coordinator opened (wherever it runs), plus the other
- * top-level conversations of its project, bucketed by derived status. Child
+ * Every conversation the coordinator opened (wherever it runs), bucketed by
+ * derived status. Accepting a task archives it, so it leaves the board. Child
  * Tabs roll up into their root the way sidebar rows do. Only the current user's
  * own conversations are listed, as in the sidebar's "My" scope; an unknown
  * account lists none.
@@ -144,19 +144,24 @@ export function buildProjectBoard(options: {
   currentUserId: string | null | undefined;
   liveSessionStatuses: ReadonlyMap<string, SessionStatus>;
   sendStates: Readonly<Record<string, SessionSendState>>;
+  /** Every session including archived ones, so accepted (archived) tasks keep their numbers. */
+  numberingSessions?: readonly SessionMeta[];
 }): ProjectBoard {
   const board: ProjectBoard = { needsYou: [], working: [], review: [], accepted: [] };
-  const { coordinatorSessionId, project } = options;
-  const taskNumbers = buildCoordinatorTaskNumbers(options.sessions, coordinatorSessionId);
+  const { coordinatorSessionId } = options;
+  const taskNumbers = buildCoordinatorTaskNumbers(
+    options.numberingSessions ?? options.sessions,
+    coordinatorSessionId
+  );
   for (const session of options.sessions) {
     if (session.isArchived || session.parentSessionId) continue;
     if (session.id === coordinatorSessionId) continue;
     if (!isSessionInMyScope(session, options.currentUserId)) continue;
     // Another coordinator of the same project is a conversation of its own, not a task.
     if (isCoordinatorSession(session)) continue;
-    const opened = isOpenedBy(session, coordinatorSessionId);
-    const inProject = project !== null && isSessionInCoordinatorProject(session, project);
-    if (!opened && !inProject) continue;
+    // Only the coordinator's own tasks: conversations started by hand in the
+    // same project stay in the ordinary sidebar (the owner's choice).
+    if (!isOpenedBy(session, coordinatorSessionId)) continue;
     const activity = getEffectiveSessionActivitySummary(
       session,
       options.childSessionsByParent,
@@ -178,7 +183,7 @@ export function buildProjectBoard(options: {
       session,
       bucket,
       taskNumber: taskNumbers.get(session.id) ?? null,
-      createdManually: !opened,
+      createdManually: false,
       isWorking: activity.isWorking,
       isWaitingPermission: activity.isWaitingPermission,
       hasUnreadMessages: activity.hasUnreadMessages,

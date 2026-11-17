@@ -98,10 +98,10 @@ describe('project board', () => {
     // The archived first task keeps T1, so the others never renumber.
     expect(numberOf('second')).toBe(2);
     expect(numberOf('third')).toBe(3);
-    expect(numberOf('manual')).toBeNull();
+    expect(numberOf('manual')).toBeUndefined();
   });
 
-  it('includes conversations the coordinator opened elsewhere and marks the project’s own as manual', () => {
+  it('lists only the coordinator’s own tasks, wherever they run', () => {
     const result = board([
       coordinator,
       session('dispatched-elsewhere', {
@@ -122,11 +122,8 @@ describe('project board', () => {
     ]);
     const rows = Object.values(result).flat();
 
-    expect(ids(rows).sort()).toEqual(['dispatched-elsewhere', 'manual']);
-    expect(rows.find((row) => row.session.id === 'manual')?.createdManually).toBe(true);
-    expect(rows.find((row) => row.session.id === 'dispatched-elsewhere')?.createdManually).toBe(
-      false
-    );
+    // A conversation started by hand in the same project stays out of the board.
+    expect(ids(rows)).toEqual(['dispatched-elsewhere']);
   });
 
   it('lists nothing while the current account is unknown', () => {

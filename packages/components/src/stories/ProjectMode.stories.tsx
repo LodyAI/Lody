@@ -184,7 +184,18 @@ const target = (sessionId: string) => ({ sessionId, userTurnId: `${sessionId}-tu
 /** The rows a real coordinator conversation carries: creation progress and a result batch. */
 const streamItems: ChatStreamItem[] = [
   turnItem('turn-0', 'user', 30, [{ type: 'text', text: turns[0]!.text }]),
-  turnItem('turn-1', 'assistant', 29, [{ type: 'text', text: turns[1]!.text }]),
+  turnItem('turn-1', 'assistant', 29, [
+    // Hidden in the coordinator's bubble: only the text output shows.
+    { type: 'thought', text: '三件事互不依赖，可以并行开三个对话。' },
+    {
+      type: 'tool_call',
+      toolCallId: 'call-create',
+      title: 'lody_session_create_many',
+      kind: 'other',
+      status: 'completed',
+    },
+    { type: 'text', text: turns[1]!.text },
+  ]),
   turnItem('turn-created', 'system', 28, [
     {
       type: 'operation_progress',

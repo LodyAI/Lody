@@ -295,6 +295,9 @@ Step 1, built at the owner's request; the four open questions were settled on th
 - Task states are derived: Needs you, In progress, To review, Accepted. A finished task stays in To review until the user accepts it (`SessionMeta.coordinatorTaskAcceptedAt` on the task's own metadata); new activity after acceptance sends it back. Task numbers follow creation order among the coordinator's conversations, archived ones included, so a number never moves.
 - In the coordinator's own conversation, every system row about child conversations (creation progress, completion receipts and batches) renders as one "Changes" line listing the tasks it touched with their current state; "Details" shows the original row. History, model input and receipts are unchanged.
 - A to-do card at the end of the conversation lists Needs you, then To review, with Open and Accept actions and Accept all.
+- Each coordinator turn renders as one reply bubble holding only its text output; thoughts, tool calls and the work duration are not shown (the owner's request). A turn with no text yet shows an ellipsis while it runs.
+- Accepting a task also archives its conversation (the owner's request), so it leaves the board; task numbers are counted over archived sessions too, so they never shift.
+- The board and to-do list only the coordinator's own tasks; conversations started by hand in the same project stay in the ordinary sidebar (the owner's request). This replaces the earlier "Created manually" rows.
 
 ## Permission inheritance today (left to step 2)
 
