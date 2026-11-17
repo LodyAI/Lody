@@ -1,3 +1,4 @@
+import * as recoveryHistory from './e2ee-recovery-history.mts'
 import * as identityStorage from '@lody/shared/node/e2ee-identity'
 
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
@@ -157,40 +158,46 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
     require: (id) =>
       Object.hasOwn(dependencies, id)
         ? dependencies[id]
-        : id === './e2ee-diagnostics.mjs'
-          ? { rememberDesktopE2eeFailure }
-          : id === '../../services/e2ee-member-join.mjs'
-            ? memberJoining
-            : id === '../../services/e2ee-cloud-errors.mjs' || id === './e2ee-cloud-errors.mjs'
-              ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
-              : id === '../../services/e2ee-personal-pairing.mjs'
-                ? { PersonalPairingOfferSchema }
-                : id === '../../services/e2ee-account-pairing-host.mjs'
-                  ? { makeDesktopAccountPairingHost }
-                  : id === '../../services/e2ee-key-delivery.mjs'
-                    ? loadSync('./e2ee-key-delivery.mts', dependencies, console, env, globals)
-                    : id === '../../services/e2ee-agent-pairing-service.mjs'
-                      ? loadSync(
-                          './e2ee-agent-pairing-service.mts',
-                          dependencies,
-                          console,
-                          env,
-                          globals
-                        )
-                      : id === '@lody/e2ee-client/account-requester'
-                        ? { KEY_DELIVERY_RETRY_DELAYS }
-                        : id === '@lody/e2ee-core/protocol'
-                          ? { decodeRecord }
-                          : id === '../../services/e2ee-recovery-vault.mjs' ||
-                              id === '../../services/e2ee-passkey-macos.mjs'
-                            ? {}
-                            : id === '../../services/e2ee-client-loss-probe'
-                              ? // Production default: the E2E probe is disabled and forwards work.
-                                {
-                                  observeClientLossOperation: (_kind, _workspace, _sender, work) =>
-                                    work()
-                                }
-                              : require(id)
+        : id === '../../services/e2ee-recovery-history.mjs'
+          ? recoveryHistory
+          : id === './e2ee-diagnostics.mjs'
+            ? { rememberDesktopE2eeFailure }
+            : id === '../../services/e2ee-member-join.mjs'
+              ? memberJoining
+              : id === '../../services/e2ee-cloud-errors.mjs' || id === './e2ee-cloud-errors.mjs'
+                ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
+                : id === '../../services/e2ee-personal-pairing.mjs'
+                  ? { PersonalPairingOfferSchema }
+                  : id === '../../services/e2ee-account-pairing-host.mjs'
+                    ? { makeDesktopAccountPairingHost }
+                    : id === '../../services/e2ee-key-delivery.mjs'
+                      ? loadSync('./e2ee-key-delivery.mts', dependencies, console, env, globals)
+                      : id === '../../services/e2ee-agent-pairing-service.mjs'
+                        ? loadSync(
+                            './e2ee-agent-pairing-service.mts',
+                            dependencies,
+                            console,
+                            env,
+                            globals
+                          )
+                        : id === '@lody/e2ee-client/account-requester'
+                          ? { KEY_DELIVERY_RETRY_DELAYS }
+                          : id === '@lody/e2ee-core/protocol'
+                            ? { decodeRecord }
+                            : id === '../../services/e2ee-recovery-vault.mjs' ||
+                                id === '../../services/e2ee-passkey-macos.mjs'
+                              ? {}
+                              : id === '../../services/e2ee-client-loss-probe'
+                                ? // Production default: the E2E probe is disabled and forwards work.
+                                  {
+                                    observeClientLossOperation: (
+                                      _kind,
+                                      _workspace,
+                                      _sender,
+                                      work
+                                    ) => work()
+                                  }
+                                : require(id)
   })
   return exports
 }

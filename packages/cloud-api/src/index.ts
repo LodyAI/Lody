@@ -578,6 +578,11 @@ export type CloudApi = {
     abandonReplacement: Mutation<{ vaultId: string }, { ok: true }>;
     putImmutable: Mutation<RecoveryVaultPutRequest, { ok: true }>;
     readEntry: Query<RecoveryVaultReadRequest, RecoveryVaultCiphertextDto | null>;
+    /** Bounded to eight distinct ids and 256 KiB combined ciphertext bodies, ordered. */
+    readEntries: Query<
+      { vaultId: string; entryIds: string[] },
+      (RecoveryVaultCiphertextDto | null)[]
+    >;
     readIndex: Query<RecoveryVaultIndexReadRequest, RecoveryVaultCiphertextDto | null>;
     compareAndSwapIndex: Mutation<RecoveryVaultIndexCasRequest, RecoveryVaultIndexCasReply>;
     deleteUnreferenced: Mutation<RecoveryVaultDeleteRequest, { ok: true }>;

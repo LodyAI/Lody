@@ -1,5 +1,5 @@
 import { useAtomValue } from 'jotai';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
@@ -17,6 +17,7 @@ import {
   useRecoveryPort,
   type RecoveryPasskey,
   type RecoveryPlan,
+  type RecoveryRestoreResult,
   type RecoveryReplacementPort,
   type RecoverySecurityEvent,
   type RecoveryUnlockMethod,
@@ -115,7 +116,7 @@ type Result =
     }
   | {
       kind: 'restored';
-      results: readonly { name: string; outcome: string; partialEpochKey?: boolean }[];
+      results: readonly RecoveryRestoreResult[];
     }
   | { kind: 'setupAll'; done: number; failed: readonly string[] }
   | { kind: 'created'; vaultId: string; method?: 'file' | 'passkey' | 'password' }
@@ -187,6 +188,21 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
   // `disabled`: the host refused because recovery is off there (desktop main started
   // with `LODY_E2EE_RECOVERY_VAULT=off`), which no retry changes; `failed`: anything else.
   const [planFailed, setPlanFailed] = useState<false | 'failed' | 'disabled'>(false);
+  const [restoreProgress, setRestoreProgress] = useState<readonly RecoveryRestoreResult[]>([]);
+  const operation = useRef(0);
+  const observations = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setRestoreProgress([]);
+    setResult(undefined);
+    setPlan(undefined);
+    setPlanFailed(false);
+    setEvents([]);
+    setBusy(false);
+    return () => {
+      operation.current++;
+      observations.current?.abort();
+    };
+  }, [accountId, port]);
   const [reload, setReload] = useState(0);
   const [dialog, setDialog] = useState<'begin' | 'continue'>();
   const [passkey, setPasskey] = useState(false);
@@ -256,7 +272,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     return () => {
       live = false;
     };
-  }, [enabled, port, result, reload]);
+  }, [enabled, port, accountId, result, reload]);
 
   if (!enabled || !port) return null;
   // Actions the host cannot perform are not offered at all.
@@ -297,17 +313,21 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     unlockMethod?: RecoveryUnlockMethod
   ) => {
     if (busy) return;
+    const ticket = ++operation.current;
     setBusy(true);
+    setRestoreProgress([]);
     try {
       const next = await work();
+      if (operation.current !== ticket) return;
       if (next) setResult(next);
     } catch (error) {
+      if (operation.current !== ticket) return;
       const code = error instanceof Error ? error.message : '';
       // Dismissing the system prompt is a choice, not a failure.
       if (!code.includes('e2ee_recovery_cancelled'))
         setResult({ kind: 'error', code, method: unlockMethod });
     } finally {
-      setBusy(false);
+      if (operation.current === ticket) setBusy(false);
     }
   };
 
@@ -468,6 +488,53 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
         !(hasFile && checkFile) &&
         !(!hasFile && saveFile)));
 
+  const restore = async (
+    method: RecoveryUnlockMethod,
+    options?: RecoveryUnlockOptions
+  ): Promise<Result | undefined> => {
+    const ticket = operation.current;
+    setRestoreProgress(
+      (plan?.uncovered ?? []).map((row) => ({
+        workspaceId: row.id,
+        name: row.name,
+        outcome: 'Restoring',
+      }))
+    );
+    const observation = new AbortController();
+    observations.current?.abort();
+    observations.current = observation;
+    try {
+      const restored = await port.restore(
+        method,
+        options,
+        (row) => {
+          if (operation.current !== ticket) return;
+          setRestoreProgress((rows) => {
+            const index = row.workspaceId
+              ? rows.findIndex((old) => old.workspaceId === row.workspaceId)
+              : -1;
+            return index < 0 ? [...rows, row] : rows.map((old, i) => (i === index ? row : old));
+          });
+        },
+        observation.signal
+      );
+      if (operation.current !== ticket) return;
+      if (restored.outcome !== 'restored') {
+        setRestoreProgress([]);
+        return;
+      }
+      setRestoreProgress(restored.results);
+      return { kind: 'restored', results: restored.results };
+    } finally {
+      observation.abort();
+      if (observations.current === observation) observations.current = null;
+    }
+  };
+  const restoreRows = restoreProgress.length
+    ? restoreProgress
+    : result?.kind === 'restored'
+      ? result.results
+      : undefined;
   const restoreButton = (method: RecoveryUnlockMethod) => (
     <Button
       size="small"
@@ -475,20 +542,10 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       disabled={busy}
       onClick={() => {
         if (method === 'password') {
-          triggerWithUnlock(async (_m, options) => {
-            const restored = await port.restore('password', options);
-            return restored.outcome === 'restored'
-              ? { kind: 'restored', results: restored.results }
-              : undefined;
-          }, 'password');
+          triggerWithUnlock((_m, options) => restore('password', options), 'password');
           return;
         }
-        void run(async () => {
-          const restored = await port.restore(method);
-          return restored.outcome === 'restored'
-            ? { kind: 'restored', results: restored.results }
-            : undefined;
-        }, method);
+        void run(() => restore(method), method);
       }}
     >
       {method === 'file'
@@ -939,22 +996,28 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
           })}
         </CompactSection>
       )}
-      {result?.kind === 'restored' &&
-        (result.results.length === 0 ? (
+      {restoreRows &&
+        (restoreRows.length === 0 ? (
           <p aria-live="polite">{t('e2ee.recovery.restoreNone')}</p>
         ) : (
           <ul aria-live="polite">
-            {result.results.map((row) => (
-              <li key={row.name}>
-                {row.outcome === 'Committed'
-                  ? row.partialEpochKey
-                    ? t('e2ee.recovery.restorePartial', { name: row.name })
-                    : t('e2ee.recovery.restoreDone', { name: row.name })
-                  : row.outcome === 'Pending' || row.outcome === 'Unconfirmed'
-                    ? t('e2ee.recovery.restoreWaiting', { name: row.name })
-                    : row.outcome === 'not-backed-up'
-                      ? t('e2ee.recovery.restoreNotBackedUp', { name: row.name })
-                      : t('e2ee.recovery.restoreFailed', { name: row.name })}
+            {restoreRows.map((row, index) => (
+              <li
+                key={row.workspaceId ?? index}
+                data-recovery-result={row.workspaceId}
+                data-recovery-outcome={row.outcome}
+              >
+                {row.outcome === 'Restoring'
+                  ? t('e2ee.recovery.restoreWorking', { name: row.name })
+                  : row.outcome === 'Committed'
+                    ? row.partialEpochKey
+                      ? t('e2ee.recovery.restorePartial', { name: row.name })
+                      : t('e2ee.recovery.restoreDone', { name: row.name })
+                    : row.outcome === 'Pending' || row.outcome === 'Unconfirmed'
+                      ? t('e2ee.recovery.restoreWaiting', { name: row.name })
+                      : row.outcome === 'not-backed-up'
+                        ? t('e2ee.recovery.restoreNotBackedUp', { name: row.name })
+                        : t('e2ee.recovery.restoreFailed', { name: row.name })}
               </li>
             ))}
           </ul>

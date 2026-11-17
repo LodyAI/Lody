@@ -67,7 +67,10 @@ export type RecoveryPort = {
   /** Restore every workspace the unlock covers onto this host, each reported separately. */
   readonly restore: (
     method: RecoveryUnlockMethod,
-    options?: RecoveryUnlockOptions
+    options?: RecoveryUnlockOptions,
+    onResult?: (result: RecoveryRestoreResult) => void,
+    /** Detaches observation only; never cancels the main-owned recovery. */
+    observationSignal?: AbortSignal
   ) => Promise<
     | RecoveryCancelled
     | { readonly outcome: 'restored'; readonly results: readonly RecoveryRestoreResult[] }

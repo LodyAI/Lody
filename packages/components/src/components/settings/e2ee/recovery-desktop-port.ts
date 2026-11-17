@@ -1,4 +1,4 @@
-import type { IpcServices } from '@/lib/electron-ipc-client';
+import { onIpcEvent, type IpcServices } from '@/lib/electron-ipc-client';
 import type { RecoveryPasskeys, RecoveryPort } from './recovery-port';
 
 const passkeys = (state: RecoveryPasskeys): RecoveryPasskeys => ({
@@ -64,20 +64,34 @@ export function desktopRecoveryPort(e2ee: IpcServices['e2ee']): RecoveryPort {
         ? { outcome: 'cancelled' }
         : { outcome: removed.outcome, pending: removed.pending };
     },
-    restore: async (method, options) => {
-      const restored = options
-        ? await e2ee.restoreFromRecoveryFile(method, options)
-        : await e2ee.restoreFromRecoveryFile(method);
-      return restored.outcome === 'restored'
-        ? {
-            outcome: 'restored',
-            results: restored.results.map((row) => ({
-              ...(row.workspaceId === undefined ? {} : { workspaceId: row.workspaceId }),
-              name: row.name,
-              outcome: row.outcome,
-            })),
-          }
-        : { outcome: 'cancelled' };
+    restore: async (method, options, onResult, observationSignal) => {
+      const operationId = crypto.randomUUID();
+      const stop = observationSignal?.aborted
+        ? () => {}
+        : onIpcEvent('e2ee.recoveryProgress', (event) => {
+            if (!observationSignal?.aborted && event.operationId === operationId)
+              onResult?.(event.result);
+          });
+      observationSignal?.addEventListener('abort', stop, { once: true });
+      try {
+        const restored = await e2ee.restoreFromRecoveryFile(method, options, operationId);
+        return restored.outcome === 'restored'
+          ? {
+              outcome: 'restored',
+              results: restored.results.map((row) => ({
+                ...(row.workspaceId === undefined ? {} : { workspaceId: row.workspaceId }),
+                name: row.name,
+                outcome: row.outcome,
+                ...(row.partialEpochKey === undefined
+                  ? {}
+                  : { partialEpochKey: row.partialEpochKey }),
+              })),
+            }
+          : { outcome: 'cancelled' };
+      } finally {
+        observationSignal?.removeEventListener('abort', stop);
+        stop();
+      }
     },
     setupWorkspace: async (workspaceId, method, options) => {
       const done =
