@@ -33,6 +33,7 @@ import org.intellij.markdown.ast.getTextInNode
  */
 internal data class ChatFileLink(val path: String, val line: Int?) {
     val isMarkdown: Boolean get() = ProjectFiles.isMarkdown(path)
+    val isPreviewable: Boolean get() = ProjectFiles.isPreviewable(path)
     val name: String get() = path.trimEnd('/').substringAfterLast('/')
 
     companion object {
@@ -40,6 +41,7 @@ internal data class ChatFileLink(val path: String, val line: Int?) {
             Regex("""(?:#L([1-9][0-9]*)(?:C[0-9]+)?(?:-L?[0-9]+(?:C[0-9]+)?)?|:L([1-9][0-9]*)(?:C[0-9]+)?|:([1-9][0-9]*)(?::[0-9]+)?)$""")
         private val windowsDrive = Regex("^[A-Za-z]:/")
         private val scheme = Regex("^[A-Za-z][A-Za-z0-9+.-]*:")
+        private val fileUrl = Regex("^file://(?:localhost)?/", RegexOption.IGNORE_CASE)
 
         private val bareDomainTlds = setOf("com", "org", "net", "io", "dev", "app", "co", "ai", "gov", "edu", "info")
 
@@ -60,6 +62,11 @@ internal data class ChatFileLink(val path: String, val line: Int?) {
 
         fun parse(href: String): ChatFileLink? {
             var value = href.trim().replace('\\', '/')
+            // `file:///Users/a/report.html` and `file:///C:/a/report.html` name a file on the session's computer.
+            fileUrl.find(value)?.let { match ->
+                val rest = value.substring(match.range.last + 1)
+                value = if (windowsDrive.containsMatchIn(rest)) rest else "/$rest"
+            }
             var line: Int? = null
             lineSuffix.find(value)?.let { match ->
                 line = match.groupValues.drop(1).firstOrNull { it.isNotEmpty() }?.toIntOrNull()

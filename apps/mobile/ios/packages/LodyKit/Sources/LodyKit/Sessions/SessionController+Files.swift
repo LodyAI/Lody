@@ -16,7 +16,8 @@ extension SessionController {
       }
       guard (source ?? self).view.window != nil else { return }
       pageOwnsRelease = true
-      self.open("file-content", ["sessionId": self.sessionId, "path": path, "line": line], present: true, from: source) { [weak self] in
+      // A transcript link to an HTML file opens its rendered page; the toggle shows source.
+      self.open("file-content", ["sessionId": self.sessionId, "path": path, "line": line, "preview": line == 0], present: true, from: source) { [weak self] in
         self?.openingFiles.remove(path)
       }
     }

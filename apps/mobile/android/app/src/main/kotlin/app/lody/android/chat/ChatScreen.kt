@@ -658,8 +658,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         )
     }
     val pullRequestPanel = bar?.pullRequest?.let(panelFor)
-    // Transcript links to a file on the session's computer open its preview (Markdown only for
-    // now, iOS `openMessageLink`); links to a PR of this project (a multi-repository project's
+    // Transcript links to a file on the session's computer open its preview (Markdown and HTML
+    // for now, iOS `openMessageLink`); links to a PR of this project (a multi-repository project's
     // members included) open the PR panel; other links go to the browser. iOS `openPullRequestLink`.
     val browser = androidx.compose.ui.platform.LocalUriHandler.current
     val repositories = context.repositories
@@ -671,7 +671,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 val file = ChatFileLink.parse(uri)
                 val link = if (file == null) PullRequestLink.inProject(uri, repositories) else null
                 when {
-                    file != null && file.isMarkdown -> previewFile = file.path
+                    file != null && file.isPreviewable -> previewFile = file.path
                     file != null -> coroutines.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(markdownOnly) }
                     link != null -> linkedPullRequest = link
                     else -> runCatching { browser.openUri(uri) }

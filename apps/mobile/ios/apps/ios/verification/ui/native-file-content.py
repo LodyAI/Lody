@@ -145,7 +145,9 @@ report = ui.element('html-feedback-report')['AXLabel']
 diagnostic = json.loads(report[report.index('{'):])
 assert diagnostic['file'] == 'docs/broken.html', diagnostic
 codes = {i['code'] for i in diagnostic['issues']}
-assert codes == {'file_not_found', 'root_path_unavailable', 'local_file_unavailable', 'local_service_unavailable'}, codes
+assert codes == {'file_not_found', 'root_path_unavailable', 'local_service_unavailable'}, codes
+# An authored file:// URL is read from the computer, which decides whether it exists.
+assert any(i['path'] == '/Users/example/private.png' and i['code'] == 'file_not_found' for i in diagnostic['issues']), diagnostic['issues']
 assert any(i['reference'] == './assets/missing.svg' and i['path'] == 'docs/assets/missing.svg' for i in diagnostic['issues']), diagnostic
 assert 'token=' not in report and 'lody-preview://' not in report, report
 (ui.output / 'feedback-request.json').write_text(json.dumps(diagnostic, indent=2))

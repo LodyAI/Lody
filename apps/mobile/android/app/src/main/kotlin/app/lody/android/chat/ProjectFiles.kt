@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -72,12 +73,17 @@ internal object ProjectFiles {
 
     fun isMarkdown(path: String): Boolean = path.substringAfterLast('/').substringAfterLast('.', "").lowercase() in markdownExtensions
 
+    fun isHtml(path: String): Boolean = path.substringAfterLast('/').substringAfterLast('.', "").lowercase() in setOf("html", "htm")
+
+    /** Files the sheet renders: Markdown natively, HTML in the sandboxed [HtmlFilePreview]. */
+    fun isPreviewable(path: String): Boolean = isMarkdown(path) || isHtml(path)
+
     fun join(folder: String, name: String): String = if (folder.isEmpty()) name else "$folder/$name"
 
     /**
-     * A link in [from] resolved to a project-relative Markdown path, as iOS `openLink`: relative
+     * A link in [from] resolved to a project-relative Markdown or HTML path, as iOS `openLink`: relative
      * links only (no scheme, not absolute), query and fragment dropped, `.` / `..` applied; a link
-     * leaving the project or naming a non-Markdown file is null.
+     * leaving the project or naming a file the sheet cannot preview is null.
      */
     fun linkedMarkdown(from: String, href: String): String? {
         val target = href.substringBefore('#').substringBefore('?')
@@ -89,7 +95,7 @@ internal object ProjectFiles {
             ".." -> if (parts.isEmpty()) return null else parts.removeAt(parts.lastIndex)
             else -> parts += part
         }
-        return parts.joinToString("/").takeIf { it.isNotEmpty() && isMarkdown(it) }
+        return parts.joinToString("/").takeIf { it.isNotEmpty() && isPreviewable(it) }
     }
 }
 
@@ -243,7 +249,7 @@ private val fileErrors = mapOf(
     "path_not_allowed" to R.string.files_error_path,
 )
 
-private data class MarkdownFile(val blocks: List<String>, val lines: List<String>)
+private data class MarkdownFile(val blocks: List<String>, val lines: List<String>, val text: String)
 
 @Composable
 private fun FilePage(path: String, readFile: suspend (String) -> FileContent, back: (() -> Unit)?, openExternal: (String) -> Unit, openFile: (String) -> Unit) {
@@ -253,13 +259,14 @@ private fun FilePage(path: String, readFile: suspend (String) -> FileContent, ba
     var source by remember(path) { mutableStateOf(false) }
     var state by remember(path) { mutableStateOf<Loaded<MarkdownFile>>(Loaded.Loading) }
     var error by remember(path) { mutableStateOf<Int?>(null) }
+    val html = remember(path) { ProjectFiles.isHtml(path) }
     LaunchedEffect(path, attempt) {
         state = Loaded.Loading
         error = null
         state = try {
             when (val file = readFile(path)) {
                 is FileContent.Text -> Loaded.Ready(withContext(Dispatchers.Default) {
-                    MarkdownFile(MarkdownBlockSplitter.split(file.text), file.text.lines())
+                    MarkdownFile(if (html) emptyList() else MarkdownBlockSplitter.split(file.text), file.text.lines(), file.text)
                 })
                 is FileContent.Binary -> { error = R.string.files_error_binary; Loaded.Failed }
                 is FileContent.Failed -> { error = fileErrors[file.code] ?: R.string.files_error_read; Loaded.Failed }
@@ -293,6 +300,8 @@ private fun FilePage(path: String, readFile: suspend (String) -> FileContent, ba
                     itemsIndexed(current.value.lines) { _, line -> Text(line, style = code, color = colors.textPrimary) }
                 }
             }
+        } else if (html) {
+            HtmlFilePreview(path, current.value.text, readFile, Modifier.fillMaxSize())
         } else if (current.value.blocks.isEmpty()) {
             Notice(stringResource(R.string.files_empty_file), null)
         } else CompositionLocalProvider(LocalUriHandler provides links) {
