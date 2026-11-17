@@ -49,12 +49,20 @@ afterEach(async () => {
 it('sends a redacted main exception through the real SDK', async () => {
   const { captureElectronMainException } =
     await import('../../../apps/electron/src/main/posthog-error-reporting');
-  await captureElectronMainException(new Error('PRIVATE_MESSAGE'), {
+  await captureElectronMainException(new RangeError('PRIVATE_MESSAGE'), {
     component: 'PRIVATE_COMPONENT',
-    extra: { error_code: 'forbidden', nested: { path: 'PRIVATE_PATH' } },
+    extra: {
+      source: 'unhandledRejection',
+      error_code: 'forbidden',
+      nested: { path: 'PRIVATE_PATH' },
+    },
   });
   expect(bodies.length).toBeGreaterThan(0);
   expect(JSON.stringify(bodies)).toContain('forbidden');
+  expect(JSON.stringify(bodies)).toContain(
+    'lody-redacted-v1:electron:main:unknown:unhandledRejection:RangeError:forbidden'
+  );
+  expect(JSON.stringify(bodies)).toContain('1.0.0');
   expect(JSON.stringify(bodies)).not.toContain('PRIVATE_');
 });
 it('keeps local main telemetry and its install-id file disabled', async () => {

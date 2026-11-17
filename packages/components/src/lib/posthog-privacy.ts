@@ -245,7 +245,16 @@ export function createPostHogPrivacy(readScope: () => string | null) {
       error.stack = undefined;
       return [
         error,
-        { ...redactedTelemetryException(properties), __lody_exception_generation: generation },
+        {
+          ...redactedTelemetryException(
+            {
+              ...properties,
+              source: properties.errorBoundary !== undefined ? 'errorBoundary' : 'captureException',
+            },
+            args[0]
+          ),
+          __lody_exception_generation: generation,
+        },
       ];
     },
   };

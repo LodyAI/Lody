@@ -189,10 +189,6 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
     if (isUnauthenticatedPostHogEvent(event) || isResizeObserverLoopPostHogEvent(event)) {
       return null;
     }
-    const safeEvent = postHogPrivacy.beforeSend(event);
-    if (!safeEvent) return null;
-    event = safeEvent as typeof event;
-
     if (event.event === 'e2ee/iroh_daily') {
       // The SDK can attach initial-person metadata outside `properties`. Keep
       // only the event envelope, never its automatic $set/$set_once payloads.
@@ -204,6 +200,13 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
       };
     }
     const libraryVersion = readPostHogLibraryVersion();
+    if (event.event === '$exception') {
+      event.properties = {
+        ...event.properties,
+        platform: 'web',
+        ...(libraryVersion ? { app_version: libraryVersion } : {}),
+      };
+    }
     const mobileLibrary = readMobilePostHogLibrary();
     if (mobileLibrary) {
       event.properties = {
@@ -214,10 +217,7 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
         $lib: mobileLibrary.library,
         ...(libraryVersion ? { $lib_version: libraryVersion } : {}),
       };
-      return event;
-    }
-
-    if (isElectronRenderer()) {
+    } else if (isElectronRenderer()) {
       event.properties = {
         ...event.properties,
         platform: 'electron',
@@ -227,6 +227,6 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
       };
     }
 
-    return event;
+    return postHogPrivacy.beforeSend(event) as typeof event;
   },
 };
