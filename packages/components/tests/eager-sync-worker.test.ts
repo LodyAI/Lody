@@ -1,15 +1,28 @@
-import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it, vi } from 'vitest';
-import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
+import {
+  readEagerSyncRejection,
+  writeEagerSyncRejection,
+} from '../src/providers/eager-sync-admission';
+import { createLoroStreamsTokenProviderLegacy, type SessionId } from '@lody/shared';
+import {
+  createBackgroundSyncCoordinator,
+  WEB_EAGER_SYNC_POLICY,
+  type PrefetchOutcome,
+} from '../src/providers/background-sync-coordinator';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import {
   base64ToBytes,
   bytesToBase64,
   buildDocUpdateChunkPayloads,
 } from '@lody/shared/local-loro-data-plane';
-import { createEagerSyncWorkerClient } from '../src/providers/eager-sync-worker-client';
+import {
+  type EagerSyncWorkerClientDeps,
+  createEagerSyncWorkerClient,
+} from '../src/providers/eager-sync-worker-client';
 import { runEagerSyncWorkerTask } from '../src/providers/eager-sync-worker-task';
 import {
+  EAGER_SYNC_CACHE_DB,
   readEagerSyncSnapshot,
   writeEagerSyncSnapshot,
   type EagerSyncSnapshot,
@@ -57,9 +70,11 @@ function clientHarness(
     undefined,
   auth: (context?: EagerSyncAuthContext) => Promise<string | undefined> = async () => {
     throw new Error('Local prefetch must never request cloud credentials');
-  }
+  },
+  overrides: Partial<EagerSyncWorkerClientDeps> = {}
 ) {
   const starts = [deferred<TestWorker>(), deferred<TestWorker>(), deferred<TestWorker>()];
+  const created = deferred<TestWorker>();
   const workers: TestWorker[] = [];
   const sent: LocalSyncMessage[] = [];
   const listeners = new Set<(event: LocalSyncEvent) => void>();
@@ -67,12 +82,21 @@ function clientHarness(
     content: { mode: 'plaintext' },
     workspaceId: 'workspace',
     scope: 'scope',
+    authorizationScope: 'account',
+    // The real cross-window contract is covered by the Chromium integration.
+    // Node 22 in CI has no browser LockManager.
+    locks: {
+      request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) =>
+        run({} as Lock),
+    } as Pick<LockManager, 'request'>,
+    readRejection: async () => undefined,
     resolveTransport,
     readSnapshot,
     auth,
     createWorker: () => {
       const index = workers.length;
       const worker = new TestWorker((started) => starts[index].resolve(started));
+      created.resolve(worker);
       workers.push(worker);
       return worker as unknown as Worker;
     },
@@ -92,8 +116,9 @@ function clientHarness(
       },
       dispose() {},
     }),
+    ...overrides,
   });
-  return { client, starts, workers, sent, listeners };
+  return { client, starts, workers, sent, listeners, created };
 }
 
 describe('worker raw-document prefetch', () => {
@@ -109,6 +134,7 @@ describe('worker raw-document prefetch', () => {
     const listeners = new Set<(event: LocalSyncEvent) => void>();
     let joins = 0;
     let failWrite = false;
+    let rejectWrite = false;
     const joinedBeforeLastChunk = deferred<void>();
     let deliverLastChunk: () => void = () => {
       throw new Error('No pending chunk');
@@ -129,6 +155,7 @@ describe('worker raw-document prefetch', () => {
       readSnapshot: async () => cached,
       writeSnapshot: async (row) => {
         if (failWrite) throw new Error('disk full');
+        if (rejectWrite) return false;
         cached = { ...row, key: 'snapshot' };
         return true;
       },
@@ -217,6 +244,12 @@ describe('worker raw-document prefetch', () => {
     // A durable checkpoint avoids reopening the transport, including on restart.
     expect(await runEagerSyncWorkerTask({ ...request, lastMessageAt: 2 }, deps)).toBe('synced');
     expect(joins).toBe(2);
+    rejectWrite = true;
+    expect(await runEagerSyncWorkerTask({ ...request, lastMessageAt: 3 }, deps)).toBe(
+      'cache_rejected'
+    );
+    expect(cached?.lastMessageAt).toBe(2);
+    rejectWrite = false;
     failWrite = true;
     await expect(runEagerSyncWorkerTask({ ...request, lastMessageAt: 3 }, deps)).rejects.toThrow(
       'disk full'
@@ -305,6 +338,112 @@ describe('worker deadline cancellation', () => {
   });
 });
 
+it('bounds a waiting catch-up through the coordinator deadline and persists its retry across workers', async () => {
+  let now = 0;
+  const rows = new Map<string, Parameters<typeof writeEagerSyncRejection>[0]>();
+  const retryStore: Partial<EagerSyncWorkerClientDeps> = {
+    now: () => now,
+    readRejection: async (key) => rows.get(key),
+    writeRejection: async (row) => {
+      rows.set(row.key, { ...row });
+    },
+    clearRejection: async (key) => {
+      rows.delete(key);
+    },
+  };
+  const transport = async (): Promise<EagerSyncTransport> => ({
+    plane: 'cloud',
+    streamUrl: 'https://streams.example.com/ds/bucket/waiting',
+  });
+  const h = clientHarness(transport, undefined, undefined, retryStore);
+  const restarted = clientHarness(transport, undefined, undefined, retryStore);
+  const sessionId = 'waiting-session' as SessionId;
+  const highWater = new Map<SessionId, number>();
+  const timers = new Map<symbol, { run: () => void; delay: number }>();
+  let deadline: symbol | undefined;
+  const drained = deferred<void>();
+  const outcome = deferred<PrefetchOutcome>();
+  let activity: ((snapshot: { sessionId: SessionId; lastMessageAt: number }) => void) | undefined;
+  const coordinator = createBackgroundSyncCoordinator({
+    activitySource: {
+      list: () => [{ sessionId, lastMessageAt: 1 }],
+      subscribe: (listener) => {
+        activity = listener;
+        return () => {
+          activity = undefined;
+        };
+      },
+    },
+    registry: {
+      isJoined: () => false,
+      getRecentlySynced: () => new Set(),
+      subscribe: () => () => {},
+    },
+    prefetcher: {
+      getRetryAt: () => h.client.getRetryAt('waiting-room'),
+      prefetch: async (_session, at, signal) => {
+        const result = await h.client.prefetch('waiting-room', at, signal);
+        outcome.resolve(result);
+        return result;
+      },
+    },
+    env: { isOnline: () => true, isAppVisible: () => true, subscribe: () => () => {} },
+    clock: { now: () => now },
+    scheduler: {
+      setTimeout: (run, delay) => {
+        const handle = Symbol();
+        timers.set(handle, { run, delay });
+        if (delay === WEB_EAGER_SYNC_POLICY.prefetchTimeoutMs) deadline = handle;
+        return handle;
+      },
+      clearTimeout: (handle) => {
+        timers.delete(handle as symbol);
+        if (handle === deadline) drained.resolve();
+      },
+    },
+    policy: WEB_EAGER_SYNC_POLICY,
+    highWaterStore: {
+      get: (id) => highWater.get(id),
+      set: (id, at) => {
+        highWater.set(id, at);
+      },
+    },
+  });
+  try {
+    coordinator.start();
+    // No completion is emitted: this is the parent boundary when SDK catch-up
+    // remains waiting and firstSyncedWithRemote never resolves.
+    const waiting = await h.starts[0].promise;
+    expect(coordinator.getState().inFlight).toEqual([sessionId]);
+    const timer = timers.get(deadline!)!;
+    expect(timer.delay).toBe(20_000);
+    now = timer.delay;
+    timer.run();
+    expect(waiting.terminated).toBe(true);
+    expect(await outcome.promise).toBe('failed');
+    await drained.promise;
+    expect(coordinator.getState().inFlight).toEqual([]);
+    expect(highWater.size).toBe(0);
+    expect(h.client.getRetryAt('waiting-room')).toBe(80_000);
+    activity?.({ sessionId, lastMessageAt: 2 });
+    expect(coordinator.getState().queued).toEqual([]);
+    coordinator.stop();
+    const next = h.client.prefetch('another-room', 1, new AbortController().signal);
+    const nextWorker = await h.starts[1].promise;
+    nextWorker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await next).toBe('synced');
+    expect(await restarted.client.prefetch('waiting-room', 3, new AbortController().signal)).toBe(
+      'failed'
+    );
+    expect(restarted.workers).toEqual([]);
+    expect(highWater.size).toBe(0);
+  } finally {
+    coordinator.stop();
+    h.client.dispose();
+    restarted.client.dispose();
+  }
+});
+
 describe('eager-sync cloud auth bridge', () => {
   const cloudTransport = async (): Promise<EagerSyncTransport> => ({
     plane: 'cloud',
@@ -384,6 +523,262 @@ describe('eager-sync cloud auth bridge', () => {
     expect(await result).toBe('synced');
     h.client.dispose();
   });
+});
+
+it.each(['snapshot', 'rejection'] as const)(
+  'releases the claim and serial slot when a %s read never answers',
+  async (stage) => {
+    const reading = deferred<void>();
+    const staleRead = deferred<undefined>();
+    const released = deferred<void>();
+    let held = false;
+    const wait = async () => {
+      reading.resolve();
+      return staleRead.promise;
+    };
+    const h = clientHarness(undefined, undefined, undefined, {
+      ...(stage === 'snapshot' ? { readSnapshot: wait } : { readRejection: wait }),
+      locks: {
+        request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) => {
+          held = true;
+          try {
+            return await run({} as Lock);
+          } finally {
+            held = false;
+            released.resolve();
+          }
+        },
+      } as Pick<LockManager, 'request'>,
+    });
+    const controller = new AbortController();
+    const outcome = h.client.prefetch('stuck', 1, controller.signal);
+    await reading.promise;
+    expect(held).toBe(true);
+    controller.abort();
+    expect(await outcome).toBe('skipped');
+    await released.promise;
+    expect(held).toBe(false);
+    expect(h.workers).toEqual([]);
+    // Another task must actually run while the abandoned read is still pending.
+    const next = clientHarness();
+    const successor = next.client.prefetch('independent', 1, new AbortController().signal);
+    const worker = await next.starts[0].promise;
+    worker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await successor).toBe('synced');
+    staleRead.resolve(undefined);
+    h.client.dispose();
+    next.client.dispose();
+  }
+);
+
+it('aborts the actual refusal transaction and cannot leave a late cooldown write', async () => {
+  const controller = new AbortController();
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const original = IDBObjectStore.prototype.put;
+  const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    ...args
+  ) {
+    const request = original.apply(this, args);
+    // Cancel after a real request has entered the actual transaction.
+    controller.abort();
+    return request;
+  });
+  try {
+    await expect(
+      writeEagerSyncRejection(
+        { key: 'cancelled-refusal', lastMessageAt: 1, rejectedAt: 1 },
+        controller.signal
+      )
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    put.mockRestore();
+    expect(await readEagerSyncRejection('cancelled-refusal')).toBeUndefined();
+    await writeEagerSyncRejection({ key: 'cancelled-refusal', lastMessageAt: 2, rejectedAt: 2 });
+    expect(await readEagerSyncRejection('cancelled-refusal')).toMatchObject({ lastMessageAt: 2 });
+  } finally {
+    put.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('retires an unanswered refusal database open without starting a late writer', async () => {
+  const controller = new AbortController();
+  const opening = deferred<void>();
+  let closed = false;
+  let transactions = 0;
+  const request = {} as IDBOpenDBRequest;
+  vi.stubGlobal('indexedDB', {
+    open: () => {
+      opening.resolve();
+      return request;
+    },
+  });
+  try {
+    const writing = writeEagerSyncRejection(
+      { key: 'late-open', lastMessageAt: 1, rejectedAt: 1 },
+      controller.signal
+    );
+    await opening.promise;
+    controller.abort();
+    await expect(writing).rejects.toMatchObject({ name: 'AbortError' });
+    Object.defineProperty(request, 'result', {
+      value: {
+        close: () => {
+          closed = true;
+        },
+        transaction: () => {
+          transactions++;
+          throw new Error('Retired writer must not start');
+        },
+      },
+    });
+    request.onsuccess?.call(request, new Event('success'));
+    expect(closed).toBe(true);
+    expect(transactions).toBe(0);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it.each(['write', 'clear'] as const)(
+  'releases the claim and queue when a retry metadata %s never settles',
+  async (stage) => {
+    const writing = deferred<void>();
+    const abortSeen = deferred<void>();
+    const deadline = deferred<() => void>();
+    const released = deferred<void>();
+    let held = false;
+    const stuck = async (signal?: AbortSignal) => {
+      writing.resolve();
+      signal?.addEventListener('abort', () => abortSeen.resolve(), { once: true });
+      await new Promise<void>(() => {});
+    };
+    const h = clientHarness(undefined, undefined, undefined, {
+      readRejection: async (key) =>
+        stage === 'clear' && key.includes('"receipt"')
+          ? { key, lastMessageAt: 1, rejectedAt: 0, retryAt: 60_000 }
+          : undefined,
+      readSnapshot: async (_scope, roomId) =>
+        stage === 'clear' && roomId === 'receipt'
+          ? {
+              key: 'key',
+              scope: 'scope',
+              roomId,
+              plane: 'local',
+              lastMessageAt: 1,
+              savedAt: 1,
+              snapshot: new Blob(),
+            }
+          : undefined,
+      writeRejection: (_row, signal) => stuck(signal),
+      clearRejection: (_key, signal) => stuck(signal),
+      scheduler: {
+        setTimeout: (handler, ms) => {
+          expect(ms).toBe(1000);
+          deadline.resolve(handler);
+          return handler;
+        },
+        clearTimeout: () => {},
+      },
+      locks: {
+        request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) => {
+          held = true;
+          try {
+            return await run({} as Lock);
+          } finally {
+            held = false;
+            released.resolve();
+          }
+        },
+      } as Pick<LockManager, 'request'>,
+    });
+    const outcome = h.client.prefetch('receipt', 1, new AbortController().signal);
+    if (stage === 'write') {
+      const worker = await h.starts[0].promise;
+      worker.emit({ type: 'complete', outcome: 'cache_rejected' });
+      expect(worker.terminated).toBe(true);
+    }
+    await writing.promise;
+    expect(held).toBe(true);
+    (await deadline.promise)();
+    await abortSeen.promise;
+    expect(await outcome).toBe(stage === 'write' ? 'cache_rejected' : 'synced');
+    await released.promise;
+    expect(held).toBe(false);
+    const next = clientHarness();
+    const successor = next.client.prefetch('independent', 1, new AbortController().signal);
+    const nextWorker = await next.starts[0].promise;
+    nextWorker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await successor).toBe('synced');
+    h.client.dispose();
+    next.client.dispose();
+  }
+);
+
+it('bounds observed retry metadata even when every room was deferred by another window', async () => {
+  const h = clientHarness(undefined, undefined, undefined, {
+    now: () => 0,
+    readRejection: async (key) => ({
+      key,
+      lastMessageAt: 1,
+      rejectedAt: 0,
+      kind: 'failed',
+      retryAt: 60_000,
+    }),
+  });
+  try {
+    for (let room = 0; room <= 1000; room++) {
+      expect(await h.client.prefetch(`deferred-${room}`, 2, new AbortController().signal)).toBe(
+        'failed'
+      );
+    }
+    expect(h.client.getRetryAt('deferred-0')).toBeUndefined();
+    expect(h.client.getRetryAt('deferred-1000')).toBe(60_000);
+    expect(h.workers).toEqual([]);
+  } finally {
+    h.client.dispose();
+  }
+});
+
+it('bounds the separate timeout metadata owner before releasing its slot', async () => {
+  const writing = deferred<void>();
+  let expire: () => void = () => {
+    throw new Error('No metadata deadline');
+  };
+  const h = clientHarness(undefined, undefined, undefined, {
+    now: () => 0,
+    scheduler: {
+      setTimeout: (handler, ms) => {
+        expect(ms).toBe(1000);
+        expire = handler;
+        return 1;
+      },
+      clearTimeout: () => {},
+    },
+    writeRejection: async (_row, signal) => {
+      writing.resolve();
+      await new Promise<void>((_resolve, reject) =>
+        signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+      );
+    },
+  });
+  const controller = new AbortController();
+  const result = h.client.prefetch('deadline', 1, controller.signal);
+  const worker = await h.starts[0].promise;
+  controller.abort(new DOMException('deadline', 'TimeoutError'));
+  await writing.promise;
+  expect(worker.terminated).toBe(true);
+  const next = clientHarness();
+  const successor = next.client.prefetch('independent', 1, new AbortController().signal);
+  expect(next.workers).toEqual([]);
+  expire();
+  expect(await result).toBe('failed');
+  const nextWorker = await next.starts[0].promise;
+  nextWorker.emit({ type: 'complete', outcome: 'synced' });
+  expect(await successor).toBe('synced');
+  expect(h.client.getRetryAt('deadline')).toBe(60_000);
+  h.client.dispose();
+  next.client.dispose();
 });
 
 describe('cloud prefetch checkpoints', () => {
@@ -495,6 +890,54 @@ describe('cloud prefetch checkpoints', () => {
     };
   }
 
+  it('keeps old v1 windows readable while writing checkpoints and separate refusal metadata', async () => {
+    const h = harness();
+    let oldWindow: IDBDatabase | undefined;
+    try {
+      const snapshot = new Blob([h.remote.export({ mode: 'snapshot' }).slice().buffer]);
+      await writeEagerSyncSnapshot({
+        scope: 'legacy',
+        roomId: 'old-room',
+        plane: 'cloud',
+        lastMessageAt: 1,
+        savedAt: 1,
+        snapshot,
+      });
+      oldWindow = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(EAGER_SYNC_CACHE_DB, 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      // Leave the old version-1 connection open: an in-place DB version bump
+      // would block this new writer or make a later old-window open fail.
+      expect(await runEagerSyncWorkerTask(h.request, h.deps)).toBe('synced');
+      await writeEagerSyncRejection({ key: 'refused', lastMessageAt: 2, rejectedAt: 1 });
+      const rows = await new Promise<EagerSyncSnapshot[]>((resolve, reject) => {
+        const request = oldWindow!
+          .transaction('snapshots', 'readonly')
+          .objectStore('snapshots')
+          .getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      expect(oldWindow.version).toBe(1);
+      expect(rows).toHaveLength(2);
+      // These are the actual operations performed by the legacy LRU/foreground.
+      expect(rows.every((row) => row.snapshot.size > 0)).toBe(true);
+      expect(
+        (await Promise.all(rows.map((row) => row.snapshot.arrayBuffer()))).every(
+          (bytes) => bytes.byteLength > 0
+        )
+      ).toBe(true);
+      expect((await readEagerSyncSnapshot('legacy', 'old-room'))?.cloudCheckpoint).toBeUndefined();
+      expect((await h.read())?.cloudCheckpoint?.format).toBe(1);
+      expect(await readEagerSyncRejection('refused')).toBeDefined();
+    } finally {
+      oldWindow?.close();
+      h.remote.free();
+    }
+  });
+
   it('restarts from its own atomic snapshot and cursor and downloads only the suffix', async () => {
     const h = harness();
     try {
@@ -565,7 +1008,7 @@ describe('cloud prefetch checkpoints', () => {
           { ...h.request, lastMessageAt: 2 },
           { ...h.deps, writeSnapshot: async () => false }
         )
-      ).toBe('skipped');
+      ).toBe('cache_rejected');
       const saving = deferred<void>();
       const release = deferred<void>();
       const interrupted = runEagerSyncWorkerTask(
@@ -590,6 +1033,69 @@ describe('cloud prefetch checkpoints', () => {
       expect((await h.read())?.lastMessageAt).toBe(1);
       expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
     } finally {
+      h.remote.free();
+    }
+  });
+
+  it('persists incomplete-room backoff across clients without advancing the atomic checkpoint', async () => {
+    const h = harness();
+    let now = 0;
+    const clients: Array<ReturnType<typeof clientHarness>> = [];
+    const create = () => {
+      const client = clientHarness(
+        async () => h.request.transport,
+        h.read,
+        async () => 'token',
+        {
+          now: () => now,
+          readRejection: readEagerSyncRejection,
+          createWorker: () =>
+            new TestWorker((worker) => {
+              const input = worker.inputs.find((message) => message.type === 'start')!;
+              void runEagerSyncWorkerTask(input, h.deps).then(
+                (outcome) => worker.emit({ type: 'complete', outcome }),
+                () => worker.emit({ type: 'complete', outcome: 'failed' })
+              );
+            }) as unknown as Worker,
+        }
+      );
+      clients.push(client);
+      return client.client;
+    };
+    try {
+      await runEagerSyncWorkerTask(h.request, h.deps);
+      const before = (await h.read())!;
+      // A recovery bootstrap cannot supply the missing predecessor yet either.
+      h.setBootstrap(h.remote.export({ mode: 'snapshot' }));
+      const predecessor = h.remote.oplogVersion();
+      h.remote.getText('body').insert(0, 'missing');
+      h.remote.commit();
+      const afterMissing = h.remote.oplogVersion();
+      h.remote.getText('body').insert(7, 'pending');
+      h.remote.commit();
+      h.setDelta(h.remote.export({ mode: 'update', from: afterMissing }));
+      const first = create();
+      expect(await first.prefetch('room', 2, new AbortController().signal)).toBe('failed');
+      expect(first.getRetryAt('room')).toBe(60_000);
+      first.dispose();
+      h.reads.length = 0;
+      const restarted = create();
+      expect(await restarted.prefetch('room', 3, new AbortController().signal)).toBe('failed');
+      expect(h.reads).toEqual([]);
+      expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
+      expect((await h.read())?.lastMessageAt).toBe(1);
+      h.setDelta(h.remote.export({ mode: 'update', from: predecessor }));
+      now = 60_000;
+      expect(await restarted.prefetch('room', 3, new AbortController().signal)).toBe('synced');
+      expect((await h.read())?.lastMessageAt).toBe(3);
+      expect(restarted.getRetryAt('room')).toBeUndefined();
+      const recovered = LoroDoc.fromSnapshot(
+        new Uint8Array(await (await h.read())!.snapshot.arrayBuffer())
+      );
+      expect(recovered.toJSON()).toEqual(h.remote.toJSON());
+      recovered.free();
+    } finally {
+      for (const client of clients) client.client.dispose();
       h.remote.free();
     }
   });

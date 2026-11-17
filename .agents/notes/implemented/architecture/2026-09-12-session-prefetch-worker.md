@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2854](https://github.com/LodyAI/Lody/pull/2854)
+PR: [#2854](https://github.com/LodyAI/Lody/pull/2854), [#2853](https://github.com/LodyAI/Lody/pull/2853)
 
 [中文](2026-09-12-session-prefetch-worker.zh.md)
 
@@ -43,11 +43,47 @@ the parent also terminates stalled tasks at the twenty-second deadline. Before p
 high-water timestamp index of at most 1000 entries, so sessions evicted by the 64-entry snapshot LRU
 are not re-queued on every startup; that index reads neither the Doc nor history. The parent thread
 re-reads the snapshot checkpoint before creating the Worker and the Loro WASM, completing immediately
-on a hit; the Worker reads it once more to close the cross-window race. All windows of the same
+on a hit; the Worker also checks it before importing cached data. All windows of the same
 workspace share a `[workspaceId, roomId]` cache scope, so a slower write on the same plane cannot
 lower the checkpoint. The receiving side creates no business fields; the local adapter still follows
 the existing version-negotiation protocol. The cloud Worker uses the same explicit Streams endpoint as
 the already mounted foreground transport.
+
+Across windows, a non-waiting Web Lock claims workspace, room, cache scope, account,
+transport plane and cloud destination before checking the cache and starting a Worker.
+The claim remains held through the snapshot transaction and Worker termination; a
+contender or an unavailable lock skips optional prefetch. Window destruction releases
+its claim and child Worker. The entry registers its handler before dynamically
+loading the task module; there is no second readiness handshake.
+
+Cache refusal returns `cache_rejected`, never `synced` or a high-water timestamp.
+A separate IndexedDB index retains at most 1,000 retry records across windows and
+restarts. Refusals back off from thirty minutes, doubling to twenty-four hours.
+Network errors, incomplete catch-up and task deadlines back off from one minute;
+the cap is thirty minutes with a worker checkpoint and twenty-four hours without
+one, bounding repeated full bootstrap of an incomplete room. Genuine activity and
+metadata reseeds do not reset deadlines or retry counters. The coordinator uses the
+client's observed deadline instead of extending it on every deferred result.
+Successful cache coverage clears retry state. Expiry permits one attempt on a later
+scheduling edge; no polling timer is installed. If metadata persistence fails, a
+bounded runtime fallback remains, but cannot retain backoff across reloads or share
+it with other windows. Foreground opens remain independent. Cache clearing includes
+this scheduling index; the 128 MiB/64-entry snapshot limit is unchanged.
+
+This keeps the published Promise Repo/transport consumer boundary from the
+[rollback decision](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.md).
+Introducing another consumer kernel would expand this download-admission fix;
+the browser lock owns cross-window exclusion, which an in-process semaphore cannot.
+
+A cache read that does not answer cannot retain the renderer slot after cancellation:
+read results are abandoned without starting a Worker. Refusal metadata opens retire
+on cancellation and close any late database handle without starting a transaction.
+Retry metadata writes and clears have a one-second wait budget. Cancellation attempts
+to abort the actual IndexedDB transaction, but a missing terminal event cannot retain
+the claim or renderer queue. A task deadline gets an independent receipt budget because
+the expired task signal cannot persist that receipt. A late metadata result only changes
+rebuildable retry hints; the in-memory cooldown remains available. Document snapshots
+still commit before Worker completion, and this finalizer never advances document progress.
 
 Task cancellation terminates the Worker from the parent thread and sends a local peer detach; this
 does not depend on a Worker that is executing synchronous WASM handling a cancel message. Opening the
@@ -78,17 +114,27 @@ HistoryWriter's responsibility. The current guarantees are written into the
 
 ## Verification and limits
 
-The [worker suite](../../../../packages/components/tests/eager-sync-worker.test.ts)
-uses real Loro and scripted HTTP to cover incremental restarts, legacy and invalid
-checkpoints, pending imports, failed/interrupted writes, 410 recovery and deadline
-slot release. The [cold-load suite](../../../../packages/components/tests/local-window-bootstrap.test.ts)
-checks independent window databases, persistence-before-cursor ordering, already-covered
-disk state, retained pending imports, unsent local writes reaching the remote replica,
-410 recovery and live-document exclusion. The [cursor-store suite](../../../../packages/components/tests/resilient-remote-cursor-store.test.ts)
-checks concurrent conditional insertion against ordinary writes using a shared lock
-port and real IndexedDB behavior.
+The [worker suite](../../../../packages/components/tests/eager-sync-worker.test.ts) uses
+real Loro and controlled HTTP for incremental restarts, pending imports, failed or
+interrupted writes, 410 recovery, incomplete-room backoff across clients, and safe
+merging of unsent foreground edits. The
+[cold-load suite](../../../../packages/components/tests/local-window-bootstrap.test.ts)
+checks persistence-before-cursor ordering, independent window databases, existing
+cursors, pending imports and unsent writes reaching the remote. The
+[cursor-store suite](../../../../packages/components/tests/resilient-remote-cursor-store.test.ts)
+checks conditional insertion against ordinary writes through real IndexedDB.
 
-No real user conversations are fixtures. Installed browser/native Web Locks,
-real long-conversation performance and production traffic savings remain unverified.
-The Worker and UI share device memory and CPU; thread isolation does not provide
-unlimited memory or remove contention.
+The [coordinator suite](../../../../packages/components/tests/background-sync-coordinator.test.ts)
+pins candidate and environment gates, no false high-water, and event-driven retry.
+The [browser acceptance](../../../../packages/components/tests/eager-sync-browser.integration.mjs)
+uses actual Chromium windows, Workers, downloads and IndexedDB for duplicate-download
+exclusion, committed-cache reuse, cancellation, owner closure, authority/plane scope,
+unanswered reads, persistent timeout/failure receipts and successful reset. With
+controlled time, continuous new activity produces only six refused downloads in
+its first twenty-four hours. Refusal is injected after downloading synthetic bytes;
+it does not allocate a 128 MiB history or measure production savings.
+
+Sharing is limited to one browser storage partition: separate profiles, origins or
+Electron partitions do not share locks. Installed desktop/mobile acceptance and real
+long-conversation memory/performance remain separate. No real conversation fixtures
+are used. Thread isolation does not provide unlimited memory or remove contention.

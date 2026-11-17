@@ -4814,6 +4814,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         content: { mode: deps.content.mode },
         workspaceId,
         scope: eagerSyncScope,
+        authorizationScope: deps.accountId ?? `local:${workspaceId}`,
         localConnection: createLocalLoroDataPlaneConnection,
         resolveTransport: async (roomId) => {
           await targetRouter.prepareDocTarget(roomId);
@@ -5714,6 +5715,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
         registry: roomSyncRegistry,
         prefetcher: {
+          getRetryAt: (sessionId) => eagerSyncWorkerClient?.getRetryAt(getSessionRoomId(sessionId)),
           prefetch: async (sessionId, lastMessageAt, signal) => {
             if (signal.aborted || materializedSessionIds.has(sessionId)) {
               return 'skipped';

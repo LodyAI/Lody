@@ -1,4 +1,5 @@
 import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shared';
+import { CACHE_REJECTION_COOLDOWN_MS, FAILED_PREFETCH_COOLDOWN_MS } from './eager-sync-admission';
 import type { EagerSyncPolicy } from './eager-sync-policy';
 
 /**
@@ -33,7 +34,7 @@ export interface SessionActivitySnapshot {
   parentSessionId?: SessionId;
 }
 
-export type PrefetchOutcome = 'synced' | 'skipped' | 'failed';
+export type PrefetchOutcome = 'synced' | 'skipped' | 'failed' | 'cache_rejected';
 
 /** The subset of the room-sync registry the coordinator depends on. */
 export interface CoordinatorRegistryView {
@@ -56,6 +57,7 @@ export interface BackgroundSyncCoordinatorDeps {
   };
   registry: CoordinatorRegistryView;
   prefetcher: {
+    getRetryAt?(sessionId: SessionId): number | undefined;
     /**
      * One-shot catch-up: hold a replica until caught up (or the signal aborts /
      * a timeout fires), persist and release. Resolves with the
@@ -137,6 +139,7 @@ export function createBackgroundSyncCoordinator(
   const latest = new Map<SessionId, SessionActivitySnapshot>();
   // lastMessageAt value we have already caught up through (Linear's lastSyncId analog).
   const syncedThrough = new Map<SessionId, number>();
+  const cacheRejected = new Map<SessionId, { activity: number; until: number }>();
   // Sessions waiting to be prefetched, with the snapshot that qualified them.
   const queued = new Map<SessionId, SessionActivitySnapshot>();
   const inFlight = new Set<SessionId>();
@@ -303,6 +306,10 @@ export function createBackgroundSyncCoordinator(
     if (snap.lastMessageAt == null) {
       return false;
     }
+    const rejected = cacheRejected.get(snap.sessionId);
+    if (rejected && clock.now() < rejected.until) {
+      return false;
+    }
     const synced = getSyncedThrough(snap.sessionId);
     if (synced != null && snap.lastMessageAt <= synced) {
       return false;
@@ -378,6 +385,17 @@ export function createBackgroundSyncCoordinator(
           // pre-queue index. The parent also checks the snapshot checkpoint
           // before it creates a worker.
           recordSyncedThrough(sessionId, lastMessageAt);
+        }
+        if (outcome === 'cache_rejected' || outcome === 'failed') {
+          cacheRejected.delete(sessionId);
+          cacheRejected.set(sessionId, {
+            activity: lastMessageAt,
+            until:
+              prefetcher.getRetryAt?.(sessionId) ??
+              clock.now() +
+                (outcome === 'failed' ? FAILED_PREFETCH_COOLDOWN_MS : CACHE_REJECTION_COOLDOWN_MS),
+          });
+          if (cacheRejected.size > 1000) cacheRejected.delete(cacheRejected.keys().next().value!);
         }
         logger?.debug('[eager-sync] prefetch', sessionId, outcome);
       })
