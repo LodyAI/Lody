@@ -5,6 +5,9 @@ import app.lody.android.home.ChatAttention
 import app.lody.android.home.ChatListModel
 
 object DirectoryTabs {
+    fun hasBackgroundUnread(sessions: List<CatalogSession>, currentId: String): Boolean =
+        sessions.any { it.id != currentId && ChatListModel.isUnread(it) }
+
     fun sessions(current: CatalogSession, all: List<CatalogSession>) = family(current, all).filter { !it.isTabClosed }
     fun closed(current: CatalogSession, all: List<CatalogSession>) = family(current, all).filter { it.isTabClosed }
     fun root(current: CatalogSession, all: List<CatalogSession>): String = root(current, all.associateBy { it.id })

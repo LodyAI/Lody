@@ -16,4 +16,6 @@ let pendingJSON = #"[{"id":"local","role":"user","finished":true,"status":"pendi
 let pending = ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].self, from: Data(pendingJSON.utf8))).rows()
 assert(pending.first(where: { $0.kind == "user" })?.readState == "sending")
 assert(pending.contains { $0.kind == "delivery" && $0.actionable && $0.attention })
+assert(pending.first?.kind == "user" && pending.last?.kind == "delivery",
+  "An unconfirmed persisted send keeps its delivery action below the user bubble")
 print("User message delivery projection passed")

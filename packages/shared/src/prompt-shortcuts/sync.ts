@@ -1,4 +1,8 @@
-import { requirePlaintextWorkspaceStreamsContent, type WorkspaceStreamsMode } from '../workspace-streams-content';
+import { HANDLED_SHORTCUT_TOKEN_ERROR, isConvexUnauthenticatedError } from '../auth';
+import {
+  requirePlaintextWorkspaceStreamsContent,
+  type WorkspaceStreamsMode,
+} from '../workspace-streams-content';
 import {
   StreamsCrdt,
   type CrdtAdapter,
@@ -175,7 +179,19 @@ export class PromptShortcutSync {
         sync: async () => {
           if (closed) throw new Error('Shortcut room closed');
           const result = await transport.sync();
-          if (!result.ok) throw new Error(result.error.message);
+          if (!result.ok) {
+            // Streams retains the thrown auth-provider cause. Keep our handled
+            // failure identity through refresh rather than creating a new generic
+            // exception that the UI/global handlers would report again.
+            if (
+              result.error.code === 'auth_provider_error' &&
+              result.error.cause instanceof Error &&
+              (result.error.cause.name === HANDLED_SHORTCUT_TOKEN_ERROR ||
+                isConvexUnauthenticatedError(result.error.cause))
+            )
+              throw result.error.cause;
+            throw new Error(result.error.message);
+          }
           await persist();
         },
         join: () => {
@@ -183,7 +199,19 @@ export class PromptShortcutSync {
           if (joining) return joining;
           joining = (async () => {
             const result = await transport.join();
-            if (!result.ok) throw new Error(result.error.message);
+            if (!result.ok) {
+              // Streams retains the thrown auth-provider cause. Keep our handled
+              // failure identity through refresh rather than creating a new generic
+              // exception that the UI/global handlers would report again.
+              if (
+                result.error.code === 'auth_provider_error' &&
+                result.error.cause instanceof Error &&
+                (result.error.cause.name === HANDLED_SHORTCUT_TOKEN_ERROR ||
+                  isConvexUnauthenticatedError(result.error.cause))
+              )
+                throw result.error.cause;
+              throw new Error(result.error.message);
+            }
             subscription = result.value;
             if (closed) subscription.unsubscribe();
           })().catch((error: unknown) => {

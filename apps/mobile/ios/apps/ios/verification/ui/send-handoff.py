@@ -20,7 +20,9 @@ ui.axe('tap', '--id', 'session-send', '--tap-style', 'physical')
 ui.element('send-status')
 delivery = ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or '').endswith(':delivery')), None), 'Target delivery row missing')
 turn = delivery['AXUniqueId'].removesuffix(':delivery')
-assert delivery['AXLabel'] == catalog.text('send.status.awaitingConnection'), 'Unacked send must show its delivery phase above the message'
+assert delivery['AXLabel'] == catalog.text('send.status.awaitingConnection'), 'Unacked send must show its delivery phase below the message'
+message = ui.element(turn + ':user')['frame']
+assert delivery['frame']['y'] >= message['y'] + message['height'] - 1, 'Handoff delivery status must follow its message'
 assert not any(i.get('AXUniqueId') == turn + ':duration' for i in ui.state()), 'Unacked send must not show a working duration'
 assert draft == ui.element(turn + ':user')['AXLabel']
 assert ui.element('send-status')['AXLabel'] == 'Calls: 0 · waiting', 'Creation waited for network or dispatched offline'

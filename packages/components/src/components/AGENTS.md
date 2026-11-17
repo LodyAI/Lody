@@ -123,6 +123,10 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 E2EE/terminals: read [rules](e2ee/AGENTS.md).
 
+## Crash diagnostics
+
+ErrorBoundary uploads one fixed-vocabulary exception per failure episode, including retries, until healthy content commits.
+
 ## Automation markers
 
 - Key workspace, machine, invitation, membership and composer controls expose

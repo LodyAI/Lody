@@ -103,35 +103,14 @@ export type MentionPrepare = (request: {
   end: number;
 }) => Promise<PreparedMention | null>;
 
-/**
- * A chip decoration for a committed mention range.
- *
- * The highlighter mirrors the textarea character for character, so the caret
- * only stays aligned while every rendered range keeps the *same advance width*
- * as the raw text underneath it. A chip therefore may only paint — background,
- * colour, and an icon drawn over characters the range already contains. It may
- * not add horizontal padding, margin, or border, nor change font size, weight,
- * family, or letter spacing.
- *
- * `iconSlots` and `trailingSlots` are how a chip buys room without buying
- * width: those leading/trailing characters of the range keep their exact boxes
- * and are simply not painted, so the icon sits over the trigger character and
- * the trailing character reads as right padding.
- */
+/** The custom view of an atomic node; the editor owns its canonical text. */
 interface MentionChip {
-  /** Painted over the range's first `iconSlots` characters. */
   icon?: React.ReactNode;
-  /**
-   * Chip body classes — colour only, per the width rule above.
-   *
-   * The mirror is the only visible text source; chip backgrounds are optional
-   * decoration, never a cover for a second copy of the glyphs.
-   */
   className?: string;
-  /** Leading characters of the range surrendered to the icon. @default 1 */
-  iconSlots?: number;
-  /** Trailing characters of the range left blank as right padding. @default 0 */
-  trailingSlots?: number;
+  /** Canonical prefix omitted from the visible label. @default 1 */
+  textPrefixLength?: number;
+  /** Canonical suffix omitted from the visible label. @default 0 */
+  textSuffixLength?: number;
 }
 
 /**
@@ -140,7 +119,7 @@ interface MentionChip {
  */
 type MentionChipResolver = (
   mention: Mention,
-  /** The range's current text, so a resolver can size its slots from it. */
+  /** The canonical text, including any delimiters omitted by the view. */
   text: string
 ) => MentionChip | null | undefined;
 

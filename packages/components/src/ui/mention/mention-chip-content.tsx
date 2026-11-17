@@ -1,54 +1,53 @@
+import * as stylex from '@stylexjs/stylex';
+import { radius } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cn } from '@/lib/utils';
 import type { Mention, MentionChip } from './mention-root';
 
-export const CHIP_CLASS_NAME = 'box-decoration-clone';
-export const CHIP_SELECTED_CLASS_NAME =
-  'bg-[image:linear-gradient(Highlight,Highlight)] !text-[HighlightText]';
+const styles = stylex.create({
+  chip: {
+    display: 'inline-flex',
+    alignItems: 'baseline',
+    gap: '0.2em',
+    maxWidth: '100%',
+    verticalAlign: 'baseline',
+    borderRadius: radius.mini,
+  },
+  icon: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    width: '1em',
+    height: '1em',
+    transform: 'translateY(0.12em)',
+  },
+  label: { minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere' },
+  fallback: { backgroundColor: `color-mix(in srgb, ${colors.accent} 15%, transparent)` },
+  pastedFallback: { backgroundColor: `color-mix(in srgb, ${colors.label} 10%, transparent)` },
+  selected: {
+    backgroundColor: 'Highlight',
+    borderRadius: 0,
+  },
+});
 
-/**
- * Splits the range into its icon slot, label, and trailing pad. The slot
- * characters still render — as `invisible`, so they keep their exact boxes —
- * and the icon overrides `visibility` from inside the slot it covers.
- */
+/** Only the visible label belongs in layout; wire-format delimiters take no space. */
 function MentionChipContent({ chip, text }: { chip: MentionChip; text: string }) {
-  const iconSlots = Math.max(0, Math.min(chip.iconSlots ?? 1, text.length));
-  const trailingSlots = Math.max(0, Math.min(chip.trailingSlots ?? 0, text.length - iconSlots));
-  const iconText = text.slice(0, iconSlots);
-  const labelText = text.slice(iconSlots, text.length - trailingSlots);
-  const trailingText = text.slice(text.length - trailingSlots);
-
+  const prefix = Math.max(0, Math.min(chip.textPrefixLength ?? 1, text.length));
+  const suffix = Math.max(0, Math.min(chip.textSuffixLength ?? 0, text.length - prefix));
   return (
     <>
-      {iconText ? (
-        <span className="invisible relative">
-          {iconText}
-          {chip.icon ? (
-            <span
-              aria-hidden="true"
-              // Confined to the slot, never hanging past it. Hanging left into
-              // the preceding space looked better and was wrong twice: a slash
-              // command sits at offset 0 with nothing to its left, and any
-              // mention can wrap to the start of a line, where the space that
-              // was supposed to absorb the overflow has been eaten by the break.
-              // Neither is visible to CSS, so the icon simply stays inside.
-              className="visible absolute inset-y-0 left-0 right-px flex items-center justify-end [&>*]:max-w-full"
-            >
-              {chip.icon}
-            </span>
-          ) : null}
+      {chip.icon ? (
+        <span aria-hidden="true" {...stylex.props(styles.icon)}>
+          {chip.icon}
         </span>
       ) : null}
-      {labelText ? <span>{labelText}</span> : null}
-      {trailingText ? <span className="invisible">{trailingText}</span> : null}
+      <span data-mention-label="" {...stylex.props(styles.label)}>
+        {text.slice(prefix, text.length - suffix)}
+      </span>
     </>
   );
 }
 
-/**
- * One committed range as the composer paints it: a chip when the resolver
- * returns one, otherwise the plain range highlight. Range offsets and identity
- * are exposed as data attributes for hit-testing and tests.
- */
+/** The editor owns text/ranges; this view owns the atomic chip's presentation. */
 export function MentionRangeView({
   mention,
   text,
@@ -65,30 +64,24 @@ export function MentionRangeView({
     'data-mention-end': mention.end,
     'data-mention-kind': mention.kind ?? 'mention',
     'data-mention-value': mention.value,
+    // The visible view omits delimiters. Preserve the editor's canonical text
+    // separately for DOM consumers; Lexical remains the editing authority.
+    'data-mention-text': text,
     'data-selected': selected ? '' : undefined,
   };
-  if (chip) {
-    return (
-      <span
-        {...rangeProps}
-        className={cn(CHIP_CLASS_NAME, chip.className, selected && CHIP_SELECTED_CLASS_NAME)}
-      >
-        <MentionChipContent chip={chip} text={text} />
-      </span>
-    );
-  }
   return (
     <span
-      data-tag=""
       {...rangeProps}
       className={cn(
-        mention.kind === 'pasted_text'
-          ? 'rounded-md bg-foreground/10 box-decoration-clone'
-          : 'rounded-sm bg-primary/15 box-decoration-clone',
-        selected && CHIP_SELECTED_CLASS_NAME
+        stylex.props(
+          styles.chip,
+          !chip && (mention.kind === 'pasted_text' ? styles.pastedFallback : styles.fallback),
+          selected && styles.selected
+        ).className,
+        chip?.className
       )}
     >
-      {text}
+      {chip ? <MentionChipContent chip={chip} text={text} /> : text}
     </span>
   );
 }

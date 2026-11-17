@@ -78,9 +78,10 @@ home('initial-home')
 for index in range(2 if embedded else 3):
     subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'ai.lody.mobile'], check=True, timeout=30)
     ui.invalidate_axe()
-    launch = ['xcrun', 'simctl', 'launch', udid, 'ai.lody.mobile', '--ui-verify', '--ui-verify-home',
+    launch = ['xcrun', 'simctl', 'launch', udid, 'ai.lody.mobile', '--ui-verify', '--ui-verify-home', '--ui-verify-session-tabs',
               '-AppleLanguages', f'({catalog.LANGUAGE})',
               '-AppleLocale', 'en_US' if catalog.LANGUAGE == 'en' else 'zh_CN']
+    launch.append('--ui-verify-tab-unread')
     subprocess.run(launch, check=True, timeout=30)
     ui.element('ui-verify-ready', timeout=90)
     home(f'cold-home-{index}')
@@ -172,6 +173,28 @@ ui.wait(lambda items: not any(i.get('AXUniqueId') == file_row for i in items), '
 session('首页交互设计')
 assert all(abs(before - after) < 1 for before, after in zip(header_before_cancel, conversation_header_geometry()))
 ui.capture('detail-returned')
+
+# The header dot announces unseen output in other Tabs. Working status belongs
+# to each row in the expanded panel, even after all background output is viewed.
+unread = catalog.text('session.relations.unread')
+assert ui.element('chat-directory-tabs').get('AXValue') == unread
+ui.axe('tap', '--id', 'chat-directory-tabs', '--post-delay', '.3')
+ui.element('tab:ui-history-tab')
+ui.element('tab:ui-unread-tab')
+ui.capture('tab-panel-working-and-unread')
+ui.axe('tap', '--id', 'tab:ui-history-tab', '--post-delay', '.3')
+session('Waiting for tab history')
+assert ui.element('chat-directory-tabs').get('AXValue') == unread
+ui.capture('tab-background-unread')
+ui.axe('tap', '--id', 'chat-directory-tabs', '--post-delay', '.3')
+ui.axe('tap', '--id', 'tab:ui-unread-tab', '--post-delay', '.3')
+session('Unread tab output')
+assert not ui.element('chat-directory-tabs').get('AXValue'), 'The selected Tab must not light the header dot'
+ui.axe('tap', '--id', 'chat-directory-tabs', '--post-delay', '.3')
+ui.axe('tap', '--id', 'tab:ui-design', '--post-delay', '.3')
+session('首页交互设计')
+assert not ui.element('chat-directory-tabs').get('AXValue'), 'Local viewing must clear the dot while the other Tab is still working'
+ui.capture('tab-working-without-unread-dot')
 
 swipe_back()
 home('toolbar-returned')
