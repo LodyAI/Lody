@@ -939,11 +939,28 @@ export async function openSession(
   sessions.set(id, state);
   trimSessions();
   const event = (status: string, reason?: string) => {
+    // A terminal read failure still needs a reopen even if the other reader
+    // keeps receiving data or retrying.
+    if (status === 'syncing' && state.status === 'offline') return;
     scheduleEmit(state, status, reason);
   };
   const retrying = (error: unknown) => {
     state.ready = false;
     event('syncing', error instanceof Error ? error.message : 'sync_failed');
+  };
+  const retryStream = (error: unknown) => {
+    state.streamReady = false;
+    retrying(error);
+  };
+  const retryHistory = (error: unknown) => {
+    state.historyReady = false;
+    retrying(error);
+  };
+  const updateReadiness = () => {
+    state.ready =
+      state.streamReady === true &&
+      (state.target?.backend !== 'roost' || state.historyReady === true);
+    if (state.ready) settleLive(state);
   };
   event('syncing');
   void (async () => {
@@ -962,7 +979,7 @@ export async function openSession(
             if (!initial.ok) throw new Error(initial.result.code);
             return initial.result;
           }),
-        retrying,
+        retryStream,
       );
       if (sessions.get(id) !== state) return;
       let size = 0;
@@ -994,7 +1011,7 @@ export async function openSession(
               if (!result.ok) throw new Error(result.result.code);
               return result;
             }),
-          retrying,
+          retryStream,
         );
         if (sessions.get(id) !== state) return;
         if (next.result.payload) consume(next.result.payload.body);
@@ -1055,7 +1072,7 @@ export async function openSession(
         let window = await retrySessionRead(
           controller.signal,
           () => reader.latest(),
-          retrying,
+          retryHistory,
         );
         if (sessions.get(id) !== state) return;
         installHistory(state, window);
@@ -1098,11 +1115,7 @@ export async function openSession(
               const next = await retrySessionRead(
                 controller.signal,
                 () => reader.waitForChange(window),
-                (error) => {
-                  state.historyReady = false;
-                  state.ready = false;
-                  retrying(error);
-                },
+                retryHistory,
               );
               if (sessions.get(id) !== state) return;
               await retrySessionRead(
@@ -1117,22 +1130,19 @@ export async function openSession(
                     installHistory(state, retained);
                     window = retained;
                   }),
-                retrying,
+                retryHistory,
               );
               if (reader.metadataChanged(state.roostMetadata))
                 refreshMetadata();
               state.historyReady = true;
-              state.ready = state.streamReady === true;
-              if (state.ready) {
-                settleLive(state);
-                scheduleEmit(state, 'live');
-              }
+              updateReadiness();
+              if (state.ready) event('live');
             }
           } catch (error) {
             if (!controller.signal.aborted && sessions.get(id) === state) {
+              state.historyReady = false;
               state.ready = false;
-              scheduleEmit(
-                state,
+              event(
                 'offline',
                 error instanceof Error ? error.message : 'history_failed',
               );
@@ -1144,11 +1154,8 @@ export async function openSession(
       let changed = true;
       while (!controller.signal.aborted) {
         state.streamReady = upToDate;
-        state.ready =
-          upToDate &&
-          (state.target?.backend !== 'roost' || state.historyReady === true);
+        updateReadiness();
         if (upToDate) {
-          if (state.ready) settleLive(state);
           if (changed || state.status !== 'live')
             event(state.ready ? 'live' : 'syncing');
           changed = false;
@@ -1170,7 +1177,7 @@ export async function openSession(
               if (!result.ok) throw new Error(result.result.code);
               return result;
             }),
-          retrying,
+          retryStream,
         );
         if (sessions.get(id) !== state) return;
         if (next.result.payload) {
@@ -1190,6 +1197,7 @@ export async function openSession(
       const failed = error instanceof Error ? error : new Error('sync_failed');
       settleLive(state, failed);
       if (controller.signal.aborted || sessions.get(id) !== state) return;
+      state.streamReady = false;
       state.ready = false;
       event('offline', failed.message);
     }

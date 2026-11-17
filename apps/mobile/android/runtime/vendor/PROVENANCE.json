@@ -195,6 +195,13 @@
     ],
     "note": "Archiving no longer writes the machine meta needToArchiveSessions queue, which daemons have discarded since #620 reconciled archived worktrees from session state. Mirrored verbatim from the iOS source in the same change; dependencies and licenses are unchanged."
   },
+  "roostReadiness": {
+    "commit": "2d7411c58510a4caadf01a2d6e180c5569de761d",
+    "files": [
+      "src/runtime/session.ts"
+    ],
+    "note": "Mirrors the iOS Roost readiness change. A failed control-stream or owner-history read clears that reader's readiness until it recovers. Unrelated iOS session changes stay outside this snapshot."
+  },
   "scheduleCustomSteps": {
     "files": [
       "src/protocol/proposals.ts",
