@@ -115,7 +115,7 @@ minimumReleaseAgeExclude:
   - '@loro-dev/roost-node-win32-arm64-msvc@0.3.1'
   - '@loro-dev/roost-node-win32-x64-msvc@0.3.1'
   - '@loro-dev/roost@0.3.1'
-  - '@openai/codex@0.166.0 || 0.166.0-darwin-arm64 || 0.166.0-darwin-x64 || 0.166.0-linux-arm64 || 0.166.0-linux-x64 || 0.166.0-win32-arm64 || 0.166.0-win32-x64'
+  - '@openai/codex@0.169.0 || 0.169.0-darwin-arm64 || 0.169.0-darwin-x64 || 0.169.0-linux-arm64 || 0.169.0-linux-x64 || 0.169.0-win32-arm64 || 0.169.0-win32-x64'
   - '@peculiar/asn1-x509@2.10.0'
   - '@peculiar/asn1-x509-attr@2.10.0'
   - '@peculiar/asn1-rsa@2.10.0'
