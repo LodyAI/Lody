@@ -1,5 +1,4 @@
-import * as stylex from '@stylexjs/stylex';
-('use client');
+'use client';
 
 /**
  * LandingAgentsSection — the landing's third screen: "every coding agent".
@@ -23,19 +22,6 @@ import { LandingAgentBanner } from './landing-agent-banner';
    registry refresh can never leave the table on a stale logo. */
 import { LANDING_AGENTS } from './landing-agents.generated';
 import type { LandingLocale } from './landing';
-const previewStyles = stylex.create({
-  overlay: {
-    position: 'absolute',
-    width: '1px',
-    height: '1px',
-    padding: '0',
-    margin: '-1px',
-    overflow: 'hidden',
-    'clip-path': 'inset(50%)',
-    'white-space': 'nowrap',
-    'border-width': '0',
-  },
-});
 
 export type AgentsSectionCopy = {
   eyebrow: string;
@@ -113,11 +99,11 @@ export function LandingAgentsSection({
           </div>
 
           <table className="uw-agents__table">
-            <caption {...stylex.props(previewStyles.overlay)}>{copy.matrix.title}</caption>
+            <caption className="sr-only">{copy.matrix.title}</caption>
             <thead>
               <tr>
                 <th scope="col">
-                  <span {...stylex.props(previewStyles.overlay)}>{copy.matrix.title}</span>
+                  <span className="sr-only">{copy.matrix.title}</span>
                 </th>
                 {copy.matrix.columns.map((column, index) => {
                   const mark = MARK_BY_ID.get(CAPABILITY_AGENTS[index]);
@@ -147,7 +133,7 @@ export function LandingAgentsSection({
                   {copy.matrix.columns.map((column) => (
                     <td key={column}>
                       <CheckMark />
-                      <span {...stylex.props(previewStyles.overlay)}>{supportedLabel}</span>
+                      <span className="sr-only">{supportedLabel}</span>
                     </td>
                   ))}
                 </tr>

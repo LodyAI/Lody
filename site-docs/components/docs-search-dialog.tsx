@@ -1,10 +1,6 @@
 import { createContentHighlighter } from 'fumadocs-core/search';
 import {
   SearchDialog,
-  type SearchItemType,
-  type SharedProps,
-} from 'fumadocs-ui/components/dialog/search';
-import {
   SearchDialogClose,
   SearchDialogContent,
   SearchDialogHeader,
@@ -12,7 +8,9 @@ import {
   SearchDialogInput,
   SearchDialogList,
   SearchDialogOverlay,
-} from './docs-ui/search-parts';
+  type SearchItemType,
+  type SharedProps,
+} from 'fumadocs-ui/components/dialog/search';
 import { useI18n } from 'fumadocs-ui/contexts/i18n';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -105,9 +103,7 @@ export function DocsSearchDialog(props: SharedProps) {
         id: entry.id,
         type: 'page' as const,
         url: entry.url,
-        content: highlighter
-          .highlightMarkdown(entry.title)
-          .replaceAll('<mark>', '<mark data-docs-search-highlight>'),
+        content: highlighter.highlightMarkdown(entry.title),
         breadcrumbs: [entry.description],
       }));
   }, [entries, locale, search]);

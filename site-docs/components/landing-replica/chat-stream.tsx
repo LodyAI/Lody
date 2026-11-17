@@ -1,4 +1,3 @@
-import * as stylex from '@stylexjs/stylex';
 import {
   useCallback,
   useEffect,
@@ -22,509 +21,7 @@ import type {
   ReplicaUserMessage,
   ReplicaVisualAnnotation,
 } from './types';
-
-const streamLayout = stylex.create({
-  column: {
-    marginInline: 'auto',
-    width: '100%',
-    maxWidth: '46rem',
-    paddingInline: { default: 14, '@media (width >= 40rem)': 18 },
-  },
-  root: {
-    height: '100%',
-    containerType: 'inline-size',
-    position: 'relative',
-    backgroundColor: 'hsl(var(--background))',
-  },
-  avatar: {
-    position: 'relative',
-    display: 'flex',
-    height: 'calc(var(--spacing) * 8)',
-    width: 'calc(var(--spacing) * 8)',
-    flexShrink: 0,
-    overflow: 'hidden',
-    borderRadius: 'calc(infinity * 1px)',
-  },
-  mobileAvatar: { height: 'calc(var(--spacing) * 7)', width: 'calc(var(--spacing) * 7)' },
-  desktopAvatar: { height: 'calc(var(--spacing) * 8)', width: 'calc(var(--spacing) * 8)' },
-  processMobile: {
-    height: 'calc(var(--spacing) * 3.5)',
-    width: 'calc(var(--spacing) * 3.5)',
-    flexShrink: 0,
-    color: 'hsl(var(--muted-foreground))',
-  },
-  processDesktop: { height: '1em', width: '1em' },
-  footer: { paddingTop: 0, paddingBottom: 0 },
-  image: { paddingTop: 'calc(var(--spacing) * 3)', paddingBottom: 0 },
-  prose: { paddingTop: 'calc(var(--spacing) * 1)', paddingBottom: 0 },
-  last: {
-    paddingBottom: {
-      default: 'calc(var(--spacing) * 2)',
-      '@media (width >= 40rem)': 'calc(var(--spacing) * 3)',
-    },
-  },
-  user: {
-    paddingBlock: {
-      default: 'calc(var(--spacing) * 2)',
-      '@media (width >= 40rem)': 'calc(var(--spacing) * 3)',
-    },
-  },
-});
-const chatStreamComposition = stylex.create({
-  part1: {
-    'margin-inline': 'auto',
-    width: '100%',
-    'max-width': '46rem',
-    'padding-inline': '14px',
-    '@media (width >= 40rem)': {
-      'padding-inline': '18px',
-    },
-  },
-  part2: {
-    display: 'inline-flex',
-    flex: 'none',
-    'flex-shrink': '0',
-    'transform-origin': 'center',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  part3: {
-    opacity: '0%',
-    'transition-property': 'opacity',
-    'transition-timing-function': 'var(--default-transition-timing-function)',
-    'transition-duration': '150ms',
-    '@media (hover: hover)': {
-      ':is(*):is(:where(.group):hover *)': {
-        opacity: '100%',
-      },
-    },
-    ':is(*):is(:where(.group):focus-visible *)': {
-      opacity: '100%',
-    },
-  },
-  part4: {
-    'min-width': '0px',
-  },
-  part5: {
-    flex: '1',
-    'font-size': '12.5px',
-    'line-height': 'var(--leading-snug)',
-    'font-weight': 'var(--font-weight-medium)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  part6: {
-    'font-size': 'var(--markdown-body-font-size,1em)',
-    'line-height': '1.75',
-    'font-weight': 'var(--font-weight-normal)',
-  },
-  part7: {
-    display: 'flex',
-    width: '100%',
-    'align-items': 'center',
-    'padding-block': 'calc(var(--spacing) * 0.5)',
-    'text-align': 'left',
-  },
-  part8: {
-    gap: 'calc(var(--spacing) * 1.5)',
-    'border-radius': 'var(--radius-md)',
-    'padding-right': 'var(--spacing)',
-    'font-size': '12.5px',
-    'line-height': 'var(--leading-snug)',
-    'font-weight': 'var(--font-weight-medium)',
-    color: 'hsl(var(--muted-foreground))',
-    '@media (hover: hover)': {
-      ':is(*):hover': {
-        'background-color': 'color-mix(in oklab, hsl(var(--hover)) 40%, transparent)',
-      },
-    },
-  },
-  part9: {
-    'justify-content': 'flex-start',
-    gap: 'calc(var(--spacing) * 0.5)',
-    'padding-inline': '4px',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  part10: {
-    display: 'flex',
-    'flex-wrap': 'wrap',
-    'align-items': 'center',
-    'justify-content': 'flex-start',
-    'font-size': '11px',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  part11: {
-    'min-height': 'calc(var(--spacing) * 6)',
-    gap: 'var(--spacing)',
-  },
-  part12: {
-    'min-height': 'calc(var(--spacing) * 7)',
-    gap: 'calc(var(--spacing) * 2)',
-  },
-  part13: {
-    opacity: '0%',
-    'transition-property': 'opacity',
-    'transition-timing-function': 'var(--default-transition-timing-function)',
-    'transition-duration': '150ms',
-    ':is(*):focus-within': {
-      opacity: '100%',
-    },
-  },
-  part14: {
-    'max-width': '800px',
-    'overflow-wrap': 'break-word',
-  },
-  part15: {
-    color: 'hsl(var(--muted-foreground))',
-  },
-  part16: {
-    color: 'hsl(var(--foreground))',
-  },
-  part17: {
-    display: 'flex',
-    width: '100%',
-    'max-width': 'var(--container-sm)',
-    'flex-direction': 'column',
-    gap: 'var(--spacing)',
-    'border-radius': 'var(--radius-lg)',
-    'border-style': 'solid',
-    'border-width': '1px',
-    'padding-inline': 'calc(var(--spacing) * 3)',
-    'padding-block': 'calc(var(--spacing) * 2)',
-    'text-align': 'left',
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-  },
-  part18: {
-    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
-    'transition-property':
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    'transition-timing-function': 'var(--default-transition-timing-function)',
-    'transition-duration': 'var(--default-transition-duration)',
-    '@media (hover: hover)': {
-      ':is(*):hover': {
-        'background-color': 'color-mix(in oklab, hsl(var(--muted)) 70%, transparent)',
-      },
-    },
-  },
-  part19: {
-    cursor: 'default',
-  },
-  part20: {
-    position: 'relative',
-    display: 'flex',
-    width: 'calc(var(--spacing) * 8)',
-    height: 'calc(var(--spacing) * 8)',
-    'flex-shrink': '0',
-    overflow: 'hidden',
-    'border-radius': 'calc(infinity * 1px)',
-  },
-  part21: {
-    display: 'flex',
-    width: '100%',
-    'flex-direction': 'row-reverse',
-  },
-  part22: {
-    gap: 'calc(var(--spacing) * 2)',
-    'padding-left': 'calc(var(--spacing) * 7)',
-  },
-  part23: {
-    gap: 'calc(var(--spacing) * 2.5)',
-  },
-  part24: {
-    display: 'flex',
-    'min-width': '0px',
-    flex: '1',
-    'flex-direction': 'column',
-    'align-items': 'flex-end',
-    'text-align': 'left',
-  },
-  part25: {
-    'max-width': 'min(100%, 28rem)',
-    gap: 'var(--spacing)',
-  },
-  part26: {
-    'max-width': '100%',
-    gap: 'calc(var(--spacing) * 1.5)',
-    '@container (width >= 520px)': {
-      'max-width': '80%',
-    },
-    '@container (width >= 720px)': {
-      'max-width': '70%',
-    },
-  },
-  part27: {
-    'container-type': 'inline-size',
-    position: 'relative',
-    height: '100%',
-    'background-color': 'hsl(var(--background))',
-  },
-});
-
-const chatStreamStylesNative = stylex.create({
-  row: {
-    display: 'inline-flex',
-    height: 'calc(var(--spacing) * 7)',
-    width: 'calc(var(--spacing) * 7)',
-    'flex-shrink': '0',
-    'align-items': 'center',
-    'justify-content': 'center',
-    'border-radius': 'var(--radius-sm)',
-    color: 'hsl(var(--muted-foreground))',
-    'transition-property':
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    'transition-timing-function': 'var(--default-transition-timing-function)',
-    'transition-duration': 'var(--default-transition-duration)',
-    '@media (hover: hover)': {
-      ':is(*):hover': {
-        'background-color': 'color-mix(in oklab, hsl(var(--hover)) 50%, transparent)',
-        color: 'hsl(var(--foreground))',
-      },
-    },
-    ':is(*):focus-visible': {
-      'box-shadow':
-        '0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(1px + 0px) currentcolor, 0 0 #0000',
-      'outline-style': 'none',
-    },
-  },
-});
-
-const chatStreamStyles = stylex.create({
-  row: {
-    display: 'inline-flex',
-    'transform-origin': 'center',
-  },
-  row2: {
-    display: 'flex',
-    width: '100%',
-    'justify-content': 'flex-start',
-  },
-  stack: {
-    display: 'inline-flex',
-    'max-width': '100%',
-    'flex-direction': 'column',
-    overflow: 'hidden',
-    'border-radius': 'var(--radius-xl)',
-    'border-style': 'solid',
-    'border-width': '1px',
-    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
-    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
-  },
-  row3: {
-    display: 'inline-flex',
-    'max-width': '100%',
-  },
-  element: {
-    display: 'block',
-    'max-height': '10.5rem',
-    'max-width': '100%',
-    'object-fit': 'contain',
-  },
-  stack2: {
-    display: 'flex',
-    'flex-direction': 'column',
-    gap: 'var(--spacing)',
-  },
-  label: {
-    'flex-shrink': '0',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  row4: {
-    'margin-right': 'calc(7px * -1)',
-    display: 'flex',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 0.5)',
-  },
-  glyph: {
-    height: 'calc(var(--spacing) * 3.5)',
-    width: 'calc(var(--spacing) * 3.5)',
-  },
-  section: {
-    position: 'relative',
-  },
-  frame: {
-    width: '100%',
-  },
-  row5: {
-    display: 'flex',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 1.5)',
-    'font-weight': 'var(--font-weight-medium)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  glyph2: {
-    height: 'calc(var(--spacing) * 3)',
-    width: 'calc(var(--spacing) * 3)',
-    'flex-shrink': '0',
-  },
-  label2: {
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-  },
-  caption: {
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    color: 'color-mix(in oklab, hsl(var(--foreground)) 75%, transparent)',
-  },
-  caption2: {
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-family': 'var(--font-mono)',
-    'font-size': '10px',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  frame2: {
-    'aspect-ratio': '1 / 1',
-    width: '100%',
-    height: '100%',
-  },
-  row6: {
-    display: 'flex',
-    width: '100%',
-    height: '100%',
-    'align-items': 'center',
-    'justify-content': 'center',
-    'border-radius': 'calc(infinity * 1px)',
-    'background-color': 'hsl(var(--muted))',
-  },
-  glyph3: {
-    height: 'calc(var(--spacing) * 4)',
-    width: 'calc(var(--spacing) * 4)',
-  },
-  caption3: {
-    'margin-top': 'calc(var(--spacing) * 0.5)',
-    'flex-shrink': '0',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  row7: {
-    display: 'flex',
-    'flex-direction': 'row-reverse',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 1.5)',
-    'font-size': '11px',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  label3: {
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  glyph4: {
-    height: 'calc(var(--spacing) * 3.5)',
-    width: 'calc(var(--spacing) * 3.5)',
-    color: 'hsl(var(--primary))',
-  },
-  row8: {
-    display: 'flex',
-    width: '100%',
-    'min-width': '0px',
-    'align-items': 'flex-start',
-    'justify-content': 'flex-end',
-  },
-  row9: {
-    display: 'flex',
-    width: '100%',
-    'max-width': '100%',
-    'min-width': '0px',
-    'justify-content': 'flex-end',
-  },
-  frame3: {
-    position: 'relative',
-    width: 'fit-content',
-    'max-width': '100%',
-    'min-width': '0px',
-  },
-  frame4: {
-    width: 'fit-content',
-    'max-width': '100%',
-    'min-width': '0px',
-    color: 'hsl(var(--foreground))',
-    '@media (width >= 40rem)': {
-      'max-width': '800px',
-    },
-  },
-  stack3: {
-    display: 'flex',
-    'max-width': '100%',
-    'min-width': '0px',
-    'flex-direction': 'column',
-    'align-items': 'flex-end',
-    gap: 'calc(var(--spacing) * 2)',
-  },
-  row10: {
-    display: 'flex',
-    width: '100%',
-    'justify-content': 'flex-end',
-    'padding-inline': 'calc(var(--spacing) * 2)',
-    'padding-top': 'var(--spacing)',
-  },
-  row11: {
-    display: 'flex',
-    'max-width': '100%',
-    'justify-content': 'flex-end',
-    '@media (width >= 40rem)': {
-      'padding-left': 'calc(var(--spacing) * 2)',
-    },
-  },
-  surface: {
-    'max-width': '100%',
-    'min-width': '0px',
-    'border-radius': '1.15rem',
-    'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
-    'padding-inline': 'calc(var(--spacing) * 3.5)',
-    'padding-block': 'calc(var(--spacing) * 2)',
-    '@media (width >= 40rem)': {
-      'border-radius': 'var(--radius-2xl)',
-      'padding-inline': 'calc(var(--spacing) * 4)',
-      'padding-block': 'calc(var(--spacing) * 2.5)',
-    },
-  },
-  caption4: {
-    'max-width': '100%',
-    'min-width': '0px',
-    'overflow-wrap': 'anywhere',
-    'white-space': 'pre-wrap',
-    color: 'hsl(var(--foreground))',
-  },
-  row12: {
-    display: 'flex',
-    gap: 'calc(var(--spacing) * 0.5)',
-  },
-  frame5: {
-    position: 'relative',
-    height: '100%',
-    'overflow-x': 'hidden',
-    'padding-block': 'calc(var(--spacing) * 5)',
-    '@media (width >= 40rem)': {
-      'padding-block': 'calc(var(--spacing) * 6)',
-    },
-  },
-  overlay: {
-    'pointer-events': 'none',
-    position: 'absolute',
-    'inset-inline': '0px',
-    top: '0px',
-    height: 'calc(var(--spacing) * 12)',
-    'background-image':
-      'linear-gradient(to bottom in oklab, hsl(var(--background)) 0%, transparent 100%)',
-  },
-});
-
-const buttonStyles = stylex.create({
-  copy: {
-    height: 'calc(var(--spacing) * 7)',
-    width: 'calc(var(--spacing) * 7)',
-    color: {
-      default: 'hsl(var(--muted-foreground))',
-      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--foreground))' },
-    },
-    backgroundColor: {
-      default: null,
-      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--hover))' },
-    },
-  },
-  fade: { transitionProperty: 'opacity' },
-  desktopCopy: { opacity: { default: 0, ':is(.group\\/usermsg:hover *)': 1, ':focus-visible': 1 } },
-});
+import { cn } from './utils';
 
 /* Display-only replica of the app's ai-gui conversation renderer
    (`SessionChatStreamView` + `MessageRowView` + `AssistantChatItem`), following
@@ -561,18 +58,11 @@ const STRINGS = {
 type Strings = (typeof STRINGS)[ReplicaLocale];
 
 /** `lib/conversation-layout` CONVERSATION_CONTENT_WIDTH_CLASS. */
-export function ConversationColumn({
-  className,
-  style,
-  xstyle,
-  ...props
-}: HTMLAttributes<HTMLDivElement> & { xstyle?: stylex.StyleXStyles }) {
-  const sx = stylex.props(streamLayout.column, xstyle);
+export function ConversationColumn({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
+      className={cn('mx-auto w-full max-w-[46rem] px-[14px] sm:px-[18px]', className)}
       {...props}
-      className={[sx.className, className].filter(Boolean).join(' ')}
-      style={{ ...sx.style, ...style }}
     />
   );
 }
@@ -717,21 +207,27 @@ function ProcessDisclosure({ label, variant }: { label: string; variant: Variant
   const isMobile = variant === 'mobile';
   const chevron = (
     <span
-      {...stylex.props([chatStreamComposition.part2, !isMobile && chatStreamComposition.part3])}
+      className={cn(
+        'inline-flex flex-none shrink-0 origin-center text-muted-foreground',
+        !isMobile &&
+          'opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100'
+      )}
     >
-      <span {...stylex.props(chatStreamStyles.row)}>
+      <span className="inline-flex origin-center">
         <ChevronRight
-          {...stylex.props(isMobile ? streamLayout.processMobile : streamLayout.processDesktop)}
+          className={isMobile ? 'h-3.5 w-3.5 shrink-0 text-muted-foreground' : 'h-[1em] w-[1em]'}
         />
       </span>
     </span>
   );
   const title = (
     <span
-      {...stylex.props([
-        chatStreamComposition.part4,
-        isMobile ? chatStreamComposition.part5 : chatStreamComposition.part6,
-      ])}
+      className={cn(
+        'min-w-0',
+        isMobile
+          ? 'flex-1 text-[12.5px] font-medium leading-snug text-muted-foreground'
+          : 'text-[length:var(--markdown-body-font-size,1em)] font-normal leading-[1.75]'
+      )}
     >
       {label}
     </span>
@@ -740,15 +236,12 @@ function ProcessDisclosure({ label, variant }: { label: string; variant: Variant
     <button
       type="button"
       aria-expanded={false}
-      className={[
-        stylex.props([
-          chatStreamComposition.part7,
-          isMobile ? chatStreamComposition.part8 : chatStreamComposition.part9,
-        ]).className,
-        'group',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      className={cn(
+        'group flex w-full items-center py-0.5 text-left',
+        isMobile
+          ? 'gap-1.5 rounded-md pr-1 hover:bg-hover/40 text-[12.5px] font-medium leading-snug text-muted-foreground'
+          : 'justify-start gap-0.5 px-[4px] text-muted-foreground'
+      )}
     >
       {isMobile ? chevron : title}
       {isMobile ? title : chevron}
@@ -763,15 +256,15 @@ function AssistantImage({ image }: { image: ReplicaImage }) {
   const height = Math.min(168, image.height);
   const width = Math.round((height * image.width) / image.height);
   return (
-    <div {...stylex.props(chatStreamStyles.row2)}>
-      <div {...stylex.props(chatStreamStyles.stack)}>
-        <button type="button" {...stylex.props(chatStreamStyles.row3)}>
+    <div className="flex w-full justify-start">
+      <div className="overflow-hidden rounded-xl border border-border/70 bg-muted/20 inline-flex max-w-full flex-col">
+        <button type="button" className="inline-flex max-w-full">
           <img
             src={image.src}
             alt={image.fileName}
             width={width}
             height={height}
-            {...stylex.props(chatStreamStyles.element)}
+            className="block max-h-[10.5rem] max-w-full object-contain"
           />
         </button>
       </div>
@@ -793,38 +286,35 @@ function AssistantFooter({
 }) {
   const isMobile = variant === 'mobile';
   return (
-    <div {...stylex.props(chatStreamStyles.stack2)}>
+    <div className="flex flex-col gap-1">
       <div
-        {...stylex.props([
-          chatStreamComposition.part10,
-          isMobile ? chatStreamComposition.part11 : chatStreamComposition.part12,
-          !isMobile && chatStreamComposition.part13,
-        ])}
+        className={cn(
+          'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
+          isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
+          !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100'
+        )}
         data-assistant-turn-actions
       >
-        {isMobile ? (
-          <span {...stylex.props(chatStreamStyles.label)} style={{ minWidth: 48 }} />
-        ) : null}
+        {isMobile ? <span className="shrink-0 tabular-nums" style={{ minWidth: 48 }} /> : null}
         {hasCopyableText || hasConfig ? (
-          <div {...stylex.props(chatStreamStyles.row4)}>
+          <div className="flex items-center gap-0.5 -mr-[7px]">
             {hasCopyableText ? (
               <Button
                 variant="ghost"
                 size="icon"
-                xstyle={buttonStyles.copy}
-                iconSize="calc(var(--spacing) * 3.5)"
+                className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
                 aria-label={t.copyResponse}
               >
-                <Copy />
+                <Copy className="h-3.5 w-3.5" />
               </Button>
             ) : null}
             {hasConfig ? (
               <button
                 type="button"
-                {...stylex.props(chatStreamStylesNative.row)}
+                className="inline-flex shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring h-7 w-7"
                 aria-label={t.turnConfig}
               >
-                <Info {...stylex.props(chatStreamStyles.glyph)} strokeWidth={2} />
+                <Info className="h-3.5 w-3.5" strokeWidth={2} />
               </button>
             ) : null}
           </div>
@@ -853,14 +343,14 @@ function AssistantTurn({
         // AssistantChatItem's sibling gaps: cards `pt-3`, prose/headers `pt-1`, footer flush.
         const vertical =
           row.kind === 'footer'
-            ? streamLayout.footer
+            ? 'pt-0 pb-0'
             : row.kind === 'content' && row.item.type === 'image'
-              ? streamLayout.image
-              : streamLayout.prose;
+              ? 'pt-3 pb-0'
+              : 'pt-1 pb-0';
         const tone =
           row.kind === 'activity' || row.kind === 'worked'
-            ? chatStreamComposition.part15
-            : chatStreamComposition.part16;
+            ? 'text-muted-foreground'
+            : 'text-foreground';
         let body: ReactNode;
         switch (row.kind) {
           case 'content':
@@ -889,16 +379,13 @@ function AssistantTurn({
             break;
         }
         return (
-          <div key={row.key} {...stylex.props(chatStreamStyles.section)}>
+          <div key={row.key} className="relative">
             <ConversationColumn
-              xstyle={[vertical, isLast && streamLayout.last]}
+              className={cn(vertical, isLast && 'pb-2 sm:pb-3')}
               data-assistant-turn-id={message.id}
             >
-              <div {...stylex.props(chatStreamStyles.frame)}>
-                <div
-                  {...stylex.props([chatStreamComposition.part14, tone])}
-                  style={{ fontSize: '14px' }}
-                >
+              <div className="w-full">
+                <div className={cn('max-w-[800px] break-words', tone)} style={{ fontSize: '14px' }}>
                   {body}
                 </div>
               </div>
@@ -922,22 +409,20 @@ function AnnotationCard({ annotation }: { annotation: ReplicaVisualAnnotation })
   return (
     <button
       type="button"
-      {...stylex.props([
-        chatStreamComposition.part17,
-        chatStreamComposition.part18,
-        chatStreamComposition.part19,
-      ])}
+      className={cn(
+        'flex w-full max-w-sm flex-col gap-1 rounded-lg border px-3 py-2 text-left text-xs',
+        'bg-muted/40 transition-colors hover:bg-muted/70',
+        'cursor-default'
+      )}
     >
-      <div {...stylex.props(chatStreamStyles.row5)}>
-        <MousePointer2 {...stylex.props(chatStreamStyles.glyph2)} />
-        <span {...stylex.props(chatStreamStyles.label2)}>
+      <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
+        <MousePointer2 className="h-3 w-3 shrink-0" />
+        <span className="truncate">
           {annotation.pagePath ?? '/'} · {annotation.tag.toLowerCase()}
         </span>
       </div>
-      <div {...stylex.props(chatStreamStyles.caption)}>
-        &ldquo;{truncate(annotation.body)}&rdquo;
-      </div>
-      <div {...stylex.props(chatStreamStyles.caption2)}>
+      <div className="truncate text-foreground/75">&ldquo;{truncate(annotation.body)}&rdquo;</div>
+      <div className="truncate font-mono text-[10px] text-muted-foreground">
         {targetText ? `${annotation.selector} · ${targetText}` : annotation.selector}
       </div>
     </button>
@@ -945,19 +430,25 @@ function AnnotationCard({ annotation }: { annotation: ReplicaVisualAnnotation })
 }
 
 /** `UserAvatar` with `showIcon` (Radix Avatar markup). */
-function UserAvatar({ user, xstyle }: { user: ReplicaChatUser; xstyle: stylex.StyleXStyles }) {
+function UserAvatar({ user, className }: { user: ReplicaChatUser; className: string }) {
   return (
-    <span data-slot="avatar" {...stylex.props(streamLayout.avatar, xstyle)}>
+    <span
+      data-slot="avatar"
+      className={cn('relative flex size-8 shrink-0 overflow-hidden rounded-full', className)}
+    >
       {user.avatarUrl ? (
         <img
           data-slot="avatar-image"
           src={user.avatarUrl}
           alt={user.name || 'User'}
-          {...stylex.props(chatStreamStyles.frame2)}
+          className="aspect-square size-full"
         />
       ) : (
-        <span data-slot="avatar-fallback" {...stylex.props(chatStreamStyles.row6)}>
-          <UserIcon {...stylex.props(chatStreamStyles.glyph3)} />
+        <span
+          data-slot="avatar-fallback"
+          className="bg-muted flex size-full items-center justify-center rounded-full"
+        >
+          <UserIcon className="h-4 w-4" />
         </span>
       )}
     </span>
@@ -981,59 +472,45 @@ function UserRow({
   const timestampLabel = formatConversationTimestamp(message.timestamp, locale);
   const hasText = Boolean(message.text?.trim());
   return (
-    <div
-      {...stylex.props(chatStreamStyles.section)}
-      data-message-role="user"
-      data-message-id={message.id}
-    >
-      <ConversationColumn xstyle={streamLayout.user}>
-        <div
-          {...stylex.props([
-            chatStreamComposition.part21,
-            isMobile ? chatStreamComposition.part22 : chatStreamComposition.part23,
-          ])}
-        >
-          <div {...stylex.props(chatStreamStyles.caption3)}>
-            <UserAvatar
-              user={user}
-              xstyle={isMobile ? streamLayout.mobileAvatar : streamLayout.desktopAvatar}
-            />
+    <div className="relative" data-message-role="user" data-message-id={message.id}>
+      <ConversationColumn className="py-2 sm:py-3">
+        <div className={cn('flex w-full flex-row-reverse', isMobile ? 'gap-2 pl-7' : 'gap-2.5')}>
+          <div className="mt-0.5 shrink-0 text-muted-foreground">
+            <UserAvatar user={user} className={isMobile ? 'h-7 w-7' : 'h-8 w-8'} />
           </div>
           <div
-            className={[
-              stylex.props([
-                chatStreamComposition.part24,
-                isMobile ? chatStreamComposition.part25 : chatStreamComposition.part26,
-              ]).className,
-              'group/usermsg',
-            ]
-              .filter(Boolean)
-              .join(' ')}
+            className={cn(
+              'group/usermsg flex min-w-0 flex-1 flex-col items-end text-left',
+              isMobile
+                ? 'max-w-[min(100%,28rem)] gap-1'
+                : 'max-w-full gap-1.5 @[520px]:max-w-[80%] @[720px]:max-w-[70%]'
+            )}
           >
-            <div {...stylex.props(chatStreamStyles.row7)} data-testid="user-message-metadata">
-              {timestampLabel ? (
-                <span {...stylex.props(chatStreamStyles.label3)}>{timestampLabel}</span>
-              ) : null}
+            <div
+              className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground"
+              data-testid="user-message-metadata"
+            >
+              {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
               <span>
-                <CheckCircle2 {...stylex.props(chatStreamStyles.glyph4)} strokeWidth={2} />
+                <CheckCircle2 className="h-3.5 w-3.5 text-primary" strokeWidth={2} />
               </span>
             </div>
-            <div {...stylex.props(chatStreamStyles.row8)}>
-              <div {...stylex.props(chatStreamStyles.row9)}>
-                <div {...stylex.props(chatStreamStyles.frame3)}>
-                  <div {...stylex.props(chatStreamStyles.frame4)}>
+            <div className="flex w-full min-w-0 items-start justify-end">
+              <div className="flex w-full min-w-0 justify-end max-w-full">
+                <div className="relative min-w-0 max-w-full w-fit">
+                  <div className="min-w-0 max-w-full text-foreground w-fit sm:max-w-[800px]">
                     {/* UserChatBubble: attachments (the annotation card) above the text. */}
-                    <div {...stylex.props(chatStreamStyles.stack3)}>
+                    <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
                       {message.annotation ? (
-                        <div {...stylex.props(chatStreamStyles.row10)}>
+                        <div className="flex w-full justify-end px-2 pt-1">
                           <AnnotationCard annotation={message.annotation} />
                         </div>
                       ) : null}
                       {hasText ? (
-                        <div {...stylex.props(chatStreamStyles.row11)}>
-                          <div {...stylex.props(chatStreamStyles.surface)}>
+                        <div className="flex max-w-full justify-end sm:pl-2">
+                          <div className="min-w-0 max-w-full rounded-[1.15rem] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
                             <div
-                              {...stylex.props(chatStreamStyles.caption4)}
+                              className="min-w-0 max-w-full whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]"
                               style={{ fontSize: '14px' }}
                             >
                               {message.text}
@@ -1047,19 +524,18 @@ function UserRow({
               </div>
             </div>
             {hasText ? (
-              <div {...stylex.props(chatStreamStyles.row12)}>
+              <div className="flex gap-0.5">
                 <Button
                   variant="ghost"
                   size="icon"
-                  xstyle={[
-                    buttonStyles.copy,
-                    buttonStyles.fade,
-                    !isMobile && buttonStyles.desktopCopy,
-                  ]}
-                  iconSize="calc(var(--spacing) * 3.5)"
+                  className={cn(
+                    'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                    !isMobile &&
+                      'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                  )}
                   aria-label={t.copyMessage}
                 >
-                  <Copy />
+                  <Copy className="h-3.5 w-3.5" />
                 </Button>
               </div>
             ) : null}
@@ -1078,14 +554,12 @@ export function ReplicaChatStream({
   variant,
   locale,
   className,
-  xstyle,
 }: {
   messages: readonly ReplicaMessage[];
   user: ReplicaChatUser;
   variant: Variant;
   locale: ReplicaLocale;
   className?: string;
-  xstyle?: stylex.StyleXStyles;
 }) {
   const t = STRINGS[locale];
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1114,18 +588,11 @@ export function ReplicaChatStream({
   }, [pinToBottom]);
 
   return (
-    <div
-      className={[stylex.props(streamLayout.root, xstyle).className, className]
-        .filter(Boolean)
-        .join(' ')}
-      style={stylex.props(streamLayout.root, xstyle).style}
-    >
+    <div className={cn('h-full @container relative bg-background', className)}>
       <div
         ref={scrollRef}
         data-slot="scroll-area"
-        className={[stylex.props(chatStreamStyles.frame5).className, 'chat-scrollbar']
-          .filter(Boolean)
-          .join(' ')}
+        className="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
         // `--conversation-top-inset` (set by the mobile session shell) lets the
         // first message clear its floating header; unset it is a no-op.
         style={{
@@ -1156,7 +623,7 @@ export function ReplicaChatStream({
       </div>
       {/* Top fade into the canvas once scrolled (desktop only). */}
       {variant === 'desktop' && scrolledFromTop ? (
-        <div {...stylex.props(chatStreamStyles.overlay)} />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
       ) : null}
     </div>
   );

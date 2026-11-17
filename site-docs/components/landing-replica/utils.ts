@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
-/** Join StyleX classes and the replica's ordinary CSS hooks. */
+/** Class joiner with Tailwind conflict resolution, so copied overrides win. */
 export function cn(...inputs: ClassValue[]): string {
-  return clsx(inputs);
+  return twMerge(clsx(inputs));
 }

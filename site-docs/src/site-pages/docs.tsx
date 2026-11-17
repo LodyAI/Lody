@@ -1,4 +1,3 @@
-import * as stylex from '@stylexjs/stylex';
 import { DocsTocLanguageSelect } from '@site/components/docs-toc-language-select';
 import { DocsSidebarFooter } from '@site/components/docs-sidebar-footer';
 import { getMDXComponents } from '@site/components/mdx';
@@ -11,26 +10,8 @@ import browserCollections from '@site/.source/browser';
 import { deserializePageTree } from 'fumadocs-core/source/client';
 import type { TOCItemType } from 'fumadocs-core/toc';
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
-import { DocsPage } from 'fumadocs-ui/layouts/docs/page';
-import { DocsBody, DocsDescription, DocsTitle } from '@site/components/docs-ui/page-text';
-import { DocsPageContainer } from '@site/components/docs-ui/page-container';
-import { DocsLayoutContainer } from '@site/components/docs-ui/layout-container';
-import { DocsPageBreadcrumb } from '@site/components/docs-ui/page-breadcrumb';
-import { DocsPageFooter } from '@site/components/docs-ui/page-footer';
-import {
-  DocsLayoutHeader,
-  DocsNavTitle,
-  DocsSearchTrigger,
-  DocsFullSearchTrigger,
-} from '@site/components/docs-ui/layout-header';
-import { DocsSidebarSlots } from '@site/components/docs-ui/layout-sidebar';
-import { DocsPageTOC, DocsPageTOCPopover } from '@site/components/docs-ui/page-toc';
-import { TOCProvider } from 'fumadocs-ui/components/toc';
+import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
 import { type DocsRouteData, localeCode, type SerializedTocItem, type SiteLocale } from './shared';
-
-const styles = stylex.create({
-  titleAnchor: { scrollMargin: 'calc(var(--spacing) * 28)' },
-});
 
 const docsContentLoaders = {
   en: browserCollections.docsEn.createClientLoader({
@@ -80,19 +61,9 @@ export function DocsRoutePage({ locale, data }: { locale: SiteLocale; data: Docs
   const titleAnchor = data.toc.find((item) => item.depth === 1)?.url;
   const titleId = titleAnchor ? decodeURIComponent(titleAnchor.slice(1)) : undefined;
 
-  const layoutOptions = baseOptions(locale);
-
   return (
     <DocsLayout
-      {...layoutOptions}
-      slots={{
-        ...layoutOptions.slots,
-        container: DocsLayoutContainer,
-        header: DocsLayoutHeader,
-        navTitle: DocsNavTitle,
-        searchTrigger: { sm: DocsSearchTrigger, full: DocsFullSearchTrigger },
-        sidebar: DocsSidebarSlots,
-      }}
+      {...baseOptions(locale)}
       tree={deserializePageTree(data.pageTree)}
       sidebar={{
         defaultOpenLevel: 1,
@@ -100,12 +71,6 @@ export function DocsRoutePage({ locale, data }: { locale: SiteLocale; data: Docs
       }}
     >
       <DocsPage
-        slots={{
-          container: DocsPageContainer,
-          breadcrumb: DocsPageBreadcrumb,
-          footer: DocsPageFooter,
-          toc: { provider: TOCProvider, main: DocsPageTOC, popover: DocsPageTOCPopover },
-        }}
         toc={deserializeToc(data.toc)}
         tableOfContent={{
           header: <DocsTocLanguageSelect />,
@@ -114,7 +79,7 @@ export function DocsRoutePage({ locale, data }: { locale: SiteLocale; data: Docs
           header: <DocsTocLanguageSelect />,
         }}
       >
-        <DocsTitle id={titleId} xstyle={styles.titleAnchor}>
+        <DocsTitle id={titleId} className="scroll-m-28">
           {data.title}
         </DocsTitle>
         <DocsDescription>{data.description}</DocsDescription>

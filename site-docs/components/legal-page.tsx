@@ -1,13 +1,8 @@
-import * as stylex from '@stylexjs/stylex';
 import '@site/app/legal.css';
 import { getMDXComponents } from '@site/components/mdx';
 import { SiteNav } from '@site/components/site-nav';
 import type { LegalPageEntry, PageLocale } from '@site/lib/pages';
 import browserCollections from '@site/.source/browser';
-
-const legalStyles = stylex.create({
-  article: { maxWidth: 'var(--container-3xl)' },
-});
 
 const pageContentLoaders = {
   en: browserCollections.pagesEn.createClientLoader({
@@ -35,9 +30,7 @@ export function LegalPage({ entry, locale }: { entry: LegalPageEntry; locale: Pa
     <div className="landing-page-root legal-page-root">
       <SiteNav locale={locale} languageHref={languageHref} />
       <main className="legal-page">
-        <article
-          className={['legal-page__article', stylex.props(legalStyles.article).className].join(' ')}
-        >
+        <article className="legal-page__article max-w-3xl">
           <header className="legal-page__header">
             <h1>{entry.title}</h1>
             {entry.description ? <p className="legal-page__lead">{entry.description}</p> : null}

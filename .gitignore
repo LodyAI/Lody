@@ -124,10 +124,6 @@ logs/
 /e2e/artifacts/
 # Local acceptance captures and experiment bundles; do not commit generated evidence.
 /artifacts/
-# Visual-regression captures for the Tailwind -> StyleX migration.
-/packages/components/artifacts/
-# Temporary capture plans stay with local evidence; reusable profiles are source modules.
-/packages/components/tests/visual/*.json
 
 # OS
 .DS_Store

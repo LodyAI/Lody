@@ -32,9 +32,15 @@ body {
   font-family: var(--lody-docs-font-sans, ui-sans-serif, system-ui, sans-serif);
 }
 
-body[data-site-body] {
+body.flex {
   display: flex;
+}
+
+body.min-h-screen {
   min-height: 100vh;
+}
+
+body.flex-col {
   flex-direction: column;
 }
 

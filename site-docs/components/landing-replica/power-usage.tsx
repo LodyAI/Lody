@@ -1,4 +1,3 @@
-import * as stylex from '@stylexjs/stylex';
 /**
  * Display-only replica of the app's Settings → Usage view (`StatsSettingsView`)
  * for the landing "power" section: range tabs, the two KPI tiles, the "Usage
@@ -24,1121 +23,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Button } from './button';
-const previewStyles = stylex.create({
-  grid: {
-    display: 'grid',
-    'grid-template-columns': 'repeat(24,minmax(0,1fr))',
-    gap: '3px',
-  },
-  section: {
-    'margin-top': 'calc(var(--spacing) * 1.5)',
-  },
-  grid2: {
-    display: 'grid',
-    'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
-    'column-gap': 'calc(var(--spacing) * 4)',
-    'row-gap': 'calc(var(--spacing) * 3)',
-    '@media (width >= 40rem)': {
-      'grid-template-columns': 'repeat(3, minmax(0, 1fr))',
-    },
-    '@media (width >= 64rem)': {
-      'grid-template-columns': 'repeat(5, minmax(0, 1fr))',
-    },
-  },
-  section2: {
-    'max-width': '200px',
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-weight': 'var(--font-weight-normal)',
-  },
-  text: {
-    'max-width': '200px',
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    color: 'hsl(var(--muted-foreground))',
-  },
-});
-
-const columnSweep = stylex.keyframes({
-  from: {
-    opacity: 0,
-    transform: 'translate3d(0,6px,0) scale3d(1,1,1) rotate(0)',
-    filter: 'blur(5px)',
-  },
-});
-const rowSweep = stylex.keyframes({
-  from: {
-    opacity: 0,
-    transform: 'translate3d(calc(2 * var(--spacing) * -1),0,0) scale3d(1,1,1) rotate(0)',
-    filter: 'blur(5px)',
-  },
-});
-const crossFade = stylex.keyframes({
-  from: {
-    opacity: 0,
-    transform: 'translate3d(0,0,0) scale3d(1,1,1) rotate(0)',
-    filter: 'blur(6px)',
-  },
-});
-const usageStateStyles = stylex.create({
-  minimumWidth: { minWidth: 0 },
-  fullWidth: { width: '100%', minWidth: 0 },
-  metricTabs: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    borderRadius: 'var(--radius-md)',
-    backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 60%, transparent)',
-    padding: 'calc(var(--spacing) * .5)',
-  },
-  metricTab: {
-    borderRadius: '5px',
-    paddingInline: 'calc(var(--spacing) * 2.5)',
-    paddingBlock: 'var(--spacing)',
-    fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--text-xs--line-height)',
-    fontWeight: 'var(--font-weight-normal)',
-    transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    transitionDuration: 'var(--default-transition-duration)',
-    transitionTimingFunction: 'var(--default-transition-timing-function)',
-  },
-  metricActive: {
-    backgroundColor: 'hsl(var(--background))',
-    color: 'hsl(var(--foreground))',
-    boxShadow:
-      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px color-mix(in oklab, hsl(var(--border)) 70%, transparent), var(--shadow-xs)',
-  },
-  rangeTabs: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 'calc(var(--spacing) * .5)',
-    borderRadius: 'var(--radius-lg)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
-    backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
-    padding: 'calc(var(--spacing) * .5)',
-  },
-  rangeTab: {
-    borderRadius: 'var(--radius-md)',
-    paddingInline: 'calc(var(--spacing) * 3)',
-    paddingBlock: 'var(--spacing)',
-    fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--text-xs--line-height)',
-    fontWeight: 'var(--font-weight-normal)',
-    transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    transitionDuration: 'var(--default-transition-duration)',
-    transitionTimingFunction: 'var(--default-transition-timing-function)',
-  },
-  rangeActive: {
-    backgroundColor: 'hsl(var(--background))',
-    color: 'hsl(var(--foreground))',
-    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-xs)',
-  },
-  inactiveTab: {
-    color: {
-      default: 'hsl(var(--muted-foreground))',
-      ':hover': { '@media (hover: hover)': 'hsl(var(--foreground))' },
-    },
-  },
-  sweep: {
-    animationDuration: '360ms',
-    animationTimingFunction: 'cubic-bezier(0.22,1,0.36,1)',
-    animationFillMode: 'both',
-    animationIterationCount: 1,
-    animationDirection: 'normal',
-  },
-  sweepColumn: { animationName: columnSweep },
-  sweepRow: { animationName: rowSweep },
-  crossFade: {
-    animationName: crossFade,
-    animationDuration: '.2s',
-    animationTimingFunction: 'var(--ease-out)',
-    animationDelay: '0s',
-    animationIterationCount: 1,
-    animationDirection: 'normal',
-    animationFillMode: 'none',
-    transitionDuration: '.2s',
-    transitionTimingFunction: 'var(--ease-out)',
-  },
-  hourBar: {
-    position: 'relative',
-    width: '100%',
-    borderTopLeftRadius: '3px',
-    borderTopRightRadius: '3px',
-    transitionProperty: {
-      default: 'height,background-color',
-      '@media (prefers-reduced-motion: reduce)': 'none',
-    },
-    transitionDuration: '.3s',
-    transitionTimingFunction: 'var(--default-transition-timing-function)',
-    filter: {
-      default: 'none',
-      ':is(:where(.group):hover *)': { '@media (hover: hover)': 'brightness(110%)' },
-    },
-    boxShadow: {
-      default: 'none',
-      ':is(:where(.group):focus-visible *)': '0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  selectedBar: {
-    boxShadow: {
-      default: '0 0 0 1px hsl(var(--foreground))',
-      ':is(:where(.group):focus-visible *)': '0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  weekDot: {
-    display: 'block',
-    borderRadius: 'calc(infinity * 1px)',
-    transitionProperty: {
-      default: 'width,height,background-color,filter',
-      '@media (prefers-reduced-motion: reduce)': 'none',
-    },
-    transitionDuration: '.3s',
-    transitionTimingFunction: 'var(--default-transition-timing-function)',
-    filter: {
-      default: 'none',
-      ':is(:where(.group):hover *)': { '@media (hover: hover)': 'brightness(110%)' },
-    },
-    boxShadow: {
-      default: 'none',
-      ':is(:where(.group):hover *)': {
-        '@media (hover: hover)':
-          '0 0 0 1px color-mix(in oklab, hsl(var(--foreground)) 40%, transparent)',
-      },
-      ':is(:where(.group):focus-visible *)': '0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  selectedDot: {
-    boxShadow: {
-      default: '0 0 0 1px hsl(var(--foreground))',
-      ':is(:where(.group):hover *)': {
-        '@media (hover: hover)':
-          '0 0 0 1px color-mix(in oklab, hsl(var(--foreground)) 40%, transparent)',
-      },
-      ':is(:where(.group):focus-visible *)': '0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  calendarStack: {
-    position: 'relative',
-    ':is(*) > :not(:last-child)': {
-      'margin-block-start': 0,
-      'margin-block-end': 'calc(var(--spacing) * 3)',
-    },
-  },
-  usageStack: {
-    ':is(*) > :not(:last-child)': {
-      'margin-block-start': 0,
-      'margin-block-end': 'calc(var(--spacing) * 4)',
-    },
-  },
-  legendMargin: { marginTop: 'calc(var(--spacing) * 2)' },
-  calendarCell: {
-    '--usage-ring-inset': 'initial',
-    aspectRatio: '1',
-    width: '100%',
-    borderRadius: '20%',
-    outlineStyle: 'none',
-    transitionProperty: {
-      default: 'filter,opacity',
-      '@media (prefers-reduced-motion: reduce)': 'none',
-    },
-    transitionDuration: '.3s',
-    transitionTimingFunction: 'var(--default-transition-timing-function)',
-    boxShadow: {
-      default: 'none',
-      ':focus-visible': 'var(--usage-ring-inset,) 0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  calendarActive: {
-    filter: { default: 'none', ':hover': { '@media (hover: hover)': 'brightness(110%)' } },
-    boxShadow: {
-      default: 'none',
-      ':hover': {
-        '@media (hover: hover)':
-          'var(--usage-ring-inset,) 0 0 0 1px color-mix(in oklab, hsl(var(--foreground)) 40%, transparent)',
-      },
-      ':focus-visible': 'var(--usage-ring-inset,) 0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  futureCell: { cursor: 'default' },
-  clickableCell: { cursor: 'pointer' },
-  todayCell: {
-    '--usage-ring-inset': 'inset',
-    boxShadow: {
-      default: 'inset 0 0 0 1px color-mix(in oklab, hsl(var(--foreground)) 45%, transparent)',
-      ':hover': {
-        '@media (hover: hover)':
-          'inset 0 0 0 1px color-mix(in oklab, hsl(var(--foreground)) 40%, transparent)',
-      },
-      ':focus-visible': 'inset 0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  selectedFutureCell: {
-    boxShadow: {
-      default: 'var(--usage-ring-inset,) 0 0 0 1px hsl(var(--foreground))',
-      ':focus-visible': 'var(--usage-ring-inset,) 0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  selectedCell: {
-    boxShadow: {
-      default: 'var(--usage-ring-inset,) 0 0 0 1px hsl(var(--foreground))',
-      ':hover': {
-        '@media (hover: hover)':
-          'var(--usage-ring-inset,) 0 0 0 1px color-mix(in oklab, hsl(var(--foreground)) 40%, transparent)',
-      },
-      ':focus-visible': 'var(--usage-ring-inset,) 0 0 0 2px hsl(var(--ring))',
-    },
-  },
-  chartLayout: { position: 'relative', minWidth: 0 },
-  chartWithRings: {
-    display: 'grid',
-    alignItems: 'center',
-    columnGap: 'calc(var(--spacing) * 6)',
-    rowGap: 'calc(var(--spacing) * 5)',
-    gridTemplateColumns: {
-      default: null,
-      '@media (width >= 40rem)': 'minmax(0,10.5rem) minmax(0,1fr)',
-    },
-  },
-  detail: {
-    display: 'grid',
-    transitionProperty: {
-      default: 'grid-template-rows,opacity',
-      '@media (prefers-reduced-motion: reduce)': 'none',
-    },
-    transitionDuration: '450ms',
-    transitionTimingFunction: 'cubic-bezier(0.34,1.25,0.64,1)',
-  },
-  detailOpen: { gridTemplateRows: '1fr', opacity: 1 },
-  detailClosed: { gridTemplateRows: '0fr', opacity: 0 },
-});
-
-const powerUsageStyles = stylex.create({
-  stack: {
-    'container-type': 'inline-size',
-    position: 'relative',
-    display: 'flex',
-    'min-width': '0px',
-    'flex-direction': 'column',
-    gap: 'calc(var(--spacing) * 3)',
-    overflow: 'hidden',
-    'border-radius': 'var(--radius-lg)',
-    'border-style': 'solid',
-    'border-width': '1px',
-    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
-    'background-color': 'color-mix(in oklab, hsl(var(--card)) 60%, transparent)',
-    padding: 'calc(var(--spacing) * 4)',
-  },
-  caption: {
-    'font-size': '0.8rem',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  section: {
-    'margin-top': 'auto',
-  },
-  row: {
-    display: 'flex',
-    'min-height': '4.25rem',
-    'min-width': '0px',
-    'align-items': 'center',
-    'font-size': 'clamp(1.5rem, 16cqw, 2.75rem)',
-    'line-height': '1',
-    'font-weight': 'var(--font-weight-normal)',
-    'letter-spacing': 'var(--tracking-tight)',
-    'white-space': 'nowrap',
-    color: 'hsl(var(--foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  section2: {
-    'margin-top': 'calc(var(--spacing) * 2)',
-  },
-  row2: {
-    display: 'flex',
-    'flex-shrink': '0',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 2)',
-    'font-size': '11px',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  frame: {
-    height: 'calc(var(--spacing) * 2)',
-    width: 'calc(var(--spacing) * 20)',
-    'border-radius': 'calc(infinity * 1px)',
-  },
-  caption2: {
-    'min-width': '0px',
-    flex: '1',
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-    color: 'hsl(var(--muted-foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  row3: {
-    display: 'inline-flex',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 1.5)',
-  },
-  glyph: {
-    height: 'calc(var(--spacing) * 3.5)',
-    width: 'calc(var(--spacing) * 3.5)',
-  },
-  label: {
-    'text-align': 'center',
-    'font-size': '9px',
-    'line-height': '1',
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  row4: {
-    position: 'relative',
-    display: 'flex',
-    width: '100%',
-    cursor: 'pointer',
-    'align-items': 'flex-end',
-    'border-radius': '3px',
-    'outline-style': 'none',
-    '@media (hover: hover)': {
-      ':is(*):hover': {
-        'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 6%, transparent)',
-      },
-    },
-    ':is(*):focus-visible': {
-      'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
-    },
-  },
-  surface: {
-    height: '1px',
-    width: '100%',
-    'background-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
-  },
-  row5: {
-    display: 'flex',
-    gap: 'calc(var(--spacing) * 2)',
-  },
-  stack2: {
-    display: 'flex',
-    'flex-shrink': '0',
-    'flex-direction': 'column',
-    gap: '3px',
-  },
-  row6: {
-    display: 'flex',
-    'align-items': 'center',
-    'justify-content': 'flex-end',
-    gap: 'var(--spacing)',
-    'font-size': '10px',
-    'line-height': '1',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  label2: {
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 55%, transparent)',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  section3: {
-    'min-width': '0px',
-    flex: '1',
-  },
-  stack3: {
-    display: 'flex',
-    'flex-direction': 'column',
-    gap: '3px',
-  },
-  row7: {
-    display: 'flex',
-    cursor: 'pointer',
-    'align-items': 'center',
-    'justify-content': 'center',
-    'outline-style': 'none',
-    ':is(*):focus-visible': {
-      'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
-    },
-  },
-  section4: {
-    'min-width': '0px',
-  },
-  row8: {
-    display: 'flex',
-    'flex-wrap': 'wrap',
-    'align-items': 'baseline',
-    'justify-content': 'space-between',
-    'column-gap': 'calc(var(--spacing) * 4)',
-    'row-gap': 'var(--spacing)',
-  },
-  caption3: {
-    'min-width': '0px',
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': '11px',
-    color: 'hsl(var(--muted-foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  label3: {
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)',
-  },
-  row9: {
-    display: 'flex',
-    'flex-shrink': '0',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 3)',
-  },
-  caption4: {
-    'font-size': '11px',
-    color: 'hsl(var(--muted-foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  label4: {
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--foreground))',
-  },
-  section5: {
-    'margin-top': 'calc(var(--spacing) * 3)',
-  },
-  frame2: {
-    position: 'relative',
-    'min-height': '10.5rem',
-    'min-width': '0px',
-  },
-  row10: {
-    'margin-top': 'calc(var(--spacing) * 3)',
-    display: 'flex',
-    height: 'calc(var(--spacing) * 5)',
-    'align-items': 'center',
-  },
-  row11: {
-    'container-type': 'inline-size',
-    display: 'flex',
-    gap: 'calc(var(--spacing) * 1.5)',
-  },
-  grid: {
-    'margin-top': 'calc(0.625rem + 0.375rem)',
-    display: 'grid',
-    width: 'calc(var(--spacing) * 7)',
-    'flex-shrink': '0',
-    'grid-template-rows': 'repeat(7, minmax(0, 1fr))',
-    gap: '4px',
-    'font-size': '10px',
-    'line-height': '1',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  row12: {
-    display: 'flex',
-    'align-items': 'center',
-  },
-  section6: {
-    'min-width': '0px',
-    flex: '1',
-    'overflow-x': 'auto',
-    'padding-bottom': 'var(--spacing)',
-  },
-  section7: {
-    'min-width': 'var(--usage-heatmap-min-track-width)',
-    'padding-inline': 'calc(var(--spacing) * 0.5)',
-    '@container (width >= 672px)': {
-      'min-width': '0px',
-    },
-  },
-  grid2: {
-    'margin-bottom': 'calc(var(--spacing) * 1.5)',
-    display: 'grid',
-    gap: '4px',
-    'font-size': '10px',
-    'line-height': '1',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  label5: {
-    'white-space': 'nowrap',
-  },
-  grid3: {
-    position: 'relative',
-    display: 'grid',
-    'grid-template-rows': 'repeat(7, minmax(0, 1fr))',
-    gap: '4px',
-  },
-  overlay: {
-    'pointer-events': 'none',
-    position: 'absolute',
-    'z-index': '10',
-    translate: 'calc(calc(1 / 2 * 100%) * -1) -100%',
-    'border-radius': 'var(--radius-md)',
-    'background-color': 'hsl(var(--popover))',
-    'padding-inline': 'calc(var(--spacing) * 2)',
-    'padding-block': 'calc(var(--spacing) * 1.5)',
-    'font-size': '11px',
-    'line-height': 'var(--leading-tight)',
-    'white-space': 'nowrap',
-    color: 'hsl(var(--popover-foreground))',
-    'box-shadow':
-      '0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(1px + 0px) color-mix(in oklab, hsl(var(--border)) 70%, transparent), var(--shadow-md)',
-  },
-  label6: {
-    'font-weight': 'var(--font-weight-normal)',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  label7: {
-    'margin-left': 'calc(var(--spacing) * 1.5)',
-    color: 'color-mix(in oklab, hsl(var(--popover-foreground)) 60%, transparent)',
-  },
-  label8: {
-    'margin-top': 'calc(var(--spacing) * 0.5)',
-    display: 'block',
-    color: 'color-mix(in oklab, hsl(var(--popover-foreground)) 50%, transparent)',
-  },
-  row13: {
-    display: 'flex',
-    height: 'calc(var(--spacing) * 5)',
-    'align-items': 'center',
-    'justify-content': 'space-between',
-    gap: 'calc(var(--spacing) * 4)',
-  },
-  label9: {
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)',
-  },
-  surface2: {
-    position: 'relative',
-    height: 'calc(var(--spacing) * 6)',
-    overflow: 'hidden',
-    'border-radius': '5px',
-    'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 6%, transparent)',
-  },
-  overlay2: {
-    position: 'absolute',
-    'inset-block': '0px',
-    left: '0px',
-    'border-radius': '5px',
-  },
-  row14: {
-    position: 'relative',
-    display: 'flex',
-    height: '100%',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 1.5)',
-    'padding-inline': 'calc(var(--spacing) * 2)',
-  },
-  label10: {
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': '11px',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--foreground))',
-  },
-  label11: {
-    'margin-left': 'auto',
-    'flex-shrink': '0',
-    'padding-left': 'calc(var(--spacing) * 2)',
-    'font-size': '11px',
-    color: 'hsl(var(--muted-foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  caption5: {
-    'padding-inline': 'calc(var(--spacing) * 2)',
-    'padding-top': 'calc(var(--spacing) * 0.5)',
-    'font-size': '11px',
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  section8: {
-    position: 'relative',
-    'padding-top': 'calc(var(--spacing) * 2)',
-  },
-  overlay3: {
-    position: 'absolute',
-    top: 'calc(var(--spacing) * 0.5)',
-    height: 'calc(var(--spacing) * 3)',
-    width: 'calc(var(--spacing) * 3)',
-    translate: 'calc(calc(1 / 2 * 100%) * -1) 0',
-    rotate: '45deg',
-    'border-radius': '2px',
-    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 60%, transparent)',
-  },
-  surface3: {
-    position: 'relative',
-    'border-radius': 'var(--radius-lg)',
-    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
-    padding: 'calc(var(--spacing) * 4)',
-  },
-  grid4: {
-    display: 'grid',
-    'column-gap': 'calc(var(--spacing) * 6)',
-    'row-gap': 'calc(var(--spacing) * 4)',
-    '@media (width >= 64rem)': {
-      'grid-template-columns': 'minmax(0,13rem) 1fr',
-    },
-  },
-  caption6: {
-    'font-size': '11px',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  row15: {
-    'margin-top': 'var(--spacing)',
-    display: 'flex',
-    'align-items': 'baseline',
-    gap: 'calc(var(--spacing) * 1.5)',
-  },
-  label12: {
-    'font-size': 'var(--text-2xl)',
-    'line-height': '1',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  label13: {
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  frame3: {
-    'margin-top': 'calc(var(--spacing) * 1.5)',
-    'min-height': 'calc(var(--spacing) * 4)',
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-    color: 'hsl(var(--muted-foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  row16: {
-    'margin-top': 'calc(var(--spacing) * 4)',
-    display: 'flex',
-    height: 'calc(var(--spacing) * 1.5)',
-    overflow: 'hidden',
-    'border-radius': 'calc(infinity * 1px)',
-  },
-  row17: {
-    display: 'flex',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 1.5)',
-    'font-size': '11px',
-  },
-  frame4: {
-    height: 'calc(var(--spacing) * 1.5)',
-    width: 'calc(var(--spacing) * 1.5)',
-    'flex-shrink': '0',
-    'border-radius': 'calc(infinity * 1px)',
-  },
-  label14: {
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  label15: {
-    'margin-left': 'auto',
-    'flex-shrink': '0',
-    color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  caption7: {
-    'margin-top': 'calc(var(--spacing) * 4)',
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  grid5: {
-    display: 'grid',
-    'column-gap': 'calc(var(--spacing) * 6)',
-    'row-gap': 'calc(var(--spacing) * 4)',
-    '@media (width >= 40rem)': {
-      'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
-    },
-  },
-  caption8: {
-    'margin-bottom': 'calc(var(--spacing) * 2)',
-    'font-size': '11px',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  row18: {
-    position: 'relative',
-    display: 'flex',
-    width: 'calc(var(--spacing) * 4)',
-    height: 'calc(var(--spacing) * 4)',
-    'flex-shrink': '0',
-    overflow: 'hidden',
-    'border-radius': 'calc(infinity * 1px)',
-  },
-  row19: {
-    display: 'flex',
-    width: '100%',
-    height: '100%',
-    'align-items': 'center',
-    'justify-content': 'center',
-    'border-radius': 'calc(infinity * 1px)',
-    'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 15%, transparent)',
-    'font-size': '8px',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
-    'text-transform': 'uppercase',
-  },
-  stack4: {
-    display: 'flex',
-    'min-width': '0px',
-    'flex-direction': 'column',
-    'align-items': 'center',
-  },
-  frame5: {
-    position: 'relative',
-    width: '9.5rem',
-    'max-width': '100%',
-    '@media (width >= 40rem)': {
-      width: '10.5rem',
-    },
-  },
-  glyph2: {
-    width: '100%',
-    rotate: 'calc(90deg * -1)',
-  },
-  overlay4: {
-    'pointer-events': 'none',
-    position: 'absolute',
-    inset: '0px',
-    display: 'flex',
-    'flex-direction': 'column',
-    'align-items': 'center',
-    'justify-content': 'center',
-    'padding-inline': 'calc(var(--spacing) * 10)',
-    'text-align': 'center',
-  },
-  frame6: {
-    width: '100%',
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': '15px',
-    'line-height': '1',
-    'font-weight': 'var(--font-weight-normal)',
-    'letter-spacing': 'var(--tracking-tight)',
-    color: 'hsl(var(--foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-    '@media (width >= 40rem)': {
-      'font-size': 'var(--text-base)',
-      'line-height': '1',
-    },
-  },
-  frame7: {
-    'margin-top': 'var(--spacing)',
-    width: '100%',
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': '9px',
-    'font-weight': 'var(--font-weight-normal)',
-    'letter-spacing': '0.08em',
-    color: 'hsl(var(--muted-foreground))',
-    'text-transform': 'uppercase',
-  },
-  frame8: {
-    'margin-top': 'calc(var(--spacing) * 3)',
-    width: '100%',
-    'font-size': '10px',
-    'font-weight': 'var(--font-weight-normal)',
-    'letter-spacing': '0.08em',
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
-    'text-transform': 'uppercase',
-  },
-  grid6: {
-    'margin-top': 'calc(var(--spacing) * 1.5)',
-    display: 'grid',
-    width: '100%',
-    'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
-    'column-gap': 'calc(var(--spacing) * 3)',
-    'row-gap': 'var(--spacing)',
-  },
-  row20: {
-    display: 'flex',
-    'min-width': '0px',
-    'align-items': 'center',
-    gap: 'var(--spacing)',
-    'font-size': '10px',
-  },
-  frame9: {
-    width: 'calc(var(--spacing) * 1.5)',
-    height: 'calc(var(--spacing) * 1.5)',
-    'flex-shrink': '0',
-    'border-radius': 'calc(infinity * 1px)',
-  },
-  label16: {
-    'margin-left': 'auto',
-    'flex-shrink': '0',
-    color: 'color-mix(in oklab, hsl(var(--foreground)) 70%, transparent)',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  caption9: {
-    'font-size': '10px',
-    'font-weight': 'var(--font-weight-normal)',
-    'letter-spacing': '0.08em',
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
-    'text-transform': 'uppercase',
-  },
-  row21: {
-    'margin-top': 'calc(var(--spacing) * 1.5)',
-    display: 'flex',
-    height: 'calc(var(--spacing) * 1.5)',
-    gap: '1px',
-    overflow: 'hidden',
-    'border-radius': 'calc(infinity * 1px)',
-    'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 10%, transparent)',
-  },
-  frame10: {
-    height: '100%',
-    'transition-property': 'width',
-    'transition-timing-function': 'cubic-bezier(0.22,1,0.36,1)',
-    'transition-duration': '500ms',
-    '@media (prefers-reduced-motion: reduce)': {
-      'transition-property': 'none',
-    },
-  },
-  row22: {
-    'margin-top': 'calc(var(--spacing) * 1.5)',
-    display: 'flex',
-    'flex-wrap': 'wrap',
-    'align-items': 'center',
-    'column-gap': 'calc(var(--spacing) * 2.5)',
-    'row-gap': 'var(--spacing)',
-  },
-  label17: {
-    'max-width': '8rem',
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  label18: {
-    color: 'color-mix(in oklab, hsl(var(--foreground)) 70%, transparent)',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  caption10: {
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': '11px',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  caption11: {
-    'margin-top': 'calc(var(--spacing) * 0.5)',
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': 'var(--text-sm)',
-    'line-height': 'var(--text-sm--line-height)',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--foreground))',
-    'font-variant-numeric': '   tabular-nums ',
-  },
-  caption12: {
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': '11px',
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
-  },
-  surface4: {
-    overflow: 'hidden',
-    'border-radius': 'var(--radius-lg)',
-    'border-style': 'solid',
-    'border-width': '1px',
-    'border-color': 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
-    'background-color': 'color-mix(in oklab, hsl(var(--card)) 40%, transparent)',
-  },
-  row23: {
-    display: 'flex',
-    'flex-wrap': 'wrap',
-    'align-items': 'center',
-    'justify-content': 'space-between',
-    gap: 'calc(var(--spacing) * 3)',
-    'padding-inline': 'calc(var(--spacing) * 4)',
-    'padding-top': 'calc(var(--spacing) * 4)',
-  },
-  caption13: {
-    'font-size': 'var(--text-sm)',
-    'line-height': 'var(--text-sm--line-height)',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--foreground))',
-  },
-  caption14: {
-    'margin-top': 'calc(var(--spacing) * 0.5)',
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  row24: {
-    display: 'flex',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 1.5)',
-  },
-  section9: {
-    padding: 'calc(var(--spacing) * 4)',
-  },
-  frame11: {
-    'min-height': '0px',
-    overflow: 'hidden',
-  },
-  surface5: {
-    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 25%, transparent)',
-    'padding-inline': 'calc(var(--spacing) * 4)',
-    'padding-block': 'calc(var(--spacing) * 4)',
-    '@media (width >= 40rem)': {
-      'padding-inline': 'calc(var(--spacing) * 5)',
-    },
-  },
-  grid7: {
-    'margin-bottom': 'calc(var(--spacing) * 6)',
-    display: 'grid',
-    'column-gap': 'calc(var(--spacing) * 6)',
-    'row-gap': 'calc(var(--spacing) * 3)',
-    'border-top-style': 'solid',
-    'border-top-width': '1px',
-    'border-color': 'color-mix(in oklab, hsl(var(--border)) 50%, transparent)',
-    'padding-top': 'calc(var(--spacing) * 3)',
-    '@media (width >= 40rem)': {
-      'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
-    },
-  },
-  glyph3: {
-    display: 'block',
-    overflow: 'visible',
-  },
-  row25: {
-    display: 'flex',
-    'min-height': 'calc(var(--spacing) * 10)',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 2)',
-    'border-bottom-style': 'solid',
-    'border-bottom-width': '1px',
-    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
-    'padding-inline': 'calc(var(--spacing) * 3)',
-    'padding-block': 'calc(var(--spacing) * 1.5)',
-    ':is(*):where(.dark, .dark *)': {
-      'background-color': 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
-    },
-  },
-  caption15: {
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  surface6: {
-    'border-radius': 'var(--radius-lg)',
-    'border-style': 'solid',
-    'border-width': '1px',
-    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
-    'background-color': 'color-mix(in oklab, hsl(var(--card)) 60%, transparent)',
-    'font-size': 'var(--text-sm)',
-    'line-height': 'var(--text-sm--line-height)',
-  },
-  caption16: {
-    'font-size': 'var(--text-sm)',
-    'line-height': 'var(--text-sm--line-height)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-  surface7: {
-    overflow: 'hidden',
-    'border-radius': 'var(--radius-lg)',
-    'border-style': 'solid',
-    'border-width': '1px',
-    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
-    'background-color': 'color-mix(in oklab, hsl(var(--card)) 60%, transparent)',
-  },
-  section10: {
-    'border-top-style': 'solid',
-    'border-top-width': '1px',
-    'border-color': 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
-    'padding-inline': 'calc(var(--spacing) * 4)',
-    'padding-top': 'calc(var(--spacing) * 2)',
-    'padding-bottom': 'calc(var(--spacing) * 3)',
-  },
-  row26: {
-    display: 'flex',
-    'flex-wrap': 'wrap',
-    'column-gap': 'calc(var(--spacing) * 3)',
-    'row-gap': 'calc(var(--spacing) * 1.5)',
-  },
-  row27: {
-    display: 'inline-flex',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 1.5)',
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-  },
-  frame12: {
-    display: 'inline-block',
-    height: 'calc(var(--spacing) * 2.5)',
-    width: 'calc(var(--spacing) * 2.5)',
-    'flex-shrink': '0',
-    'border-radius': 'var(--radius-xs)',
-  },
-  label19: {
-    'flex-shrink': '0',
-    'font-family': 'var(--font-mono)',
-    'white-space': 'nowrap',
-    color: 'hsl(var(--foreground))',
-  },
-  row28: {
-    display: 'flex',
-    'flex-wrap': 'wrap',
-    'align-items': 'flex-end',
-    'justify-content': 'space-between',
-    gap: 'calc(var(--spacing) * 3)',
-  },
-  caption17: {
-    overflow: 'hidden',
-    'text-overflow': 'ellipsis',
-    'white-space': 'nowrap',
-    'font-size': 'var(--text-lg)',
-    'line-height': 'var(--leading-tight)',
-    'font-weight': 'var(--font-weight-normal)',
-    color: 'hsl(var(--foreground))',
-  },
-  grid8: {
-    display: 'grid',
-    'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
-    gap: 'calc(var(--spacing) * 3)',
-  },
-  glyph4: {
-    position: 'absolute',
-    right: 'calc(var(--spacing) * -8)',
-    bottom: 'calc(var(--spacing) * -8)',
-    height: 'calc(var(--spacing) * 60)',
-    width: 'calc(var(--spacing) * 60)',
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 10%, transparent)',
-    ':is(*):where(.dark, .dark *)': {
-      color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 5%, transparent)',
-    },
-  },
-  glyph5: {
-    position: 'absolute',
-    right: 'calc(var(--spacing) * -10)',
-    bottom: 'calc(var(--spacing) * -5)',
-    height: 'calc(var(--spacing) * 50)',
-    width: 'calc(var(--spacing) * 50)',
-    rotate: '-25deg',
-    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 10%, transparent)',
-    ':is(*):where(.dark, .dark *)': {
-      color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 5%, transparent)',
-    },
-  },
-});
-
-const buttonStyles = stylex.create({
-  close: {
-    position: 'absolute',
-    right: 'calc(var(--spacing) * 2)',
-    top: 'calc(var(--spacing) * 2)',
-    height: 'calc(var(--spacing) * 6)',
-    width: 'calc(var(--spacing) * 6)',
-    color: 'hsl(var(--muted-foreground))',
-  },
-});
+import { cn } from './utils';
 
 // ---- Types -----------------------------------------------------------------
 
@@ -1369,11 +254,13 @@ function StatTile({
   footer: ReactNode;
 }) {
   return (
-    <div {...stylex.props(powerUsageStyles.stack)}>
-      <p {...stylex.props(powerUsageStyles.caption)}>{label}</p>
-      <div {...stylex.props(powerUsageStyles.section)}>
-        <div {...stylex.props(powerUsageStyles.row)}>{children}</div>
-        <div {...stylex.props(powerUsageStyles.section2)}>{footer}</div>
+    <div className="@container relative flex min-w-0 flex-col gap-3 overflow-hidden rounded-lg border border-border/70 bg-card/60 p-4">
+      <p className="text-[0.8rem] font-normal text-muted-foreground">{label}</p>
+      <div className="mt-auto">
+        <div className="flex min-h-[4.25rem] min-w-0 items-center whitespace-nowrap text-3xl font-normal leading-none tracking-tight tabular-nums text-foreground text-[clamp(1.5rem,16cqw,2.75rem)]">
+          {children}
+        </div>
+        <div className="mt-2">{footer}</div>
       </div>
     </div>
   );
@@ -1384,20 +271,20 @@ function TabList<Value extends string>({
   onChange,
   options,
   label,
-  xstyle,
-  tabXstyle,
-  activeXstyle,
+  className,
+  tabClassName,
+  activeClassName,
 }: {
   value: Value;
   onChange?: (value: Value) => void;
   options: Array<{ value: Value; label: string }>;
   label: string;
-  xstyle: stylex.StyleXStyles;
-  tabXstyle: stylex.StyleXStyles;
-  activeXstyle: stylex.StyleXStyles;
+  className: string;
+  tabClassName: string;
+  activeClassName: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} {...stylex.props(xstyle)}>
+    <div role="tablist" aria-label={label} className={className}>
       {options.map((option) => (
         <button
           key={option.value}
@@ -1405,9 +292,9 @@ function TabList<Value extends string>({
           role="tab"
           aria-selected={option.value === value}
           onClick={() => onChange?.(option.value)}
-          {...stylex.props(
-            tabXstyle,
-            option.value === value ? activeXstyle : usageStateStyles.inactiveTab
+          className={cn(
+            tabClassName,
+            option.value === value ? activeClassName : 'text-muted-foreground hover:text-foreground'
           )}
         >
           {option.label}
@@ -1432,11 +319,11 @@ function createRangeIntensity(values: number[]): (value: number) => number {
 
 function HeatLegend({ labels }: { labels: PowerUsageLabels['skyline'] }) {
   return (
-    <div {...stylex.props(powerUsageStyles.row2)}>
+    <div className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
       <span>{labels.less}</span>
       <span
         aria-hidden="true"
-        {...stylex.props(powerUsageStyles.frame)}
+        className="h-2 w-20 rounded-full"
         style={{
           backgroundImage: `linear-gradient(to right, ${EMPTY_DAY_COLOR}, ${heatColor(0.2)}, ${heatColor(0.55)}, ${heatColor(1)})`,
         }}
@@ -1448,9 +335,9 @@ function HeatLegend({ labels }: { labels: PowerUsageLabels['skyline'] }) {
 
 function ClickHint({ text }: { text: string }) {
   return (
-    <p {...stylex.props(powerUsageStyles.caption2)}>
-      <span {...stylex.props(powerUsageStyles.row3)}>
-        <MousePointerClick {...stylex.props(powerUsageStyles.glyph)} aria-hidden="true" />
+    <p className="min-w-0 flex-1 truncate text-xs tabular-nums text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        <MousePointerClick className="h-3.5 w-3.5" aria-hidden="true" />
         {text}
       </span>
     </p>
@@ -1472,10 +359,11 @@ function Sweep({
   return (
     <div
       role="presentation"
-      {...stylex.props(
-        usageStateStyles.minimumWidth,
-        !reduced && usageStateStyles.sweep,
-        !reduced && (axis === 'column' ? usageStateStyles.sweepColumn : usageStateStyles.sweepRow)
+      className={cn(
+        'min-w-0',
+        !reduced &&
+          'animate-in fade-in blur-in-5 fill-mode-both animation-duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)]',
+        !reduced && (axis === 'column' ? 'slide-in-from-bottom-[6px]' : 'slide-in-from-left-2')
       )}
       style={reduced ? undefined : { animationDelay: `${index * 22}ms` }}
     >
@@ -1484,11 +372,17 @@ function Sweep({
   );
 }
 
+const CROSS_FADE = 'animate-in fade-in blur-in-6 duration-200 ease-out';
+const HOUR_COLUMNS_CLASS = 'grid grid-cols-[repeat(24,minmax(0,1fr))] gap-[3px]';
+
 function HourAxis() {
   return (
-    <div aria-hidden="true" {...stylex.props(previewStyles.grid, previewStyles.section)}>
+    <div aria-hidden="true" className={cn(HOUR_COLUMNS_CLASS, 'mt-1.5')}>
       {Array.from({ length: 24 }, (_, hour) => (
-        <span key={hour} {...stylex.props(powerUsageStyles.label)}>
+        <span
+          key={hour}
+          className="text-center text-[9px] leading-none tabular-nums text-muted-foreground/60"
+        >
           {hour % 3 === 0 ? String(hour).padStart(2, '0') : ''}
         </span>
       ))}
@@ -1523,7 +417,7 @@ function UsageDayMatrix({
   const maxValue = buckets.reduce((peak, bucket) => Math.max(peak, bucketValue(bucket, metric)), 0);
   return (
     <div>
-      <div {...stylex.props(previewStyles.grid)} role="row">
+      <div className={HOUR_COLUMNS_CLASS} role="row">
         {buckets.map((bucket, index) => {
           const value = bucketValue(bucket, metric);
           const height = value > 0 && maxValue > 0 ? Math.max(7, (value / maxValue) * 100) : 0;
@@ -1538,9 +432,7 @@ function UsageDayMatrix({
                 title={label}
                 aria-label={label}
                 aria-selected={selected}
-                className={[stylex.props(powerUsageStyles.row4).className, 'group']
-                  .filter(Boolean)
-                  .join(' ')}
+                className="group relative flex w-full cursor-pointer items-end rounded-[3px] outline-none focus-visible:shadow-none hover:bg-muted-foreground/[0.06]"
                 style={{ height: 148 }}
                 onClick={(event) =>
                   onToggleDay(dayStartMs, bucket.bucketStartMs, event.currentTarget)
@@ -1548,9 +440,10 @@ function UsageDayMatrix({
               >
                 <span
                   aria-hidden="true"
-                  {...stylex.props(
-                    usageStateStyles.hourBar,
-                    selected && usageStateStyles.selectedBar
+                  className={cn(
+                    'relative w-full rounded-t-[3px] transition-[height,background-color] duration-300 motion-reduce:transition-none',
+                    'group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-ring',
+                    selected && 'ring-1 ring-foreground'
                   )}
                   style={{
                     height: `${height}%`,
@@ -1562,7 +455,7 @@ function UsageDayMatrix({
           );
         })}
       </div>
-      <div aria-hidden="true" {...stylex.props(powerUsageStyles.surface)} />
+      <div aria-hidden="true" className="h-px w-full bg-border/70" />
       <HourAxis />
     </div>
   );
@@ -1600,26 +493,26 @@ function UsageWeekMatrix({
   );
 
   return (
-    <div {...stylex.props(powerUsageStyles.row5)}>
-      <div aria-hidden="true" {...stylex.props(powerUsageStyles.stack2)}>
+    <div className="flex gap-2">
+      <div aria-hidden="true" className="flex shrink-0 flex-col gap-[3px]">
         {dayStarts.map((dayStartMs) => (
           <span
             key={dayStartMs}
-            {...stylex.props(powerUsageStyles.row6)}
+            className="flex items-center justify-end gap-1 text-[10px] leading-none text-muted-foreground"
             style={{ height: WEEK_ROW_PX }}
           >
             <span>{formats.weekday.format(new Date(dayStartMs))}</span>
-            <span {...stylex.props(powerUsageStyles.label2)}>
+            <span className="tabular-nums text-muted-foreground/55">
               {formats.dayOfMonth.format(new Date(dayStartMs))}
             </span>
           </span>
         ))}
       </div>
-      <div {...stylex.props(powerUsageStyles.section3)}>
-        <div {...stylex.props(powerUsageStyles.stack3)}>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-col gap-[3px]">
           {dayStarts.map((dayStartMs, dayIndex) => (
             <Sweep key={dayStartMs} index={dayIndex} reduced={reduced} axis="row">
-              <div {...stylex.props(previewStyles.grid)} role="row">
+              <div className={HOUR_COLUMNS_CLASS} role="row">
                 {Array.from({ length: 24 }, (_, hour) => {
                   const cellMs = dayStartMs + hour * HOUR_MS;
                   const value = valuesByBucket.get(cellMs) ?? 0;
@@ -1635,19 +528,19 @@ function UsageWeekMatrix({
                       title={label}
                       aria-label={label}
                       aria-selected={selected}
-                      className={[stylex.props(powerUsageStyles.row7).className, 'group']
-                        .filter(Boolean)
-                        .join(' ')}
+                      className="group flex cursor-pointer items-center justify-center outline-none focus-visible:shadow-none"
                       style={{ height: WEEK_ROW_PX }}
                       onClick={(event) => onToggleDay(dayStartMs, cellMs, event.currentTarget)}
                     >
-                      {/* The manual-scroll preview couples this dot's height to its constrained width. */}
+                      {/* `.uw-power__demo--manual-scroll [role='gridcell'] > span.rounded-full`
+                          keeps these circular once the 24 tracks get narrower than the dot. */}
                       <span
                         aria-hidden="true"
-                        data-usage-dot
-                        {...stylex.props(
-                          usageStateStyles.weekDot,
-                          selected && usageStateStyles.selectedDot
+                        className={cn(
+                          'block rounded-full transition-[width,height,background-color,filter] duration-300 motion-reduce:transition-none',
+                          'group-hover:brightness-110 group-hover:ring-1 group-hover:ring-foreground/40',
+                          'group-focus-visible:ring-2 group-focus-visible:ring-ring',
+                          selected && 'ring-1 ring-foreground'
                         )}
                         style={{
                           width: size,
@@ -1738,32 +631,30 @@ function UsageRangePanel({
         );
 
   return (
-    <div {...stylex.props(powerUsageStyles.section4)}>
-      <div {...stylex.props(powerUsageStyles.row8)}>
-        <p {...stylex.props(powerUsageStyles.caption3)}>
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="min-w-0 truncate text-[11px] tabular-nums text-muted-foreground">
           {spanLabel}
-          <span {...stylex.props(powerUsageStyles.label3)}>
+          <span className="text-muted-foreground/60">
             {` · ${labels.activeIntervals} ${activeCount}/${values.length}`}
           </span>
         </p>
-        <div {...stylex.props(powerUsageStyles.row9)}>
+        <div className="flex shrink-0 items-center gap-3">
           {peakBucket && (values[peakIndex] ?? 0) > 0 ? (
-            <p {...stylex.props(powerUsageStyles.caption4)}>
-              <span {...stylex.props(powerUsageStyles.label3)}>{`${labels.peakInterval} `}</span>
-              <span {...stylex.props(powerUsageStyles.label4)}>
+            <p className="text-[11px] tabular-nums text-muted-foreground">
+              <span className="text-muted-foreground/60">{`${labels.peakInterval} `}</span>
+              <span className="font-normal text-foreground">
                 {formatMetric(values[peakIndex] ?? 0, metric, locale)}
               </span>
-              <span
-                {...stylex.props(powerUsageStyles.label3)}
-              >{` · ${peakBucket.bucketLabel}`}</span>
+              <span className="text-muted-foreground/60">{` · ${peakBucket.bucketLabel}`}</span>
             </p>
           ) : null}
           <HeatLegend labels={labels} />
         </div>
       </div>
-      <div {...stylex.props(powerUsageStyles.section5)}>
-        <div role="grid" aria-label={labels.heatmap} {...stylex.props(powerUsageStyles.frame2)}>
-          <div key={timeline.range} {...stylex.props(!reduced && usageStateStyles.crossFade)}>
+      <div className="mt-3">
+        <div role="grid" aria-label={labels.heatmap} className="relative min-h-[10.5rem] min-w-0">
+          <div key={timeline.range} className={cn(!reduced && CROSS_FADE)}>
             {timeline.range === 'week' ? (
               <UsageWeekMatrix
                 timeline={timeline}
@@ -1789,9 +680,12 @@ function UsageRangePanel({
           </div>
         </div>
       </div>
-      <div {...stylex.props(powerUsageStyles.row10)}>
+      <div className="mt-3 flex h-5 items-center">
         {selectedDayMs !== null && selectedDayTotal !== null ? (
-          <p {...stylex.props(powerUsageStyles.caption2)} aria-live="polite">
+          <p
+            className="min-w-0 flex-1 truncate text-xs tabular-nums text-muted-foreground"
+            aria-live="polite"
+          >
             {formats.day.format(new Date(selectedDayMs))}
             {selectedDayTotal > 0
               ? ` · ${formatMetric(selectedDayTotal, metric, locale)}${
@@ -1965,35 +859,38 @@ function UsageHeatmap({
       : null;
 
   return (
-    <div ref={rootRef} {...stylex.props(usageStateStyles.calendarStack)}>
-      <div {...stylex.props(powerUsageStyles.row11)}>
-        <div aria-hidden="true" {...stylex.props(powerUsageStyles.grid)}>
+    <div ref={rootRef} className="relative space-y-3">
+      <div className="@container flex gap-1.5">
+        <div
+          aria-hidden="true"
+          className="mt-[calc(0.625rem+0.375rem)] grid w-7 shrink-0 grid-rows-7 gap-[4px] text-[10px] leading-none text-muted-foreground"
+        >
           {Array.from({ length: CAL_ROWS }, (_, row) => {
             const sample = model.cells[row];
             return (
-              <span key={row} {...stylex.props(powerUsageStyles.row12)}>
+              <span key={row} className="flex items-center">
                 {row % 2 === 1 && sample ? formats.weekday.format(new Date(sample.dayStartMs)) : ''}
               </span>
             );
           })}
         </div>
         {/* RTL gives the overflowing calendar a right-edge scroll origin. */}
-        <div dir="rtl" {...stylex.props(powerUsageStyles.section6)}>
+        <div dir="rtl" className="min-w-0 flex-1 overflow-x-auto pb-1">
           <div
             dir="ltr"
-            {...stylex.props(powerUsageStyles.section7)}
+            className="min-w-[var(--usage-heatmap-min-track-width)] px-0.5 @[672px]:min-w-0"
             style={
               { '--usage-heatmap-min-track-width': `${CAL_MIN_TRACK_WIDTH}px` } as CSSProperties
             }
           >
             <div
-              {...stylex.props(powerUsageStyles.grid2)}
+              className="mb-1.5 grid gap-[4px] text-[10px] leading-none text-muted-foreground"
               style={{ gridTemplateColumns: CAL_COLUMN_TEMPLATE }}
             >
               {monthLabels.map(({ column, label }) => (
                 <span
                   key={column}
-                  {...stylex.props(powerUsageStyles.label5)}
+                  className="whitespace-nowrap"
                   style={{ gridColumn: `${column + 1} / span ${MIN_COLUMNS_BETWEEN_MONTH_LABELS}` }}
                 >
                   {label}
@@ -2003,7 +900,7 @@ function UsageHeatmap({
             <div
               role="grid"
               aria-label={labels.heatmap}
-              {...stylex.props(powerUsageStyles.grid3)}
+              className="relative grid grid-rows-7 gap-[4px]"
               style={{ gridTemplateColumns: CAL_COLUMN_TEMPLATE, gridAutoFlow: 'column' }}
               onPointerLeave={clearDetail}
             >
@@ -2016,15 +913,15 @@ function UsageHeatmap({
                     role="gridcell"
                     aria-label={cellLabel(cell)}
                     aria-selected={index === detailIndex}
-                    {...stylex.props(
-                      usageStateStyles.calendarCell,
-                      !cell.isFuture && usageStateStyles.calendarActive,
-                      cell.isFuture ? usageStateStyles.futureCell : usageStateStyles.clickableCell,
-                      index === todayIndex && usageStateStyles.todayCell,
-                      cell.dayStartMs === selectedDayMs &&
-                        (cell.isFuture
-                          ? usageStateStyles.selectedFutureCell
-                          : usageStateStyles.selectedCell)
+                    className={cn(
+                      'aspect-square w-full rounded-[20%] outline-none',
+                      'transition-[filter,opacity] duration-300 motion-reduce:transition-none',
+                      !cell.isFuture &&
+                        'hover:brightness-110 hover:ring-1 hover:ring-foreground/40',
+                      'focus-visible:ring-2 focus-visible:ring-ring',
+                      cell.isFuture ? 'cursor-default' : 'cursor-pointer',
+                      index === todayIndex && 'ring-1 ring-inset ring-foreground/45',
+                      cell.dayStartMs === selectedDayMs && 'ring-1 ring-foreground'
                     )}
                     style={{
                       backgroundColor: cell.isFuture
@@ -2048,33 +945,36 @@ function UsageHeatmap({
       {tooltip && detailCell ? (
         <div
           aria-hidden="true"
-          {...stylex.props(powerUsageStyles.overlay)}
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-popover px-2 py-1.5 text-[11px] leading-tight text-popover-foreground shadow-md ring-1 ring-border/70"
           style={{ left: tooltip.left, top: tooltip.top }}
         >
-          <span {...stylex.props(powerUsageStyles.label6)}>
+          <span className="font-normal tabular-nums">
             {detailCell.isFuture
               ? labels.future
               : detailCell.value > 0
                 ? formatMetric(detailCell.value, metric, locale)
                 : labels.noUsage}
           </span>
-          <span {...stylex.props(powerUsageStyles.label7)}>
+          <span className="ml-1.5 text-popover-foreground/60">
             {formats.day.format(new Date(detailCell.dayStartMs))}
           </span>
           {!detailCell.isFuture && detailCell.dayStartMs !== selectedDayMs ? (
-            <span {...stylex.props(powerUsageStyles.label8)}>{labels.clickForDetails}</span>
+            <span className="mt-0.5 block text-popover-foreground/50">
+              {labels.clickForDetails}
+            </span>
           ) : null}
         </div>
       ) : null}
 
-      <div {...stylex.props(powerUsageStyles.row13)}>
+      <div className="flex h-5 items-center justify-between gap-4">
         {detailCell ? (
-          <p {...stylex.props(powerUsageStyles.caption2)} aria-live="polite">
+          <p
+            className="min-w-0 flex-1 truncate text-xs tabular-nums text-muted-foreground"
+            aria-live="polite"
+          >
             {cellLabel(detailCell)}
             {peakShare !== null ? (
-              <span
-                {...stylex.props(powerUsageStyles.label9)}
-              >{` · ${labels.peakShare(peakShare)}`}</span>
+              <span className="text-muted-foreground/70">{` · ${labels.peakShare(peakShare)}`}</span>
             ) : null}
           </p>
         ) : (
@@ -2110,12 +1010,15 @@ function RankedBars({
     .slice(DAY_DETAIL_ROW_LIMIT)
     .reduce((sum, row) => sum + Math.max(0, row.tokens), 0);
   return (
-    <ul>
+    <ul className="space-y-1">
       {visible.map((row, rank) => (
-        <li key={row.id} {...stylex.props(powerUsageStyles.surface2)}>
+        <li
+          key={row.id}
+          className="relative h-6 overflow-hidden rounded-[5px] bg-muted-foreground/[0.06]"
+        >
           <span
             aria-hidden="true"
-            {...stylex.props(powerUsageStyles.overlay2)}
+            className="absolute inset-y-0 left-0 rounded-[5px]"
             style={{
               width: `${max > 0 ? Math.max(3, (row.tokens / max) * 100) : 0}%`,
               backgroundColor: heatColor(
@@ -2123,17 +1026,17 @@ function RankedBars({
               ),
             }}
           />
-          <span {...stylex.props(powerUsageStyles.row14)}>
+          <span className="relative flex h-full items-center gap-1.5 px-2">
             {row.icon}
-            <span {...stylex.props(powerUsageStyles.label10)}>{row.label}</span>
-            <span {...stylex.props(powerUsageStyles.label11)}>
+            <span className="truncate text-[11px] font-normal text-foreground">{row.label}</span>
+            <span className="ml-auto shrink-0 pl-2 text-[11px] tabular-nums text-muted-foreground">
               {formatCompact(row.tokens, locale)}
             </span>
           </span>
         </li>
       ))}
       {restTokens > 0 ? (
-        <li {...stylex.props(powerUsageStyles.caption5)}>
+        <li className="px-2 pt-0.5 text-[11px] tabular-nums text-muted-foreground/80">
           {otherRows(rows.length - DAY_DETAIL_ROW_LIMIT, formatCompact(restTokens, locale))}
         </li>
       ) : null}
@@ -2186,30 +1089,32 @@ function UsageDayDetailPanel({
     heatColor(COMPOSITION_ALPHAS[index % COMPOSITION_ALPHAS.length]!);
 
   return (
-    <div {...stylex.props(powerUsageStyles.section8)}>
+    <div className="relative pt-2">
       <span
         aria-hidden="true"
-        {...stylex.props(powerUsageStyles.overlay3)}
+        className="absolute top-0.5 h-3 w-3 -translate-x-1/2 rotate-45 rounded-[2px] bg-muted/60"
         style={{ left: anchorX }}
       />
-      <section aria-label={labels.skyline.dayDetail} {...stylex.props(powerUsageStyles.surface3)}>
+      <section
+        aria-label={labels.skyline.dayDetail}
+        className="relative rounded-lg bg-muted/40 p-4"
+      >
         <Button
           size="icon"
           variant="ghost"
           aria-label={labels.skyline.close}
-          xstyle={buttonStyles.close}
-          iconSize="calc(var(--spacing) * 3.5)"
+          className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
           onClick={onClose}
         >
-          <X />
+          <X className="h-3.5 w-3.5" />
         </Button>
-        <div {...stylex.props(powerUsageStyles.grid4)}>
-          <div {...stylex.props(powerUsageStyles.section4)}>
-            <p {...stylex.props(powerUsageStyles.caption6)}>
+        <div className="grid gap-x-6 gap-y-4 lg:grid-cols-[minmax(0,13rem)_1fr]">
+          <div className="min-w-0">
+            <p className="text-[11px] font-normal text-muted-foreground">
               {formats.day.format(new Date(dayStartMs))}
             </p>
-            <p {...stylex.props(powerUsageStyles.row15)}>
-              <span {...stylex.props(powerUsageStyles.label12)}>
+            <p className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-normal leading-none tabular-nums text-foreground">
                 {day ? (
                   <NumberFlow
                     value={day.totals.tokens}
@@ -2220,9 +1125,9 @@ function UsageDayDetailPanel({
                   '—'
                 )}
               </span>
-              <span {...stylex.props(powerUsageStyles.label13)}>{labels.tokens}</span>
+              <span className="text-xs text-muted-foreground">{labels.tokens}</span>
             </p>
-            <p {...stylex.props(powerUsageStyles.frame3)}>
+            <p className="mt-1.5 min-h-4 text-xs tabular-nums text-muted-foreground">
               {day
                 ? [
                     formatUsd(day.totals.costUSD, locale),
@@ -2236,7 +1141,7 @@ function UsageDayDetailPanel({
             </p>
             {hasUsage ? (
               <>
-                <div aria-hidden="true" {...stylex.props(powerUsageStyles.row16)}>
+                <div aria-hidden="true" className="mt-4 flex h-1.5 overflow-hidden rounded-full">
                   {composition.map((segment, index) => (
                     <span
                       key={segment.key}
@@ -2247,16 +1152,16 @@ function UsageDayDetailPanel({
                     />
                   ))}
                 </div>
-                <ul {...stylex.props(usageStateStyles.legendMargin)}>
+                <ul className="mt-2 space-y-1">
                   {composition.map((segment, index) => (
-                    <li key={segment.key} {...stylex.props(powerUsageStyles.row17)}>
+                    <li key={segment.key} className="flex items-center gap-1.5 text-[11px]">
                       <span
                         aria-hidden="true"
-                        {...stylex.props(powerUsageStyles.frame4)}
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
                         style={{ backgroundColor: compositionFill(index) }}
                       />
-                      <span {...stylex.props(powerUsageStyles.label14)}>{segment.label}</span>
-                      <span {...stylex.props(powerUsageStyles.label15)}>
+                      <span className="truncate text-muted-foreground">{segment.label}</span>
+                      <span className="ml-auto shrink-0 tabular-nums text-foreground/80">
                         {formatCompact(segment.value, locale)}
                       </span>
                     </li>
@@ -2265,14 +1170,16 @@ function UsageDayDetailPanel({
               </>
             ) : null}
             {day && !hasUsage ? (
-              <p {...stylex.props(powerUsageStyles.caption7)}>{labels.skyline.noUsage}</p>
+              <p className="mt-4 text-xs text-muted-foreground">{labels.skyline.noUsage}</p>
             ) : null}
           </div>
 
           {hasUsage && day ? (
-            <div {...stylex.props(powerUsageStyles.grid5)}>
-              <div {...stylex.props(powerUsageStyles.section4)}>
-                <p {...stylex.props(powerUsageStyles.caption8)}>{labels.byModel}</p>
+            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+              <div className="min-w-0">
+                <p className="mb-2 text-[11px] font-normal text-muted-foreground">
+                  {labels.byModel}
+                </p>
                 <RankedBars
                   locale={locale}
                   otherRows={labels.skyline.otherRows}
@@ -2284,8 +1191,10 @@ function UsageDayDetailPanel({
                   }))}
                 />
               </div>
-              <div {...stylex.props(powerUsageStyles.section4)}>
-                <p {...stylex.props(powerUsageStyles.caption8)}>{labels.byUser}</p>
+              <div className="min-w-0">
+                <p className="mb-2 text-[11px] font-normal text-muted-foreground">
+                  {labels.byUser}
+                </p>
                 <RankedBars
                   locale={locale}
                   otherRows={labels.skyline.otherRows}
@@ -2296,10 +1205,13 @@ function UsageDayDetailPanel({
                       label,
                       tokens: row.tokens,
                       icon: (
-                        <span data-slot="avatar" {...stylex.props(powerUsageStyles.row18)}>
+                        <span
+                          data-slot="avatar"
+                          className="relative flex size-4 shrink-0 overflow-hidden rounded-full"
+                        >
                           <span
                             data-slot="avatar-fallback"
-                            {...stylex.props(powerUsageStyles.row19)}
+                            className="flex size-full items-center justify-center rounded-full bg-foreground/15 text-[8px] font-normal uppercase text-foreground/80"
                           >
                             {label.slice(0, 2)}
                           </span>
@@ -2416,15 +1328,15 @@ function UsageTokenRings({
     return slice;
   });
   return (
-    <div {...stylex.props(powerUsageStyles.stack4)}>
-      <div {...stylex.props(powerUsageStyles.frame5)}>
+    <div className="flex min-w-0 flex-col items-center">
+      <div className="relative w-[9.5rem] max-w-full sm:w-[10.5rem]">
         <svg
           viewBox={`0 0 ${RING_VIEWBOX} ${RING_VIEWBOX}`}
           role="img"
           aria-label={`${caption}: ${segments
             .map((segment) => `${segment.label} ${Math.round(segment.share * 100)}%`)
             .join(', ')}`}
-          {...stylex.props(powerUsageStyles.glyph2)}
+          className="w-full -rotate-90"
         >
           <circle
             cx={center}
@@ -2455,8 +1367,8 @@ function UsageTokenRings({
             </g>
           ))}
         </svg>
-        <div {...stylex.props(powerUsageStyles.overlay4)}>
-          <span {...stylex.props(powerUsageStyles.frame6)}>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-10 text-center">
+          <span className="w-full truncate text-[15px] font-normal leading-none tabular-nums tracking-tight text-foreground sm:text-base">
             {metric === 'tokens' ? (
               <NumberFlow
                 value={total}
@@ -2467,20 +1379,24 @@ function UsageTokenRings({
               formatUsd(total, locale)
             )}
           </span>
-          <span {...stylex.props(powerUsageStyles.frame7)}>{totalLabel}</span>
+          <span className="mt-1 w-full truncate text-[9px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
+            {totalLabel}
+          </span>
         </div>
       </div>
-      <p {...stylex.props(powerUsageStyles.frame8)}>{caption}</p>
-      <ul {...stylex.props(powerUsageStyles.grid6)}>
+      <p className="mt-3 w-full text-[10px] font-normal uppercase tracking-[0.08em] text-muted-foreground/80">
+        {caption}
+      </p>
+      <ul className="mt-1.5 grid w-full grid-cols-2 gap-x-3 gap-y-1">
         {segments.map((segment) => (
-          <li key={segment.id} {...stylex.props(powerUsageStyles.row20)}>
+          <li key={segment.id} className="flex min-w-0 items-center gap-1 text-[10px]">
             <span
               aria-hidden="true"
-              {...stylex.props(powerUsageStyles.frame9)}
+              className="size-1.5 shrink-0 rounded-full"
               style={{ backgroundColor: segment.color }}
             />
-            <span {...stylex.props(powerUsageStyles.label14)}>{segment.label}</span>
-            <span {...stylex.props(powerUsageStyles.label16)}>
+            <span className="truncate text-muted-foreground">{segment.label}</span>
+            <span className="ml-auto shrink-0 tabular-nums text-foreground/70">
               {Math.round(segment.share * 100)}%
             </span>
           </li>
@@ -2501,14 +1417,16 @@ function CompositionBar({
 }) {
   const grown = useMountedFrame(reduced);
   return (
-    <div {...stylex.props(powerUsageStyles.section4)}>
-      <p {...stylex.props(powerUsageStyles.caption9)}>{label}</p>
-      <div {...stylex.props(powerUsageStyles.row21)}>
+    <div className="min-w-0">
+      <p className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted-foreground/80">
+        {label}
+      </p>
+      <div className="mt-1.5 flex h-1.5 gap-px overflow-hidden rounded-full bg-muted-foreground/10">
         {segments.map((segment) => (
           <span
             key={segment.id}
             title={`${segment.label} · ${Math.round(segment.share * 100)}%`}
-            {...stylex.props(powerUsageStyles.frame10)}
+            className="h-full transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
             style={{
               backgroundColor: segment.color,
               width: grown ? `${segment.share * 100}%` : 0,
@@ -2516,16 +1434,16 @@ function CompositionBar({
           />
         ))}
       </div>
-      <ul {...stylex.props(powerUsageStyles.row22)}>
+      <ul className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
         {segments.map((segment) => (
-          <li key={segment.id} {...stylex.props(powerUsageStyles.row20)}>
+          <li key={segment.id} className="flex min-w-0 items-center gap-1 text-[10px]">
             <span
               aria-hidden="true"
-              {...stylex.props(powerUsageStyles.frame9)}
+              className="size-1.5 shrink-0 rounded-full"
               style={{ backgroundColor: segment.color }}
             />
-            <span {...stylex.props(powerUsageStyles.label17)}>{segment.label}</span>
-            <span {...stylex.props(powerUsageStyles.label18)}>
+            <span className="max-w-[8rem] truncate text-muted-foreground">{segment.label}</span>
+            <span className="tabular-nums text-foreground/70">
               {Math.round(segment.share * 100)}%
             </span>
           </li>
@@ -2539,13 +1457,15 @@ function CompositionBar({
 
 function SummaryStat({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
-    <div {...stylex.props(powerUsageStyles.section4)}>
-      <dt {...stylex.props(powerUsageStyles.caption10)}>{label}</dt>
-      <dd {...stylex.props(powerUsageStyles.caption11)}>{value}</dd>
-      {detail ? <p {...stylex.props(powerUsageStyles.caption12)}>{detail}</p> : null}
+    <div className="min-w-0">
+      <dt className="truncate text-[11px] font-normal text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 truncate text-sm font-normal tabular-nums text-foreground">{value}</dd>
+      {detail ? <p className="truncate text-[11px] text-muted-foreground/80">{detail}</p> : null}
     </div>
   );
 }
+
+const SUMMARY_GRID = 'grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5';
 
 function CalendarSummary({
   model,
@@ -2567,7 +1487,7 @@ function CalendarSummary({
   );
   const dailyAverage = completed.length > 0 ? model.totalValue / completed.length : 0;
   return (
-    <dl {...stylex.props(previewStyles.grid2)}>
+    <dl className={SUMMARY_GRID}>
       <SummaryStat label={labels.total} value={formatMetric(model.totalValue, metric, locale)} />
       <SummaryStat label={labels.dailyAverage} value={formatMetric(dailyAverage, metric, locale)} />
       <SummaryStat
@@ -2615,7 +1535,7 @@ function TimelineSummary({
     longestStreak = Math.max(longestStreak, streak);
   }
   return (
-    <dl {...stylex.props(previewStyles.grid2)}>
+    <dl className={SUMMARY_GRID}>
       <SummaryStat label={labels.total} value={formatMetric(total, metric, locale)} />
       <SummaryStat
         label={labels.averagePerInterval}
@@ -2752,11 +1672,14 @@ function UsageSkylineCard({
   );
 
   return (
-    <section ref={cardRef} {...stylex.props(powerUsageStyles.surface4)}>
-      <header {...stylex.props(powerUsageStyles.row23)}>
-        <div {...stylex.props(powerUsageStyles.section4)}>
-          <h3 {...stylex.props(powerUsageStyles.caption13)}>{labels.skyline.title}</h3>
-          <p {...stylex.props(powerUsageStyles.caption14)}>
+    <section
+      ref={cardRef}
+      className="overflow-hidden rounded-lg border border-border/60 bg-card/40"
+    >
+      <header className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4">
+        <div className="min-w-0">
+          <h3 className="text-sm font-normal text-foreground">{labels.skyline.title}</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             {hourly
               ? labels.windowLong[hourly.range]
               : timeline.range === 'month'
@@ -2764,7 +1687,7 @@ function UsageSkylineCard({
                 : labels.skyline.subtitle}
           </p>
         </div>
-        <div {...stylex.props(powerUsageStyles.row24)}>
+        <div className="flex items-center gap-1.5">
           <TabList
             label={labels.skyline.metric}
             value={metric}
@@ -2773,22 +1696,23 @@ function UsageSkylineCard({
               { value: 'tokens', label: labels.tokens },
               { value: 'costUSD', label: labels.cost },
             ]}
-            xstyle={usageStateStyles.metricTabs}
-            tabXstyle={usageStateStyles.metricTab}
-            activeXstyle={usageStateStyles.metricActive}
+            className="inline-flex items-center rounded-md bg-muted/60 p-0.5"
+            tabClassName="rounded-[5px] px-2.5 py-1 text-xs font-normal transition-colors"
+            activeClassName="bg-background text-foreground shadow-xs ring-1 ring-border/70"
           />
         </div>
       </header>
 
-      <div {...stylex.props(powerUsageStyles.section9)}>
+      <div className="p-4">
         <div
-          {...stylex.props(
-            usageStateStyles.chartLayout,
-            showRings && usageStateStyles.chartWithRings
+          className={cn(
+            'relative min-w-0',
+            showRings &&
+              'grid items-center gap-x-6 gap-y-5 sm:grid-cols-[minmax(0,10.5rem)_minmax(0,1fr)]'
           )}
         >
           {showRings && hourly ? (
-            <div {...stylex.props(powerUsageStyles.section4)}>
+            <div className="min-w-0">
               <UsageTokenRings
                 segments={rings}
                 caption={labels.breakdown.title}
@@ -2802,7 +1726,7 @@ function UsageSkylineCard({
           ) : null}
           <div
             key={hourly ? 'hourly' : 'skyline'}
-            {...stylex.props(usageStateStyles.fullWidth, !reduced && usageStateStyles.crossFade)}
+            className={cn('w-full min-w-0', !reduced && CROSS_FADE)}
           >
             {hourly ? (
               <UsageRangePanel
@@ -2835,15 +1759,15 @@ function UsageSkylineCard({
             bezier approximates a soft spring. */}
         <div
           ref={detailRef}
-          {...stylex.props(
-            usageStateStyles.detail,
-            selectedDay ? usageStateStyles.detailOpen : usageStateStyles.detailClosed
+          className={cn(
+            'grid transition-[grid-template-rows,opacity] duration-[450ms] ease-[cubic-bezier(0.34,1.25,0.64,1)] motion-reduce:transition-none',
+            selectedDay ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
           )}
           onTransitionEnd={() => {
             if (!selectedDay) setCollapsingDay(null);
           }}
         >
-          <div {...stylex.props(powerUsageStyles.frame11)}>
+          <div className="min-h-0 overflow-hidden">
             {collapsingDay ? (
               <UsageDayDetailPanel
                 dayStartMs={collapsingDay.dayStartMs}
@@ -2860,8 +1784,8 @@ function UsageSkylineCard({
         </div>
       </div>
 
-      <div {...stylex.props(powerUsageStyles.surface5)}>
-        <div {...stylex.props(powerUsageStyles.grid7)}>
+      <div className="bg-muted/25 px-4 py-4 sm:px-5">
+        <div className="mb-6 grid gap-x-6 gap-y-3 border-t border-border/50 pt-3 sm:grid-cols-2">
           <CompositionBar label={labels.byModel} segments={modelSegments} reduced={reduced} />
           <CompositionBar label={labels.byUser} segments={memberSegments} reduced={reduced} />
         </div>
@@ -3031,7 +1955,7 @@ function StackedAreaPlot({
   const xInterval = Math.max(0, Math.ceil(count / 8) - 1);
 
   return (
-    <svg width={width} height={height} {...stylex.props(powerUsageStyles.glyph3)}>
+    <svg width={width} height={height} className="block overflow-visible">
       {ticks.map((tick) => (
         <line
           key={tick}
@@ -3125,26 +2049,26 @@ function UsageStackedAreaChart({
   const prepared = useMemo(() => prepareChart(buckets, otherLabel), [buckets, otherLabel]);
   const [plotRef, width] = useElementWidth();
   const header = (
-    <header {...stylex.props(powerUsageStyles.row25)}>
-      <p {...stylex.props(powerUsageStyles.caption15)}>{title}</p>
+    <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+      <p className="text-xs font-normal text-muted-foreground">{title}</p>
     </header>
   );
 
   if (!prepared) {
     return (
-      <div {...stylex.props(powerUsageStyles.surface6)}>
+      <div className="rounded-lg border border-border/70 bg-card/60 text-sm">
         {header}
-        <div {...stylex.props(powerUsageStyles.section9)}>
-          <p {...stylex.props(powerUsageStyles.caption16)}>{emptyText}</p>
+        <div className="p-4">
+          <p className="text-sm text-muted-foreground">{emptyText}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div {...stylex.props(powerUsageStyles.surface7)}>
+    <div className="overflow-hidden rounded-lg border border-border/70 bg-card/60">
       {header}
-      <div {...stylex.props(powerUsageStyles.section9)}>
+      <div className="p-4">
         <div ref={plotRef} style={{ height: chartHeight }}>
           {width > 0 ? (
             <StackedAreaPlot
@@ -3157,25 +2081,31 @@ function UsageStackedAreaChart({
           ) : null}
         </div>
       </div>
-      <div {...stylex.props(powerUsageStyles.section10)}>
-        <div {...stylex.props(powerUsageStyles.row26)}>
+      <div className="border-t border-border/60 px-4 pb-3 pt-2">
+        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
           {prepared.series.map((s) => (
-            <div key={s.id} {...stylex.props(powerUsageStyles.row27)}>
+            <div key={s.id} className="inline-flex items-center gap-1.5 text-xs">
               {renderSeriesMarker ? (
                 renderSeriesMarker(s)
               ) : (
                 <span
-                  {...stylex.props(powerUsageStyles.frame12)}
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-xs"
                   style={{ backgroundColor: s.color }}
                 />
               )}
               <span
-                {...stylex.props(tintSeriesLabel ? previewStyles.section2 : previewStyles.text)}
+                className={
+                  tintSeriesLabel
+                    ? 'max-w-[200px] truncate whitespace-nowrap font-normal'
+                    : 'max-w-[200px] truncate whitespace-nowrap text-muted-foreground'
+                }
                 style={tintSeriesLabel ? { color: s.color } : undefined}
               >
                 {s.label}
               </span>
-              <span {...stylex.props(powerUsageStyles.label19)}>{formatValue(s.total)}</span>
+              <span className="shrink-0 whitespace-nowrap font-mono text-foreground">
+                {formatValue(s.total)}
+              </span>
             </div>
           ))}
         </div>
@@ -3214,29 +2144,33 @@ export function PowerUsageView({
   );
 
   return (
-    <div data-power-demo-layout="usage" {...stylex.props(usageStateStyles.usageStack)}>
-      <div {...stylex.props(powerUsageStyles.row28)}>
-        <div {...stylex.props(powerUsageStyles.section4)}>
-          <h2 {...stylex.props(powerUsageStyles.caption17)}>{workspaceName || labels.title}</h2>
-          <p {...stylex.props(powerUsageStyles.caption14)}>{labels.windowLong[range]}</p>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-normal leading-tight text-foreground">
+            {workspaceName || labels.title}
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{labels.windowLong[range]}</p>
         </div>
-        <div {...stylex.props(powerUsageStyles.row24)}>
+        <div className="flex items-center gap-1.5">
           <TabList
             label={labels.range}
             value={range}
             onChange={onRangeChange}
             options={RANGE_ORDER.map((value) => ({ value, label: labels.windowShort[value] }))}
-            xstyle={usageStateStyles.rangeTabs}
-            tabXstyle={usageStateStyles.rangeTab}
-            activeXstyle={usageStateStyles.rangeActive}
+            className="inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-muted/40 p-0.5"
+            tabClassName="rounded-md px-3 py-1 text-xs font-normal transition-colors"
+            activeClassName="bg-background text-foreground shadow-xs"
           />
         </div>
       </div>
 
-      <div {...stylex.props(powerUsageStyles.grid8)}>
+      <div className="grid grid-cols-2 gap-3">
         <StatTile
           label={labels.tokens}
-          footer={<Coins {...stylex.props(powerUsageStyles.glyph4)} />}
+          footer={
+            <Coins className="absolute -bottom-8 -right-8 h-60 w-60 text-muted-foreground/10 dark:text-muted-foreground/5" />
+          }
         >
           <NumberFlow
             value={totals.tokens}
@@ -3246,7 +2180,9 @@ export function PowerUsageView({
         </StatTile>
         <StatTile
           label={labels.cost}
-          footer={<DollarSign {...stylex.props(powerUsageStyles.glyph5)} />}
+          footer={
+            <DollarSign className="absolute -bottom-5 -right-10 h-50 w-50 text-muted-foreground/10 dark:text-muted-foreground/5 rotate-[-25deg]" />
+          }
         >
           <NumberFlow
             value={totals.costUSD}

@@ -258,40 +258,12 @@ and focus as well as the component's own hover and focus.
 
 ## Verify a style change
 
-Identify the owned surface and its actual callers, including dynamic styles,
-Slot/render children, integration hooks and portals. Capture the unchanged source
-before editing, then build the final source into a separate immutable directory.
-Use the same maintained profile and Chromium environment for both captures. The
-[visual acceptance workflow](../../tests/visual/README.md) owns the commands,
-profile map, deterministic policy and report contract.
+Inspect actual callers, Slot/render children, portals and dynamic styles. Verify
+resting, hover, focus, disabled and selected states in the affected host, including
+light/dark themes and relevant viewport and scoped-variable boundaries. Compare
+computed layout and physical CSS readers as well as rendered appearance.
 
-Profiles render production components with synthetic data. Include important
-states, both themes, relevant viewport boundaries and actual pointer/keyboard
-interactions. Verify the effective theme and visible state rather than assuming
-URL globals or stable geometry establish them: a panel can be stable at opacity
-zero, and an avatar fallback is a different state from a loaded image. Use real
-completion signals, including selection, clipping and portal state where relevant.
-A narrow desktop viewport does not qualify a mobile UA-dependent branch.
-
-Run the owning behavior suites, typecheck and formatting as well as the real-browser
-gate. The [design-system AST inventory](../../scripts/design-system-audit.mjs) can
-locate declarations needing semantic owner review; candidate or unresolved counts
-are neither violations nor a visual acceptance result. Do not reinstall the retired
-Tailwind compiler merely to reproduce historical source inventories.
-
-The static gate requires independent repeatability, zero raw pixel differences and
-equal recorded geometry/content. Computed CSS differences remain explicit. Inspect
-the self-contained report in a browser, investigate each difference and preserve
-failed runs under ignored `artifacts/visual/`. A corrected capture uses a new output
-directory; it does not overwrite evidence or close unexplained historical differences.
-Generated reports, screenshots and per-run inventories stay outside the source tree.
-
-Intentional design-system changes need separate After-only token/material and
-interaction contracts. Passing those checks does not turn a changed Before/After
-image into equivalence. Keep intentional changes, unresolved differences and
-unverified states distinct in the report.
-
-Validate the actual built desktop where the affected route or host behavior matters.
-Storybook success does not establish full-app, native or backend coverage. A completed
-surface has verified production rendering and behavior with its real callers; remaining
-unvisited states and open visual differences still limit the larger migration claim.
+Run the owning behavior suites, typecheck and formatting. Component previews do
+not establish full-application or native-host coverage. Record intentional design
+changes and unresolved differences separately; compilation alone does not prove
+visual compatibility.

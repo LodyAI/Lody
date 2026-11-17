@@ -6,12 +6,11 @@ colours and layout scales; a legacy theme alias is not proof of design-system
 conformance. [Design-system convergence](../../../../.agents/notes/implemented/architecture/2026-11-07-design-system-convergence.md)
 owns the deliberate replacement of preserved legacy overrides.
 
-| Part                                              | Responsibility                                                        |
-| ------------------------------------------------- | --------------------------------------------------------------------- |
-| [Theme colors](theme-colors.stylex.ts)            | App semantic colors, including portals and VS Code themes.            |
-| [Theme scale](theme-scale.stylex.ts)              | Existing spacing, radius, type, motion, shadow and stacking scales.   |
-| [Migration guide](MIGRATION.md)                   | Style ownership, cascade, compatibility and real visual verification. |
-| [Visual acceptance](../../tests/visual/README.md) | Deterministic browser verification and self-contained HTML reports.   |
+| Part                                   | Responsibility                                                        |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| [Theme colors](theme-colors.stylex.ts) | App semantic colors, including portals and VS Code themes.            |
+| [Theme scale](theme-scale.stylex.ts)   | Existing spacing, radius, type, motion, shadow and stacking scales.   |
+| [Migration guide](MIGRATION.md)        | Style ownership, cascade, compatibility and real visual verification. |
 
 The declaration bridge, its Tailwind-dependent profile and the Electron Tailwind
 plugin have been removed. Browser normalization and ordinary theme defaults live
@@ -90,12 +89,6 @@ Do **not** mint a token per alpha step (`muted60`, `border60`, …). There is no
 semantic behind most of those numbers, and a token would freeze a value the
 theme may want to move. Choose an existing semantic role for the component or
 material before introducing a new token.
-
-Use the current read-only inventory with `node scripts/design-system-audit.mjs`.
-It records opacity, mixes, shadows and literal colours with owner/state context;
-its findings require semantic review and are not a violation count. Visibility,
-artwork and motion are distinct from disabled controls or hint text. Add a named
-role only when an actual semantic gap exists; do not create `muted60`-style steps.
 
 ## Size map
 

@@ -1037,8 +1037,7 @@ element for virtualization, keyboard handling and scroll restoration. Root and
 viewport classes/styles carry caller layout, not thumb appearance.
 `contentFullHeight` lets the owned Content box fill the viewport for a full-height
 fold layout. It adds no wrapper; callers keep scrolling and measurement on the same
-native viewport. See the [integration decision](../../.agents/notes/implemented/architecture/2026-11-07-stylex-main-integration.md)
-for the ownership and verification boundary.
+native viewport.
 
 `contentStyle` can constrain the content wrapper's layout, for example to allow
 a horizontal tab strip to shrink to the viewport before its contents overflow.

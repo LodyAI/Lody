@@ -29,30 +29,6 @@ describe('collapsible card public contracts', () => {
     container.remove();
   });
 
-  it('preserves caller inline styles on the root, header, title and scrolling content', () => {
-    act(() => {
-      root.render(
-        <CollapsibleCard defaultOpen data-testid="card" style={{ maxWidth: 430 }}>
-          <CollapsibleCardHeader data-testid="header" style={{ height: 37 }}>
-            <CollapsibleCardTitle data-testid="title" style={{ color: 'rgb(12, 34, 56)' }}>
-              Synthetic title
-            </CollapsibleCardTitle>
-          </CollapsibleCardHeader>
-          <CollapsibleCardContent data-testid="content" style={{ paddingBottom: 3 }}>
-            Synthetic content
-          </CollapsibleCardContent>
-        </CollapsibleCard>
-      );
-    });
-
-    const element = (testId: string) =>
-      container.querySelector<HTMLElement>(`[data-testid="${testId}"]`)!;
-    expect(element('card').style.maxWidth).toBe('430px');
-    expect(element('header').style.height).toBe('37px');
-    expect(element('title').style.color).toBe('rgb(12, 34, 56)');
-    expect(element('content').style.paddingBottom).toBe('3px');
-  });
-
   it('keeps the real toggle button connected to controlled open state and content visibility', () => {
     function ControlledCard() {
       const [open, setOpen] = useState(false);

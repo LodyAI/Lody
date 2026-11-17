@@ -205,36 +205,25 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
-  # The site owns its StyleX skin; the patched Fumadocs runtime only joins class names.
-  '@fumadocs/base-ui@16.8.12>@fumadocs/tailwind': '-'
-  '@fumadocs/base-ui@16.8.12>tailwind-merge': '-'
-  # The quote converters exchange HAST nodes and must share their augmented types.
-  'hast-util-from-dom>@types/hast': 3.0.5
-  'hast-util-to-mdast>@types/hast': 3.0.5
-  # Tango Consumable needs one class identity across ADB and scrcpy streams.
-  '@yume-chan/stream-extra': 2.6.1
-  # CodeMode tools and Lody must share the same Effect runtime and schema identity.
-  '@opencode/codemode>effect': 4.0.2
-  # GHSA-xjj6-f33q-929c: patch each affected major without crossing API/runtime floors.
-  'undici@>=6.23.0 <6.29.1': 6.29.1
-  'undici@>=7.18.0 <7.30.1': 7.30.1
-  'undici@>=8.0.0 <8.12.2': 8.12.2
-  # The local Lab server shares the approved Node-API 10 SQLite runtime.
   '@loro-dev/streams-crdt>@loro-dev/flock-wasm': ^0.5.0
   'loro-repo>@loro-dev/flock-wasm': ^0.5.0
   'loro-repo>@loro-dev/streams-crdt': 0.20.0
   '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
+  '@opencode/codemode>effect': 4.0.2
   '@peculiar/x509>@peculiar/asn1-schema': 2.10.0
+  '@yume-chan/stream-extra': 2.6.1
   acp-extension-core: workspace:*
   electron-builder-squirrel-windows: ^26.15.3
+  hast-util-from-dom>@types/hast: 3.0.5
+  hast-util-to-mdast>@types/hast: 3.0.5
   tsx@4.21.0>esbuild: 0.27.0
+  undici@>=6.23.0 <6.29.1: 6.29.1
+  undici@>=7.18.0 <7.30.1: 7.30.1
+  undici@>=8.0.0 <8.12.2: 8.12.2
   vite@7.3.1>esbuild: 0.27.0
   zod: 4.3.6
 
 packageExtensions:
-  '@fumadocs/base-ui@16.8.12':
-    dependencies:
-      clsx: 2.1.1
   konsta@4.0.1:
     peerDependencies:
       react: '*'
@@ -242,7 +231,6 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
-  '@fumadocs/base-ui@16.8.12': patches/@fumadocs__base-ui@16.8.12.patch
   '@better-auth/api-key@1.6.33': patches/@better-auth__api-key@1.6.33.patch
   '@better-auth/electron@1.6.33': patches/@better-auth__electron@1.6.33.patch
   '@hpke/common@1.10.1': patches/@hpke__common@1.10.1.patch
@@ -252,7 +240,6 @@ patchedDependencies:
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   '@xterm/xterm@5.5.0': patches/@xterm__xterm@5.5.0.patch
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
-  # Backport isaacs/node-glob 4682e8c9; remove when compatible parents adopt the fix.
   glob@13.0.1: patches/glob@13.0.1.patch
   mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
   pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch

@@ -1,13 +1,12 @@
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
-import stylex from '@stylexjs/unplugin';
-import { siteStylexOptions } from './stylex-options';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import mdx from 'fumadocs-mdx/vite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NodeRequest, sendNodeResponse } from 'srvx/node';
 import type { DevEnvironment, Plugin, RunnableDevEnvironment } from 'vite';
-import { defineConfig, perEnvironmentPlugin } from 'vite';
+import { defineConfig } from 'vite';
 import { resolveModulePreloadDependencies } from './lib/module-preload';
 import { collectSitePaths } from './scripts/site-paths.mjs';
 
@@ -66,7 +65,7 @@ const alias = [
   { find: '@site', replacement: siteSrc },
 ];
 
-export default defineConfig(({ command }) => ({
+export default defineConfig({
   server: {
     port: 3002,
   },
@@ -93,9 +92,7 @@ export default defineConfig(({ command }) => ({
     }),
     installStartDevServerMiddleware(),
     mdx(),
-    command === 'build'
-      ? perEnvironmentPlugin('site-stylex', () => stylex.vite(siteStylexOptions))
-      : stylex.vite(siteStylexOptions),
+    tailwindcss(),
     react(),
   ],
   ssr: {
@@ -125,4 +122,4 @@ export default defineConfig(({ command }) => ({
       resolveDependencies: resolveModulePreloadDependencies,
     },
   },
-}));
+});

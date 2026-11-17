@@ -1,70 +1,8 @@
-import * as stylex from '@stylexjs/stylex';
 import type { ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, MessageCircle, RefreshCw, Share2, X } from 'lucide-react';
 import { Button } from './button';
 import type { ReplicaLocale } from './types';
-const previewStyles = stylex.create({
-  row: {
-    display: 'flex',
-    'min-width': '0px',
-    'align-items': 'center',
-    gap: 'calc(var(--spacing) * 0.5)',
-    'border-bottom-style': 'solid',
-    'border-bottom-width': '1px',
-    'border-color': 'hsl(var(--border))',
-    'background-color': 'hsl(var(--background))',
-    'padding-inline': 'calc(var(--spacing) * 1.5)',
-    'padding-top': 'calc(0.375rem + var(--safe-area-top))',
-    'padding-bottom': 'calc(var(--spacing) * 1.5)',
-  },
-  frame: {
-    height: 'calc(var(--spacing) * 4)',
-    width: 'calc(var(--spacing) * 4)',
-  },
-  section: {
-    'min-width': '0px',
-    flex: '1',
-    'padding-inline': 'var(--spacing)',
-  },
-  row2: {
-    display: 'flex',
-    height: 'calc(var(--spacing) * 8)',
-    'min-width': '0px',
-    'align-items': 'center',
-    'border-radius': 'var(--radius-md)',
-    'border-style': 'solid',
-    'border-width': '1px',
-    'border-color': 'hsl(var(--input-border))',
-    'transition-property':
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-    'transition-timing-function': 'var(--default-transition-timing-function)',
-    'transition-duration': 'var(--default-transition-duration)',
-    ':focus-within': {
-      'border-color': 'hsl(var(--ring))',
-      'box-shadow':
-        '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 calc(1px + 0px) hsl(var(--ring)), 0 0 #0000',
-    },
-  },
-  text: {
-    height: '100%',
-    'min-width': '0px',
-    flex: '1',
-    'background-color': 'transparent',
-    'padding-inline': 'calc(var(--spacing) * 2.5)',
-    'font-size': 'var(--text-xs)',
-    'line-height': 'var(--text-xs--line-height)',
-    color: 'hsl(var(--foreground))',
-    'outline-style': 'none',
-    '::placeholder': {
-      color: 'hsl(var(--muted-foreground))',
-    },
-  },
-});
-
-const buttonStyles = stylex.create({
-  control: { height: 'calc(var(--spacing) * 8)', width: 'calc(var(--spacing) * 8)', flexShrink: 0 },
-  pressed: { backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))' },
-});
+import { cn } from './utils';
 
 /* Display-only replica of `sessions/session-browser-toolbar.tsx` for the design
    demo: no history (back/forward disabled), annotation available, sharing
@@ -101,13 +39,13 @@ function ToolbarButton({
   label,
   disabled,
   pressed,
-  xstyle,
+  className,
   children,
 }: {
   label: string;
   disabled?: boolean;
   pressed?: boolean;
-  xstyle?: stylex.StyleXStyles;
+  className?: string;
   children: ReactNode;
 }) {
   return (
@@ -115,7 +53,7 @@ function ToolbarButton({
       type="button"
       variant="ghost"
       size="icon"
-      xstyle={[buttonStyles.control, xstyle]}
+      className={cn('h-8 w-8 shrink-0', className)}
       aria-label={label}
       aria-pressed={pressed}
       disabled={disabled}
@@ -138,23 +76,19 @@ export function ReplicaBrowserToolbar({
 }) {
   const labels = LABELS[locale];
   return (
-    <div {...stylex.props(previewStyles.row)}>
+    <div className="flex min-w-0 items-center gap-0.5 border-b border-border bg-background px-1.5 pb-1.5 pt-[calc(0.375rem+var(--safe-area-top))]">
       <ToolbarButton label={labels.back} disabled>
-        <ArrowLeft {...stylex.props(previewStyles.frame)} />
+        <ArrowLeft className="h-4 w-4" />
       </ToolbarButton>
       <ToolbarButton label={labels.forward} disabled>
-        <ArrowRight {...stylex.props(previewStyles.frame)} />
+        <ArrowRight className="h-4 w-4" />
       </ToolbarButton>
       <ToolbarButton label={loading ? labels.stop : labels.reload}>
-        {loading ? (
-          <X {...stylex.props(previewStyles.frame)} />
-        ) : (
-          <RefreshCw {...stylex.props(previewStyles.frame)} />
-        )}
+        {loading ? <X className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
       </ToolbarButton>
 
-      <div {...stylex.props(previewStyles.section)}>
-        <div {...stylex.props(previewStyles.row2)}>
+      <div className="min-w-0 flex-1 px-1">
+        <div className="flex h-8 min-w-0 items-center rounded-md border border-input-border bg-input-field transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
           <input
             type="text"
             inputMode="url"
@@ -165,20 +99,20 @@ export function ReplicaBrowserToolbar({
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
-            {...stylex.props(previewStyles.text)}
+            className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
       </div>
 
       <ToolbarButton
         label={annotating ? ANNOTATE_DISABLE_LABEL : ANNOTATE_ENABLE_LABEL}
-        xstyle={annotating ? buttonStyles.pressed : undefined}
+        className={annotating ? 'bg-accent text-accent-foreground' : undefined}
         pressed={annotating}
       >
-        <MessageCircle {...stylex.props(previewStyles.frame)} />
+        <MessageCircle className="h-4 w-4" />
       </ToolbarButton>
       <ToolbarButton label={labels.share}>
-        <Share2 {...stylex.props(previewStyles.frame)} />
+        <Share2 className="h-4 w-4" />
       </ToolbarButton>
     </div>
   );
