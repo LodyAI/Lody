@@ -34,7 +34,12 @@ export interface SessionActivitySnapshot {
   parentSessionId?: SessionId;
 }
 
-export type PrefetchOutcome = 'synced' | 'skipped' | 'failed' | 'cache_rejected';
+export type PrefetchOutcome =
+  | 'synced'
+  | 'skipped'
+  | 'failed'
+  | 'cache_rejected'
+  | 'apply_incomplete';
 
 /** The subset of the room-sync registry the coordinator depends on. */
 export interface CoordinatorRegistryView {
@@ -386,14 +391,20 @@ export function createBackgroundSyncCoordinator(
           // before it creates a worker.
           recordSyncedThrough(sessionId, lastMessageAt);
         }
-        if (outcome === 'cache_rejected' || outcome === 'failed') {
+        if (
+          outcome === 'cache_rejected' ||
+          outcome === 'failed' ||
+          outcome === 'apply_incomplete'
+        ) {
           cacheRejected.delete(sessionId);
           cacheRejected.set(sessionId, {
             activity: lastMessageAt,
             until:
               prefetcher.getRetryAt?.(sessionId) ??
               clock.now() +
-                (outcome === 'failed' ? FAILED_PREFETCH_COOLDOWN_MS : CACHE_REJECTION_COOLDOWN_MS),
+                (outcome === 'cache_rejected'
+                  ? CACHE_REJECTION_COOLDOWN_MS
+                  : FAILED_PREFETCH_COOLDOWN_MS),
           });
           if (cacheRejected.size > 1000) cacheRejected.delete(cacheRejected.keys().next().value!);
         }

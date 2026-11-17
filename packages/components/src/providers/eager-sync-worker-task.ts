@@ -113,7 +113,12 @@ export async function runEagerSyncWorkerTask(
         snapshotUpload: { canUpload: async () => false },
       });
       const result = await transport.catchup();
-      if (!result.ok) throw result.error;
+      if (!result.ok) {
+        // Exhausting the recovery budget still means missing dependencies. An
+        // existing checkpoint must not shorten this room's download backoff.
+        if (result.error.code === 'apply_incomplete') return 'apply_incomplete' as const;
+        throw result.error;
+      }
       const cursor = await cursors.load(streamUrl);
       if (cursor)
         cloudCheckpoint = {
@@ -125,7 +130,7 @@ export async function runEagerSyncWorkerTask(
     // A snapshot excludes unresolved imports. Never certify missing data or
     // advance activity progress, even if the transport reports catch-up complete.
     if (doc.exportPendingUpdates() !== undefined) {
-      throw new Error('Eager-sync document has unresolved imports');
+      return 'apply_incomplete' as const;
     }
     const snapshot = new Blob([doc.export({ mode: 'snapshot' }).slice().buffer]);
     const stored = await (deps.writeSnapshot ?? writeEagerSyncSnapshot)({

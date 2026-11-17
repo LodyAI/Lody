@@ -3,7 +3,7 @@ export const EAGER_SYNC_ADMISSION_DB = 'lody:eager-sync-admission-v1';
 export const CACHE_REJECTION_COOLDOWN_MS = 30 * 60 * 1000;
 export const FAILED_PREFETCH_COOLDOWN_MS = 60 * 1000;
 export const MAX_PREFETCH_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-export type PrefetchRetryKind = 'cache_rejected' | 'failed';
+export type PrefetchRetryKind = 'cache_rejected' | 'failed' | 'apply_incomplete';
 const STORE = 'rejections';
 const MAX_ENTRIES = 1000;
 export type EagerSyncRejection = {
@@ -27,6 +27,8 @@ export function eagerSyncRetryDelay(
 ): number {
   const initial =
     kind === 'cache_rejected' ? CACHE_REJECTION_COOLDOWN_MS : FAILED_PREFETCH_COOLDOWN_MS;
+  // Incomplete imports may require a full bootstrap in every new worker. A
+  // checkpoint does not make those downloads cheap or supply missing ancestors.
   const cap =
     kind === 'failed' && hasCheckpoint ? CACHE_REJECTION_COOLDOWN_MS : MAX_PREFETCH_COOLDOWN_MS;
   return Math.min(cap, initial * 2 ** Math.min(20, Math.max(0, attempts - 1)));

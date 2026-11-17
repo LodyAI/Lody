@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createServer } from 'node:http';
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import {
   readEagerSyncRejection,
@@ -1075,12 +1076,16 @@ describe('cloud prefetch checkpoints', () => {
       h.remote.commit();
       h.setDelta(h.remote.export({ mode: 'update', from: afterMissing }));
       const first = create();
-      expect(await first.prefetch('room', 2, new AbortController().signal)).toBe('failed');
+      expect(await first.prefetch('room', 2, new AbortController().signal)).toBe(
+        'apply_incomplete'
+      );
       expect(first.getRetryAt('room')).toBe(60_000);
       first.dispose();
       h.reads.length = 0;
       const restarted = create();
-      expect(await restarted.prefetch('room', 3, new AbortController().signal)).toBe('failed');
+      expect(await restarted.prefetch('room', 3, new AbortController().signal)).toBe(
+        'apply_incomplete'
+      );
       expect(h.reads).toEqual([]);
       expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
       expect((await h.read())?.lastMessageAt).toBe(1);
@@ -1100,6 +1105,121 @@ describe('cloud prefetch checkpoints', () => {
     }
   });
 
+  it('bounds incomplete checkpoint bootstrap downloads over 24 hours across window restarts', async () => {
+    async function observeDay(legacyNetworkClassification: boolean) {
+      const h = harness();
+      // Exercise actual loopback HTTP with the published SDK, not a simulated
+      // transport outcome. Only the server's CRDT bytes and clock are controlled.
+      const server = createServer(async (request, response) => {
+        const result = await h.fetch(`http://127.0.0.1${request.url}`, { method: request.method });
+        response.writeHead(result.status, Object.fromEntries(result.headers));
+        response.end(Buffer.from(await result.arrayBuffer()));
+      });
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Missing HTTP fixture address');
+      h.request.transport.streamUrl = `http://127.0.0.1:${address.port}/ds/bucket/room`;
+      h.deps.fetch = (input, init) => globalThis.fetch(input, init);
+      let now = 0;
+      let attempts = 0;
+      let dayAttempts = 0;
+      let dayDownloads = 0;
+      let lastDelay = 0;
+      const perAttemptBootstraps: number[] = [];
+      try {
+        expect(await runEagerSyncWorkerTask(h.request, h.deps)).toBe('synced');
+        const before = (await h.read())!;
+        h.remote.getText('body').insert(0, 'missing');
+        h.remote.commit();
+        const afterMissing = h.remote.oplogVersion();
+        h.remote.getText('body').insert(7, 'pending');
+        h.remote.commit();
+        // Every fresh task sees an expired cursor and a bootstrap that still
+        // cannot supply the missing predecessor. These are real SDK HTTP reads.
+        const incomplete = h.remote.export({ mode: 'update', from: afterMissing });
+        h.setBootstrap(incomplete);
+        h.setDelta(incomplete);
+        h.reads.length = 0;
+        const day = 24 * 60 * 60 * 1000;
+        // Continue the repaired path into day two to reach its 24-hour cap.
+        while (now <= (legacyNetworkClassification ? day : 2 * day)) {
+          const client = clientHarness(
+            async () => h.request.transport,
+            h.read,
+            async () => 'token',
+            {
+              now: () => now,
+              readRejection: readEagerSyncRejection,
+              createWorker: () =>
+                new TestWorker((worker) => {
+                  attempts++;
+                  h.gone();
+                  const input = worker.inputs.find((message) => message.type === 'start')!;
+                  void runEagerSyncWorkerTask(input, h.deps).then(
+                    (outcome) => {
+                      expect(outcome).toBe('apply_incomplete');
+                      worker.emit({
+                        type: 'complete',
+                        // Negative control: the old worker classified incomplete
+                        // state as a network failure, selecting the 30-minute cap.
+                        outcome: legacyNetworkClassification ? 'failed' : outcome,
+                      });
+                    },
+                    () => worker.emit({ type: 'complete', outcome: 'failed' })
+                  );
+                }) as unknown as Worker,
+            }
+          ).client;
+          try {
+            const bootstrapBefore = h.reads.filter((url) =>
+              url.pathname.endsWith('/bootstrap')
+            ).length;
+            expect(await client.prefetch('room', attempts + 2, new AbortController().signal)).toBe(
+              legacyNetworkClassification ? 'failed' : 'apply_incomplete'
+            );
+            const downloads =
+              h.reads.filter((url) => url.pathname.endsWith('/bootstrap')).length - bootstrapBefore;
+            perAttemptBootstraps.push(downloads);
+            if (now <= day) {
+              dayAttempts++;
+              dayDownloads += downloads;
+            }
+            const retryAt = client.getRetryAt('room')!;
+            expect(retryAt).toBeGreaterThan(now);
+            // Newer activity in another window cannot bypass persisted backoff.
+            lastDelay = retryAt - now;
+            now = retryAt;
+          } finally {
+            client.dispose();
+          }
+        }
+        expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
+        expect((await h.read())?.lastMessageAt).toBe(1);
+        expect(perAttemptBootstraps.every((count) => count > 0)).toBe(true);
+        return { attempts: dayAttempts, downloads: dayDownloads, lastDelay };
+      } finally {
+        h.remote.free();
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        );
+      }
+    }
+    const bounded = await observeDay(false);
+    const oldPolicy = await observeDay(true);
+    // Delays 1,2,4,... minutes admit t=0,1,3,...,1023: eleven attempts.
+    // The old 30-minute cap admits t=0,1,3,7,15,31,61,...,1411: fifty-two.
+    expect(bounded.attempts).toBe(11);
+    expect(bounded.downloads).toBeLessThanOrEqual(60);
+    expect(oldPolicy.attempts).toBe(52);
+    expect(oldPolicy.downloads).toBeGreaterThan(4 * bounded.downloads);
+    expect(bounded.lastDelay).toBe(24 * 60 * 60 * 1000);
+    expect(oldPolicy.lastDelay).toBe(30 * 60 * 1000);
+  });
+
   it('does not persist pending imports or activity progress', async () => {
     const h = harness();
     try {
@@ -1112,9 +1232,9 @@ describe('cloud prefetch checkpoints', () => {
       h.remote.getText('body').insert(7, 'pending');
       h.remote.commit();
       h.setDelta(h.remote.export({ mode: 'update', from: beforeB }));
-      await expect(
-        runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)
-      ).rejects.toBeDefined();
+      expect(await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)).toBe(
+        'apply_incomplete'
+      );
       expect((await h.read())?.lastMessageAt).toBe(1);
       h.setDelta(h.remote.export({ mode: 'update', from: beforeA }));
       expect(await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)).toBe(
@@ -1143,4 +1263,102 @@ describe('cloud prefetch checkpoints', () => {
       h.remote.free();
     }
   });
+});
+
+describe('cloud prefetch uses the published Legacy Streams boundary', () => {
+  for (const fenced of [false, true]) {
+    it(
+      fenced
+        ? 'does not create a missing namespace or cache a successful read after a gateway fence'
+        : 'cold bootstraps real Loro into the disposable worker cache without uploading',
+      async () => {
+        const remote = new LoroDoc();
+        remote.getMap('data').set('title', 'remote worker content');
+        remote.commit();
+        const snapshot = remote.export({ mode: 'snapshot' });
+        let created = false;
+        let cached: EagerSyncSnapshot | undefined;
+        const methods: string[] = [];
+        const metadata = { 'Stream-Next-Offset': '100', 'Stream-Up-To-Date': 'true' };
+        const fetch: NonNullable<Parameters<typeof runEagerSyncWorkerTask>[1]['fetch']> = async (
+          input,
+          init
+        ) => {
+          const url = new URL(input);
+          const method = init?.method ?? 'GET';
+          methods.push(method);
+          if (method === 'PUT') created = true;
+          if (fenced && !created && method === 'GET')
+            return new Response(null, {
+              status: 404,
+              headers: { 'Stream-Error-Code': 'space_not_found' },
+            });
+          if (url.pathname.endsWith('/bootstrap'))
+            return new Response(
+              new Blob([
+                '--worker\r\nContent-Type: application/octet-stream\r\n\r\n',
+                snapshot.slice().buffer as ArrayBuffer,
+                '\r\n--worker--\r\n',
+              ]),
+              {
+                headers: {
+                  ...metadata,
+                  'Content-Type': 'multipart/mixed; boundary=worker',
+                  'Stream-Snapshot-Offset': '100',
+                },
+              }
+            );
+          return new Response(null, { status: method === 'PUT' ? 201 : 204, headers: metadata });
+        };
+        try {
+          const pending = runEagerSyncWorkerTask(
+            {
+              type: 'start',
+              content: { mode: 'plaintext' },
+              scope: 'worker-registry',
+              workspaceId: 'worker-workspace',
+              roomId: 'session-worker',
+              peerId: 'worker-replica',
+              lastMessageAt: 1,
+              connected: true,
+              transport: {
+                plane: 'cloud',
+                streamUrl: 'https://worker.invalid/ds/worker-bucket/session-worker',
+              },
+            },
+            {
+              fetch,
+              auth: async () => 'worker-token',
+              readSnapshot: async () => undefined,
+              writeSnapshot: async (row) => {
+                cached = { ...row, key: 'worker-snapshot' };
+                return true;
+              },
+              connection: {
+                isConnected: () => false,
+                onMessage: () => () => {},
+                onStatusChange: () => () => {},
+                send: () => {
+                  throw new Error('Cloud prefetch must not publish on the local plane');
+                },
+              },
+            }
+          );
+          if (fenced) {
+            await expect(pending).rejects.toBeDefined();
+            expect(cached).toBeUndefined();
+          } else {
+            expect(await pending).toBe('synced');
+            const restored = new LoroDoc();
+            restored.import(new Uint8Array(await cached!.snapshot.arrayBuffer()));
+            expect(restored.toJSON()).toEqual(remote.toJSON());
+            restored.free();
+          }
+          expect(methods.some((method) => method === 'PUT' || method === 'POST')).toBe(false);
+        } finally {
+          remote.free();
+        }
+      }
+    );
+  }
 });

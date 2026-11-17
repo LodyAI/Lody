@@ -610,6 +610,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
   });
+  // Bound to this replica's immutable account/workspace/content admission.
+  // Cloud adapter replacement must not renew its incomplete-recovery budget.
+  const incompleteRecoveryScope = {};
   // E2E-only protected transport evidence; absent outside a probe-enabled window.
   const transportEffects = protectedContent ? clientLossEffects(deps.workspaceId) : null;
   transportEffects?.ownerOpened();
@@ -3703,6 +3706,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): StreamsTransportAdapter => {
     durableStreamsBaseUrl = streamsBaseUrl;
     return createWorkspaceStreamsTransport({
+      incompleteRecoveryScope,
       content: deps.content,
       ...(protectedContent ? { bucketId: deps.e2ee?.bucketId() ?? undefined } : {}),
       repo,
