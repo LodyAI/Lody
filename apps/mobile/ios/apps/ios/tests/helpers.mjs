@@ -58,6 +58,7 @@ export function frame(bytes) {
 
 export async function openTestSession({
   failAppend = () => false,
+  afterAppend,
   markDispatch = async () => {},
   onRpc,
   onEvent = () => {},
@@ -194,6 +195,7 @@ export async function openTestSession({
         replies.set(request.replyTo, request);
       } else if (!this.url.includes(':rpc:'))
         server.import(part.body.subarray(4));
+      if (afterAppend) await afterAppend(this.url, part);
       return ok({ nextOffset: String(++offset) });
     }
   };

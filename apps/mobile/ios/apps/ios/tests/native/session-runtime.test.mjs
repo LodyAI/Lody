@@ -454,6 +454,52 @@ test('Roost retries the failed receipt upload before handing the same input to i
   }
 });
 
+test('a Loro send with a lost append response can be forgotten locally without Roost input state', async () => {
+  let current = true;
+  const resolveTarget = () => ({ backend: 'loro' });
+  resolveTarget.isCurrent = () => current;
+  const fixture = await openTestSession({
+    resolveTarget,
+    afterAppend(url) {
+      if (!url.includes(':rpc:')) throw new Error('lost_response_after_commit');
+    },
+  });
+  try {
+    const result = await fixture.runtime.sendTurn({
+      id: '00000000-0000-4000-8000-000000000001',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'claude',
+      text: 'Synthetic unconfirmed input',
+    });
+    assert.equal(result.state, 'unknown');
+    const persisted = fixture.server.toJSON();
+    assert.deepEqual(
+      persisted.history.map((entry) => entry.id),
+      [result.id],
+    );
+    await fixture.runtime.actOnPendingInput('s1', result.id, 'forget');
+    assert.deepEqual(
+      fixture.server.toJSON(),
+      persisted,
+      'Local removal must not alter or resend remote history',
+    );
+    await assert.rejects(
+      fixture.runtime.actOnPendingInput('s1', result.id, 'retry'),
+      /session_not_ready/,
+    );
+    current = false;
+    await assert.rejects(
+      fixture.runtime.actOnPendingInput('s1', result.id, 'forget'),
+      /workspace_changed/,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
 test(
   'Roost can cancel a saved input while its reopened session is still syncing',
   { timeout: 5000 },

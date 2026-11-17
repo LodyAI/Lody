@@ -480,6 +480,13 @@ export async function actOnPendingInput(
   inputId: string,
   action: 'retry' | 'forget',
 ) {
+  const state = sessions.get(sessionId);
+  if (action === 'forget' && state?.target?.backend === 'loro') {
+    if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+    // Loro has no record in the Roost pending-input owner. The caller removes
+    // its native Outbox record; this never claims to cancel remote work.
+    return;
+  }
   const owner = acceptedInputs;
   if (!owner) throw new Error('session_not_ready');
   await owner.refresh();
