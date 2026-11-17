@@ -962,7 +962,7 @@ describe('cloud prefetch checkpoints', () => {
     }
   });
 
-  it.each(['legacy', 'lost', 'uncovered', 'stream', 'format'] as const)(
+  it.each(['legacy', 'lost', 'uncovered', 'snapshot-version', 'stream', 'format'] as const)(
     'bootstraps safely for a %s checkpoint',
     async (kind) => {
       const h = harness();
@@ -975,6 +975,7 @@ describe('cloud prefetch checkpoints', () => {
             ...row.cloudCheckpoint!.cursor,
             serverLowerBoundVersion: { '1': 999 },
           };
+        else if (kind === 'snapshot-version') row.cloudCheckpoint!.snapshotVersion = { '1': 999 };
         else if (kind === 'stream')
           row.cloudCheckpoint!.cursor = {
             ...row.cloudCheckpoint!.cursor,
