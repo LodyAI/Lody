@@ -7440,9 +7440,7 @@ export const SessionChatInterface = memo(
                         !shareSelection.active &&
                         !shouldReplaceComposerWithPermission
                       }
-                      onQuote={(text, options) =>
-                        inputAreaRef.current?.addMessageQuote(text, options) ?? false
-                      }
+                      onQuote={(text) => inputAreaRef.current?.addMessageQuote(text) ?? false}
                     />
                     <div
                       ref={setMessageArea}

@@ -688,7 +688,7 @@ describe('SessionChatInputArea submission feedback', () => {
     });
   });
 
-  it('appends an inline quote question after the draft and sends it, or keeps it as a draft', async () => {
+  it('inserts at the saved composer caret after focus leaves, without sending', async () => {
     scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
     const composerRef = createRef<SessionChatInputAreaHandle>();
     const submitted: SessionInputBlock[][] = [];
@@ -699,43 +699,23 @@ describe('SessionChatInputArea submission feedback', () => {
         return true;
       },
     });
+    textarea.focus();
+    textarea.setSelectionRange(6, 6);
+    textarea.blur();
     await act(async () => {
-      expect(
-        composerRef.current!.addMessageQuote('Keep this', { comment: '  Why keep it?  ' })
-      ).toBe(true);
+      expect(composerRef.current!.addMessageQuote('Keep this')).toBe(true);
     });
     expect(submitted).toHaveLength(0);
-    expect(textarea.value.startsWith('focus regression draft')).toBe(true);
-    expect(textarea.value.endsWith('Why keep it?')).toBe(true);
-    expect(textarea.value).not.toContain('\n');
-    await act(async () => {
-      expect(
-        composerRef.current!.addMessageQuote('Second passage', {
-          comment: 'And this?',
-          send: true,
-        })
-      ).toBe(true);
-    });
-    expect(submitted).toHaveLength(1);
+    expect(textarea.value.startsWith('focus ')).toBe(true);
+    expect(textarea.value.endsWith('regression draft')).toBe(true);
+    await submit('button');
     const block = submitted[0]![0]!;
     expect(block).toMatchObject({
       type: 'text',
-      spans: [
-        { kind: 'message_quote', quoteVersion: 1 },
-        { kind: 'message_quote', quoteVersion: 1 },
-      ],
+      spans: [{ kind: 'message_quote', quoteVersion: 1 }],
     });
     const sent = block.type === 'text' ? block.text : '';
-    const order = [
-      'focus regression draft',
-      formatMessageQuote('Keep this'),
-      'Why keep it?',
-      formatMessageQuote('Second passage'),
-      'And this?',
-    ].map((part) => sent.indexOf(part));
-    expect(order.every((index) => index >= 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(textarea.value).toBe('');
+    expect(sent).toBe('focus ' + formatMessageQuote('Keep this') + 'regression draft');
   });
 
   it('preserves a quote draft when the target machine loses support', async () => {
