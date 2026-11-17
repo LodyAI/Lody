@@ -68,10 +68,13 @@ so existing Playwright child drivers can retain process ownership. It must:
   deployment, account, credentials, local service or data directory.
 - Launch two built Cloud Electron applications with distinct temporary profiles,
   Lody data, host endpoints, daemons, and Repo/engine owners under the supplied root.
-  Register each through the normal product chain. Set the supplied external ACP
-  command on each machine and enter the ordinary workspace with the composer ready.
-  Both commands are executable on this test machine; separate physical hosts need
-  their own fixture paths. The external provider is the only simulated service.
+  Register each through the normal product chain and enter the ordinary workspace
+  with the composer ready. Configure the supplied external ACP command on the
+  shared Session's execution owner through product UI. The collaborator may submit
+  to that shared machine while retaining its independent daemon and Repo; this
+  does not establish ACP execution on both machines. The OSS prerequisite above
+  separately verifies direct execution on each profile. Separate physical hosts
+  need their own fixture command paths. Only the external provider is simulated.
 - Return runtime observations of account/workspace/machine identity, daemon and
   Repo owner PIDs, Repo instance identity, host endpoint and actual directories.
   Do not report requested configuration as observed runtime state. Native SDK
