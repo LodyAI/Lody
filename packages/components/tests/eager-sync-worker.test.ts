@@ -640,50 +640,80 @@ it('retires an unanswered refusal database open without starting a late writer',
   }
 });
 
-it('retains the claim until the cancelled refusal writer confirms its transaction ended', async () => {
-  const writing = deferred<void>();
-  const abortSeen = deferred<void>();
-  const transactionEnded = deferred<void>();
-  let held = false;
-  const h = clientHarness(undefined, undefined, undefined, {
-    writeRejection: async (_row, signal) => {
+it.each(['write', 'clear'] as const)(
+  'releases the claim and queue when a retry metadata %s never settles',
+  async (stage) => {
+    const writing = deferred<void>();
+    const abortSeen = deferred<void>();
+    const deadline = deferred<() => void>();
+    const released = deferred<void>();
+    let held = false;
+    const stuck = async (signal?: AbortSignal) => {
       writing.resolve();
       signal?.addEventListener('abort', () => abortSeen.resolve(), { once: true });
-      await transactionEnded.promise;
-      signal?.throwIfAborted();
-    },
-    locks: {
-      request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) => {
-        held = true;
-        try {
-          return await run({} as Lock);
-        } finally {
-          held = false;
-        }
+      await new Promise<void>(() => {});
+    };
+    const h = clientHarness(undefined, undefined, undefined, {
+      readRejection: async (key) =>
+        stage === 'clear' && key.includes('"receipt"')
+          ? { key, lastMessageAt: 1, rejectedAt: 0, retryAt: 60_000 }
+          : undefined,
+      readSnapshot: async (_scope, roomId) =>
+        stage === 'clear' && roomId === 'receipt'
+          ? {
+              key: 'key',
+              scope: 'scope',
+              roomId,
+              plane: 'local',
+              lastMessageAt: 1,
+              savedAt: 1,
+              snapshot: new Blob(),
+            }
+          : undefined,
+      writeRejection: (_row, signal) => stuck(signal),
+      clearRejection: (_key, signal) => stuck(signal),
+      scheduler: {
+        setTimeout: (handler, ms) => {
+          expect(ms).toBe(1000);
+          deadline.resolve(handler);
+          return handler;
+        },
+        clearTimeout: () => {},
       },
-    } as Pick<LockManager, 'request'>,
-  });
-  const controller = new AbortController();
-  const outcome = h.client.prefetch('refused', 1, controller.signal);
-  const worker = await h.starts[0].promise;
-  worker.emit({ type: 'complete', outcome: 'cache_rejected' });
-  await writing.promise;
-  expect(worker.terminated).toBe(true);
-  controller.abort();
-  await abortSeen.promise;
-  expect(await outcome).toBe('skipped');
-  expect(held).toBe(true);
-  const next = clientHarness();
-  const successor = next.client.prefetch('independent', 1, new AbortController().signal);
-  expect(next.workers).toEqual([]);
-  transactionEnded.resolve();
-  const nextWorker = await next.starts[0].promise;
-  expect(held).toBe(false);
-  nextWorker.emit({ type: 'complete', outcome: 'synced' });
-  expect(await successor).toBe('synced');
-  h.client.dispose();
-  next.client.dispose();
-});
+      locks: {
+        request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) => {
+          held = true;
+          try {
+            return await run({} as Lock);
+          } finally {
+            held = false;
+            released.resolve();
+          }
+        },
+      } as Pick<LockManager, 'request'>,
+    });
+    const outcome = h.client.prefetch('receipt', 1, new AbortController().signal);
+    if (stage === 'write') {
+      const worker = await h.starts[0].promise;
+      worker.emit({ type: 'complete', outcome: 'cache_rejected' });
+      expect(worker.terminated).toBe(true);
+    }
+    await writing.promise;
+    expect(held).toBe(true);
+    (await deadline.promise)();
+    await abortSeen.promise;
+    expect(await outcome).toBe(stage === 'write' ? 'cache_rejected' : 'synced');
+    await released.promise;
+    expect(held).toBe(false);
+    const next = clientHarness();
+    const successor = next.client.prefetch('independent', 1, new AbortController().signal);
+    const nextWorker = await next.starts[0].promise;
+    nextWorker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await successor).toBe('synced');
+    h.client.dispose();
+    next.client.dispose();
+  }
+);
 
 it('bounds observed retry metadata even when every room was deferred by another window', async () => {
   const h = clientHarness(undefined, undefined, undefined, {

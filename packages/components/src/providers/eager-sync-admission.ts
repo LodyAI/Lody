@@ -80,9 +80,9 @@ async function withStore<T>(
       let failure: unknown;
       const abort = () => {
         failure = signal?.reason;
-        // Aborting the waiter alone would leave a writer outside the claim.
-        // Wait for the actual transaction's terminal event, including when it
-        // was already committing and abort() can no longer interrupt it.
+        // Observe the actual transaction's terminal event for this promise.
+        // The scheduling owner separately bounds its wait: a late receipt only
+        // changes retry hints and never confirms document progress.
         try {
           transaction.abort();
         } catch {

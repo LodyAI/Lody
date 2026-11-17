@@ -78,11 +78,12 @@ the browser lock owns cross-window exclusion, which an in-process semaphore cann
 A cache read that does not answer cannot retain the renderer slot after cancellation:
 read results are abandoned without starting a Worker. Refusal metadata opens retire
 on cancellation and close any late database handle without starting a transaction.
-An active refusal write is aborted at the IndexedDB transaction itself; its terminal
-`abort` or `complete` event, rather than a waiter timeout, releases the claim. A
-task deadline gets a separate one-second cancellation owner for its metadata-only
-receipt, because the expired task signal cannot persist that receipt. Cancellation
-still aborts the actual transaction; the finalizer never advances document progress.
+Retry metadata writes and clears have a one-second wait budget. Cancellation attempts
+to abort the actual IndexedDB transaction, but a missing terminal event cannot retain
+the claim or renderer queue. A task deadline gets an independent receipt budget because
+the expired task signal cannot persist that receipt. A late metadata result only changes
+rebuildable retry hints; the in-memory cooldown remains available. Document snapshots
+still commit before Worker completion, and this finalizer never advances document progress.
 
 Task cancellation terminates the Worker from the parent thread and sends a local peer detach; this
 does not depend on a Worker that is executing synchronous WASM handling a cancel message. Opening the

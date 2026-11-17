@@ -77,6 +77,38 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
     }
   };
 
+  // These receipts are rebuildable scheduling hints. Attempt to abort their
+  // transaction, but never retain a worker slot waiting for a stuck database.
+  // Document snapshots and remote cursors do not use this best-effort boundary.
+  const finishMetadata = async (
+    operation: (signal: AbortSignal) => Promise<void>,
+    signal: AbortSignal
+  ): Promise<void> => {
+    const cleanup = new AbortController();
+    const abort = () => cleanup.abort(signal.reason);
+    const timedOut = signal.aborted && signal.reason?.name === 'TimeoutError';
+    if (!timedOut) {
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    }
+    const timer = (deps.scheduler?.setTimeout ?? setTimeout)(() => cleanup.abort(), 1000);
+    try {
+      await readUntilCancelled(
+        Promise.resolve().then(() => {
+          cleanup.signal.throwIfAborted();
+          return operation(cleanup.signal);
+        }),
+        cleanup.signal
+      );
+    } finally {
+      signal.removeEventListener('abort', abort);
+      (
+        deps.scheduler?.clearTimeout ??
+        ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>))
+      )(timer);
+    }
+  };
+
   const run = async (
     roomId: string,
     lastMessageAt: number,
@@ -121,7 +153,10 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
         if (outcome === 'synced') {
           rejections.delete(roomId);
           if (previous)
-            await (deps.clearRejection ?? clearEagerSyncRejection)(key, signal).catch(() => {});
+            await finishMetadata(
+              (cleanup) => (deps.clearRejection ?? clearEagerSyncRejection)(key, cleanup),
+              signal
+            );
         } else if (outcome === 'failed' || outcome === 'cache_rejected') {
           // Switching failure categories is not recovery. Only a successful
           // cache resets the room's accumulated retry history.
@@ -136,24 +171,10 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
             retryAt: rejectedAt + eagerSyncRetryDelay(outcome, attempts, !!cached?.cloudCheckpoint),
           };
           rememberRejection(roomId, row);
-          // The expired task signal cannot persist its timeout receipt. Give
-          // this metadata-only finalizer its own bounded cancellation owner.
-          const cleanup = timedOut ? new AbortController() : undefined;
-          const timer = cleanup
-            ? (deps.scheduler?.setTimeout ?? setTimeout)(() => cleanup.abort(), 1000)
-            : undefined;
-          try {
-            await (deps.writeRejection ?? writeEagerSyncRejection)(
-              row,
-              cleanup?.signal ?? signal
-            ).catch(() => {});
-          } finally {
-            if (timer !== undefined)
-              (
-                deps.scheduler?.clearTimeout ??
-                ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>))
-              )(timer);
-          }
+          await finishMetadata(
+            (cleanup) => (deps.writeRejection ?? writeEagerSyncRejection)(row, cleanup),
+            signal
+          );
         }
         return outcome;
       };

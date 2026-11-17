@@ -58,8 +58,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   Mirror. Its disposable worker owns raw Doc import/export and a separate,
   rebuildable snapshot cache. Keep one worker per renderer; terminate before releasing
   its slot and workspace/room/authorization/plane lock. Detach local peers on cancellation.
-  Recheck the checkpoint after claiming, before constructing a worker; unavailable locks
-  skip prefetch. Failures back off separately from sync success. Scope cache rows by
+  Recheck checkpoints after claiming, before constructing a worker; unavailable locks
+  skip prefetch. Bound metadata waits; retrying never confirms sync. Scope cache rows by
   workspace and room across windows.
   Keep the timestamp-only high-water index as the pre-queue startup filter; it
   must not load snapshots, Docs, histories, or foreground cursor state.
