@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2854](https://github.com/LodyAI/Lody/pull/2854)
 
 [中文](2026-09-12-session-prefetch-worker.zh.md)
 
