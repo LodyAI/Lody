@@ -172,8 +172,10 @@ native navigation-bar controls retain their bar-item anchors.
 Conversation titles use 16 pt semibold system text, fading at the trailing edge
 only on overflow rather than inserting an ellipsis. VoiceOver retains the full title. User bubbles fill the available
 reading width beside the avatar; long-press offers Copy, plus Edit for the last
-eligible user message, without inline action buttons. Below the conversation title,
-secondary-gray machine text starts with a presence icon; tapping the header opens
+eligible user message, without inline action buttons. Delivery status appears below
+the complete user message, including attachments, and stays there during history
+takeover and confirmation dismissal. Below the conversation title, secondary-gray
+machine text starts with a presence icon; tapping the header opens
 the panel with name and presence, owner avatar and name, then
 private/shared visibility. Visibility comes from the public machine-registration
 query on opening; unavailable data is shown as unknown, never inferred as private.

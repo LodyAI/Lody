@@ -61,7 +61,7 @@ ui.wait(lambda items: any(i.get('AXUniqueId') == turns[1] + ':delivery' for i in
 assert not any(i.get('AXUniqueId') == turns[1] + ':queued' for i in ui.state())
 delivery = ui.element(turns[1] + ':delivery')['frame']
 bubble = ui.element(turns[1] + ':user')['frame']
-assert delivery['y'] + delivery['height'] <= bubble['y'] + 1, 'Steer status must stay above its user bubble'
+assert delivery['y'] >= bubble['y'] + bubble['height'] - 1, 'Steer status must stay below its user bubble'
 ui.capture('steer-pending')
 ui.wait(lambda _: trace.reserved_space() is not None, 'Steer landing geometry missing')
 assert abs(trace.reserved_space()) < 1, 'Steering a queued message must not reserve a new turn viewport'
@@ -78,7 +78,7 @@ assert not any(i.get('AXUniqueId') == turns[1] + ':queued' for i in ui.state())
 ui.wait(lambda items: not any(i.get('AXUniqueId') == turns[1] + ':delivery' for i in items), 'Accepted steer status did not disappear')
 ui.element(turns[1] + ':reply:text')
 if not any(i.get('AXUniqueId') == turns[1] + ':user' for i in ui.state()):
-    ui.axe('swipe', '--start-x', '200', '--start-y', '350', '--end-x', '200', '--end-y', '700', '--duration', '.4', '--post-delay', '.6')
+    ui.axe('drag', '--start-x', '200', '--start-y', '350', '--end-x', '200', '--end-y', '700', '--duration', '.4', '--post-delay', '.6')
 ui.element(turns[1] + ':user')
 assert ui.element('session-input').get('AXValue') == '123456', 'Steer must preserve the current unsent draft'
 ui.capture('steer-applied-first-still-queued')
@@ -95,7 +95,7 @@ ui.axe('tap', '--id', 'send-complete', '--post-delay', '1')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'queue-count' and i.get('AXLabel') == 'Queue: 0' for i in items), 'Stop did not advance the queued message')
 ui.element(turns[0] + ':reply:text')
 if not any(i.get('AXUniqueId') == turns[0] + ':user' for i in ui.state()):
-    ui.axe('swipe', '--start-x', '200', '--start-y', '350', '--end-x', '200', '--end-y', '700', '--duration', '.4', '--post-delay', '.6')
+    ui.axe('drag', '--start-x', '200', '--start-y', '350', '--end-x', '200', '--end-y', '700', '--duration', '.4', '--post-delay', '.6')
 ui.element(turns[0] + ':user')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'session-stop' and i.get('enabled') for i in items), 'The next running turn must offer Stop')
 ui.capture('stop-advanced-queue')

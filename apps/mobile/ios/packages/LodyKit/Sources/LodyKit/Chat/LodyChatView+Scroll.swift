@@ -12,7 +12,7 @@ extension LodyChatView {
     var space: CGFloat = 0
     if let id = anchoredUserID,
        let entryID = rows[id]?.entryID,
-       let index = dataSource.indexPath(for: entryID + ":delivery") ?? dataSource.indexPath(for: id),
+       let index = dataSource.indexPath(for: id) ?? dataSource.indexPath(for: entryID + ":delivery"),
        let frame = collection.layoutAttributesForItem(at: index)?.frame {
       let naturalBottom = collection.contentSize.height - collection.bounds.height + collection.safeAreaInsets.bottom + base
       space = max(0, frame.minY - collection.adjustedContentInset.top - naturalBottom)
