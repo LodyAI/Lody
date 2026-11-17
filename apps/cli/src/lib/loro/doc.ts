@@ -467,6 +467,9 @@ function describeDocOpener(stack: string | undefined): string {
 
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
+  // A cloud transport can be detached and replaced while this manager's replica
+  // remains alive. Keep its repair budget across those adapter generations.
+  private readonly incompleteRecoveryScope = {};
   sessions: Map<SessionId, SessionDocument> = new Map();
   /**
    * When each cached Session doc was last handed to a caller. Every opener, not
@@ -924,6 +927,7 @@ export class LoroDocumentManager {
     this.remoteStreamsTokens = streamsTokens;
     if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
     const streamsTransport = await createCliStreamsTransport({
+      incompleteRecoveryScope: this.incompleteRecoveryScope,
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,

@@ -157,7 +157,11 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
               (cleanup) => (deps.clearRejection ?? clearEagerSyncRejection)(key, cleanup),
               signal
             );
-        } else if (outcome === 'failed' || outcome === 'cache_rejected') {
+        } else if (
+          outcome === 'failed' ||
+          outcome === 'cache_rejected' ||
+          outcome === 'apply_incomplete'
+        ) {
           // Switching failure categories is not recovery. Only a successful
           // cache resets the room's accumulated retry history.
           const attempts = previous ? (previous.attempts ?? 1) + 1 : 1;
