@@ -246,12 +246,16 @@ describe('UnifiedProjectSelectorView options', () => {
 
     const trigger = container.querySelector<HTMLButtonElement>('button');
     vi.useFakeTimers();
+    // A shared worker can have an unrelated bootstrap poll still running.
+    const backgroundPoll = setInterval(() => {}, 500);
     try {
       await act(async () => {
         trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
-        await vi.runAllTimersAsync();
+        // Flush only the menu's immediate work, not the shared worker's polling clock.
+        await vi.advanceTimersByTimeAsync(0);
       });
     } finally {
+      clearInterval(backgroundPoll);
       vi.useRealTimers();
     }
 
