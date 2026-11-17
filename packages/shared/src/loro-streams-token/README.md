@@ -75,6 +75,16 @@ sorted failure kinds and 401/403 statuses, including nested shutdown/release Cau
 Both diagnostic outputs omit credentials, JWTs, URLs, messages, stacks and recovery
 owners. Preserve the original Cause separately for recovery; log the safe summary.
 
+Producer diagnostics observe the final Exit after I/O finalizers. An explicit
+provider close records `owner_released` before interrupting its readers; only a
+pure interruption then emits the content-free `fetch-cancelled` event instead of
+`fetch-failure`. The renderer's existing logger handles it as a debug lifecycle
+event. A previous stop keeps its unknown reason, and timeout, transport, capacity,
+mixed Causes and failed cleanup remain failures. Waiters still receive their
+original failure; no request is retried or treated as a successful write.
+This local owner proof cannot classify Convex platform `Client disconnected`
+events, which do not carry the client's cancellation reason.
+
 Renderer workspace runtime, CLI durable transports and Machine RPC still use
 `createLoroStreamsTokenProviderLegacy` / `createTokenProviderLegacy` (the CLI ones borrow
 a shared workspace kernel, below). Renderer

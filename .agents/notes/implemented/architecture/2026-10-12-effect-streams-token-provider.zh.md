@@ -72,6 +72,12 @@ health 仍可观察，成功 retryCleanup 清除阻塞。同一 parent Scope 的
 receipt。Retained release failure 在新 credential I/O 准入前设置 fence，而非只阻止 producer
 替换。不修改 P1 拥有的 logger/presence 文件。
 
+Producer 诊断观察完整 Exit，包括中断及 I/O finalizer 失败。只有第一次停止意图是
+owner 显式关闭、且结果为纯中断，才记录固定且不含业务内容的
+`fetch-cancelled` / `owner_released` 生命周期事件。未知停止、deadline 和混合失败继续报告，
+不按错误名称判断取消；waiter 的返回结果与清理所有权保持原样。
+这个证明只在 provider 内成立，不能推断平台侧断开的原因。
+
 Raw HTTP receipt 包括 success-body EOF 与 error-body 取消；body 释放拒绝保留 owner 和
 I/O failure，401/403 同时保留 typed auth 原因与 terminal suppression。Cleanup 报告已经结束
 但释放失败的 receipt 后才退休它，下一次成功 retry 才允许交接。锁定 v4 tapCause 使用
