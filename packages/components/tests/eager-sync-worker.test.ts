@@ -17,6 +17,7 @@ import {
 } from '../src/providers/eager-sync-worker-client';
 import { runEagerSyncWorkerTask } from '../src/providers/eager-sync-worker-task';
 import {
+  EAGER_SYNC_CACHE_DB,
   readEagerSyncSnapshot,
   writeEagerSyncSnapshot,
   type EagerSyncSnapshot,
@@ -693,6 +694,54 @@ describe('cloud prefetch checkpoints', () => {
       read: () => readEagerSyncSnapshot('scope', 'room'),
     };
   }
+
+  it('keeps old v1 windows readable while writing checkpoints and separate refusal metadata', async () => {
+    const h = harness();
+    let oldWindow: IDBDatabase | undefined;
+    try {
+      const snapshot = new Blob([h.remote.export({ mode: 'snapshot' }).slice().buffer]);
+      await writeEagerSyncSnapshot({
+        scope: 'legacy',
+        roomId: 'old-room',
+        plane: 'cloud',
+        lastMessageAt: 1,
+        savedAt: 1,
+        snapshot,
+      });
+      oldWindow = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(EAGER_SYNC_CACHE_DB, 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      // Leave the old version-1 connection open: an in-place DB version bump
+      // would block this new writer or make a later old-window open fail.
+      expect(await runEagerSyncWorkerTask(h.request, h.deps)).toBe('synced');
+      await writeEagerSyncRejection({ key: 'refused', lastMessageAt: 2, rejectedAt: 1 });
+      const rows = await new Promise<EagerSyncSnapshot[]>((resolve, reject) => {
+        const request = oldWindow!
+          .transaction('snapshots', 'readonly')
+          .objectStore('snapshots')
+          .getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      expect(oldWindow.version).toBe(1);
+      expect(rows).toHaveLength(2);
+      // These are the actual operations performed by the legacy LRU/foreground.
+      expect(rows.every((row) => row.snapshot.size > 0)).toBe(true);
+      expect(
+        (await Promise.all(rows.map((row) => row.snapshot.arrayBuffer()))).every(
+          (bytes) => bytes.byteLength > 0
+        )
+      ).toBe(true);
+      expect((await readEagerSyncSnapshot('legacy', 'old-room'))?.cloudCheckpoint).toBeUndefined();
+      expect((await h.read())?.cloudCheckpoint?.format).toBe(1);
+      expect(await readEagerSyncRejection('refused')).toBeDefined();
+    } finally {
+      oldWindow?.close();
+      h.remote.free();
+    }
+  });
 
   it('restarts from its own atomic snapshot and cursor and downloads only the suffix', async () => {
     const h = harness();

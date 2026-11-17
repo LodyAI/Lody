@@ -26,12 +26,8 @@ const body = JSON.stringify({
   },
 });
 remote.free();
-const watchdog = setTimeout(() => {
-  console.error('Browser acceptance timed out');
-  process.exitCode = 1;
-  void browser?.close();
-  server?.closeAllConnections();
-}, 60_000);
+const deadline = new AbortController();
+let watchdog;
 let browser;
 let server;
 try {
@@ -54,10 +50,23 @@ try {
   });
   const downloads = [];
   let waiting;
-  const nextDownload = () =>
-    new Promise((resolve) => {
-      waiting = resolve;
+  const nextDownload = () => {
+    const pending = new Promise((resolve, reject) => {
+      const abort = () => reject(deadline.signal.reason);
+      if (deadline.signal.aborted) {
+        abort();
+        return;
+      }
+      deadline.signal.addEventListener('abort', abort, { once: true });
+      waiting = () => {
+        deadline.signal.removeEventListener('abort', abort);
+        resolve();
+      };
     });
+    // Observe a watchdog rejection even while a page command is still pending.
+    void pending.catch(() => {});
+    return pending;
+  };
   server = createServer(async (request, response) => {
     if (request.url === '/download') {
       downloads.push(response);
@@ -106,6 +115,14 @@ try {
   };
   const a = await page();
   const b = await page();
+  // Load the cold build and browser fixture before starting the runner watchdog.
+  watchdog = setTimeout(() => {
+    const error = new Error('Browser acceptance timed out');
+    console.error(error.message);
+    deadline.abort(error);
+    void browser?.close();
+    server?.closeAllConnections();
+  }, 60_000);
   let arrived = nextDownload();
   await start(a, 'first', 'room');
   await arrived;
@@ -142,6 +159,10 @@ try {
   await start(a, 'closing', 'close');
   await arrived;
   await a.close();
+  // Closing a context releases Web Locks asynchronously. Join that actual
+  // release before using the production client's non-waiting claim.
+  const closedOwnerLock = `lody:eager-sync:${JSON.stringify(['workspace', 'close', 'workspace', 'account', 'local'])}`;
+  await b.evaluate((key) => navigator.locks.request(key, () => {}), closedOwnerLock);
   arrived = nextDownload();
   await start(b, 'after-close', 'close');
   await arrived;
