@@ -36,6 +36,10 @@ and history cache read and observe history, capture sharing snapshots, and submi
 permission responses through the encrypted owner RPC. The control document
 carries the shared queue and human-input receipts.
 
+Both the control stream and owner history must be ready before the runtime
+reports a Roost session as live. A failed read clears that reader's readiness
+until it recovers, while the other reader can continue.
+
 The iOS runtime package holds the authoring source in `vendor/upstream-roost`.
 The iOS asset build verifies the generated `src/runtime/upstream-roost.js` against
 that source. Android's runtime snapshot carries the verified module and licenses.
