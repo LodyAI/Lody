@@ -1,3 +1,5 @@
+import type { RemoteCursor } from '@loro-dev/streams-crdt';
+
 // Rebuildable, worker-authored cache. Never share the UI repo's persistence or
 // stream cursors: that repo may contain user edits this downloader has not seen.
 export const EAGER_SYNC_CACHE_DB = 'lody:eager-sync-snapshots-v1';
@@ -13,6 +15,8 @@ export type EagerSyncSnapshot = {
   lastMessageAt: number;
   savedAt: number;
   snapshot: Blob;
+  // Optional for v1 rows. This cursor belongs only to the snapshot in this row.
+  cloudCheckpoint?: { format: 1; snapshotVersion: Record<string, number>; cursor: RemoteCursor };
 };
 
 const keyOf = (scope: string, roomId: string) => JSON.stringify([scope, roomId]);
