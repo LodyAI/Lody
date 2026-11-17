@@ -1,7 +1,6 @@
 import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
 import { PassThrough } from 'node:stream';
 import { parseCopilotQuota, readCopilotQuota } from './copilot-quota';
-import { createRequire } from 'node:module';
 import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclientprotocol/sdk';
 import {
   initializeAndSetAcpSessionArchived,
@@ -1079,23 +1078,35 @@ describe('Copilot subscription quota', () => {
   // A synthetic SDK server: any session/prompt/tool/MCP request fails the test.
   function peer(payload: unknown, mode = 'quota') {
     return `
-      const { createMessageConnection } = require(${JSON.stringify(createRequire(import.meta.url).resolve('vscode-jsonrpc/node'))});
       if (process.env.COPILOT_TEST_ACCOUNT !== 'selected' || process.env.COPILOT_TEST_LAUNCH !== 'preserved') process.exit(2);
       const args = process.argv.slice(1);
       if (!args.includes('--headless') || !args.includes('--stdio') || args.includes('--acp') || !args.includes('--no-auto-update') || args[args.indexOf('--config-dir')+1] !== '/synthetic/account') process.exit(3);
-      const rpc = createMessageConnection(process.stdin, process.stdout);
-      rpc.onRequest('ping', () => {
-        if (${JSON.stringify(mode)} === 'oversized') { process.stdout.write('x'.repeat(70000)); return new Promise(()=>{}); }
-        return { protocolVersion: ${mode === 'version' ? 999 : 3} };
+      const mode = ${JSON.stringify(mode)};
+      let input = Buffer.alloc(0);
+      const send = (message) => {
+        const body = Buffer.from(JSON.stringify(message));
+        process.stdout.write(Buffer.concat([Buffer.from('Content-Length: '+body.length+'\\r\\n\\r\\n'), body]));
+      };
+      process.stdin.on('data', chunk => {
+        input = Buffer.concat([input, chunk]);
+        while (true) {
+          const end = input.indexOf('\\r\\n\\r\\n');
+          if (end < 0) return;
+          const length = Number(input.subarray(0,end).toString().split(':')[1]);
+          if (input.length < end+4+length) return;
+          const request = JSON.parse(input.subarray(end+4,end+4+length).toString());
+          input = input.subarray(end+4+length);
+          if (request.method === 'ping') {
+            if (mode === 'oversized') { process.stdout.write('x'.repeat(70000)); continue; }
+            send({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: mode === 'version' ? 999 : 3 } });
+          } else if (request.method === 'account.getQuota') {
+            if (mode === 'wait') { process.stderr.write('quota-ready'); continue; }
+            if (mode === 'login' || mode === 'unsupported') {
+              send({ jsonrpc: '2.0', id: request.id, error: { code: mode === 'login' ? -32000 : -32601, message: 'Unavailable' } });
+            } else send({ jsonrpc: '2.0', id: request.id, result: ${JSON.stringify(payload)} });
+          } else process.exit(4);
+        }
       });
-      rpc.onRequest('account.getQuota', () => {
-        if (${JSON.stringify(mode)} === 'wait') { process.stderr.write('quota-ready'); return new Promise(()=>{}); }
-        if (${JSON.stringify(mode)} === 'login') throw new Error('Authentication required');
-        if (${JSON.stringify(mode)} === 'unsupported') { const e = new Error('Method not found'); e.code = -32601; throw e; }
-        return ${JSON.stringify(payload)};
-      });
-      rpc.onRequest(() => { process.exitCode = 4; throw new Error('Unexpected activity'); });
-      rpc.listen();
     `;
   }
 
@@ -1197,6 +1208,93 @@ describe('Copilot subscription quota', () => {
       expect(runtime.exited()).toBe(true);
     }
   );
+
+  it('reads fragmented UTF-8 SDK frames and skips notifications and unrelated replies', async () => {
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    const stderr = new PassThrough();
+    const requests: string[] = [];
+    const frame = (value: unknown) => {
+      const body = Buffer.from(JSON.stringify(value));
+      return Buffer.concat([
+        Buffer.from(`Content-Length: ${body.length}\r\nContent-Type: application/json\r\n\r\n`),
+        body,
+      ]);
+    };
+    stdin.on('data', (chunk: Buffer) => {
+      const request = JSON.parse(chunk.subarray(chunk.indexOf('\r\n\r\n') + 4).toString());
+      requests.push(request.method);
+      if (request.method === 'ping') {
+        const response = Buffer.concat([
+          frame({ jsonrpc: '2.0', method: 'status', params: { text: '订阅 🐦' } }),
+          frame({ jsonrpc: '2.0', id: 'unrelated', result: {} }),
+          frame({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { protocolVersion: 3, text: '订阅 🐦' },
+          }),
+        ]);
+        // Split headers, bodies and multibyte characters at every byte boundary.
+        for (const byte of response) stdout.write(Buffer.from([byte]));
+      } else stdout.write(frame({ jsonrpc: '2.0', id: request.id, result: quota(34.5) }));
+    });
+    try {
+      const snapshot = await readCopilotQuota(
+        { stdout, stdin, stderr } as ChildProcess,
+        new Promise<never>(() => {})
+      );
+      expect(snapshot.rateLimits[0]?.windows[0]?.usedPercent).toBe(65.5);
+      expect(requests).toEqual(['ping', 'account.getQuota']);
+    } finally {
+      stdout.destroy();
+      stdin.destroy();
+      stderr.destroy();
+    }
+  });
+
+  it.each([
+    'Content-Length: -1\r\n\r\n',
+    'Content-Length: 1\r\nContent-Length: 1\r\n\r\n{}',
+    'Content-Length: 65537\r\n\r\n',
+    'Content-Length: 1\r\n\r\n{',
+    'Content-Length: 2\r\n\r\n{}',
+  ])('rejects malformed SDK framing without returning a quota: %#', async (frame) => {
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    const stderr = new PassThrough();
+    try {
+      const result = readCopilotQuota(
+        { stdout, stdin, stderr } as ChildProcess,
+        new Promise<never>(() => {})
+      );
+      const rejected = expect(result).rejects.toThrow('invalid');
+      stdout.write(frame);
+      await rejected;
+    } finally {
+      stdout.destroy();
+      stdin.destroy();
+      stderr.destroy();
+    }
+  });
+
+  it('rejects a connection that ends partway through its response', async () => {
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    const stderr = new PassThrough();
+    try {
+      const result = readCopilotQuota(
+        { stdout, stdin, stderr } as ChildProcess,
+        new Promise<never>(() => {})
+      );
+      const rejected = expect(result).rejects.toThrow('closed');
+      stdout.end('Content-Length: 100\r\n\r\n{');
+      await rejected;
+    } finally {
+      stdout.destroy();
+      stdin.destroy();
+      stderr.destroy();
+    }
+  });
 
   it('bounds an unresponsive SDK connection with a deadline', async () => {
     vi.useFakeTimers();

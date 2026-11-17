@@ -38,7 +38,7 @@ Google registry ACP server 1.4.5 声明 `/usage`，但未声明 Core `rateLimits
 
 registry 条目 `github-copilot-cli` 在 SDK 模式下复用解析后的官方启动器和账户环境。Lody 将 ACP 参数替换为 `--headless --stdio`，保留包前缀及其余参数。既有 startup owner 负责启动准入和独立进程的所有权。成功、失败、超时和取消都等待进程树结束。无法确认清理完成时，沿用 Provider 隔离，不影响其他配置或聊天。SDK transport 仍是外部 Promise 边界；启动器、startup gate 和清理所有者的原生 Effect 迁移不属于此读取器范围。
 
-读取器使用 Content-Length JSON-RPC，以 `ping` 确认 SDK protocol version 3，再调用 `account.getQuota`，不创建会话。官方 CLI 1.0.107 和 registry 固定版本 1.0.112 都能使用已有本地登录查询。1.0.107 的 ACP 不支持账户 RPC，也没有 Core 额度声明。ACP `/usage` 只报告会话消耗，不能提供账户额度。Lody 仅为官方 registry 身份投影兼容能力，不为同名自定义命令声明支持。
+读取器使用 Content-Length JSON-RPC，以 `ping` 确认 SDK protocol version 3，再调用 `account.getQuota`，不创建会话。读取器仅处理这两个顺序请求，限制字节缓冲区大小，不为只读账户查询引入通用 JSON-RPC 依赖。官方 CLI 1.0.107 和 registry 固定版本 1.0.112 都能使用已有本地登录查询。1.0.107 的 ACP 不支持账户 RPC，也没有 Core 额度声明。ACP `/usage` 只报告会话消耗，不能提供账户额度。Lody 仅为官方 registry 身份投影兼容能力，不为同名自定义命令声明支持。
 
 只有 [0, 100] 范围内的有限 `premium_interactions.remainingPercentage` 才转换为 Core 窗口，已用百分比为 100 减去剩余百分比。零保留为耗尽；`hasQuota` 不代替数值。无限、缺失或无效额度会失败并保留缓存。通用 limit ID 使用 `github-copilot-cli`，因此选择模型不会隐藏账户级额度。基于 token 的计费使 request 数量含义不明确，实际观察到的 reset date 又接近查询时间，因此不展示数量、超额计费、固定窗口或重置时间，避免暗示月度请求数或重置预测。
 
