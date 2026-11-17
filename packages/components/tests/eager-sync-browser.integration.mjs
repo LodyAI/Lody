@@ -1,0 +1,290 @@
+// node tests/eager-sync-browser.integration.mjs
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from '@playwright/test';
+import { build } from 'vite';
+import wasm from 'vite-plugin-wasm';
+import { loroCrdtBundlerAlias, loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
+import { LoroDoc } from 'loro-crdt';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const output = await mkdtemp(path.join(tmpdir(), 'eager-sync-browser-'));
+const remote = new LoroDoc();
+remote.getList('history').push({ id: 'synthetic' });
+remote.commit();
+const body = JSON.stringify({
+  type: 'joined',
+  protocolVersion: 7,
+  serverVersion: Buffer.from(remote.oplogVersion().encode()).toString('base64'),
+  payload: {
+    kind: 'doc-update',
+    dataBase64: Buffer.from(remote.export({ mode: 'update' })).toString('base64'),
+  },
+});
+remote.free();
+const watchdog = setTimeout(() => {
+  console.error('Browser acceptance timed out');
+  process.exitCode = 1;
+  void browser?.close();
+  server?.closeAllConnections();
+}, 60_000);
+let browser;
+let server;
+try {
+  await build({
+    root,
+    configFile: false,
+    logLevel: 'error',
+    resolve: { alias: loroCrdtBundlerAlias() },
+    plugins: [loroCrdtWasmUrlWorkaround(), wasm()],
+    worker: { format: 'es', plugins: () => [loroCrdtWasmUrlWorkaround(), wasm()] },
+    build: {
+      outDir: output,
+      target: 'esnext',
+      lib: {
+        entry: path.join(root, 'tests/eager-sync-browser.fixture.ts'),
+        formats: ['es'],
+        fileName: () => 'fixture.js',
+      },
+    },
+  });
+  const downloads = [];
+  let waiting;
+  const nextDownload = () =>
+    new Promise((resolve) => {
+      waiting = resolve;
+    });
+  server = createServer(async (request, response) => {
+    if (request.url === '/download') {
+      downloads.push(response);
+      waiting?.();
+      waiting = undefined;
+      return;
+    }
+    if (request.url === '/') {
+      response.setHeader('Content-Type', 'text/html');
+      response.end('<script type="module" src="/fixture.js"></script>');
+      return;
+    }
+    try {
+      const file = path.join(output, new URL(request.url, 'http://localhost').pathname);
+      response.setHeader(
+        'Content-Type',
+        file.endsWith('.wasm') ? 'application/wasm' : 'text/javascript'
+      );
+      response.end(await readFile(file));
+    } catch {
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  browser = await chromium.launch({ headless: true });
+  let context = await browser.newContext();
+  const page = async (options = {}) => {
+    const p = await context.newPage();
+    p.on('pageerror', (error) => console.error('Page error:', error));
+    await p.goto(url);
+    await p.waitForFunction(() => typeof globalThis.configure === 'function');
+    await p.evaluate((o) => globalThis.configure(o), options);
+    return p;
+  };
+  const start = (p, id, room, activity = 1) =>
+    p.evaluate(({ id, room, activity }) => globalThis.start(id, room, activity), {
+      id,
+      room,
+      activity,
+    });
+  const result = (p, id) => p.evaluate((id) => globalThis.result(id), id);
+  const release = (index) => {
+    downloads[index].setHeader('Content-Type', 'application/json');
+    downloads[index].end(body);
+  };
+  const a = await page();
+  const b = await page();
+  let arrived = nextDownload();
+  await start(a, 'first', 'room');
+  await arrived;
+  await start(b, 'overlap', 'room');
+  assert.equal(await result(b, 'overlap'), 'skipped');
+  assert.equal(downloads.length, 1, 'two windows must not download the same room concurrently');
+  assert.equal(
+    await a.evaluate(() => globalThis.snapshot('room')),
+    null,
+    'checkpoint must wait for downloaded data'
+  );
+  release(0);
+  assert.equal(await result(a, 'first'), 'synced');
+  assert.ok((await a.evaluate(() => globalThis.snapshot('room'))).size > 0);
+  await start(b, 'cache', 'room');
+  assert.equal(await result(b, 'cache'), 'synced');
+  assert.equal(downloads.length, 1, 'successor must re-read the committed cache under its claim');
+  console.log('PASS concurrent dedup and committed cache');
+
+  arrived = nextDownload();
+  await start(a, 'cancelled', 'cancel');
+  await arrived;
+  await a.evaluate(() => globalThis.cancel('cancelled'));
+  assert.equal(await result(a, 'cancelled'), 'skipped');
+  arrived = nextDownload();
+  await start(b, 'after-cancel', 'cancel');
+  await arrived;
+  release(1);
+  release(2);
+  assert.equal(await result(b, 'after-cancel'), 'synced');
+  console.log('PASS cancellation');
+
+  arrived = nextDownload();
+  await start(a, 'closing', 'close');
+  await arrived;
+  await a.close();
+  arrived = nextDownload();
+  await start(b, 'after-close', 'close');
+  await arrived;
+  release(3);
+  release(4);
+  assert.equal(await result(b, 'after-close'), 'synced');
+  console.log('PASS owning window close');
+
+  const rejecter = await page({ reject: true });
+  arrived = nextDownload();
+  await start(rejecter, 'rejected', 'large');
+  await arrived;
+  release(5);
+  assert.equal(await result(rejecter, 'rejected'), 'cache_rejected');
+  assert.equal(await b.evaluate(() => globalThis.snapshot('large')), null);
+  await start(b, 'cooldown', 'large');
+  assert.equal(await result(b, 'cooldown'), 'cache_rejected');
+  assert.equal(downloads.length, 6, 'another window must respect persisted rejection');
+  await rejecter.close();
+  const restarted = await page({ reject: true });
+  await start(restarted, 'restart', 'large');
+  assert.equal(await result(restarted, 'restart'), 'cache_rejected');
+  assert.equal(downloads.length, 6);
+  arrived = nextDownload();
+  await start(restarted, 'new-activity', 'large', 2);
+  await arrived;
+  release(6);
+  assert.equal(await result(restarted, 'new-activity'), 'cache_rejected');
+  await restarted.evaluate(() => globalThis.advance(30 * 60 * 1000));
+  arrived = nextDownload();
+  await start(restarted, 'expired', 'large', 2);
+  await arrived;
+  release(7);
+  assert.equal(await result(restarted, 'expired'), 'cache_rejected');
+  console.log('PASS persisted rejection, restart, new activity and expiry');
+
+  const unavailable = await page({ locks: null });
+  await start(unavailable, 'no-lock', 'no-lock');
+  assert.equal(await result(unavailable, 'no-lock'), 'skipped');
+  assert.equal(downloads.length, 8, 'lock-unavailable degradation must not download');
+  console.log('PASS unavailable locks');
+
+  await context.close();
+  context = await browser.newContext();
+  // Claims and refusal records must not spread across authority/plane/workspace.
+  const scopes = [
+    await page({ reject: true }),
+    await page({ reject: true, authorizationScope: 'another-account' }),
+    await page({ reject: true, plane: 'cloud' }),
+    await page({ reject: true, workspaceId: 'another-workspace' }),
+  ];
+  for (let i = 0; i < scopes.length; i++) {
+    arrived = nextDownload();
+    await start(scopes[i], 'isolated', 'scope-room');
+    assert.equal(
+      await Promise.race([arrived.then(() => 'download'), result(scopes[i], 'isolated')]),
+      'download'
+    );
+    const held = await scopes[i].evaluate(async () =>
+      (await navigator.locks.query()).held.map((lock) => lock.name)
+    );
+    const workspace = i === 3 ? 'another-workspace' : 'workspace';
+    const plane = i === 2 ? 'cloud' : 'local';
+    const authority = i === 1 ? 'another-account' : 'account';
+    const key = [
+      workspace,
+      'scope-room',
+      workspace,
+      authority,
+      plane,
+      ...(plane === 'cloud' ? [`${url}/ds/bucket/scope-room`] : []),
+    ];
+    assert.ok(held.includes(`lody:eager-sync:${JSON.stringify(key)}`));
+    if (i === 0) {
+      const contender = await page();
+      await start(contender, 'same-scope', 'scope-room');
+      assert.equal(await result(contender, 'same-scope'), 'skipped');
+      await contender.close();
+    }
+    release(8 + i);
+    assert.equal(await result(scopes[i], 'isolated'), 'cache_rejected');
+  }
+  assert.equal(downloads.length, 12);
+  console.log('PASS independent account, plane and workspace claims');
+
+  for (const stage of ['snapshot', 'rejection']) {
+    const stalled = await page({ pendingRead: stage });
+    const room = `unanswered-${stage}`;
+    await start(stalled, 'stalled', room);
+    await stalled.evaluate(() => globalThis.enteredRead());
+    await stalled.evaluate(() => globalThis.cancel('stalled'));
+    assert.equal(await result(stalled, 'stalled'), 'skipped');
+    const lock = `lody:eager-sync:${JSON.stringify(['workspace', room, 'workspace', 'account', 'local'])}`;
+    // Native lock acquisition is the release receipt, not a sleep/poll heuristic.
+    await stalled.evaluate((key) => navigator.locks.request(key, () => {}), lock);
+    const successor = await page();
+    const index = downloads.length;
+    arrived = nextDownload();
+    await start(successor, 'successor', room);
+    assert.equal(
+      await Promise.race([arrived.then(() => 'download'), result(successor, 'successor')]),
+      'download'
+    );
+    release(index);
+    assert.equal(await result(successor, 'successor'), 'synced');
+    await stalled.close();
+    await successor.close();
+  }
+  console.log('PASS cancelled unanswered cache reads release native claims and queue slots');
+
+  // A failed/incomplete download and a terminated deadline both leave no
+  // snapshot high-water, but must retain a durable failure receipt on reload.
+  for (const mode of ['failed', 'timeout']) {
+    const failed = await page({ failure: mode === 'failed' });
+    const room = `failure-${mode}`;
+    const index = downloads.length;
+    arrived = nextDownload();
+    await start(failed, 'failure', room);
+    await arrived;
+    if (mode === 'failed') release(index);
+    else await failed.evaluate(() => globalThis.timeout('failure'));
+    assert.equal(await result(failed, 'failure'), 'failed');
+    // Joining the renderer queue observes completion of the failure receipt.
+    await start(failed, 'settled', room);
+    assert.equal(await result(failed, 'settled'), 'failed');
+    assert.equal(await failed.evaluate((room) => globalThis.snapshot(room), room), null);
+    await failed.close();
+    const reopened = await page({ failure: true });
+    await start(reopened, 'restart', room);
+    assert.equal(await result(reopened, 'restart'), 'failed');
+    assert.equal(downloads.length, index + 1);
+    arrived = nextDownload();
+    await start(reopened, 'new-activity', room, 2);
+    await arrived;
+    release(index + 1);
+    assert.equal(await result(reopened, 'new-activity'), 'failed');
+    await reopened.close();
+  }
+  console.log('PASS durable failed and timeout cooldown without false snapshot progress');
+} finally {
+  clearTimeout(watchdog);
+  await browser?.close();
+  server?.closeAllConnections();
+  await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+  await rm(output, { recursive: true, force: true });
+}

@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2854](https://github.com/LodyAI/Lody/pull/2854)
+PR: [#2853](https://github.com/LodyAI/Lody/pull/2853), [#2854](https://github.com/LodyAI/Lody/pull/2854)
 
 [中文](2026-09-12-session-prefetch-worker.zh.md)
 
@@ -29,7 +29,7 @@ does not isolate Loro's own cost. Another possible direction is caching the tran
 directly, but the transport adapter depends on document version vectors, so this keeps a real Doc inside the Worker. Cloud prefetch uses the published Streams `catchup()` operation rather than joining a writer room; restored cache operations must never be inferred as local uploads. It does not share the
 renderer's Repo database, avoiding two independent instances writing the same persisted state.
 
-The Worker entry installs its message handler before importing the WASM task module, preserving an immediate start message during initialization. The Worker exits at the end of each task; both concurrency and batch size are 1. The cooldown between
+The Worker sends `ready` only after its handler exists; the parent sends `start` once after that handshake, preserving requests during WASM initialization. The Worker exits at the end of each task; both concurrency and batch size are 1. The cooldown between
 batches is 1.5 seconds on desktop/web and 3 seconds on mobile. The separate cache is capped at
 128 MiB / 64 entries. Snapshot, snapshot version vector, activity progress and the
 optional version-1 cloud checkpoint are committed in one IndexedDB row. The cloud
@@ -43,11 +43,40 @@ the parent also terminates stalled tasks at the twenty-second deadline. Before p
 high-water timestamp index of at most 1000 entries, so sessions evicted by the 64-entry snapshot LRU
 are not re-queued on every startup; that index reads neither the Doc nor history. The parent thread
 re-reads the snapshot checkpoint before creating the Worker and the Loro WASM, completing immediately
-on a hit; the Worker reads it once more to close the cross-window race. All windows of the same
+on a hit; the Worker also checks it before importing cached data. All windows of the same
 workspace share a `[workspaceId, roomId]` cache scope, so a slower write on the same plane cannot
 lower the checkpoint. The receiving side creates no business fields; the local adapter still follows
 the existing version-negotiation protocol. The cloud Worker uses the same explicit Streams endpoint as
 the already mounted foreground transport.
+
+Across windows, a non-waiting Web Lock claims workspace, room, cache scope, account,
+transport plane and cloud destination before checking the cache and starting a Worker.
+The claim remains held through the snapshot transaction and Worker termination; a
+contender or an unavailable lock skips optional prefetch. Window destruction releases
+its claim and child Worker. An explicit `ready` message precedes `start`: a module
+Worker can dispatch messages while its top-level WASM initialization is still pending.
+Sending `start` immediately can lose it before the handler exists.
+
+Cache refusal returns `cache_rejected`; errors, incomplete imports and deadlines return `failed`. Neither outcome advances high-water.
+A separate bounded IndexedDB index remembers the same claim/activity for thirty
+minutes across windows and restarts; the coordinator also suppresses reseeds within
+its runtime. New activity bypasses the refusal. Expiry permits retry on a later
+scheduling edge, without a polling timer. Up to 1,000 refusal records are retained;
+if that metadata write fails, the runtime keeps a bounded memory fallback. That
+fallback cannot provide rejection persistence to other windows or after reload.
+Failed task receipts get their own bounded two-second transaction budget after termination, so an aborted download deadline cannot silently remove restart cooldown. Foreground opening still cancels prefetch and uses the existing merge/sync path.
+The 128 MiB/64-entry snapshot cap is unchanged. Cache clearing includes this index.
+
+This keeps the published Promise Repo/transport consumer boundary from the
+[rollback decision](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.md).
+Introducing another consumer kernel would expand this download-admission fix;
+the browser lock owns cross-window exclusion, which an in-process semaphore cannot.
+
+A cache read that does not answer cannot retain the renderer slot after cancellation:
+read results are abandoned without starting a Worker. Refusal metadata opens retire
+on cancellation and close any late database handle without starting a transaction.
+An active refusal write is aborted at the IndexedDB transaction itself; its terminal
+`abort` or `complete` event, rather than a waiter timeout, releases the claim.
 
 Task cancellation terminates the Worker from the parent thread and sends a local peer detach; this
 does not depend on a Worker that is executing synchronous WASM handling a cancel message. Opening the
@@ -58,7 +87,7 @@ already covered on disk), before Repo owns the document. Plaintext mode, workspa
 scope, room and the mounted transport's stream URL must match. A covered checkpoint
 is inserted only when no foreground cursor exists; offsets and timestamps cannot
 order two cursors. Web Locks serialize this conditional write with ordinary saves
-across callers sharing a database. Without Web Locks, adoption is skipped. Existing
+across callers sharing a database. Without Web Locks, adoption is skipped. Ordinary safe cursor saves/deletes fall back to their usual operation if lock acquisition fails; conditional adoption stays strict. Existing
 live documents never adopt progress. Failure keeps ordinary bootstrap available.
 The cursor records contain remote replay progress, not producer acknowledgments;
 local operations outside the server lower bound still upload normally. Cache
@@ -78,17 +107,6 @@ HistoryWriter's responsibility. The current guarantees are written into the
 
 ## Verification and limits
 
-The [worker suite](../../../../packages/components/tests/eager-sync-worker.test.ts)
-uses real Loro and scripted HTTP to cover incremental restarts, legacy and invalid
-checkpoints, pending imports, failed/interrupted writes, 410 recovery and deadline
-slot release. The [cold-load suite](../../../../packages/components/tests/local-window-bootstrap.test.ts)
-checks independent window databases, persistence-before-cursor ordering, already-covered
-disk state, retained pending imports, unsent local writes reaching the remote replica,
-410 recovery and live-document exclusion. The [cursor-store suite](../../../../packages/components/tests/resilient-remote-cursor-store.test.ts)
-checks concurrent conditional insertion against ordinary writes using a shared lock
-port and real IndexedDB behavior.
+The [worker suite](../../../../packages/components/tests/eager-sync-worker.test.ts) uses real Loro and scripted HTTP for incremental restarts, old/invalid checkpoints, pending dependencies, interrupted writes and 410 recovery. The [cold-load suite](../../../../packages/components/tests/local-window-bootstrap.test.ts) covers durable-before-cursor ordering, independent window databases, retained pending imports, live-document exclusion and unuploaded edits reaching the remote replica. Both reject a cache-declared snapshot version not covered by the actual document. The [cursor suite](../../../../packages/components/tests/resilient-remote-cursor-store.test.ts) guards conditional insertion against ordinary writes and lock-unavailable degradation.
 
-No real user conversations are fixtures. Installed browser/native Web Locks,
-real long-conversation performance and production traffic savings remain unverified.
-The Worker and UI share device memory and CPU; thread isolation does not provide
-unlimited memory or remove contention.
+The [coordinator suite](../../../../packages/components/tests/background-sync-coordinator.test.ts) covers rejection/failure cooldown without false high-water, newer activity and event-driven expiry. [Browser acceptance](../../../../packages/components/tests/eager-sync-browser.integration.mjs) uses actual Chromium windows, Workers, HTTP and IndexedDB for claims, ready/start, cancellation, window closure, rejection and failed/deadline receipts surviving reload. Refusal is injected after downloading synthetic bytes rather than allocating a 128 MiB history. Separate profiles, origins and Electron partitions do not share browser claims. Installed desktop/mobile acceptance, real long-history performance and production traffic savings remain unverified; Worker and UI still share device resources. No captured conversations are fixtures.

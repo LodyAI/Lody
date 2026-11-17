@@ -50,6 +50,7 @@ export type EagerSyncWorkerInput =
   | { type: 'auth-result'; id: number; token?: string };
 
 export type EagerSyncWorkerOutput =
-  | { type: 'complete'; outcome: 'synced' | 'failed' | 'skipped' }
+  | { type: 'ready' }
+  | { type: 'complete'; outcome: import('./background-sync-coordinator').PrefetchOutcome }
   | { type: 'local-send'; message: LocalSyncMessage }
   | { type: 'auth'; id: number; context?: EagerSyncAuthContext };

@@ -77,7 +77,7 @@ independent of that prefetch gate. See [window behavior](../../specs/desktop-win
 Background prefetch does not materialize UI stores. The workspace runtime sends
 room identity and transport configuration to `eager-sync-worker-client.ts`; one
 disposable worker at a time imports/syncs a raw Loro Doc and persists a snapshot.
-The Worker entry registers its message handler before lazily importing the WASM task, so an immediate start message survives initialization. The worker sends only completion status back, and retains no warm Doc or Mirror.
+The Worker registers its message handler and sends `ready`; the parent sends `start` once after that handshake so initialization cannot lose the request. The worker sends only completion status back, and retains no warm Doc or Mirror.
 The independent IndexedDB cache holds at most 128 MiB / 64 snapshots; each row
 atomically stores binary state, its activity checkpoint and, for cloud downloads, a versioned stream cursor with the snapshot version vector. Older rows without a cursor remain snapshot-only inputs. The database schema stays at version 1; adding the optional field requires no blocked upgrade. Before constructing a
 worker (and its Loro WASM), the parent checks that checkpoint and skips already

@@ -161,4 +161,20 @@ describe('ResilientRemoteCursorStore', () => {
     await store.save(cursor);
     expect(await store.load(cursor.streamUrl)).toEqual(cursor);
   });
+  it('keeps durable ordinary progress available when the adoption lock cannot be acquired', async () => {
+    const indexedDb = new IDBFactory();
+    const locks = {
+      request: async () => {
+        throw new DOMException('lock unavailable', 'TimeoutError');
+      },
+    } as Pick<LockManager, 'request'>;
+    const store = new ResilientRemoteCursorStore({ dbName: 'lock-unavailable', indexedDb, locks });
+    const cursor = createCursor('https://streams.example.com/ds/bucket/session');
+    await store.save(cursor);
+    expect(await store.load(cursor.streamUrl)).toEqual(cursor);
+    await store.delete(cursor.streamUrl);
+    expect(await store.load(cursor.streamUrl)).toBeNull();
+    await expect(store.saveIfAbsent(cursor)).rejects.toThrow('lock unavailable');
+    expect(await store.load(cursor.streamUrl)).toBeNull();
+  });
 });

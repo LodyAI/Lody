@@ -89,27 +89,47 @@ export class ResilientRemoteCursorStore<
   private degraded = false;
   private readonly locks: Pick<LockManager, 'request'> | undefined;
 
-  private async withWriter<T>(streamUrl: string, operation: () => Promise<T>): Promise<T> {
+  private async withWriter<T>(
+    streamUrl: string,
+    operation: () => Promise<T>,
+    requireLock = false
+  ): Promise<T> {
     if (!this.locks) return operation();
-    return await this.locks.request(
-      JSON.stringify(['lody:remote-cursor-write', this.dbName, streamUrl]),
-      {
-        signal: AbortSignal.timeout(
-          this.timeoutMs > 0 ? this.timeoutMs : DEFAULT_REMOTE_CURSOR_STORE_TIMEOUT_MS
-        ),
-      },
-      operation
-    );
+    let acquired = false;
+    try {
+      return await this.locks.request(
+        JSON.stringify(['lody:remote-cursor-write', this.dbName, streamUrl]),
+        {
+          signal: AbortSignal.timeout(
+            this.timeoutMs > 0 ? this.timeoutMs : DEFAULT_REMOTE_CURSOR_STORE_TIMEOUT_MS
+          ),
+        },
+        () => {
+          acquired = true;
+          return operation();
+        }
+      );
+    } catch (error) {
+      // Ordinary progress already has its document durability barrier. A lock
+      // failure must not disable synchronization; only conditional adoption
+      // requires exclusion. Never retry an operation that actually ran.
+      if (acquired || requireLock) throw error;
+      return operation();
+    }
   }
 
   /** Conditional insertion for a cold replica; ordinary cursor writes use the same gate. */
   saveIfAbsent(cursor: RemoteCursor<TVersion>): Promise<boolean> {
     if (!this.locks) return Promise.resolve(false);
-    return this.withWriter(cursor.streamUrl, async () => {
-      if (await this.load(cursor.streamUrl)) return false;
-      await this.saveUnlocked(cursor);
-      return true;
-    });
+    return this.withWriter(
+      cursor.streamUrl,
+      async () => {
+        if (await this.load(cursor.streamUrl)) return false;
+        await this.saveUnlocked(cursor);
+        return true;
+      },
+      true
+    );
   }
 
   constructor(options: ResilientRemoteCursorStoreOptions<TVersion>) {
