@@ -9,6 +9,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { styles as taskStyles } from './subagent-task-panel.stylex';
 import { useTranslation } from 'react-i18next';
 import {
+  getAgentRoleEmoji,
   getSessionLaunchConfigLegacyFields,
   getSessionRoomId,
   type AgentConfigCliType,
@@ -78,8 +79,10 @@ const sameSessionAgent = (a: SessionAgentFields | null, b: SessionAgentFields | 
     a.env === b.env);
 
 export type CreatedSessionIdentity = SessionAgentFields & {
-  /** The readable Agent Role name, when the Session was created from one. */
+  /** The readable Agent Role, when the Session was created from one. */
   roleName: string | null;
+  /** That Role's glyph, shown in place of the provider icon as on every Role surface. */
+  roleEmoji: string | null;
   /** Provider (agent config) name; always present once the target meta synced. */
   providerName: string;
   brandId?: Parameters<typeof AgentIcon>[0]['brandId'];
@@ -104,9 +107,9 @@ export function useCreatedSessionIdentity(sessionId: SessionId): CreatedSessionI
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(agent?.agentConfigId));
   const { roles } = useWorkspaceAgentRoles();
   if (!agent) return null;
-  const roleName = agent.agentRoleId
-    ? roles.find((role) => role.id === agent.agentRoleId)?.name?.trim() || null
-    : null;
+  const role = agent.agentRoleId
+    ? roles.find((entry) => entry.id === agent.agentRoleId && entry.name?.trim())
+    : undefined;
   const providerName =
     agentConfig?.name?.trim() ||
     getAgentDisplayName(agent.cliType, agent.agentType) ||
@@ -115,7 +118,8 @@ export function useCreatedSessionIdentity(sessionId: SessionId): CreatedSessionI
     ...agent,
     env: agentConfig?.env ?? agent.env,
     brandId: agentConfig?.brandId,
-    roleName,
+    roleName: role ? role.name.trim() : null,
+    roleEmoji: role ? getAgentRoleEmoji(role) : null,
     providerName,
   };
 }
@@ -131,18 +135,33 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
-    // The title gives way first (its shrink weight is far larger); only then
-    // does a long Role name ellipsize, so the status never leaves the row.
+    // The title gives way first; only then does a long Role name ellipsize,
+    // so the status never leaves the row.
     flexShrink: 1,
     minWidth: '3em',
     maxWidth: '45%',
     color: colors.label,
   },
   actorIcon: { width: '13px', height: '13px', flexShrink: 0, color: colors.secondaryLabel },
+  // A fixed glyph box: an emoji's fallback-font width must not move the name.
+  actorEmoji: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '14px',
+    height: '14px',
+    fontSize: '13px',
+    lineHeight: 1,
+  },
   actorName: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   title: {
     flexGrow: 1,
-    flexShrink: 1000,
+    // Shrink is weighted by base size, so the actor still receives a fraction of
+    // a pixel at a smaller ratio, and any fractional overflow draws an ellipsis
+    // on a name that fits. At this weight its share rounds to zero until the
+    // title reaches its minimum.
+    flexShrink: 1_000_000,
     minWidth: '2em',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -232,13 +251,19 @@ export function CreatedSessionOperationCard({
                 data-created-session-agent={identity.roleName ? 'role' : 'provider'}
                 {...stylex.props(styles.actor)}
               >
-                <AgentIcon
-                  cliType={identity.cliType}
-                  agentType={identity.agentType}
-                  brandId={identity.brandId}
-                  env={identity.env}
-                  className={stylex.props(styles.actorIcon).className}
-                />
+                {identity.roleEmoji ? (
+                  <span aria-hidden="true" {...stylex.props(styles.actorEmoji)}>
+                    {identity.roleEmoji}
+                  </span>
+                ) : (
+                  <AgentIcon
+                    cliType={identity.cliType}
+                    agentType={identity.agentType}
+                    brandId={identity.brandId}
+                    env={identity.env}
+                    className={stylex.props(styles.actorIcon).className}
+                  />
+                )}
                 <span {...stylex.props(styles.actorName)}>{actor}</span>
               </span>
               <span aria-hidden="true" {...stylex.props(taskStyles.dot)}>

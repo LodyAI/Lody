@@ -27,7 +27,9 @@ vi.mock('../src/hooks/use-session-actions', () => ({
 }));
 
 // The workspace Role catalog is a synced room; this suite supplies its readable rows.
-const readableRoles = vi.hoisted(() => ({ current: [] as { id: string; name: string }[] }));
+const readableRoles = vi.hoisted(() => ({
+  current: [] as { id: string; name: string; emoji?: string }[],
+}));
 vi.mock('../src/hooks/use-workspace-agent-roles', () => ({
   useWorkspaceAgentRoles: () => ({ roles: readableRoles.current, synced: true }),
 }));
@@ -100,7 +102,7 @@ describe('Session relation cards', () => {
     childMeta('role-child', 'Review PR security', { agentRoleId: 'role-ui' });
     childMeta('plain-child', 'Fix flaky test', {});
     childMeta('gone-role-child', 'Role was deleted', { agentRoleId: 'role-deleted' });
-    readableRoles.current = [{ id: 'role-ui', name: 'UI Designer' }];
+    readableRoles.current = [{ id: 'role-ui', name: 'UI Designer', emoji: '🎨' }];
 
     await act(async () =>
       root.render(
@@ -136,12 +138,15 @@ describe('Session relation cards', () => {
     const agentOf = (index: number) =>
       cards[index]?.querySelector('[data-created-session-agent]') ?? null;
     expect(agentOf(0)?.getAttribute('data-created-session-agent')).toBe('role');
-    expect(agentOf(0)?.textContent).toBe('UI Designer');
+    // A Role shows its own emoji, not the provider's icon.
+    expect(agentOf(0)?.textContent).toBe('🎨UI Designer');
+    expect(agentOf(0)?.querySelector('svg')).toBeNull();
     expect(cards[0]?.querySelector('button')?.getAttribute('aria-label')).toBe(
       'View session: UI Designer (Agent Role) · Codex · Review PR security'
     );
     expect(agentOf(1)?.getAttribute('data-created-session-agent')).toBe('provider');
     expect(agentOf(1)?.textContent).toBe('Codex');
+    expect(agentOf(1)?.querySelector('svg')).not.toBeNull();
     // A Role the reader can no longer see falls back to the provider, never its id.
     expect(agentOf(2)?.textContent).toBe('Codex');
     expect(container.textContent).not.toContain('role-deleted');
