@@ -63,9 +63,9 @@ def rail_photo_pixels(identifier):
 
 
 # The family button is hidden from AX (VoiceOver exposes a custom action on
-# the parent). Its physical target is the bottom 44 points of the parent frame.
+# the parent). Its physical target is the bottom 40 points of the parent frame.
 # Probe that contract directly, without locating text ink or invoking AX actions.
-FAMILY_HEIGHT = 44
+FAMILY_HEIGHT = 40
 PARENT = 'st-ship'
 CHILDREN = {'st-ship-mac', 'st-ship-fix'}
 
