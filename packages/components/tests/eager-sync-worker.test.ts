@@ -1,5 +1,9 @@
-import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it, vi } from 'vitest';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
+import {
+  readEagerSyncRejection,
+  writeEagerSyncRejection,
+} from '../src/providers/eager-sync-admission';
 import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import {
@@ -7,7 +11,10 @@ import {
   bytesToBase64,
   buildDocUpdateChunkPayloads,
 } from '@lody/shared/local-loro-data-plane';
-import { createEagerSyncWorkerClient } from '../src/providers/eager-sync-worker-client';
+import {
+  type EagerSyncWorkerClientDeps,
+  createEagerSyncWorkerClient,
+} from '../src/providers/eager-sync-worker-client';
 import { runEagerSyncWorkerTask } from '../src/providers/eager-sync-worker-task';
 import {
   readEagerSyncSnapshot,
@@ -37,7 +44,12 @@ class TestWorker {
   onmessageerror: (() => void) | null = null;
   terminated = false;
   inputs: EagerSyncWorkerInput[] = [];
-  constructor(private start: (worker: TestWorker) => void) {}
+  constructor(
+    private start: (worker: TestWorker) => void,
+    ready = true
+  ) {
+    if (ready) queueMicrotask(() => this.emit({ type: 'ready' }));
+  }
   postMessage(input: EagerSyncWorkerInput) {
     if (this.terminated) throw new Error('Posting to a terminated worker');
     this.inputs.push(input);
@@ -57,9 +69,12 @@ function clientHarness(
     undefined,
   auth: (context?: EagerSyncAuthContext) => Promise<string | undefined> = async () => {
     throw new Error('Local prefetch must never request cloud credentials');
-  }
+  },
+  ready = true,
+  overrides: Partial<EagerSyncWorkerClientDeps> = {}
 ) {
   const starts = [deferred<TestWorker>(), deferred<TestWorker>(), deferred<TestWorker>()];
+  const created = deferred<TestWorker>();
   const workers: TestWorker[] = [];
   const sent: LocalSyncMessage[] = [];
   const listeners = new Set<(event: LocalSyncEvent) => void>();
@@ -67,12 +82,21 @@ function clientHarness(
     content: { mode: 'plaintext' },
     workspaceId: 'workspace',
     scope: 'scope',
+    authorizationScope: 'account',
+    // The real cross-window contract is covered by the Chromium integration.
+    // Node 22 in CI has no browser LockManager.
+    locks: {
+      request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) =>
+        run({} as Lock),
+    } as Pick<LockManager, 'request'>,
+    readRejection: async () => undefined,
     resolveTransport,
     readSnapshot,
     auth,
     createWorker: () => {
       const index = workers.length;
-      const worker = new TestWorker((started) => starts[index].resolve(started));
+      const worker = new TestWorker((started) => starts[index].resolve(started), ready);
+      created.resolve(worker);
       workers.push(worker);
       return worker as unknown as Worker;
     },
@@ -92,8 +116,9 @@ function clientHarness(
       },
       dispose() {},
     }),
+    ...overrides,
   });
-  return { client, starts, workers, sent, listeners };
+  return { client, starts, workers, sent, listeners, created };
 }
 
 describe('worker raw-document prefetch', () => {
@@ -109,6 +134,7 @@ describe('worker raw-document prefetch', () => {
     const listeners = new Set<(event: LocalSyncEvent) => void>();
     let joins = 0;
     let failWrite = false;
+    let rejectWrite = false;
     const joinedBeforeLastChunk = deferred<void>();
     let deliverLastChunk: () => void = () => {
       throw new Error('No pending chunk');
@@ -129,6 +155,7 @@ describe('worker raw-document prefetch', () => {
       readSnapshot: async () => cached,
       writeSnapshot: async (row) => {
         if (failWrite) throw new Error('disk full');
+        if (rejectWrite) return false;
         cached = { ...row, key: 'snapshot' };
         return true;
       },
@@ -217,6 +244,12 @@ describe('worker raw-document prefetch', () => {
     // A durable checkpoint avoids reopening the transport, including on restart.
     expect(await runEagerSyncWorkerTask({ ...request, lastMessageAt: 2 }, deps)).toBe('synced');
     expect(joins).toBe(2);
+    rejectWrite = true;
+    expect(await runEagerSyncWorkerTask({ ...request, lastMessageAt: 3 }, deps)).toBe(
+      'cache_rejected'
+    );
+    expect(cached?.lastMessageAt).toBe(2);
+    rejectWrite = false;
     failWrite = true;
     await expect(runEagerSyncWorkerTask({ ...request, lastMessageAt: 3 }, deps)).rejects.toThrow(
       'disk full'
@@ -225,66 +258,6 @@ describe('worker raw-document prefetch', () => {
     expect(listeners.size).toBe(0);
     remote.free();
     foreground.free();
-  });
-});
-
-describe('worker module startup', () => {
-  it('accepts its start message before the WASM task module finishes loading', async () => {
-    vi.stubGlobal('indexedDB', new IDBFactory());
-    const doc = new LoroDoc();
-    await writeEagerSyncSnapshot({
-      scope: 'startup',
-      roomId: 'room',
-      plane: 'local',
-      lastMessageAt: 1,
-      savedAt: 1,
-      snapshot: new Blob([doc.export({ mode: 'snapshot' }).slice().buffer]),
-    });
-    doc.free();
-    const loading = deferred<void>();
-    const release = deferred<void>();
-    const complete = deferred<EagerSyncWorkerOutput>();
-    let finished = false;
-    const worker = {
-      onmessage: null as ((event: MessageEvent<EagerSyncWorkerInput>) => void) | null,
-      postMessage: (message: EagerSyncWorkerOutput) => {
-        finished = true;
-        complete.resolve(message);
-      },
-    };
-    vi.stubGlobal('self', worker);
-    vi.doMock('../src/providers/eager-sync-worker-task', async (importOriginal) => {
-      loading.resolve();
-      await release.promise;
-      return await importOriginal();
-    });
-    try {
-      await import('../src/providers/eager-sync.worker');
-      expect(worker.onmessage).toBeTypeOf('function');
-      worker.onmessage!({
-        data: {
-          type: 'start',
-          content: { mode: 'plaintext' },
-          scope: 'startup',
-          workspaceId: 'workspace',
-          roomId: 'room',
-          peerId: 'worker',
-          lastMessageAt: 1,
-          connected: false,
-          transport: { plane: 'local' },
-        },
-      } as MessageEvent<EagerSyncWorkerInput>);
-      await loading.promise;
-      worker.onmessage!({
-        data: { type: 'local-status', connected: true },
-      } as MessageEvent<EagerSyncWorkerInput>);
-      expect(finished).toBe(false);
-      release.resolve();
-      expect(await complete.promise).toEqual({ type: 'complete', outcome: 'synced' });
-    } finally {
-      release.resolve();
-      vi.doUnmock('../src/providers/eager-sync-worker-task');
-    }
   });
 });
 
@@ -519,7 +492,7 @@ describe('cloud prefetch checkpoints', () => {
     }
   });
 
-  it.each(['legacy', 'lost', 'uncovered', 'stream', 'format'] as const)(
+  it.each(['legacy', 'lost', 'uncovered', 'snapshot-version', 'stream', 'format'] as const)(
     'bootstraps safely for a %s checkpoint',
     async (kind) => {
       const h = harness();
@@ -532,6 +505,7 @@ describe('cloud prefetch checkpoints', () => {
             ...row.cloudCheckpoint!.cursor,
             serverLowerBoundVersion: { '1': 999 },
           };
+        else if (kind === 'snapshot-version') row.cloudCheckpoint!.snapshotVersion = { '1': 999 };
         else if (kind === 'stream')
           row.cloudCheckpoint!.cursor = {
             ...row.cloudCheckpoint!.cursor,
@@ -565,7 +539,7 @@ describe('cloud prefetch checkpoints', () => {
           { ...h.request, lastMessageAt: 2 },
           { ...h.deps, writeSnapshot: async () => false }
         )
-      ).toBe('skipped');
+      ).toBe('cache_rejected');
       const saving = deferred<void>();
       const release = deferred<void>();
       const interrupted = runEagerSyncWorkerTask(
@@ -638,3 +612,218 @@ describe('cloud prefetch checkpoints', () => {
     }
   });
 });
+
+it('cancels a worker still initializing WASM without attaching a local peer', async () => {
+  const h = clientHarness(undefined, undefined, undefined, false);
+  const controller = new AbortController();
+  const outcome = h.client.prefetch('initializing', 1, controller.signal);
+  const worker = await h.created.promise;
+  expect(worker.inputs).toEqual([]);
+  controller.abort();
+  expect(await outcome).toBe('skipped');
+  expect(worker.terminated).toBe(true);
+  // Late ready cannot resurrect the retired task or start a download.
+  worker.emit({ type: 'ready' });
+  expect(worker.inputs).toEqual([]);
+  expect(h.sent).toEqual([]);
+  h.client.dispose();
+});
+
+it.each(['snapshot', 'rejection'] as const)(
+  'releases the claim and serial slot when a %s read never answers',
+  async (stage) => {
+    const reading = deferred<void>();
+    const staleRead = deferred<undefined>();
+    const released = deferred<void>();
+    let held = false;
+    const wait = async () => {
+      reading.resolve();
+      return staleRead.promise;
+    };
+    const h = clientHarness(undefined, undefined, undefined, true, {
+      ...(stage === 'snapshot' ? { readSnapshot: wait } : { readRejection: wait }),
+      locks: {
+        request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) => {
+          held = true;
+          try {
+            return await run({} as Lock);
+          } finally {
+            held = false;
+            released.resolve();
+          }
+        },
+      } as Pick<LockManager, 'request'>,
+    });
+    const controller = new AbortController();
+    const outcome = h.client.prefetch('stuck', 1, controller.signal);
+    await reading.promise;
+    expect(held).toBe(true);
+    controller.abort();
+    expect(await outcome).toBe('skipped');
+    await released.promise;
+    expect(held).toBe(false);
+    expect(h.workers).toEqual([]);
+    // Another task must actually run while the abandoned read is still pending.
+    const next = clientHarness();
+    const successor = next.client.prefetch('independent', 1, new AbortController().signal);
+    const worker = await next.starts[0].promise;
+    worker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await successor).toBe('synced');
+    staleRead.resolve(undefined);
+    h.client.dispose();
+    next.client.dispose();
+  }
+);
+
+it('aborts the actual refusal transaction and cannot leave a late cooldown write', async () => {
+  const controller = new AbortController();
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const original = IDBObjectStore.prototype.put;
+  const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    ...args
+  ) {
+    const request = original.apply(this, args);
+    // Cancel after a real request has entered the actual transaction.
+    controller.abort();
+    return request;
+  });
+  try {
+    await expect(
+      writeEagerSyncRejection(
+        { key: 'cancelled-refusal', lastMessageAt: 1, rejectedAt: 1 },
+        controller.signal
+      )
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    put.mockRestore();
+    expect(await readEagerSyncRejection('cancelled-refusal')).toBeUndefined();
+    await writeEagerSyncRejection({ key: 'cancelled-refusal', lastMessageAt: 2, rejectedAt: 2 });
+    expect(await readEagerSyncRejection('cancelled-refusal')).toMatchObject({ lastMessageAt: 2 });
+  } finally {
+    put.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('retires an unanswered refusal database open without starting a late writer', async () => {
+  const controller = new AbortController();
+  const opening = deferred<void>();
+  let closed = false;
+  let transactions = 0;
+  const request = {} as IDBOpenDBRequest;
+  vi.stubGlobal('indexedDB', {
+    open: () => {
+      opening.resolve();
+      return request;
+    },
+  });
+  try {
+    const writing = writeEagerSyncRejection(
+      { key: 'late-open', lastMessageAt: 1, rejectedAt: 1 },
+      controller.signal
+    );
+    await opening.promise;
+    controller.abort();
+    await expect(writing).rejects.toMatchObject({ name: 'AbortError' });
+    Object.defineProperty(request, 'result', {
+      value: {
+        close: () => {
+          closed = true;
+        },
+        transaction: () => {
+          transactions++;
+          throw new Error('Retired writer must not start');
+        },
+      },
+    });
+    request.onsuccess?.call(request, new Event('success'));
+    expect(closed).toBe(true);
+    expect(transactions).toBe(0);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('retains the claim until the cancelled refusal writer confirms its transaction ended', async () => {
+  const writing = deferred<void>();
+  const abortSeen = deferred<void>();
+  const transactionEnded = deferred<void>();
+  let held = false;
+  const h = clientHarness(undefined, undefined, undefined, true, {
+    writeRejection: async (_row, signal) => {
+      writing.resolve();
+      signal?.addEventListener('abort', () => abortSeen.resolve(), { once: true });
+      await transactionEnded.promise;
+      signal?.throwIfAborted();
+    },
+    locks: {
+      request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) => {
+        held = true;
+        try {
+          return await run({} as Lock);
+        } finally {
+          held = false;
+        }
+      },
+    } as Pick<LockManager, 'request'>,
+  });
+  const controller = new AbortController();
+  const outcome = h.client.prefetch('refused', 1, controller.signal);
+  const worker = await h.starts[0].promise;
+  worker.emit({ type: 'complete', outcome: 'cache_rejected' });
+  await writing.promise;
+  expect(worker.terminated).toBe(true);
+  controller.abort();
+  await abortSeen.promise;
+  expect(await outcome).toBe('skipped');
+  expect(held).toBe(true);
+  const next = clientHarness();
+  const successor = next.client.prefetch('independent', 1, new AbortController().signal);
+  expect(next.workers).toEqual([]);
+  transactionEnded.resolve();
+  const nextWorker = await next.starts[0].promise;
+  expect(held).toBe(false);
+  nextWorker.emit({ type: 'complete', outcome: 'synced' });
+  expect(await successor).toBe('synced');
+  h.client.dispose();
+  next.client.dispose();
+});
+
+it.each(['failed', 'timeout'] as const)(
+  'persists %s cooldown across client restarts without certifying activity',
+  async (kind) => {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    let now = 100;
+    const receipt = deferred<void>();
+    const overrides: Partial<EagerSyncWorkerClientDeps> = {
+      now: () => now,
+      readRejection: readEagerSyncRejection,
+      writeRejection: async (row, signal) => {
+        expect(signal?.aborted).toBe(false);
+        await writeEagerSyncRejection(row, signal);
+        receipt.resolve();
+      },
+    };
+    const h = clientHarness(undefined, undefined, undefined, true, overrides);
+    const controller = new AbortController();
+    const first = h.client.prefetch('incomplete', 1, controller.signal);
+    const worker = await h.starts[0].promise;
+    if (kind === 'timeout') controller.abort(new DOMException('deadline', 'TimeoutError'));
+    else worker.emit({ type: 'complete', outcome: 'failed' });
+    expect(await first).toBe('failed');
+    await receipt.promise;
+    expect(worker.terminated).toBe(true);
+    h.client.dispose();
+    const restarted = clientHarness(undefined, undefined, undefined, true, overrides);
+    expect(await restarted.client.prefetch('incomplete', 1, new AbortController().signal)).toBe(
+      'failed'
+    );
+    expect(restarted.workers).toEqual([]);
+    now++;
+    const fresh = restarted.client.prefetch('incomplete', 2, new AbortController().signal);
+    const freshWorker = await restarted.starts[0].promise;
+    freshWorker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await fresh).toBe('synced');
+    restarted.client.dispose();
+  }
+);

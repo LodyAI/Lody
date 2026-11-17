@@ -56,15 +56,16 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 - Background Session prefetch must never acquire a UI Session store or create a
   Mirror. Its disposable worker owns raw Doc import/export and a separate,
-  rebuildable snapshot cache. Keep one worker task per renderer, terminate before
-  releasing its slot, and detach local peers from the parent on cancellation. The
-  parent must check the durable activity checkpoint before constructing a worker;
-  scope cache rows by workspace and room so auxiliary windows share them.
-  Keep the timestamp-only high-water index as the pre-queue startup filter; it
-  must not load snapshots, Docs, histories, or foreground cursor state.
+  rebuildable snapshot cache. Keep one worker per renderer; terminate before releasing
+  its slot and cross-window workspace/room/authorization/plane lock. Detach local peers
+  on cancellation. Recheck the checkpoint after claiming, before constructing
+  a worker; unavailable locks skip prefetch. Refused and failed activity cool separately
+  from sync success. Scope rows by workspace and room across windows.
+  Use the timestamp-only high-water index as the pre-queue filter; it
+  must not load snapshots, Docs, histories, or foreground cursors.
   Foreground acquisition cancels that room's prefetch and merges cached binary
   state into the existing repo document; never replace unsent local edits or share
-  the UI repo's persistence/cursors with the worker. Cold readers seed empty foreground cursors only after durable merges under cross-window exclusion. Intent:
+  the UI repo's persistence/cursors with the worker. Cold readers seed empty cursors only after durable merges under cross-window exclusion. Intent:
   [background prefetch](../../../../specs/session-background-prefetch.zh.md).
 - Keep one Repo view across auth refresh and unrelated mode-cache changes;
   `WorkspaceTargetRouter` owns target/transport selection.
