@@ -70,6 +70,32 @@ const sdkMessage = z.object({
   error: z.object({ code: z.number().int(), message: z.string() }).optional(),
 });
 
+function createCopilotMessageDecoder() {
+  let buffer = Buffer.alloc(0);
+  return function* decode(chunk: Buffer) {
+    buffer = Buffer.concat([buffer, chunk]);
+    while (true) {
+      const boundary = buffer.indexOf('\r\n\r\n');
+      if (boundary < 0) return;
+      const lengths = buffer
+        .subarray(0, boundary)
+        .toString('ascii')
+        .split('\r\n')
+        .filter((line) => /^content-length:/i.test(line));
+      const match = /^content-length:[ \t]*(\d+)[ \t]*$/i.exec(lengths[0] ?? '');
+      const length = Number(match?.[1]);
+      if (lengths.length !== 1 || !Number.isSafeInteger(length) || length < 1 || length > 65_536)
+        throw new Error('Invalid Copilot quota frame length');
+      if (buffer.length < boundary + 4 + length) return;
+      const message = sdkMessage.parse(
+        JSON.parse(buffer.subarray(boundary + 4, boundary + 4 + length).toString('utf8'))
+      );
+      buffer = buffer.subarray(boundary + 4 + length);
+      yield message;
+    }
+  };
+}
+
 /** Two sequential SDK requests only; the startup owner terminates and awaits the tree. */
 export async function readCopilotQuota(child: ChildProcess, startupAbort: Promise<never>) {
   const { stdout, stdin, stderr } = child;
@@ -77,7 +103,7 @@ export async function readCopilotQuota(child: ChildProcess, startupAbort: Promis
   let dispose = () => {};
   const query = new Promise<RateLimitsSnapshot>((resolve, reject) => {
     let bytes = 0;
-    let buffer = Buffer.alloc(0);
+    const decodeMessages = createCopilotMessageDecoder();
     let expectedId = 1;
     const countOutput = (chunk: Buffer | string) => {
       bytes += Buffer.byteLength(chunk);
@@ -93,30 +119,8 @@ export async function readCopilotQuota(child: ChildProcess, startupAbort: Promis
     };
     const onData = (chunk: Buffer) => {
       if (!countOutput(chunk)) return;
-      buffer = Buffer.concat([buffer, chunk]);
       try {
-        while (true) {
-          const boundary = buffer.indexOf('\r\n\r\n');
-          if (boundary < 0) return;
-          const lengths = buffer
-            .subarray(0, boundary)
-            .toString('ascii')
-            .split('\r\n')
-            .filter((line) => /^content-length:/i.test(line));
-          const match = /^content-length:[ \t]*(\d+)[ \t]*$/i.exec(lengths[0] ?? '');
-          const length = Number(match?.[1]);
-          if (
-            lengths.length !== 1 ||
-            !Number.isSafeInteger(length) ||
-            length < 1 ||
-            length > 65_536
-          )
-            throw new Error('Invalid Copilot quota frame length');
-          if (buffer.length < boundary + 4 + length) return;
-          const message = sdkMessage.parse(
-            JSON.parse(buffer.subarray(boundary + 4, boundary + 4 + length).toString('utf8'))
-          );
-          buffer = buffer.subarray(boundary + 4 + length);
+        for (const message of decodeMessages(chunk)) {
           if (message.method !== undefined) {
             if (message.id !== undefined)
               throw new Error('Unexpected Copilot quota server request');
