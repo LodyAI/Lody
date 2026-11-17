@@ -69,7 +69,7 @@ this page is the full text of the rules summarised there.
   same-origin and forms, never modals, popups or top navigation. The unique origin keeps that
   cross-origin to the renderer. Main's `will-frame-navigate` guard keeps a preview frame on
   `lody-html-preview:` URLs, and the default session refuses every permission a preview requests. The renderer CSP admits the scheme only in `frame-src`. Main
-  refuses dot-files, other paths outside the folder (symlinks included), and other machines; a
+  refuses dot-files and paths outside the folder, judged after resolving symlinks, and other machines; a
   null answer falls back to the `srcdoc` preview. This mode has no annotation or script toggle,
   shows the saved file rather than unsaved editor text, and with scripts allowed the page can
   reach the network. Remote and Web sessions keep the `srcdoc` path.

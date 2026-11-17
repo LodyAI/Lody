@@ -125,4 +125,4 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   consent it serves a local HTML file's folder from a random per-preview
   `lody-html-preview://` origin. Scripts run only when the user allowed them. Preview frames
   cannot navigate off that scheme and receive no permissions. It never
-  serves dot-files or paths outside that folder, and its tokens share the resource owner's lifetime.
+  serves dot-files or paths outside that folder, including through symlinks, and its tokens share the resource owner's lifetime.

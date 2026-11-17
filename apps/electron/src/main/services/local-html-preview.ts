@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
-import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { z } from 'zod'
 import { resolveFilePreviewPath } from '@lody/shared/node/file-preview-path-policy'
@@ -148,6 +148,13 @@ async function resolveSiteFile(root: string, pathname: string) {
     const realRoot = await realpath(root)
     const resolved = await realpath(join(realRoot, ...segments))
     if (!resolved.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) return null
+    // A visible symlink (`config.txt -> .env`) must not reach a hidden file either.
+    if (
+      relative(realRoot, resolved)
+        .split(sep)
+        .some((part) => part.startsWith('.'))
+    )
+      return null
     const info = await stat(resolved)
     return info.isFile() ? { path: resolved, size: info.size } : null
   } catch {

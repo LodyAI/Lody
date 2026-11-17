@@ -74,6 +74,11 @@ void test('local HTML preview with scripts allowed omits the script-blocking pol
 void test('local HTML preview never leaves the page folder or exposes hidden files', async (t) => {
   const { dir, page } = await site(t)
   await symlink(join(dir, 'outside.txt'), join(page, 'link.txt'))
+  // Visible names that resolve to hidden files or folders stay hidden.
+  await symlink(join(page, '.env'), join(page, 'config.txt'))
+  await mkdir(join(page, '.git'))
+  await writeFile(join(page, '.git', 'config'), '[remote]')
+  await symlink(join(page, '.git'), join(page, 'repo'))
   const sites = new LocalHtmlPreviewSites()
   const opened = openLocalHtmlPreview(
     sites,
@@ -87,6 +92,8 @@ void test('local HTML preview never leaves the page folder or exposes hidden fil
     '/%2e%2e/outside.txt',
     '/.env',
     '/link.txt',
+    '/config.txt',
+    '/repo/config',
     '/assets',
     '/'
   ]) {

@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
 import { AlertDialog } from '@/ui/dialog';
 
@@ -111,9 +112,12 @@ export function LocalHtmlPreviewConsentDialog({
         </label>
         <AlertDialog.Footer>
           <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
-          <AlertDialog.Action onClick={() => onConfirm(allowScripts)}>
+          {/* Not `AlertDialog.Action`: that is a `Close`, whose close request would
+              reach `onOpenChange` as a cancellation. Confirming moves the caller's
+              state on, which closes this controlled dialog. */}
+          <Button onClick={() => onConfirm(allowScripts)}>
             {t('sessions.fileViewer.preview.show', 'Preview')}
-          </AlertDialog.Action>
+          </Button>
         </AlertDialog.Footer>
       </AlertDialog.Content>
     </AlertDialog.Root>
