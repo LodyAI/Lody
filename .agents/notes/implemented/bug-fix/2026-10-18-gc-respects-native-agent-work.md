@@ -124,6 +124,15 @@ cancellation attention is unchanged and never waits.
   and a Core release that defines it. Older adapters and other providers report
   nothing and keep exactly the old GC behavior, including late output not
   counting as activity.
+- Added 2026-11-17 ([#2797](https://github.com/LodyAI/Lody/issues/2797)): the
+  DeepSeek Harness adapter also reports the level, from native `agent/status` and
+  the root session's live jobs. It used to force `quiet` job completion and reject
+  every root step outside a prompt, so a job that finished while idle reached the
+  model only with the next user message, and idle GC removed the process and its
+  in-memory job registry after 20 minutes. It now keeps the native `wakeup`
+  delivery and admits only the turn that claims the completion notice. A job still
+  dies with its ACP process (eviction, crash, daemon restart); Harness has no
+  cross-process job registry.
 - The adapter sends the level without awaiting it, so the SDK message loop never
   yields at these points. Ordering holds because each send reaches the
   connection before its first `await`.
