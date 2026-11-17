@@ -70,16 +70,22 @@ to GC:
 
 ## Completion signals
 
-Added 2026-11-16. The same level also decides when a Turn counts as finished for
+Added 2026-11-16, hardened 2026-11-17. The same level also decides when a Turn counts as finished for
 its reader. A Turn that ends while its agent still reports `running` or
 `background` no longer marks the Session unread or sends the success notification
 at release; `SessionExecutionService` waits on that agent instance's lifecycle
 events, without a clock, and publishes once the agent reports idle, with the
 later activity time. If the process ends first (idle GC after its 24-hour cap,
-memory pressure, a crash), the conversation gets a `nativeWorkInterrupted` notice,
+memory pressure, a crash, or ACP child exit without `Session.terminate`), the
+conversation gets a `nativeWorkInterrupted` notice before completion is flushed,
 the Session is still marked unread, and the user is alerted to an `unknown` result
-(`native_work_interrupted`) instead of a success. A newer Turn on the Session
-withdraws the wait, because that Turn publishes its own completion.
+(`native_work_interrupted`) instead of a success. When Antigravity's monitor hits
+its 24-hour cap with pending work or tears down on `closeSession`/disconnect, its
+unsettled work is preserved for the interruption check rather than flipped to
+normal idle while still releasing GC. If GC destroyed the Turn's `SessionDocument`
+at termination, completion re-acquires the live document unless the Session was
+archived or deleted. A newer Turn, Stop, archive, or delete withdraws the wait so
+intentional teardown publishes no stale interruption.
 
 The wait is not completion bookkeeping: it holds no write, so it does not count
 in `inspectClientLoss` or the shutdown drain, which a background dev server could

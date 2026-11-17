@@ -1,7 +1,11 @@
-import { describe, expect, it } from '@effect/vitest';
+import { describe, expect, it, vi } from '@effect/vitest';
+import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { Cause, Deferred, Effect, Fiber } from 'effect';
 import { TestClock } from 'effect/testing';
-import { publishTurnCompletion } from '../src/session/turn-completion';
+import type { LoroDocumentManager, SessionDocument } from '../src/lib/loro/doc';
+import { awaitNativeWorkSettlement, publishTurnCompletion } from '../src/session/turn-completion';
+import { publishTurnCompletionLegacy } from '../src/session/turn-completion-legacy';
+import { withHistoryPort } from './history-port-fixture';
 
 const fixture = () => {
   const published: string[] = [];
@@ -173,4 +177,106 @@ describe('released turn completion publication', () => {
         if (result._tag === 'Failure') expect(result.cause.reasons).toHaveLength(2);
       })
   );
+
+  it.effect("reports 'interrupted' on 'ended' even if watch.current() already flipped to null", () =>
+    Effect.gen(function* () {
+      let current: 'running' | 'background' | null = 'background';
+      let emit: ((event: 'changed' | 'ended' | 'superseded') => void) | undefined;
+      const subscribed = yield* Deferred.make<void>();
+      const fiber = yield* Effect.forkChild(
+        awaitNativeWorkSettlement({
+          current: () => current,
+          subscribe: (onEvent) => {
+            emit = onEvent;
+            Deferred.doneUnsafe(subscribed, Effect.void);
+            return () => {};
+          },
+        })
+      );
+      yield* Deferred.await(subscribed);
+      current = null;
+      emit?.('ended');
+      const settlement = yield* Fiber.join(fiber);
+      expect(settlement).toBe('interrupted');
+    })
+  );
+
+  it('re-acquires a live SessionDocument across destruction and skips archived or deleted sessions', async () => {
+    const sessionId = 'turn-completion-reacquire' as SessionId;
+    const roomId = getSessionRoomId(sessionId);
+    const makeDoc = (destroyed: boolean) => {
+      let currentMeta = { isArchived: false };
+      let lastMessageAt: number | undefined;
+      let flushed = 0;
+      const doc = withHistoryPort({
+        sessionId,
+        roomId,
+        get isDestroyed() {
+          return destroyed;
+        },
+        getMetaState: async () => currentMeta,
+        flushLocalWrites: async () => {
+          flushed += 1;
+        },
+        waitUntilSynced: async () => true,
+        setLastMessageAt: async (at?: number) => {
+          if (destroyed) throw new Error('SessionDocument not initialized');
+          lastMessageAt = at;
+        },
+      });
+      return {
+        doc: doc as unknown as SessionDocument,
+        readLastMessageAt: () => lastMessageAt,
+        readFlushed: () => flushed,
+      };
+    };
+
+    const destroyedDoc = makeDoc(true);
+    const liveDoc = makeDoc(false);
+    let docMeta: unknown = { exists: true, meta: { isArchived: false } };
+    const getOrCreateSessionDoc = vi.fn(async () => liveDoc.doc);
+    const workspaceDocument = {
+      getRemoteStreamsGeneration: () => undefined,
+      isSessionDocCleaning: () => false,
+      getOrCreateSessionDoc,
+      repo: { getDocMeta: vi.fn(async () => docMeta) },
+    } as unknown as Pick<
+      LoroDocumentManager,
+      'getRemoteStreamsGeneration' | 'getOrCreateSessionDoc' | 'isSessionDocCleaning' | 'repo'
+    >;
+
+    const notified: string[] = [];
+    await publishTurnCompletionLegacy({
+      completedAt: 1234,
+      sessionDoc: destroyedDoc.doc,
+      workspaceDocument,
+      signal: new AbortController().signal,
+      notify: async () => {
+        notified.push('live');
+      },
+    });
+    expect(getOrCreateSessionDoc).toHaveBeenCalledOnce();
+    expect(liveDoc.readFlushed()).toBe(1);
+    expect(liveDoc.readLastMessageAt()).toBe(1234);
+    expect(notified).toEqual(['live']);
+
+    for (const closedMeta of [
+      { exists: true, meta: { isArchived: true } },
+      { exists: false, meta: { isArchived: false } },
+    ]) {
+      docMeta = closedMeta;
+      getOrCreateSessionDoc.mockClear();
+      await publishTurnCompletionLegacy({
+        completedAt: 5678,
+        sessionDoc: destroyedDoc.doc,
+        workspaceDocument,
+        signal: new AbortController().signal,
+        notify: async () => {
+          notified.push('closed');
+        },
+      });
+      expect(getOrCreateSessionDoc).not.toHaveBeenCalled();
+      expect(notified).toEqual(['live']);
+    }
+  });
 });

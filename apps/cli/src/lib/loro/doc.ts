@@ -1663,7 +1663,7 @@ export class LoroDocumentManager {
     // any one-shot renderer reconciliation without unloading the shared doc.
     this.cancelLocalDocRoomBridge(docId);
     const existing = this.sessions.get(sessionId);
-    if (existing?.isDestroyed) {
+    if (existing && (existing.isDestroyed || this.sessionDocCleanup.has(sessionId))) {
       try {
         await withTimeout(
           this.cleanSessionDoc(sessionId),
@@ -2412,6 +2412,11 @@ export class LoroDocumentManager {
   peekSessionDoc(sessionId: SessionId): SessionDocument | undefined {
     const sessionDoc = this.sessions.get(sessionId);
     return sessionDoc && !sessionDoc.isDestroyed ? sessionDoc : undefined;
+  }
+
+  /** Whether `cleanSessionDoc` is currently tearing down this Session's cached doc. */
+  isSessionDocCleaning(sessionId: SessionId): boolean {
+    return this.sessionDocCleanup.has(sessionId);
   }
 
   cleanSessionDoc(sessionId: SessionId, options: { preserveStatus?: boolean } = {}): Promise<void> {
