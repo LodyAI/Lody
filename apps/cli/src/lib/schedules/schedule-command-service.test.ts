@@ -4,12 +4,17 @@ import * as localIpc from '@lody/shared/node/local-ipc';
 import { LoroDoc } from 'loro-crdt';
 import { withHistoryPort } from '../../../tests/history-port-fixture';
 import {
+  ScheduleCommandSchema,
   ScheduleRepository,
   ScheduleDefinitionSchema,
+  nextScheduleSlot,
+  scheduleProposalRuleToTrigger,
   type ScheduleCommand,
   type ScheduleRepositoryPort,
 } from '@lody/shared';
 import {
+  parseScheduleEvery,
+  scheduleEveryTrigger,
   scheduleRequesterSessionId,
   sendScheduleCommand,
   sendDaemonScheduleCommand,
@@ -327,6 +332,100 @@ describe('proposing a schedule from a conversation', () => {
       propose(h, { rule: { kind: 'cron', expression: '0 9 * * *', timeZone: 'UTC' } })
     ).rejects.toThrow();
     expect(h.history()).toHaveLength(0);
+  });
+
+  it('accepts any custom minute or hour step the editor accepts, and runs it as proposed', async () => {
+    const h = await fixture();
+    h.context.requesterSessionId = 'session' as never;
+    const parse = (rule: unknown) =>
+      ScheduleCommandSchema.safeParse({
+        action: 'propose',
+        requestId: 'step',
+        title: 'Step',
+        prompt: 'Synthetic prompt',
+        rule,
+      }).success;
+    expect(parse({ kind: 'minutes', every: 1440 })).toBe(true);
+    expect(parse({ kind: 'hours', every: 168 })).toBe(true);
+    expect(parse({ kind: 'minutes', every: 1441 })).toBe(false);
+    expect(parse({ kind: 'hours', every: 169 })).toBe(false);
+    expect(parse({ kind: 'minutes', every: 1.5 })).toBe(false);
+    expect(parse({ kind: 'hours', every: 0 })).toBe(false);
+
+    await expect(
+      propose(h, { requestId: 'every-90', rule: { kind: 'minutes', every: 90 } })
+    ).resolves.toMatchObject({ ok: true, pending: true });
+    expect(
+      h.history().find((entry) => entry.id === 'schedule-proposal-every-90')?.items?.[0]?.meta
+    ).toMatchObject({ rule: { kind: 'minutes', every: 90 } });
+
+    // What Create stores for that card: every 90 minutes from the click, not :00/:30.
+    const created = Date.parse('2026-11-17T08:07:00Z');
+    const trigger = scheduleProposalRuleToTrigger({ kind: 'minutes', every: 90 }, created, 'UTC');
+    expect(trigger).toEqual({
+      kind: 'interval',
+      everyMs: 90 * 60_000,
+      anchorAt: '2026-11-17T08:07:00.000Z',
+    });
+    expect(nextScheduleSlot(trigger, created, created)).toBe(created + 90 * 60_000);
+  });
+});
+
+describe('lody schedule --every', () => {
+  const now = Date.parse('2026-11-17T08:07:00Z');
+
+  it('parses minute and hour steps within the shared bounds', () => {
+    expect(parseScheduleEvery('90m')).toEqual({ kind: 'minutes', every: 90 });
+    expect(parseScheduleEvery(' 36 hours ')).toEqual({ kind: 'hours', every: 36 });
+    expect(parseScheduleEvery('1440min')).toEqual({ kind: 'minutes', every: 1440 });
+    for (const bad of ['0m', '1441m', '169h', '1.5h', '-5m', '90', '5d', '99999999999m'])
+      expect(() => parseScheduleEvery(bad), bad).toThrow('--every');
+  });
+
+  it('stores the same trigger the editor and a proposal card would', () => {
+    for (const [text, rule] of [
+      ['90m', { kind: 'minutes', every: 90 }],
+      ['15m', { kind: 'minutes', every: 15 }],
+      ['6h', { kind: 'hours', every: 6 }],
+      ['36h', { kind: 'hours', every: 36 }],
+    ] as const)
+      expect(
+        scheduleEveryTrigger(parseScheduleEvery(text), { timeZone: 'Asia/Shanghai', now })
+      ).toEqual(scheduleProposalRuleToTrigger(rule, now, 'Asia/Shanghai'));
+  });
+
+  it('aligns dividing steps to the given zone and anchors the rest at now', () => {
+    const sixHours = scheduleEveryTrigger(parseScheduleEvery('6h'), {
+      timeZone: 'Asia/Shanghai',
+      now,
+    });
+    // 00/06/12/18 in Shanghai are 16/22/04/10 UTC.
+    expect(nextScheduleSlot(sixHours, now, now)).toBe(Date.parse('2026-11-17T10:00:00Z'));
+    const thirtySixHours = scheduleEveryTrigger(parseScheduleEvery('36h'), {
+      timeZone: 'UTC',
+      now,
+    });
+    expect(nextScheduleSlot(thirtySixHours, now, now)).toBe(now + 36 * 3_600_000);
+    expect(() =>
+      scheduleEveryTrigger(parseScheduleEvery('6h'), { timeZone: 'Mars/Base', now })
+    ).toThrow('Unknown time zone');
+  });
+
+  it('keeps the stored trigger when an edit repeats the same step', () => {
+    const previous = scheduleEveryTrigger(parseScheduleEvery('90m'), {
+      timeZone: 'UTC',
+      now: now - 86_400_000,
+    });
+    expect(
+      scheduleEveryTrigger(parseScheduleEvery('90m'), { timeZone: 'UTC', now, previous })
+    ).toBe(previous);
+    expect(
+      scheduleEveryTrigger(parseScheduleEvery('100m'), { timeZone: 'UTC', now, previous })
+    ).toMatchObject({
+      kind: 'interval',
+      everyMs: 100 * 60_000,
+      anchorAt: new Date(now).toISOString(),
+    });
   });
 });
 

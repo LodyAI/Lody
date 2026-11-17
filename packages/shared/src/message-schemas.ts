@@ -3621,10 +3621,25 @@ const proposalTimeOfDay = {
   minute: z.number().int().min(0).max(59),
   timeZone: z.string().min(1).max(100).optional(),
 };
+/**
+ * Largest typed step for "every N minutes / hours", shared by the editor's
+ * Custom field, agent proposals and the CLI. A step that does not divide the
+ * clock is stored as an anchored interval; the caps only keep the step below the
+ * sizes the calendar rules already name better (a day, a week).
+ */
+export const SCHEDULE_CUSTOM_MINUTES_MAX = 1440;
+export const SCHEDULE_CUSTOM_HOURS_MAX = 168;
 export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('manual') }).strict(),
-  z.object({ kind: z.literal('minutes'), every: z.number().int().min(1).max(59) }).strict(),
-  z.object({ kind: z.literal('hours'), every: z.number().int().min(1).max(23) }).strict(),
+  z
+    .object({
+      kind: z.literal('minutes'),
+      every: z.number().int().min(1).max(SCHEDULE_CUSTOM_MINUTES_MAX),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('hours'), every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX) })
+    .strict(),
   z.object({ kind: z.literal('daily'), ...proposalTimeOfDay }).strict(),
   z.object({ kind: z.literal('weekdays'), ...proposalTimeOfDay }).strict(),
   z

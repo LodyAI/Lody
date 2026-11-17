@@ -166,11 +166,11 @@ export function proposalRule(value: unknown): ProposalRule | undefined {
     case 'manual':
       return { kind: 'manual' };
     case 'minutes':
-      return integer(value.every, 1, 59)
+      return integer(value.every, 1, 1440)
         ? { kind: 'minutes', every: value.every as number }
         : undefined;
     case 'hours':
-      return integer(value.every, 1, 23)
+      return integer(value.every, 1, 168)
         ? { kind: 'hours', every: value.every as number }
         : undefined;
     case 'daily':
