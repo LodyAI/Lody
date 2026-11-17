@@ -3,7 +3,7 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
-Every provider shows thoughts in disclosures separate from tool groups.
+Every provider groups adjacent thoughts and tool calls in one default-closed disclosure.
 Explicit toggles remain respected. Thought prose
 uses the same Markdown typography as ordinary answers, aligned with its disclosure
 label and shown in secondary text color; tool
@@ -12,7 +12,7 @@ intermediate prose stays visible in order. When the turn finishes, the final con
 plans or notices stays visible, and the shared work disclosure folds earlier prose and tools;
 expanding it restores their order and independent disclosure states. Interrupted
 turns without an answer remain visible. Duration follows the shared header/footer
-policy. Both layout and virtual-row caches include provider visibility. Other providers retain their grouping and filtering. This is
+policy. Group identity follows its first entry, so appended tools and thoughts preserve the reader’s expansion choice. This is
 presentation only: stored thought/text types and provider delivery remain unchanged.
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and

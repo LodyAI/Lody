@@ -114,17 +114,17 @@ describe('Thought visibility', () => {
       ],
     ]);
 
-  it('keeps collapsed thought groups and keys when commands stream into the turn', () => {
+  it('keeps one collapsed group and its key when tools and thoughts stream into the turn', () => {
     const id = 'dsh-streaming';
     const before = buildChatVirtualRows(fixture(id, [thought]));
     const tool = toolCall();
     const after = buildChatVirtualRows(fixture(id, [thought, tool, nextThought]));
     expect(visibleContents(after)).toEqual([]);
-    expect(headers(after).map((header) => header.expanded)).toEqual([false, false, false]);
+    expect(headers(after).map((header) => header.expanded)).toEqual([false]);
     expect(after.slice(0, before.length).map((row) => row.key)).toEqual(
       before.map((row) => row.key)
     );
-    expect(headers(after).map((header) => header.isThinking)).toEqual([false, false, true]);
+    expect(headers(after).map((header) => header.isThinking)).toEqual([true]);
   });
 
   it('folds the process on completion and restores ordered prose when expanded', () => {
@@ -135,7 +135,7 @@ describe('Thought visibility', () => {
     const contents = [thought, tool, progress, nextThought, answer];
     const live = buildChatVirtualRows(fixture(id, contents));
     expect(visibleContents(live)).toEqual([progress, answer]);
-    expect(headers(live).map((header) => header.expanded)).toEqual([false, false, false]);
+    expect(headers(live).map((header) => header.expanded)).toEqual([false, false]);
 
     const args = fixture(id, contents, true);
     const rows = buildChatVirtualRows(args);
@@ -152,7 +152,7 @@ describe('Thought visibility', () => {
       selectionLayouts: expansion(id, {}, { [`segment:${id}:0`]: true }),
     });
     expect(visibleContents(expanded)).toEqual([progress, answer]);
-    expect(headers(expanded).map((group) => group.expanded)).toEqual([false, false, false]);
+    expect(headers(expanded).map((group) => group.expanded)).toEqual([false, false]);
     expect(
       visibleContents(
         buildChatVirtualRows({
@@ -170,42 +170,54 @@ describe('Thought visibility', () => {
     ]);
     expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: searched }))).toEqual([
       thought,
+      tool,
       progress,
       answer,
     ]);
   });
 
-  it('preserves explicit independent toggles and reveals a collapsed thought for search', () => {
-    const id = 'dsh-toggles';
+  it('toggles adjacent thoughts and tools together and reveals the whole group for search', () => {
+    const id = 'mixed-toggles';
     const tool = toolCall();
-    const args = fixture(id, [thought, tool, nextThought], true);
+    const contents = [thought, tool, nextThought];
+    const args = fixture(id, contents, true);
     const defaults = buildChatVirtualRows(args);
-    const [first, command, last] = headers(defaults);
-    const selected = expansion(id, { [first!.block.key]: false, [command!.block.key]: true });
-    const changed = buildChatVirtualRows({ ...args, selectionLayouts: selected });
-    expect(visibleContents(changed)).toEqual([tool]);
-    expect(headers(changed).map((header) => header.expanded)).toEqual([false, true, false]);
-    const reopened = expansion(id, {
-      [first!.block.key]: true,
-      [command!.block.key]: false,
-      [last!.block.key]: false,
-    });
-    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: reopened }))).toEqual([
-      thought,
-    ]);
-    // Search IDs use the original item index, independent of the new group boundaries.
+    expect(headers(defaults)).toHaveLength(1);
+    const key = headers(defaults)[0]!.block.key;
+    const selected = expansion(id, { [key]: true });
+    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: selected }))).toEqual(
+      contents
+    );
+    const collapsed = expansion(id, { [key]: false });
+    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: collapsed }))).toEqual([]);
+    // Search retains original item indexes, including thoughts after a tool call.
     const search = new Map([
-      [id, { ...selected.get(id)!, activeSearchBlockId: getMessageItemPrefix(id, 0) }],
+      [id, { ...collapsed.get(id)!, activeSearchBlockId: getMessageItemPrefix(id, 2) }],
     ]);
-    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: search }))).toEqual([
-      thought,
-      tool,
-    ]);
+    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: search }))).toEqual(
+      contents
+    );
   });
 
-  it('keeps interrupted thoughts in their own closed groups', () => {
+  it('preserves an expanded group when another tool and thought arrive', () => {
+    const id = 'mixed-streaming-toggle';
+    const before = buildChatVirtualRows(fixture(id, [thought]));
+    const key = headers(before)[0]!.block.key;
+    const contents = [thought, toolCall(), nextThought, toolCall()];
+    const selected = expansion(id, { [key]: true });
+    const after = buildChatVirtualRows({ ...fixture(id, contents), selectionLayouts: selected });
+    expect(headers(after)).toHaveLength(1);
+    expect(headers(after)[0]).toMatchObject({
+      expanded: true,
+      isThinking: false,
+      block: { key },
+    });
+    expect(visibleContents(after)).toEqual(contents);
+  });
+
+  it('keeps interrupted thoughts and tools in one closed group', () => {
     const args = fixture('interrupted', [thought, toolCall(), nextThought], true);
     expect(visibleContents(buildChatVirtualRows(args))).toEqual([]);
-    expect(headers(buildChatVirtualRows(args))).toHaveLength(3);
+    expect(headers(buildChatVirtualRows(args))).toHaveLength(1);
   });
 });

@@ -1555,6 +1555,7 @@ const dshMessage: SessionHistoryParsed = {
       title: 'pnpm test',
       content: [{ type: 'content', content: { type: 'text', text: 'Synthetic command output' } }],
     },
+    { type: 'thought', text: '命令完成，先核对输出。' },
     { type: 'text', text: '测试已经返回，继续核对结果。' },
     { type: 'thought', text: '命令完成后，这段思考仍然独立可读。' },
     { type: 'text', text: '检查完成。' },
@@ -1578,9 +1579,9 @@ export const DeepSeekIndependentProse: Story = {
     await userEvent.click(workedButton());
     await waitFor(async () => {
       await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
-      await expect(canvasElement.querySelectorAll('button[aria-expanded]').length).toBeGreaterThan(
-        1
-      );
+      await expect(
+        canvasElement.querySelectorAll('button[data-conversation-disclosure="group"]').length
+      ).toBe(3);
     });
     await userEvent.click(
       canvasElement.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')[1]!
@@ -1604,6 +1605,7 @@ export const DeepSeekIndependentProse: Story = {
       await expect(
         Math.abs(thought!.getBoundingClientRect().left - answer!.getBoundingClientRect().left)
       ).toBeLessThan(1);
+      await expect(canvasElement.textContent).toContain('命令完成，先核对输出。');
       await expect(canvasElement.textContent).not.toContain('Synthetic command output');
       await expect(canvasElement.textContent).toContain('测试已经返回，继续核对结果。');
     });

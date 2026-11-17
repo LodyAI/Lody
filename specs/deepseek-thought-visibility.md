@@ -7,10 +7,10 @@ Translation: current
 
 ## Behavior
 
-Conversations with every provider show thoughts in independent default-closed
-disclosures and tools in separate default-closed groups, preserving their order.
-Explicit toggles remain respected and search can reveal matching thoughts. Tool
-arrival must not change the reader’s choice for preceding thoughts. During streaming, prose stays
+Conversations with every provider group adjacent thoughts and tool calls in one
+default-closed disclosure, preserving their order. Prose and plan approval separate groups.
+Explicit toggles remain respected and search can reveal matching thoughts. New thoughts or tools
+must not change the reader’s expansion choice for the existing group. During streaming, prose stays
 visible. After completion, the shared finished-work disclosure collapses earlier
 thoughts, tools and intermediate prose, keeping the final answer tail visible.
 Users can expand the whole process again; search reveals matching folded prose.

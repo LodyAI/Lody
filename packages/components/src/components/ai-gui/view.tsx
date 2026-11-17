@@ -1142,7 +1142,7 @@ const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLay
   const cached = assistantTurnLayoutCache.get(message);
   if (cached) return cached;
   const layout: AssistantTurnLayout = {
-    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true, true),
+    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true),
     subagentTasks: collectSubagentTasks(message.items),
   };
   assistantTurnLayoutCache.set(message, layout);
@@ -5404,11 +5404,8 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
-     preserving thought search identity and the separate disclosure label.
-     The thought is prose on the rail, with no glyph: it is the agent's own
-     words, and an icon beside every paragraph of it read as a list of
-     objects. The group header already says "Thought". */
+  // Thoughts keep answer typography and their original search identity inside
+  // the shared activity group; its summary describes the adjacent tool calls.
   return (
     <ActivityProcessStep flush>
       <span className="sr-only">
