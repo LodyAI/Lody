@@ -1,4 +1,7 @@
-import { requirePlaintextWorkspaceStreamsContent, type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
+import {
+  requirePlaintextWorkspaceStreamsContent,
+  type WorkspaceStreamsMode,
+} from '@lody/shared/workspace-streams-content';
 import { LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION } from '@lody/shared/local-loro-data-plane';
 import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
 import type { PrefetchOutcome } from './background-sync-coordinator';
@@ -92,7 +95,7 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
         local?.dispose();
         resolve(outcome);
       };
-      const abort = () => finish('skipped');
+      const abort = () => finish(signal.reason?.name === 'TimeoutError' ? 'failed' : 'skipped');
       signal.addEventListener('abort', abort, { once: true });
       worker.onerror = () => finish('failed');
       worker.onmessageerror = () => finish('failed');
@@ -163,12 +166,13 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
     ): Promise<PrefetchOutcome> {
       if (disposed || signal.aborted || jobs.has(roomId)) return 'skipped';
       const controller = new AbortController();
-      const abort = () => controller.abort();
+      const abort = () => controller.abort(signal.reason);
       signal.addEventListener('abort', abort, { once: true });
       jobs.set(roomId, controller);
       let cancelWait: () => void = () => {};
       const cancelled = new Promise<PrefetchOutcome>((resolve) => {
-        cancelWait = () => resolve('skipped');
+        cancelWait = () =>
+          resolve(controller.signal.reason?.name === 'TimeoutError' ? 'failed' : 'skipped');
         controller.signal.addEventListener('abort', cancelWait, { once: true });
       });
       const task = workerQueue

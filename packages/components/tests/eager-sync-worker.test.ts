@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
+import { describe, expect, it, vi } from 'vitest';
 import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import {
@@ -8,7 +9,11 @@ import {
 } from '@lody/shared/local-loro-data-plane';
 import { createEagerSyncWorkerClient } from '../src/providers/eager-sync-worker-client';
 import { runEagerSyncWorkerTask } from '../src/providers/eager-sync-worker-task';
-import type { EagerSyncSnapshot } from '../src/providers/eager-sync-snapshot-cache';
+import {
+  readEagerSyncSnapshot,
+  writeEagerSyncSnapshot,
+  type EagerSyncSnapshot,
+} from '../src/providers/eager-sync-snapshot-cache';
 import type {
   EagerSyncAuthContext,
   EagerSyncTransport,
@@ -223,16 +228,87 @@ describe('worker raw-document prefetch', () => {
   });
 });
 
+describe('worker module startup', () => {
+  it('accepts its start message before the WASM task module finishes loading', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    const doc = new LoroDoc();
+    await writeEagerSyncSnapshot({
+      scope: 'startup',
+      roomId: 'room',
+      plane: 'local',
+      lastMessageAt: 1,
+      savedAt: 1,
+      snapshot: new Blob([doc.export({ mode: 'snapshot' }).slice().buffer]),
+    });
+    doc.free();
+    const loading = deferred<void>();
+    const release = deferred<void>();
+    const complete = deferred<EagerSyncWorkerOutput>();
+    let finished = false;
+    const worker = {
+      onmessage: null as ((event: MessageEvent<EagerSyncWorkerInput>) => void) | null,
+      postMessage: (message: EagerSyncWorkerOutput) => {
+        finished = true;
+        complete.resolve(message);
+      },
+    };
+    vi.stubGlobal('self', worker);
+    vi.doMock('../src/providers/eager-sync-worker-task', async (importOriginal) => {
+      loading.resolve();
+      await release.promise;
+      return await importOriginal();
+    });
+    try {
+      await import('../src/providers/eager-sync.worker');
+      expect(worker.onmessage).toBeTypeOf('function');
+      worker.onmessage!({
+        data: {
+          type: 'start',
+          content: { mode: 'plaintext' },
+          scope: 'startup',
+          workspaceId: 'workspace',
+          roomId: 'room',
+          peerId: 'worker',
+          lastMessageAt: 1,
+          connected: false,
+          transport: { plane: 'local' },
+        },
+      } as MessageEvent<EagerSyncWorkerInput>);
+      await loading.promise;
+      worker.onmessage!({
+        data: { type: 'local-status', connected: true },
+      } as MessageEvent<EagerSyncWorkerInput>);
+      expect(finished).toBe(false);
+      release.resolve();
+      expect(await complete.promise).toEqual({ type: 'complete', outcome: 'synced' });
+    } finally {
+      release.resolve();
+      vi.doUnmock('../src/providers/eager-sync-worker-task');
+    }
+  });
+});
+
+describe('worker deadline cancellation', () => {
+  it('reports a timed-out room as failed, terminates its worker and releases the next task', async () => {
+    const h = clientHarness();
+    const controller = new AbortController();
+    const first = h.client.prefetch('stuck-room', 1, controller.signal);
+    const worker = await h.starts[0].promise;
+    controller.abort(new DOMException('task deadline', 'TimeoutError'));
+    expect(await first).toBe('failed');
+    expect(worker.terminated).toBe(true);
+    const next = h.client.prefetch('next-room', 1, new AbortController().signal);
+    const nextWorker = await h.starts[1].promise;
+    nextWorker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await next).toBe('synced');
+    h.client.dispose();
+  });
+});
+
 describe('eager-sync cloud auth bridge', () => {
   const cloudTransport = async (): Promise<EagerSyncTransport> => ({
     plane: 'cloud',
-    streamId: 'stream',
-    options: {
-      bucketId: 'bucket',
-      metaStreamId: 'meta',
-      baseUrl: 'https://streams.example.com',
-      shardUrls: undefined,
-    },
+    streamUrl: 'https://streams.example.com/ds/bucket/stream',
   });
 
   it('refreshes a rejected JWT through the held provider callback instead of returning it', async () => {
@@ -307,5 +383,258 @@ describe('eager-sync cloud auth bridge', () => {
     worker.emit({ type: 'complete', outcome: 'synced' });
     expect(await result).toBe('synced');
     h.client.dispose();
+  });
+});
+
+describe('cloud prefetch checkpoints', () => {
+  function harness() {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    const remote = new LoroDoc();
+    remote.setPeerId('1');
+    remote.getMap('fields').set('remote', 'first');
+    remote.commit();
+    const request = {
+      type: 'start' as const,
+      content: { mode: 'plaintext' as const },
+      scope: 'scope',
+      roomId: 'room',
+      workspaceId: 'workspace',
+      peerId: 'worker',
+      lastMessageAt: 1,
+      connected: false,
+      transport: {
+        plane: 'cloud' as const,
+        streamUrl: 'https://streams.example.com/ds/bucket/room',
+      },
+    };
+    const reads: URL[] = [];
+    let delta: Uint8Array | undefined;
+    let tail = '100';
+    let gone = false;
+    let status = 200;
+    let bootstrapOverride: Uint8Array | undefined;
+    const fetch = async (input: string, init?: RequestInit) => {
+      expect(init?.method ?? 'GET').toBe('GET');
+      const url = new URL(input);
+      reads.push(url);
+      if (status !== 200) return new Response(null, { status });
+      if (url.pathname.endsWith('/bootstrap')) {
+        return new Response(
+          new Blob([
+            '--cp\r\nContent-Type: application/octet-stream\r\n\r\n',
+            (bootstrapOverride ?? remote.export({ mode: 'snapshot' })).slice().buffer,
+            '\r\n--cp--\r\n',
+          ]),
+          {
+            headers: {
+              'Content-Type': 'multipart/mixed; boundary=cp',
+              'Stream-Snapshot-Offset': tail,
+              'Stream-Next-Offset': tail,
+              'Stream-Up-To-Date': 'true',
+            },
+          }
+        );
+      }
+      if (gone) {
+        gone = false;
+        return new Response(null, { status: 410 });
+      }
+      const body = delta ? new Uint8Array(delta.length + 4) : undefined;
+      if (body && delta) {
+        new DataView(body.buffer).setUint32(0, delta.length, false);
+        body.set(delta, 4);
+      }
+      return new Response(body?.buffer, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Stream-Next-Offset': tail,
+          'Stream-Up-To-Date': 'true',
+        },
+      });
+    };
+    const deps: Parameters<typeof runEagerSyncWorkerTask>[1] = {
+      fetch,
+      now: () => 100,
+      auth: async () => 'token',
+      connection: {
+        isConnected: () => false,
+        send: () => {
+          throw new Error('cloud must not use local');
+        },
+        onMessage: () => () => {},
+        onStatusChange: () => () => {},
+      },
+    };
+    return {
+      request,
+      deps,
+      remote,
+      reads,
+      fetch,
+      change() {
+        const before = remote.oplogVersion();
+        remote.getMap('fields').set('remote', 'second');
+        remote.commit();
+        delta = remote.export({ mode: 'update', from: before });
+        tail = '200';
+      },
+      setBootstrap(value: Uint8Array) {
+        bootstrapOverride = value;
+      },
+      setDelta(value: Uint8Array) {
+        delta = value;
+        tail = '200';
+      },
+      gone() {
+        gone = true;
+      },
+      fail() {
+        status = 403;
+      },
+      read: () => readEagerSyncSnapshot('scope', 'room'),
+    };
+  }
+
+  it('restarts from its own atomic snapshot and cursor and downloads only the suffix', async () => {
+    const h = harness();
+    try {
+      expect(await runEagerSyncWorkerTask(h.request, h.deps)).toBe('synced');
+      const first = await h.read();
+      expect(first?.cloudCheckpoint?.cursor.nextOffset).toBe('100');
+      h.change();
+      h.reads.length = 0;
+      expect(await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)).toBe(
+        'synced'
+      );
+      expect(h.reads.map((url) => [url.pathname, url.searchParams.get('offset')])).toEqual([
+        ['/ds/bucket/room', '100'],
+      ]);
+      const second = await h.read();
+      const restored = LoroDoc.fromSnapshot(new Uint8Array(await second!.snapshot.arrayBuffer()));
+      expect(restored.toJSON()).toEqual(h.remote.toJSON());
+      expect(second?.cloudCheckpoint?.cursor.nextOffset).toBe('200');
+      restored.free();
+    } finally {
+      h.remote.free();
+    }
+  });
+
+  it.each(['legacy', 'lost', 'uncovered', 'stream', 'format'] as const)(
+    'bootstraps safely for a %s checkpoint',
+    async (kind) => {
+      const h = harness();
+      try {
+        await runEagerSyncWorkerTask(h.request, h.deps);
+        const row = (await h.read())!;
+        if (kind === 'legacy' || kind === 'lost') delete row.cloudCheckpoint;
+        else if (kind === 'uncovered')
+          row.cloudCheckpoint!.cursor = {
+            ...row.cloudCheckpoint!.cursor,
+            serverLowerBoundVersion: { '1': 999 },
+          };
+        else if (kind === 'stream')
+          row.cloudCheckpoint!.cursor = {
+            ...row.cloudCheckpoint!.cursor,
+            streamUrl: 'https://other.example.com/ds/bucket/room',
+          };
+        else row.cloudCheckpoint!.format = 99 as 1;
+        await writeEagerSyncSnapshot(row);
+        h.change();
+        h.reads.length = 0;
+        await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps);
+        expect(h.reads[0].pathname).toBe('/ds/bucket/room/bootstrap');
+        const restored = LoroDoc.fromSnapshot(
+          new Uint8Array(await (await h.read())!.snapshot.arrayBuffer())
+        );
+        expect(restored.toJSON()).toEqual(h.remote.toJSON());
+        restored.free();
+      } finally {
+        h.remote.free();
+      }
+    }
+  );
+
+  it('retains the previous atomic pair on network failure, rejected writes and interrupted saves', async () => {
+    const h = harness();
+    try {
+      await runEagerSyncWorkerTask(h.request, h.deps);
+      const before = (await h.read())!;
+      h.change();
+      expect(
+        await runEagerSyncWorkerTask(
+          { ...h.request, lastMessageAt: 2 },
+          { ...h.deps, writeSnapshot: async () => false }
+        )
+      ).toBe('skipped');
+      const saving = deferred<void>();
+      const release = deferred<void>();
+      const interrupted = runEagerSyncWorkerTask(
+        { ...h.request, lastMessageAt: 2 },
+        {
+          ...h.deps,
+          writeSnapshot: async () => {
+            saving.resolve();
+            await release.promise;
+            throw new Error('worker terminated before commit');
+          },
+        }
+      );
+      await saving.promise;
+      expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
+      release.resolve();
+      await expect(interrupted).rejects.toThrow('worker terminated');
+      h.fail();
+      await expect(
+        runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)
+      ).rejects.toBeDefined();
+      expect((await h.read())?.lastMessageAt).toBe(1);
+      expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
+    } finally {
+      h.remote.free();
+    }
+  });
+
+  it('does not persist pending imports or activity progress', async () => {
+    const h = harness();
+    try {
+      await runEagerSyncWorkerTask(h.request, h.deps);
+      h.setBootstrap(h.remote.export({ mode: 'snapshot' }));
+      const beforeA = h.remote.oplogVersion();
+      h.remote.getText('body').insert(0, 'missing');
+      h.remote.commit();
+      const beforeB = h.remote.oplogVersion();
+      h.remote.getText('body').insert(7, 'pending');
+      h.remote.commit();
+      h.setDelta(h.remote.export({ mode: 'update', from: beforeB }));
+      await expect(
+        runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)
+      ).rejects.toBeDefined();
+      expect((await h.read())?.lastMessageAt).toBe(1);
+      h.setDelta(h.remote.export({ mode: 'update', from: beforeA }));
+      expect(await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)).toBe(
+        'synced'
+      );
+    } finally {
+      h.remote.free();
+    }
+  });
+
+  it('recovers a gone worker cursor through bootstrap', async () => {
+    const h = harness();
+    try {
+      await runEagerSyncWorkerTask(h.request, h.deps);
+      h.change();
+      h.gone();
+      h.reads.length = 0;
+      await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps);
+      expect(h.reads.some((url) => url.pathname.endsWith('/bootstrap'))).toBe(true);
+      const restored = LoroDoc.fromSnapshot(
+        new Uint8Array(await (await h.read())!.snapshot.arrayBuffer())
+      );
+      expect(restored.toJSON()).toEqual(h.remote.toJSON());
+      restored.free();
+    } finally {
+      h.remote.free();
+    }
   });
 });

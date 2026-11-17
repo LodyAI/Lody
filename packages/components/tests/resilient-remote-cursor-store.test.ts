@@ -1,3 +1,4 @@
+import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JsonObject, RemoteCursor, RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { DEFAULT_LORO_STREAMS_BASE_URL, LEGACY_LORO_STREAMS_BASE_URL } from '@lody/shared';
@@ -107,5 +108,57 @@ describe('ResilientRemoteCursorStore', () => {
     expect(await fallback.load(cursor.streamUrl)).toEqual(cursor);
     expect(await store.load(cursor.streamUrl)).toEqual(cursor);
     expect(warnings).toHaveLength(1);
+  });
+  it('conditionally seeds cold progress across instances without overwriting concurrent UI saves', async () => {
+    const indexedDb = new IDBFactory();
+    const queues = new Map<string, Promise<unknown>>();
+    const locks = {
+      request: <T>(name: string, _options: LockOptions, callback: (lock: Lock) => T) => {
+        const task = (queues.get(name) ?? Promise.resolve()).then(() => callback({ name } as Lock));
+        queues.set(
+          name,
+          task.catch(() => {})
+        );
+        return task;
+      },
+    } as Pick<LockManager, 'request'>;
+    const first = new ResilientRemoteCursorStore({
+      dbName: 'shared-cold-cursor',
+      indexedDb,
+      locks,
+    });
+    const second = new ResilientRemoteCursorStore({
+      dbName: 'shared-cold-cursor',
+      indexedDb,
+      locks,
+    });
+    const stream = 'https://streams.example.com/ds/bucket/session';
+    const worker = createCursor(stream);
+    const foreground = { ...worker, nextOffset: 'ui-progress' };
+    const writing = first.save(foreground);
+    const adopting = second.saveIfAbsent(worker);
+    await writing;
+    expect(await adopting).toBe(false);
+    expect(await second.load(stream)).toEqual(foreground);
+    await first.delete(stream);
+    const results = await Promise.all([
+      first.saveIfAbsent(worker),
+      second.saveIfAbsent(foreground),
+    ]);
+    expect(results).toEqual([true, false]);
+    expect(await first.load(stream)).toEqual(worker);
+  });
+
+  it('keeps ordinary synchronization available when conditional adoption has no cross-window lock', async () => {
+    vi.stubGlobal('navigator', {});
+    const primary = new MemoryRemoteCursorStore();
+    const store = new ResilientRemoteCursorStore({
+      dbName: 'no-locks',
+      createPrimaryStore: () => primary,
+    });
+    const cursor = createCursor('https://streams.example.com/ds/bucket/session');
+    expect(await store.saveIfAbsent(cursor)).toBe(false);
+    await store.save(cursor);
+    expect(await store.load(cursor.streamUrl)).toEqual(cursor);
   });
 });

@@ -64,7 +64,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   must not load snapshots, Docs, histories, or foreground cursor state.
   Foreground acquisition cancels that room's prefetch and merges cached binary
   state into the existing repo document; never replace unsent local edits or share
-  the UI repo's persistence/cursors with the worker. Intent:
+  the UI repo's persistence/cursors with the worker. Cold readers seed empty foreground cursors only after durable merges under cross-window exclusion. Intent:
   [background prefetch](../../../../specs/session-background-prefetch.zh.md).
 - Keep one Repo view across auth refresh and unrelated mode-cache changes;
   `WorkspaceTargetRouter` owns target/transport selection.

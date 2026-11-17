@@ -367,7 +367,7 @@ export function createBackgroundSyncCoordinator(
     controllers.set(sessionId, controller);
 
     const timeoutHandle = scheduler.setTimeout(() => {
-      controller.abort();
+      controller.abort(new DOMException('Eager-sync task timed out', 'TimeoutError'));
     }, policy.prefetchTimeoutMs);
 
     void prefetcher
