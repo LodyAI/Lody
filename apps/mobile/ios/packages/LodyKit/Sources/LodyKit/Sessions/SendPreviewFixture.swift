@@ -97,7 +97,14 @@ final class SendPreviewFixture {
           ])
         },
         tier: { _, _ in nil }
-      )
+      ),
+      retryInput: { [weak self] _, _, _, inputId in
+        guard let self, self.record?.sendId == inputId else { throw OutboxError.scopeExpired }
+        self.controlRequest = "Recovered original input: \(inputId)"
+        self.changed?()
+        return .accepted
+      },
+      forgetInput: { _, _, _, _ in }
     )
   }
 

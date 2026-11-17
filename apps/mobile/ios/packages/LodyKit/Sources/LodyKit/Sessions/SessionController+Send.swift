@@ -12,6 +12,19 @@ struct SessionSendEnvironment {
   var foreground: @MainActor (_ sessionId: String, _ active: Bool) -> Void
   var control: SessionControl.Request
   var composer: SessionComposerService
+  var retryInput: @MainActor (String, String, String, String) async throws -> RuntimeContract.RetryPendingInputResultState = { workspace, user, sessionId, inputId in
+    guard let runtime = DataRuntime.current, runtime.workspace == workspace, runtime.userId == user else { throw OutboxError.scopeExpired }
+    let result = try await runtime.workspaceCall(RuntimeContract.Calls.RetryPendingInput.self) { _, _ in
+      RuntimeContract.ForgetPendingInputParams(sessionId: sessionId, inputId: inputId)
+    }
+    return result.state
+  }
+  var forgetInput: @MainActor (String, String, String, String) async throws -> Void = { workspace, user, sessionId, inputId in
+    guard let runtime = DataRuntime.current, runtime.workspace == workspace, runtime.userId == user else { throw OutboxError.scopeExpired }
+    _ = try await runtime.workspaceCall(RuntimeContract.Calls.ForgetPendingInput.self) { _, _ in
+      RuntimeContract.ForgetPendingInputParams(sessionId: sessionId, inputId: inputId)
+    }
+  }
   var turn: @MainActor (_ payload: String) async throws -> String = { payload in
     guard let runtime = DataRuntime.current else { throw OutboxError.scopeExpired }
     return try await withCheckedThrowingContinuation { runtime.sendTurn(payload, sink: .continuation($0)) }
@@ -60,7 +73,8 @@ extension SessionController {
       self.sender?.submit(body, choice: self.composerModel.sendChoice, role: self.composerModel.sendRole)
     }
     chat.onRetrySend = { [weak self] body in
-      if body["forget"] as? Bool == true { self?.confirmForgetPendingInput(body["id"] as? String) }
+      if body["pendingActions"] as? Bool == true { self?.presentPendingActions(body["id"] as? String) }
+      else if body["forget"] as? Bool == true { self?.confirmForgetPendingInput(body["id"] as? String) }
       else if body["retryPending"] as? Bool == true, let id = body["id"] as? String { self?.retryPendingInput(id) }
       else { self?.sender?.retry() }
     }
@@ -78,15 +92,43 @@ extension SessionController {
   private func retryPendingInput(_ id: String) {
     let workspace = source.state.workspaceId, user = source.state.userId
     Task { @MainActor [weak self] in
-      guard let self, let runtime = DataRuntime.current, runtime.workspace == workspace, runtime.userId == user else { return }
+      guard let self, self.source.state.workspaceId == workspace, self.source.state.userId == user else { return }
       do {
-        _ = try await runtime.workspaceCall(RuntimeContract.Calls.RetryPendingInput.self) { _, _ in
-          RuntimeContract.ForgetPendingInputParams(sessionId: self.sessionId, inputId: id)
+        let result = try await self.environment.retryInput(workspace, user, self.sessionId, id)
+        guard self.source.state.workspaceId == workspace, self.source.state.userId == user else { return }
+        switch result {
+        case .settled: try await self.sender?.discardPending(id)
+        case .accepted: try await self.sender?.confirmPending(id)
+        case .pending: break
         }
       } catch {
-        LodyToastOverlay.shared.show(message: String(localized: "native.chat.error.retryFailed", bundle: .lody), kind: .error)
+        guard self.source.state.workspaceId == workspace, self.source.state.userId == user else { return }
+        LodyToastOverlay.shared.show(message: String(localized: "send.recover.failed", bundle: .lody), kind: .error)
       }
     }
+  }
+
+  private func presentPendingActions(_ selectedId: String?) {
+    guard let record = sender?.record, record.sendId == selectedId, ["unknown", "uploaded"].contains(record.phase) else { return }
+    let workspace = source.state.workspaceId, user = source.state.userId, inputId = record.sendId
+    let alert = UIAlertController(title: String(localized: "send.recover.title", bundle: .lody),
+      message: String(localized: "send.recover.message", bundle: .lody), preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: String(localized: "send.recover.action", bundle: .lody), style: .default) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self, self.source.state.workspaceId == workspace, self.source.state.userId == user,
+              self.sender?.record?.sendId == inputId else { return }
+        self.retryPendingInput(inputId)
+      }
+    })
+    alert.addAction(UIAlertAction(title: String(localized: "send.forget.action", bundle: .lody), style: .destructive) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self, self.source.state.workspaceId == workspace, self.source.state.userId == user,
+              self.sender?.record?.sendId == inputId else { return }
+        self.forgetPendingInput(inputId, workspace: workspace, user: user)
+      }
+    })
+    alert.addAction(UIAlertAction(title: String(localized: "common.cancel", bundle: .lody), style: .cancel))
+    present(alert, animated: true)
   }
 
   private func confirmForgetPendingInput(_ selectedId: String?) {
@@ -94,17 +136,20 @@ extension SessionController {
     let workspace = source.state.workspaceId, user = source.state.userId
     SettingsPage.confirm(from: self, title: String(localized: "send.forget.title", bundle: .lody),
       message: String(localized: "send.forget.message", bundle: .lody), action: String(localized: "send.forget.action", bundle: .lody), destructive: true) { [weak self] in
-      Task { @MainActor [weak self] in
-        guard let self, let runtime = DataRuntime.current else { return }
-        guard runtime.workspace == workspace, runtime.userId == user else { return }
-        do {
-          _ = try await runtime.workspaceCall(RuntimeContract.Calls.ForgetPendingInput.self) { _, _ in
-            RuntimeContract.ForgetPendingInputParams(sessionId: self.sessionId, inputId: inputId)
-          }
-          try await self.sender?.discardPending(inputId)
-        } catch {
-          LodyToastOverlay.shared.show(message: String(localized: "send.forget.failed", bundle: .lody), kind: .error)
-        }
+      self?.forgetPendingInput(inputId, workspace: workspace, user: user)
+    }
+  }
+
+  private func forgetPendingInput(_ inputId: String, workspace: String, user: String) {
+    Task { @MainActor [weak self] in
+      guard let self, self.source.state.workspaceId == workspace, self.source.state.userId == user else { return }
+      do {
+        try await self.environment.forgetInput(workspace, user, self.sessionId, inputId)
+        guard self.source.state.workspaceId == workspace, self.source.state.userId == user else { return }
+        try await self.sender?.discardPending(inputId)
+      } catch {
+        guard self.source.state.workspaceId == workspace, self.source.state.userId == user else { return }
+        LodyToastOverlay.shared.show(message: String(localized: "send.forget.failed", bundle: .lody), kind: .error)
       }
     }
   }

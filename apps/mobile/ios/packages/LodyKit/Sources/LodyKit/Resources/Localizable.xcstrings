@@ -31430,6 +31430,91 @@
           }
         }
       }
+    },
+    "send.recover.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap for options"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "轻点查看操作"
+          }
+        }
+      }
+    },
+    "send.recover.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unconfirmed message"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "消息尚未确认"
+          }
+        }
+      }
+    },
+    "send.recover.action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check and continue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "核对并继续"
+          }
+        }
+      }
+    },
+    "send.recover.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check whether the original message was saved and hand it to the computer. Removing it locally does not cancel processing on the computer."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "核对原消息是否已保存，再交给电脑处理。本地移除不会取消电脑上的处理。"
+          }
+        }
+      }
+    },
+    "send.recover.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not confirm delivery. The message is still pending; check the connection and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂时无法确认交接，消息仍待确认。请检查连接后重试。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
