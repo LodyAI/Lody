@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { build } from 'vite';
 import { chromium, webkit } from '@playwright/test';
 
+const boundaryOnly = process.argv.includes('--boundary-only');
 const dailyOnly = process.argv.includes('--daily-only');
 const stuckOnly = process.argv.includes('--stuck-only');
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -21,7 +22,28 @@ const result = await build({
   configFile: false,
   root,
   define: { 'import.meta.env': '{}', 'process.env.NODE_ENV': '"production"' },
-  resolve: { alias: { '@': `${root}/src` } },
+  resolve: {
+    alias: [
+      { find: '@/components/error-boundary-fallback', replacement: 'fixture:boundary-fallback' },
+      { find: '@', replacement: `${root}/src` },
+      // Boundary/deferred probes use the script SDK; sync-stuck keeps its real ESM singleton.
+      ...(!stuckOnly ? [{ find: 'posthog-js', replacement: 'fixture:posthog' }] : []),
+    ],
+  },
+  plugins: [
+    {
+      name: 'locked-global-posthog',
+      resolveId(id) {
+        if (id === 'fixture:posthog' || id === 'fixture:boundary-fallback') return id;
+      },
+      load(id) {
+        if (id === 'fixture:posthog') return 'export default window.posthog;';
+        // Probe supplies fallbackRender; avoid bundling unrelated support UI.
+        if (id === 'fixture:boundary-fallback')
+          return 'export function ErrorBoundaryFallback() { throw new Error("probe requires fallbackRender"); }';
+      },
+    },
+  ],
   build: {
     target: 'esnext',
     write: false,
@@ -42,6 +64,7 @@ const received = [];
 const ingestion = new EventEmitter();
 let currentDistinctId;
 let rejectNextSnapshot = false;
+let rejectNextBoundary = false;
 const handleRequest = async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (process.env.DEBUG_PROBE) console.log(req.method, url.pathname);
@@ -94,7 +117,16 @@ const handleRequest = async (req, res) => {
     received.push({ path: url.pathname, events: Array.isArray(events) ? events : [events] });
     ingestion.emit('batch');
     res.setHeader('Content-Type', 'application/json');
-    if (url.pathname === '/s/' && rejectNextSnapshot) {
+    if (
+      rejectNextBoundary &&
+      events &&
+      (Array.isArray(events) ? events : [events]).some(
+        (event) => event.event === '$exception' && event.properties?.source === 'errorBoundary'
+      )
+    ) {
+      rejectNextBoundary = false;
+      res.writeHead(500);
+    } else if (url.pathname === '/s/' && rejectNextSnapshot) {
       rejectNextSnapshot = false;
       res.writeHead(500);
     }
@@ -120,7 +152,13 @@ const allEvents = () =>
     .filter((event) => event.properties?.distinct_id === currentDistinctId);
 const wire = () => JSON.stringify(allEvents());
 
-async function setup(browser, shell = 'web', late = false, compressed = false) {
+async function setup(
+  browser,
+  shell = 'web',
+  late = false,
+  compressed = false,
+  boundaryDeferred = false
+) {
   const context = browser.newContext
     ? await browser.newContext({
         userAgent:
@@ -180,6 +218,7 @@ async function setup(browser, shell = 'web', late = false, compressed = false) {
     }
     return route.continue();
   });
+  if (boundaryDeferred) await page.clock.install();
   page.setDefaultTimeout(10000);
   page.on('pageerror', (error) => console.error('PAGE', error.message));
   await page.goto(origin + (late ? '/?late' : '/'));
@@ -190,6 +229,7 @@ async function setup(browser, shell = 'web', late = false, compressed = false) {
       shell: shellKind,
       negative: insecure,
       compressed: useCompression,
+      boundaryDeferred: deferBoundary,
       stuckOnly: useStuckClient,
     }) => {
       // The hook's deferred facade and the guarded transport must share one SDK.
@@ -205,13 +245,20 @@ async function setup(browser, shell = 'web', late = false, compressed = false) {
       window.installWorkspaceTelemetryScope(() => window.scope);
       window.setTelemetryRouteTarget('workspace', true);
       if (!insecure) window.postHogPrivacy.attach(window.posthog);
+      window.failedRequest = new Promise((resolve) => {
+        window.resolveFailedRequest = resolve;
+      });
       const options = window.POSTHOG_OPTIONS;
-      window.posthog.init('synthetic-key', {
+      const init = deferBoundary
+        ? window.scheduleDeferredPostHogInitialization
+        : window.posthog.init.bind(window.posthog);
+      init('synthetic-key', {
         ...options,
         api_host: receiverOrigin,
         opt_out_useragent_filter: true,
         on_request_error: () => {
           window.requestFailures = (window.requestFailures ?? 0) + 1;
+          window.resolveFailedRequest();
         },
         person_profiles: 'never',
         disable_compression: true,
@@ -244,9 +291,11 @@ async function setup(browser, shell = 'web', late = false, compressed = false) {
         window.dispatchEvent(new Event('pagehide'));
       };
     },
-    { origin, shell, negative, compressed, stuckOnly }
+    { origin, shell, negative, compressed, boundaryDeferred, stuckOnly }
   );
-  currentDistinctId = await page.evaluate(() => window.posthog.get_distinct_id());
+  currentDistinctId = boundaryDeferred
+    ? undefined
+    : await page.evaluate(() => window.posthog.get_distinct_id());
   return { page, requested, releaseScript };
 }
 
@@ -390,6 +439,104 @@ try {
   ]) {
     const browser = await engine.launch({ headless: true });
     try {
+      // Real product ErrorBoundary -> deferred controller -> locked SDK -> HTTP.
+      // One failed upload retries the same UUID; React retries enqueue no extra event.
+      if (!dailyOnly && !stuckOnly && !negative) {
+        for (const initialScope of [null, 'account/plain/workspace']) {
+          received.length = 0;
+          const { page } = await setup(browser, 'web', false, false, true);
+          try {
+            await page.evaluate((scope) => {
+              window.change(scope);
+              window.boundary = window.mountBoundaryProbe();
+              window.boundary.render();
+              for (let i = 0; i < 20; i++) window.boundary.retry();
+            }, initialScope);
+            assert.equal(
+              received
+                .flatMap((request) => request.events)
+                .filter((event) => event.event === '$exception').length,
+              0,
+              'boundary stays deferred before startup'
+            );
+            rejectNextBoundary = true;
+            const failed = page.waitForResponse((response) => response.status() === 500);
+            await page.clock.runFor(15_050);
+            currentDistinctId = await page.evaluate(() => window.posthog.get_distinct_id());
+            await failed;
+            await page.evaluate(() => window.failedRequest);
+            await page.evaluate(() => {
+              window.change(null);
+              window.change('account/plain/workspace');
+              // Simulate an old SDK queue entering the final transport directly.
+              window.posthog._send_request({
+                method: 'POST',
+                url: location.origin + '/legacy-boundary/',
+                data: {
+                  event: 'app/error_boundary_triggered',
+                  properties: { error_fingerprint: 'BOUNDARY_SYNTHETIC_HASH' },
+                },
+                callback: () => {
+                  window.legacyBoundarySettled = true;
+                },
+              });
+              window.posthog.capture('app/error_boundary_triggered', {
+                error_type: 'BOUNDARY_SYNTHETIC_NAME',
+                reason_code: 'BOUNDARY_SYNTHETIC_CODE',
+                error_fingerprint: 'BOUNDARY_SYNTHETIC_HASH',
+              });
+            });
+            assert.equal(await page.evaluate(() => window.legacyBoundarySettled), true);
+            // Fake clock drives the SDK backoff, including its jitter, within its
+            // bounded retry interval. HTTP response is the completion signal.
+            const retried = page.waitForResponse((response) => response.url().includes('/e/'));
+            await page.clock.runFor(30_000);
+            await barrier(page);
+            await retried;
+            const boundaryEvents = () =>
+              allEvents().filter(
+                (event) =>
+                  event.event === '$exception' && event.properties?.source === 'errorBoundary'
+              );
+            assert.equal(new Set(boundaryEvents().map((event) => event.uuid)).size, 1);
+            assert.equal(
+              boundaryEvents().length,
+              2,
+              'one upload plus one real SDK transport retry'
+            );
+            assert.equal(
+              allEvents().filter((event) => event.event === '$exception').length,
+              boundaryEvents().length,
+              'no companion automatic exception'
+            );
+            assert.equal(wire().includes('BOUNDARY_SYNTHETIC_'), false);
+            assert.equal(
+              allEvents().some((event) => event.event === 'app/error_boundary_triggered'),
+              false
+            );
+            assert.equal(await page.locator('main').textContent(), 'BOUNDARY_SYNTHETIC_MESSAGE');
+            await page.evaluate(() => {
+              window.boundary.recover();
+            });
+            assert.equal(await page.locator('main').textContent(), 'boundary recovered');
+            await page.evaluate(() => window.boundary.fail());
+            await barrier(page);
+            assert.equal(
+              new Set(boundaryEvents().map((event) => event.uuid)).size,
+              2,
+              'independent post-recovery failure remains visible'
+            );
+            assert.equal(wire().includes('BOUNDARY_SYNTHETIC_'), false);
+            console.log(
+              `${name}/${initialScope ? 'ordinary' : 'restricted'}: boundary deferred, retries, privacy, recovery PASS`
+            );
+          } finally {
+            // Retire this probe's fake-clock context before other SDK modes run.
+            await page.context().close();
+          }
+        }
+      }
+      if (boundaryOnly) continue;
       for (const shell of shells) {
         if (dailyOnly && shell === 'web') continue;
         received.length = 0;

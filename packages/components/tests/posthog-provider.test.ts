@@ -35,6 +35,36 @@ describe('PostHog provider options', () => {
     vi.unstubAllGlobals();
   });
 
+  it('retires boundary analytics and projects boundary exceptions in ordinary scopes too', () => {
+    expect(
+      runBeforeSend({
+        event: 'app/error_boundary_triggered',
+        properties: {
+          reason_code: 'SYNTHETIC_TOKEN',
+          error_fingerprint: 'SYNTHETIC_HASH',
+        },
+      })
+    ).toBeNull();
+    const projected = runBeforeSend({
+      event: '$exception',
+      properties: {
+        errorBoundary: 'SYNTHETIC_BOUNDARY',
+        error_type: 'SYNTHETIC_NAME',
+        error_code: 'SYNTHETIC_CODE',
+        componentStack: 'SYNTHETIC_STACK',
+        $exception_list: [{ type: 'SYNTHETIC_NAME', value: 'SYNTHETIC_MESSAGE' }],
+        $groups: { workspace: 'SYNTHETIC_WORKSPACE' },
+      },
+    });
+    expect(projected?.properties).toMatchObject({
+      source: 'errorBoundary',
+      error_type: 'unknown',
+      error_code: 'redacted_exception',
+      $exception_list: [{ type: 'Error', value: 'redacted_exception' }],
+    });
+    expect(JSON.stringify(projected)).not.toContain('SYNTHETIC_');
+  });
+
   it('keeps an encrypted approval private above ordinary workspaces until all actual surfaces retire', () => {
     let current = 'ordinary-A';
     const removeScope = installWorkspaceTelemetryScope(() => current);
