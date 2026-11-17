@@ -6,7 +6,7 @@ PR: https://github.com/LodyAI/Lody/pull/499
 
 English | [中文](2026-09-07-ci-affected-tests.zh.md)
 
-Later: [CI test groups and pnpm store cache](2026-09-26-ci-test-groups-and-pnpm-store-cache.md) splits `Tests` into runner-level groups behind the same required check.
+Later: [CI test groups and pnpm store cache](2026-09-26-ci-test-groups-and-pnpm-store-cache.md) splits `Tests` into runner-level groups behind the same required check. [Vitest related tests](2026-11-17-ci-vitest-related-tests.md) revisits alternative 5 and narrows pull-request Vitest suites to files.
 
 ## Abstract
 

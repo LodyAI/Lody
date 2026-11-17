@@ -2,7 +2,10 @@
 
 import { execFileSync as defaultExecFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+import { RELATED_FLAGS, relatedTestFiles } from './related-test-files.mjs';
 
 import { REST_PACKAGES } from '../../scripts/vitest-rest.config.mjs';
 
@@ -18,6 +21,7 @@ const EXCLUDED_FILTERS = [
 // splitting them across jobs does. `rest` runs repository scripts, site-docs,
 // the single-boot aggregated Vitest workspace projects, then electron.
 const DEDICATED_PACKAGES = { components: '@lody/components', cli: 'lody' };
+const DEDICATED_DIRECTORIES = { components: 'packages/components', cli: 'apps/cli' };
 const DEDICATED_WORKERS = 4;
 export const REST_PACKAGE_DIRS = Object.fromEntries(
   REST_PACKAGES.map((dir) => [dir === 'ignore' ? '@loro-dev/ignore' : `@lody/${dir}`, dir])
@@ -41,8 +45,10 @@ const filters = (names) => names.flatMap((name) => ['--filter', name]);
 /**
  * pnpm argv lists for one CI test group. An empty list means the scope leaves
  * nothing for this group. Missing or invalid scope fails open to the full group.
+ * `related` (repository-relative changed modules) narrows Vitest suites to the
+ * test files whose import graph reaches them; null keeps whole suites.
  */
-export function planCiTests({ scope, group, shard = null, full = false }) {
+export function planCiTests({ scope, group, shard = null, full = false, related = null }) {
   if (!TEST_GROUPS.includes(group)) throw new Error(`Unknown test group: ${group}`);
   if (shard !== null && (!(group in DEDICATED_PACKAGES) || !/^[1-9]\d*\/[1-9]\d*$/.test(shard))) {
     throw new Error(`Invalid shard for group ${group}: ${shard}`);
@@ -52,11 +58,28 @@ export function planCiTests({ scope, group, shard = null, full = false }) {
   const listed = !forceFull && Array.isArray(scope.testPackages) ? scope.testPackages : [];
   // An affected scope that names no package is not trusted to mean "nothing".
   const runAll = listed.length === 0;
+  const relatedFiles = !runAll && related?.length ? related : null;
   const selected = (name) => runAll || listed.includes(name);
 
   if (group in DEDICATED_PACKAGES) {
     const name = DEDICATED_PACKAGES[group];
     if (!selected(name)) return [];
+    if (relatedFiles) {
+      const directory = DEDICATED_DIRECTORIES[group];
+      return [
+        [
+          '--filter',
+          name,
+          'exec',
+          'vitest',
+          'related',
+          ...RELATED_FLAGS,
+          `--maxWorkers=${DEDICATED_WORKERS}`,
+          ...(shard ? [`--shard=${shard}`] : []),
+          ...relatedFiles.map((file) => path.posix.relative(directory, file)),
+        ],
+      ];
+    }
     return [
       [
         '--filter',
@@ -84,9 +107,11 @@ export function planCiTests({ scope, group, shard = null, full = false }) {
     const nonRestPackages = others.filter((name) => !(name in REST_PACKAGE_DIRS));
     if (restDirs.length > 0) {
       commands.push([
-        'test:rest',
+        relatedFiles ? 'test:rest:related' : 'test:rest',
+        ...(relatedFiles ? ['--passWithNoTests'] : []),
         `--maxWorkers=${DEDICATED_WORKERS}`,
         ...restDirs.map((dir) => `--project=${dir}:*`),
+        ...(relatedFiles ?? []),
       ]);
     }
     if (nonRestPackages.length > 0) {
@@ -112,7 +137,8 @@ export function runCiTests({
   execFileSync = defaultExecFileSync,
   cwd = process.cwd(),
 } = {}) {
-  const commands = planCiTests({ scope, group, shard, full });
+  const related = full ? null : relatedTestFiles(scope, { root: cwd });
+  const commands = planCiTests({ scope, group, shard, full, related });
   if (commands.length === 0) console.log(`Nothing to test in group ${group} for this scope.`);
   for (const args of commands) execFileSync('pnpm', args, { cwd, stdio: 'inherit' });
   return commands;
