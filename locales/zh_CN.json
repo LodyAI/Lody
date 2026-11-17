@@ -4644,6 +4644,7 @@
   "workspace.usage.skyline.asciiPreview": "ASCII 加载预览",
   "workspace.usage.skyline.clickForDetails": "点击查看明细",
   "workspace.usage.skyline.clickHint": "点击某一天查看当日明细",
+  "workspace.usage.skyline.hourClickHint": "选择一个小时，查看对应 UTC 日期的用量明细",
   "workspace.usage.skyline.copyAscii": "复制 ASCII 天际线",
   "workspace.usage.skyline.copyFailed": "无法复制 ASCII 天际线",
   "workspace.usage.skyline.currentStreak": "当前连续",
