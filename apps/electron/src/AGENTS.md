@@ -123,5 +123,6 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   The scheme never bypasses CSP, executes file content, or authorizes a remote RPC.
 - Direct HTML preview (`local-html-preview.ts`) is the one exception: after user
   consent it serves a local HTML file's folder from a random per-preview
-  `lody-html-preview://` origin. Scripts run only when the user allowed them. It never
+  `lody-html-preview://` origin. Scripts run only when the user allowed them. Preview frames
+  cannot navigate off that scheme and receive no permissions. It never
   serves dot-files or paths outside that folder, and its tokens share the resource owner's lifetime.

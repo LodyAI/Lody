@@ -3,7 +3,12 @@ import test from 'node:test'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LocalHtmlPreviewSites, openLocalHtmlPreview } from './local-html-preview.ts'
+import {
+  blocksHtmlPreviewFrameNavigation,
+  isHtmlPreviewPermissionRequester,
+  LocalHtmlPreviewSites,
+  openLocalHtmlPreview
+} from './local-html-preview.ts'
 
 async function site(t) {
   const dir = await mkdtemp(join(tmpdir(), 'lody-html-preview-'))
@@ -112,4 +117,30 @@ void test('local HTML preview is limited to this machine, HTML files, and live o
   sites.releaseOwner(1)
   assert.equal((await get(sites, first.url)).status, 404)
   assert.equal((await get(sites, other.url)).status, 200)
+})
+
+void test('local HTML preview frames stay on preview content and get no permissions', () => {
+  const preview = 'lody-html-preview://0123456789abcdef0123456789abcdef/index.html'
+  // A preview page may move within previews, but not become a web page in Lody's window.
+  assert.equal(blocksHtmlPreviewFrameNavigation(preview, 'https://example.com/login'), true)
+  assert.equal(blocksHtmlPreviewFrameNavigation(preview, 'file:///etc/hosts'), true)
+  assert.equal(blocksHtmlPreviewFrameNavigation(preview, 'javascript:alert(1)'), true)
+  assert.equal(
+    blocksHtmlPreviewFrameNavigation(
+      preview,
+      'lody-html-preview://0123456789abcdef0123456789abcdef/b.html'
+    ),
+    false
+  )
+  // Other frames (product UI, browser previews) keep their own navigation rules.
+  assert.equal(
+    blocksHtmlPreviewFrameNavigation('http://127.0.0.1:5173/', 'https://example.com/'),
+    false
+  )
+  assert.equal(blocksHtmlPreviewFrameNavigation(null, 'https://example.com/'), false)
+
+  assert.equal(isHtmlPreviewPermissionRequester(preview), true)
+  assert.equal(isHtmlPreviewPermissionRequester(undefined, 'lody-html-preview://abc'), true)
+  assert.equal(isHtmlPreviewPermissionRequester('file:///app/index.html', 'file:///'), false)
+  assert.equal(isHtmlPreviewPermissionRequester(undefined, null), false)
 })

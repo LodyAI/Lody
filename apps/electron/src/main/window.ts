@@ -38,6 +38,7 @@ import { E2EE_CLIENT_LOSS_PROBE, type ElectronWindowTarget } from '@lody/shared/
 import { clientLossProbeEnabled } from './services/e2ee-client-loss-gate'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import { isDevbarRendererEnabled } from './services/devbar/service'
+import { blocksHtmlPreviewFrameNavigation } from './services/local-html-preview'
 import { devbarRendererEntry } from './services/devbar/control'
 import {
   clearMountWatchdog,
@@ -250,6 +251,14 @@ function installNavigationGuard(window: BrowserWindow, targets: readonly ReloadT
 
   window.webContents.on('will-navigate', preventUntrustedNavigation)
   window.webContents.on('will-redirect', preventUntrustedNavigation)
+  // A local HTML preview frame must not turn itself into a live web page
+  // inside the product window; its own preview origin stays navigable.
+  window.webContents.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame || event.isSameDocument) return
+    if (!blocksHtmlPreviewFrameNavigation(event.frame?.url, event.url)) return
+    event.preventDefault()
+    console.warn('[Electron] Blocked HTML preview frame navigation')
+  })
 }
 
 function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: ReloadTarget): void {

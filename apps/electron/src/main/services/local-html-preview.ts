@@ -25,6 +25,29 @@ export type LocalHtmlPreviewResult =
 
 type Site = { owner: number; root: string; allowScripts: boolean }
 
+/** True for a preview document URL or origin (`lody-html-preview://<token>`). */
+export function isHtmlPreviewUrl(url: string | null | undefined): boolean {
+  return typeof url === 'string' && url.toLowerCase().startsWith(`${HTML_PREVIEW_SCHEME}://`)
+}
+
+/**
+ * A preview frame stays on preview content: it may not replace itself with a
+ * web page (which would then run inside Lody's window) or any other scheme.
+ */
+export function blocksHtmlPreviewFrameNavigation(
+  frameUrl: string | null | undefined,
+  targetUrl: string
+): boolean {
+  return isHtmlPreviewUrl(frameUrl) && !isHtmlPreviewUrl(targetUrl)
+}
+
+/** Permission requests from preview pages are always refused. */
+export function isHtmlPreviewPermissionRequester(
+  ...urls: ReadonlyArray<string | null | undefined>
+): boolean {
+  return urls.some(isHtmlPreviewUrl)
+}
+
 const MAX_SITES_PER_OWNER = 32
 
 const MIME_TYPES: Readonly<Record<string, string>> = {

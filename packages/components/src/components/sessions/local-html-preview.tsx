@@ -46,10 +46,11 @@ export function LocalHtmlPreviewFrame({
       {...stylex.props(styles.frame)}
       title={title}
       src={url}
-      // Without consent the frame stays fully sandboxed: no scripts, forms or
-      // modals. With consent the page keeps its own origin so storage, fetch and
-      // module scripts behave as they would when opened directly.
-      sandbox={allowScripts ? 'allow-scripts allow-same-origin allow-forms allow-modals' : ''}
+      // Without consent the frame stays fully sandboxed: no scripts or forms.
+      // With consent the page keeps its own origin so storage, fetch and module
+      // scripts behave as they would when opened directly. Modal dialogs stay
+      // off so a page cannot block Lody's window with alert loops.
+      sandbox={allowScripts ? 'allow-scripts allow-same-origin allow-forms' : ''}
       referrerPolicy="no-referrer"
       allow="camera 'none'; microphone 'none'; geolocation 'none'; display-capture 'none'; clipboard-read 'none'"
     />
