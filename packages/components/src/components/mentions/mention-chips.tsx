@@ -1,6 +1,5 @@
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
 import { ClipboardList, MessagesSquare, UserRoundCog, Quote } from 'lucide-react';
 
 import { MonochromeFileIcon, MonochromeFolderIcon } from '@/components/icons/file-icons';
@@ -15,7 +14,7 @@ import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/ind
 const CHIP_PAD = '\u2007';
 const styles = stylex.create({
   quote: {
-    marginInline: space[1],
+    marginInline: 1,
   },
 });
 export const wrapPastedTextChipLabel = (label: string) => `${CHIP_PAD}${label}${CHIP_PAD}`;

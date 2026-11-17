@@ -79,7 +79,7 @@ test('native selection action does not resize or scroll the conversation, and qu
   for (const quote of quoteStyles) {
     expect(quote.background).toBe('rgba(0, 0, 0, 0)');
     expect(quote.colourMatchesLink).toBe(true);
-    expect(quote.marginInline).toBeGreaterThan(0);
+    expect(quote.marginInline).toBe(1);
     expect(quote.marginBlock).toBe(0);
   }
   await page.screenshot({ path: testInfo.outputPath('inline-quotes.png') });
@@ -168,7 +168,7 @@ for (const theme of ['light', 'dark']) {
       nodes[1]!.getClientRects()[0]!.toJSON(),
     ]);
     if (Math.abs(second.top - first.top) < 1) {
-      expect(second.left - first.right).toBeGreaterThanOrEqual(4);
+      expect(second.left - first.right).toBeGreaterThanOrEqual(2);
     } else {
       expect(second.top).toBeGreaterThanOrEqual(first.bottom);
     }
