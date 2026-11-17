@@ -91,6 +91,11 @@ so existing Playwright child drivers can retain process ownership. It must:
   gate evidence, exact source/build/service versions and service failure logs
   under the supplied artifacts path. Keep synthetic account secrets out of logs.
 
+An offline restart history failure stays latched while the runner restores the
+actor's connection and checks catch-up and the execution owner's restart.
+`checkpoints.json` records these distinct assertions; `round-status.json` is written
+only after cleanup and still reports failure if any assertion or cleanup failed.
+
 Artifacts use fresh `e2e/artifacts/multidevice/round-*` directories. Public runner
 results describe assertions, not independent certification of a private adapter;
 review the adapter and its network/process evidence before accepting a run.

@@ -53,6 +53,11 @@ export async function runCloudRound(
   let round: DesktopRound | undefined;
   let primaryError: unknown;
   let result: unknown;
+  const checkpoints: { name: string; status: 'passed' | 'failed' }[] = [];
+  const checkpoint = (name: string, status: 'passed' | 'failed' = 'passed') => {
+    checkpoints.push({ name, status });
+    writeFileSync(join(root, 'checkpoints.json'), JSON.stringify(checkpoints, null, 2) + '\n');
+  };
   try {
     // Fixture owns cleanup of resources acquired before createRound returns.
     round = await fixture.createRound({
@@ -100,15 +105,25 @@ export async function runCloudRound(
     };
     await complete(0, 'a-initial', true);
     await complete(1, 'b-followup');
+    checkpoint('bidirectional-conversation');
     await actors[1].setOnline(false);
     await complete(0, 'a-while-b-offline', false, false);
     await ui(1).expectMissing('a-while-b-offline');
+    checkpoint('offline-isolation');
     const previous = actors[1];
     actors[1] = await previous.restart(); // Restart must preserve the network gate.
     await previous.assertStopped();
-    await ui(1).open(sessionId);
-    await ui(1).expectHistory(tokens.slice(0, 2));
-    await ui(1).expectMissing('a-while-b-offline');
+    try {
+      await ui(1).open(sessionId);
+      await ui(1).expectHistory(tokens.slice(0, 2));
+      await ui(1).expectMissing('a-while-b-offline');
+      checkpoint('offline-restart-history');
+    } catch (error) {
+      // Continue independent recovery checks, but keep this round failed.
+      primaryError = error;
+      checkpoint('offline-restart-history', 'failed');
+      await actors[1].screenshot('actor-1-offline-restart-failure');
+    }
     await actors[1].setOnline(true);
     const restarted = await assertIndependentActors(actors, root, membership, backend);
     for (const field of [
@@ -124,7 +139,9 @@ export async function runCloudRound(
     writeFileSync(join(root, 'restarted-replicas.json'), JSON.stringify(restarted, null, 2) + '\n');
     await ui(1).open(sessionId);
     await ui(1).expectHistory(tokens);
+    checkpoint('online-catch-up');
     await complete(1, 'b-after-restart');
+    checkpoint('bidirectional-after-restart');
     // Restart the execution owner too: renderer reload alone cannot prove its
     // daemon/Repo persisted the accepted conversation.
     const previousOwner = actors[0];
@@ -148,12 +165,15 @@ export async function runCloudRound(
     await ui(0).open(sessionId);
     await ui(0).expectHistory(tokens);
     await ui(1).expectHistory(tokens);
+    checkpoint('execution-owner-restart');
     for (const token of tokens)
       assert.equal(starts(token, 'start').length, 1, `Duplicate ACP dispatch: ${token}`);
     for (let i = 0; i < actors.length; i++) await actors[i]!.screenshot(`actor-${i}-complete`);
     result = { membership, backend, sessionId, tokens, status: 'passed' };
   } catch (error) {
-    primaryError = error;
+    primaryError = primaryError
+      ? new AggregateError([primaryError, error], 'Multiple sync assertions failed')
+      : error;
   } finally {
     try {
       await round?.close();
@@ -163,6 +183,10 @@ export async function runCloudRound(
         : error;
     }
   }
+  writeFileSync(
+    join(root, 'round-status.json'),
+    JSON.stringify({ membership, backend, status: primaryError ? 'failed' : 'passed', checkpoints }, null, 2) + '\n'
+  );
   if (primaryError) throw primaryError;
   return result;
 }
