@@ -4,7 +4,12 @@ import {
   readEagerSyncRejection,
   writeEagerSyncRejection,
 } from '../src/providers/eager-sync-admission';
-import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
+import { createLoroStreamsTokenProviderLegacy, type SessionId } from '@lody/shared';
+import {
+  createBackgroundSyncCoordinator,
+  WEB_EAGER_SYNC_POLICY,
+  type PrefetchOutcome,
+} from '../src/providers/background-sync-coordinator';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import {
   base64ToBytes,
@@ -331,6 +336,112 @@ describe('worker deadline cancellation', () => {
     expect(await next).toBe('synced');
     h.client.dispose();
   });
+});
+
+it('bounds a waiting catch-up through the coordinator deadline and persists its retry across workers', async () => {
+  let now = 0;
+  const rows = new Map<string, Parameters<typeof writeEagerSyncRejection>[0]>();
+  const retryStore: Partial<EagerSyncWorkerClientDeps> = {
+    now: () => now,
+    readRejection: async (key) => rows.get(key),
+    writeRejection: async (row) => {
+      rows.set(row.key, { ...row });
+    },
+    clearRejection: async (key) => {
+      rows.delete(key);
+    },
+  };
+  const transport = async (): Promise<EagerSyncTransport> => ({
+    plane: 'cloud',
+    streamUrl: 'https://streams.example.com/ds/bucket/waiting',
+  });
+  const h = clientHarness(transport, undefined, undefined, retryStore);
+  const restarted = clientHarness(transport, undefined, undefined, retryStore);
+  const sessionId = 'waiting-session' as SessionId;
+  const highWater = new Map<SessionId, number>();
+  const timers = new Map<symbol, { run: () => void; delay: number }>();
+  let deadline: symbol | undefined;
+  const drained = deferred<void>();
+  const outcome = deferred<PrefetchOutcome>();
+  let activity: ((snapshot: { sessionId: SessionId; lastMessageAt: number }) => void) | undefined;
+  const coordinator = createBackgroundSyncCoordinator({
+    activitySource: {
+      list: () => [{ sessionId, lastMessageAt: 1 }],
+      subscribe: (listener) => {
+        activity = listener;
+        return () => {
+          activity = undefined;
+        };
+      },
+    },
+    registry: {
+      isJoined: () => false,
+      getRecentlySynced: () => new Set(),
+      subscribe: () => () => {},
+    },
+    prefetcher: {
+      getRetryAt: () => h.client.getRetryAt('waiting-room'),
+      prefetch: async (_session, at, signal) => {
+        const result = await h.client.prefetch('waiting-room', at, signal);
+        outcome.resolve(result);
+        return result;
+      },
+    },
+    env: { isOnline: () => true, isAppVisible: () => true, subscribe: () => () => {} },
+    clock: { now: () => now },
+    scheduler: {
+      setTimeout: (run, delay) => {
+        const handle = Symbol();
+        timers.set(handle, { run, delay });
+        if (delay === WEB_EAGER_SYNC_POLICY.prefetchTimeoutMs) deadline = handle;
+        return handle;
+      },
+      clearTimeout: (handle) => {
+        timers.delete(handle as symbol);
+        if (handle === deadline) drained.resolve();
+      },
+    },
+    policy: WEB_EAGER_SYNC_POLICY,
+    highWaterStore: {
+      get: (id) => highWater.get(id),
+      set: (id, at) => {
+        highWater.set(id, at);
+      },
+    },
+  });
+  try {
+    coordinator.start();
+    // No completion is emitted: this is the parent boundary when SDK catch-up
+    // remains waiting and firstSyncedWithRemote never resolves.
+    const waiting = await h.starts[0].promise;
+    expect(coordinator.getState().inFlight).toEqual([sessionId]);
+    const timer = timers.get(deadline!)!;
+    expect(timer.delay).toBe(20_000);
+    now = timer.delay;
+    timer.run();
+    expect(waiting.terminated).toBe(true);
+    expect(await outcome.promise).toBe('failed');
+    await drained.promise;
+    expect(coordinator.getState().inFlight).toEqual([]);
+    expect(highWater.size).toBe(0);
+    expect(h.client.getRetryAt('waiting-room')).toBe(80_000);
+    activity?.({ sessionId, lastMessageAt: 2 });
+    expect(coordinator.getState().queued).toEqual([]);
+    coordinator.stop();
+    const next = h.client.prefetch('another-room', 1, new AbortController().signal);
+    const nextWorker = await h.starts[1].promise;
+    nextWorker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await next).toBe('synced');
+    expect(await restarted.client.prefetch('waiting-room', 3, new AbortController().signal)).toBe(
+      'failed'
+    );
+    expect(restarted.workers).toEqual([]);
+    expect(highWater.size).toBe(0);
+  } finally {
+    coordinator.stop();
+    h.client.dispose();
+    restarted.client.dispose();
+  }
 });
 
 describe('eager-sync cloud auth bridge', () => {
