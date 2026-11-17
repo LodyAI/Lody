@@ -122,7 +122,6 @@ import {
   parseLodyPresenceStates,
   LODY_PRESENCE_TTL_MS,
   type LodyPresenceStateMap,
-  type LoroStreamsTokenProviderEvent,
   type SyncReason,
   ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
 } from '@lody/shared';
@@ -130,6 +129,7 @@ import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import { clientLossEffects } from '@/lib/e2ee-client-loss-effects';
 import type { WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
+import { logTokenProviderEvent } from './loro-streams-token-diagnostics';
 import {
   createConversationSession,
   type ConversationSessionDataFactory,
@@ -869,18 +869,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let eagerSyncWorkerClient: ReturnType<typeof createEagerSyncWorkerClient> | null = null;
   let cancelDelayedBackgroundSyncStart: (() => void) | null = null;
   let startBackgroundSyncCoordinator: () => void = () => {};
-
-  const logTokenProviderEvent = (event: LoroStreamsTokenProviderEvent): void => {
-    const logContext = {
-      ...event,
-      hasCachedToken: event.type === 'cache-hit',
-    };
-    if (event.type === 'fetch-failure') {
-      console.warn('Loro Streams token provider event', logContext);
-      return;
-    }
-    console.debug('Loro Streams token provider event', logContext);
-  };
 
   const markMetaRemoteCursorBypass = (reason: string): void => {
     // A new suspicion is not covered by a delete that happened before it.

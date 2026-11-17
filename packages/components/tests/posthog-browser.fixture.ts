@@ -13,6 +13,7 @@ import {
 } from '../src/lib/deferred-posthog';
 import { createIrohDaily } from '../src/lib/iroh-daily';
 import { POSTHOG_OPTIONS } from '../src/providers/posthog-options';
+import { logTokenProviderEvent } from '../src/providers/loro-streams-token-diagnostics';
 import {
   postHogPrivacy,
   installWorkspaceTelemetryScope,
@@ -21,6 +22,7 @@ import {
 } from '../src/lib/posthog-privacy';
 Object.assign(window, {
   POSTHOG_OPTIONS,
+  logTokenProviderEvent,
   ShortcutTokenAttempts,
   shortcutTokenDiagnostic,
   shortcutProbeError(mixed = false) {
