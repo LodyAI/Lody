@@ -2,7 +2,14 @@ import * as stylex from '@stylexjs/stylex';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Badge } from '@lody/ui/badge';
-import { findFreshSessionPresenceState, type SessionStatus } from '@lody/shared';
+import { Button } from '@lody/ui/button';
+import { toast } from '@/lib/toast';
+import {
+  findFreshSessionPresenceState,
+  getServerNow,
+  type SessionId,
+  type SessionStatus,
+} from '@lody/shared';
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue } from 'jotai';
 import { memo, useCallback, useMemo, useRef, type MouseEvent } from 'react';
@@ -14,6 +21,7 @@ import { buildChildSessionsByParent } from '@/components/sessions/session-list-r
 import { useMySessionScope, useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   buildProjectBoard,
   findProjectCoordinatorSession,
@@ -67,15 +75,35 @@ const styles = stylex.create({
   row: {
     display: 'flex',
     alignItems: 'center',
-    gap: space[3],
+    gap: space[2],
     minWidth: 0,
-    paddingBlock: space[3],
-    paddingInline: space[3],
-    color: colors.label,
-    textDecoration: 'none',
+    paddingInlineEnd: space[3],
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     // Ruled rows: the separator sits between rows, never around the card.
     boxShadow: { default: 'none', ':not(:first-child)': `inset 0 0.5px 0 ${colors.separator}` },
+  },
+  rowLink: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    flexGrow: 1,
+    minWidth: 0,
+    paddingBlock: space[3],
+    paddingInlineStart: space[3],
+    color: colors.label,
+    textDecoration: 'none',
+  },
+  taskNumber: {
+    marginInlineEnd: space[1.5],
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+  headingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    minHeight: 28,
   },
   rowText: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flexGrow: 1 },
   rowTitle: {
@@ -106,28 +134,42 @@ const styles = stylex.create({
 const BUCKET_LABELS: Record<ProjectBoardBucket, [key: string, fallback: string]> = {
   needsYou: ['projectMode.board.needsYou', 'Needs you'],
   working: ['projectMode.board.working', 'In progress'],
-  unread: ['projectMode.board.unread', 'Unread'],
-  done: ['projectMode.board.done', 'Done'],
+  review: ['projectMode.board.review', 'To review'],
+  accepted: ['projectMode.board.accepted', 'Accepted'],
 };
 
+/** `T3` for a coordinator task; manual conversations have no number. */
+export const formatTaskNumber = (taskNumber: number | null): string | null =>
+  taskNumber === null ? null : `T${taskNumber}`;
+
+/** Accepting writes the conversation's own metadata, so it syncs like any session field. */
+export function useAcceptCoordinatorTasks(): (sessionIds: readonly string[]) => void {
+  const { updateSessionMetadata } = useSessionActions();
+  const { t } = useTranslation();
+  return useCallback(
+    (sessionIds) => {
+      const acceptedAt = getServerNow();
+      void Promise.all(
+        sessionIds.map((id) =>
+          updateSessionMetadata(id as SessionId, { coordinatorTaskAcceptedAt: acceptedAt })
+        )
+      ).catch(() => {
+        toast.error(t('projectMode.board.acceptFailed', 'Could not accept the task'));
+      });
+    },
+    [t, updateSessionMetadata]
+  );
+}
+
 /**
- * The right-hand column of a project: every conversation its coordinator
- * opened, plus the project's other conversations, by what they need from the
- * user. A leaf of the page, so the presence clock re-renders only this column.
+ * The project's tasks with live status, shared by the board, the coordinator's
+ * conversation strips and its to-do card. Call it from a leaf: it follows the
+ * presence clock.
  */
-export function ProjectBoard({
-  coordinatorSessionId,
-  project,
-  onOpenSession,
-  hideTitle = false,
-}: {
-  coordinatorSessionId: string | null;
-  project: CoordinatorProjectKey | null;
-  /** Opens a row in place (the coordinator's right panel); defaults to the conversation's page. */
-  onOpenSession?: (sessionId: string) => void;
-  /** Inside the side panel the tab already names the board. */
-  hideTitle?: boolean;
-}) {
+export function useProjectBoardData(
+  coordinatorSessionId: string | null,
+  project: CoordinatorProjectKey | null
+): ProjectBoardData {
   const { allActiveSessions } = useVisibleSessionMetas();
   const { currentUserId } = useMySessionScope();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
@@ -189,6 +231,29 @@ export function ProjectBoard({
     ]
   );
 
+  return board;
+}
+
+/**
+ * The right-hand column of a project: every conversation its coordinator
+ * opened, plus the project's other conversations, by what they need from the
+ * user. A leaf of the page, so the presence clock re-renders only this column.
+ */
+export function ProjectBoard({
+  coordinatorSessionId,
+  project,
+  onOpenSession,
+  hideTitle = false,
+}: {
+  coordinatorSessionId: string | null;
+  project: CoordinatorProjectKey | null;
+  /** Opens a row in place (the coordinator's right panel); defaults to the conversation's page. */
+  onOpenSession?: (sessionId: string) => void;
+  /** Inside the side panel the tab already names the board. */
+  hideTitle?: boolean;
+}) {
+  const board = useProjectBoardData(coordinatorSessionId, project);
+
   const router = useRouter();
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const getSessionHref = useCallback(
@@ -208,11 +273,13 @@ export function ProjectBoard({
     },
     [router, workspaceSlug]
   );
+  const acceptTasks = useAcceptCoordinatorTasks();
   return (
     <ProjectBoardView
       board={board}
       getSessionHref={getSessionHref}
       onOpenSession={onOpenSession ?? openSession}
+      onAcceptTasks={acceptTasks}
       hideTitle={hideTitle}
     />
   );
@@ -223,11 +290,14 @@ export function ProjectBoardView({
   board,
   getSessionHref,
   onOpenSession,
+  onAcceptTasks,
   hideTitle = false,
 }: {
   board: ProjectBoardData;
   getSessionHref: (sessionId: string) => string;
   onOpenSession: (sessionId: string) => void;
+  /** Marks finished tasks as reviewed; omitted where accepting is not offered. */
+  onAcceptTasks?: (sessionIds: readonly string[]) => void;
   hideTitle?: boolean;
 }) {
   const { t } = useTranslation();
@@ -247,10 +317,23 @@ export function ProjectBoardView({
             {...stylex.props(styles.section)}
             data-project-board-bucket={bucket}
           >
-            <h3 {...stylex.props(styles.heading)}>
-              {t(key, fallback)}
-              {rows.length > 0 ? <span {...stylex.props(styles.count)}>{rows.length}</span> : null}
-            </h3>
+            <div {...stylex.props(styles.headingRow)}>
+              <h3 {...stylex.props(styles.heading)}>
+                {t(key, fallback)}
+                {rows.length > 0 ? (
+                  <span {...stylex.props(styles.count)}>{rows.length}</span>
+                ) : null}
+              </h3>
+              {bucket === 'review' && onAcceptTasks && rows.length > 1 ? (
+                <Button
+                  size="small"
+                  variant="ghost"
+                  onClick={() => onAcceptTasks(rows.map((row) => row.session.id))}
+                >
+                  {t('projectMode.board.acceptAll', 'Accept all')}
+                </Button>
+              ) : null}
+            </div>
             {rows.length > 0 ? (
               <div {...stylex.props(styles.card)}>
                 {rows.map((row) => (
@@ -259,6 +342,7 @@ export function ProjectBoardView({
                     row={row}
                     href={getSessionHref(row.session.id)}
                     onOpen={onOpenSession}
+                    onAccept={onAcceptTasks}
                   />
                 ))}
               </div>
@@ -276,10 +360,12 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
   row,
   href,
   onOpen,
+  onAccept,
 }: {
   row: ProjectBoardRow;
   href: string;
   onOpen: (sessionId: string) => void;
+  onAccept?: (sessionIds: readonly string[]) => void;
 }) {
   const { t, i18n } = useTranslation();
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -295,29 +381,35 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
     hour: '2-digit',
     minute: '2-digit',
   });
+  const taskLabel = formatTaskNumber(row.taskNumber);
   return (
-    <a
-      href={href}
-      onClick={handleClick}
-      {...stylex.props(styles.row)}
-      data-project-board-session-id={row.session.id}
-    >
-      <span {...stylex.props(styles.mark)}>
-        <SessionRowStatusIndicator
-          // A pending question waits on the user exactly like a permission request.
-          isWaitingPermission={row.bucket === 'needsYou' && row.sendState !== 'failed'}
-          isWorking={row.isWorking}
-          hasUnreadMessages={row.hasUnreadMessages}
-          sendState={row.sendState}
-        />
-      </span>
-      <span {...stylex.props(styles.rowText)}>
-        <span {...stylex.props(styles.rowTitle)}>{title}</span>
-        <span {...stylex.props(styles.rowMeta)}>{updated}</span>
-      </span>
-      {row.createdManually ? (
-        <Badge tone="neutral">{t('projectMode.board.createdManually', 'Created manually')}</Badge>
+    <div {...stylex.props(styles.row)} data-project-board-session-id={row.session.id}>
+      <a href={href} onClick={handleClick} {...stylex.props(styles.rowLink)}>
+        <span {...stylex.props(styles.mark)}>
+          <SessionRowStatusIndicator
+            // A pending question waits on the user exactly like a permission request.
+            isWaitingPermission={row.bucket === 'needsYou' && row.sendState !== 'failed'}
+            isWorking={row.isWorking}
+            hasUnreadMessages={row.hasUnreadMessages}
+            sendState={row.sendState}
+          />
+        </span>
+        <span {...stylex.props(styles.rowText)}>
+          <span {...stylex.props(styles.rowTitle)}>
+            {taskLabel ? <span {...stylex.props(styles.taskNumber)}>{taskLabel}</span> : null}
+            {title}
+          </span>
+          <span {...stylex.props(styles.rowMeta)}>{updated}</span>
+        </span>
+        {row.createdManually ? (
+          <Badge tone="neutral">{t('projectMode.board.createdManually', 'Created manually')}</Badge>
+        ) : null}
+      </a>
+      {row.bucket === 'review' && onAccept ? (
+        <Button size="small" variant="secondary" onClick={() => onAccept([row.session.id])}>
+          {t('projectMode.board.accept', 'Accept')}
+        </Button>
       ) : null}
-    </a>
+    </div>
   );
 });

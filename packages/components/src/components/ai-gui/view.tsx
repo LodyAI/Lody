@@ -77,6 +77,7 @@ import {
   isSessionHistoryDelivered,
   type AcpConfigOptionValue,
   type MessageContent,
+  type OperationCompletionContent,
   type SessionHistoryParsed,
   type SessionId,
   type SessionInputBlock,
@@ -295,6 +296,10 @@ import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal
 import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
 import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
+import {
+  CoordinatorTaskChangeStrip,
+  useCoordinatorConversation,
+} from '@/components/project-mode/coordinator-conversation';
 import {
   getOperationCompletionItems,
   hasVisibleOperationContent,
@@ -2837,6 +2842,66 @@ export const MessageRowView = memo(function MessageRowView({
  * Renders system messages (e.g., system notices like resume_from_external_chat_history)
  */
 const SystemMessageRowView = ({
+  message,
+  sessionId,
+  onNavigateSession,
+  capacityRetry,
+}: {
+  message: SessionHistoryParsed;
+  sessionId: SessionId;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+  capacityRetry?: CapacityRetryControl;
+}) => {
+  const coordinator = useCoordinatorConversation();
+  const original = (
+    <SystemMessageRowContent
+      message={message}
+      sessionId={sessionId}
+      onNavigateSession={onNavigateSession}
+      capacityRetry={capacityRetry}
+    />
+  );
+  if (coordinator) {
+    // Project mode: a row about child conversations becomes one "changes" line.
+    const targets = collectOperationTaskTargets(message);
+    if (targets.size > 0) {
+      return (
+        <CoordinatorTaskChangeStrip
+          sessionIds={[...targets.keys()]}
+          fallbackTitles={targets}
+          details={original}
+        />
+      );
+    }
+  }
+  return original;
+};
+
+/** Child conversations a system row reports on, with the titles it carries. */
+function collectOperationTaskTargets(message: SessionHistoryParsed): Map<string, string> {
+  const targets = new Map<string, string>();
+  const add = (sessionId: string | undefined, label: string | undefined) => {
+    if (sessionId && !targets.has(sessionId)) targets.set(sessionId, label ?? '');
+  };
+  for (const card of getCreatedSessionCards(message) ?? []) add(card.sessionId, card.fallbackTitle);
+  const addCompletion = (completion: OperationCompletionContent) => {
+    for (const item of getOperationCompletionItems(completion)) {
+      add(item.target?.sessionId, item.label);
+    }
+  };
+  for (const item of message.items) {
+    if (item.type === 'operation_progress') {
+      for (const entry of item.items) add(entry.target.sessionId, entry.label);
+    } else if (item.type === 'operation_completion') {
+      addCompletion(item);
+    } else if (item.type === 'operation_completion_batch') {
+      for (const member of item.members ?? []) addCompletion(member);
+    }
+  }
+  return targets;
+}
+
+const SystemMessageRowContent = ({
   message,
   sessionId,
   onNavigateSession,

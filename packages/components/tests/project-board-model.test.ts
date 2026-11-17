@@ -55,10 +55,18 @@ describe('project board', () => {
           lastMessageAt: 20,
           lastReadAt: 10,
         }),
-        session('read', {
+        session('accepted', {
           openedBySessionId: coordinator.id as never,
           lastMessageAt: 5,
           lastReadAt: 9,
+          coordinatorTaskAcceptedAt: 6,
+        }),
+        // New activity after acceptance sends a task back to review.
+        session('reopened', {
+          openedBySessionId: coordinator.id as never,
+          lastMessageAt: 30,
+          lastReadAt: 30,
+          coordinatorTaskAcceptedAt: 25,
         }),
       ],
       { permission: { type: 'requestPermission' }, running: { type: 'running' } }
@@ -66,8 +74,31 @@ describe('project board', () => {
 
     expect(ids(result.needsYou).sort()).toEqual(['asks', 'permission']);
     expect(ids(result.working)).toEqual(['running']);
-    expect(ids(result.unread)).toEqual(['finished']);
-    expect(ids(result.done)).toEqual(['read']);
+    // Read or not, a finished task waits for the user's review until accepted.
+    expect(ids(result.review)).toEqual(['reopened', 'finished']);
+    expect(ids(result.accepted)).toEqual(['accepted']);
+  });
+
+  it('numbers the coordinator’s tasks by creation, stable across archiving and manual work', () => {
+    const created = (minute: number) => `2026-11-12T00:${String(minute).padStart(2, '0')}:00.000Z`;
+    const result = board([
+      coordinator,
+      session('second', { openedBySessionId: coordinator.id as never, createdAt: created(2) }),
+      session('first-archived', {
+        openedBySessionId: coordinator.id as never,
+        createdAt: created(1),
+        isArchived: true,
+      }),
+      session('third', { openedBySessionId: coordinator.id as never, createdAt: created(3) }),
+      session('manual', { createdAt: created(0) }),
+    ]);
+    const rows = Object.values(result).flat();
+    const numberOf = (id: string) => rows.find((row) => row.session.id === id)?.taskNumber;
+
+    // The archived first task keeps T1, so the others never renumber.
+    expect(numberOf('second')).toBe(2);
+    expect(numberOf('third')).toBe(3);
+    expect(numberOf('manual')).toBeNull();
   });
 
   it('includes conversations the coordinator opened elsewhere and marks the project’s own as manual', () => {
@@ -89,7 +120,7 @@ describe('project board', () => {
         openedBySessionId: coordinator.id as never,
       }),
     ]);
-    const rows = [...result.needsYou, ...result.working, ...result.unread, ...result.done];
+    const rows = Object.values(result).flat();
 
     expect(ids(rows).sort()).toEqual(['dispatched-elsewhere', 'manual']);
     expect(rows.find((row) => row.session.id === 'manual')?.createdManually).toBe(true);

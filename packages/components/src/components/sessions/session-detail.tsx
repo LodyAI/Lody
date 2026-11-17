@@ -375,6 +375,7 @@ import { persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { SessionChangesSidebar } from './session-changes-sidebar';
 import { developerModeEnabledAtom } from '@/atoms/settings';
 import { ProjectBoard } from '@/components/project-mode/project-board';
+import { CoordinatorConversationProvider } from '@/components/project-mode/coordinator-conversation';
 import { getSessionCoordinatorProjectKey } from '@/components/project-mode/project-board-model';
 import {
   OwnedSessionFileViewer,
@@ -7477,6 +7478,29 @@ const SessionDetail = ({
           const externalHistoryProviderLabel = externalHistoryRefresh
             ? getExternalHistoryProviderLabel(externalHistoryRefresh.provider)
             : undefined;
+          const chatSurface = (
+            <SessionChatSurface
+              {...getSharedChatSurfaceProps(tabSession, isActive)}
+              paintSessionMentionOverlay={false}
+              isChildTab={tabSession.id !== sessionId}
+              isExternalHistoryRefreshing={externalHistoryRefresh !== undefined}
+              externalHistoryProviderLabel={externalHistoryProviderLabel}
+              messageFileDiffEntriesByTurn={
+                tabSession.id === activeSessionTabId ? messageFileDiffEntriesByTurn : undefined
+              }
+              onOpenBrowser={
+                previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
+              }
+              changesDiffStat={changesDiffStat}
+              onForkLastAssistant={
+                canForkSession(tabSession)
+                  ? (turnId, destination) => handleForkDestination(tabSession, turnId, destination)
+                  : undefined
+              }
+              forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
+              forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
+            />
+          );
           return (
             <div
               key={tabSession.id}
@@ -7489,28 +7513,17 @@ const SessionDetail = ({
               }
               aria-hidden={!isActive}
             >
-              <SessionChatSurface
-                {...getSharedChatSurfaceProps(tabSession, isActive)}
-                paintSessionMentionOverlay={false}
-                isChildTab={tabSession.id !== sessionId}
-                isExternalHistoryRefreshing={externalHistoryRefresh !== undefined}
-                externalHistoryProviderLabel={externalHistoryProviderLabel}
-                messageFileDiffEntriesByTurn={
-                  tabSession.id === activeSessionTabId ? messageFileDiffEntriesByTurn : undefined
-                }
-                onOpenBrowser={
-                  previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
-                }
-                changesDiffStat={changesDiffStat}
-                onForkLastAssistant={
-                  canForkSession(tabSession)
-                    ? (turnId, destination) =>
-                        handleForkDestination(tabSession, turnId, destination)
-                    : undefined
-                }
-                forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
-                forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
-              />
+              {isProjectCoordinator && tabSession.id === sessionId ? (
+                <CoordinatorConversationProvider
+                  coordinatorSessionId={tabSession.id}
+                  project={coordinatorProject}
+                  onOpenTask={handleOpenPanelSession}
+                >
+                  {chatSurface}
+                </CoordinatorConversationProvider>
+              ) : (
+                chatSurface
+              )}
             </div>
           );
         })}

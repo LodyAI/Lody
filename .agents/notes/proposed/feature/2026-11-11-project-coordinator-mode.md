@@ -280,6 +280,22 @@ All of these are the owner's decisions. The first two replace the earlier statem
 
 Decisions for the owner to check: forks keep the marker; the entry exists only for local projects; a Role picked on the coordinator page still adds its `promptPrefix` to the first message, as it does everywhere else; the capability cache version was not bumped, so existing entries need one session start or refresh before they qualify.
 
+## Coordinator conversation redesign (proposed; step 1 built)
+
+The owner found that a coordinator conversation reads like any other: creation cards, result batches and tool calls pile up in time order, so the user cannot tell which tasks are finished and ready to check, in what order things happened, or how to reply to one task. The proposal separates three layers:
+
+- **Task ledger**: every conversation the coordinator opens is a task with a stable number (T1, T2…), a state derived from the conversation itself, not from what the model says, a result summary and its PR.
+- **Conversation**: only the user's messages, the coordinator's prose and dedicated cards; machinery collapses.
+- **To-do**: everything waiting on the user, in one card at the end of the conversation.
+
+Planned in three steps: (1) presentation only; (2) decision cards ("Go ahead" / "I have other requirements") and quote-replies to a card or a task, with silent structured inputs; (3) backend work: events when a child is stuck, a coordinator tool profile, model-written task summaries. Whether completion receipts wake an idle coordinator must be measured before step 2.
+
+Step 1, built at the owner's request; the four open questions were settled on the drafter's recommendations, pending the owner's review:
+
+- Task states are derived: Needs you, In progress, To review, Accepted. A finished task stays in To review until the user accepts it (`SessionMeta.coordinatorTaskAcceptedAt` on the task's own metadata); new activity after acceptance sends it back. Task numbers follow creation order among the coordinator's conversations, archived ones included, so a number never moves.
+- In the coordinator's own conversation, every system row about child conversations (creation progress, completion receipts and batches) renders as one "Changes" line listing the tasks it touched with their current state; "Details" shows the original row. History, model input and receipts are unchanged.
+- A to-do card at the end of the conversation lists Needs you, then To review, with Open and Accept actions and Accept all.
+
 ## Permission inheritance today (left to step 2)
 
 When a child is created with a Role, its permission mode comes from that Role's own pinned run configuration and is unrelated to the creator (`apps/cli/src/mcp/README.md`, "Role dispatch"). Mode names also differ between providers, so the coordinator's (Lody Agent) mode cannot be applied as-is to a Codex or Claude Code child. Inheritance needs that mapping decided first.

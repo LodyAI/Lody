@@ -71,21 +71,25 @@ export function findProjectCoordinatorSession(
 const createdTime = (session: SessionMeta): number => Date.parse(session.createdAt) || 0;
 
 /**
- * Board columns, in the order the user should look at them. "Needs you" is a
+ * Task states, in the order the user should look at them. "Needs you" is a
  * pending permission or question, or an input that failed to send; there is no
- * durable "failed turn" signal in session metadata yet.
+ * durable "failed turn" signal in session metadata yet. A finished task waits
+ * for the user's review ("To review") until the user accepts it; new activity
+ * after acceptance sends it back to review.
  */
-export type ProjectBoardBucket = 'needsYou' | 'working' | 'unread' | 'done';
+export type ProjectBoardBucket = 'needsYou' | 'working' | 'review' | 'accepted';
 export const PROJECT_BOARD_BUCKETS: readonly ProjectBoardBucket[] = [
   'needsYou',
   'working',
-  'unread',
-  'done',
+  'review',
+  'accepted',
 ];
 
 export type ProjectBoardRow = {
   session: SessionMeta;
   bucket: ProjectBoardBucket;
+  /** `T<n>` for a conversation this coordinator opened, in creation order. */
+  taskNumber: number | null;
   /** In the project but not opened by this coordinator. */
   createdManually: boolean;
   isWorking: boolean;
@@ -96,6 +100,34 @@ export type ProjectBoardRow = {
 };
 
 export type ProjectBoard = Record<ProjectBoardBucket, ProjectBoardRow[]>;
+
+const isOpenedBy = (session: SessionMeta, coordinatorSessionId: string | null): boolean =>
+  coordinatorSessionId !== null &&
+  (session.openedBySessionId === coordinatorSessionId ||
+    session.openedByRootSessionId === coordinatorSessionId);
+
+/**
+ * Stable task numbers: every conversation the coordinator opened, archived ones
+ * included, numbered by creation time, so a number never moves to another task.
+ */
+export function buildCoordinatorTaskNumbers(
+  sessions: readonly SessionMeta[],
+  coordinatorSessionId: string | null
+): Map<string, number> {
+  const opened = sessions
+    .filter((session) => !session.parentSessionId && isOpenedBy(session, coordinatorSessionId))
+    .sort((a, b) => createdTime(a) - createdTime(b) || a.id.localeCompare(b.id));
+  return new Map(opened.map((session, index) => [session.id, index + 1]));
+}
+
+/** Accepted only while nothing happened in the task after the user accepted it. */
+export function isCoordinatorTaskAccepted(
+  session: Pick<SessionMeta, 'coordinatorTaskAcceptedAt'>,
+  latestMessageAt: number
+): boolean {
+  const acceptedAt = session.coordinatorTaskAcceptedAt;
+  return typeof acceptedAt === 'number' && acceptedAt >= latestMessageAt;
+}
 
 /**
  * Every conversation the coordinator opened (wherever it runs), plus the other
@@ -113,18 +145,16 @@ export function buildProjectBoard(options: {
   liveSessionStatuses: ReadonlyMap<string, SessionStatus>;
   sendStates: Readonly<Record<string, SessionSendState>>;
 }): ProjectBoard {
-  const board: ProjectBoard = { needsYou: [], working: [], unread: [], done: [] };
+  const board: ProjectBoard = { needsYou: [], working: [], review: [], accepted: [] };
   const { coordinatorSessionId, project } = options;
+  const taskNumbers = buildCoordinatorTaskNumbers(options.sessions, coordinatorSessionId);
   for (const session of options.sessions) {
     if (session.isArchived || session.parentSessionId) continue;
     if (session.id === coordinatorSessionId) continue;
     if (!isSessionInMyScope(session, options.currentUserId)) continue;
     // Another coordinator of the same project is a conversation of its own, not a task.
     if (isCoordinatorSession(session)) continue;
-    const opened =
-      coordinatorSessionId !== null &&
-      (session.openedBySessionId === coordinatorSessionId ||
-        session.openedByRootSessionId === coordinatorSessionId);
+    const opened = isOpenedBy(session, coordinatorSessionId);
     const inProject = project !== null && isSessionInCoordinatorProject(session, project);
     if (!opened && !inProject) continue;
     const activity = getEffectiveSessionActivitySummary(
@@ -141,12 +171,13 @@ export function buildProjectBoard(options: {
       ? 'needsYou'
       : activity.isWorking || sendState === 'sending'
         ? 'working'
-        : activity.hasUnreadMessages
-          ? 'unread'
-          : 'done';
+        : isCoordinatorTaskAccepted(session, activity.latestMessageAt)
+          ? 'accepted'
+          : 'review';
     board[bucket].push({
       session,
       bucket,
+      taskNumber: taskNumbers.get(session.id) ?? null,
       createdManually: !opened,
       isWorking: activity.isWorking,
       isWaitingPermission: activity.isWaitingPermission,

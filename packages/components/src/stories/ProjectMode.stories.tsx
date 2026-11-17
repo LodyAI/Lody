@@ -5,7 +5,7 @@
  * synthetic session metadata, so its grouping is the real one.
  */
 import type { Meta, StoryObj } from '@storybook/react';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/shared';
@@ -28,6 +28,11 @@ import {
   type CoordinatorProjectKey,
 } from '@/components/project-mode/project-board-model';
 import { ProjectWorkspace } from '@/components/project-mode/project-workspace';
+import {
+  CoordinatorConversationPreviewProvider,
+  CoordinatorTodoCard,
+} from '@/components/project-mode/coordinator-conversation';
+import { ConversationColumn } from '@/components/shared/conversation-column';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import {
   SessionSidePanelTabBar,
@@ -68,16 +73,27 @@ const sessions: SessionMeta[] = [
     openedBySessionId: undefined,
   }),
   session('asks', '迁移 E2EE 会话分享：要不要保留旧链接？', {
+    createdAt: new Date(minutesAgo(120)).toISOString(),
     awaitingUserSince: minutesAgo(4),
     lastMessageAt: minutesAgo(4),
   }),
-  session('permission', '修复 Android 提及列表的排序', { lastMessageAt: minutesAgo(9) }),
-  session('running', '给 Roost 历史分页加回归测试', { lastMessageAt: minutesAgo(2) }),
+  session('permission', '修复 Android 提及列表的排序', {
+    createdAt: new Date(minutesAgo(110)).toISOString(),
+    lastMessageAt: minutesAgo(9),
+  }),
+  session('running', '给 Roost 历史分页加回归测试', {
+    createdAt: new Date(minutesAgo(100)).toISOString(),
+    lastMessageAt: minutesAgo(2),
+  }),
   session('unread-pr', '侧边栏折叠动画卡顿（PR #2631）', {
+    createdAt: new Date(minutesAgo(90)).toISOString(),
     lastMessageAt: minutesAgo(15),
     lastReadAt: minutesAgo(40),
   }),
   session('done-1', '整理协调者提示词的中英文版本', {
+    // Accepted after its last reply, so it sits under Accepted.
+    coordinatorTaskAcceptedAt: minutesAgo(55),
+    createdAt: new Date(minutesAgo(80)).toISOString(),
     lastMessageAt: minutesAgo(70),
     lastReadAt: minutesAgo(60),
   }),
@@ -142,32 +158,95 @@ const turns: { role: 'user' | 'assistant'; text: string }[] = [
   },
 ];
 
-const streamItems: ChatStreamItem[] = turns.map((turn, turnIndex) => ({
-  turnIndex,
-  type: 'message',
-  sessionId: coordinatorId,
-  message: {
-    id: `turn-${turnIndex}`,
-    role: turn.role,
-    timestamp: new Date(minutesAgo(30 - turnIndex * 10)).toISOString(),
-    read: true,
-    finished: true,
-    modelInfo:
-      turn.role === 'assistant' ? { modelId: 'sonnet-5.5', name: 'Sonnet 5.5' } : undefined,
-    items: [{ type: 'text', text: turn.text }],
-  },
-}));
+const turnItem = (
+  id: string,
+  role: 'user' | 'assistant' | 'system',
+  minutes: number,
+  items: unknown[]
+): ChatStreamItem =>
+  ({
+    turnIndex: 0,
+    type: 'message',
+    sessionId: coordinatorId,
+    message: {
+      id,
+      role,
+      timestamp: new Date(minutesAgo(minutes)).toISOString(),
+      read: true,
+      finished: true,
+      modelInfo: role === 'assistant' ? { modelId: 'sonnet-5.5', name: 'Sonnet 5.5' } : undefined,
+      items,
+    },
+  }) as ChatStreamItem;
+
+const target = (sessionId: string) => ({ sessionId, userTurnId: `${sessionId}-turn-1` });
+
+/** The rows a real coordinator conversation carries: creation progress and a result batch. */
+const streamItems: ChatStreamItem[] = [
+  turnItem('turn-0', 'user', 30, [{ type: 'text', text: turns[0]!.text }]),
+  turnItem('turn-1', 'assistant', 29, [{ type: 'text', text: turns[1]!.text }]),
+  turnItem('turn-created', 'system', 28, [
+    {
+      type: 'operation_progress',
+      operationId: 'op-create',
+      operationKind: 'session_create_many',
+      items: [
+        { target: target('asks'), label: '迁移 E2EE 会话分享', status: 'running' },
+        { target: target('permission'), label: '修复 Android 提及列表排序', status: 'running' },
+        { target: target('running'), label: 'Roost 历史分页回归测试', status: 'running' },
+      ],
+    },
+  ]),
+  turnItem('turn-results', 'system', 12, [
+    {
+      type: 'operation_completion_batch',
+      batchId: 'batch-1',
+      memberCount: 2,
+      deliveryStatus: 'settled',
+      members: [
+        {
+          type: 'operation_completion',
+          deliveryId: 'delivery-1',
+          operationId: 'op-chat-1',
+          operationKind: 'session_chat',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  target: target('asks'),
+                  label: '迁移 E2EE 会话分享',
+                  output: { text: '需要你决定：旧的分享链接要继续有效，还是迁移后一律失效？' },
+                },
+                {
+                  status: 'succeeded',
+                  target: target('unread-pr'),
+                  label: '侧边栏折叠动画卡顿',
+                  output: { text: '已修好，PR #2631。' },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    },
+  ]),
+  turnItem('turn-2', 'assistant', 10, [{ type: 'text', text: turns[2]!.text }]),
+].map((item, turnIndex) => ({ ...item, turnIndex }));
 
 function ConversationPage({
   sessionId,
   title,
   items,
   placeholder,
+  trailingContent,
 }: {
   sessionId: SessionId;
   title: string;
   items: ChatStreamItem[];
   placeholder: string;
+  trailingContent?: ReactNode;
 }) {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState('');
@@ -181,6 +260,7 @@ function ConversationPage({
             <SessionChatStreamView
               sessionId={sessionId}
               items={items}
+              trailingContent={trailingContent}
               className="h-full"
               renderMessageRow={({ message, sessionId: id }) => (
                 <MessageRowView message={message} sessionId={id} />
@@ -234,6 +314,12 @@ const childItems: ChatStreamItem[] = [
   },
 }));
 
+const coordinatorTasks = new Map(
+  Object.values(board)
+    .flat()
+    .map((row) => [row.session.id, row] as const)
+);
+
 const BOARD_TAB = 'project-board';
 const CHILD_TAB = `side-session:${childId}`;
 
@@ -263,12 +349,29 @@ function CoordinatorPage() {
       defaultSizes={{ main: 58, sidebar: 42 }}
       topBar={null}
       chatSurfaces={
-        <ConversationPage
-          sessionId={coordinatorId}
-          title="项目协调者 · lody"
-          items={streamItems}
-          placeholder="告诉协调者你想做什么"
-        />
+        <CoordinatorConversationPreviewProvider
+          value={{
+            tasks: coordinatorTasks,
+            todo: [...board.needsYou, ...board.review],
+            openTask: () => {
+              setOpenedChild(true);
+              setActiveTab(CHILD_TAB);
+            },
+            acceptTasks: () => {},
+          }}
+        >
+          <ConversationPage
+            sessionId={coordinatorId}
+            title="项目协调者 · lody"
+            items={streamItems}
+            placeholder="告诉协调者你想做什么"
+            trailingContent={
+              <ConversationColumn>
+                <CoordinatorTodoCard />
+              </ConversationColumn>
+            }
+          />
+        </CoordinatorConversationPreviewProvider>
       }
       terminalDock={null}
       secondaryPanel={
@@ -293,6 +396,7 @@ function CoordinatorPage() {
                   setActiveTab(CHILD_TAB);
                 }}
                 hideTitle
+                onAcceptTasks={() => {}}
               />
             ) : (
               <ConversationPage

@@ -1106,6 +1106,11 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
    * capability advertises `systemPrompt` (`session-coordinator.ts`).
    */
   coordinator?: SessionCoordinatorMarker;
+  /**
+   * Project mode: when the owner accepted this conversation's result as a
+   * coordinator task. Activity after this time sends the task back to review.
+   */
+  coordinatorTaskAcceptedAt?: number;
   projectRun?: SessionProjectRun;
   repoFullName?: string;
   /** Base branch selected when the session starts (starting point). */

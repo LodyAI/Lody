@@ -92,6 +92,7 @@ import {
   X,
 } from 'lucide-react';
 import { useChangeCoordinatorAction } from '@/components/project-mode/use-change-coordinator';
+import { CoordinatorTodoCard } from '@/components/project-mode/coordinator-conversation';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
@@ -7508,6 +7509,10 @@ export const SessionChatInterface = memo(
                                   unsentFirstMessage ? undefined : (
                                     <>
                                       {pendingMessages.trailingContent}
+                                      {/* Project mode: open items, at the end of the coordinator's conversation. */}
+                                      <ConversationColumn>
+                                        <CoordinatorTodoCard />
+                                      </ConversationColumn>
                                       {continuation.views.length > 0 ? (
                                         // The stream's trailing row is full-bleed, so the
                                         // note mounts its own conversation column like every
