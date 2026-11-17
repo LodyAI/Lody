@@ -281,6 +281,16 @@ enum NativeHomeFixture {
     let url = Bundle.main.url(forResource: "DebugHome", withExtension: "json")!
     let fixture = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
     catalog = fixture["catalog"] as! [String: Any]
+    if LodyUIVerify.has("--ui-verify-session-tabs"), var sessions = catalog["sessions"] as? [[String: Any]],
+       var tab = sessions.first(where: { $0["id"] as? String == "ui-design" }) {
+      HomeScope.store(.team)
+      tab["id"] = "ui-history-tab"
+      tab["title"] = "Waiting for tab history"
+      tab["parentSessionId"] = "ui-design"
+      tab["status"] = "running"
+      sessions.append(tab)
+      catalog["sessions"] = sessions
+    }
     if LodyUIVerify.has("--ui-verify-sticky-groups") {
       HomeGrouping.store(.project)
       let names = ["Alpha project", "Beta project", "Gamma project"]
@@ -325,11 +335,24 @@ enum NativeHomeFixture {
     // Every offline Home run starts expanded, even after a failed interaction check.
     UserDefaults.standard.removeObject(forKey: "homeFoldedOpeners")
     UserDefaults.standard.removeObject(forKey: "homeCollapsedGroups")
+    if LodyUIVerify.has("--ui-verify-tab-unread"), var sessions = catalog["sessions"] as? [[String: Any]],
+       var unread = sessions.first(where: { $0["id"] as? String == "ui-design" }) {
+      unread["id"] = "ui-unread-tab"
+      unread["title"] = "Unread tab output"
+      unread["parentSessionId"] = "ui-design"
+      unread["lastMessageAt"] = 2_000
+      unread["lastReadAt"] = 1_000
+      sessions.append(unread)
+      catalog["sessions"] = sessions
+    }
     let catalogJSON = SessionController.json(["catalog": catalog, "syncedAt": 0])
     try LocalStore.queue.sync {
       let store = LocalStore.shared
       try store.write("ui-device-presence", "{\"state\":\"live\",\"onlineMachineIds\":[\"ui\",\"mini\"]}")
       try store.write("catalog:ui-home:ui-home", catalogJSON)
+      if LodyUIVerify.has("--ui-verify-tab-unread") {
+        try store.write("session-views:[\"ui-home\",\"ui-home\"]", "{}")
+      }
       try store.write("pending-sends:ui-home:ui-home", "[]")
       try store.write("draft:ui-home:ui-home:ui-design", "")
       let search = LodyUIVerify.has("--ui-verify-search")

@@ -438,6 +438,8 @@ try:
                         launch.append('--ui-verify-home')
                     if case == 'home-grouping-crash':
                         launch.append('--ui-verify-sticky-groups')
+                    if case == 'navigation':
+                        launch.append('--ui-verify-session-tabs')
                     if case in {'session-search', 'session-search-pad'}:
                         launch.append('--ui-verify-search')
                     if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:

@@ -120,6 +120,14 @@ final class SessionSender {
     try await store.remove(sessionId).value
   }
 
+  func confirmPending(_ inputId: String) async throws {
+    guard let store, let record, record.sendId == inputId else { return }
+    guard ["unknown", "uploaded"].contains(record.phase), !dispatching else { throw OutboxError.scopeExpired }
+    // A dispatch ACK confirms delivery only. Keep the record until its reply;
+    // do not turn it into an inferred running timer.
+    try await store.put(record.with(phase: "uploaded")).value
+  }
+
   func retry() {
     guard let store, let record, record.phase == "failed", !dispatching else { return }
     var next = record.with(phase: "waiting")

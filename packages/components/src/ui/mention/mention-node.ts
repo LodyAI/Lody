@@ -1,6 +1,7 @@
 import {
   $applyNodeReplacement,
   DecoratorNode,
+  type DOMExportOutput,
   type EditorConfig,
   type LexicalNode,
   type NodeKey,
@@ -85,8 +86,14 @@ export class MentionDecoratorNode extends DecoratorNode<MentionDecoration> {
     return false;
   }
 
+  override exportDOM(): DOMExportOutput {
+    const element = document.createElement('span');
+    element.textContent = this.getTextContent();
+    return { element };
+  }
+
   override getTextContent(): string {
-    return this.__text;
+    return this.getLatest().__text;
   }
 
   getRange(): MentionNodeRange {

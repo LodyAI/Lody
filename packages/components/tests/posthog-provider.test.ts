@@ -35,6 +35,36 @@ describe('PostHog provider options', () => {
     vi.unstubAllGlobals();
   });
 
+  it('retires boundary analytics and projects boundary exceptions in ordinary scopes too', () => {
+    expect(
+      runBeforeSend({
+        event: 'app/error_boundary_triggered',
+        properties: {
+          reason_code: 'SYNTHETIC_TOKEN',
+          error_fingerprint: 'SYNTHETIC_HASH',
+        },
+      })
+    ).toBeNull();
+    const projected = runBeforeSend({
+      event: '$exception',
+      properties: {
+        errorBoundary: 'SYNTHETIC_BOUNDARY',
+        error_type: 'SYNTHETIC_NAME',
+        error_code: 'SYNTHETIC_CODE',
+        componentStack: 'SYNTHETIC_STACK',
+        $exception_list: [{ type: 'SYNTHETIC_NAME', value: 'SYNTHETIC_MESSAGE' }],
+        $groups: { workspace: 'SYNTHETIC_WORKSPACE' },
+      },
+    });
+    expect(projected?.properties).toMatchObject({
+      source: 'errorBoundary',
+      error_type: 'unknown',
+      error_code: 'redacted_exception',
+      $exception_list: [{ type: 'Error', value: 'redacted_exception' }],
+    });
+    expect(JSON.stringify(projected)).not.toContain('SYNTHETIC_');
+  });
+
   it('keeps an encrypted approval private above ordinary workspaces until all actual surfaces retire', () => {
     let current = 'ordinary-A';
     const removeScope = installWorkspaceTelemetryScope(() => current);
@@ -356,6 +386,11 @@ it('rejects unrecognized diagnostic fields and versions rather than hashing secr
       $lib_version: '1.2.3-PRIVATE_TOKEN',
       app_version: 'PRIVATE_VERSION',
       release: 'PRIVATE_RELEASE',
+      operation: 'PRIVATE_OPERATION',
+      stage: 'doc_meta_scan_failed',
+      failure_kind: 'rejected',
+      handling_state: 'observed',
+      retry_state: 'not_scheduled',
       $exception_fingerprint: 'PRIVATE_FINGERPRINT',
       extra: { cause: 'PRIVATE_CAUSE' },
     },
@@ -366,5 +401,46 @@ it('rejects unrecognized diagnostic fields and versions rather than hashing secr
     platform: 'unknown',
   });
   expect(result?.properties).not.toHaveProperty('app_version');
+  expect(result?.properties).not.toHaveProperty('stage');
   expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+});
+
+it('preserves fixed sync diagnostics through deferred capture and transport reprojection', () => {
+  const privacy = createPostHogPrivacy(() => null);
+  const sent: unknown[] = [];
+  const client = {
+    __loaded: false,
+    _send_request: (options: { data: unknown }) => sent.push(options.data),
+  };
+  privacy.attach(client as never);
+  const prepared = privacy.prepareException([
+    new Error('PRIVATE_MESSAGE'),
+    {
+      operation: 'workspace_sync',
+      stage: 'doc_meta_scan_failed',
+      failure_kind: 'rejected',
+      handling_state: 'observed',
+      retry_state: 'not_scheduled',
+      workspace_id: 'PRIVATE_WORKSPACE',
+    },
+  ]);
+  const event = privacy.beforeSend({
+    event: '$exception',
+    properties: prepared[1] as Record<string, unknown>,
+  });
+  client._send_request({ data: [event] });
+  client._send_request({ data: sent[0] });
+  expect(sent[1]).toEqual(sent[0]);
+  expect(sent[0]).toMatchObject([
+    {
+      properties: {
+        operation: 'workspace_sync',
+        stage: 'doc_meta_scan_failed',
+        failure_kind: 'rejected',
+        handling_state: 'observed',
+        retry_state: 'not_scheduled',
+      },
+    },
+  ]);
+  expect(JSON.stringify(sent)).not.toContain('PRIVATE_');
 });

@@ -58,6 +58,8 @@ export function frame(bytes) {
 
 export async function openTestSession({
   failAppend = () => false,
+  afterAppend,
+  beforeBootstrap,
   markDispatch = async () => {},
   onRpc,
   onEvent = () => {},
@@ -131,6 +133,7 @@ export async function openTestSession({
       this.url = decodeURIComponent(url);
     }
     async bootstrap() {
+      if (beforeBootstrap) await beforeBootstrap(this.url);
       if (this.url.includes(':wf:') && settings)
         return ok({
           snapshotOffset: '1',
@@ -194,6 +197,7 @@ export async function openTestSession({
         replies.set(request.replyTo, request);
       } else if (!this.url.includes(':rpc:'))
         server.import(part.body.subarray(4));
+      if (afterAppend) await afterAppend(this.url, part);
       return ok({ nextOffset: String(++offset) });
     }
   };

@@ -7,23 +7,22 @@ Translation: current
 
 ## Scenario and decision
 
-A user selects part of a chat message and asks about it in a small field that
-opens beside the selection (a compact dialog on mobile). The default action adds
-the quote and question to the composer draft, so the user can quote again before
-sending; an explicit Send puts them there and sends the composer to an Agent. Lody owns the
-quote interaction and durable snapshot; delivery uses ordinary ACP text across
-Agents. An experimental implementation exists; this draft does not assert human
+A user selects part of a chat message and clicks Quote to insert a snapshot
+at the composer's last used caret. Focus returns to the composer, where the user
+can type a question or add more quotes before sending. Lody owns the quote
+interaction and durable snapshot; delivery uses ordinary ACP text across Agents.
+An experimental implementation exists; this draft does not assert human
 approval or completed runtime acceptance across Agents.
 
 ## Guarantees
 
-The selection action and its question field stay outside conversation layout.
-Opening or dismissing them does not resize the viewport or change scroll
-ownership. A quote added without a question is an atomic unit at the saved
-composer caret; one with a question is appended to the end of the draft followed
-by that question, and sending sends the whole composer draft. Questions may sit
-before, between or after quotes. Focus transfer and composer growth preserve the reading anchor under the
-[existing scroll contract](conversation-scroll.md).
+The selection action stays outside conversation layout. Appearing or dismissing
+it does not resize the viewport or change scroll ownership. Clicking it directly
+inserts an atomic quote at the saved composer caret, appending if none exists.
+Questions may sit before, between or after quotes. The composer grows with the
+inserted content up to its row limit, then scrolls internally to keep the caret
+visible. Focus transfer and composer growth preserve the reading anchor under
+the [existing scroll contract](conversation-scroll.md).
 
 The quote is a read-only snapshot of the selected text at capture time. Preview
 shows that snapshot; later source changes do not alter it. Removal and editor

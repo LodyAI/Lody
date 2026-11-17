@@ -1,5 +1,24 @@
 import Foundation
 
+let badgeCurrent = SessionItem(id: "current", lastMessageAt: 2, lastReadAt: 1)
+var badgeOther = SessionItem(id: "other")
+for status in ["running", "waiting", "error", "completed"] {
+  badgeOther.status = status
+  badgeOther.lastMessageAt = nil
+  precondition(!DirectoryTabs.hasBackgroundUnread([badgeCurrent, badgeOther], currentId: "current"), "Activity and the current Tab never light the header dot")
+  badgeOther.lastMessageAt = 2
+  badgeOther.lastReadAt = 1
+  precondition(DirectoryTabs.hasBackgroundUnread([badgeCurrent, badgeOther], currentId: "current"), "Unread output lights the dot regardless of activity")
+}
+badgeOther.lastViewedMessageAt = 2
+precondition(!DirectoryTabs.hasBackgroundUnread([badgeCurrent, badgeOther], currentId: "current"), "A local visit clears the dot before its read receipt arrives")
+badgeOther.lastMessageAt = 3
+precondition(DirectoryTabs.hasBackgroundUnread([badgeCurrent, badgeOther], currentId: "current"), "Later background output restores the dot")
+precondition(!DirectoryTabs.hasBackgroundUnread([badgeOther], currentId: "other"), "Selecting the unread Tab excludes it")
+badgeOther.isTabClosed = true
+precondition(!DirectoryTabs.hasBackgroundUnread([badgeCurrent, badgeOther], currentId: "current"), "Closed Tabs do not light the header dot")
+print("PASS: header dot reflects only unseen output in other open Tabs")
+
 let hour = 3_600_000.0
 let now = Date().timeIntervalSince1970 * 1000
 
@@ -84,6 +103,7 @@ precondition(openRow.menuActions.map(\.id) == ["rename", "pin", "archive", "shar
 precondition(row.preview == "session" && row.navigates && row.action && row.diff == ["add": 3, "del": 1])
 precondition(SessionRows.row(child).modelName == "session.notRun")
 var viewed = root
+viewed.archived = false
 viewed.lastViewedMessageAt = root.lastMessageAt
 precondition(!SessionRows.row(viewed).unread && SessionRows.isUnread(viewed), "A local view clears emphasis without changing the server watermark")
 precondition(SessionRows.row(viewed).actions.map(\.id) == ["archive"], "Viewed output must not offer Mark Read")
@@ -234,9 +254,8 @@ sidePanel.id = "side"
 sidePanel.childSessionPlacement = "side-panel"
 let directoryFamily = DirectoryTabs.sessions(current: directoryTab, all: [openedChat, sidePanel, directoryTab, tabRoot])
 precondition(directoryFamily.map(\.id) == ["root", "tab"])
-precondition(DirectoryTabs.symbol([live, chat]) == "hand.raised")
 precondition(DirectoryTabs.sessions(current: tabRoot, all: [tabRoot, openedChat]).count == 1)
-print("PASS: directory Tabs exclude opened chats and side panels, and waiting outranks running")
+print("PASS: directory Tabs exclude opened chats and side panels")
 
 var closedRoot = tabRoot
 closedRoot.isTabClosed = true
