@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="script-src 'unsafe-inline' 'unsafe-eval' http: https:; object-src 'none'; base-uri 'none'"
+    />
+    <title>HTML preview</title>
+  </head>
+  <body>
+    <script>
+      // A fetched document owns its CSP; srcdoc would inherit the host's script ban.
+      addEventListener('message', function initialize(event) {
+        if (
+          event.source !== parent ||
+          typeof event.data?.id !== 'string' ||
+          typeof event.data?.document !== 'string'
+        )
+          return;
+        removeEventListener('message', initialize);
+        parent.postMessage({ id: event.data.id, type: 'initialized' }, '*');
+        document.open();
+        document.write(event.data.document);
+        document.close();
+      });
+    </script>
+  </body>
+</html>

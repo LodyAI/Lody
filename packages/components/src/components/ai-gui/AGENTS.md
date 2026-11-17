@@ -137,3 +137,5 @@ Ownership: [README.md](README.md).
 - Live file Markdown images and plain-text image links use the owning file provider:
   same-machine reads are automatic; remote ones need a per-image click. Anonymous
   shares never get this resolver. Release own Blob URLs; drop late reads.
+
+- Executable HTML callers follow [HTML preview contracts](html-preview/AGENTS.md).
