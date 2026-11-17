@@ -283,11 +283,12 @@ names, whichever machine created it.
 - `show|pause|resume|run|delete <id>` act on one schedule. `run` starts it now.
 - `create --file draft.json` and `edit <id> --file draft.json` take a JSON draft.
 - `--every <step>` on `create`/`edit` fills the draft's `trigger` (omit `trigger` from the
-  file): `90m`, `5h`, 1–1440 minutes or 1–168 hours, the same steps the editor's Custom
-  field and agent proposals accept. A step that divides the hour (minutes) or the day
-  (hours) runs on the clock in `--time-zone` (default: this device; pass the target
-  machine's zone when it differs). Any other step runs every N from now. An `edit` with
-  the same step keeps the stored trigger and its anchor.
+  file): `90m`, `5h`, any whole number of minutes or hours up to 2147483647, the same steps
+  the editor's Custom field and agent proposals accept (Android carries the step as a
+  32-bit integer). A step that divides the hour (minutes) or the day (hours) runs on the
+  clock in `--time-zone` (default: this device; pass the target machine's zone when it
+  differs). Any other step runs every N from now. An `edit` with the same step keeps the
+  stored trigger and its anchor.
 
 Draft format (unknown fields are rejected):
 

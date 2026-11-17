@@ -1,4 +1,5 @@
 import type { ScheduleProposalRule } from './ai';
+import { SCHEDULE_CUSTOM_STEP_MAX } from './message-schemas';
 import { validateScheduleTrigger } from './schedule-time';
 import type { ScheduleTrigger } from './schedule-types';
 
@@ -174,10 +175,14 @@ export function triggerToRecurrence(trigger: TimedScheduleTrigger): ScheduleRecu
   if (trigger.kind === 'once') return { kind: 'once', at: trigger.at };
   const unsupported: ScheduleRecurrence = { kind: 'unsupported', trigger };
   if (trigger.kind === 'interval') {
-    // Interval carries the steps that do not divide the clock evenly.
-    if (trigger.everyMs % 3_600_000 === 0)
+    // Interval carries the steps that do not divide the clock evenly. A step
+    // longer than any client can carry is kept verbatim, never truncated.
+    if (
+      trigger.everyMs % 3_600_000 === 0 &&
+      trigger.everyMs / 3_600_000 <= SCHEDULE_CUSTOM_STEP_MAX
+    )
       return { kind: 'hours', every: trigger.everyMs / 3_600_000, timeZone: getDeviceTimeZone() };
-    if (trigger.everyMs % 60_000 === 0)
+    if (trigger.everyMs % 60_000 === 0 && trigger.everyMs / 60_000 <= SCHEDULE_CUSTOM_STEP_MAX)
       return { kind: 'minutes', every: trigger.everyMs / 60_000, timeZone: getDeviceTimeZone() };
     return unsupported;
   }

@@ -84,7 +84,7 @@ for (const action of [
       )
       .option(
         '--every <step>',
-        'Repeat every N minutes (1–1440) or hours (1–168), e.g. 90m or 5h; replaces the draft trigger. ' +
+        'Repeat every N minutes or hours (N up to 2147483647), e.g. 90m or 5h; replaces the draft trigger. ' +
           'Steps dividing the hour/day run on the clock; others run every N from now'
       )
       .option(

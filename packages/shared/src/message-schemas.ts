@@ -3622,13 +3622,16 @@ const proposalTimeOfDay = {
   timeZone: z.string().min(1).max(100).optional(),
 };
 /**
- * Largest typed step for "every N minutes / hours", shared by the editor's
- * Custom field, agent proposals and the CLI. A step that does not divide the
- * clock is stored as an anchored interval; the caps only keep the step below the
- * sizes the calendar rules already name better (a day, a week).
+ * Largest "every N minutes / hours" step, shared by the editor's Custom field,
+ * agent proposals, the CLI and the mobile runtimes. It is the 32-bit signed
+ * maximum because Android carries `every` as a Kotlin `Int`; it also keeps
+ * `every × unit` an exact JS integer whose first run, from any anchor before
+ * year 29,000, stays inside the JS Date range the planner and ledger store.
+ * A step that does not divide the clock is stored as an anchored interval.
  */
-export const SCHEDULE_CUSTOM_MINUTES_MAX = 1440;
-export const SCHEDULE_CUSTOM_HOURS_MAX = 168;
+export const SCHEDULE_CUSTOM_STEP_MAX = 2_147_483_647;
+export const SCHEDULE_CUSTOM_MINUTES_MAX = SCHEDULE_CUSTOM_STEP_MAX;
+export const SCHEDULE_CUSTOM_HOURS_MAX = SCHEDULE_CUSTOM_STEP_MAX;
 export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('manual') }).strict(),
   z

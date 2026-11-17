@@ -334,7 +334,7 @@ describe('proposing a schedule from a conversation', () => {
     expect(h.history()).toHaveLength(0);
   });
 
-  it('accepts any custom minute or hour step the editor accepts, and runs it as proposed', async () => {
+  it('accepts any whole minute or hour step up to the 32-bit limit, and runs it as proposed', async () => {
     const h = await fixture();
     h.context.requesterSessionId = 'session' as never;
     const parse = (rule: unknown) =>
@@ -345,10 +345,11 @@ describe('proposing a schedule from a conversation', () => {
         prompt: 'Synthetic prompt',
         rule,
       }).success;
-    expect(parse({ kind: 'minutes', every: 1440 })).toBe(true);
-    expect(parse({ kind: 'hours', every: 168 })).toBe(true);
-    expect(parse({ kind: 'minutes', every: 1441 })).toBe(false);
-    expect(parse({ kind: 'hours', every: 169 })).toBe(false);
+    expect(parse({ kind: 'minutes', every: 200_000 })).toBe(true);
+    expect(parse({ kind: 'hours', every: 2_147_483_647 })).toBe(true);
+    // Android carries `every` as a 32-bit Int.
+    expect(parse({ kind: 'minutes', every: 2_147_483_648 })).toBe(false);
+    expect(parse({ kind: 'hours', every: 2_147_483_648 })).toBe(false);
     expect(parse({ kind: 'minutes', every: 1.5 })).toBe(false);
     expect(parse({ kind: 'hours', every: 0 })).toBe(false);
 
@@ -377,8 +378,9 @@ describe('lody schedule --every', () => {
   it('parses minute and hour steps within the shared bounds', () => {
     expect(parseScheduleEvery('90m')).toEqual({ kind: 'minutes', every: 90 });
     expect(parseScheduleEvery(' 36 hours ')).toEqual({ kind: 'hours', every: 36 });
-    expect(parseScheduleEvery('1440min')).toEqual({ kind: 'minutes', every: 1440 });
-    for (const bad of ['0m', '1441m', '169h', '1.5h', '-5m', '90', '5d', '99999999999m'])
+    expect(parseScheduleEvery('200000min')).toEqual({ kind: 'minutes', every: 200_000 });
+    expect(parseScheduleEvery('2147483647h')).toEqual({ kind: 'hours', every: 2_147_483_647 });
+    for (const bad of ['0m', '2147483648m', '1.5h', '-5m', '90', '5d', '99999999999m'])
       expect(() => parseScheduleEvery(bad), bad).toThrow('--every');
   });
 
@@ -388,6 +390,7 @@ describe('lody schedule --every', () => {
       ['15m', { kind: 'minutes', every: 15 }],
       ['6h', { kind: 'hours', every: 6 }],
       ['36h', { kind: 'hours', every: 36 }],
+      ['2147483647h', { kind: 'hours', every: 2_147_483_647 }],
     ] as const)
       expect(
         scheduleEveryTrigger(parseScheduleEvery(text), { timeZone: 'Asia/Shanghai', now })
@@ -406,6 +409,12 @@ describe('lody schedule --every', () => {
       now,
     });
     expect(nextScheduleSlot(thirtySixHours, now, now)).toBe(now + 36 * 3_600_000);
+    // The largest step still has a first run inside the Date range.
+    const longest = scheduleEveryTrigger(parseScheduleEvery('2147483647h'), {
+      timeZone: 'UTC',
+      now,
+    });
+    expect(nextScheduleSlot(longest, now, now)).toBe(now + 2_147_483_647 * 3_600_000);
     expect(() =>
       scheduleEveryTrigger(parseScheduleEvery('6h'), { timeZone: 'Mars/Base', now })
     ).toThrow('Unknown time zone');

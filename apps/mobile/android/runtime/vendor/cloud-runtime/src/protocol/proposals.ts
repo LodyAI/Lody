@@ -149,6 +149,9 @@ export function roleProposal(meta: unknown): RoleProposal | undefined {
 const zone = (value: unknown) =>
   value === undefined ? undefined : bounded(value, 100);
 
+/** Web `SCHEDULE_CUSTOM_STEP_MAX`: Android carries `every` as a 32-bit `Int`. */
+const STEP_MAX = 2_147_483_647;
+
 /** Web `ScheduleProposalRuleSchema`, as the editor's named rule. */
 export function proposalRule(value: unknown): ProposalRule | undefined {
   if (!record(value)) return undefined;
@@ -166,11 +169,11 @@ export function proposalRule(value: unknown): ProposalRule | undefined {
     case 'manual':
       return { kind: 'manual' };
     case 'minutes':
-      return integer(value.every, 1, 59)
+      return integer(value.every, 1, STEP_MAX)
         ? { kind: 'minutes', every: value.every as number }
         : undefined;
     case 'hours':
-      return integer(value.every, 1, 23)
+      return integer(value.every, 1, STEP_MAX)
         ? { kind: 'hours', every: value.every as number }
         : undefined;
     case 'daily':

@@ -100,7 +100,7 @@ export function registerScheduleTools(server: LodyToolServer, deps: Dependencies
         'as the full prompt it will receive with no reference to this conversation, (2) when —',
         'one of the named rules below, or manual for run-on-demand, and (3) optionally where the',
         'result goes. If any of these is missing or ambiguous, ask the user a short question',
-        'instead of guessing. Rule shapes: manual; minutes {every: 1-1440}; hours {every: 1-168};',
+        'instead of guessing. Rule shapes: manual; minutes {every}; hours {every} (any whole number up to 2147483647);',
         'a step that divides the hour (minutes) or the day (hours) runs on the clock (every 15',
         'minutes = :00 :15 :30 :45), any other step runs every N from when the user clicks',
         'Create, so express whole hours as hours; daily /',

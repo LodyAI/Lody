@@ -1,5 +1,6 @@
 import { Effect } from 'effect';
 import {
+  SCHEDULE_CUSTOM_STEP_MAX,
   ScheduleProposalRuleSchema,
   ScheduleTriggerSchema,
   applyScheduleRecurrence,
@@ -104,7 +105,7 @@ export type ScheduleEveryStep = { kind: 'minutes' | 'hours'; every: number };
  * the same steps.
  */
 export function parseScheduleEvery(value: string): ScheduleEveryStep {
-  const match = /^(\d{1,5})\s*(m|mins?|minutes?|h|hrs?|hours?)$/i.exec(value.trim());
+  const match = /^(\d{1,10})\s*(m|mins?|minutes?|h|hrs?|hours?)$/i.exec(value.trim());
   const rule = match
     ? ScheduleProposalRuleSchema.safeParse({
         kind: match[2]!.toLowerCase().startsWith('m') ? 'minutes' : 'hours',
@@ -113,7 +114,7 @@ export function parseScheduleEvery(value: string): ScheduleEveryStep {
     : undefined;
   if (!rule?.success || (rule.data.kind !== 'minutes' && rule.data.kind !== 'hours'))
     throw new Error(
-      '--every takes a whole number of minutes (1–1440) or hours (1–168), for example 90m or 5h'
+      `--every takes a whole number of minutes or hours from 1 to ${SCHEDULE_CUSTOM_STEP_MAX}, for example 90m or 5h`
     );
   return { kind: rule.data.kind, every: rule.data.every };
 }
