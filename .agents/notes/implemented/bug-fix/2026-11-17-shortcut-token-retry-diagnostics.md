@@ -18,7 +18,7 @@ retain their existing reporting behavior.
 ## Ownership and compatibility
 
 The provider effect owns the account, auth session, workspace and operation lifetime.
-Retirement fences late completions; a late earlier success cannot clear a newer
+Temporary auth-session absence during refetch keeps the last confirmed same-account owner. Retirement fences late completions; a late earlier success cannot clear a newer
 failure. Counts stay in memory and are never analytics events, authorization caches,
 repo metadata or persistent state. Distinct failure codes/phases/statuses and other
 operations retain their first diagnosis. Success clears only that operation's counts.

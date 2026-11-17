@@ -22,7 +22,11 @@ const fixture = vi.hoisted(() => {
   });
   return {
     session,
-    auth: { authSessionId: 'session-a', requestAuthRecovery: vi.fn() },
+    auth: {
+      authSessionId: 'session-a' as string | null,
+      confirmedUnauthenticated: false,
+      requestAuthRecovery: vi.fn(),
+    },
     makePlatform,
     platform: makePlatform(),
     workspaceId: 'workspace-a',
@@ -128,6 +132,7 @@ describe('PromptShortcutProvider lifecycle', () => {
   beforeEach(() => {
     fixture.workspaceId = 'workspace-a';
     fixture.auth.authSessionId = 'session-a';
+    fixture.auth.confirmedUnauthenticated = false;
     fixture.status = 'allowed';
     fixture.platform = fixture.makePlatform();
     fixture.records = [];
@@ -190,12 +195,18 @@ describe('PromptShortcutProvider lifecycle', () => {
   it('retires the previous auth-session runtime even when the same account signs in again', async () => {
     await render();
     const first = current!;
+    fixture.auth.authSessionId = null;
+    await render();
+    expect(current).toBe(first);
     fixture.auth.authSessionId = 'session-b';
     rendered = [];
     await render();
     expect(rendered).not.toContain(first);
     expect(current).not.toBe(first);
     expect(() => first.setDirectory([])).toThrow('Shortcut runtime disposed');
+    fixture.auth.confirmedUnauthenticated = true;
+    await render();
+    expect(current).toBeNull();
   });
 
   it('keeps the old runtime hidden until its durable close finishes', async () => {

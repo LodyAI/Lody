@@ -15,7 +15,7 @@ V2 对已处理失败返回固定结果，由 Shortcut provider 按资源、读�
 
 ## 所有权与兼容
 
-provider effect 绑定账号、认证会话、workspace 和操作。退役后旧回调不能上报；
+provider effect 绑定账号、认证会话、workspace 和操作。refetch 期间短暂无 session 保留同账号最后确认的 owner。退役后旧回调不能上报；
 更早请求的迟到成功不能清空较新故障。次数只存在内存中，不变成 analytics、认证缓存、
 repo meta 或持久状态。不同故障码、阶段、状态和操作仍保留首份诊断，成功只清空本操作。
 

@@ -103,8 +103,15 @@ export function PromptShortcutProvider({
   const userId = session.status === 'authenticated' ? session.user.id : null;
   const cloud = platform.capabilities.has('cloudAccount');
   const legacyStatus = useLegacyWorkspaceQueryStatus(scope.workspaceId);
+  const auth = useOptionalAuthenticatedConvex();
+  const tokenSession = useRef({ userId, id: auth?.authSessionId ?? null });
+  // A userless/refetching auth response is not another login or a new outage.
+  if (tokenSession.current.userId !== userId || auth?.confirmedUnauthenticated)
+    tokenSession.current = { userId, id: auth?.authSessionId ?? null };
+  else if (auth?.authSessionId) tokenSession.current.id = auth.authSessionId;
+  const authSessionId = tokenSession.current.id;
   const workspaceId =
-    (!cloud || legacyStatus === 'allowed') &&
+    (!cloud || (!auth?.confirmedUnauthenticated && legacyStatus === 'allowed')) &&
     scope.enabled &&
     scope.workspaceId === workspaceRuntime?.workspaceId
       ? scope.workspaceId
@@ -115,8 +122,6 @@ export function PromptShortcutProvider({
   const settle = useLegacyWorkspaceMutation(api.promptShortcuts.settleDocument);
   const grant = useLegacyWorkspaceAction(api.promptShortcuts.getStreamToken);
   const attempt = useLegacyWorkspaceAction(api.promptShortcuts.getStreamTokenV2);
-  const auth = useOptionalAuthenticatedConvex();
-  const authSessionId = auth?.authSessionId ?? null;
   const directory = useLegacyWorkspaceQuery(
     api.promptShortcuts.listAccessibleDocuments,
     cloud && workspaceId && userId ? { workspaceId } : 'skip'
