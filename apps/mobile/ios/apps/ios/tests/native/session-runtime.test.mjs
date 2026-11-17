@@ -109,6 +109,125 @@ test('control stream catchup happens before choosing a legacy history backend', 
   }
 });
 
+test(
+  'Roost history can catch up while the control stream is retrying without confirming session sync',
+  { timeout: 8_000 },
+  async (t) => {
+    const controlRead = Promise.withResolvers();
+    const controlRetry = Promise.withResolvers();
+    const controlFailed = Promise.withResolvers();
+    const historyWatch = Promise.withResolvers();
+    const liveAfterRecovery = Promise.withResolvers();
+    const eventsWhileControlUnavailable = [];
+    let revision = 1;
+    let polls = 0;
+    let controlUnavailable = false;
+    const turn = () => ({
+      id: 'assistant-1',
+      role: 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      finished: revision === 2,
+      items: [{ type: 'text', text: 'Synthetic reply' }],
+    });
+    const fixture = await openTestSession({
+      target: { backend: 'roost', machineId: 'm1' },
+      readSession({ signal }) {
+        if (++polls === 1) return controlRead.promise;
+        if (polls === 2) return controlRetry.promise;
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      },
+      onEvent(event) {
+        if (event.type !== 'session') return;
+        const snapshot = JSON.parse(event.session);
+        if (controlUnavailable) {
+          eventsWhileControlUnavailable.push(event.synced);
+          if (
+            snapshot.status === 'syncing' &&
+            snapshot.reason === 'network_error'
+          )
+            controlFailed.resolve();
+        } else if (event.synced && snapshot.entries[0]?.finished) {
+          liveAfterRecovery.resolve();
+        }
+      },
+      async onRpc(request, runtime, signal) {
+        const { query } = await runtime.openPayload(request.params);
+        let result, pageTurns;
+        if (query.kind === 'watchChanges') {
+          const response = Promise.withResolvers();
+          signal.addEventListener(
+            'abort',
+            () => response.reject(signal.reason),
+            { once: true },
+          );
+          if (query.checkpoint === 'c1') historyWatch.resolve(response.resolve);
+          result = await response.promise;
+        } else {
+          result = {
+            checkpoint: `c${revision}`,
+            startPosition: 0,
+            totalCount: 1,
+            rows: [{ position: 0, state: 'ready', turnId: 'assistant-1' }],
+            hasMoreOlder: false,
+            cursor: null,
+          };
+          pageTurns = [turn()];
+        }
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: 'session/history-read_response',
+            sessionId: 's1',
+            success: true,
+            historyRevision: revision,
+            historyCount: 1,
+            result,
+            pageTurns,
+          }),
+        };
+      },
+    });
+    t.after(() => {
+      controlRetry.resolve({ ok: false, result: { code: 'cancelled' } });
+      fixture.close();
+    });
+    assert.equal(fixture.events.at(-1).entries[0].finished, false);
+    controlUnavailable = true;
+    controlRead.resolve({ ok: false, result: { code: 'network_error' } });
+    await controlFailed.promise;
+
+    revision = 2;
+    (await historyWatch.promise)({
+      state: 'ready',
+      checkpoint: 'c2',
+      ids: ['assistant-1'],
+      bodies: { changed: [turn()], suffix: [] },
+    });
+    // A retained session open flushes its current projection. Advance the test
+    // only after that projection contains the owner's new history.
+    do {
+      t.signal.throwIfAborted();
+      await new Promise((resolve) => setImmediate(resolve));
+      await fixture.reopen();
+    } while (!fixture.events.at(-1).entries[0]?.finished);
+    assert.equal(fixture.events.at(-1).status, 'syncing');
+    assert.ok(
+      eventsWhileControlUnavailable.every((synced) => synced === false),
+    );
+
+    controlUnavailable = false;
+    controlRetry.resolve({
+      ok: true,
+      result: { nextOffset: '2', upToDate: true, closed: false },
+    });
+    await liveAfterRecovery.promise;
+    assert.equal(fixture.events.at(-1).status, 'live');
+  },
+);
+
 test('Roost sessions read, observe and send through the owning machine', async () => {
   const turn = (text) => ({
     id: 'old',

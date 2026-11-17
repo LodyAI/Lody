@@ -60,6 +60,7 @@ export async function openTestSession({
   failAppend = () => false,
   afterAppend,
   beforeBootstrap,
+  readSession,
   markDispatch = async () => {},
   onRpc,
   onEvent = () => {},
@@ -156,7 +157,8 @@ export async function openTestSession({
         updates: [],
       });
     }
-    async readOnce({ signal } = {}) {
+    async readOnce(options = {}) {
+      const { signal } = options;
       if (this.url.includes(':rpc:res:') && onRpc) {
         const request = replies.get(this.url.split('/ds/lody/')[1]);
         const result = await onRpc(request, runtime, signal);
@@ -181,6 +183,8 @@ export async function openTestSession({
           payload: { body: frame(bytes) },
         });
       }
+      if (readSession && this.url.endsWith(':s:s1'))
+        return readSession(options);
       return new Promise((resolve) => {
         sessionRead = resolve;
       });
@@ -227,15 +231,17 @@ export async function openTestSession({
     (target
       ? () => ({ incremental: true, watch: true, ...target })
       : undefined);
-  await runtime.openSession(
-    's1',
-    'w1',
-    async () => ({ token: 'synthetic', gatewayBaseUrl: 'https://x.invalid' }),
-    emit,
-    markDispatch,
-    true,
-    resolver,
-  );
+  const reopen = () =>
+    runtime.openSession(
+      's1',
+      'w1',
+      async () => ({ token: 'synthetic', gatewayBaseUrl: 'https://x.invalid' }),
+      emit,
+      markDispatch,
+      true,
+      resolver,
+    );
+  await reopen();
   await ready;
   if (target?.backend === 'roost' || resolveTarget?.()?.backend === 'roost') {
     runtime.startAcceptedInputs({
@@ -304,6 +310,7 @@ export async function openTestSession({
     runtime,
     server,
     pushUpdate,
+    reopen,
     nextEmit,
     events,
     background,
