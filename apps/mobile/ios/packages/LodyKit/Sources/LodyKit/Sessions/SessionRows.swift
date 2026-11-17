@@ -312,16 +312,7 @@ enum DirectoryTabs {
       }
   }
 
-  static func symbol(_ sessions: [SessionItem]) -> String {
-    for state: SessionState in [.attention, .failed, .live] {
-      if sessions.contains(where: { SessionState($0) == state }) {
-        switch state {
-        case .attention: return "hand.raised"
-        case .failed: return "exclamationmark.circle"
-        default: return "square.grid.2x2.fill"
-        }
-      }
-    }
-    return sessions.contains(where: SessionRows.isUnread) ? "circle.fill" : ""
+  static func hasBackgroundUnread(_ sessions: [SessionItem], currentId: String) -> Bool {
+    sessions.contains { $0.id != currentId && SessionRows.needsEmphasis($0) }
   }
 }

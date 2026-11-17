@@ -127,6 +127,44 @@ export function ToastViewport({ className, closeLabel, label }: ToastViewportPro
     <BaseToast.Portal>
       <BaseToast.Viewport
         aria-label={label}
+        onPointerDown={(event) => {
+          // A global toast is outside the mobile conversation drawer's portal.
+          // Its controls must not become an outside press that closes the drawer.
+          event.stopPropagation();
+        }}
+        onClick={(event) => event.stopPropagation()}
+        render={({
+          onMouseEnter,
+          onMouseMove,
+          onMouseLeave,
+          onPointerUp,
+          onPointerCancel,
+          ...props
+        }) => {
+          // Base UI pauses on mouse hover and touch drag. Touch browsers emit
+          // compatibility mouse events without leaving; use pointer hover and
+          // finish the paused interaction when the finger lifts or is cancelled.
+          return (
+            <div
+              {...props}
+              onPointerEnter={(event) => {
+                if (event.pointerType !== 'touch') onMouseEnter?.(event);
+              }}
+              onPointerMove={(event) => {
+                if (event.pointerType !== 'touch') onMouseMove?.(event);
+              }}
+              onPointerLeave={onMouseLeave}
+              onPointerUp={(event) => {
+                onPointerUp?.(event);
+                if (event.pointerType === 'touch') onMouseLeave?.(event);
+              }}
+              onPointerCancel={(event) => {
+                onPointerCancel?.(event);
+                if (event.pointerType === 'touch') onMouseLeave?.(event);
+              }}
+            />
+          );
+        }}
         className={[appendClassName(sx.className, className), ...palette].filter(Boolean).join(' ')}
         style={sx.style}
       >

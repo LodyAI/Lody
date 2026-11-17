@@ -26,11 +26,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Workspace switching
 
-- Prompt Shortcuts instances belong to one initialization effect lifetime. Cleanup
-  must retire the published instance immediately, before asynchronous durable close.
-  Never reuse retired instances; fence platform, cloud capability and retry generation.
-  Cloud discovery, store opening, tokens and writes require the shared legacy
-  admission verdict; unknown waits and encrypted disables. Preserve the local store path.
+- Prompt Shortcut instances retire on effect cleanup and never cross platform, capability,
+  retry generation, account/session or workspace boundaries. Legacy admission gates cloud
+  work: unknown waits, encrypted disables; preserve local stores. V2 token owners retain
+  local retry counts and one diagnostic per fault until success, notify auth recovery,
+  and never cache authorization; see [retry reporting](../../../../.agents/notes/implemented/bug-fix/2026-11-17-shortcut-token-retry-diagnostics.md).
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must
   require that target, the active runtime, and the runtime-owned doc-meta snapshot to agree
   before reading singleton caches. Shared visibility and sharing hooks enforce this gate by

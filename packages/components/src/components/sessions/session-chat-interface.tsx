@@ -2389,7 +2389,10 @@ export type SessionChatToolbar = {
     | 'sharing'
     | 'onShareWithTeam'
     | 'onShareAsImage'
-  >;
+  > & {
+    /** Copies the active tab's session link; the tab row reuses the root header menu. */
+    onCopyUrl: (linkFormat: 'https' | 'deeplink') => void | Promise<void>;
+  };
 };
 
 export type SessionChatInterfaceHandle = {
@@ -7209,9 +7212,13 @@ export const SessionChatInterface = memo(
         machineName={sessionMachine?.name}
         onCopyConversationHistory={headerCopyConversation}
         onCopyUrl={() => {
-          void handleCopySessionLink();
+          void (toolbarActions
+            ? toolbarActions.onCopyUrl('https')
+            : handleCopySessionLink('https'));
         }}
-        onCopyDeepLink={() => handleCopySessionLink('deeplink')}
+        onCopyDeepLink={() =>
+          toolbarActions ? toolbarActions.onCopyUrl('deeplink') : handleCopySessionLink('deeplink')
+        }
         sharing={headerSharing}
         onShareWithTeam={headerShareWithTeam}
         onShareAsImage={headerShareAsImage}
@@ -7440,9 +7447,7 @@ export const SessionChatInterface = memo(
                         !shareSelection.active &&
                         !shouldReplaceComposerWithPermission
                       }
-                      onQuote={(text, options) =>
-                        inputAreaRef.current?.addMessageQuote(text, options) ?? false
-                      }
+                      onQuote={(text) => inputAreaRef.current?.addMessageQuote(text) ?? false}
                     />
                     <div
                       ref={setMessageArea}

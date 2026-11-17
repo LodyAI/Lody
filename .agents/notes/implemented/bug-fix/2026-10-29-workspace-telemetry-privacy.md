@@ -10,7 +10,8 @@ Translation: current
 Text masking does not remove replay DOM attributes. Encrypted and unknown workspace
 scopes therefore disable replay and reduce automatic exceptions to a fixed error
 vocabulary. Confirmed ordinary scopes retain recording and ordinary exception
-behavior. Local diagnostics remain available for explicit user submission.
+behavior, except ErrorBoundary diagnostics, which always use fixed categories.
+Local diagnostics remain available for explicit user submission.
 
 ## Decision and constraints
 
@@ -37,6 +38,12 @@ Sensitive requests use synchronous SDK encoding: native gzip otherwise serialize
 before yielding, allowing an encoded body to outlive a scope change. Already
 sent requests cannot be recalled. SDK upgrades must run the real browser suite;
 missing recorder controls leave recording disabled.
+
+ErrorBoundary owns one fixed diagnostic per mounted failure episode, including
+failed user retries; only a healthy commit permits another. It has no companion
+analytics event or message-derived hash. Capture and final transport both reject
+the retired `app/error_boundary_triggered` event and reproject boundary exceptions
+in every scope. Detailed local support reports remain available.
 
 Deferred exceptions are redacted before queuing in an unknown scope, so delayed
 initialization cannot restore their originals. Main and daemon processes always

@@ -6,6 +6,28 @@ import catalog
 from send_motion import ThrowTrace
 ui = UI(*sys.argv[1:])
 trace = ThrowTrace(ui)
+def pending_actions(calls):
+    ui.axe('tap', '--id', 'stale-pending:delivery')
+    ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('send.recover.action') for i in items), 'Pending-input actions missing')
+    ui.capture('pending-input-actions')
+    ui.axe('tap', '--label', catalog.text('send.recover.action'))
+    ui.wait(lambda items: any(i.get('AXLabel') == f'Calls: {calls} · uploaded' for i in items), 'Recovery must confirm delivery without a new send')
+    ui.element('stale-pending:user')
+    assert not any(i.get('AXUniqueId') == 'stale-pending:duration' for i in ui.state()), 'A delivery ACK must not infer working time'
+    ui.capture('delivery-confirmed-only')
+    ui.axe('tap', '--id', 'stale-pending:delivery')
+    ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('send.forget.action') for i in items), 'Confirmed delivery must retain local removal')
+    ui.axe('tap', '--label', catalog.text('send.forget.action'))
+    ui.wait(lambda items: any(i.get('AXLabel') == f'Calls: {calls} · idle' for i in items), 'Local removal did not clear the pending input')
+    ui.capture('pending-input-removed')
+
+if os.environ.get('LODY_UI_PENDING_ONLY') == '1':
+    ui.axe('tap', '--id', 'send-toggle-pending')
+    ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 0 · unknown' for i in items), 'Pending-input fixture missing')
+    pending_actions(0)
+    print('PASS: original-input recovery confirms delivery without replay or a working timer; local removal clears it')
+    sys.exit(0)
+
 progress = ui.element('send-upload-progress')['frame']
 viewport = ui.element('chat-transcript')['frame']
 assert progress['width'] >= 44 and progress['height'] >= 44, 'Upload progress must retain a 44 pt touch target'
@@ -24,9 +46,11 @@ ui.axe('tap', '-x', str(frame['x'] + 40), '-y', str(frame['y'] + 20), '--post-de
 timer = ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or '').endswith(':delivery')), None), 'Offline delivery missing')
 assert timer['frame']['y'] >= frame['y'] - 1, 'Collapsed composer scrolled the delivery status above the transcript'
 turn = timer['AXUniqueId'].removesuffix(':delivery')
-assert timer['AXLabel'] == catalog.text('send.status.awaitingConnection'), 'Unacked send must show its delivery phase above the message'
+assert timer['AXLabel'] == catalog.text('send.status.awaitingConnection'), 'Unacked send must show its delivery phase below the message'
 assert ui.element('send-status')['AXLabel'] == 'Calls: 0 · waiting'
 assert ui.element(turn + ':user-text')['AXLabel'] == draft
+message = ui.element(turn + ':user-text')['frame']
+assert timer['frame']['y'] >= message['y'] + message['height'] - 1, 'Delivery status must follow the complete user message'
 assert not ui.element('session-input').get('AXValue')
 ui.element(turn + ':attachment:fixture-file')
 ui.capture('offline')
@@ -101,6 +125,9 @@ assert ui.element('session-send')['enabled'], 'Completed Session did not accept 
 ui.capture('completed-unlocked')
 ui.axe('tap', '--id', 'send-toggle-pending')
 ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · unknown' for i in items), 'Unknown-send fixture did not load')
+pending_actions(4)
+ui.axe('tap', '--id', 'send-toggle-pending')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · unknown' for i in items), 'Unknown-send fixture did not reset')
 ui.axe('tap', '--id', 'session-input')
 ui.type_into('session-input', 'draft during confirmation')
 confirmation_draft = ui.element('session-input').get('AXValue') or ''

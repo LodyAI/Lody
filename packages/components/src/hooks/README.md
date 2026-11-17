@@ -4,6 +4,18 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Workspace sync diagnostics
+
+`useWorkspaceSyncStuckReport` observes readiness without changing sync or retry
+ownership. One continuous wait for a route target reports once, even as its blocker
+or connection changes; recovery ends that episode so a new wait can report again.
+Its exception carries only fixed operation/stage/failure/handling/retry diagnostics.
+A rejected initial metadata scan has no scheduled retry; other retry states and
+unproven causes remain `unknown`. Restricted capture and transport reprojection
+preserve those fields through `@lody/platform/telemetry`, rejecting unknown values
+and excluding workspace content and raw error metadata. Existing analytics also
+omit workspace IDs and raw error names; detailed local diagnostics remain local.
+
 ## Electron state snapshots
 
 `use-electron-updater-state.ts` and `use-electron-cli-daemon.ts` subscribe before
@@ -382,7 +394,6 @@ Unknown placements and nested/cross-machine links do not inherit. Opener provena
 alone grants nothing; malformed parent links do not redirect a sharing mutation away
 from the current session. This client check cannot authenticate a forged otherwise
 valid containment relation or provide an authoritative session-to-machine binding.
-
 
 ## Live member directory
 
