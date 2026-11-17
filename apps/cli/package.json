@@ -123,6 +123,7 @@
     "vite": "^7.0.0",
     "vite-plugin-top-level-await": "catalog:",
     "vite-plugin-wasm": "catalog:",
+    "vscode-jsonrpc": "9.0.1",
     "vitest": "catalog:",
     "werift": "0.24.4",
     "winston": "^3.18.3",

@@ -1,3 +1,4 @@
+import { copilotQuotaArgs, isCopilotQuotaAgent, readCopilotQuota } from './copilot-quota';
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
 import {
@@ -446,6 +447,30 @@ export async function initializeAndReadAcpRateLimits(
 
 /** Core queries need no session; official Antigravity /usage needs an isolated scratch session. */
 export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
+  if (isCopilotQuotaAgent(options)) {
+    const started = await startLocalAcpProtocol(
+      options,
+      {
+        prepareArgs: copilotQuotaArgs,
+        start: async (child, startupAbort) => ({
+          snapshot: await readCopilotQuota(child, startupAbort),
+        }),
+      },
+      true,
+      true
+    );
+    try {
+      await terminateAcpProcessTree(started.agentProcess, {
+        logger: options.logger,
+        sessionLabel: 'copilot-quota',
+        exitTimeoutMs: 3000,
+      });
+    } catch (cause) {
+      throw new AcpQuotaCleanupError(started.agentProcess, cause);
+    }
+    options.signal?.throwIfAborted();
+    return started.snapshot;
+  }
   if (isAntigravityBuiltinAgent(options)) {
     // Never drop account-selecting ACP arguments and accidentally read another account.
     if (options.extraArgs?.length || options.magpieGatewayUrl)
@@ -629,7 +654,12 @@ export async function prepareAcpProcessEnvironmentLegacy(
 
 async function startLocalAcpProtocol<T>(
   options: LocalAcpProtocolOptions,
-  startClient: (options: LocalAcpConnectionOptions) => Promise<T>,
+  startClient:
+    | ((options: LocalAcpConnectionOptions) => Promise<T>)
+    | {
+        prepareArgs: (args: readonly string[]) => string[];
+        start: (child: ChildProcess, startupAbort: Promise<never>) => Promise<T>;
+      },
   retainCleanupFailure = false,
   sensitiveOutput = false,
   safeOfflineBeforeInitialization?: () => boolean
@@ -656,6 +686,7 @@ async function startLocalAcpProtocol<T>(
     signal: options.signal,
   });
   options.signal?.throwIfAborted();
+  if (typeof startClient !== 'function') launch.args = startClient.prepareArgs(launch.args);
   const launcher: AcpLauncher = resolveAcpLauncher(launch.command);
   const spawnAnalyticsProps = {
     cliType: options.cliType,
@@ -866,10 +897,6 @@ async function startLocalAcpProtocol<T>(
       throw new Error('Agent process stdin is not available');
     }
 
-    const output = createStdoutReadableStream(agentProcess.stdout);
-    const input = createStdinWritableStream(agentProcess.stdin);
-    const stream = ndJsonStream(input, output);
-
     let rejectSignalAbort: ((error: DOMException) => void) | undefined;
     const signalAbort = options.signal
       ? new Promise<never>((_resolve, reject) => {
@@ -883,14 +910,21 @@ async function startLocalAcpProtocol<T>(
     try {
       options.signal?.throwIfAborted();
       options.logger.debug('[acp-startup] creating ACP client');
-      const started = await startClient({
-        stream,
-        launcher,
-        startupTimeouts,
-        startupAbort: signalAbort
-          ? Promise.race([startupMonitor.abortPromise, signalAbort])
-          : startupMonitor.abortPromise,
-      });
+      const startupAbort = signalAbort
+        ? Promise.race([startupMonitor.abortPromise, signalAbort])
+        : startupMonitor.abortPromise;
+      const started =
+        typeof startClient !== 'function'
+          ? await startClient.start(agentProcess, startupAbort)
+          : await startClient({
+              stream: ndJsonStream(
+                createStdinWritableStream(agentProcess.stdin),
+                createStdoutReadableStream(agentProcess.stdout)
+              ),
+              launcher,
+              startupTimeouts,
+              startupAbort,
+            });
       options.signal?.throwIfAborted();
       return {
         agentProcess,

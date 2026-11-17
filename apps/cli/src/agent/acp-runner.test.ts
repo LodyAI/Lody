@@ -1,4 +1,7 @@
 import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
+import { PassThrough } from 'node:stream';
+import { parseCopilotQuota, readCopilotQuota } from './copilot-quota';
+import { createRequire } from 'node:module';
 import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclientprotocol/sdk';
 import {
   initializeAndSetAcpSessionArchived,
@@ -1044,5 +1047,201 @@ describe('spawnAcpProcess ELECTRON_RUN_AS_NODE handling', () => {
     expect(captured).toHaveLength(2);
     expect(captured[0]?.env?.ELECTRON_RUN_AS_NODE).toBe('1');
     expect(captured[1]?.env?.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+});
+
+describe('Copilot subscription quota', () => {
+  const options = () => ({
+    cliType: 'registry' as const,
+    agentType: 'github-copilot-cli',
+    workdir: os.tmpdir(),
+    env: { COPILOT_TEST_ACCOUNT: 'selected' },
+    logger: createSilentLogger(),
+    terminalManager: {} as never,
+    onUpdateMessage: () => {},
+    onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
+  });
+  const quota = (remainingPercentage: unknown) => ({
+    quotaSnapshots: {
+      chat: { isUnlimitedEntitlement: true },
+      premium_interactions: {
+        isUnlimitedEntitlement: false,
+        hasQuota: true,
+        remainingPercentage,
+        tokenBasedBilling: true,
+        entitlementRequests: 1000,
+        usedRequests: 600,
+        resetDate: '2030-01-01T00:00:00Z',
+      },
+    },
+  });
+
+  // A synthetic SDK server: any session/prompt/tool/MCP request fails the test.
+  function peer(payload: unknown, mode = 'quota') {
+    return `
+      const { createMessageConnection } = require(${JSON.stringify(createRequire(import.meta.url).resolve('vscode-jsonrpc/node'))});
+      if (process.env.COPILOT_TEST_ACCOUNT !== 'selected' || process.env.COPILOT_TEST_LAUNCH !== 'preserved') process.exit(2);
+      const args = process.argv.slice(1);
+      if (!args.includes('--headless') || !args.includes('--stdio') || args.includes('--acp') || !args.includes('--no-auto-update') || args[args.indexOf('--config-dir')+1] !== '/synthetic/account') process.exit(3);
+      const rpc = createMessageConnection(process.stdin, process.stdout);
+      rpc.onRequest('ping', () => {
+        if (${JSON.stringify(mode)} === 'oversized') { process.stdout.write('x'.repeat(70000)); return new Promise(()=>{}); }
+        return { protocolVersion: ${mode === 'version' ? 999 : 3} };
+      });
+      rpc.onRequest('account.getQuota', () => {
+        if (${JSON.stringify(mode)} === 'wait') { process.stderr.write('quota-ready'); return new Promise(()=>{}); }
+        if (${JSON.stringify(mode)} === 'login') throw new Error('Authentication required');
+        if (${JSON.stringify(mode)} === 'unsupported') { const e = new Error('Method not found'); e.code = -32601; throw e; }
+        return ${JSON.stringify(payload)};
+      });
+      rpc.onRequest(() => { process.exitCode = 4; throw new Error('Unexpected activity'); });
+      rpc.listen();
+    `;
+  }
+
+  function setup(payload: unknown, mode?: string, onReady?: () => void) {
+    vi.spyOn(loginShell, 'getLoginShellEnvLegacy').mockResolvedValue({});
+    vi.spyOn(setting, 'resolveACPProcessLaunchAsync').mockResolvedValue({
+      command: '/selected/launcher',
+      args: ['-y', '@github/copilot@1.0.112', '--acp', '--config-dir', '/synthetic/account'],
+      env: { COPILOT_TEST_LAUNCH: 'preserved' },
+    });
+    let child: ChildProcess | undefined;
+    return {
+      spawnImpl: ((command, args, opts) => {
+        if (command !== '/selected/launcher' || !args?.includes('@github/copilot@1.0.112'))
+          throw new Error('Wrong launcher');
+        child = spawn(process.execPath, ['-e', peer(payload, mode), '--', ...(args ?? [])], opts);
+        child.stderr?.on('data', (chunk) => {
+          if (String(chunk).includes('quota-ready')) onReady?.();
+        });
+        return child;
+      }) as NonNullable<Parameters<typeof queryLocalAcpRateLimits>[0]['spawnImpl']>,
+      exited: () => child !== undefined && (child.exitCode !== null || child.signalCode !== null),
+    };
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+  it.each([0, 34.5, 100])(
+    'reads %s%% remaining and confirms process exit before returning',
+    async (remaining) => {
+      const runtime = setup(quota(remaining));
+      const result = await queryLocalAcpRateLimits({ ...options(), spawnImpl: runtime.spawnImpl });
+      expect(result.rateLimits).toEqual([
+        {
+          limitId: 'github-copilot-cli',
+          scope: { providerId: 'github-copilot' },
+          windows: [
+            {
+              label: 'Copilot subscription',
+              usedPercent: 100 - remaining,
+              windowDurationSeconds: null,
+              resetsAtEpochSeconds: null,
+            },
+          ],
+        },
+      ]);
+      expect(runtime.exited()).toBe(true);
+    }
+  );
+
+  it.each([
+    {},
+    { quotaSnapshots: {} },
+    {
+      quotaSnapshots: {
+        premium_interactions: {
+          isUnlimitedEntitlement: true,
+          hasQuota: true,
+          remainingPercentage: 100,
+        },
+      },
+    },
+    quota(null),
+    quota('50'),
+    quota(-1),
+    quota(101),
+  ])('rejects unavailable or malformed readings and releases the child: %#', async (payload) => {
+    const runtime = setup(payload);
+    await expect(
+      queryLocalAcpRateLimits({ ...options(), spawnImpl: runtime.spawnImpl })
+    ).rejects.toThrow('unavailable');
+    expect(runtime.exited()).toBe(true);
+  });
+
+  it('preserves exhausted finite quota even when the provider reports no available quota', () => {
+    const payload = quota(0);
+    payload.quotaSnapshots.premium_interactions.hasQuota = false;
+    expect(parseCopilotQuota(payload).rateLimits[0]?.windows[0]?.usedPercent).toBe(100);
+    expect(
+      parseCopilotQuota({
+        quotaSnapshots: {
+          premium_interactions: {
+            isUnlimitedEntitlement: false,
+            remainingPercentage: 100,
+          },
+        },
+      }).rateLimits[0]?.windows[0]?.usedPercent
+    ).toBe(0);
+    for (const value of [NaN, Infinity, -Infinity])
+      expect(() => parseCopilotQuota(quota(value))).toThrow('unavailable');
+  });
+
+  it.each(['login', 'unsupported', 'version', 'oversized'])(
+    'releases the child after %s failure',
+    async (mode) => {
+      const runtime = setup(quota(50), mode);
+      await expect(
+        queryLocalAcpRateLimits({ ...options(), spawnImpl: runtime.spawnImpl })
+      ).rejects.toThrow();
+      expect(runtime.exited()).toBe(true);
+    }
+  );
+
+  it('bounds an unresponsive SDK connection with a deadline', async () => {
+    vi.useFakeTimers();
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    const stderr = new PassThrough();
+    try {
+      const result = readCopilotQuota(
+        { stdout, stdin, stderr } as ChildProcess,
+        new Promise<never>(() => {})
+      );
+      const rejected = expect(result).rejects.toThrow('timed out');
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+    } finally {
+      stdout.destroy();
+      stdin.destroy();
+      stderr.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels raw quota work and confirms exit before a subsequent read', async () => {
+    let ready = () => {};
+    const waiting = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const runtime = setup(quota(50), 'wait', ready);
+    const controller = new AbortController();
+    const result = queryLocalAcpRateLimits({
+      ...options(),
+      signal: controller.signal,
+      spawnImpl: runtime.spawnImpl,
+    });
+    const rejected = expect(result).rejects.toThrow();
+    await waiting;
+    controller.abort();
+    await rejected;
+    expect(runtime.exited()).toBe(true);
+    vi.restoreAllMocks();
+    const next = setup(quota(50));
+    expect(
+      (await queryLocalAcpRateLimits({ ...options(), spawnImpl: next.spawnImpl })).rateLimits[0]
+        ?.windows[0]?.usedPercent
+    ).toBe(50);
+    expect(next.exited()).toBe(true);
   });
 });
