@@ -80,4 +80,4 @@ isolated execution of the actual row builder and its actual grouping/folding
 helpers passes these scenarios, with unrelated footer/subagent services stubbed.
 This is narrower than a component test or visual desktop verification.
 
-Thought-only DSH groups now default closed, including under expanded finished work. Explicit expansion and search reveal still work. Regression coverage includes the default, toggling and separate groups.
+Thought-only groups default closed, including under expanded finished work. Adjacent thoughts and tools share a disclosure across every provider; explicit expansion and search reveal preserve their order. Prose still separates groups.
