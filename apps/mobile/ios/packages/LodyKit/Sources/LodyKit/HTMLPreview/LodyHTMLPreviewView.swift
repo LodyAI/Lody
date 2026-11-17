@@ -31,13 +31,19 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
   private var resourceBytes = 0
   private weak var scrollOwner: UIViewController?
   private var handle = ""
+  private var requestedPath: String?
+  private var documentPath = ""
 
-  func setHandle(_ handle: String) {
-    if self.handle == handle, webView != nil { return }
+  /// `documentPath` is the path the user opened. The computer reports a workspace file by
+  /// its relative path, but resources resolve against the opened absolute path, as on disk.
+  func setHandle(_ handle: String, documentPath: String? = nil) {
+    if self.handle == handle, requestedPath == documentPath, webView != nil { return }
     self.handle = handle
+    requestedPath = documentPath
     guard let stored = ContentStore.shared.get(handle) else { fail("content_expired"); return }
     stopLoading()
     content = stored
+    self.documentPath = documentPath ?? stored.path
     resourceCount = 0
     resourceBytes = 0
     issues.removeAll()
@@ -64,7 +70,7 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
     isAccessibilityElement = false
     addSubview(web)
     webView = web
-    let url = HTMLPreviewResource.url(path: stored.path, host: UUID().uuidString.lowercased())
+    let url = HTMLPreviewResource.url(path: self.documentPath, host: UUID().uuidString.lowercased())
     documentURL = url
     initialNavigation = true
     // WebKit content filters accept a regex subset; use separate host rules.
@@ -81,18 +87,18 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
   }
 
   fileprivate func start(_ task: WKURLSchemeTask) {
-    guard let url = task.request.url, let root = documentURL, let content,
-      url.host == root.host, task.request.httpMethod == "GET" else {
+    guard let url = task.request.url, let root = documentURL, let host = root.host, let content,
+      url.host == host, task.request.httpMethod == "GET" else {
       task.didFailWithError(NSError(domain: "LodyKit.HTMLPreview", code: 1)); return
     }
     if url.path == root.path {
-      guard let protected = HTMLPreviewDocumentPolicy.protect(content.data) else {
+      guard let protected = HTMLPreviewDocumentPolicy.protect(HTMLPreviewResource.rewriteFileURLs(content.data, host: host)) else {
         fail(task, code: "resource_failed"); return
       }
       finish(task, data: protected, mime: "text/html")
       return
     }
-    guard url.path.hasPrefix(HTMLPreviewResource.filePrefix) else {
+    guard let path = HTMLPreviewResource.path(url, documentPath: documentPath) else {
       fail(task, code: "root_path_unavailable")
       return
     }
@@ -100,7 +106,6 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
     guard resourceCount <= 128 else { fail(task, code: "resource_limit"); return }
     let id = UUID().uuidString
     requests[id] = task
-    let path = HTMLPreviewResource.path(url, documentPath: content.path)
     onResourceRequest(["id": id, "path": path])
     resourceRequested?(id, path)
   }
@@ -124,7 +129,9 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
       resourceBytes += resource.data.count
       guard resourceBytes <= 16 * 1024 * 1024 else { fail(task, code: "resource_limit"); continue }
       let mime = resource.mimeType ?? UTType(filenameExtension: (resource.path as NSString).pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-      finish(task, data: resource.data, mime: mime)
+      // Stylesheets name images and fonts by `file://` URL as often as documents do.
+      let data = mime == "text/css" ? HTMLPreviewResource.rewriteFileURLs(resource.data, host: documentURL?.host ?? "") : resource.data
+      finish(task, data: data, mime: mime)
     }
   }
 
@@ -156,12 +163,13 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
   }
 
   private func record(url: URL, reference: String, kind: String, code: String) {
-    guard let content else { return }
+    guard content != nil else { return }
     var issue = ["reference": HTMLPreviewResource.safeReference(reference), "kind": String(kind.prefix(32)), "code": code]
     let key = HTMLPreviewResource.safeReference(url.absoluteString)
     guard issues[key] != nil || issues.count < 128 else { return }
-    if url.scheme == HTMLPreviewResource.scheme, url.path.hasPrefix(HTMLPreviewResource.filePrefix) {
-      issue["path"] = HTMLPreviewResource.path(url, documentPath: content.path)
+    if url.scheme == HTMLPreviewResource.scheme, url.host == documentURL?.host,
+      let path = HTMLPreviewResource.path(url, documentPath: documentPath) {
+      issue["path"] = path
       if reference.hasPrefix(HTMLPreviewResource.scheme + ":") || reference == url.path { issue["reference"] = issue["path"] }
     }
     if let old = issues[key], old["code"] != "resource_failed", code == "resource_failed" {
@@ -274,7 +282,7 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
   override func layoutSubviews() { super.layoutSubviews(); webView?.frame = bounds; attachScrollOwner() }
   override func didMoveToWindow() {
     super.didMoveToWindow()
-    if window != nil, webView == nil, !handle.isEmpty { setHandle(handle) }
+    if window != nil, webView == nil, !handle.isEmpty { setHandle(handle, documentPath: requestedPath) }
     attachScrollOwner()
   }
 

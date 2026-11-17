@@ -6,6 +6,11 @@ struct ChatFileLink {
 
   init?(_ href: String) {
     var value = href.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\\", with: "/")
+    // `file:///Users/a/report.html` and `file:///C:/a/report.html` name a file on the session's computer.
+    if let range = value.range(of: #"^file://(?:localhost)?/"#, options: [.regularExpression, .caseInsensitive]) {
+      let rest = String(value[range.upperBound...])
+      value = rest.range(of: #"^[A-Za-z]:/"#, options: .regularExpression) != nil ? rest : "/" + rest
+    }
     let suffix = #"(?:#L([1-9][0-9]*)(?:C[0-9]+)?(?:-L?[0-9]+(?:C[0-9]+)?)?|:L([1-9][0-9]*)(?:C[0-9]+)?|:([1-9][0-9]*)(?::[0-9]+)?)$"#
     var start: Int?
     if let range = value.range(of: suffix, options: .regularExpression) {
