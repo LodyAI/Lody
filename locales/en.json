@@ -2253,6 +2253,7 @@
   "sessions.operationReply.expand": "View full reply",
   "sessions.openedBy.deletedSession": "Deleted session",
   "sessions.openedBy.expand": "Show {{count}} opened sessions",
+  "sessions.openedBy.agentRoleOnProvider": "{{role}} (Agent Role) · {{provider}}",
   "sessions.openedBy.backToOpener": "Back to session",
   "sessions.openedBy.openOpener": "Opened by",
   "sessions.openedBy.openedSessions": "Opened sessions",
