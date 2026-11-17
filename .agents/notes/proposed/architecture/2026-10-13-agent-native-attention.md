@@ -41,6 +41,7 @@ The owner reversed part of the independent-channel decision. If any of the user'
   - the window is visible and focused;
   - there has been keyboard or pointer input within five minutes.
 - **Write rate:** focus changes are debounced by one second, and the entry rides the existing 30s presence heartbeat. Blur, hide, idle and teardown delete it actively.
+- **Sleep and lock:** Electron main forwards `powerMonitor` suspend/resume and lock/unlock as `app.powerState`. Suspend or lock deletes the entry immediately, without debounce. Suspend and lock are tracked separately, so a resume while the screen stays locked does not restore suppression. Linux has no lock events and relies on idle and the TTL.
 - **Host side:** `MessageHandler.notifyTurnOutcome` checks the recipient across the presence replicas of every workspace the daemon hosts. A fresh entry skips only `notifySessionCompleted`; the silent Live Activity summary still syncs.
 - **Fail-open:** only a fresh entry suppresses. Absence, staleness, an unjoined room and read failures all send.
 
@@ -55,7 +56,7 @@ Accepted gaps:
 
 - A desktop focused on a workspace the finishing Host does not host is invisible to it, so the phone still rings.
 - Old CLIs and old desktops keep sending.
-- A crashed desktop may suppress pushes for up to the 90s TTL.
+- A crashed desktop, or one whose suspend event never reaches the renderer, may suppress pushes for up to the 90s TTL.
 - Focus without input for under five minutes still counts.
 - The entry tells workspace members and the Streams service that the user is at a desktop.
 

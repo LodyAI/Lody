@@ -21,6 +21,7 @@ import {
   type PresenceTransportLike,
 } from '../src/providers/workspace-presence-transport';
 import { mergePresenceSnapshots } from '../src/providers/presence-snapshot-merge';
+import type { ElectronPowerState } from '@lody/shared/electron-ipc';
 import {
   DESKTOP_FOREGROUND_DEBOUNCE_MS,
   DESKTOP_FOREGROUND_IDLE_MS,
@@ -1001,7 +1002,11 @@ describe('desktop-foreground-presence', () => {
   const createEnv = (start: number) => {
     let foreground = true;
     let now = start;
-    const listeners = { onFocusChange: () => {}, onInput: () => {} };
+    const listeners: {
+      onFocusChange: () => void;
+      onInput: () => void;
+      onPowerState: (state: ElectronPowerState) => void;
+    } = { onFocusChange: () => {}, onInput: () => {}, onPowerState: () => {} };
     return {
       env: {
         isForeground: () => foreground,
@@ -1017,6 +1022,9 @@ describe('desktop-foreground-presence', () => {
       },
       input() {
         listeners.onInput();
+      },
+      power(state: ElectronPowerState) {
+        listeners.onPowerState(state);
       },
       advance(ms: number) {
         now += ms;
@@ -1069,6 +1077,34 @@ describe('desktop-foreground-presence', () => {
       expect(published).toEqual(['user-1', null]);
 
       // Returning to the keyboard restores suppression.
+      harness.input();
+      harness.advance(DESKTOP_FOREGROUND_DEBOUNCE_MS);
+      expect(published).toEqual(['user-1', null, 'user-1']);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets the phone ring immediately when the computer sleeps or locks, and only after unlock resumes suppression', () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createEnv(0);
+      const published: (string | null)[] = [];
+      const stop = startDesktopForegroundPublisher({
+        userId: 'user-1',
+        publish: (value) => published.push(value),
+        env: harness.env,
+      });
+      // Withdrawn without waiting for the debounce or the presence TTL.
+      harness.power('lock-screen');
+      expect(published).toEqual(['user-1', null]);
+      harness.power('suspend');
+      // Waking from sleep while the screen is still locked does not suppress again.
+      harness.power('resume');
+      harness.advance(DESKTOP_FOREGROUND_DEBOUNCE_MS);
+      expect(published).toEqual(['user-1', null]);
+      harness.power('unlock-screen');
       harness.input();
       harness.advance(DESKTOP_FOREGROUND_DEBOUNCE_MS);
       expect(published).toEqual(['user-1', null, 'user-1']);

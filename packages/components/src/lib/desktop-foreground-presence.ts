@@ -1,4 +1,6 @@
 import { isAppForeground } from '@/lib/session-completion-notification';
+import { onIpcEvent } from '@/lib/electron-ipc-client';
+import type { ElectronPowerState } from '@lody/shared/electron-ipc';
 
 /** Focus flapping (alt-tab bursts) collapses into at most one presence write per window. */
 export const DESKTOP_FOREGROUND_DEBOUNCE_MS = 1_000;
@@ -14,8 +16,12 @@ export type DesktopForegroundEnvironment = {
   /** Window visible and focused. */
   isForeground(): boolean;
   now(): number;
-  /** Subscribe to focus/visibility transitions and to user input; returns the unsubscribe. */
-  subscribe(listeners: { onFocusChange: () => void; onInput: () => void }): () => void;
+  /** Subscribe to focus/visibility transitions, user input and OS sleep/lock; returns the unsubscribe. */
+  subscribe(listeners: {
+    onFocusChange: () => void;
+    onInput: () => void;
+    onPowerState: (state: ElectronPowerState) => void;
+  }): () => void;
 };
 
 /**
@@ -33,9 +39,16 @@ export function startDesktopForegroundPublisher(args: {
   const { userId, publish, env } = args;
   let lastInputAt = env.now();
   let published = false;
+  // Tracked separately: macOS can resume from sleep while the screen stays locked.
+  let suspended = false;
+  let locked = false;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const desired = () => env.isForeground() && env.now() - lastInputAt < DESKTOP_FOREGROUND_IDLE_MS;
+  const desired = () =>
+    !suspended &&
+    !locked &&
+    env.isForeground() &&
+    env.now() - lastInputAt < DESKTOP_FOREGROUND_IDLE_MS;
   const apply = () => {
     debounceTimer = null;
     const want = desired();
@@ -54,6 +67,19 @@ export function startDesktopForegroundPublisher(args: {
       lastInputAt = env.now();
       // Only input that ends an idle period can change the verdict.
       if (!published && !debounceTimer && env.isForeground()) schedule();
+    },
+    onPowerState: (state) => {
+      if (state === 'suspend') suspended = true;
+      else if (state === 'resume') suspended = false;
+      else if (state === 'lock-screen') locked = true;
+      else locked = false;
+      if (!suspended && !locked) {
+        schedule();
+        return;
+      }
+      // Sleep/lock withdraws at once: the renderer may freeze before a debounce fires.
+      if (debounceTimer) clearTimeout(debounceTimer);
+      apply();
     },
   });
   const idleCheck = setInterval(() => {
@@ -77,13 +103,15 @@ export function createBrowserDesktopForegroundEnvironment(): DesktopForegroundEn
   return {
     isForeground: isAppForeground,
     now: () => Date.now(),
-    subscribe: ({ onFocusChange, onInput }) => {
+    subscribe: ({ onFocusChange, onInput, onPowerState }) => {
       const options = { capture: true, passive: true } as const;
       window.addEventListener('focus', onFocusChange);
       window.addEventListener('blur', onFocusChange);
       document.addEventListener('visibilitychange', onFocusChange);
       for (const type of INPUT_EVENTS) window.addEventListener(type, onInput, options);
+      const stopPower = onIpcEvent('app.powerState', onPowerState);
       return () => {
+        stopPower();
         window.removeEventListener('focus', onFocusChange);
         window.removeEventListener('blur', onFocusChange);
         document.removeEventListener('visibilitychange', onFocusChange);

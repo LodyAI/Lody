@@ -15,6 +15,7 @@ import type {
   PreparedWindowTarget,
   GlobalShortcutTriggeredPayload,
   SessionCompletionNotificationClickPayload,
+  ElectronPowerState,
 } from './electron-ipc';
 
 export type IpcPushMap = {
@@ -43,6 +44,8 @@ export type IpcPushMap = {
   'app.activatePreparedWindow': PreparedWindowTarget;
   /** Re-read hint only: the renderer learns the exact reason from its own refresh. */
   'e2ee.accessLost': { workspaceId: string };
+  /** OS sleep/lock transitions; lock events exist on macOS and Windows only. */
+  'app.powerState': ElectronPowerState;
 };
 
 export type IpcSendMap = {
@@ -80,6 +83,7 @@ export const IPC_PUSH_CHANNELS = {
   appPrepareWindowTarget: 'app.prepareWindowTarget',
   appActivatePreparedWindow: 'app.activatePreparedWindow',
   e2eeAccessLost: 'e2ee.accessLost',
+  appPowerState: 'app.powerState',
 } as const satisfies { [K: string]: keyof IpcPushMap };
 
 export const IPC_SEND_CHANNELS = {
