@@ -1,3 +1,4 @@
+import { isHandledShortcutTokenError } from '@/lib/shortcut-token-attempt';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { hashAnalyticsId, isConvexUnauthenticatedError } from '@lody/shared';
 import { deferredPostHog } from '@/lib/deferred-posthog';
@@ -123,6 +124,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       variant: this.props.variant ?? 'section',
       componentStack: info.componentStack ?? null,
     });
+    if (isHandledShortcutTokenError(error)) return;
     // Authoritative crash report: send the full exception (stack + component
     // stack) to PostHog error tracking. posthog-js groups by the exception
     // itself; the boundary name and React component stack ride along as

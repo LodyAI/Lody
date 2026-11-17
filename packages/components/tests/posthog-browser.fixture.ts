@@ -1,3 +1,4 @@
+import { ShortcutTokenAttempts, shortcutTokenDiagnostic } from '../src/lib/shortcut-token-attempt';
 import { createIrohDaily } from '../src/lib/iroh-daily';
 import { POSTHOG_OPTIONS } from '../src/providers/posthog-options';
 import {
@@ -8,6 +9,8 @@ import {
 } from '../src/lib/posthog-privacy';
 Object.assign(window, {
   POSTHOG_OPTIONS,
+  ShortcutTokenAttempts,
+  shortcutTokenDiagnostic,
   createIrohDaily,
   postHogPrivacy,
   installWorkspaceTelemetryScope,

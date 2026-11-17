@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { build } from 'vite';
 import { chromium, webkit } from '@playwright/test';
 
+const shortcutOnly = process.argv.includes('--shortcut-only');
 const dailyOnly = process.argv.includes('--daily-only');
 const root = fileURLToPath(new URL('..', import.meta.url));
 const require = createRequire(import.meta.url);
@@ -203,6 +204,8 @@ async function setup(browser, shell = 'web', late = false, compressed = false) {
         ...options,
         api_host: receiverOrigin,
         opt_out_useragent_filter: true,
+        // The test must measure our boundary, not the SDK's default burst limiter.
+        rate_limiting: { events_per_second: 10000, events_burst_limit: 10000 },
         on_request_error: () => {
           window.requestFailures = (window.requestFailures ?? 0) + 1;
         },
@@ -244,17 +247,22 @@ async function setup(browser, shell = 'web', late = false, compressed = false) {
 }
 
 async function barrier(page) {
-  const response = page.waitForResponse((res) => res.url().includes('/barrier/'));
-  await page.evaluate(() => {
+  // Observe the receiver, not a private SDK URL option (the locked SDK routes
+  // capture requests to /e/). Subscribe before triggering the flush.
+  const id = crypto.randomUUID();
+  const batches = on(ingestion, 'batch', { signal: AbortSignal.timeout(10_000) });
+  const delivered = (async () => {
+    for await (const _ of batches) {
+      if (allEvents().some((event) => event.properties?.barrier_id === id)) return;
+    }
+  })();
+  await page.evaluate((barrierId) => {
     window.flush();
-    window.posthog.capture(
-      'probe/barrier',
-      {},
-      { send_instantly: true, _url: location.origin + '/barrier/' }
-    );
-  });
-  await response;
+    window.posthog.capture('probe/barrier', { barrier_id: barrierId }, { send_instantly: true });
+  }, id);
+  await delivered;
 }
+
 async function flushRecording(page) {
   await page.click('body > button');
   await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
@@ -273,6 +281,156 @@ try {
   ]) {
     const browser = await engine.launch({ headless: true });
     try {
+      if (!dailyOnly && !negative) {
+        received.length = 0;
+        const { page } = await setup(browser);
+        try {
+          await page.evaluate(async () => {
+            window.change('account/plain/workspace');
+            window.shortcutReply = {
+              ok: false,
+              failure: { kind: 'retryable', code: 'exchange_unavailable', phase: 'exchange' },
+            };
+            window.shortcutRequest = {
+              workspaceId: 'LOCAL_WORKSPACE_SECRET',
+              target: { kind: 'body', bodyDocId: 'LOCAL_BODY_SECRET' },
+              write: false,
+            };
+            window.shortcutOwner = new window.ShortcutTokenAttempts({
+              attempt: async () => window.shortcutReply,
+              legacy: async () => {
+                throw new Error('unexpected fallback');
+              },
+              report: (failure) => {
+                const diagnostic = window.shortcutTokenDiagnostic(failure);
+                window.posthog.captureException(diagnostic.error, diagnostic.properties);
+              },
+              active: () => true,
+              authRejected: () => {},
+            });
+            for (let i = 0; i < 100; i++)
+              try {
+                await window.shortcutOwner.grant(window.shortcutRequest);
+              } catch (error) {
+                // Exercise both explicit SDK capture and its global rejection listener.
+                window.posthog.captureException(error);
+                window.dispatchEvent(
+                  new PromiseRejectionEvent('unhandledrejection', {
+                    reason: error,
+                    promise: Promise.resolve(),
+                  })
+                );
+              }
+          });
+          const exceptions = () => allEvents().filter((event) => event.event === '$exception');
+          const waitForExceptionCount = async (count) => {
+            const batches = on(ingestion, 'batch', { signal: AbortSignal.timeout(10_000) });
+            try {
+              await barrier(page);
+              while (exceptions().length < count) await batches.next();
+            } finally {
+              await batches.return();
+            }
+          };
+          await waitForExceptionCount(1);
+          assert.equal(
+            exceptions().length,
+            1,
+            '100 handled retries must send exactly one exception'
+          );
+          assert.equal(exceptions()[0].properties.error_code, 'shortcut_exchange_unavailable');
+          assert.equal(exceptions()[0].properties.shortcut_phase, 'exchange');
+          assert.equal(wire().includes('LOCAL_WORKSPACE_SECRET'), false);
+          assert.equal(wire().includes('LOCAL_BODY_SECRET'), false);
+          assert.deepEqual(await page.evaluate(() => window.shortcutOwner.counts()), [100]);
+          await page.evaluate(async () => {
+            window.shortcutReply = {
+              ok: true,
+              grant: {
+                token: 'LOCAL_TOKEN_SECRET',
+                expiresIn: 900,
+                gatewayBaseUrl: 'https://gateway.test',
+                streamId: 'LOCAL_BODY_SECRET',
+              },
+            };
+            await window.shortcutOwner.grant(window.shortcutRequest);
+            window.shortcutReply = {
+              ok: false,
+              failure: { kind: 'retryable', code: 'exchange_unavailable', phase: 'exchange' },
+            };
+            try {
+              await window.shortcutOwner.grant(window.shortcutRequest);
+            } catch (error) {
+              window.posthog.captureException(error);
+            }
+            window.shortcutReply = {
+              ok: false,
+              failure: { kind: 'fatal', code: 'exchange_invalid', phase: 'exchange' },
+            };
+            try {
+              await window.shortcutOwner.grant(window.shortcutRequest);
+            } catch (error) {
+              window.posthog.captureException(error);
+            }
+            window.shortcutOwner.dispose();
+          });
+          await waitForExceptionCount(3);
+          assert.equal(
+            exceptions().length,
+            3,
+            'recovery and a distinct fault each retain their diagnostic'
+          );
+          await page.evaluate(async () => {
+            const peer = new window.ShortcutTokenAttempts({
+              attempt: async () => window.shortcutReply,
+              legacy: async () => {
+                throw new Error('unexpected fallback');
+              },
+              report: (failure) => {
+                const diagnostic = window.shortcutTokenDiagnostic(failure);
+                window.posthog.captureException(diagnostic.error, diagnostic.properties);
+              },
+              active: () => true,
+              authRejected: () => {},
+            });
+            try {
+              await peer.grant(window.shortcutRequest);
+            } catch (error) {
+              window.posthog.captureException(error);
+            }
+            window.shortcutReply = {
+              ok: false,
+              failure: { kind: 'denied', code: 'unauthenticated', phase: 'authorize' },
+            };
+            for (let i = 0; i < 100; i++)
+              try {
+                await peer.grant(window.shortcutRequest);
+              } catch (error) {
+                window.posthog.captureException(error);
+              }
+            peer.dispose();
+            window.posthog.captureException(new Error('Independent synthetic platform fault'));
+          });
+          await waitForExceptionCount(5);
+          assert.equal(
+            exceptions().length,
+            5,
+            'independent owner and unknown fault stay visible; expected auth denials add no exceptions'
+          );
+          assert.equal(wire().includes('LOCAL_TOKEN_SECRET'), false);
+          assert.equal(
+            allEvents().some((event) => event.event.startsWith('shortcut/')),
+            false,
+            'no per-retry analytics replacement'
+          );
+          console.log(
+            `${name}: Shortcut 100 retries -> 1 ingested exception; recovery + distinct fault -> 3; independent owner + platform fault -> 5 PASS`
+          );
+        } finally {
+          await page.close();
+        }
+      }
+      if (shortcutOnly) continue;
       for (const shell of shells) {
         if (dailyOnly && shell === 'web') continue;
         received.length = 0;

@@ -1,3 +1,4 @@
+import { isHandledShortcutTokenEvent } from '@/lib/shortcut-token-attempt';
 import { sanitizeIrohDailyProperties } from '@/lib/iroh-daily';
 import type posthog from 'posthog-js';
 import { isConvexAuthErrorData } from '@lody/shared';
@@ -186,7 +187,11 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
     if (!event) {
       return event;
     }
-    if (isUnauthenticatedPostHogEvent(event) || isResizeObserverLoopPostHogEvent(event)) {
+    if (
+      isHandledShortcutTokenEvent(event) ||
+      isUnauthenticatedPostHogEvent(event) ||
+      isResizeObserverLoopPostHogEvent(event)
+    ) {
       return null;
     }
     if (event.event === 'e2ee/iroh_daily') {

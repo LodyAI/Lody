@@ -1,5 +1,10 @@
 /** Fixed diagnostics vocabulary. Never infer a safe code from an error message. */
 const TELEMETRY_ERROR_CODES = new Set([
+  'shortcut_exchange_unavailable',
+  'shortcut_exchange_rejected',
+  'shortcut_exchange_invalid',
+  'shortcut_exchange_not_configured',
+  'shortcut_token_expired',
   'e2ee_feature_unavailable',
   'workspace_mode_mismatch',
   'workspace_mode_admission_timeout',
@@ -103,6 +108,23 @@ export function redactedTelemetryException(
   return {
     $exception_list: [{ type: errorType === 'unknown' ? 'Error' : errorType, value: code }],
     error_code: code,
+    ...(code.startsWith('shortcut_')
+      ? {
+          shortcut_phase: fixed(properties.shortcut_phase, [
+            'authorize',
+            'register',
+            'exchange',
+            'reauthorize',
+            'delivery',
+          ]),
+          ...(typeof properties.shortcut_status === 'number' &&
+          Number.isInteger(properties.shortcut_status) &&
+          properties.shortcut_status >= 100 &&
+          properties.shortcut_status <= 599
+            ? { shortcut_status: properties.shortcut_status }
+            : {}),
+        }
+      : {}),
     error_type: errorType,
     source,
     platform,
