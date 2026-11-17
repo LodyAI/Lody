@@ -36,11 +36,34 @@ reuse the foreground remote cursor. Before producing candidates, the coordinator
 high-water timestamp index of at most 1000 entries, so sessions evicted by the 64-entry snapshot LRU
 are not re-queued on every startup; that index reads neither the Doc nor history. The parent thread
 re-reads the snapshot checkpoint before creating the Worker and the Loro WASM, completing immediately
-on a hit; the Worker reads it once more to close the cross-window race. All windows of the same
+on a hit; the Worker also checks it before importing cached data. All windows of the same
 workspace share a `[workspaceId, roomId]` cache scope, so a slower write on the same plane cannot
 lower the checkpoint. The receiving side creates no business fields; the local adapter still follows
 the existing version-negotiation protocol. The cloud Worker uses the same explicit Streams endpoint as
 the already mounted foreground transport.
+
+Across windows, a non-waiting Web Lock claims workspace, room, cache scope, account,
+transport plane and cloud destination before checking the cache and starting a Worker.
+The claim remains held through the snapshot transaction and Worker termination; a
+contender or an unavailable lock skips optional prefetch. Window destruction releases
+its claim and child Worker. An explicit `ready` message precedes `start`: a module
+Worker can dispatch messages while its top-level WASM initialization is still pending.
+Sending `start` immediately can lose it before the handler exists.
+
+Cache refusal returns `cache_rejected`, never `synced` or a high-water timestamp.
+A separate bounded IndexedDB index remembers the same claim/activity for thirty
+minutes across windows and restarts; the coordinator also suppresses reseeds within
+its runtime. New activity bypasses the refusal. Expiry permits retry on a later
+scheduling edge, without a polling timer. Up to 1,000 refusal records are retained;
+if that metadata write fails, the runtime keeps a bounded memory fallback. That
+fallback cannot provide rejection persistence to other windows or after reload.
+Foreground opening still cancels prefetch and uses the existing merge/sync path.
+The 128 MiB/64-entry snapshot cap is unchanged. Cache clearing includes this index.
+
+This keeps the published Promise Repo/transport consumer boundary from the
+[rollback decision](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.md).
+Introducing another consumer kernel would expand this download-admission fix;
+the browser lock owns cross-window exclusion, which an in-process semaphore cannot.
 
 Task cancellation terminates the Worker from the parent thread and sends a local peer detach; this
 does not depend on a Worker that is executing synchronous WASM handling a cancel message. Opening the
@@ -62,21 +85,17 @@ HistoryWriter's responsibility. The current guarantees are written into the
 
 ## Verification and limits
 
-New deterministic tests cover: no Worker created on a checkpoint hit, a Worker created after an
-activity update, serial tasks, detach on cancellation, slot release after an asynchronously routed
-cancellation, Worker error/destruction, and merging a real Loro update cache with unuploaded
-foreground edits. The chunking case explicitly delays the final chunk to confirm the snapshot is not
-saved early. The original scheduler tests are retained; the separate policy-constant test file is
-deleted because the same assertion already exists in the scheduler suite. Verification used
-temporary isolated dependencies rather than a full install in a nested checkout.
-
-Isolated verification passed 36 tests, three of which are temporary probes for IndexedDB persistence,
-capacity, and cross-window checkpoint monotonicity. The Worker module's typecheck and the browser
-Worker build under Vite 6.4.1 also passed. The repository-wide document check and public-boundary
-check are blocked by uninitialized ACP submodules; neither a full application build nor a full
-typecheck was run. The new shared subpath only re-exports existing snapshot codecs and introduces no
-dependency version change.
-
-There is no real user-conversation fixture and no real long-conversation performance test. The Worker
-and the UI still share device memory and CPU, so thread isolation must not be read as unlimited memory
-or complete freedom from resource contention.
+The [worker suite](../../../../packages/components/tests/eager-sync-worker.test.ts) uses
+real CRDT updates, delays the final local chunk, checks refused/failed cache writes,
+and merges remote history without losing unsent foreground edits. The
+[coordinator suite](../../../../packages/components/tests/background-sync-coordinator.test.ts)
+checks bounded candidates, environment gates, rejection without false high-water,
+new activity and event-driven expiry. The
+[browser acceptance](../../../../packages/components/tests/eager-sync-browser.integration.mjs)
+uses actual Chromium windows, Workers, HTTP downloads and IndexedDB to check claims,
+committed cache reuse, cancellation, owner-window closure and durable rejection.
+Refusal is injected after downloading synthetic bytes rather than allocating a
+128 MiB history; no real conversation fixtures or production traffic measurements
+are involved. Browser storage partitioning bounds sharing; separate profiles,
+origins or Electron partitions do not share these claims. Installed desktop/mobile
+acceptance and real long-conversation memory/performance remain separate.

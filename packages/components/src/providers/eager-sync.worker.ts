@@ -67,3 +67,7 @@ worker.onmessage = ({ data }) => {
     );
   }
 };
+
+// Module Workers may dispatch messages while top-level WASM imports are pending.
+// Admit the start request only after the handler above exists.
+worker.postMessage({ type: 'ready' });

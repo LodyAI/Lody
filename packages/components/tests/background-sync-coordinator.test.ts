@@ -421,3 +421,36 @@ describe('createBackgroundSyncCoordinator', () => {
     expect(prefetcher.calls.includes(sid('b'))).toBe(true);
   });
 });
+
+it('does not turn cache rejection into sync success or re-download on unrelated reseeds', async () => {
+  const highWater = createFakeHighWaterStore();
+  const h = setup({
+    activity: [{ sessionId: sid('large'), lastMessageAt: 1 }],
+    highWaterStore: highWater.port,
+  });
+  h.coordinator.start();
+  await tick();
+  h.prefetcher.resolve(sid('large'), 'cache_rejected');
+  await tick();
+  expect(highWater.values.get(sid('large'))).toBeUndefined();
+  h.activity.emit({ sessionId: sid('other'), lastMessageAt: 2 });
+  h.env.set({ visible: false });
+  h.env.set({ visible: true });
+  await tick();
+  expect(h.prefetcher.isPending(sid('large'))).toBe(false);
+  expect(h.coordinator.getState().queued).not.toContain(sid('large'));
+  // A real activity revision remains eligible immediately.
+  h.activity.emit({ sessionId: sid('large'), lastMessageAt: 3 });
+  await tick();
+  expect(h.prefetcher.isPending(sid('large'))).toBe(true);
+  h.prefetcher.resolve(sid('large'), 'cache_rejected');
+  await tick();
+  h.time.advance(30 * 60 * 1000);
+  // Expiry does not install a polling loop. A later genuine scheduling edge retries.
+  expect(h.prefetcher.isPending(sid('large'))).toBe(false);
+  h.activity.emit({ sessionId: sid('other'), lastMessageAt: 4 });
+  await tick();
+  expect(h.prefetcher.isPending(sid('large'))).toBe(true);
+  h.coordinator.stop();
+  await tick();
+});

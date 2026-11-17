@@ -4805,6 +4805,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         content: { mode: deps.content.mode },
         workspaceId,
         scope: eagerSyncScope,
+        authorizationScope: deps.accountId ?? `local:${workspaceId}`,
         localConnection: createLocalLoroDataPlaneConnection,
         resolveTransport: async (roomId) => {
           await targetRouter.prepareDocTarget(roomId);

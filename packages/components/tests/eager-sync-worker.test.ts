@@ -32,7 +32,9 @@ class TestWorker {
   onmessageerror: (() => void) | null = null;
   terminated = false;
   inputs: EagerSyncWorkerInput[] = [];
-  constructor(private start: (worker: TestWorker) => void) {}
+  constructor(private start: (worker: TestWorker) => void, ready = true) {
+    if (ready) queueMicrotask(() => this.emit({ type: 'ready' }));
+  }
   postMessage(input: EagerSyncWorkerInput) {
     if (this.terminated) throw new Error('Posting to a terminated worker');
     this.inputs.push(input);
@@ -52,9 +54,11 @@ function clientHarness(
     undefined,
   auth: (context?: EagerSyncAuthContext) => Promise<string | undefined> = async () => {
     throw new Error('Local prefetch must never request cloud credentials');
-  }
+  },
+  ready = true
 ) {
   const starts = [deferred<TestWorker>(), deferred<TestWorker>(), deferred<TestWorker>()];
+  const created = deferred<TestWorker>();
   const workers: TestWorker[] = [];
   const sent: LocalSyncMessage[] = [];
   const listeners = new Set<(event: LocalSyncEvent) => void>();
@@ -62,12 +66,14 @@ function clientHarness(
     content: { mode: 'plaintext' },
     workspaceId: 'workspace',
     scope: 'scope',
+    authorizationScope: 'account',
     resolveTransport,
     readSnapshot,
     auth,
     createWorker: () => {
       const index = workers.length;
-      const worker = new TestWorker((started) => starts[index].resolve(started));
+      const worker = new TestWorker((started) => starts[index].resolve(started), ready);
+      created.resolve(worker);
       workers.push(worker);
       return worker as unknown as Worker;
     },
@@ -88,7 +94,7 @@ function clientHarness(
       dispose() {},
     }),
   });
-  return { client, starts, workers, sent, listeners };
+  return { client, starts, workers, sent, listeners, created };
 }
 
 describe('worker raw-document prefetch', () => {
@@ -104,6 +110,7 @@ describe('worker raw-document prefetch', () => {
     const listeners = new Set<(event: LocalSyncEvent) => void>();
     let joins = 0;
     let failWrite = false;
+    let rejectWrite = false;
     const joinedBeforeLastChunk = deferred<void>();
     let deliverLastChunk: () => void = () => {
       throw new Error('No pending chunk');
@@ -124,6 +131,7 @@ describe('worker raw-document prefetch', () => {
       readSnapshot: async () => cached,
       writeSnapshot: async (row) => {
         if (failWrite) throw new Error('disk full');
+        if (rejectWrite) return false;
         cached = { ...row, key: 'snapshot' };
         return true;
       },
@@ -212,6 +220,12 @@ describe('worker raw-document prefetch', () => {
     // A durable checkpoint avoids reopening the transport, including on restart.
     expect(await runEagerSyncWorkerTask({ ...request, lastMessageAt: 2 }, deps)).toBe('synced');
     expect(joins).toBe(2);
+    rejectWrite = true;
+    expect(await runEagerSyncWorkerTask({ ...request, lastMessageAt: 3 }, deps)).toBe(
+      'cache_rejected'
+    );
+    expect(cached?.lastMessageAt).toBe(2);
+    rejectWrite = false;
     failWrite = true;
     await expect(runEagerSyncWorkerTask({ ...request, lastMessageAt: 3 }, deps)).rejects.toThrow(
       'disk full'
@@ -308,4 +322,21 @@ describe('eager-sync cloud auth bridge', () => {
     expect(await result).toBe('synced');
     h.client.dispose();
   });
+});
+
+
+it('cancels a worker still initializing WASM without attaching a local peer', async () => {
+  const h = clientHarness(undefined, undefined, undefined, false);
+  const controller = new AbortController();
+  const outcome = h.client.prefetch('initializing', 1, controller.signal);
+  const worker = await h.created.promise;
+  expect(worker.inputs).toEqual([]);
+  controller.abort();
+  expect(await outcome).toBe('skipped');
+  expect(worker.terminated).toBe(true);
+  // Late ready cannot resurrect the retired task or start a download.
+  worker.emit({ type: 'ready' });
+  expect(worker.inputs).toEqual([]);
+  expect(h.sent).toEqual([]);
+  h.client.dispose();
 });

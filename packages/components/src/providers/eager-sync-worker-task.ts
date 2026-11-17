@@ -96,7 +96,7 @@ export async function runEagerSyncWorkerTask(
       savedAt: (deps.now ?? Date.now)(),
       snapshot,
     });
-    return stored ? ('synced' as const) : ('skipped' as const);
+    return stored ? ('synced' as const) : ('cache_rejected' as const);
   } finally {
     for (const dispose of disposers) dispose();
     subscription?.unsubscribe();

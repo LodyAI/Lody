@@ -31,11 +31,28 @@ Worker 每次任务结束即退出；并发和批大小均为 1。桌面／Web �
 进度的同一条记录，不复用前台远端游标。协调器在产生候选前加载最多 1000
 条的轻量 high-water 时间戳索引，使被 64 条快照 LRU 淘汰的旧会话也不会在
 每次启动重新排队；该索引不读取 Doc 或 history。父线程在创建 Worker 和
-Loro WASM 前再读取快照 checkpoint，命中即完成；Worker 再读一次以关闭
-跨窗口竞态。同一 workspace 的所有窗口共用 `[workspaceId, roomId]` 缓存
+Loro WASM 前再读取快照 checkpoint，命中即完成；Worker 导入缓存前也会再读一次。
+同一 workspace 的所有窗口共用 `[workspaceId, roomId]` 缓存
 作用域，较慢的同平面写入不能降低 checkpoint。接收端没有创建业务字段；
 本地适配器仍遵守现有版本协商协议。云端 Worker 使用与已挂载前台
 transport 相同的显式 Streams endpoint。
+
+跨窗口先用不等待的 Web Lock 领取 workspace、room、缓存作用域、账户、传输平面
+及云目标，再检查缓存并启动 Worker。锁覆盖快照事务完成和 Worker 终止；锁已被
+占用或不可用时跳过可选预取。窗口销毁会释放锁及其子 Worker。显式 `ready`
+消息先于 `start`：模块 Worker 的顶层 WASM 初始化尚未完成时就可能分派消息，
+立即发送的 `start` 会早于处理器注册而丢失。
+
+缓存拒绝返回 `cache_rejected`，不返回 `synced`，也不写同步 high-water。
+独立的有界 IndexedDB 索引按同一领取键及活动版本冷却三十分钟，跨窗口和重启
+保留；协调器在运行期也抑制重复播种。真实新活动可立即重试。到期后只在后续
+调度事件重试，不增加轮询定时器。最多保留 1000 条拒绝记录；元数据写失败时，
+运行期用有界内存兜底，但这不能跨窗口或重启保留拒绝。前台打开仍取消预取，
+沿已有合并和同步路径继续。128 MiB／64 条快照上限不变，缓存清理包含拒绝索引。
+
+保留[回退决策](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)
+中的已发布 Promise Repo／transport 消费边界。另建消费内核会扩大这次下载准入
+修复；跨窗口互斥由浏览器锁负责，进程内信号量不能代替它。
 
 任务取消由父线程终止 Worker，并发送本地 peer detach；这不依赖正在执行
 同步 WASM 的 Worker 处理取消消息。打开目标会话先取消对应后台任务，已有
@@ -54,19 +71,14 @@ UI store 不参与预同步。导入缓存使用 CRDT merge，保留前台未上
 
 ## 验证与限制
 
-新增确定性测试覆盖 checkpoint 命中时不创建 Worker、活动更新后创建 Worker、
-串行任务、取消时 detach、异步路由取消后的槽位释放、Worker 错误／销毁，
-以及真实 Loro 更新缓存后与未上传前台编辑的合并。
-分块用例显式延迟最后一块，确认不会提前保存快照。原调度器测试保留；
-删除独立的策略常量测试文件，因为同一断言已在调度器
-套件中存在。使用临时隔离依赖验证，不在嵌套 checkout 执行完整安装。
-
-隔离验证共通过 36 项测试，其中 3 项是临时 IndexedDB 持久化／容量／跨窗口
-checkpoint 单调性探针。Worker 模块类型检查及 Vite 6.4.1 的浏览器 Worker
-构建也通过。整个仓库的文档
-检查和 public-boundary 检查受到未初始化 ACP 子模块阻塞；未运行完整
-应用构建或完整类型检查。新增 shared 子路径只导出已有快照编解码器，不
-引入依赖版本变化。
-
-没有真实用户对话 fixture，没有真实长对话性能测试。Worker 与 UI 仍共享
-设备内存和 CPU，不能把线程隔离解释为无限内存或完全无资源竞争。
+[Worker 测试](../../../../packages/components/tests/eager-sync-worker.test.ts)使用真实
+CRDT 更新，延迟最后一个本地分块，检查缓存拒绝及写入失败，并确认合并远端
+历史不会丢失前台未上传编辑。
+[协调器测试](../../../../packages/components/tests/background-sync-coordinator.test.ts)
+覆盖候选上限、环境门控、拒绝不写 high-water、新活动及按事件触发的到期重试。
+[浏览器验收](../../../../packages/components/tests/eager-sync-browser.integration.mjs)使用
+真实 Chromium 窗口、Worker、HTTP 下载和 IndexedDB，检查领取互斥、已提交缓存
+复用、取消、持锁窗口关闭及持久化拒绝。
+拒绝是在合成字节下载后注入，不分配 128 MiB 历史；没有真实对话 fixture 或线上
+流量测量。共享受浏览器存储分区限制，不覆盖独立 profile、origin 或 Electron
+partition。已安装桌面／移动端验收、真实长对话内存和性能仍需单独验证。
