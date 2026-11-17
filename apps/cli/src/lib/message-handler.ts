@@ -54,6 +54,7 @@ import {
 } from '@lody/shared/notifications';
 import type { SessionActivePresencePhase } from './loro/session-active-presence';
 import { projectTurnAttention, type TerminalOutcome } from '@lody/shared/notifications';
+import { reportIfWasmFault } from './loro/wasm-runtime-health';
 import { turnNotificationAudience } from './notifications/turn-notification-audience';
 import { fileLocksLegacy } from '@/utils/file-lock';
 import { Effect } from 'effect';
@@ -200,6 +201,8 @@ import {
   type MessageContent,
   type AcpSessionNotification,
   getServerNow,
+  hasFreshDesktopForegroundPresence,
+  type LodyPresenceStateMap,
   CODE_COLLAB_V2_TEXT_LIMITS,
   isSessionGoalActive,
   type SessionGoalAction,
@@ -695,6 +698,12 @@ export interface MessageHandlerConfig {
   ) => Promise<string>;
   supportRegistryAgentTypes?: string[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  /**
+   * Presence snapshots of every workspace this daemon hosts, so a desktop focused
+   * on another hosted workspace also suppresses this workspace's mobile push.
+   * Absent: only this workspace's snapshot is read.
+   */
+  readHostedPresenceStates?: () => LodyPresenceStateMap[];
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
@@ -800,6 +809,7 @@ export class MessageHandler {
   private cliVersion: string;
   private supportRegistryAgentTypes: string[];
   private closeSessionTerminals?: (sessionId: SessionId) => void;
+  private readHostedPresenceStates?: () => LodyPresenceStateMap[];
   private cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
   ) => Promise<void>;
@@ -3244,6 +3254,7 @@ export class MessageHandler {
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
+    this.readHostedPresenceStates = config.readHostedPresenceStates;
     this.cleanupLocalProjectWorktreeSetupIfUnreferenced =
       config.cleanupLocalProjectWorktreeSetupIfUnreferenced;
     this.onFatalAuthFailure = config.onFatalAuthFailure;
@@ -12045,6 +12056,13 @@ export class MessageHandler {
     }
     const notificationService = this.notificationService;
     await this.runTurnCloudSideEffect(sessionId, 'turn outcome notification', async () => {
+      if (this.isRecipientAtFocusedDesktop(userId)) {
+        // The user is at a Lody desktop: the desktop channel is enough. Only the
+        // mobile push is skipped; the silent Live Activity summary stays current.
+        this.logger.debug(`[${sessionId}] Mobile push skipped: recipient desktop is focused`);
+        await this.syncLiveActivitySummary(userId);
+        return;
+      }
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const meta = await sessionDoc.getMetaState();
       const workspaceSlug = this.workspaceSlug?.trim() || this.workspaceId;
@@ -12061,6 +12079,24 @@ export class MessageHandler {
       });
       await this.syncLiveActivitySummary(userId);
     });
+  }
+
+  /**
+   * True only on positive evidence: a fresh `desktop-foreground` presence entry for
+   * the recipient in a hosted workspace. Unjoined rooms, read failures and stale
+   * entries answer false, so the mobile push is sent as before.
+   */
+  private isRecipientAtFocusedDesktop(userId: string): boolean {
+    try {
+      const snapshots = this.readHostedPresenceStates?.() ?? [
+        this.workspaceDocument.getPresenceStates() ?? {},
+      ];
+      return hasFreshDesktopForegroundPresence(snapshots, userId, getServerNow());
+    } catch (error) {
+      reportIfWasmFault(error);
+      this.logger.debug(`Desktop foreground presence read failed: ${formatErrorMessage(error)}`);
+      return false;
+    }
   }
 
   private async buildLiveActivitySummary(userId: string): Promise<LiveActivitySummary> {

@@ -1,7 +1,14 @@
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SessionStatusFactory, type SessionId, type WorkspaceId } from '@lody/shared';
+import {
+  LODY_PRESENCE_TTL_MS,
+  SessionStatusFactory,
+  getServerNow,
+  type LodyPresenceStateMap,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 
 import { MessageHandler } from '../src/lib/message-handler';
@@ -71,8 +78,126 @@ const createNotificationPort = (
   ...overrides,
 });
 
+const focusedDesktopPresence = (
+  userId: string,
+  updatedAt: number = getServerNow()
+): LodyPresenceStateMap => ({
+  [`desktop:${userId}:instance-1`]: {
+    kind: 'desktop-foreground',
+    userId,
+    instanceId: 'instance-1' as never,
+    updatedAt,
+  },
+});
+
+describe('MessageHandler completion push with desktop foreground presence', () => {
+  const setup = (options: {
+    hosted?: () => LodyPresenceStateMap[];
+    own?: LodyPresenceStateMap;
+  }) => {
+    const sessionId = 's-1' as SessionId;
+    const sessionDoc = withSessionData(
+      withHistoryPort({
+        getMetaState: vi.fn(async () => ({
+          title: 'My Session',
+          userId: 'u-1',
+          cliType: 'claude',
+        })),
+        getHistory: vi.fn(() => []),
+        mirror: { subscribe: vi.fn(() => () => {}), getState: () => ({ history: [] }) },
+      })
+    );
+    const workspaceDocument = {
+      sessions: new Map<SessionId, unknown>(),
+      repo: {
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+        getDocMeta: vi.fn(async () => ({ meta: { needToArchiveSessions: {} } })),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      isTransportConnected: vi.fn(() => true),
+      publishSessionPresence: vi.fn(),
+      clearSessionPresence: vi.fn(),
+      getPresenceStates: vi.fn(() => options.own ?? null),
+    };
+    const sessionManager = {
+      on: vi.fn(),
+      setRequestPermissionHandler: vi.fn(),
+      hasSession: vi.fn(() => false),
+    };
+    const notifySessionCompleted = vi.fn(async () => {});
+    const syncLiveActivitySummary = vi.fn(async () => ({ sent: true as const, ended: false }));
+    const handler = new MessageHandler(
+      sessionManager as unknown as SessionManager,
+      workspaceDocument as unknown as LoroDocumentManager,
+      createSilentLogger(),
+      {
+        token: 't',
+        workspaceId: 'ws-1' as WorkspaceId,
+        workspaceSlug: 'ws-slug',
+        userId: 'u-1',
+        machineId: 'm-1',
+        machineName: 'machine',
+        cliVersion: '0.0.0',
+        ...(options.hosted ? { readHostedPresenceStates: options.hosted } : {}),
+        cloudPort: createTestCloudPort({
+          notifications: createNotificationPort({
+            notifySessionCompleted,
+            syncLiveActivitySummary,
+          }),
+        }),
+      }
+    );
+    const notify = () =>
+      (
+        handler as unknown as {
+          notifyTurnOutcome: (
+            sessionId: SessionId,
+            userId: string,
+            occurrenceId: string,
+            outcome: 'succeeded'
+          ) => Promise<void>;
+        }
+      ).notifyTurnOutcome(sessionId, 'u-1', 'turn-1', 'succeeded');
+    return { notify, notifySessionCompleted, syncLiveActivitySummary };
+  };
+
+  it('skips the mobile push while the recipient has a focused desktop in any hosted workspace', async () => {
+    const otherWorkspace = focusedDesktopPresence('u-1');
+    const h = setup({ own: {}, hosted: () => [{}, otherWorkspace] });
+    await h.notify();
+    expect(h.notifySessionCompleted).not.toHaveBeenCalled();
+    // The silent Live Activity summary still reflects the finished turn.
+    expect(h.syncLiveActivitySummary).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['another user is focused', () => focusedDesktopPresence('u-2')],
+    [
+      'the desktop entry expired',
+      () => focusedDesktopPresence('u-1', getServerNow() - LODY_PRESENCE_TTL_MS),
+    ],
+    ['presence is unavailable', () => null],
+  ])('sends the mobile push when %s', async (_label, own) => {
+    const h = setup({ own: own() ?? undefined });
+    await h.notify();
+    expect(h.notifySessionCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 's-1', userId: 'u-1', outcome: 'succeeded' })
+    );
+  });
+
+  it('sends the mobile push when reading hosted presence fails', async () => {
+    const h = setup({
+      hosted: () => {
+        throw new Error('presence replica unavailable');
+      },
+    });
+    await h.notify();
+    expect(h.notifySessionCompleted).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('MessageHandler permission notifications', () => {
-  it('sends ordinary permission push independently of a successful silent Live Activity', async () => {
+  it('sends ordinary permission push independently of a successful silent Live Activity, even while the recipient desktop is focused', async () => {
     const logger = createSilentLogger();
 
     const sessionId = 's-1' as SessionId;
@@ -138,6 +263,8 @@ describe('MessageHandler permission notifications', () => {
       isTransportConnected: vi.fn(() => true),
       publishSessionPresence: vi.fn(),
       clearSessionPresence: vi.fn(),
+      // Desktop focus suppresses only completion pushes, never permission requests.
+      getPresenceStates: vi.fn(() => focusedDesktopPresence('active-user')),
     };
 
     const sessionManager = {

@@ -6806,5 +6806,7 @@
   "e2ee.recovery.passwordNudgeBody": "Passkeys protect your cloud backup with full-entropy keys immune to password guessing. If all your devices support passkeys (or you saved an offline recovery file), removing the recovery password hardens your backup.",
   "e2ee.recovery.wrongPassword": "Incorrect recovery password, or no recovery password is set on this account.",
   "e2ee.lostAll.password.title": "Use recovery password",
-  "e2ee.lostAll.password.help": "Enter the recovery password you set up earlier."
+  "e2ee.lostAll.password.help": "Enter the recovery password you set up earlier.",
+  "settings.general.suppressMobilePushWhenFocused.label": "Pause phone notifications while using this computer",
+  "settings.general.suppressMobilePushWhenFocused.helper": "While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify."
 }
