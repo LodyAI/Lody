@@ -8,11 +8,11 @@ PR: https://github.com/LodyAI/Lody/pull/1535
 
 ## 摘要
 
-Composer 和 Agent 设置原先只展示缓存额度，没有主动获取当前值。Lody 现在把 Core 已有的 `rateLimits` 能力投影到 Provider 缓存，在符合条件的界面可见时发起独立查询。daemon 拥有短生命周期 ACP 进程并独立查询；Core 查询不创建会话，旧 registry Antigravity 使用隔离的 `/usage` 会话，内置 Antigravity 使用 agy 的零轮次 JSON 命令。失败或语义含糊的空结果保留原额度；完整快照替换和更新时间仍留待后续实现。
+Composer 和 Agent 设置原先只展示缓存额度，没有主动获取当前值。Lody 现在把 Core 已有的 `rateLimits` 能力投影到 Provider 缓存，在符合条件的界面可见时发起独立查询。daemon 拥有短生命周期 ACP 进程并独立查询；Core 查询不创建会话，Antigravity 使用官方 usage 命令，registry Copilot 使用 SDK 账户 RPC。失败或语义含糊的空结果保留原额度；完整快照替换和更新时间仍留待后续实现。
 
 ## 契约与职责
 
-Core 已定义 `_lody/rate_limits/get` 和 `{version: 1, query?: true}`，共享查询契约保持不变。展示要求运行时能力声明或官方 Antigravity 兼容读取器；刷新额外要求 `query: true` 和 Machine 协议 `providerRateLimitsRefresh: 1`。仅支持推送的 Provider 可以展示缓存。builtin 的凭据／账户覆盖配置、品牌路由和 Codex API-key profile 仍不适用；自定义 ACP Provider 对自己声明的账户语义负责。
+Core 已定义 `_lody/rate_limits/get` 和 `{version: 1, query?: true}`，共享查询契约保持不变。展示要求运行时能力声明或官方 Antigravity/Copilot 兼容读取器；刷新额外要求 `query: true` 和 Machine 协议 `providerRateLimitsRefresh: 1`。仅支持推送的 Provider 可以展示缓存。builtin 的凭据／账户覆盖配置、品牌路由和 Codex API-key profile 仍不适用；自定义 ACP Provider 对自己声明的账户语义负责。
 
 共享 UI hook 在 composer／Provider 激活、页面回到前台、popover 打开时刷新。workspace runtime 合并请求，使用已有本地控制或 Machine RPC 路由，随后协调已有 Flock handle。没有轮询、新订阅、猜测百分比或加载遮罩。
 
@@ -33,6 +33,16 @@ Google registry ACP server 1.4.5 声明 `/usage`，但未声明 Core `rateLimits
 内置 Provider 运行官方 agy，额度查询使用与 ACP 会话相同的已选可执行文件和账户环境。它执行 `--print /usage --output-format json`，要求返回成功的 `usage` 命令且 `num_turns: 0`，严格验证每组 weekly／5h 的剩余比例和重置时间。Lody 不读取凭据。额外启动参数和 Magpie 路由暂不支持此读取器，避免查询到另一个账户。输出未知或格式错误时保留缓存额度。内置 Antigravity 允许经过核对的代理和语言环境设置，未知环境变量仍不适用。探测与真实会话快照投影相同的兼容能力，原生 Core 声明保持优先，避免缓存 writer 一概保留过时能力。
 
 这个有时限的只读子进程由原生 Effect 命令持有：Provider 刷新触发它，取消／超时终止进程树，完成和失败交回既有刷新所有者。不创建 ACP 会话或模型轮次。上层 Provider 缓存与 ACP 流程仍保留既有 Promise 边界。新 builtin 使用独立身份；弃用的 registry Provider 保留旧启动器和会话，不做静默改写。
+
+## 官方 Copilot 兼容
+
+registry 条目 `github-copilot-cli` 在 SDK 模式下复用解析后的官方启动器和账户环境。Lody 将 ACP 参数替换为 `--headless --stdio`，保留包前缀及其余参数。既有 startup owner 负责启动准入和独立进程的所有权。成功、失败、超时和取消都等待进程树结束。无法确认清理完成时，沿用 Provider 隔离，不影响其他配置或聊天。SDK transport 仍是外部 Promise 边界；启动器、startup gate 和清理所有者的原生 Effect 迁移不属于此读取器范围。
+
+读取器使用 Content-Length JSON-RPC，以 `ping` 确认 SDK protocol version 3，再调用 `account.getQuota`，不创建会话。官方 CLI 1.0.107 和 registry 固定版本 1.0.112 都能使用已有本地登录查询。1.0.107 的 ACP 不支持账户 RPC，也没有 Core 额度声明。ACP `/usage` 只报告会话消耗，不能提供账户额度。Lody 仅为官方 registry 身份投影兼容能力，不为同名自定义命令声明支持。
+
+只有 [0, 100] 范围内的有限 `premium_interactions.remainingPercentage` 才转换为 Core 窗口，已用百分比为 100 减去剩余百分比。零保留为耗尽；`hasQuota` 不代替数值。无限、缺失或无效额度会失败并保留缓存。通用 limit ID 使用 `github-copilot-cli`，因此选择模型不会隐藏账户级额度。基于 token 的计费使 request 数量含义不明确，实际观察到的 reset date 又接近查询时间，因此不展示数量、超额计费、固定窗口或重置时间，避免暗示月度请求数或重置预测。
+
+[GitHub 用量指南](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing)区分账户额度与会话消耗。对固定 CLI 的本地只读验证确认了此处使用的 v3 查询，不依赖较新 SDK 的握手要求。测试仅使用合成服务端与账户数据。
 
 ## 持久化与顺序
 
