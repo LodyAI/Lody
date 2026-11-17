@@ -131,9 +131,10 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
-    // The title gives way first; a long Role name ellipsizes at its own cap.
-    flexShrink: 0,
-    minWidth: 0,
+    // The title gives way first (its shrink weight is far larger); only then
+    // does a long Role name ellipsize, so the status never leaves the row.
+    flexShrink: 1,
+    minWidth: '3em',
     maxWidth: '45%',
     color: colors.label,
   },
@@ -141,8 +142,8 @@ const styles = stylex.create({
   actorName: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   title: {
     flexGrow: 1,
-    flexShrink: 1,
-    minWidth: '4em',
+    flexShrink: 1000,
+    minWidth: '2em',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
