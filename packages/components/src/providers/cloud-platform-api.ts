@@ -1,5 +1,8 @@
 import { useAction, useConvex, useMutation } from 'convex/react';
-import { useMemo } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { ConvexError } from 'convex/values';
+import { isConvexUnauthenticatedError } from '@lody/shared';
+import { useOptionalAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 import type { CloudAction, CloudApi, CloudMutation, CloudQuery } from '@lody/platform';
 import {
@@ -44,6 +47,90 @@ function useCloudPlatformQuery<Args, Result>(
   return (operation.access === 'public' ? publicResult : authenticatedResult) as Result | undefined;
 }
 
+/** Keep imperative owners stable across recovery, just like mounted query hooks. */
+function useCloudAuthGate() {
+  const auth = useOptionalAuthenticatedConvex();
+  const live = useRef(auth);
+  live.current = auth;
+  // A userless refetch is not a new login. Bind work created in that gap to
+  // the last session, so it cannot be adopted by a different account.
+  const session = useRef(auth?.authSessionId ?? null);
+  if (auth?.authSessionId) session.current = auth.authSessionId;
+  const gate = useMemo(() => {
+    const listeners = new Set<() => void>();
+    let rejected = false;
+    let mounted = true;
+    const unavailable = () => new ConvexError({ kind: 'lody.auth', code: 'unauthenticated' });
+    return {
+      active: () => mounted,
+      ready: () =>
+        mounted &&
+        !!live.current?.isAuthenticated &&
+        !live.current.confirmedUnauthenticated &&
+        !rejected,
+      terminal: () => !!live.current?.confirmedUnauthenticated,
+      session: () => session.current,
+      assert(access: 'public' | 'authenticated') {
+        if (access === 'authenticated' && !this.ready()) throw unavailable();
+      },
+      failed(error: unknown) {
+        if (
+          !mounted ||
+          live.current?.confirmedUnauthenticated ||
+          !isConvexUnauthenticatedError(error) ||
+          rejected
+        )
+          return;
+        rejected = true;
+        for (const listener of listeners) listener();
+        live.current?.requestAuthRecovery();
+      },
+      mount(value: boolean) {
+        mounted = value;
+        for (const listener of listeners) listener();
+      },
+      update() {
+        rejected = false;
+        for (const listener of listeners) listener();
+      },
+      subscribe(listener: () => void) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+  }, []);
+  useLayoutEffect(() => {
+    gate.mount(true);
+    return () => gate.mount(false);
+  }, [gate]);
+  useLayoutEffect(() => {
+    gate.update();
+  }, [gate, auth?.authSessionId, auth?.isAuthenticated, auth?.confirmedUnauthenticated]);
+  return gate;
+}
+
+function useCloudCommand<Args, Result>(
+  operation: CloudMutation<Args, Result> | CloudAction<Args, Result>,
+  run: (args: Args) => Promise<Result>
+) {
+  const gate = useCloudAuthGate();
+  return useCallback(
+    async (args: Args): Promise<Result> => {
+      gate.assert(operation.access);
+      const session = gate.session();
+      try {
+        return await run(args);
+      } catch (error) {
+        if (operation.access === 'authenticated' && session === gate.session()) gate.failed(error);
+        throw error;
+      }
+    },
+    [gate, operation.access, run]
+  );
+}
+
 /**
  * The only React/Convex adapter in the open tree. Operation descriptors carry
  * public DTO types and stable names; generated Convex references stay private
@@ -65,9 +152,15 @@ export const cloudPlatformApi: CloudApi = {
   useQuery: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args | 'skip') =>
     useCloudPlatformQuery(operation, args),
   useMutation: <Args, Result>(operation: CloudMutation<Args, Result>) =>
-    useMutation(mutationReference(operation)) as (args: Args) => Promise<Result>,
+    useCloudCommand(
+      operation,
+      useMutation(mutationReference(operation)) as (args: Args) => Promise<Result>
+    ),
   useAction: <Args, Result>(operation: CloudAction<Args, Result>) =>
-    useAction(actionReference(operation)) as (args: Args) => Promise<Result>,
+    useCloudCommand(
+      operation,
+      useAction(actionReference(operation)) as (args: Args) => Promise<Result>
+    ),
 };
 
 /** Imperative operations for the app-owned workspace control lifecycle. Callers
@@ -75,46 +168,111 @@ export const cloudPlatformApi: CloudApi = {
  */
 export function useCloudPlatformClient() {
   const client = useConvex();
-  return useMemo(
-    () => ({
-      /** Deliver cached query values without issuing another query per notification. */
-      subscribeValue: <Args, Result>(
-        operation: CloudQuery<Args, Result>,
-        args: Args,
-        changed: (value: Result) => void,
-        failed: (error: unknown) => void
-      ) => {
+  const gate = useCloudAuthGate();
+  return useMemo(() => {
+    const run = async <Result>(
+      access: 'public' | 'authenticated',
+      execute: () => Promise<Result>
+    ) => {
+      gate.assert(access);
+      const session = gate.session();
+      try {
+        return await execute();
+      } catch (error) {
+        if (access === 'authenticated' && session === gate.session()) gate.failed(error);
+        throw error;
+      }
+    };
+    const subscribe = <Args, Result>(
+      operation: CloudQuery<Args, Result>,
+      args: Args,
+      changed: (value: Result) => void,
+      failed: (error: unknown) => void
+    ) => {
+      let session = gate.session();
+      let unsubscribe: (() => void) | undefined;
+      let disposed = false;
+      let retired = false;
+      let attached = false;
+      const stop = () => {
+        unsubscribe?.();
+        unsubscribe = undefined;
+      };
+      const reconcile = () => {
+        if (disposed) return;
+        if (!gate.active()) {
+          stop();
+          return;
+        }
+        if (operation.access === 'authenticated') {
+          retired ||=
+            gate.terminal() ||
+            (session !== null && gate.session() !== null && session !== gate.session());
+          if (retired || !gate.ready()) {
+            stop();
+            return;
+          }
+          session ??= gate.session();
+        }
+        if (unsubscribe) return;
         const query = client.watchQuery(queryReference(operation), args as never);
-        const emit = () => {
+        const emit = (cached = false) => {
+          if (
+            disposed ||
+            (operation.access === 'authenticated' && (!gate.ready() || session !== gate.session()))
+          )
+            return;
           try {
             const value = query.localQueryResult();
             if (value !== undefined) changed(value as Result);
           } catch (error) {
+            // A resumed watch can still hold its pre-refresh error until the
+            // SDK receives the server's next result. Do not reject the new JWT
+            // from that old cache entry.
+            if (cached && attached && isConvexUnauthenticatedError(error)) return;
+            if (operation.access === 'authenticated') gate.failed(error);
             failed(error);
           }
         };
-        const unsubscribe = query.onUpdate(emit);
-        emit();
-        return unsubscribe;
-      },
-      /** Keep an optional app-owned query live; imperative reads then reuse its cache. */
+        unsubscribe = query.onUpdate(() => emit());
+        emit(true);
+        attached = true;
+      };
+      const unlisten = gate.subscribe(reconcile);
+      reconcile();
+      return () => {
+        disposed = true;
+        unlisten();
+        stop();
+      };
+    };
+    return {
+      subscribeValue: subscribe,
       subscribe: <Args, Result>(
         operation: CloudQuery<Args, Result>,
         args: Args,
         changed: () => void
-      ) => client.watchQuery(queryReference(operation), args as never).onUpdate(changed),
+      ) => subscribe(operation, args, changed, changed),
       query: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args): Promise<Result> =>
-        client.query(queryReference(operation), args as never) as Promise<Result>,
+        run(
+          operation.access,
+          () => client.query(queryReference(operation), args as never) as Promise<Result>
+        ),
       mutation: <Args, Result>(
         operation: CloudMutation<Args, Result>,
         args: Args
       ): Promise<Result> =>
-        client.mutation(mutationReference(operation), args as never) as Promise<Result>,
+        run(
+          operation.access,
+          () => client.mutation(mutationReference(operation), args as never) as Promise<Result>
+        ),
       action: <Args, Result>(operation: CloudAction<Args, Result>, args: Args): Promise<Result> =>
-        client.action(actionReference(operation), args as never) as Promise<Result>,
-    }),
-    [client]
-  );
+        run(
+          operation.access,
+          () => client.action(actionReference(operation), args as never) as Promise<Result>
+        ),
+    };
+  }, [client, gate]);
 }
 
 /** Optional catalog failures remain data, so unrelated workspace surfaces can continue. */
