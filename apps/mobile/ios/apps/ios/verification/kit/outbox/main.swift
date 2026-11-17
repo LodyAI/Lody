@@ -154,6 +154,31 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     try await foreground()
     try await handoff()
     try await failedSendRecovery()
+    try await reconciledDelivery()
+  }
+
+  @MainActor static func reconciledDelivery() async throws {
+    let disk = Disk(), network = Network()
+    let store = OutboxStore(key: "reconciled-input", generation: 0, persistence: disk.persistence, awaitingConfirmation: "unknown")
+    store.onChange = { NotificationCenter.default.post(name: .lodyOutboxDidChange, object: store) }
+    let original = record("s1", phase: "unknown", sendId: "original")
+    try await store.put(original).value
+    let sender = SessionSender(sessionId: "s1", store: store, services: network.services, inflight: OutboxInflight())
+    defer { store.onChange = nil }
+    try await sender.confirmPending("unrelated")
+    precondition(sender.record?.phase == "unknown")
+    try await sender.confirmPending("original")
+    precondition(sender.record == original.with(phase: "uploaded"), "Delivery confirmation preserves the original payload and identity")
+    precondition(disk.records("reconciled-input").first?.phase == "uploaded", "Confirmation must survive restart")
+    precondition(network.sent.isEmpty, "Reconciliation must not replay the original send")
+    let replacement = record("s1", phase: "unknown", sendId: "replacement")
+    try await store.put(replacement).value
+    try await sender.confirmPending("original")
+    try await sender.discardPending("original")
+    precondition(sender.record == replacement, "Late exact-ID results cannot replace or remove a newer pending turn")
+    try await sender.discardPending("replacement")
+    precondition(sender.record == nil)
+    print("PASS: explicit handoff reconciliation confirms delivery without replay, survives restart, and fences late results by exact input")
   }
 
   @MainActor static func failedSendRecovery() async throws {

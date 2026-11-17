@@ -36,6 +36,7 @@ import type {
   ControlTurnResult,
   EditSessionResult,
   SendTurnResult,
+  RetryPendingInputResult,
   SessionRuntimeEvent,
   SessionTrace,
 } from '../contract/methods.ts';
@@ -112,6 +113,11 @@ type SessionState = {
   sendingId?: string;
   /** A queued Roost send waiting for earlier inputs; it orders later sends only. */
   queueWaitId?: string;
+  recovery?: {
+    inputId: string;
+    controller: AbortController;
+    promise: Promise<RetryPendingInputResult>;
+  };
   steerReceipts?: Map<string, SteerReceipt>;
   backgroundWork?: { id: string; turnId: string; guide?: boolean };
   status: string;
@@ -479,13 +485,42 @@ export async function actOnPendingInput(
   sessionId: string,
   inputId: string,
   action: 'retry' | 'forget',
+  recoveryTarget?: () => { userId: string; machineId: string },
 ) {
   const state = sessions.get(sessionId);
-  if (action === 'forget' && state?.target?.backend === 'loro') {
+  if (state?.target?.backend === 'loro') {
     if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+    if (action === 'retry') {
+      if (!recoveryTarget) throw new Error('session_not_ready');
+      if (state.sending || state.queueWaitId)
+        throw new Error('send_in_progress');
+      if (state.recovery) {
+        if (state.recovery.inputId !== inputId)
+          throw new Error('send_in_progress');
+        return state.recovery.promise;
+      }
+      const controller = new AbortController();
+      const promise = recoverLoroInput(
+        state,
+        inputId,
+        recoveryTarget,
+        controller.signal,
+      );
+      const recovery = { inputId, controller, promise };
+      state.recovery = recovery;
+      try {
+        return await promise;
+      } finally {
+        if (state.recovery === recovery) state.recovery = undefined;
+      }
+    }
+    if (state.recovery?.inputId === inputId) {
+      state.recovery.controller.abort();
+      state.recovery = undefined;
+    }
     // Loro has no record in the Roost pending-input owner. The caller removes
     // its native Outbox record; this never claims to cancel remote work.
-    return;
+    return { state: 'pending' as const };
   }
   const owner = acceptedInputs;
   if (!owner) throw new Error('session_not_ready');
@@ -496,6 +531,118 @@ export async function actOnPendingInput(
   if (!input || owner !== acceptedInputs) throw new Error('session_not_ready');
   if (action === 'forget') await owner.cancel(inputId);
   else if (input.error) owner.retry(inputId);
+  return { state: 'pending' as const };
+}
+
+/** Reconcile an explicit user request; never replay the original history write. */
+async function recoverLoroInput(
+  state: SessionState,
+  inputId: string,
+  resolve: () => { userId: string; machineId: string },
+  cancelled: AbortSignal,
+): Promise<RetryPendingInputResult> {
+  const target = resolve();
+  const signal = AbortSignal.any([
+    state.controller.signal,
+    cancelled,
+    AbortSignal.timeout(25_000),
+  ]);
+  const check = () => {
+    signal.throwIfAborted();
+    if (sessions.get(state.id) !== state || !targetIsCurrent(state))
+      throw new Error('workspace_changed');
+    const current = resolve();
+    if (
+      current.machineId !== target.machineId ||
+      current.userId !== target.userId
+    )
+      throw new Error('workspace_changed');
+  };
+  // The session replica may contain the unacknowledged local write. Only a
+  // fresh server snapshot/catch-up proves that the original input was saved.
+  const remote = new LoroDoc();
+  try {
+    check();
+    const initial = await state.client.bootstrap({ signal });
+    check();
+    if (!initial.ok) throw new Error(initial.result.code);
+    let size = 0;
+    const consume = (bytes: Uint8Array, snapshot = false) => {
+      size += bytes.length;
+      if (size > 32 * 1024 * 1024) throw new Error('session_limit');
+      if (snapshot) remote.import(unpack(bytes));
+      else importUpdates(remote, bytes);
+    };
+    const data = initial.result;
+    if (data.snapshotOffset !== '-1' && data.snapshot)
+      consume(data.snapshot.body, true);
+    for (const part of data.updates) consume(part.body);
+    let { nextOffset: offset, cursor, upToDate } = data;
+    for (let pages = 0; !upToDate; pages++) {
+      if (pages >= 100) throw new Error('session_limit');
+      const next = await state.client.readOnce({ offset, cursor, signal });
+      check();
+      if (!next.ok) throw new Error(next.result.code);
+      if (next.result.closed) throw new Error('stream_closed');
+      if (next.result.payload) consume(next.result.payload.body);
+      if (next.result.nextOffset === offset && !next.result.upToDate)
+        throw new Error('stalled_cursor');
+      ({ nextOffset: offset, cursor, upToDate } = next.result);
+    }
+    const history = remote.getList('history').toJSON() as Record<string, any>[];
+    const entry = history.find(
+      (entry) => entry.id === inputId && entry.role === 'user',
+    );
+    if (!entry) throw new Error('input_not_confirmed');
+    if (entry.userId !== target.userId) throw new Error('input_owner_changed');
+    if (
+      ['handled', 'failed', 'canceled'].includes(entry.status) ||
+      history.some(
+        (entry) => entry.role === 'assistant' && entry.userTurnId === inputId,
+      )
+    )
+      return { state: 'settled' };
+    if (entry.status === 'processing') return { state: 'accepted' };
+    if (
+      !['pending', 'seen'].includes(entry.status) ||
+      entry.inputConfig?._lodyDeliveryKind === 'steer' ||
+      (remote.getMovableList('mq').toJSON() as Record<string, any>[]).some(
+        (item) => item.userTurnId === inputId,
+      )
+    )
+      throw new Error('input_not_recoverable');
+    if (!entry.inputConfig || typeof entry.timestamp !== 'string')
+      throw new Error('input_not_recoverable');
+    check();
+    const reply = await machineRpc(
+      state.workspace,
+      target.machineId,
+      'session/dispatch-turn',
+      {
+        sessionId: state.id,
+        userTurnId: inputId,
+        userId: target.userId,
+        timestamp: entry.timestamp,
+        inputConfig: entry.inputConfig,
+      },
+      async () => {
+        check();
+        const grant = await sessionGrant(state);
+        check();
+        return grant;
+      },
+      signal,
+    );
+    check();
+    const result = reply.result as
+      { accepted?: boolean; disposition?: string } | undefined;
+    if (!result?.accepted) throw new Error('dispatch_unconfirmed');
+    return {
+      state: result.disposition === 'already-terminal' ? 'settled' : 'accepted',
+    };
+  } finally {
+    remote.free();
+  }
 }
 
 /** User turns in a Loro transcript's first window and in each older page. */
@@ -1409,7 +1556,7 @@ export async function sendTurn(
   )
     // The local entry may come from a lost append ACK. Never replay its write.
     return { id: args.id, state: 'unknown', reason: 'turn_already_exists' };
-  if (state.sending || state.queueWaitId)
+  if (state.sending || state.queueWaitId || state.recovery)
     return { state: 'not_sent', reason: 'session_not_ready' };
   const quota = checkTurnQuota(args);
   if (quota.state === 'not_sent') return quota;

@@ -1182,9 +1182,12 @@ extension ChatPendingSend {
     let acknowledged = phase == "accepted"
     if !hasReply && !acknowledged && !hasDelivery {
       let delivery = status.isEmpty ? String(localized: "send.status.awaitingConnection", bundle: .lody) : status
-      let label = phase == "unknown" ? delivery + " · " + String(localized: "send.forget.hint", bundle: .lody) : delivery
+      let recoverable = ["unknown", "uploaded"].contains(phase ?? "") && queue != true && guide != true
+      var label = delivery
+      if recoverable { label += " · " + String(localized: "send.recover.hint", bundle: .lody) }
+      else if phase == "unknown" { label += " · " + String(localized: "send.forget.hint", bundle: .lody) }
       result.append(ChatRow(id: id + ":delivery", entryID: id, kind: "delivery", text: label,
-        actionable: phase == "unknown", attention: phase == "unknown"))
+        actionable: phase == "unknown" || recoverable, attention: phase == "unknown"))
     }
     if !hasReply && acknowledged && !hasDelivery {
       let now = Date().timeIntervalSince1970 * 1000

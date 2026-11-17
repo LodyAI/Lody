@@ -59,6 +59,7 @@ export function frame(bytes) {
 export async function openTestSession({
   failAppend = () => false,
   afterAppend,
+  beforeBootstrap,
   markDispatch = async () => {},
   onRpc,
   onEvent = () => {},
@@ -132,6 +133,7 @@ export async function openTestSession({
       this.url = decodeURIComponent(url);
     }
     async bootstrap() {
+      if (beforeBootstrap) await beforeBootstrap(this.url);
       if (this.url.includes(':wf:') && settings)
         return ok({
           snapshotOffset: '1',

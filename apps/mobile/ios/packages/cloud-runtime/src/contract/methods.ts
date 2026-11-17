@@ -110,6 +110,7 @@ import {
   ForkSessionParams,
   ForkSessionResult,
   ForgetPendingInputParams,
+  RetryPendingInputResult,
   CreateSessionResult,
   DeleteSessionParams,
   DeleteSessionResult,
@@ -138,6 +139,7 @@ export type {
   CreateSessionResult,
   EditSessionResult,
   SendTurnResult,
+  RetryPendingInputResult,
 } from './sessions.ts';
 export type { CreationOptions } from './projects.ts';
 export type { SessionRuntimeEvent, SessionTrace } from './session-events.ts';
@@ -369,7 +371,7 @@ export const runtimeCalls = {
   },
   retryPendingInput: {
     params: ForgetPendingInputParams,
-    result: Empty,
+    result: RetryPendingInputResult,
     timeoutMs: 30_000,
   },
   forgetPendingInput: {
