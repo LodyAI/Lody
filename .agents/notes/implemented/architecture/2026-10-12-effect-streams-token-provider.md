@@ -100,7 +100,7 @@ traversed iteratively with identity deduplication; original Causes remain intact
 recovery. A failed close/timeout leaves health observable, and successful cleanup
 clears its blocked state. New providers in the same parent Scope have independent
 close receipts. A retained release failure fences admission before any new credential
-I/O, not only before producer replacement. This changes no P1-owned logger/presence files.
+I/O, not only before producer replacement.
 
 Producer diagnostics observe Exit, including interruption and I/O finalizer failures.
 Only a pure interruption whose first stop intent is explicit owner close becomes

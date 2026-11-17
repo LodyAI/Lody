@@ -11,6 +11,7 @@ import { build } from 'vite';
 import { chromium, webkit } from '@playwright/test';
 
 const dailyOnly = process.argv.includes('--daily-only');
+const tokenDiagnosticsOnly = process.argv.includes('--token-diagnostics-only');
 const root = fileURLToPath(new URL('..', import.meta.url));
 const require = createRequire(import.meta.url);
 const sdkDir = fileURLToPath(
@@ -273,6 +274,55 @@ try {
   ]) {
     const browser = await engine.launch({ headless: true });
     try {
+      if (!dailyOnly && !negative) {
+        received.length = 0;
+        const { page } = await setup(browser);
+        try {
+          await page.evaluate(() => {
+            for (let attempt = 0; attempt < 100; attempt++) {
+              window.logTokenProviderEvent({ type: 'fetch-cancelled', reason: 'owner_released' });
+              window.logTokenProviderEvent({
+                type: 'fetch-failure',
+                workspaceId: 'synthetic-workspace',
+                error: new TypeError('synthetic handled retry failure'),
+              });
+            }
+            if (window.observed.some((event) => event.event === '$exception'))
+              throw new Error('handled token diagnostics entered the SDK exception queue');
+          });
+          await barrier(page);
+          const exceptions = () => allEvents().filter((event) => event.event === '$exception');
+          assert.equal(exceptions().length, 0, 'retry/cancellation diagnostics sent exceptions');
+          // Separate terminal episodes may share a message/fingerprint. Neither is hidden.
+          for (let episode = 1; episode <= 2; episode++) {
+            await page.evaluate(() => {
+              window.posthog.captureException(new Error('synthetic unrecovered failure'));
+            });
+            await barrier(page);
+            if (exceptions().length < episode) {
+              for await (const _ of on(ingestion, 'batch', {
+                signal: AbortSignal.timeout(15_000),
+              })) {
+                if (exceptions().length >= episode) break;
+              }
+            }
+            assert.equal(exceptions().length, episode, 'terminal exception wire count changed');
+          }
+          assert.equal(new Set(exceptions().map((event) => event.uuid)).size, 2);
+          const exceptionPosts = received.filter((request) =>
+            request.events.some(
+              (event) =>
+                event.event === '$exception' && event.properties?.distinct_id === currentDistinctId
+            )
+          ).length;
+          console.log(
+            `${name}: 100 cancellations + 100 handled retry diagnostics -> 0 exceptions; two terminal captures -> 2 wire events in ${exceptionPosts} exception-bearing POSTs PASS`
+          );
+        } finally {
+          await page.close();
+        }
+      }
+      if (tokenDiagnosticsOnly) continue;
       for (const shell of shells) {
         if (dailyOnly && shell === 'web') continue;
         received.length = 0;

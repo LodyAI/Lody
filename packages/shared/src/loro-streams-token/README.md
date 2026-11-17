@@ -82,6 +82,9 @@ pure interruption then emits the content-free `fetch-cancelled` event instead of
 event. A previous stop keeps its unknown reason, and timeout, transport, capacity,
 mixed Causes and failed cleanup remain failures. Waiters still receive their
 original failure; no request is retried or treated as a successful write.
+These callbacks are local diagnostics, not PostHog events: handled retry attempts
+must not each call exception capture. A terminal observation belongs to its
+operation/episode owner; a later recovered-then-failed episode remains reportable.
 This local owner proof cannot classify Convex platform `Client disconnected`
 events, which do not carry the client's cancellation reason.
 

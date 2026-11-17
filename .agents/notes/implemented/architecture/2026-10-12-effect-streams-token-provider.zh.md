@@ -70,7 +70,7 @@ Direct getToken 没有 callback fallback。旧 token 的晚到 callback 不抹�
 嵌套 retained Cause 迭代遍历并按对象身份去重；恢复仍保留原始完整 Cause。关闭/超时清理失败后
 health 仍可观察，成功 retryCleanup 清除阻塞。同一 parent Scope 的后继 provider 使用独立 close
 receipt。Retained release failure 在新 credential I/O 准入前设置 fence，而非只阻止 producer
-替换。不修改 P1 拥有的 logger/presence 文件。
+替换。
 
 Producer 诊断观察完整 Exit，包括中断及 I/O finalizer 失败。只有第一次停止意图是
 owner 显式关闭、且结果为纯中断，才记录固定且不含业务内容的
