@@ -161,6 +161,15 @@ A crash the user cannot read or copy is a crash we never hear about, which is wh
 `ErrorBoundary` fallback shows the real error text and offers a one-click copy of the
 full report on every build rather than only in development.
 
+Automatic boundary diagnostics use the existing fixed error categories in every scope.
+The mounted boundary owns one report through re-renders and failed retries; a healthy
+commit permits the next independent failure. There is no companion
+`app/error_boundary_triggered` analytics event. Use `$exception` with
+`source=errorBoundary` for the product failure count, deduplicated by event UUID
+across transport retries. Older dashboard queries for the retired event need to
+move to that signal; raw error text, custom names/codes and message hashes stay out
+of automatic diagnostics. User-initiated support copies retain their full details.
+
 Crash screens wait for explicit user recovery; `resetKeys` cannot clear an error.
 Authenticated cloud queries retry opaque server failures before reaching a boundary,
 with a shared, finite budget. Pending retries return loading rather than stale access

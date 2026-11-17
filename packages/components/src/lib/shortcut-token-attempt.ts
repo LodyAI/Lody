@@ -22,8 +22,23 @@ export class ShortcutTokenAttemptError extends ConvexError<{
     if (failure.code !== 'unauthenticated') this.name = HANDLED_SHORTCUT_TOKEN_ERROR;
   }
 }
-export const isHandledShortcutTokenError = (error: unknown): boolean =>
-  error instanceof ShortcutTokenAttemptError;
+export function isHandledShortcutTokenError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current !== undefined) {
+    if (!(current instanceof ShortcutTokenAttemptError) || seen.has(current) || seen.size >= 16)
+      return false;
+    seen.add(current);
+    // Do not let an owned root hide an independent/foreign cause (or a getter
+    // failure). Boundary diagnostics will safely project the mixed error.
+    try {
+      current = current.cause;
+    } catch {
+      return false;
+    }
+  }
+  return seen.size > 0;
+}
 export function isHandledShortcutTokenEvent(event: {
   event: string;
   properties?: Record<string, unknown>;

@@ -29,6 +29,8 @@ repo meta 或持久状态。不同故障码、阶段、状态和操作仍保留�
 旧客户端和旧后端兼容路径仍可能逐次计费。不按时间或文本在后端合并：
 未认证请求没有可信重试身份，不能吞掉独立故障。
 
+只有整条 cause 都属于已处理 Shortcut 失败时才跳过 boundary/deferred 上报。混合或外部 cause 保留独立的固定 boundary 诊断；较早的已处理令牌失败不会消耗 boundary 的本轮预算。浏览器测试保留 Shortcut/boundary 的 script SDK 与 sync-stuck ESM fixture 的独立模式。
+
 ## 证据与边界
 
 有限模型检查五种事件、深度七内的 78,125 条序列；实现检查覆盖 100 次尝试、owner

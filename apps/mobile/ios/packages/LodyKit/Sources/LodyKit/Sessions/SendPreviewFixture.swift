@@ -33,8 +33,14 @@ final class SendPreviewFixture {
 
   init(options: Options) {
     self.options = options
+    // The synthetic send workspace explicitly admits plaintext, like the Home fixture.
+    precondition(LodyUIVerify.enabled || _isDebugAssertConfiguration())
+    let mode = try! WorkspaceModePins.shared.observe(Self.workspace, mode: .plaintext)
+    precondition(mode == .plaintext, "Send fixtures must retain plaintext admission")
     store = OutboxSession.shared.outboxStore(user: Self.user, workspace: Self.workspace)
     entries = Self.initialEntries(options)
+    // Each scene starts independently of the previous scene's unconfirmed send.
+    store?.remove(Self.sessionId)
   }
 
   func stop() {
@@ -48,8 +54,9 @@ final class SendPreviewFixture {
   var record: OutboxRecord? { store?.snapshot.records.first { $0.sessionId == Self.sessionId } }
 
   var session: SessionItem {
-    SessionItem(
-      id: Self.sessionId, title: "Send handoff check", status: options.queue ? "running" : "idle", projectId: "fixture:local:project",
+    let running = entries.contains { $0["role"] as? String == "assistant" && $0["finished"] as? Bool != true }
+    return SessionItem(
+      id: Self.sessionId, title: "Send handoff check", status: running ? "running" : "idle", projectId: "fixture:local:project",
       createdAt: "2026-09-07T00:00:00Z", machineId: "fixture", cliType: "builtin", agentType: "fixture"
     )
   }

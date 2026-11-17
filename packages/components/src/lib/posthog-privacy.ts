@@ -8,6 +8,13 @@ type Event = {
   timestamp?: unknown;
 };
 
+function isBoundaryException(event: Event): boolean {
+  return (
+    event.event === '$exception' &&
+    (event.properties?.source === 'errorBoundary' || event.properties?.errorBoundary !== undefined)
+  );
+}
+
 const REDACTED_CAPABILITY = '[redacted_installation_capability]';
 
 function decodedCapabilityText(value: string): string {
@@ -173,12 +180,18 @@ export function createPostHogPrivacy(readScope: () => string | null) {
     isAllowed: allowed,
     beforeSend(event: Event): Event | null {
       sync();
+      // Retired duplicate event: also reject older callers and deferred queues.
+      if (event.event === 'app/error_boundary_triggered') return null;
       if (event.event === '$snapshot') {
         if (!allowed() || !canDiscard) return null;
         generations.set(event, generation);
       } else if (event.event === '$exception') {
         const deferredGeneration = event.properties?.__lody_exception_generation;
-        if (!allowed() || (deferredGeneration !== undefined && deferredGeneration !== generation)) {
+        if (
+          isBoundaryException(event) ||
+          !allowed() ||
+          (deferredGeneration !== undefined && deferredGeneration !== generation)
+        ) {
           event = redact(event);
         } else if (event.properties) {
           delete event.properties.__lody_exception_generation;
@@ -197,6 +210,7 @@ export function createPostHogPrivacy(readScope: () => string | null) {
         const filter = (data: unknown): unknown => {
           if (!data || typeof data !== 'object' || !('event' in data)) return data;
           const event = data as Event;
+          if (event.event === 'app/error_boundary_triggered') return null;
           if (event.event === '$snapshot') {
             sensitive = true;
             return allowed() && canDiscard && generations.get(event) === generation
@@ -205,7 +219,7 @@ export function createPostHogPrivacy(readScope: () => string | null) {
           }
           if (event.event === '$exception') {
             sensitive = true;
-            return allowed() && generations.get(event) === generation
+            return !isBoundaryException(event) && allowed() && generations.get(event) === generation
               ? sanitizeEventCapabilities(event)
               : redact(event);
           }
@@ -249,7 +263,9 @@ export function createPostHogPrivacy(readScope: () => string | null) {
           ...redactedTelemetryException(
             {
               ...properties,
-              source: properties.errorBoundary !== undefined ? 'errorBoundary' : 'captureException',
+              source: isBoundaryException({ event: '$exception', properties })
+                ? 'errorBoundary'
+                : 'captureException',
             },
             args[0]
           ),

@@ -651,16 +651,16 @@ struct ChatTranscript {
         }
         if entry.inputState == "unknown" {
           let label = String(localized: "send.status.unknown", bundle: .lody) + " · " + String(localized: "send.forget.hint", bundle: .lody)
-          result.insert(ChatRow(id: entry.id + ":delivery", entryID: entry.id, kind: "delivery", text: label, actionable: true, attention: true), at: 0)
+          result.append(ChatRow(id: entry.id + ":delivery", entryID: entry.id, kind: "delivery", text: label, actionable: true, attention: true))
         }
         if entry.inputRetryable == true {
-          result.insert(ChatRow(id: entry.id + ":retryPending", entryID: entry.id, kind: "delivery",
-            text: String(localized: "native.chat.error.retry", bundle: .lody), actionable: true, attention: true), at: 0)
+          result.append(ChatRow(id: entry.id + ":retryPending", entryID: entry.id, kind: "delivery",
+            text: String(localized: "native.chat.error.retry", bundle: .lody), actionable: true, attention: true))
         }
         if let delivery = entry.delivery, delivery != "accepted" {
           let key = "native.chat.message.guide." + delivery
-          result.insert(ChatRow(id: entry.id + ":delivery", entryID: entry.id, kind: "delivery",
-            text: String(localized: String.LocalizationValue(key), bundle: .lody), attention: delivery == "rejected" || delivery == "unknown"), at: 0)
+          result.append(ChatRow(id: entry.id + ":delivery", entryID: entry.id, kind: "delivery",
+            text: String(localized: String.LocalizationValue(key), bundle: .lody), attention: delivery == "rejected" || delivery == "unknown"))
         }
         return result
       }
@@ -1183,8 +1183,8 @@ extension ChatPendingSend {
     if !hasReply && !acknowledged && !hasDelivery {
       let delivery = status.isEmpty ? String(localized: "send.status.awaitingConnection", bundle: .lody) : status
       let label = phase == "unknown" ? delivery + " · " + String(localized: "send.forget.hint", bundle: .lody) : delivery
-      result.insert(ChatRow(id: id + ":delivery", entryID: id, kind: "delivery", text: label,
-        actionable: phase == "unknown", attention: phase == "unknown"), at: 0)
+      result.append(ChatRow(id: id + ":delivery", entryID: id, kind: "delivery", text: label,
+        actionable: phase == "unknown", attention: phase == "unknown"))
     }
     if !hasReply && acknowledged && !hasDelivery {
       let now = Date().timeIntervalSince1970 * 1000

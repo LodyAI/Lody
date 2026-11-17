@@ -36,6 +36,8 @@ and old-backend compatibility still incur their original exception volume. A
 backend-only time/fingerprint cache was rejected because unauthenticated requests
 have no trustworthy retry identity and independent failures must remain visible.
 
+Only wholly handled Shortcut cause chains skip boundary/deferred capture. Mixed or foreign causes retain their independent fixed boundary diagnostic, without consuming the boundary episode for an earlier handled token failure. The browser harness keeps Shortcut/boundary script-SDK probes separate from the sync-stuck ESM fixture.
+
 ## Evidence and limits
 
 The finite model checks 78,125 traces over five events at depth seven; implementation
