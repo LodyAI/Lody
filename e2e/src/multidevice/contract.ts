@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
-import type { ElectronApplication, Page } from '@playwright/test';
+import type { SyncSessionUi } from './session-ui.js';
 
 export type Membership = 'same-account' | 'different-members';
 export type Backend = 'legacy' | 'native';
 export type Replica = {
+  mainPid: number;
   accountId: string;
   workspaceId: string;
   machineId: string;
@@ -22,13 +23,17 @@ export type Replica = {
 };
 
 export type DesktopActor = {
-  app: ElectronApplication;
-  page: Page;
+  // Private drivers may keep Playwright in an owned child process. The UI port
+  // must execute these same product interactions, without injecting Repo state.
+  ui: Pick<
+    SyncSessionUi,
+    'send' | 'open' | 'expectStreaming' | 'expectHistory' | 'expectMissing' | 'sessionId'
+  >;
   observe(): Promise<Replica>;
-  // Must cut ALL product network paths, including main/daemon and existing sockets.
-  // Resolve only after the per-actor network gate has acknowledged the change.
   setOnline(online: boolean): Promise<void>;
   restart(): Promise<DesktopActor>;
+  assertStopped(): Promise<void>;
+  screenshot(name: string): Promise<void>;
 };
 
 export type DesktopRound = {
@@ -59,13 +64,9 @@ export async function assertIndependentActors(
   membership: Membership,
   backend: Backend
 ): Promise<[Replica, Replica]> {
-  assert.notEqual(actors[0].app, actors[1].app, 'Two windows are not two desktop processes');
-  assert.notEqual(actors[0].app.process().pid, actors[1].app.process().pid);
   const replicas = await Promise.all(actors.map((actor) => actor.observe()));
   for (let i = 0; i < replicas.length; i++) {
     const replica = replicas[i]!;
-    const window = await actors[i]!.app.browserWindow(actors[i]!.page);
-    await window.dispose();
     for (const field of [
       'accountId',
       'workspaceId',
@@ -75,7 +76,7 @@ export async function assertIndependentActors(
     ] as const) {
       assert.ok(replica[field], `Missing runtime observation: ${field}`);
     }
-    for (const field of ['daemonPid', 'repoOwnerPid'] as const) {
+    for (const field of ['mainPid', 'daemonPid', 'repoOwnerPid'] as const) {
       assert.ok(Number.isSafeInteger(replica[field]) && replica[field] > 0, `Missing ${field}`);
     }
     assert.equal(replica.backend, backend);
@@ -85,10 +86,6 @@ export async function assertIndependentActors(
         client: '0.1.0',
         jsonPatch: '0.1.0',
       });
-    assert.equal(
-      await actors[i]!.app.evaluate(({ app }) => app.getPath('userData')),
-      replica.userDataDir
-    );
     for (const field of ['userDataDir', 'dataDir', 'repoDir'] as const) {
       assert.ok(
         contains(realpathSync(root), realpathSync(replica[field])),
@@ -110,8 +107,8 @@ export async function assertIndependentActors(
   for (const field of ['machineId', 'daemonPid', 'repoInstanceId', 'hostEndpoint'] as const) {
     assert.notEqual(a[field], b[field], `Shared ${field} invalidates multi-device evidence`);
   }
-  for (const left of [actors[0].app.process().pid, a.daemonPid, a.repoOwnerPid]) {
-    for (const right of [actors[1].app.process().pid, b.daemonPid, b.repoOwnerPid]) {
+  for (const left of [a.mainPid, a.daemonPid, a.repoOwnerPid]) {
+    for (const right of [b.mainPid, b.daemonPid, b.repoOwnerPid]) {
       assert.notEqual(left, right, 'Shared process owner across devices');
     }
   }

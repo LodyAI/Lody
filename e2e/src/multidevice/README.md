@@ -1,6 +1,19 @@
 # Desktop multi-device acceptance
 
-Run from the public checkout after building a **private Cloud desktop composition**:
+The private native owner runs this scenario through its existing child drivers:
+
+```sh
+LOCAL_STACK_INSTANCE=repo-sync-e2e LOCAL_STACK_PORT_OFFSET=24700 \
+  node local-stack/desktop/native-debug.mjs --ordinary-sync --build-profile test-build
+```
+
+Start that named private stack first using its normal `stack.mjs up --native`
+entry. The ordinary-sync mode consumes the exported `runCloudRound` function;
+it owns real Cloud applications, login, invitations and the TCP network gates.
+It currently accepts the legacy backend only. Runtime results, rather than the
+presence of this integration, determine whether synchronization passed.
+
+Other private owners may provide a default-exported fixture to the public entry:
 
 ```sh
 pnpm --dir e2e exec tsx src/multidevice/runner.ts \
@@ -16,7 +29,8 @@ unreleased upstream changes are outside that acceptance target. The public test 
 or depend on the engine; it is reusable for the migration's eventual Cloud build.
 Roost sessions are outside this lane.
 
-The driver operates real Playwright Electron pages. For both same-account devices
+The UI port operates real Playwright Electron pages, either in the fixture owner
+or through an owned child driver. For both same-account devices
 and different workspace members, A creates a Session through the composer, B
 opens it through the sidebar, both observe streaming, and the deterministic ACP
 finishes only after both observations. B sends a follow-up to the same Session.
@@ -43,8 +57,10 @@ after a full profile restart. Evidence is retained under
 
 ## Private fixture boundary
 
-Default-export the `CloudFixture` interface from [contract.ts](contract.ts).
-Its implementation belongs in the private outer repository. It must:
+Implement `CloudFixture` from [contract.ts](contract.ts) in the private outer
+repository. The CLI consumes a default export; embedded owners may import
+`runCloudRound` directly. `DesktopActor.ui` contains only product interactions,
+so existing Playwright child drivers can retain process ownership. It must:
 
 - Create a fresh loopback-only Convex deployment, Worker ingress and real authenticated Streams/Riverrun
   data for each membership round; provision synthetic accounts and a shared ordinary
@@ -105,13 +121,17 @@ storage, rather than the Lab's unauthenticated SQLite development server. Native
 Worker relay coverage is limited to its explicitly supported routes and must stay
 visible in any result; it is not acceptance of Worker uploads or runtime downloads.
 
-The public runner's private adapter has not been implemented. Reuse the existing
-private launch/login/drain owners rather than duplicating them. Its current
-controller carries Playwright work in owned child drivers; it does not export
-in-process `ElectronApplication`/`Page` handles for this interface. Bridging the
-UI/observation contract, ordinary workspace membership setup and a network gate
-covering all processes remains private integration work. A fresh private checkout
-also needs its own root installation, public source override and named stack startup;
-preflight success alone would not execute these scenarios. The implemented public
-scenarios and passing OSS isolation check do **not** complete desktop multi-device
-synchronization acceptance.
+The private ordinary-sync integration keeps those launch/login/drain owners and
+uses product invitation acceptance and machine-sharing UI for ordinary members.
+Each device owns real TCP/CONNECT forwarders; the inherited Node routing preload
+covers the embedded CLI while Chromium uses its explicit proxy. Offline closes
+existing forwarded sockets and refuses new ones. Read-only network probes and
+process-tree socket inventories must verify coverage before a result can pass.
+The native-engine backend needs its own demonstrated routing coverage; the
+current private lane rejects it rather than inferring coverage from JavaScript
+socket interception.
+
+A fresh private checkout needs its own root installation, public source override
+and named stack startup. Preflight or OSS isolation success does **not** complete
+desktop multi-device synchronization acceptance. The private lane also retains
+its same-user macOS/Keychain and limited Worker-route scope.

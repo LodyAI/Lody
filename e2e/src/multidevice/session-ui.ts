@@ -8,7 +8,7 @@ export const syncStarted = (token: string): string => `SYNC_STARTED_${token}`;
 export class SyncSessionUi {
   constructor(readonly page: Page) {}
 
-  async configureAgent(command: string): Promise<void> {
+  async configureAgent(command: string, name = 'Synthetic sync agent'): Promise<void> {
     await this.page.getByRole('button', { name: 'Settings', exact: true }).click();
     const settings = this.page
       .getByRole('dialog')
@@ -20,12 +20,12 @@ export class SyncSessionUi {
       .first()
       .click();
     await this.page.getByRole('option', { name: /^(Custom command|自定义命令)$/u }).click();
-    await this.page.locator('#agent-config-name').fill('Synthetic sync agent');
+    await this.page.locator('#agent-config-name').fill(name);
     await this.page.locator('#custom-acp-command').fill(command);
     await this.page.getByRole('button', { name: /^(Test command|测试命令)$/u }).click();
     await expect(this.page.getByText(/^(Ready|就绪)$/u).first()).toBeVisible({ timeout: 60_000 });
     await this.page.getByRole('button', { name: /^(Create|创建)$/u }).click();
-    await expect(this.page.getByText('Synthetic sync agent', { exact: true })).toBeVisible({
+    await expect(this.page.getByText(name, { exact: true })).toBeVisible({
       timeout: 30_000,
     });
     await this.page.keyboard.press('Escape');

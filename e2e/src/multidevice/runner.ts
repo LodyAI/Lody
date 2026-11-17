@@ -11,12 +11,10 @@ import {
   type DesktopRound,
   type Membership,
 } from './contract.js';
-import { SyncSessionUi } from './session-ui.js';
 
 const suiteRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const artifactBase = join(suiteRoot, 'artifacts', 'multidevice');
-mkdirSync(artifactBase, { recursive: true });
-const artifacts = mkdtempSync(join(artifactBase, 'round-'));
+let artifacts = '';
 const results: unknown[] = [];
 function save(status: string, reason?: string) {
   writeFileSync(
@@ -29,7 +27,13 @@ function argument(name: string): string | undefined {
   return i < 0 ? undefined : process.argv[i + 1];
 }
 
-async function run(fixture: CloudFixture, membership: Membership, backend: Backend): Promise<void> {
+export async function runCloudRound(
+  fixture: CloudFixture,
+  membership: Membership,
+  backend: Backend,
+  artifacts: string,
+  options: { suiteRoot?: string } = {}
+) {
   const root = join(artifacts, membership);
   mkdirSync(root);
   const signals = join(root, 'signals');
@@ -37,12 +41,18 @@ async function run(fixture: CloudFixture, membership: Membership, backend: Backe
   const logs = [join(root, 'agent-a.ndjson'), join(root, 'agent-b.ndjson')];
   for (const log of logs) writeFileSync(log, '');
   const commands = logs.map((log) =>
-    [process.execPath, join(suiteRoot, 'fixtures/sync-scripted-acp.mjs'), log, signals]
+    [
+      process.execPath,
+      join(options.suiteRoot ?? suiteRoot, 'fixtures/sync-scripted-acp.mjs'),
+      log,
+      signals,
+    ]
       .map(quoteCommandArgument)
       .join(' ')
   ) as [string, string];
   let round: DesktopRound | undefined;
   let primaryError: unknown;
+  let result: unknown;
   try {
     // Fixture owns cleanup of resources acquired before createRound returns.
     round = await fixture.createRound({
@@ -57,7 +67,7 @@ async function run(fixture: CloudFixture, membership: Membership, backend: Backe
     writeFileSync(join(root, 'replicas.json'), JSON.stringify(observations, null, 2) + '\n');
     const tokens: string[] = [];
     let sessionId = '';
-    const ui = (i: number) => new SyncSessionUi(actors[i]!.page);
+    const ui = (i: number) => actors[i]!.ui;
     const starts = (token: string, event: string) =>
       logs
         .flatMap((log) =>
@@ -94,12 +104,12 @@ async function run(fixture: CloudFixture, membership: Membership, backend: Backe
     await complete(0, 'a-while-b-offline', false, false);
     await ui(1).expectMissing('a-while-b-offline');
     const previous = actors[1];
-    const previousProcess = previous.app.process();
     actors[1] = await previous.restart(); // Restart must preserve the network gate.
-    assert.ok(
-      previousProcess.exitCode !== null || previousProcess.signalCode !== null,
-      'Restart left the old Electron process alive'
-    );
+    await previous.assertStopped();
+    await ui(1).open(sessionId);
+    await ui(1).expectHistory(tokens.slice(0, 2));
+    await ui(1).expectMissing('a-while-b-offline');
+    await actors[1].setOnline(true);
     const restarted = await assertIndependentActors(actors, root, membership, backend);
     for (const field of [
       'accountId',
@@ -111,22 +121,15 @@ async function run(fixture: CloudFixture, membership: Membership, backend: Backe
     ] as const) {
       assert.equal(restarted[1][field], observations[1][field], `Restart changed device ${field}`);
     }
-    await ui(1).open(sessionId);
-    await ui(1).expectHistory(tokens.slice(0, 2));
-    await ui(1).expectMissing('a-while-b-offline');
     writeFileSync(join(root, 'restarted-replicas.json'), JSON.stringify(restarted, null, 2) + '\n');
-    await actors[1].setOnline(true);
     await ui(1).open(sessionId);
     await ui(1).expectHistory(tokens);
     await complete(1, 'b-after-restart');
     // Restart the execution owner too: renderer reload alone cannot prove its
     // daemon/Repo persisted the accepted conversation.
-    const ownerProcess = actors[0].app.process();
+    const previousOwner = actors[0];
     actors[0] = await actors[0].restart();
-    assert.ok(
-      ownerProcess.exitCode !== null || ownerProcess.signalCode !== null,
-      'Owner restart left the old process alive'
-    );
+    await previousOwner.assertStopped();
     const ownerRestarted = await assertIndependentActors(actors, root, membership, backend);
     for (const field of [
       'accountId',
@@ -147,16 +150,10 @@ async function run(fixture: CloudFixture, membership: Membership, backend: Backe
     await ui(1).expectHistory(tokens);
     for (const token of tokens)
       assert.equal(starts(token, 'start').length, 1, `Duplicate ACP dispatch: ${token}`);
-    for (let i = 0; i < actors.length; i++) {
-      await actors[i]!.page.screenshot({
-        path: join(root, `actor-${i}-complete.png`),
-        fullPage: true,
-      });
-    }
-    results.push({ membership, backend, sessionId, tokens, status: 'passed' });
+    for (let i = 0; i < actors.length; i++) await actors[i]!.screenshot(`actor-${i}-complete`);
+    result = { membership, backend, sessionId, tokens, status: 'passed' };
   } catch (error) {
     primaryError = error;
-    results.push({ membership, backend, status: 'failed', error: String(error) });
   } finally {
     try {
       await round?.close();
@@ -167,9 +164,12 @@ async function run(fixture: CloudFixture, membership: Membership, backend: Backe
     }
   }
   if (primaryError) throw primaryError;
+  return result;
 }
 
 async function main() {
+  mkdirSync(artifactBase, { recursive: true });
+  artifacts = mkdtempSync(join(artifactBase, 'round-'));
   const adapter = argument('--adapter');
   if (!adapter) {
     save(
@@ -191,15 +191,17 @@ async function main() {
     'Adapter must default-export a CloudFixture'
   );
   for (const membership of ['same-account', 'different-members'] as const)
-    await run(fixture, membership, backend);
+    results.push(await runCloudRound(fixture, membership, backend, artifacts));
   save('passed');
   console.log(`Multi-device acceptance passed: ${artifacts}`);
 }
-try {
-  await main();
-} catch (error) {
-  save('failed', String(error));
-  console.error(error);
-  console.error(`Evidence: ${artifacts}`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  try {
+    await main();
+  } catch (error) {
+    if (artifacts) save('failed', String(error));
+    console.error(error);
+    console.error(`Evidence: ${artifacts}`);
+    process.exitCode = 1;
+  }
 }
