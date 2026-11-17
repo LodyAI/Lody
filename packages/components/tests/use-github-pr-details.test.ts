@@ -59,6 +59,7 @@ vi.mock('../src/hooks/use-recoverable-convex-query', () => ({
 
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => convexAuthMock.state,
+  useOptionalAuthenticatedConvex: () => convexAuthMock.state,
 }));
 
 vi.mock('@lody/cloud-api', () => ({

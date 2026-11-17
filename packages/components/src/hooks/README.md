@@ -119,8 +119,23 @@ boundary. Auth expiry continues through the central supervisor and retains only 
 matching committed snapshot. Brief success and temporary auth skips do not replenish
 attempts; 30 seconds of continuously observed success resets the budget. Skipped or
 unmounted queries stop retries, and session/query identity fences callbacks and results.
-Public queries, mutations/actions and local-only clients keep their existing behavior.
+Public queries and local-only clients keep their existing behavior.
 See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
+
+`providers/cloud-platform-api.ts` also admits imperative queries, subscriptions,
+and React action/mutation commands through the same authenticated Convex state.
+Structured `unauthenticated` failures report to the existing supervisor and stop
+new protected requests. Imperative subscriptions release their watches while auth
+is unavailable and resume for the same session after recovery. Confirmed logout or
+account replacement retires those subscriptions; provider cleanup stops their
+watches. Reattachment does not treat an old SDK-cached auth rejection as a fresh
+server rejection. Commands preserve their rejected result and never replay.
+Intentionally public operations stay available without authentication.
+
+`CloudPlatformProvider` also wraps standalone login without authenticated Convex
+context. Its optional authenticated child owns organization queries and E2EE email
+inbox hosts. The shared router supplies that context; standalone login must still
+render without it.
 
 Authentication recovery status is presented separately from query retries:
 `AuthenticatedConvexProvider` owns its budget and actions; `AuthRecoveryEntryProvider`

@@ -2,10 +2,9 @@
 
 `CLAUDE.md` links here; ancestor rules apply.
 
-`CloudPlatformProvider` also wraps standalone login without authenticated Convex
-context. Keep organization queries and E2EE email inbox hosts in its optional
-authenticated child; absence of that context must still render login. The shared
-router supplies the context and retains workspace actions and owner/admin inboxes.
+Standalone login must render without authenticated Convex context; keep protected
+queries and E2EE hosts in its optional authenticated child.
+Commands and imperative subscriptions follow [cloud auth admission](../hooks/README.md#cloud-query-recovery).
 
 ## Mirrors over synced docs tolerate unknown root keys
 
