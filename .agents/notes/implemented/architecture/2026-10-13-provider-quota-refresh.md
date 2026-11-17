@@ -57,7 +57,9 @@ The SDK transport is an external Promise boundary. Migrating the launcher, start
 gate and cleanup owner to native Effect remains outside this reader's scope.
 
 The reader uses Content-Length JSON-RPC, checks SDK protocol version 3 with `ping`,
-and calls `account.getQuota` without creating a session. Official CLI versions
+and calls `account.getQuota` without creating a session. The reader handles only
+these two sequential exchanges with bounded byte buffering, avoiding a general
+JSON-RPC dependency for this account-only read. Official CLI versions
 1.0.107 and the registry pin 1.0.112 support this query with an existing local login.
 The 1.0.107 ACP endpoint has neither the account RPC nor a Core quota declaration.
 The ACP `/usage` command reports session consumption, so it cannot supply an account
