@@ -82,6 +82,13 @@ Monitor 任务。因此 GC 会把三种情况当成空闲：
   未经验证。
 - 该状态需要声明 `sessionActivity` 的 Claude 适配器版本，以及定义它的 Core 版本。
   旧适配器和其他 provider 不上报，GC 行为与之前完全相同，包括迟到输出不算活动。
+- 2026-11-17 补充（[#2797](https://github.com/LodyAI/Lody/issues/2797)）：DeepSeek
+  Harness 适配器也上报该状态，来源是原生 `agent/status` 和根会话存活的 job。它原先
+  强制 `quiet` 的 job 完成投递，并拒绝 prompt 之外的所有根 step，所以空闲时结束的
+  job 要等下一条用户消息才会被模型看到，空闲 GC 还会在 20 分钟后连同内存中的 job
+  注册表一起回收进程。现在它保留原生 `wakeup` 投递，只放行领取了完成通知的那个
+  turn。job 仍随 ACP 进程一起消失（驱逐、崩溃、守护进程重启）；Harness 没有跨进程
+  的 job 注册表。
 - 适配器发送状态时不 await，SDK 消息循环不会在这些位置让出。顺序依然成立，
   因为每次发送都在第一个 `await` 之前交给了连接。
 
