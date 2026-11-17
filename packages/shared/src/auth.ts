@@ -1,3 +1,6 @@
+/** Typed, handled Shortcut result failures have one operation-owned diagnostic. */
+export const HANDLED_SHORTCUT_TOKEN_ERROR = 'LodyShortcutTokenFailure';
+
 export const MISSING_EMAIL_DOMAIN = 'missing-email.lody.invalid';
 export const MISSING_EMAIL_PREFIX = 'missing-email';
 
@@ -25,9 +28,7 @@ export const isConvexAuthErrorData = (value: unknown): value is ConvexAuthErrorD
   value.code === CONVEX_AUTH_ERROR_CODE.unauthenticated;
 
 export const isConvexError = (error: unknown): boolean =>
-  isRecord(error) &&
-  error.name === 'ConvexError' &&
-  error[CONVEX_ERROR_IDENTIFYING_FIELD] === true;
+  isRecord(error) && error.name === 'ConvexError' && error[CONVEX_ERROR_IDENTIFYING_FIELD] === true;
 
 export const getConvexAuthErrorCode = (error: unknown): ConvexAuthErrorCode | null => {
   if (!isConvexError(error) || !isConvexAuthErrorData((error as { data?: unknown }).data)) {

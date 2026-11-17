@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+import { ShortcutTokenAttemptError } from '../src/lib/shortcut-token-attempt';
 import { act, createRef, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -154,6 +155,44 @@ describe('ErrorBoundary manual recovery', () => {
     fail = true;
     render();
     expect(reports).toHaveLength(2);
+  });
+
+  it('owned Shortcut failures do not consume the boundary episode but an independent cause remains reportable', () => {
+    const boundary = createRef<ErrorBoundary>();
+    const handled = new ShortcutTokenAttemptError({
+      kind: 'retryable',
+      code: 'exchange_unavailable',
+      phase: 'exchange',
+    });
+    let error: Error = handled;
+    function Content(): never {
+      throw error;
+    }
+    act(() =>
+      root.render(
+        <ErrorBoundary ref={boundary} fallbackRender={({ error }) => <span>{error.message}</span>}>
+          <Content />
+        </ErrorBoundary>
+      )
+    );
+    for (let i = 0; i < 20; i++) act(() => boundary.current!.resetErrorBoundary());
+    expect(deferredPostHog.captureException).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('exchange_unavailable');
+    const mixed = new ShortcutTokenAttemptError({
+      kind: 'retryable',
+      code: 'exchange_unavailable',
+      phase: 'exchange',
+    });
+    mixed.cause = new Error('SYNTHETIC_INDEPENDENT_CAUSE');
+    error = mixed;
+    act(() => boundary.current!.resetErrorBoundary());
+    const reports = vi.mocked(deferredPostHog.captureException).mock.calls;
+    expect(reports).toHaveLength(1);
+    expect(JSON.stringify(reports)).not.toContain('SYNTHETIC_');
+    expect(reports[0][1]).toMatchObject({ source: 'errorBoundary' });
+    error = new Error('another independent crash during same boundary episode');
+    act(() => boundary.current!.resetErrorBoundary());
+    expect(reports).toHaveLength(1);
   });
 
   it('keeps separate mounted owners visible even when their error objects match', () => {

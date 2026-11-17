@@ -1,3 +1,4 @@
+import { isHandledShortcutTokenError } from '@/lib/shortcut-token-attempt';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { isConvexUnauthenticatedError } from '@lody/shared';
 import { redactedTelemetryException } from '@lody/platform/telemetry';
@@ -76,6 +77,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       variant: this.props.variant ?? 'section',
       componentStack: info.componentStack ?? null,
     });
+    // The Shortcut operation already owns this handled failure. Do not consume
+    // the boundary episode: a subsequent independent crash must remain visible.
+    if (isHandledShortcutTokenError(error)) return;
     if (this.hasReportedError) return;
     this.hasReportedError = true;
 

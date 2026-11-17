@@ -1,3 +1,4 @@
+import { isHandledShortcutTokenError } from './shortcut-token-attempt';
 import posthog from 'posthog-js';
 import { isElectronRenderer } from './electron';
 import { isNativeAppShell } from './native-platform';
@@ -276,6 +277,7 @@ export function createDeferredPostHogController(
   };
 
   const enqueueOrInvoke = (method: DeferredMethod, args: unknown[]): unknown => {
+    if (method === 'captureException' && isHandledShortcutTokenError(args[0])) return undefined;
     if (method === 'captureException' && realClient === posthog) {
       args = postHogPrivacy.prepareException(args);
     }
