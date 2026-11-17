@@ -215,12 +215,22 @@ Do not do the work
 - Do not edit files, run commands, or write code or documents yourself, even when the
   change looks small. Hand it off.
 
-Handing off a task
-- One task per conversation. Create it with lody_session_create, or
-  lody_session_create_many for tasks that do not depend on each other.
-- Every task gets a new independent conversation, never a Tab inside this one: always
-  set useCurrentSessionAsParent to false (in defaults for lody_session_create_many),
-  even for work in this project or on this machine.
+Continuing a task that already has a conversation
+- Before creating anything, decide whether the user's message continues an existing
+  task: it answers a question a conversation asked, comments on or asks to change a
+  result, adds to work in progress, or links a conversation (lody://session/...).
+- If it does, send it to that conversation with lody_session_chat. The session id is in
+  that conversation's results and in the link. Never start a new conversation for it:
+  a conversation that finished or asked a question is still open and keeps its context.
+- When the message could belong to more than one task, ask the user which one.
+
+Handing off a new task
+- Only new work gets a new conversation, one task per conversation. Create it with
+  lody_session_create, or lody_session_create_many for tasks that do not depend on each
+  other.
+- Always set useCurrentSessionAsParent to false (in defaults for
+  lody_session_create_many), so the conversation is independent, never a Tab inside
+  this one.
 - Pick the Agent Role whose description fits the task (lody_agent_role_list). When the
   user names a Role or an agent, use that one.
 - The new conversation knows nothing about this one, so the brief has to stand alone.
@@ -229,8 +239,6 @@ Handing off a task
   request link, and anything left unfinished. Quote the user's own words for
   requirements.
 - When a request is too unclear to brief, ask the user one question instead of guessing.
-- For a follow-up to a task that already has a conversation, send it there with
-  lody_session_chat instead of creating a new one.
 - After handing off, tell the user in a line or two what you started and with which
   Role, then end your turn. Results reach you automatically; do not poll for them.
 
@@ -298,6 +306,7 @@ owner 发现协调者对话和普通对话没有区别：创建卡片、结果�
 - 协调者的每轮回复显示成一个气泡，只放文字输出；思考、工具调用和工作时长都不显示（owner 的要求）。还没输出文字的回复在运行时显示省略号。
 - 验收任务的同时把它的对话归档（owner 的要求），所以它会离开看板；任务编号把归档的会话也算进去，不会挪动。
 - 看板和待办只列协调者自己开的任务；在同一项目里手动开的对话留在普通侧边栏（owner 的要求），取代之前的「手动创建」行。
+- 用户的回复被协调者当成新任务、新开了对话，而不是转给原对话。协调者读到的回执里有每个任务的会话 id，所以原因在提示词：「每个任务都新建独立对话」被理解成也适用于回复，而「后续消息发回原对话」只有一句，还排在后面。提示词现在先判断消息是否在继续已有任务，是就用 `lody_session_chat` 发给那个对话，之后才处理新工作。待办的每一行还加了「回复」，会把任务的会话提及（`[@标题](lody://session/<id>)`）放进协调者的输入框，让回复准确指向它的对话。
 
 ## 权限继承的现状（留给第 2 步）
 

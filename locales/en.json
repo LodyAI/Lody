@@ -6833,5 +6833,6 @@
   "projectMode.todo.title": "To do",
   "projectMode.todo.open": "Open",
   "projectMode.todo.showLess": "Show less",
-  "projectMode.todo.showMore": "{{count}} more"
+  "projectMode.todo.showMore": "{{count}} more",
+  "projectMode.todo.reply": "Reply"
 }

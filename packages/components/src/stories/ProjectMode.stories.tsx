@@ -369,6 +369,7 @@ function CoordinatorPage() {
               setActiveTab(CHILD_TAB);
             },
             acceptTasks: () => {},
+            replyToTask: () => {},
           }}
         >
           <ConversationPage

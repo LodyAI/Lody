@@ -26,6 +26,11 @@ type CoordinatorConversationValue = {
   todo: readonly ProjectBoardRow[];
   openTask: (sessionId: string) => void;
   acceptTasks: (sessionIds: readonly string[]) => void;
+  /**
+   * Starts a reply about a task: puts the task's session mention in the
+   * coordinator's composer, so the message names its conversation exactly.
+   */
+  replyToTask: (sessionId: string) => void;
 };
 
 const CoordinatorConversationContext = createContext<CoordinatorConversationValue | null>(null);
@@ -38,11 +43,13 @@ export function CoordinatorConversationProvider({
   coordinatorSessionId,
   project,
   onOpenTask,
+  onReplyToTask,
   children,
 }: {
   coordinatorSessionId: string;
   project: CoordinatorProjectKey | null;
   onOpenTask: (sessionId: string) => void;
+  onReplyToTask: (sessionId: string) => void;
   children: ReactNode;
 }) {
   const board = useProjectBoardData(coordinatorSessionId, project);
@@ -58,8 +65,9 @@ export function CoordinatorConversationProvider({
       todo: [...board.needsYou, ...board.review],
       openTask: onOpenTask,
       acceptTasks,
+      replyToTask: onReplyToTask,
     };
-  }, [acceptTasks, board, onOpenTask]);
+  }, [acceptTasks, board, onOpenTask, onReplyToTask]);
   return (
     <CoordinatorConversationContext.Provider value={value}>
       {children}
@@ -320,6 +328,13 @@ export function CoordinatorTodoCard() {
               <span {...stylex.props(styles.chipTitle)}>{title}</span>
               <TaskState bucket={row.bucket} />
             </button>
+            <Button
+              size="small"
+              variant="ghost"
+              onClick={() => coordinator.replyToTask(row.session.id)}
+            >
+              {t('projectMode.todo.reply', 'Reply')}
+            </Button>
             {row.bucket === 'review' ? (
               <Button size="small" variant="secondary" onClick={() => acceptOne(row.session.id)}>
                 {t('projectMode.board.accept', 'Accept')}

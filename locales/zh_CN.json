@@ -6820,5 +6820,6 @@
   "projectMode.todo.title": "待办",
   "projectMode.todo.open": "打开",
   "projectMode.todo.showLess": "收起",
-  "projectMode.todo.showMore": "还有 {{count}} 项"
+  "projectMode.todo.showMore": "还有 {{count}} 项",
+  "projectMode.todo.reply": "回复"
 }

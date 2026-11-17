@@ -5471,6 +5471,14 @@ const SessionDetail = ({
     sessionId,
   ]);
 
+  /** Puts a task's session mention in the coordinator's own composer to reply about it. */
+  const handleReplyToCoordinatorTask = useCallback(
+    (taskSessionId: string) => {
+      chatRefsMap.current.get(sessionId)?.insertSessionMention(taskSessionId);
+    },
+    [sessionId]
+  );
+
   /** Opens a board conversation as a right-panel tab, keeping the coordinator on the left. */
   const handleOpenPanelSession = useCallback(
     (panelSessionId: string) => {
@@ -7518,6 +7526,7 @@ const SessionDetail = ({
                   coordinatorSessionId={tabSession.id}
                   project={coordinatorProject}
                   onOpenTask={handleOpenPanelSession}
+                  onReplyToTask={handleReplyToCoordinatorTask}
                 >
                   {chatSurface}
                 </CoordinatorConversationProvider>
