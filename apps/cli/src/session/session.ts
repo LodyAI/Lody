@@ -226,6 +226,17 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     };
   }
 
+  /** Whether this Session still owns a live ACP agent process not yet stopping. */
+  hasLiveAgentProcess(): boolean {
+    return (
+      this.agentProcess !== null &&
+      this.termination === null &&
+      this.status !== 'stopping' &&
+      this.status !== 'terminated' &&
+      this.status !== 'failed'
+    );
+  }
+
   async applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void> {
     await this.sandbox.applyLimits(limits);
   }

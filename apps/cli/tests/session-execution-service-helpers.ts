@@ -398,6 +398,8 @@ const runSilentPromptTurn = async (options: {
   restore?: SessionConfig[];
   /** What the agent reports outside Lody's Turns (Core `sessionActivity`). */
   nativeWork?: { current: 'running' | 'background' | null };
+  /** Ordered lifecycle steps observed by the test (e.g. interruption notice before flush). */
+  onLifecycleEvent?: (event: string) => void;
 }) => {
   let history: Array<Record<string, unknown>> = [
     ...(options.earlierInputAuthor
@@ -429,6 +431,7 @@ const runSilentPromptTurn = async (options: {
     currentModel: undefined,
     getNativeWork: () => options.nativeWork?.current ?? null,
   };
+  let liveAgentProcess = true;
   const activeSession = {
     sessionId: options.sessionId as SessionId,
     acpSessionId: 'acp-silent' as ACPSessionId,
@@ -440,26 +443,42 @@ const runSilentPromptTurn = async (options: {
     getExecutionScope: () => options.liveConfig ?? {},
     exec: vi.fn(async () => ''),
     terminate: vi.fn(async () => {}),
+    hasLiveAgentProcess: () => liveAgentProcess,
     updateGitIdentity: vi.fn(),
     createAgent: vi.fn(async () => 'acp-silent'),
     applyExecutionPlaneLimits: vi.fn(async () => {}),
   };
   let status = SessionStatusFactory.idle();
   let restored = false;
-  const sessionDoc = withHistoryPort({
-    // Read at call time, so a test can change synced metadata mid-turn.
-    getMetaState: vi.fn(async () => ({ isArchived: false, ...options.meta })),
-    setStatus: vi.fn(async (next: typeof status) => {
-      status = next;
-    }),
-    setLastMessageAt: vi.fn(async () => {}),
-    waitUntilSynced: async () => {},
-    flushLocalWrites: async () => {},
-    getHistory: vi.fn(() => history),
-    updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-      history = updater(history);
-    }),
-  });
+  let docDestroyed = false;
+  const roomId = getSessionRoomId(options.sessionId as SessionId);
+  const makeDocPort = (isDestroyedFn: () => boolean) =>
+    withHistoryPort({
+      sessionId: options.sessionId as SessionId,
+      roomId,
+      get isDestroyed() {
+        return isDestroyedFn();
+      },
+      // Read at call time, so a test can change synced metadata mid-turn.
+      getMetaState: vi.fn(async () => ({ isArchived: false, ...options.meta })),
+      setStatus: vi.fn(async (next: typeof status) => {
+        status = next;
+      }),
+      setLastMessageAt: vi.fn(async () => {
+        if (isDestroyedFn()) throw new Error('SessionDocument not initialized');
+        options.onLifecycleEvent?.(isDestroyedFn() ? 'stale:unread' : 'unread');
+      }),
+      waitUntilSynced: async () => true,
+      flushLocalWrites: async () => {
+        options.onLifecycleEvent?.(isDestroyedFn() ? 'stale:flush' : 'flush');
+      },
+      getHistory: vi.fn(() => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+    });
+  const sessionDoc = makeDocPort(() => docDestroyed);
+  const replacementSessionDoc = makeDocPort(() => false);
   const failureMessages: string[] = [];
   const interruptedNotices: string[] = [];
   // Lifecycle events of the live agent, as SessionManager publishes them.
@@ -505,6 +524,7 @@ const runSilentPromptTurn = async (options: {
       validateSessionCredentials: vi.fn(async () => {}),
     }) as unknown as SessionManager,
     recordNativeWorkInterrupted: vi.fn(async (_sessionId: SessionId, turnId: string) => {
+      options.onLifecycleEvent?.('notice');
       interruptedNotices.push(turnId);
     }),
     workspaceDocument: {
@@ -512,7 +532,8 @@ const runSilentPromptTurn = async (options: {
         upsertDocMeta,
         getDocMeta: vi.fn(async () => undefined),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      isSessionDocCleaning: () => false,
+      getOrCreateSessionDoc: vi.fn(async () => (docDestroyed ? replacementSessionDoc : sessionDoc)),
       updateAcpCapabilities: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager,
     turnFinalization: {
@@ -585,6 +606,7 @@ const runSilentPromptTurn = async (options: {
   return withHistoryPort({
     deps,
     sessionDoc,
+    replacementSessionDoc,
     notificationFacts,
     failureMessages,
     upsertDocMeta,
@@ -599,9 +621,16 @@ const runSilentPromptTurn = async (options: {
       if (options.nativeWork) options.nativeWork.current = work;
       sessionEvents.emit('onNativeWorkChanged', options.sessionId, work);
     },
+    /** The ACP child crashes (`onExit` clears `agentProcess` and emits null without `'terminated'`). */
+    crashAgentProcess: () => {
+      liveAgentProcess = false;
+      sessionEvents.emit('onNativeWorkChanged', options.sessionId, null);
+    },
     /** The agent process exits, as idle GC or memory pressure ends it. */
-    endAgentProcess: () => {
+    endAgentProcess: (opts?: { destroyDoc?: boolean }) => {
       sessionEnded = true;
+      liveAgentProcess = false;
+      if (opts?.destroyDoc) docDestroyed = true;
       sessionEvents.emit('terminated', { sessionId: options.sessionId });
     },
   });

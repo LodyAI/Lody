@@ -36,8 +36,8 @@ export const awaitNativeWorkSettlement = (watch: NativeWorkWatch) =>
     };
     unsubscribe = watch.subscribe((event) => {
       if (event === 'superseded') finish('superseded');
-      else if (watch.current() === null) finish('settled');
       else if (event === 'ended') finish('interrupted');
+      else if (watch.current() === null) finish('settled');
     });
     if (done) unsubscribe();
     return Effect.sync(() => {

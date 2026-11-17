@@ -2711,9 +2711,6 @@ export class AgentClient implements acp.Client {
     }).finally(() => {
       connection.signal.removeEventListener('abort', onConnectionAbort);
       if (this.antigravityMonitor === controller) this.antigravityMonitor = null;
-      if (this.acpSessionId === sessionId && this.antigravityTracker === tracker) {
-        this.setAntigravityNativeActivity(sessionId, 'idle', 0);
-      }
     });
   }
 
@@ -2722,6 +2719,15 @@ export class AgentClient implements acp.Client {
     if (!activity || activity.sessionId !== this.acpSessionId) return null;
     if (activity.state !== 'idle') return 'running';
     return activity.backgroundTaskCount > 0 ? 'background' : null;
+  }
+
+  /** True while native work is active or reached the Antigravity monitor cap unsettled. */
+  hasUnsettledNativeWork(): boolean {
+    if (this.getNativeWork() !== null) return true;
+    return Boolean(
+      this.antigravityTracker?.hasExpiredPendingWork() &&
+      this.nativeActivity?.sessionId === this.acpSessionId
+    );
   }
 
   getNativeActivityObservation(): 'idle' | 'running' | 'background' | 'unknown' {

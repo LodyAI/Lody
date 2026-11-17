@@ -489,4 +489,54 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it('preserves unsettled native work on closeSession and connection abort instead of flipping to idle', async () => {
+    const closeHarness = createHarness();
+    installTranscript();
+    await closeHarness.client.startSession({} as never, '/synthetic/project');
+    promptOnce([tool('cmd-1', 'run_command', 'in_progress')]);
+    await send(closeHarness, 'Run');
+    expect(closeHarness.client.getNativeWork()).toBe('background');
+    expect(closeHarness.client.hasUnsettledNativeWork()).toBe(true);
+
+    await closeHarness.client.closeSession('agy-sess-1' as ACPSessionId);
+    await Promise.resolve();
+    expect(closeHarness.client.getNativeWork()).toBe('background');
+    expect(closeHarness.client.hasUnsettledNativeWork()).toBe(true);
+    expect(closeHarness.workChanges).toEqual(['background']);
+
+    mockState.abortController = new AbortController();
+    const abortHarness = createHarness();
+    installTranscript();
+    await abortHarness.client.startSession({} as never, '/synthetic/project');
+    promptOnce([tool('cmd-2', 'run_command', 'in_progress')]);
+    await send(abortHarness, 'Run');
+    expect(abortHarness.client.getNativeWork()).toBe('background');
+
+    mockState.abortController.abort();
+    await Promise.resolve();
+    expect(abortHarness.client.getNativeWork()).toBe('background');
+    expect(abortHarness.client.hasUnsettledNativeWork()).toBe(true);
+    expect(abortHarness.workChanges).toEqual(['background']);
+  });
+
+  it('retains unsettled marker when the 24-hour protection cap releases GC until a new turn starts', async () => {
+    const harness = createHarness();
+    installTranscript();
+    await harness.client.startSession({} as never, '/synthetic/project');
+
+    promptOnce([
+      tool('sched-1', 'schedule', 'in_progress', { rawInput: { DurationSeconds: 86_400 * 2 } }),
+    ]);
+    await send(harness, 'Remind me in two days');
+    await vi.advanceTimersByTimeAsync(
+      DEFAULT_ANTIGRAVITY_POLL_TIMINGS.maxDurationMs + listPollIntervalMs
+    );
+    expect(harness.client.getNativeWork()).toBeNull();
+    expect(harness.client.hasUnsettledNativeWork()).toBe(true);
+
+    promptOnce([say('Done.')]);
+    await send(harness, 'Status');
+    expect(harness.client.hasUnsettledNativeWork()).toBe(false);
+  });
 });
