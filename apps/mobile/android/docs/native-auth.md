@@ -43,10 +43,11 @@ geometry are `designsystem/LodyLoginColors.kt`; controls keep 44 dp touch target
 ## Provider setup (public IDs only in the app)
 
 - Google uses AndroidX Credential Manager with the official Google ID library,
-  `GetSignInWithGoogleOption`, and a per-attempt nonce. Supply the **Web OAuth client
-  ID** via `-PLODY_GOOGLE_WEB_CLIENT_ID=…apps.googleusercontent.com` or a local
-  Gradle user property. No placeholder ID or secret is bundled. Without the ID,
-  the Google action reports that this build is not configured.
+  `GetSignInWithGoogleOption`, and a per-attempt nonce. `app/build.gradle.kts` defaults
+  `LODY_GOOGLE_WEB_CLIENT_ID` to production's public **Web OAuth client ID**;
+  `-PLODY_GOOGLE_WEB_CLIENT_ID=…` or a Gradle user property overrides it. No secret is
+  bundled. An explicitly empty value makes the Google action report that this build is
+  not configured.
 - In Google Cloud, register Android OAuth clients for application ID
   `ai.lody.android` and each permitted signing-certificate SHA fingerprint. The
   optional `.m3e` application ID needs its own registration. The Web client ID must

@@ -19,7 +19,7 @@ import { useTranslation } from 'react-i18next';
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
 import { ComposerImagePeek } from './composer-image-peek';
-import { measureTextareaScrollHeight } from './textarea-measurement';
+import { measureComposerContentHeight } from './textarea-measurement';
 import { CommentReferenceChip, type CommentReferenceChipItem } from './comment-reference-chip';
 import {
   VisualAnnotationReferenceChip,
@@ -69,6 +69,12 @@ import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  type ComposerInputElement,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 const typography = stylex.create({
   imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
@@ -188,8 +194,8 @@ export interface ChatComposerProps {
   promptId?: string;
   promptValue: string;
   onPromptChange: (value: string) => void;
-  onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onPromptKeyDown?: (event: KeyboardEvent<ComposerInputElement>) => void;
+  onPromptPaste?: (event: ClipboardEvent<ComposerInputElement>) => void;
   /**
    * Advisory next-prompt text for an empty composer. Desktop accepts it with
    * Tab; mobile only through the inline Apply control. Accepting writes the
@@ -207,7 +213,7 @@ export interface ChatComposerProps {
   /** Focus the prompt as soon as this composer mounts (new-chat sheet). */
   promptAutoFocus?: boolean;
   promptEnterKeyHint?: TextareaProps['enterKeyHint'];
-  promptRef?: Ref<HTMLTextAreaElement>;
+  promptRef?: Ref<ComposerInputElement>;
   pastedTextDrafts?: PastedTextDraft[];
   onPastedTextDraftsChange?: (drafts: PastedTextDraft[]) => void;
   /**
@@ -257,8 +263,6 @@ export interface ChatComposerProps {
   visualAnnotationReferenceItems?: VisualAnnotationReferenceChipItem[];
   /** Remove a visual annotation reference by localId */
   onVisualAnnotationReferenceRemove?: (localId: string) => void;
-  /** @deprecated Use footerSelector instead */
-  selector?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, agent) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -372,7 +376,6 @@ export function ChatComposer({
   revealCommentReferenceRemoveOnClick = false,
   visualAnnotationReferenceItems = [],
   onVisualAnnotationReferenceRemove,
-  selector,
   topSelector,
   footerSelector,
   bottomBar,
@@ -444,9 +447,9 @@ export function ChatComposer({
     }
     if (removed.value !== promptValue) return;
     removedQuoteCaret.current = null;
-    const input = composerBoxRef.current?.querySelector('textarea');
+    const input = composerBoxRef.current?.querySelector<HTMLElement>('[data-lody-composer-input]');
     input?.focus({ preventScroll: true });
-    input?.setSelectionRange(removed.position, removed.position);
+    setComposerSelection(input, removed.position, removed.position);
   }, [draftKey, promptValue]);
   const [useCompactPlaceholder, setUseCompactPlaceholder] = useState(false);
   useLayoutEffect(() => {
@@ -628,14 +631,14 @@ export function ChatComposer({
     ]
   );
   const handlePromptCopy = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const input = event.currentTarget;
       // Expand session/skill/role/pasted mentions to the agent-facing plain
       // text — same rewrites as send. Native copy stays when nothing expands.
       const clipboardText = getExpandedClipboardTextForSelection({
         value: promptValue,
-        selectionStart: input.selectionStart,
-        selectionEnd: input.selectionEnd,
+        selectionStart: getComposerSelection(input).start,
+        selectionEnd: getComposerSelection(input).end,
         rewrites: getMentionPromptRewrites({
           text: promptValue,
           mentions: mentionRanges,
@@ -708,9 +711,9 @@ export function ChatComposer({
         ? promptRef.current
         : null;
     if (!textarea) return;
-    const caret = textarea.value.length;
+    const caret = getComposerText(textarea).length;
     textarea.focus();
-    textarea.setSelectionRange(caret, caret);
+    setComposerSelection(textarea, caret, caret);
   }, [promptRef, promptValue]);
   const promptInputProps = {
     disabled: promptDisabled && !preservePromptFocus,
@@ -718,10 +721,10 @@ export function ChatComposer({
     onValueChange: (value: string) => {
       if (!promptDisabled) onPromptChange(value);
     },
-    onBeforeInput: (event: React.FormEvent<HTMLTextAreaElement>) => {
+    onBeforeInput: (event: React.FormEvent<ComposerInputElement>) => {
       if (promptDisabled) event.preventDefault();
     },
-    onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    onKeyDown: (event: KeyboardEvent<ComposerInputElement>) => {
       if (promptDisabled) {
         if (event.key !== 'Tab') event.preventDefault();
         return;
@@ -746,7 +749,7 @@ export function ChatComposer({
       }
       onPromptKeyDown?.(event);
     },
-    onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    onPaste: (event: ClipboardEvent<ComposerInputElement>) => {
       if (promptDisabled) event.preventDefault();
       else onPromptPaste?.(event);
     },
@@ -861,7 +864,7 @@ export function ChatComposer({
 
     // Measure outside the flex layout. A temporary height:auto on the live
     // textarea expands the conversation viewport and can clamp its scrollTop.
-    const scrollHeight = measureTextareaScrollHeight(textarea, computedStyle);
+    const scrollHeight = measureComposerContentHeight(textarea, computedStyle);
     const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
 
     textarea.style.height = `${newHeight}px`;
@@ -1397,7 +1400,7 @@ export function ChatComposer({
                     the run-config face rather than wrapping config chips onto a
                     second line (especially on mobile). */}
                 <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
-                  {footerSelector ?? selector}
+                  {footerSelector}
                 </div>
 
                 <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -1468,7 +1471,7 @@ export function ChatComposer({
             ) : null}
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex w-full flex-wrap select-none items-end gap-2">{selector}</div>
+              <div className="flex w-full flex-wrap select-none items-end gap-2" />
 
               <div className="flex w-full flex-col select-none gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:justify-end">
                 {secondaryAction ? (

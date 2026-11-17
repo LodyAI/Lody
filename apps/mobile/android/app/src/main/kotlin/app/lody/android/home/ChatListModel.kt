@@ -58,27 +58,38 @@ enum class HomeScope(val key: String) { Mine("mine"), Team("team") }
 enum class HomeGrouping(val key: String) { Time("time"), Project("project"), Status("status") }
 
 /**
- * "By status" groups, most pressing first. Mirrors web `lib/home-now.ts` (iOS `HomeStatusGroup`):
- * every chat lands in exactly one group, under the first reason that applies.
+ * "By status" groups in display order (iOS `HomeStatusGroup`). Classification mirrors web
+ * `lib/home-now.ts`: every chat lands in exactly one group, under the first reason that applies
+ * (see [ChatListModel.statusGroup]). Running chats are listed just above idle ones.
  */
 enum class StatusGroup {
     /** Failed, waiting on the person, CI failed on an idle chat's open PR, or a draft PR. */
     Attention,
     /** Finished since the person last looked. */
     Finished,
-    /** Working, even when unread or its CI is red: it may be fixing exactly that. */
-    Running,
     /** An open pull request with passing or pending CI. */
     PullRequest,
+    /** Working, even when unread or its CI is red: it may be fixing exactly that. */
+    Running,
     /** Everything else, including chats whose PR is merged or closed. */
     Idle,
 }
 
-/** One Home group; the screen localizes [header]. */
-data class HomeSection(val id: String, val header: Header, val chats: List<ChatItem>, val repository: String? = null) {
+/**
+ * One Home group; the screen localizes [header]. A [collapsed] group shows only its label; its
+ * [chats] stay for the project index's status tint.
+ */
+data class HomeSection(
+    val id: String,
+    val header: Header,
+    val chats: List<ChatItem>,
+    val repository: String? = null,
+    val collapsed: Boolean = false,
+) {
     val rootCount: Int get() = chats.count { it.nestedUnder == null }
-    val folds: Boolean get() = (header as? Header.Status)?.group == StatusGroup.Idle && rootCount > ChatListModel.IDLE_LIMIT
+    val folds: Boolean get() = !collapsed && (header as? Header.Status)?.group == StatusGroup.Idle && rootCount > ChatListModel.IDLE_LIMIT
     fun visibleChats(idleExpanded: Boolean): List<ChatItem> {
+        if (collapsed) return emptyList()
         if (!folds || idleExpanded) return chats
         val roots = chats.filter { it.nestedUnder == null }.take(ChatListModel.IDLE_LIMIT).mapTo(mutableSetOf()) { it.id }
         return chats.filter { it.id in roots || it.nestedUnder in roots }
@@ -123,11 +134,22 @@ object ChatListModel {
         else -> null
     }
 
-    /** Status first; an idle chat still flags an open question (`awaitingUserSince`) or an unread reply. */
+    /**
+     * The latest finished turn failed (web `hasFailedLatestTurn`): the failure marker still names
+     * the turn handled last. A later handled or canceled turn moves that pointer on.
+     */
+    fun latestTurnFailed(session: CatalogSession): Boolean =
+        session.lastFailedUserMsgId != null && session.lastFailedUserMsgId == session.lastHandledUserMsgId
+
+    /**
+     * Status first; a failed latest turn shows unless the agent is running again, and an idle chat
+     * still flags an open question (`awaitingUserSince`) or an unread reply.
+     */
     fun attention(session: CatalogSession): ChatAttention? {
         val status = attention(session.status)
         return when {
             status == ChatAttention.Failed -> status
+            status != ChatAttention.Running && latestTurnFailed(session) -> ChatAttention.Failed
             session.awaitingUserSince != null && status != ChatAttention.Running -> ChatAttention.Waiting
             status != null -> status
             isUnread(session) -> ChatAttention.Unread
@@ -169,14 +191,19 @@ object ChatListModel {
         owner: String? = null,
         today: LocalDate = LocalDate.now(),
         zone: ZoneId = ZoneId.systemDefault(),
+        /** The view menu's Archived switch: only archived chats, in activity buckets (iOS `InboxSections.archived`). */
+        archived: Boolean = false,
     ): List<HomeSection> {
         // Keep the whole family and parent context when filtering to the owner's chats.
         val scoped = owner?.let { id ->
             val mine = snapshot.sessions.filter { it.userId == id }.mapTo(mutableSetOf()) { it.id }
-            val included = families(snapshot).filter { family -> family.any { it.id in mine } }.flatten().mapTo(mutableSetOf()) { it.id }
+            val included = families(snapshot, archived).filter { family -> family.any { it.id in mine } }.flatten().mapTo(mutableSetOf()) { it.id }
             val all = snapshot.sessions.associateBy { it.id }
             snapshot.copy(sessions = snapshot.sessions.filter { conversation(it.id, all) in included })
         } ?: snapshot
+        // Archived chats: no Pinned group and no project or status grouping.
+        if (archived) return timeline(scoped, today, zone, archived = true)
+            .map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) }
         val pinnedIds = scoped.sessions.filter { it.pinned }.mapTo(mutableSetOf()) { it.id }
         val pinned = families(scoped).filter { family -> family.any { it.id in pinnedIds } }.flatten()
         val lifted = pinned.mapTo(mutableSetOf()) { it.id }
@@ -217,13 +244,13 @@ object ChatListModel {
     /** Quiet chats beyond this many fold behind "Show all" in the status view (iOS shows the same 20). */
     const val IDLE_LIMIT = 20
 
-    /** Non-archived rows, newest activity first, carrying their project for the detail line. */
-    private fun homeItems(snapshot: CatalogSnapshot): List<ChatItem> {
+    /** Non-archived (or, with [archived], only archived) rows, newest activity first, carrying their project for the detail line. */
+    private fun homeItems(snapshot: CatalogSnapshot, archived: Boolean = false): List<ChatItem> {
         val projects = snapshot.projects.associateBy { it.id }
         val all = snapshot.sessions.associateBy { it.id }
         val attention = conversationAttention(snapshot.sessions)
         return snapshot.sessions
-            .filter { !it.archived && !isTab(it) }
+            .filter { it.archived == archived && !isTab(it) }
             .map { session ->
                 val project = projects[session.projectId]?.takeUnless { isChat(it.id) }
                 item(session, project?.name.orEmpty(), project?.repoFullName != null, attention[session.id]).copy(openerId = opener(session, all), repository = project?.repoFullName)
@@ -232,8 +259,8 @@ object ChatListModel {
     }
 
     /** Build families before any display bucket; only the root participates in grouping. */
-    private fun families(snapshot: CatalogSnapshot): List<List<ChatItem>> =
-        nest(homeItems(snapshot)).groupBy { it.nestedUnder ?: it.id }.values.toList()
+    private fun families(snapshot: CatalogSnapshot, archived: Boolean = false): List<List<ChatItem>> =
+        nest(homeItems(snapshot, archived)).groupBy { it.nestedUnder ?: it.id }.values.toList()
 
     /**
      * A Tab or side chat (`parentSessionId`) belongs to its parent conversation, not the list
@@ -342,9 +369,9 @@ object ChatListModel {
         return groups
     }
 
-    /** Home "by time": non-archived chats in activity buckets, newest first. */
-    fun timeline(snapshot: CatalogSnapshot, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): List<TimeSection> {
-        return families(snapshot)
+    /** Home "by time": non-archived (or, with [archived], only archived) chats in activity buckets, newest first. */
+    fun timeline(snapshot: CatalogSnapshot, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault(), archived: Boolean = false): List<TimeSection> {
+        return families(snapshot, archived)
             .groupBy { bucket(it.first().activityAt, today, zone) }
             .toSortedMap()
             .map { (bucket, chats) -> TimeSection(bucket, chats.flatten()) }

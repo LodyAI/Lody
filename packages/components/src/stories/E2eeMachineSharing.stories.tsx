@@ -1,3 +1,5 @@
+import { SidebarMachineCard } from '@/components/sidebar-machine-card';
+import { fn } from 'storybook/test';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { E2eeMachineSharingView } from '@lody/platform';
@@ -12,6 +14,7 @@ const state: E2eeMachineSharingView = {
   head: { revision: 4, digest: '33'.repeat(32) },
   sharedWithTeam: true,
   projects: ['work'],
+  sessions: [],
   signer: 'a1'.repeat(32),
   canManage: true,
   needsResign: false,
@@ -82,7 +85,9 @@ export const Interactive: Story = {
             sharedWithTeam:
               change.kind === 'machine'
                 ? change.sharedWithTeam
-                : change.sharedWithTeam || current.sharedWithTeam,
+                : change.kind === 'project'
+                  ? change.sharedWithTeam || current.sharedWithTeam
+                  : current.sharedWithTeam,
             projects:
               change.kind === 'project'
                 ? change.sharedWithTeam
@@ -121,6 +126,24 @@ export const InMachineSettings: Story = {
       onAddConfig={() => {}}
       onEditConfig={() => {}}
       footer={<MachineSharingPanel {...args} />}
+    />
+  ),
+};
+
+/** The same nonblocking reminder on the real sidebar card, outside machine settings. */
+export const SidebarSignerRevoked: Story = {
+  render: () => (
+    <SidebarMachineCard
+      machine={{
+        machineId: 'studio' as MachineId,
+        name: 'Studio Mac',
+        isOwn: true,
+        isCurrent: false,
+        os: 'darwin',
+        projectCount: 2,
+        needsSharingReview: true,
+        onReviewSharing: fn(),
+      }}
     />
   ),
 };

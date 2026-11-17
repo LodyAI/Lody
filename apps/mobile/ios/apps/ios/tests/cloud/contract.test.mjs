@@ -45,7 +45,10 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 test('golden envelopes satisfy the contract schemas in both directions', async () => {
   for (const direction of ['to-runtime', 'to-host'])
-    for (const message of await fixtures(direction)) {
+    for (const message of [
+      ...(await fixtures(direction)),
+      ...(await fixtures(`provider-${direction}`)),
+    ]) {
       assert.ok(Envelope.safeParse(message).success, JSON.stringify(message));
       const schema = payloadSchema(direction, message);
       if (message.kind !== 'error') {

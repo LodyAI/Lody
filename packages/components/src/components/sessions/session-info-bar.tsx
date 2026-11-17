@@ -6,12 +6,14 @@ import { Button } from '@lody/ui/button';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import type {
   PendingScheduledTask,
+  LineChange,
   SessionGoalCommand,
   SessionGoalMessage,
   SessionPullRequestCiState,
   SessionPullRequestMeta,
+  SessionPullRequestView,
 } from '@lody/shared';
-import { sanitizeGoalObjective } from '@lody/shared';
+import { hasWorkspaceChanges, sanitizeGoalObjective } from '@lody/shared';
 import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
@@ -72,6 +74,10 @@ export type SessionInfoBarProps = {
   workspaceLocation?: { kind: WorkspaceLocationKind; path?: string | null } | null;
   pr?: SessionPullRequestMeta | null;
   onOpenPr?: () => void;
+  /** Every PR of the described context, `pr` first; more than one turns the
+   *  PR marker into a history list. */
+  prHistory?: readonly SessionPullRequestView[];
+  onOpenHistoryPr?: (view: SessionPullRequestView) => void;
   /** Agent-driven PR/worktree actions shown inside the context stage. */
   contextActions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff from the context diffstat. */
@@ -90,7 +96,7 @@ export type SessionInfoBarProps = {
   onOpenAndroidEmulator?: () => void;
   /** Mobile team workspace: persistent effective privacy status. */
   privateAccessStatus?: { label: string; description: string; onAction?: () => void };
-  diffStat?: { add: number; del: number } | null;
+  diffStat?: LineChange | null;
   /** Desktop-only ambient doc catch-up state: a quiet spinner pinned to the
    *  bar's right edge. Not a cluster/stage item — it must never steal focus
    *  or relayout the canonical order. */
@@ -169,6 +175,8 @@ export function SessionInfoBar({
   workspaceLocation,
   pr,
   onOpenPr,
+  prHistory,
+  onOpenHistoryPr,
   contextActions,
   onOpenAllChanges,
   relations,
@@ -185,7 +193,7 @@ export function SessionInfoBar({
   queue,
 }: SessionInfoBarProps) {
   const { t } = useTranslation();
-  const hasDiff = diffStat != null && diffStat.add + diffStat.del > 0;
+  const hasDiff = hasWorkspaceChanges(diffStat);
   const hasContext = !!pr || !!projectName || !!branch || hasDiff || !!contextActions?.length;
   const goalObjective = goal ? sanitizeGoalObjective(goal.objective) : '';
   const hasGoal = !!goal && !!goalObjective;
@@ -219,7 +227,7 @@ export function SessionInfoBar({
         pr?.url ?? '',
         projectName ?? '',
         branch ?? '',
-        diffStat ? `${diffStat.add}:${diffStat.del}` : '',
+        diffStat ? `${diffStat.add}:${diffStat.del}:${diffStat.files ?? ''}` : '',
         contextActions?.map((action) => action.id).join(',') ?? '',
       ].join('|')
     : null;
@@ -332,6 +340,8 @@ export function SessionInfoBar({
             workspaceLocation={workspaceLocation}
             pr={pr}
             onOpenPr={onOpenPr}
+            prHistory={prHistory}
+            onOpenHistoryPr={onOpenHistoryPr}
             actions={contextActions}
             onOpenAllChanges={onOpenAllChanges}
             diffStat={diffStat}

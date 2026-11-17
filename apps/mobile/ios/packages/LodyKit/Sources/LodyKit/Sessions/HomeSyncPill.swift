@@ -3,14 +3,15 @@ import SwiftUI
 
 /// Home's catalog connection, reduced to what the centre pill shows.
 enum HomeSyncState: Equatable, Sendable {
-  case live, syncing, offline
+  case live, syncing, connecting
 }
 
 /// The floating status pill centred in the Home navigation bar, mirroring the web
-/// `MobileConnectionStatus`: a spinner while syncing, a red dot when offline, and a brief
+/// `MobileConnectionStatus`: a spinner while syncing or reconnecting (the runtime keeps
+/// retrying, so a lost connection reads as "Connecting", never "Offline"), and a brief
 /// green check after recovering. It never takes taps; nothing shows while live.
 struct HomeSyncPill: View {
-  enum Shown: Equatable { case syncing, offline, recovered }
+  enum Shown: Equatable { case syncing, connecting, recovered }
 
   let state: Shown?
 
@@ -45,8 +46,7 @@ struct HomeSyncPill: View {
   @ViewBuilder
   private func mark(_ state: Shown) -> some View {
     switch state {
-    case .syncing: ProgressView().controlSize(.mini)
-    case .offline: Circle().fill(LodyColor.dangerDefault).frame(width: LodySpacing.xs + LodySpacing.xxs, height: LodySpacing.xs + LodySpacing.xxs)
+    case .syncing, .connecting: ProgressView().controlSize(.mini)
     case .recovered:
       LodyIcon.check.image.resizable().renderingMode(.template)
         .foregroundStyle(LodyColor.successDefault)
@@ -57,15 +57,14 @@ struct HomeSyncPill: View {
   private func label(_ state: Shown) -> String {
     switch state {
     case .syncing: String(localized: "home.status.syncing", bundle: .lody)
-    case .offline: String(localized: "home.status.offline", bundle: .lody)
+    case .connecting: String(localized: "home.status.connecting", bundle: .lody)
     case .recovered: String(localized: "home.status.connected", bundle: .lody)
     }
   }
 
   private func tint(_ state: Shown) -> Color {
     switch state {
-    case .syncing: LodyColor.textSecondary
-    case .offline: LodyColor.dangerDefault
+    case .syncing, .connecting: LodyColor.textSecondary
     case .recovered: LodyColor.successDefault
     }
   }

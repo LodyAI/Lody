@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
-import { E2eeLocalAgentApproval } from '../src/components/e2ee-local-agent-approval';
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+import {
+  E2eeLocalAgentApproval,
+  LOCAL_AGENT_RECHECK_DELAYS_MS,
+  LOCAL_AGENT_STEP_DEADLINE_MS,
+  localAgentRunsWorkspace,
+} from '../src/components/e2ee-local-agent-approval';
+import type { ElectronCliState } from '@lody/shared';
+import { createTestI18n, withTestI18n } from './test-i18n';
+
+const testI18n = createTestI18n({ keyLabels: true });
 
 describe('local encrypted agent approval', () => {
   let root: Root;
@@ -49,10 +56,18 @@ describe('local encrypted agent approval', () => {
     await act(async () => root.unmount());
     container.remove();
   });
-  const render = (enabled = true) =>
+  const render = (enabled = true, localAgentRunning: boolean | null = false) =>
     act(async () =>
       root.render(
-        <E2eeLocalAgentApproval workspaceId="workspace" runtime={runtime} enabled={enabled} />
+        withTestI18n(
+          <E2eeLocalAgentApproval
+            workspaceId="workspace"
+            runtime={runtime}
+            enabled={enabled}
+            localAgentRunning={localAgentRunning}
+          />,
+          testI18n
+        )
       )
     );
   const click = async (label: string) => {
@@ -162,6 +177,65 @@ describe('local encrypted agent approval', () => {
     expect(prepared).toBe(false);
     expect(admitted).toBe(false);
   });
+  it('reads a running workspace only from a live local agent', () => {
+    const cli = (phase: ElectronCliState['phase']) =>
+      ({
+        phase,
+        desiredState: 'running',
+        localAgentEnabled: true,
+        updatedAtMs: 0,
+        preventSleepEnabled: false,
+        runtime: { connectedWorkspaces: [{ id: 'workspace' }] },
+      }) as unknown as ElectronCliState;
+    expect(localAgentRunsWorkspace(null, 'workspace')).toBeNull();
+    expect(localAgentRunsWorkspace(cli('running'), 'workspace')).toBe(true);
+    expect(localAgentRunsWorkspace(cli('running'), 'other-workspace')).toBe(false);
+    // A stopped or restarting process may still carry its last runtime snapshot.
+    expect(localAgentRunsWorkspace(cli('stopped'), 'workspace')).toBe(false);
+    expect(localAgentRunsWorkspace(cli('starting'), 'workspace')).toBe(false);
+  });
+  it('does not offer enablement again when this machine already runs the workspace', async () => {
+    // A remount (back to Home, restart, new window) must not forget an earlier enablement.
+    await render(true, true);
+    expect(container.textContent).toBe('');
+    expect(prepared).toBe(false);
+  });
+  it('waits for the local agent state before offering enablement', async () => {
+    await render(true, null);
+    expect(container.textContent).toBe('');
+    await render(true, false);
+    expect(container.textContent).toContain('e2ee.localAgent.enable');
+    expect(prepared).toBe(false);
+  });
+  it('offers enablement again once the local agent stops running the workspace', async () => {
+    await render(true, true);
+    expect(container.textContent).toBe('');
+    await render(true, false);
+    expect(container.textContent).toContain('e2ee.localAgent.enable');
+  });
+  it('settles a waiting approval once the local agent runs the workspace, without preparing again', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      let preparations = 0;
+      const prepareOriginal = runtime.prepareLocalAgent!;
+      runtime.prepareLocalAgent = async (...args) => {
+        preparations++;
+        return prepareOriginal(...args);
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      await click('e2ee.localAgent.allow');
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      await render(true, true);
+      expect(container.textContent).toBe('');
+      for (const delay of LOCAL_AGENT_RECHECK_DELAYS_MS)
+        await act(async () => vi.advanceTimersByTime(delay));
+      expect(preparations).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('hides approval for an old workspace with no local credential', async () => {
     hasCredential = false;
     await render();
@@ -269,6 +343,136 @@ describe('local encrypted agent approval', () => {
     expect(activationRequested).toBe(true);
     expect(container.textContent).toBe('');
   });
+  it('finishes a slow start on its own after approval, without asking again', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      await render();
+      await click('e2ee.localAgent.enable');
+      await click('e2ee.localAgent.allow');
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      ready = true;
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_RECHECK_DELAYS_MS[0]!));
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('moves an unanswered admission to waiting, ignores its late answer, and rejoins it', async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: string[] = [];
+      let answer: (value: { admitted: true; ready: boolean }) => void = () => {};
+      runtime.admitLocalAgent = (_workspace: string, approvedSession: string) => {
+        calls.push(approvedSession);
+        return new Promise((resolve) => (answer = resolve));
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      await click('e2ee.localAgent.allow');
+      expect(container.textContent).toContain('e2ee.localAgent.working');
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_STEP_DEADLINE_MS));
+      // The button is usable again instead of saying "Preparing…" forever.
+      expect(container.textContent).toContain('common.tryAgain');
+      const stale = answer;
+      // The automatic check re-prepares the same, already approved session.
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_RECHECK_DELAYS_MS[0]!));
+      expect(calls).toEqual(['synthetic-session', 'synthetic-session']);
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      // The first attempt answering late cannot decide the newer attempt's result.
+      await act(async () => stale({ admitted: true, ready: true }));
+      expect(container.textContent).toContain('e2ee.localAgent.working');
+      await act(async () => answer({ admitted: true, ready: true }));
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops checking automatically after its bounded rounds and leaves retry to the user', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      let admissions = 0;
+      const admitOriginal = runtime.admitLocalAgent!;
+      runtime.admitLocalAgent = async (...args) => {
+        admissions++;
+        return admitOriginal(...args);
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      await click('e2ee.localAgent.allow');
+      for (const delay of LOCAL_AGENT_RECHECK_DELAYS_MS)
+        await act(async () => vi.advanceTimersByTime(delay));
+      expect(admissions).toBe(1 + LOCAL_AGENT_RECHECK_DELAYS_MS.length);
+      await act(async () => vi.advanceTimersByTime(10 * LOCAL_AGENT_STEP_DEADLINE_MS));
+      expect(admissions).toBe(1 + LOCAL_AGENT_RECHECK_DELAYS_MS.length);
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      ready = true;
+      await click('common.tryAgain');
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops an approval when the workspace changes', async () => {
+    ready = false;
+    await render();
+    await click('e2ee.localAgent.enable');
+    await click('e2ee.localAgent.allow');
+    expect(container.textContent).toContain('e2ee.localAgent.waiting');
+    admitted = false;
+    let admittedOther = false;
+    runtime.admitLocalAgent = async () => {
+      admittedOther = true;
+      return { admitted: true, ready: true };
+    };
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <E2eeLocalAgentApproval workspaceId="other" runtime={runtime} enabled />,
+          testI18n
+        )
+      )
+    );
+    expect(container.textContent).toContain('e2ee.localAgent.enable');
+    await click('e2ee.localAgent.enable');
+    // The same pairing session id in another workspace still needs its own consent.
+    expect(admittedOther).toBe(false);
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  });
+
+  it('does not re-open the confirmation dialog when a settled session rotates during slow activation', async () => {
+    vi.useFakeTimers();
+    try {
+      ready = false;
+      const admittedSessions: string[] = [];
+      runtime.admitLocalAgent = async (_workspace: string, approvedSession: string) => {
+        if (approvedSession !== session) throw new Error('wrong session');
+        admitted = true;
+        admittedSessions.push(approvedSession);
+        return { admitted: true, ready };
+      };
+      await render();
+      await click('e2ee.localAgent.enable');
+      expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+      await click('e2ee.localAgent.allow');
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(container.textContent).toContain('e2ee.localAgent.waiting');
+      // Main rotates pairingSessionId after settling admission while machine activation finishes.
+      session = 'rotated-settled-session';
+      ready = true;
+      await act(async () => vi.advanceTimersByTime(LOCAL_AGENT_RECHECK_DELAYS_MS[0]!));
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(admittedSessions).toEqual(['synthetic-session', 'rotated-settled-session']);
+      expect(container.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('remote encrypted machine approval', () => {
@@ -324,10 +528,17 @@ describe('remote encrypted machine approval', () => {
     };
     try {
       await act(async () =>
-        root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
+        root.render(
+          withTestI18n(
+            <E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />,
+            testI18n
+          )
+        )
       );
       await click('e2ee.remoteMachine.create');
-      expect(container.querySelector('textarea')?.value).toContain('synthetic-command');
+      expect(
+        container.querySelector('[aria-label="e2ee.remoteMachine.command"]')?.textContent
+      ).toContain('synthetic-command');
       expect(container.textContent).not.toContain(summary);
       await click('e2ee.remoteMachine.check');
       expect(state).toBe('claimed');
@@ -341,6 +552,91 @@ describe('remote encrypted machine approval', () => {
       expect(container.textContent).toContain('e2ee.remoteMachine.status.admitted');
       expect(container.textContent).toContain('e2ee.remoteMachine.resume');
       expect(container.textContent).not.toContain('e2ee.remoteMachine.status.ready');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('after another machine used the command, a refused approval shows that reason and removes Allow', async () => {
+    const { E2eeRemoteMachinePairing } =
+      await import('../src/components/pages/e2ee-remote-machine-pairing');
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const pairingSessionId = '11'.repeat(16),
+      summary = Array(8).fill('12345678').join(' ');
+    let state: 'claimed' | 'conflict' = 'claimed';
+    const material = {
+      ok: true as const,
+      type: 'prepare' as const,
+      machineId: 'synthetic-machine',
+      pairingSessionId,
+      signingPublicKey: '22'.repeat(32),
+      encryptionPublicKey: '33'.repeat(32),
+      possessionSignature: '44'.repeat(64),
+      credentialHash: '55'.repeat(32),
+      bindingSignature: '66'.repeat(64),
+      protection: 'file' as const,
+    };
+    const view = () =>
+      state === 'claimed'
+        ? {
+            pairingSessionId,
+            summary,
+            material,
+            status: state,
+            expiresAt: 2_000_000,
+            location: null,
+          }
+        : {
+            pairingSessionId,
+            summary: null,
+            material,
+            status: state,
+            noAdmissionReserved: true,
+            expiresAt: 2_000_000,
+            location: null,
+          };
+    let admitted = false;
+    const runtime = {
+      beginRemoteMachinePairing: async () => ({
+        ...view(),
+        command: 'lody machine pair --offer x',
+      }),
+      inspectRemoteMachinePairing: async () => view(),
+      // The host rechecks the session before signing and refuses the cancelled command.
+      approveRemoteMachinePairing: async () => {
+        if (state !== 'claimed') throw new Error('e2ee_conflict');
+        admitted = true;
+        return { admitted: true, ready: false };
+      },
+      cancelRemoteMachinePairing: async () => ({ ...view(), status: 'cancelled' as const }),
+    };
+    const button = (key: string) =>
+      Array.from(container.querySelectorAll('button')).find((item) => item.textContent === key);
+    try {
+      await act(async () =>
+        root.render(
+          withTestI18n(
+            <E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />,
+            testI18n
+          )
+        )
+      );
+      await act(async () => button('e2ee.remoteMachine.create')!.click());
+      await act(async () => button('e2ee.remoteMachine.check')!.click());
+      expect(button('e2ee.remoteMachine.allow')).toBeDefined();
+      // A second machine claims the same command before the owner clicks Allow.
+      state = 'conflict';
+      await act(async () => button('e2ee.remoteMachine.allow')!.click());
+      expect(admitted).toBe(false);
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        'e2ee.remoteMachine.error'
+      );
+      expect(container.textContent).toContain('e2ee.remoteMachine.status.claimedByAnotherMachine');
+      expect(button('e2ee.remoteMachine.allow')).toBeUndefined();
     } finally {
       await act(async () => root.unmount());
       container.remove();

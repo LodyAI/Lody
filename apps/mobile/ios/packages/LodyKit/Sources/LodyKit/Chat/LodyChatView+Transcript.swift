@@ -8,6 +8,14 @@ extension LodyChatView {
     applyRows()
   }
 
+  /// A proposal decision's progress or failure (`nil` clears it once the transcript carries the outcome).
+  func setProposalState(entryId: String, itemId: String, _ state: ChatProposalState?) {
+    let key = entryId + "/" + itemId
+    guard proposalStates[key] != state else { return }
+    proposalStates[key] = state
+    applyRows()
+  }
+
   func setErrorRetryState(_ json: String) {
     let next = try? JSONDecoder().decode(ChatErrorRetryState.self, from: Data(json.utf8))
     guard next != errorRetryState else { return }
@@ -229,6 +237,7 @@ extension LodyChatView {
     composer.setQueue(queue)
     let now = Date().timeIntervalSince1970 * 1000
     transcript.expandedWork = expandedWork
+    transcript.expandedThoughts = expandedThoughts
     var projected = transcript.rows(
       processEntryID: processEntryID,
       processStartID: processStartID,
@@ -245,10 +254,31 @@ extension LodyChatView {
         return ChatStream.deferringMarkdown(byEntry[row.entryID] ?? [], previous: frozen)
       }
     }
+    projected = ChatOperationPresentation.visible(projected, expanded: expandedOperations, titles: operationTitles)
+    for index in projected.indices {
+      guard let card = projected[index].operation else { continue }
+      projected[index].operationCurrent = card.sessionId == operationCurrentID
+      projected[index].operationAgentType = operationAgentTypes[card.sessionId]
+      projected[index].operationCLIType = operationCLITypes[card.sessionId]
+
+    }
+    projected = ChatOperationGrouping.rows(projected, roots: operationRoots, opened: operationOpened)
     for index in projected.indices where projected[index].kind == "proposed_plan" {
       if let state = planDecisionState, state.entryId == projected[index].entryID, state.itemId == projected[index].itemID {
         projected[index].planDecision = state
       }
+      // Web `PlanPanel`: a plan waiting on the reader's approval opens in full once; the reader
+      // may still fold it, and it clamps again as history.
+      if !projected[index].planPermissionItemID.isEmpty, awaitingPlansOpened.insert(projected[index].id).inserted {
+        expandedPlans.insert(projected[index].id)
+      }
+    }
+    for index in projected.indices where projected[index].kind == "proposal" {
+      let row = projected[index]
+      projected[index].proposalState = proposalStates[row.entryID + "/" + row.itemID]
+      let requester = row.proposal?.requesterUserId
+      projected[index].proposalDecidable = !proposalUserID.isEmpty
+        && (row.proposal?.isRole != true || requester == proposalUserID)
     }
     for index in projected.indices where projected[index].kind == "chat_failed" {
       if let state = errorRetryState, state.entryId == projected[index].entryID, state.itemId == projected[index].itemID {
@@ -320,15 +350,10 @@ extension LodyChatView {
     let entryIDsToRetain = Set(projected.map(\.entryID))
     expandedMessages.formIntersection(entryIDsToRetain)
     expandedAttachments.formIntersection(entryIDsToRetain)
-    collapsedMessageHeights = collapsedMessageHeights.filter { entryIDsToRetain.contains($0.key) }
-    for row in projected where row.kind == "user" && collapsedMessageHeights[row.entryID] == nil {
-      if let height = ChatSendHandoff.sourceHeight(id: row.entryID) {
-        collapsedMessageHeights[row.entryID] = min(ChatMessageContent.maximumCollapsedHeight, max(68, height))
-      }
-    }
     if tabClosed { projected = [] }
     let retainedIDs = Set(projected.map(\.id))
     expandedPlans.formIntersection(retainedIDs)
+    awaitingPlansOpened.formIntersection(retainedIDs)
     projected = prepareHistory(projected)
     let insertingHistory = previousHistoryStart != nil && previousHistoryStart != historyStartID
     // Starting/waiting for a page changes only the header, not the collection.
@@ -450,27 +475,29 @@ extension LodyChatView {
       self.deliverPendingContent()
     }
     let finish = { [weak self] in
-      guard let self else { return }
-      if folding { ChatContextViewProbe.checkHitTesting() }
-      self.recordHistoryCommit()
-      self.streamPerformanceProbe?.commit(milliseconds: (CACurrentMediaTime() - commitStart) * 1000)
-      self.applying = false
-      self.scrollToEditedMessage()
-      self.catchingUpEntries.removeAll()
-      self.store.nonAnimatedRows.removeAll()
-      self.updateDeferredStreams()
-      self.refreshFind()
-      self.updateHistoryHeader()
-      self.prefetchHistoryIfNeeded()
-      self.deliverPendingContent()
-      if let tail = projected.last(where: { $0.streaming }) {
-        self.renderTailLength = self.store.tailLength(id: tail.id)
-      }
-      if self.needsApply {
-        self.needsApply = false
-        self.applyRows()
-      } else {
-        self.imagePreview?.updateItems(ChatImageGallery.items(from: projected))
+      // UIKit may invoke snapshot completion before its apply call returns.
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        if folding { ChatContextViewProbe.checkHitTesting() }
+        self.recordHistoryCommit()
+        self.streamPerformanceProbe?.commit(milliseconds: (CACurrentMediaTime() - commitStart) * 1000)
+        self.applying = false
+        self.scrollToEditedMessage()
+        self.catchingUpEntries.removeAll()
+        self.store.nonAnimatedRows.removeAll()
+        self.updateDeferredStreams()
+        self.refreshFind()
+        self.updateHistoryHeader()
+        self.prefetchHistoryIfNeeded()
+        self.deliverPendingContent()
+        if let tail = projected.last(where: { $0.streaming }) {
+          self.renderTailLength = self.store.tailLength(id: tail.id)
+        }
+        if self.needsApply || self.needsTextRefresh {
+          self.drainChatUpdates()
+        } else {
+          self.imagePreview?.updateItems(ChatImageGallery.items(from: projected))
+        }
       }
     }
     if folding && !UIAccessibility.isReduceMotionEnabled {
@@ -534,18 +561,19 @@ extension LodyChatView {
     let entryIDs = projected.reduce(into: [String]()) { ids, row in
       if ids.last != row.entryID { ids.append(row.entryID) }
     }
+    historyFirstID = entryIDs.first
     guard !entryIDs.isEmpty else {
       historyStartID = nil
       historyTargetID = nil
       preparingHistory = false
-      hasEarlierHistory = false
-      hasPagedHistory = false
+      hasEarlierHistory = remoteHasEarlierHistory
+      hasPagedHistory = remoteHasEarlierHistory
       return projected
     }
     let retainedStart = historyStartID.flatMap { entryIDs.firstIndex(of: $0) }
     let start = retainedStart ?? max(0, entryIDs.count - 50)
     historyStartID = entryIDs[start]
-    hasEarlierHistory = start > 0
+    hasEarlierHistory = start > 0 || remoteHasEarlierHistory
     hasPagedHistory = hasEarlierHistory || (retainedStart != nil && hasPagedHistory)
     let width = ChatReadingColumn.itemWidth(in: collection.bounds.width)
     if width != historyWidth {
@@ -562,7 +590,7 @@ extension LodyChatView {
         historyTargetID = nil
         preparingHistory = false
         preparedHistory.removeAll()
-        hasEarlierHistory = target > 0
+        hasEarlierHistory = target > 0 || remoteHasEarlierHistory
       } else if !remaining.isEmpty, window != nil {
         prepareHistorySlice(remaining, index: 0, width: width)
       }
@@ -581,6 +609,11 @@ extension LodyChatView {
 
   func loadEarlierHistory() {
     guard hasEarlierHistory, !preparingHistory, !applying, window != nil else { return }
+    if historyStartID == historyFirstID, remoteHasEarlierHistory {
+      guard !remoteHistoryLoading else { return }
+      onLoadEarlierHistory()
+      return
+    }
     pauseTracking()
     preparingHistory = true
     applyRows()
@@ -594,7 +627,7 @@ extension LodyChatView {
 
   func updateHistoryHeader() {
     for case let header as ChatHistoryHeader in collection.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionHeader) {
-      header.configure(loading: preparingHistory, hasEarlier: hasEarlierHistory)
+      header.configure(loading: preparingHistory || remoteHistoryLoading, hasEarlier: hasEarlierHistory)
     }
   }
 

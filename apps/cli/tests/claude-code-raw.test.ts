@@ -510,9 +510,7 @@ describe('claude-code-raw', () => {
               command: 'wc -l file.ts',
               description: 'Count lines',
             },
-            content: [
-              { type: 'content', content: { type: 'text', text: 'Count lines' } },
-            ],
+            content: [{ type: 'content', content: { type: 'text', text: 'Count lines' } }],
             _meta: { claudeCode: { toolName: 'Bash' } },
           },
         } as unknown as SessionNotification,

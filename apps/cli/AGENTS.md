@@ -17,6 +17,11 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   restart an in-flight or already-started wasm runtime. A pending init retains
   the Loro document held by the snapshot upload.
   [Decision](../../.agents/notes/implemented/bug-fix/2026-11-03-cli-zstd-wasm-init-hang.md).
+- A WebAssembly trap leaves Loro's instance broken for later calls. `lib/loro/wasm-runtime-health.ts`
+  records the first fault and `start.ts` restarts through the ordinary shutdown; timer-driven Loro
+  reads without a caller catch locally and call `reportIfWasmFault`. The `loro-crdt` alias matches the
+  bare specifier only, so the bundle can import `loro-crdt/bundler/*` to read the shared memory
+  ([decision](../../.agents/notes/implemented/bug-fix/2026-11-09-loro-wasm-heap-exhaustion.md)).
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog env vars are set.
@@ -85,9 +90,9 @@ execution/consent rules. These rules also bind CLI callers outside that director
   never rewrite the exact opener to the root or treat either as `parentSessionId`.
 - INVARIANT: reasoning effort and fast mode are per MODEL. Apply mode, then model, then dependent
   options, for both top-level and config-option selections. A probe's `configOptions` describe only
-  its current model. Validate effort against the TARGET model using
-  `getModelEffortChoices` (the stored per-model declaration first, then
-  `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
+  its current model; that model and every model a requested refresh read are also kept in
+  `acpModelConfigOptions` rows. Validate effort against the TARGET model using `getAcpModelEffortChoices` (the stored
+  per-model declaration first, then `modelReasoningEfforts`, then that model's recorded list) and skip the resulting `validatedConfigIds` in
   `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
   runtime rejections in debug diagnostics. Codex/Claude effort, Fast and Plan rejections stay hidden;
   model rejections always emit `agent_warning` in the GUI. Claude Fable

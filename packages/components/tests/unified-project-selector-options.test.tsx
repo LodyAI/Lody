@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,25 +9,13 @@ import {
   type UnifiedLocalProjectOption,
 } from '../src/components/chat/unified-project-selector';
 import { Tooltip } from '@lody/ui/tooltip';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
-  }),
-}));
+const testI18n = createTestI18n({ interpolate: false });
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-class TestPointerEvent extends MouseEvent {
-  readonly pointerType: string;
-
-  constructor(type: string, init: MouseEventInit & { pointerType?: string } = {}) {
-    super(type, init);
-    this.pointerType = init.pointerType ?? '';
-  }
-}
 
 const machineId = 'machine-1' as MachineId;
 const localProjects = Array.from({ length: 30 }, (_, index) => {
@@ -49,10 +35,6 @@ describe('UnifiedProjectSelectorView options', () => {
   let root: Root;
 
   beforeEach(() => {
-    Object.defineProperty(globalThis, 'PointerEvent', {
-      configurable: true,
-      value: TestPointerEvent,
-    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -66,16 +48,19 @@ describe('UnifiedProjectSelectorView options', () => {
   it('renders the 20 most recent projects and searches the complete list', async () => {
     await act(async () => {
       root.render(
-        <Tooltip.Provider>
-          <UnifiedProjectSelectorView
-            value={{ kind: 'none' }}
-            onChange={vi.fn()}
-            localProjects={localProjects}
-            onAddLocalProject={vi.fn()}
-            onConnectGitRepo={vi.fn()}
-            renderLimit={20}
-          />
-        </Tooltip.Provider>
+        withTestI18n(
+          <Tooltip.Provider>
+            <UnifiedProjectSelectorView
+              value={{ kind: 'none' }}
+              onChange={vi.fn()}
+              localProjects={localProjects}
+              onAddLocalProject={vi.fn()}
+              onConnectGitRepo={vi.fn()}
+              renderLimit={20}
+            />
+          </Tooltip.Provider>,
+          testI18n
+        )
       );
     });
 
@@ -83,14 +68,7 @@ describe('UnifiedProjectSelectorView options', () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
 
     await act(async () => {
-      trigger?.dispatchEvent(
-        new TestPointerEvent('mousedown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
     });
 
     const projectItems = Array.from(
@@ -110,7 +88,6 @@ describe('UnifiedProjectSelectorView options', () => {
       valueSetter?.call(searchInput, 'Project 25');
       searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
       await Promise.resolve();
-      await new Promise((resolve) => setTimeout(resolve, 40));
     });
 
     const searchedProjectItems = Array.from(
@@ -122,31 +99,27 @@ describe('UnifiedProjectSelectorView options', () => {
   it('includes recently used GitHub repositories in the bounded mixed list', async () => {
     await act(async () => {
       root.render(
-        <Tooltip.Provider>
-          <UnifiedProjectSelectorView
-            value={{ kind: 'none' }}
-            onChange={vi.fn()}
-            localProjects={localProjects}
-            repositories={[{ fullName: 'loro-dev/lody' }]}
-            latestMessageAtByRepo={new Map([['loro-dev/lody', 100]])}
-            onAddLocalProject={vi.fn()}
-            onConnectGitRepo={vi.fn()}
-            renderLimit={20}
-          />
-        </Tooltip.Provider>
+        withTestI18n(
+          <Tooltip.Provider>
+            <UnifiedProjectSelectorView
+              value={{ kind: 'none' }}
+              onChange={vi.fn()}
+              localProjects={localProjects}
+              repositories={[{ fullName: 'loro-dev/lody' }]}
+              latestMessageAtByRepo={new Map([['loro-dev/lody', 100]])}
+              onAddLocalProject={vi.fn()}
+              onConnectGitRepo={vi.fn()}
+              renderLimit={20}
+            />
+          </Tooltip.Provider>,
+          testI18n
+        )
       );
     });
 
     const trigger = container.querySelector<HTMLButtonElement>('button');
     await act(async () => {
-      trigger?.dispatchEvent(
-        new TestPointerEvent('mousedown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
     });
 
     const projectItems = Array.from(
@@ -163,31 +136,27 @@ describe('UnifiedProjectSelectorView options', () => {
   it('reserves a source slot for a GitHub repository with no usage history', async () => {
     await act(async () => {
       root.render(
-        <Tooltip.Provider>
-          <UnifiedProjectSelectorView
-            value={{ kind: 'none' }}
-            onChange={vi.fn()}
-            localProjects={localProjects}
-            repositories={[{ fullName: 'loro-dev/new-repository' }]}
-            latestMessageAtByRepo={new Map()}
-            onAddLocalProject={vi.fn()}
-            onConnectGitRepo={vi.fn()}
-            renderLimit={20}
-          />
-        </Tooltip.Provider>
+        withTestI18n(
+          <Tooltip.Provider>
+            <UnifiedProjectSelectorView
+              value={{ kind: 'none' }}
+              onChange={vi.fn()}
+              localProjects={localProjects}
+              repositories={[{ fullName: 'loro-dev/new-repository' }]}
+              latestMessageAtByRepo={new Map()}
+              onAddLocalProject={vi.fn()}
+              onConnectGitRepo={vi.fn()}
+              renderLimit={20}
+            />
+          </Tooltip.Provider>,
+          testI18n
+        )
       );
     });
 
     const trigger = container.querySelector<HTMLButtonElement>('button');
     await act(async () => {
-      trigger?.dispatchEvent(
-        new TestPointerEvent('mousedown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
     });
 
     const projectItems = Array.from(
@@ -206,40 +175,40 @@ describe('UnifiedProjectSelectorView options', () => {
     const onChange = vi.fn();
     await act(async () => {
       root.render(
-        <Tooltip.Provider>
-          <UnifiedProjectSelectorView
-            value={{ kind: 'none' }}
-            onChange={onChange}
-            localProjects={[]}
-            projectGroups={[
-              { projectId: 'shop', name: 'Shop', memberCount: 3, lastUsedAt: 100 },
-              {
-                projectId: 'split',
-                name: 'Split',
-                memberCount: 2,
-                lastUsedAt: 50,
-                disabledReason: 'Its local repositories are on different machines',
-              },
-            ]}
-            onAddLocalProject={vi.fn()}
-            onConnectGitRepo={vi.fn()}
-          />
-        </Tooltip.Provider>
+        withTestI18n(
+          <Tooltip.Provider>
+            <UnifiedProjectSelectorView
+              value={{ kind: 'none' }}
+              onChange={onChange}
+              localProjects={[]}
+              projectGroups={[
+                { projectId: 'shop', name: 'Shop', memberCount: 3, lastUsedAt: 100 },
+                {
+                  projectId: 'split',
+                  name: 'Split',
+                  memberCount: 2,
+                  lastUsedAt: 50,
+                  disabledReason: 'Its local repositories are on different machines',
+                },
+              ]}
+              onAddLocalProject={vi.fn()}
+              onConnectGitRepo={vi.fn()}
+            />
+          </Tooltip.Provider>,
+          testI18n
+        )
       );
     });
 
     const trigger = container.querySelector<HTMLButtonElement>('button');
     await act(async () => {
-      trigger?.dispatchEvent(
-        new TestPointerEvent('mousedown', { bubbles: true, button: 0, pointerType: 'mouse' })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
     });
 
     const groupItems = Array.from(
       document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
     ).filter((item) => /Shop|Split/.test(item.textContent ?? ''));
-    // This suite's `t` returns the fallback without interpolating.
+    // Keep raw fallback labels here; interpolation is exercised by the other i18n suites.
     expect(groupItems.map((item) => item.textContent)).toEqual([
       'Shop{{count}} repositories',
       'SplitIts local repositories are on different machines',
@@ -258,17 +227,20 @@ describe('UnifiedProjectSelectorView options', () => {
     const onEditProjectGroup = vi.fn();
     await act(async () => {
       root.render(
-        <Tooltip.Provider>
-          <UnifiedProjectSelectorView
-            value={{ kind: 'none' }}
-            onChange={onChange}
-            localProjects={localProjects.slice(0, 1)}
-            projectGroups={[{ projectId: 'shop', name: 'Shop', memberCount: 2, lastUsedAt: 100 }]}
-            onAddLocalProject={vi.fn()}
-            onConnectGitRepo={vi.fn()}
-            onEditProjectGroup={onEditProjectGroup}
-          />
-        </Tooltip.Provider>
+        withTestI18n(
+          <Tooltip.Provider>
+            <UnifiedProjectSelectorView
+              value={{ kind: 'none' }}
+              onChange={onChange}
+              localProjects={localProjects.slice(0, 1)}
+              projectGroups={[{ projectId: 'shop', name: 'Shop', memberCount: 2, lastUsedAt: 100 }]}
+              onAddLocalProject={vi.fn()}
+              onConnectGitRepo={vi.fn()}
+              onEditProjectGroup={onEditProjectGroup}
+            />
+          </Tooltip.Provider>,
+          testI18n
+        )
       );
     });
 
@@ -276,9 +248,7 @@ describe('UnifiedProjectSelectorView options', () => {
     vi.useFakeTimers();
     try {
       await act(async () => {
-        trigger?.dispatchEvent(
-          new TestPointerEvent('mousedown', { bubbles: true, button: 0, pointerType: 'mouse' })
-        );
+        trigger?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
         await vi.runAllTimersAsync();
       });
     } finally {

@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
-// @vitest-environment jsdom
-// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -165,7 +161,7 @@ const navBase = {
     chatSessions: [] as SessionListRow[],
     chatsCollapsed: false,
   },
-  updated: { items: [] as SidebarUpdatedItem[], collapsed: false, showFull: false },
+  updated: { items: [] as SidebarUpdatedItem[], collapsedBuckets: {}, showFullBuckets: {} },
 };
 
 describe('keyboard navigation for a child-tab opener', () => {

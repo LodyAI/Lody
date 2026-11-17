@@ -13,7 +13,7 @@ Encrypted workspaces need a complete desktop-to-machine path rather than isolate
 ## Boundaries
 
 The snapshot restrictions below describe M2. The
-[PR-17 MVP](2026-10-27-e2ee-native-content-snapshots.md) supersedes that slice
+[PR-17 MVP](../../implemented/architecture/2026-10-27-e2ee-native-content-snapshots.md) supersedes that slice
 with signed native content snapshots and explicit replay/trim recovery.
 
 - An encrypted account runtime is lazy. Ordinary workspaces neither open its custody nor construct the E2EE cloud client.

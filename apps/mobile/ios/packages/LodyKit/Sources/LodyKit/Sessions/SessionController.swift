@@ -22,17 +22,24 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   let permissionService: PermissionService
   var permissionGate = SessionPermissionGate()
   weak var subagentPage: SubagentTaskController?
-  var simulator: SessionSimulator?
+  /// iOS Simulator and Android Emulator previews, independent and possibly both running.
+  var devicePreviews: [DevicePlatform: SessionSimulator] = [:]
+  /// Most recently opened platform first; the floating preview shows the first that is live.
+  var devicePreviewOrder: [DevicePlatform] = []
   var openingSimulator = false
   var browserBusy = false
   let requestBrowserPreview: BrowserRequest
-  let simulatorService: SimulatorService?
+  let deviceServices: [DevicePlatform: SimulatorService]
   let pullRequestPage: @MainActor (SessionPullRequest, SessionListState) -> PullRequestController
   weak var processPage: ProcessController?
   weak var tasksPage: TasksController?
   var permissionPage: PermissionController?
+  /// The page opened by itself (not from the transcript), so a plan approval can hand it back.
+  var permissionOpenedAutomatically = false
   var permissionScope: (userId: String, workspaceId: String)?
   var openingFiles: Set<String> = []
+  /// PR pages open from this conversation (`owner/repo#number`, lowercased) until their page closes.
+  var openPullRequests: Set<String> = []
   var mentions: MentionCatalogStore?
   var mentionSequence = 0
   var editable = ""
@@ -43,6 +50,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var githubOperation: String?
   var githubScope = ""
   var githubUpdates = SessionPullRequestUpdates()
+  var githubSettle: Task<Void, Never>?
   private let initialChoice: ModelChoice?
   private var observers: [NSObjectProtocol] = []
   private var findToken = 0
@@ -61,6 +69,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   private var tabViewsKey = ""
   private var tabViewsLoad = 0
   private var browsingVisible = false
+  private var navigationVisit = UUID()
   private var renderedEntries: String?
   private var memberScope = ""
   private var memberTask: Task<Void, Never>?
@@ -69,7 +78,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   init(sessionId: String, findQuery: String = "", choice: ModelChoice? = nil, source: SessionSource = .live,
        feed: SessionFeedService = .live, environment: SessionSendEnvironment = .live, permission: PermissionService = .live,
-       itemDetail: ItemDetailService? = nil, simulator: SimulatorService? = nil,
+       itemDetail: ItemDetailService? = nil, simulator: SimulatorService? = nil, emulator: SimulatorService? = nil,
        pullRequest: @escaping @MainActor (SessionPullRequest, SessionListState) -> PullRequestController = SessionController.livePullRequest,
        browser: BrowserRequest? = nil) {
     requestBrowserPreview = browser ?? { state, action in
@@ -82,7 +91,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     self.environment = environment
     permissionService = permission
     itemDetailService = itemDetail ?? .live(sessionId: sessionId)
-    simulatorService = simulator
+    var services: [DevicePlatform: SimulatorService] = [:]
+    services[.ios] = simulator
+    services[.android] = emulator
+    deviceServices = services
     pullRequestPage = pullRequest
     initialChoice = choice
     feedService = feed
@@ -106,16 +118,17 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   isolated deinit {
     memberTask?.cancel()
+    githubSettle?.cancel()
     feed?.finish()
-    simulator?.finish()
+    for store in devicePreviews.values { store.finish() }
     if sender != nil { environment.foreground(sessionId, false) }
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
   }
 
   var queuedMessageBehavior: String { LodyPreferences.queuedMessageBehavior }
   var persistsDraft: Bool { true }
-  /// Browser preview and simulator icons for the action bar; preview fixtures override them.
-  var resourceItems: [[String: Any]] { [browserItem, simulatorItem].compactMap { $0 } }
+  /// Browser preview, simulator and emulator icons for the action bar; preview fixtures override them.
+  var resourceItems: [[String: Any]] { [browserItem, deviceItem(.ios), deviceItem(.android)].compactMap { $0 } }
   func adjustComposer(_ state: inout [String: Any]) {}
 
   // The chat binds its title and scroll edges to its nearest controller; the shell page shows this item.
@@ -127,7 +140,6 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     view.backgroundColor = .lodyBackground
     view.addSubview(chat)
     installPageHeader()
-    chat.imageSharingEnabled = false
     wireEvents()
     find(query: findQuery, keyboard: false)
     wireSendEvents()
@@ -177,6 +189,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     #endif
     browsingVisible = false
+    navigationVisit = UUID()
     PushNotifications.shared.visibleRoute = ""
     if SettingsPage.leaving(self) {
       permissionPage?.update(nil, ready: true)
@@ -220,6 +233,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     prepareSimulator(state, session)
     startFeed(state)
     chat.setAttachmentContext(Self.json(["workspaceId": state.workspaceId, "sessionId": sessionId]))
+    if chat.proposalUserID != state.userId {
+      chat.proposalUserID = state.userId
+      chat.applyRows()
+    }
     chat.showsThoughts = session.cliType == "builtin" && session.agentType == "deepseek"
     chat.setNavigationTitle(session.title)
     let tabs = DirectoryTabs.sessions(current: session, all: state.catalog.sessions)
@@ -242,6 +259,20 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     chat.setTitleMenu("[]")
     chat.mentionRepository = session.projectId.hasPrefix("github:") ? String(session.projectId.dropFirst(7)) : ""
+    let operationTitles = SessionRelations.titles(sessions: state.catalog.sessions)
+    let operationAgentTypes = Dictionary(state.catalog.sessions.map { ($0.id, $0.agentType) }, uniquingKeysWith: { first, _ in first })
+    let operationCLITypes = Dictionary(state.catalog.sessions.map { ($0.id, $0.cliType) }, uniquingKeysWith: { first, _ in first })
+    let operationRoots = Dictionary(state.catalog.sessions.filter { operationTitles[$0.id] != nil }.map { ($0.id, $0.parentSessionId ?? $0.id) }, uniquingKeysWith: { first, _ in first })
+    let operationOpened = Set(state.catalog.sessions.filter { $0.parentSessionId == nil && $0.openedBySessionId != nil }.map(\.id))
+    if chat.operationCurrentID != sessionId || chat.operationTitles != operationTitles || chat.operationAgentTypes != operationAgentTypes || chat.operationCLITypes != operationCLITypes || chat.operationRoots != operationRoots || chat.operationOpened != operationOpened {
+      chat.operationCurrentID = sessionId
+      chat.operationRoots = operationRoots
+      chat.operationOpened = operationOpened
+      chat.operationAgentTypes = operationAgentTypes
+      chat.operationCLITypes = operationCLITypes
+      chat.operationTitles = operationTitles
+      chat.applyRows()
+    }
     renderMentions(state, session)
     renderFeed(session)
     updateMoreMenu(session)
@@ -261,6 +292,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   private func renderFeed(_ session: SessionItem) {
     let state = feed?.state ?? SessionFeedState()
+    let pagingChanged = chat.remoteHasEarlierHistory != state.historyHasMore || chat.remoteHistoryLoading != state.historyLoading
+    chat.remoteHasEarlierHistory = state.historyHasMore
+    chat.remoteHistoryLoading = state.historyLoading
+    chat.updateHistoryHeader()
     if session.isTabClosed {
       chat.setEntries("[]")
       renderedEntries = nil
@@ -273,7 +308,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     renderComposer(session, state)
     renderPermission()
     chat.setEmptyText(String(localized: String.LocalizationValue(state.status == "live" ? "chat.empty.prompt" : "chat.empty.loading"), bundle: .lody))
-    guard state.entriesJSON != renderedEntries else { return }
+    guard state.entriesJSON != renderedEntries else {
+      if pagingChanged { chat.scheduleUpdate() }
+      return
+    }
     renderedEntries = state.entriesJSON
     processPage?.update(state.entriesJSON, animate: state.isLiveUpdate)
     tasksPage?.update(state.entriesJSON)
@@ -366,16 +404,23 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
       guard let self else { return }
       defer { self.creatingTab = false; self.render() }
       do {
+        // A Tab is a session: the free-plan session quota applies, as on Web.
+        let entitlement = await runtime.billingEntitlement()
         let result = try await runtime.workspaceCall(RuntimeContract.Calls.CreateTab.self) { workspace, _ in
-          RuntimeContract.CreateTabParams(workspaceId: workspace, sessionId: target, parentSessionId: self.sessionId, title: String(localized: "session.tabs.defaultTitle", bundle: .lody))
+          RuntimeContract.CreateTabParams(workspaceId: workspace, sessionId: target, parentSessionId: self.sessionId, preferRoost: LodyPreferences.roostHistoryEnabled, title: String(localized: "session.tabs.defaultTitle", bundle: .lody), billingEntitlement: entitlement)
         }
         switch result {
         case .created:
           self.attemptedTab = nil
           LodyShell.shared.openSessionFromExternal(target)
-        case .rejected:
+        case .rejected(let rejected):
           self.attemptedTab = nil
-          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.failed", bundle: .lody), kind: .error)
+          let message = switch rejected.reason {
+          case .freeSessionLimitReached: String(localized: "session.tabs.freeSessionLimit", bundle: .lody)
+          case .workspacePaymentRequired: String(localized: "session.tabs.workspacePaymentRequired", bundle: .lody)
+          default: String(localized: "session.tabs.failed", bundle: .lody)
+          }
+          LodyToastOverlay.shared.show(message: message, kind: .error)
         case .unknown:
           LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
         }
@@ -393,6 +438,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     if reviewable {
       changes.append(UIAction(title: String(localized: "workspaceChanges.title", bundle: .lody), image: UIImage(systemName: "plus.forwardslash.minus")) {
         [weak self] _ in self?.openWorkspaceChanges()
+      })
+    }
+    if browsable {
+      // Browse the local project and open a file (Markdown renders; Source toggles the text).
+      changes.append(UIAction(title: String(localized: "session.action.projectFiles", bundle: .lody), image: UIImage(systemName: "folder")) {
+        [weak self] _ in self?.openProjectFiles(title: String(localized: "files.title", bundle: .lody))
       })
     }
     var children: [UIMenuElement] = changes
@@ -474,10 +525,21 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     ])
     chat.translatesAutoresizingMaskIntoConstraints = false
     pageHeader.translatesAutoresizingMaskIntoConstraints = false
+    // The header replaces the navigation bar, so it must clear the window controls of a windowed
+    // iPad app itself: the plain safe area does not include them, a navigation bar's layout does.
+    // The corner-adapted guide also insets for an iPhone's rounded display corners, so it is only a
+    // floor; the 16 pt margin stays measured from the plain safe area.
+    let headerArea = view.layoutGuide(for: .safeArea(cornerAdaptation: .horizontal))
+    let preferredLeading = pageHeader.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16)
+    let preferredTrailing = pageHeader.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16)
+    preferredLeading.priority = .defaultHigh
+    preferredTrailing.priority = .defaultHigh
     NSLayoutConstraint.activate([
       pageHeader.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-      pageHeader.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-      pageHeader.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+      preferredLeading,
+      preferredTrailing,
+      pageHeader.leadingAnchor.constraint(greaterThanOrEqualTo: headerArea.leadingAnchor),
+      pageHeader.trailingAnchor.constraint(lessThanOrEqualTo: headerArea.trailingAnchor),
       pageHeader.heightAnchor.constraint(equalToConstant: chat.pageHeaderHeight),
       chat.topAnchor.constraint(equalTo: view.topAnchor),
       chat.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -523,6 +585,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   private func wireEvents() {
     chat.onReconnect = { [weak self] _ in self?.feed?.reconnect() }
+    chat.onLoadEarlierHistory = { [weak self] in
+      guard let self else { return }
+      DataRuntime.current?.loadOlderSession(self.sessionId)
+    }
     chat.onTitleMenu = { [weak self] body in self?.titleMenuSelected(body["id"] as? String ?? "") }
     chat.onTitlePress = { [weak self] _ in self?.presentMachine() }
   }
@@ -557,7 +623,42 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   }
 
   func perform(_ action: String) {
-    actions.perform(action, row: sessionId, from: self)
+    let scope = source.state.key
+    let visit = navigationVisit
+    let returnToList: @MainActor () -> Void = { [weak self] in
+      guard let self, self.source.state.key == scope, self.navigationVisit == visit,
+        self.browsingVisible, self.viewIfLoaded?.window != nil,
+        let navigation = self.navigationController,
+        navigation.topViewController === (self.parent ?? self),
+        navigation.transitionCoordinator == nil,
+        (self.parent ?? self).presentedViewController == nil else { return }
+      if let home = HomeController.current, home.contains(self) {
+        home.returnToList(from: self)
+      } else {
+        LodyShell.shared.popToRoot()
+      }
+    }
+    guard action == "archive", let session = source.state.catalog.session(sessionId), !session.archived else {
+      actions.perform(action, row: sessionId, from: self)
+      return
+    }
+    let source = source
+    let workspace = source.state.workspaceId
+    let id = sessionId
+    let generation = LocalStore.shared.generation
+    weak var home = HomeController.current
+    let hadHome = home != nil
+    SessionArchive.start(
+      isCurrent: {
+        guard source.state.key == scope, !scope.isEmpty, LocalStore.shared.generation == generation else { return false }
+        return !hadHome || (home != nil && HomeController.current === home && home?.source.state.key == scope)
+      },
+      write: { try await source.write(workspace, id, .archive(true)) },
+      returnToList: returnToList,
+      failed: {
+        LodyToastOverlay.shared.show(message: String(localized: "session.toast.archiveFailed", bundle: .lody), kind: .warning)
+      }
+    )
   }
 
   func find(query: String, keyboard: Bool) {

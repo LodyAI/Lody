@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -13,10 +11,9 @@ import {
 } from '../src/atoms/focus-layer';
 import { useKeyboardNavigation } from '../src/hooks/use-keyboard-navigation';
 import { commands } from '../src/lib/commands/registry';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback?: string) => fallback ?? _key }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -75,7 +72,7 @@ function Harness() {
 }
 
 function renderWith(children: ReactNode) {
-  act(() => root.render(createElement(Provider, { store }, children)));
+  act(() => root.render(withTestI18n(createElement(Provider, { store }, children), testI18n)));
   mounted = true;
 }
 

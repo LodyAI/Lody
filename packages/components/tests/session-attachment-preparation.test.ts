@@ -25,6 +25,8 @@ import type { WorkspaceId } from '@lody/shared';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
 import type { PendingSessionSend, PendingSessionSends } from '../src/lib/session-pending-sends';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
+import { encryptedDispatchSigner } from './helpers/encrypted-dispatch-signer';
+import { initI18n } from '../src/i18n';
 
 const upload = vi.hoisted(() => ({
   run: undefined as undefined | ((file: File, signal: AbortSignal) => Promise<unknown>),
@@ -423,9 +425,14 @@ it('retains a failed same-machine image without attempting cloud fallback', asyn
   const f = fixture(false, null);
   upload.run = async (file) => ready(file);
   f.pending.enqueue(send('blocked', ['image.png']));
+  await initI18n('en');
   const held = await failed(f.pending, 'blocked');
   expect(f.turns()).toEqual([]);
-  expect(held.error).toBe('Local handoff failed');
+  // The row tells the sender which step failed and what to do, with the host's reason.
+  expect(held.error).toBe(
+    "Lody on this computer couldn't prepare this attachment (Local handoff failed). Make sure the local agent is running and up to date, then continue sending."
+  );
+  expect(held.attachments[0]?.error).toBe(held.error);
   expect(await held.attachments[0]?.source?.text()).toBe('image.png');
 });
 it('uses transfer for a different or unknown desktop local identity', async () => {
@@ -451,8 +458,14 @@ it('admits an already prepared local file in an encrypted workspace without uplo
     timestamp: '2026-10-27T00:00:00Z',
     items: [{ type: 'text', text: 'local file' }],
     fileDiff: [],
-    inputConfig: { inputBlocks: [{ type: 'text', text: 'local file' }] },
+    // The composer always names its agent; a member host signs only such an input.
+    inputConfig: {
+      inputBlocks: [{ type: 'text', text: 'local file' }],
+      cliType: 'builtin',
+      agentType: 'codex',
+    },
   };
+  const signer = encryptedDispatchSigner();
   const file = {
     type: 'file',
     transport: 'local',
@@ -466,7 +479,12 @@ it('admits an already prepared local file in an encrypted workspace without uplo
     machineId: MACHINE,
   };
   const result = await acceptSessionUserTurn(
-    { ...f.runtime, workspaceId: 'workspace', contentMode: 'e2ee' } as unknown as WorkspaceRuntime,
+    {
+      ...f.runtime,
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+      prepareEncryptedDispatch: signer.prepareEncryptedDispatch,
+    } as unknown as WorkspaceRuntime,
     SESSION,
     entry as SessionHistory,
     { kind: 'dispatch' },
@@ -478,6 +496,12 @@ it('admits an already prepared local file in an encrypted workspace without uplo
   expect(f.turns()[0]?.items).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ type: 'file', transport: 'local', fileId: '/local/private.txt' }),
+    ])
+  );
+  // The signed input carries the prepared file, so the machine runs what was signed.
+  expect(signer.signed[0]?.inputConfig.inputBlocks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'file', fileId: '/local/private.txt' }),
     ])
   );
 });

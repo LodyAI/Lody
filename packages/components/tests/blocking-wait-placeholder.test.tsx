@@ -34,21 +34,39 @@ vi.mock('../src/components/preloaded-main-layout', () => ({
 
 import 'fake-indexeddb/auto';
 import { docMetaCacheScopeAtom } from '../src/atoms/doc-meta';
-import { runtimeAtom, workspaceRuntimeInitFailureAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import {
+  runtimeAtom,
+  workspaceRuntimeInitFailureAtom,
+  type WorkspaceRuntime,
+} from '../src/atoms/runtime';
 import { setWorkspaceContextAtom } from '../src/atoms/workspace-context';
 import { BootShellProvider } from '../src/components/boot-shell';
 import { BlockingWaitPlaceholder } from '../src/components/blocking-wait-placeholder';
 import { RouteMessage } from '../src/components/route-message';
-import { resetWorkspaceDataReadyForTests, resolveWorkspaceDataWaitKind, useRecordWorkspaceDataReady, WorkspaceDataWait } from '../src/components/workspace-data-wait';
+import {
+  resetWorkspaceDataReadyForTests,
+  resolveWorkspaceDataWaitKind,
+  useRecordWorkspaceDataReady,
+  WorkspaceDataWait,
+} from '../src/components/workspace-data-wait';
 import { StuckConnectionBannerContainer } from '../src/components/stuck-connection-banner';
 import { browserOnlineAtom, lodyControlConnectionStateAtom } from '../src/atoms/control-connection';
 import { authTokenAtom } from '../src/atoms/runtime';
 import { STUCK_CONNECTION_HINT_DELAY_MS } from '../src/hooks/use-stuck-connection';
 import { TestCloudPlatformProvider } from './test-platform';
-import { describeBootRequestError, recordBootRequestResult, resetBootRequestFailuresForTests } from '../src/lib/boot-request-failures';
+import {
+  describeBootRequestError,
+  recordBootRequestResult,
+  resetBootRequestFailuresForTests,
+} from '../src/lib/boot-request-failures';
 import { initI18n } from '../src/i18n';
 import { resetAppActivityGapForTests } from '../src/lib/app-activity-gap';
-import { markCacheClearPending, maybeClearLodyCacheOnBoot, readPendingLocalClearMode, resetBootClearMemoForTests } from '../src/lib/clear-local-cache';
+import {
+  markCacheClearPending,
+  maybeClearLodyCacheOnBoot,
+  readPendingLocalClearMode,
+  resetBootClearMemoForTests,
+} from '../src/lib/clear-local-cache';
 import { WorkspaceRouteTargetProvider } from '../src/providers/workspace-route-target';
 
 (

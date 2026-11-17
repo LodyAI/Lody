@@ -30,7 +30,10 @@ export const CreateTabParams = z
     workspaceId,
     sessionId: z.string().uuid(),
     parentSessionId: z.string().min(1),
+    preferRoost: z.boolean().optional(),
     title: z.string().min(1).max(200),
+    /** A Tab is a session: the free-plan session quota applies as on Web (null fails open). */
+    billingEntitlement: BillingEntitlement.nullable(),
   })
   .meta({ id: 'CreateTabParams' });
 
@@ -42,6 +45,7 @@ export const CreateSessionParams = z
     machineId: z.string(),
     agentConfigId: z.string(),
     userId: z.string(),
+    preferRoost: z.boolean().optional(),
     title: z.string(),
     branch: z.string().optional(),
     /** Provenance only (web): the Role this session starts as, frozen at its revision. */
@@ -159,6 +163,10 @@ export const CheckTurnQuotaResult = z
     z.object({ state: z.literal('not_sent'), reason: QuotaReason }),
   ])
   .meta({ id: 'CheckTurnQuotaResult' });
+
+export const ForgetPendingInputParams = z
+  .object({ sessionId, inputId: z.string().min(1).max(256) })
+  .meta({ id: 'ForgetPendingInputParams' });
 
 export const SendTurnParams = z
   .object({
@@ -317,6 +325,27 @@ export const RespondPermissionParams = z
 export const RespondPermissionResult = z
   .object({ state: z.enum(['accepted', 'stale', 'conflict']) })
   .meta({ id: 'RespondPermissionResult' });
+
+/**
+ * Accept or dismiss an Agent's proposal notice (`agent_role_proposal` saves the
+ * Role, `schedule_proposal` creates the schedule) and record the outcome in history.
+ */
+export const DecideProposalParams = z
+  .object({
+    workspaceId,
+    sessionId,
+    entryId: z.string().min(1),
+    itemId: z.string().min(1),
+    decision: z.enum(['accept', 'dismiss']),
+  })
+  .meta({ id: 'DecideProposalParams' });
+
+export const DecideProposalResult = z
+  .object({
+    outcome: z.enum(['saved', 'created', 'dismissed']),
+    scheduleId: z.string().optional(),
+  })
+  .meta({ id: 'DecideProposalResult' });
 
 export type BillingEntitlement = z.infer<typeof BillingEntitlement>;
 export type CreateSessionResult = z.input<typeof CreateSessionResult>;

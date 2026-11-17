@@ -73,3 +73,27 @@ test('provider quotas preserve config identity, capabilities, model tiers and ex
  assert.equal(merged.filter(q=>q.id==='codex').length,2);
  assert.equal(usage.selectSessionQuota(merged,'codex','official','standard').windows[0].usedPercent,0);
 });
+
+test('Android bundled session projection carries operation progress, replies and suppressed batch receipts', async () => {
+ const {LoroDoc} = await import('loro-crdt/base64');
+ const doc = new LoroDoc();
+ const target={sessionId:'child',userTurnId:'request'};
+ const success={type:'operation_completion',deliveryId:'delivery',operationId:'op',operationKind:'session_create',progressMessageId:'progress',completion:{type:'result',value:{items:[{status:'succeeded',target,assistantTurnId:'answer'}]}}};
+ const entries=[
+  {id:'progress',role:'system',items:[{type:'operation_progress',operationId:'op',operationKind:'session_create',items:[{target,label:'Research',status:'running'}]}]},
+  {id:'success',role:'system',items:[success]},
+  {id:'reply',role:'system',items:[{...success,deliveryId:'reply',operationKind:'session_chat',completion:{type:'result',value:{items:[{status:'succeeded',target,assistantTurnId:'answer',output:{text:'Answer ready'}}]}}}]},
+  {id:'batch',role:'system',items:[{type:'operation_completion_batch',batchId:'batch',memberCount:2,deliveryStatus:'unknown',members:[success,{...success,deliveryId:'failure',completion:{type:'error',error:{code:'offline',message:'Machine offline',retryable:true}}}]}]},
+ ];
+ for(const entry of entries) doc.getList('history').push(entry);
+ const snapshot=JSON.parse(JSON.stringify(projection.projectSession(doc,'live')));
+ const item=id=>snapshot.entries.find(entry=>entry.id===id).items[0];
+ assert.equal(snapshot.entries.find(entry=>entry.id==='progress').role,'system');
+ assert.equal(item('progress').type,'operation_progress');
+ assert.deepEqual(item('progress').operation.cards,[{id:'0',kind:'created',sessionId:'child',label:'Research',status:'running'}]);
+ assert.deepEqual(item('success').operation,{cards:[],notices:[]});
+ assert.equal(item('reply').operation.cards[0].kind,'reply');
+ assert.equal(item('reply').operation.cards[0].reply,'Answer ready');
+ assert.deepEqual(item('batch').operation.notices,[{kind:'batchUnknown',count:2},{kind:'failed',detail:'Machine offline'}]);
+ assert.deepEqual(item('batch').operation.cards,[]);
+});

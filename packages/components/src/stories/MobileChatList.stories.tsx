@@ -459,3 +459,12 @@ export const WithSwipeActions: Story = {
 export const Archived: Story = {
   args: { groupBy: 'none', flatHeading: '归档对话', rowActions: {}, archived: true },
 };
+
+export const ReadOnlyRows: Story = {
+  args: {
+    groupBy: 'none',
+    chats: baseChats.map((chat, index) =>
+      index < 2 ? { ...chat, readOnly: true, owner: { id: 'teammate', name: 'Alex' } } : chat
+    ),
+  },
+};

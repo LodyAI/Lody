@@ -206,6 +206,10 @@ internal class SessionAttachmentUploads(private val resolver: ContentResolver) {
         const val FILE_LIMIT = 100L * 1024 * 1024
         const val PART_SIZE = 16 * 1024 * 1024
 
+        /** Web's composer limit: a file (or a video, which uploads as one) over 100 MB is refused when picked. */
+        fun oversized(item: PendingAttachment): Boolean = !item.image && item.size > FILE_LIMIT
+        const val FILE_LIMIT_MB = (FILE_LIMIT / (1024 * 1024)).toInt()
+
         fun segment(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
         /** iOS: the prefix has no NUL and decodes as UTF-8 (a cut multi-byte tail still counts). */

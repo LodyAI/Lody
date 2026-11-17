@@ -14,8 +14,9 @@ internal class OkHttpAuthTransport : AuthTransport {
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
     override suspend fun request(path: String, credential: Credential?, body: String?): HttpReply = suspendCancellableCoroutine { continuation ->
-        require(path.matches(Regex("/api/auth/organization/list-members\\?organizationId=[A-Za-z0-9_-]{1,200}&limit=100&offset=[0-9]{1,4}")) || path in setOf("/api/auth/mobile/exchange", "/api/auth/sign-in/email", "/api/auth/sign-up/email", "/api/auth/sign-in/social", "/api/auth/send-verification-email", "/api/auth/request-password-reset", "/api/auth/get-session", "/api/auth/organization/list", "/api/auth/sign-out", "/api/loro-streams/token"))
-        val request = Request.Builder().url("${app.lody.android.BackendEnvironment.site}$path").apply {
+        require(path.matches(Regex("/api/auth/organization/list-members\\?organizationId=[A-Za-z0-9_-]{1,200}&limit=100&offset=[0-9]{1,4}")) || path in setOf("/api/query", "/api/auth/convex/token", "/api/auth/mobile/exchange", "/api/auth/sign-in/email", "/api/auth/sign-up/email", "/api/auth/sign-in/social", "/api/auth/send-verification-email", "/api/auth/request-password-reset", "/api/auth/get-session", "/api/auth/organization/list", "/api/auth/sign-out", "/api/loro-streams/token"))
+        val origin = if (path == "/api/query") app.lody.android.BackendEnvironment.convex else app.lody.android.BackendEnvironment.site
+        val request = Request.Builder().url("$origin$path").apply {
             credential?.let { header("Authorization", "Bearer ${it.token}") }
             if (body != null) post(body.toRequestBody("application/json".toMediaType()))
         }.build()

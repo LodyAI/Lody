@@ -20,9 +20,14 @@
     "@loro-dev/flock-wasm": "0.4.3",
     "@loro-dev/streams-client": "0.7.0",
     "@loro-dev/streams-crdt": "0.16.1",
+    "acp-extension-core": "0.3.0",
+    "debug": "4.4.3",
+    "effect": "4.0.2",
     "fzstd": "0.1.1",
+    "i18next": "25.8.4",
     "loro-crdt": "1.15.1",
     "loro-mirror": "2.3.2",
+    "uuid": "11.1.1",
     "zod": "4.6.7"
   },
   "devDependencies": {

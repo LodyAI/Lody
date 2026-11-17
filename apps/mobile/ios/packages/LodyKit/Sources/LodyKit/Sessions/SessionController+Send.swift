@@ -59,7 +59,11 @@ extension SessionController {
       else { return }
       self.sender?.submit(body, choice: self.composerModel.sendChoice, role: self.composerModel.sendRole)
     }
-    chat.onRetrySend = { [weak self] _ in self?.sender?.retry() }
+    chat.onRetrySend = { [weak self] body in
+      if body["forget"] as? Bool == true { self?.confirmForgetPendingInput(body["id"] as? String) }
+      else if body["retryPending"] as? Bool == true, let id = body["id"] as? String { self?.retryPendingInput(id) }
+      else { self?.sender?.retry() }
+    }
     chat.onComposerOptionChange = { [weak self] body in self?.composerModel.change(body) }
     // The conversation composer is the new-chat composer (web's mobile session page): a card
     // with +, the run-config chip and Send, no @ button; the chip opens the run-config sheet.
@@ -69,6 +73,40 @@ extension SessionController {
     chat.composer.onRunConfig = { [weak self] in self?.presentRunConfig() }
     chat.onStop = { [weak self] _ in self?.controlTurn("stop") }
     chat.onSteer = { [weak self] body in self?.controlTurn("steer", messageId: body["id"] as? String) }
+  }
+
+  private func retryPendingInput(_ id: String) {
+    let workspace = source.state.workspaceId, user = source.state.userId
+    Task { @MainActor [weak self] in
+      guard let self, let runtime = DataRuntime.current, runtime.workspace == workspace, runtime.userId == user else { return }
+      do {
+        _ = try await runtime.workspaceCall(RuntimeContract.Calls.RetryPendingInput.self) { _, _ in
+          RuntimeContract.ForgetPendingInputParams(sessionId: self.sessionId, inputId: id)
+        }
+      } catch {
+        LodyToastOverlay.shared.show(message: String(localized: "native.chat.error.retryFailed", bundle: .lody), kind: .error)
+      }
+    }
+  }
+
+  private func confirmForgetPendingInput(_ selectedId: String?) {
+    guard let inputId = selectedId ?? sender?.record?.sendId, !inputId.isEmpty else { return }
+    let workspace = source.state.workspaceId, user = source.state.userId
+    SettingsPage.confirm(from: self, title: String(localized: "send.forget.title", bundle: .lody),
+      message: String(localized: "send.forget.message", bundle: .lody), action: String(localized: "send.forget.action", bundle: .lody), destructive: true) { [weak self] in
+      Task { @MainActor [weak self] in
+        guard let self, let runtime = DataRuntime.current else { return }
+        guard runtime.workspace == workspace, runtime.userId == user else { return }
+        do {
+          _ = try await runtime.workspaceCall(RuntimeContract.Calls.ForgetPendingInput.self) { _, _ in
+            RuntimeContract.ForgetPendingInputParams(sessionId: self.sessionId, inputId: inputId)
+          }
+          try await self.sender?.discardPending(inputId)
+        } catch {
+          LodyToastOverlay.shared.show(message: String(localized: "send.forget.failed", bundle: .lody), kind: .error)
+        }
+      }
+    }
   }
 
   private func controlTurn(_ action: String, messageId: String? = nil) {

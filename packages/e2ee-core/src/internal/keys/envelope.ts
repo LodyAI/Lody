@@ -1,4 +1,4 @@
-import { Effect, Exit, Result } from 'effect';
+import { Effect, Exit, HashMap, Option, Result } from 'effect';
 import * as Bytes from '../foundation/bytes';
 import { bytesEqual, copyBytes } from '../foundation/cbor';
 import { concat } from '../foundation/concat';
@@ -15,6 +15,7 @@ import {
   requireLedgerContinuation,
   type LedgerView,
 } from '../ledger';
+import { internalViewState } from '../ledger/replay';
 import {
   epochHpkeAad,
   sealEpochKeyHpke,
@@ -52,16 +53,20 @@ function eligibility(view: LedgerView, context: EpochEnvelopeContext) {
     );
     const aad = yield* epochHpkeAad(context);
     if (!view.genesis.equals(context.genesis)) return yield* fail('content-context-mismatch');
-    const state = view.inspectState();
-    if (state.epoch.number !== context.epoch) return yield* fail('unauthorized');
-    const sender = state.devices.get(keyId(context.sender.toBytes()));
-    const recipient = state.devices.get(keyId(context.recipient.toBytes()));
+    const state = internalViewState(view);
+    if (!state || state.epoch.number !== context.epoch) return yield* fail('unauthorized');
+    const sender = Option.getOrUndefined(
+      HashMap.get(state.devices, keyId(context.sender.toBytes()))
+    );
+    const recipient = Option.getOrUndefined(
+      HashMap.get(state.devices, keyId(context.recipient.toBytes()))
+    );
     if (
       !sender ||
       sender.kind === 'recovery' ||
       !recipient ||
-      !state.members.has(keyId(sender.membershipId.toBytes())) ||
-      !state.members.has(keyId(recipient.membershipId.toBytes()))
+      !HashMap.has(state.members, keyId(sender.membershipId.toBytes())) ||
+      !HashMap.has(state.members, keyId(recipient.membershipId.toBytes()))
     )
       return yield* fail('unauthorized');
     return { aad, recipientKey: recipient.encryptionPublicKey, commitment: fact.commitment };
@@ -122,6 +127,20 @@ export function authenticateEpochEnvelope(
     return yield* authenticateEpochEnvelopeSignature(context, input);
   });
 }
+const verifiedCandidates = new WeakMap<
+  { readonly before: LedgerView; readonly record: Uint8Array },
+  LedgerView
+>();
+/** Internal only: binds an already `extendLedger`-verified candidate poststate for multi-recipient rotation sealing. */
+export function verifiedEpochCandidate(
+  before: LedgerView,
+  record: Uint8Array,
+  proposed: LedgerView
+): { readonly before: LedgerView; readonly record: Uint8Array } {
+  const token = Object.freeze({ before, record: new Uint8Array(record) });
+  verifiedCandidates.set(token, proposed);
+  return token;
+}
 /** Creates one signed ciphertext only. Durable delivery/retry belongs to its owner. */
 export const prepareEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
   readonly context: EpochEnvelopeContext;
@@ -139,6 +158,7 @@ export const prepareEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
       input.candidate.record.length > 8192)
   )
     return yield* Effect.fail(new ContentError({ code: 'invalid-envelope' }));
+  const preverified = input.candidate ? verifiedCandidates.get(input.candidate) : undefined;
   const candidate = input.candidate && {
     before: input.candidate.before,
     record: new Uint8Array(input.candidate.record),
@@ -147,13 +167,35 @@ export const prepareEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
     const record = yield* Effect.fromResult(decodeRecord(candidate.record));
     if (
       record.body.type !== 'ordinary' ||
-      (record.body.operation.type !== 'publishEpoch' &&
+      (record.body.operation.type !== 'abandonEpoch' &&
+        record.body.operation.type !== 'publishEpoch' &&
         record.body.operation.type !== 'removeMemberAndPublishEpoch') ||
       record.body.operation.epoch !== context.epoch ||
       !record.body.signer.equals(context.sender)
     )
       return yield* Effect.fail(new ContentError({ code: 'unauthorized' }));
   }
+  let derived: LedgerView | undefined;
+  const resolveProposed = Effect.fnUntraced(function* (item: NonNullable<typeof candidate>) {
+    if (derived) return derived;
+    if (preverified) {
+      yield* Effect.fromResult(requireLedgerContinuation(item.before, preverified));
+      if (
+        preverified.length !== item.before.length + 1 ||
+        !preverified.head.equals(hashRecordBytes(item.record))
+      )
+        return yield* Effect.fail(new ContentError({ code: 'content-context-mismatch' }));
+      derived = preverified;
+      return derived;
+    }
+    derived = yield* Effect.fromResult(
+      extendLedger(item.before, [item.record], {
+        head: hashRecordBytes(item.record),
+        length: item.before.length + 1,
+      })
+    );
+    return derived;
+  });
   const lookup = candidate
     ? () =>
         Effect.gen(function* () {
@@ -164,12 +206,7 @@ export const prepareEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
             current.length !== candidate.before.length
           )
             return yield* Effect.fail(new ContentError({ code: 'content-context-mismatch' }));
-          return yield* Effect.fromResult(
-            extendLedger(candidate.before, [candidate.record], {
-              head: hashRecordBytes(candidate.record),
-              length: candidate.before.length + 1,
-            })
-          );
+          return yield* resolveProposed(candidate);
         })
     : input.ledger;
   const before = yield* lookup();
@@ -187,7 +224,13 @@ export const prepareEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
   const after = yield* lookup();
   yield* Effect.fromResult(recheck(before, after, context));
   const frame = concat([unsigned, signature.toBytes()]);
-  yield* Effect.fromResult(authenticateEpochEnvelope(after, context, frame));
+  if (
+    sealed.enc.byteLength !== 32 ||
+    sealed.ct.byteLength !== 48 ||
+    frame.byteLength !== bound.aad.length + 144 ||
+    !bytesEqual(frame.subarray(0, bound.aad.length), bound.aad)
+  )
+    return yield* Effect.fail(new ContentError({ code: 'invalid-envelope' }));
   return frame;
 });
 /** Opens a current, authenticated exact commitment; it performs no durable install. */

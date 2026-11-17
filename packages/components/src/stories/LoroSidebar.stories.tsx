@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { E2eeOfflineSummaryText } from '@/components/e2ee-offline-window';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useAtom } from 'jotai';
 import { FolderPlus } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
@@ -11,6 +13,8 @@ import type {
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import { WorkspaceCard } from '@/components/workspace-frame';
+import { sidebarLastWidthAtom } from '@/atoms/sidebar-state';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { buildSidebarOpenerRowResolver } from '@/components/sessions/session-list-rows';
@@ -580,6 +584,76 @@ export const Default: Story = {
   },
 };
 
+/** The current workspace is end-to-end encrypted: a lock beside its name, explained on hover. */
+export const EncryptedWorkspace: Story = {
+  ...Default,
+  args: {
+    ...Default.args,
+    workspaceName: 'Cipher Lab',
+    workspaces: [
+      { id: 'ws-e2ee', name: 'Cipher Lab', memberCount: 3, encrypted: true },
+      { id: 'ws-1', name: 'Loro', planTier: 'plus' },
+      { id: 'ws-2', name: 'Lody' },
+    ],
+    currentWorkspaceId: 'ws-e2ee',
+  },
+};
+
+/** The encrypted workspace cannot reach the server: hover "离线" for how long, and how
+ * long this machine can keep working from its outage window. */
+export const EncryptedWorkspaceOffline: Story = {
+  ...EncryptedWorkspace,
+  args: {
+    ...EncryptedWorkspace.args,
+    connectionUiState: 'offline',
+    offlineDetail: (
+      <E2eeOfflineSummaryText
+        window={{ executionUntilMs: 3 * 3_600_000 + 12 * 60_000, offlineSinceMs: -48 * 60_000 }}
+        now={0}
+      />
+    ),
+  },
+};
+
+function NarrowThreeColumnLayout(args: Parameters<typeof LoroSidebar>[0]) {
+  const [width, setWidth] = useAtom(sidebarLastWidthAtom);
+  return (
+    <div className="max-w-[867px]">
+      <WorkspaceSidebarHarness
+        {...args}
+        fullApp
+        defaultWidth={width || undefined}
+        onWidthChange={setWidth}
+        storyContent={
+          <DesktopSessionDetailLayout
+            defaultSizes={{ main: 50, sidebar: 50 }}
+            topBar={null}
+            chatSurfaces={
+              <section aria-label="Conversation" className="h-full p-4">
+                Conversation
+              </section>
+            }
+            secondaryPanel={
+              <section aria-label="iOS Simulator" className="h-full p-4">
+                iOS Simulator
+              </section>
+            }
+            terminalDock={null}
+            sidebarOpen
+            onSidebarCollapse={() => {}}
+            deleteConfirmDialog={null}
+          />
+        }
+      />
+    </div>
+  );
+}
+
+export const NarrowThreeColumn: Story = {
+  render: (args) => <NarrowThreeColumnLayout {...args} />,
+  args: Default.args,
+};
+
 export const WorkspaceSyncing: Story = {
   render: (args) => <StoryLayout {...args} />,
   args: {
@@ -849,6 +923,19 @@ export const UpdatedMode: Story = {
     organizeMode: 'updated',
     chatScope: 'my',
     sessionListProps: demoUpdatedTaskListProps,
+  },
+};
+
+/**
+ * The "Status" organize mode: the Updated rows split into Needs you, Just
+ * finished, Open pull requests, Running and Idle, as on mobile Home. Empty
+ * groups are skipped; only Idle folds behind "Show all".
+ */
+export const StatusMode: Story = {
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...UpdatedMode.args!,
+    organizeMode: 'status',
   },
 };
 
@@ -1189,7 +1276,6 @@ function ProductionLikeTopContent({
               <SidebarSectionHeader
                 label={group.label}
                 collapsed={groupCollapsed}
-                count={group.projects.length}
                 isMobile={isMobile}
                 toggleLabel="Toggle"
                 onToggleCollapsed={() =>
@@ -1276,7 +1362,6 @@ function ProductionLikeTopContent({
         <SidebarSectionHeader
           label="GitHub Worktrees"
           collapsed={githubCollapsed}
-          count={githubWorktreeCount}
           isMobile={isMobile}
           toggleLabel="Toggle"
           onToggleCollapsed={() => setGithubCollapsed((v) => !v)}

@@ -22,6 +22,13 @@ Older agents advertising `collaboration_mode` retain
 their `default`/`plan` select values; do not rewrite those cached contracts into
 new wire ids. A live `configOptions` snapshot determines the current controls.
 
+A capability snapshot's `configOptions` describe only the model that was current
+when it was taken. A refresh a person asks for on a built-in agent switches the
+probe session to every model and stores each model's own options in
+`acpModelConfigOptions` rows, one stored list shared by every model that reported it; selectors and CLI/MCP validation compose the selected
+model's options from them, falling back to the snapshot for an unrecorded model
+([design](../notes/proposed/architecture/2026-11-11-observed-model-config-options.md)).
+
 Scope: `packages/components/src/components/sessions`. Binding rules and the
 pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
@@ -44,6 +51,10 @@ this page is the full text of the rules summarised there.
   modes; provider interaction modes stay inside the run-config dropdown. Both
   are also used by the desktop chat landing; `DesktopRunConfigMenu` receives an
   explicit agent selection/machine scope rather than reading `SessionMeta`.
+  For an explicitly scoped machine, Agent options come from its known config
+  catalog even while presence is offline or pending. A blank child tab can change
+  its draft Agent without waiting for online status; empty scopes stay empty,
+  and existing-conversation locks still apply.
   All side submenus, including Role, anchor to their own trigger rows.
   Option-only panels use top-edge alignment; searchable Model panels lift their
   search header above the row so the option area starts beside it when space permits.

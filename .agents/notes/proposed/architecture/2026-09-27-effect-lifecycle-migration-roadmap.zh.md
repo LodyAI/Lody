@@ -219,7 +219,7 @@ Flock 新鲜度同步用 `timeout` + `orElse` 回落本地副本。约束：**�
 
 ### Worktree 与文件锁（L4/L5 的依赖）
 
-- 位置：`worktree-manager.ts`、`legacy-speculative-worktrees.ts`、`worktree-gc.ts`、
+- 位置：`worktree-manager.ts`、`worktree-gc.ts`、
   `packages/shared/src/node/file-lock.ts`。
 - 证据：#76、#6；开放 #296（可能已被 #620 修复，需核实）。
 - 文件锁内核已在 #1377 实现；其行为保证与单一 Legacy 门面以所属决定为准。
@@ -303,7 +303,7 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 
 ## 单元台账
 
-快照：main `bcb1aa8712b2d040912d735f1ae6ef2fc832ab35`，2026-10-11。
+快照：main `2fa994ceb`，2026-11-16（各行最初记录于 `bcb1aa87`，2026-10-11；2026-11-16 的刷新只新增 E2EE 行并更新依赖版本）。
 “原生”记录已合并的内核证据，不代表重新验证了所有平台；“待迁移”表示尚未完成；“部分”明确已完成的叶子。尚未评估的孤岛和未测试的环境记在证据局限中，不混入实现状态。所有权列说明实际租约/Scope 边界与应用集成余项。纯计算不计入台账；这是已知生命周期工作队列，不是全仓完整清单。
 
 | 职责单元                                  | 真实前置依赖                                          | 内核               | 消费者                          | 所有权 / 集成                           | 证据与余项                                                                                                                                                                                                       |
@@ -329,7 +329,7 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 | AgentSession 与池                         | Worktree/startup、install、shell、闸门、ACP、凭据叶子 | 部分               | Promise 编排                    | 完整实例/替换拥有者待完成               | 凭据/preparation 叶子原生，完整 Session 取消仍未完成                                                                                                                                                             |
 | 会话历史所属机器就绪                      | 第三方 Repo 订阅/快照、Clock                         | 原生               | MessageHandler 执行入口        | 单次请求 Stream Scope；关闭取消       | [就绪决定](2026-10-09-roost-native-runtime.zh.md#历史所属机器就绪检查)；所属机器/后端就绪前不打开正文，原生 Repo/文档租约已接入；上层 Session 生命周期仍待迁移                                                                                  |
 | 历史 RPC 前置拒绝结果持久化               | SQLite driver                                      | 原生               | MessageHandler RPC 回调        | 单次操作 Scope handle；FULL 拒绝事务 | [就绪决定](2026-10-09-roost-native-runtime.zh.md#历史所属机器就绪检查)；拒绝保持到原请求过期并跨重启；Promise RPC dispatch 生命周期仍待迁移 |
-| streams-crdt / loro-repo 生命周期 | 正式 CRDT 0.19.0、Client 0.12.0、Repo 0.23.2；Effect 4.0.2 | 库原生入口已具备 | 产品消费者使用已发布的 Promise API | 恢复既有 Repo 和应用所有权；撤回原生消费者与 residency 迁移 | [撤回决策](../../implemented/simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)；保留独立 presence、token、本地 writer |
+| streams-crdt / loro-repo 生命周期 | 正式 CRDT 0.20.0、Client 0.12.2、Repo 0.25.0；Effect 4.0.2 | 库原生入口已具备 | 产品消费者使用已发布的 Promise API | 恢复既有 Repo 和应用所有权；撤回原生消费者与 residency 迁移 | [撤回决策](../../implemented/simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)；保留独立 presence、token、本地 writer |
 | workspace presence 与远程代次 | 正式 streams-crdt 0.19.0 / client 0.12.0、原生 token | 原生 | doc/bridge 经唯一 Legacy 入口 | CLI 根 registry、workspace 与代次 Scope | [P5 决定](../../implemented/architecture/2026-10-12-effect-workspace-presence.zh.md)；验证共享 token 和实际 SDK 释放；P6 租约已原生化；registry 让释放失败的 owner 退役而不阻塞工作区，MCP 命令借用 daemon 的 owner（[决定](../../implemented/architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.zh.md)）；relay 上层接线仍待迁移 |
 | 本地 presence 与物理 socket writer | 原生本地来源、真实 Flock SDK 导出、Node host turn/write/drain | 下层 writer 原生 | CLI doc/socket 与 room engine 经唯一 Legacy 入口 | 全进程 FIFO pacer、共享连接 lane；有界释放保留原 owner | [P7 writer 决定](../../implemented/architecture/2026-10-12-effect-local-presence-writer.zh.md)；room/LoroRepo 及应用接线仍待迁移 |
 | 会话活跃 presence 租约 / 心跳 | 同步本地发布、Clock；实际 Turn 子 Scope | 原生 | 原生 Turn 准入；MessageHandler phase/读取回调 | 每 Turn 租约；Legacy analytics/应用入口 | [P6 决策](../../implemented/architecture/2026-10-13-effect-session-presence-leases.zh.md)；完整 Session/Turn/daemon 和 analytics 所有权仍待迁移 |
@@ -339,6 +339,7 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 | Turn、steer、stop、收尾                   | Session 与文档/历史/presence 拥有者                   | 待迁移             | Promise 编排                    | Turn 任务待迁移；已接入原生 presence 租约           | 两条依赖链都就绪；保留类型化停止与 pending-input 行为                                                                                                                                                            |
 | 已释放回合的完成发布 | Promise 历史/backend 与通知适配器 | 原生确认策略；依赖仍未迁移 | Session execution 调用 `publishTurnCompletionLegacy` | 现有 Host drain；关闭取消确认等待 | [决定](../../implemented/bug-fix/2026-10-26-turn-completion-signals.zh.md)；不重试通知、不引入 outbox；完整 Turn 迁移仍待完成 |
 | dispatch、MessageHandler、daemon 集成     | Turn、投递、文档 flush                                | 待迁移             | Promise 编排                    | 已有 shell 根 runtime；其余所有权待完成 | 停会话→最终写入 flush→拆文档，报告外部释放失败                                                                                                                                                                   |
+| E2EE 账本、密钥与托管 workflow | 异步加密/验签、SQLite 与 IndexedDB adapter、宿主托管 port | 原生：`@lody/e2ee-core` 的 ports/workflows/adapters 与 `@lody/e2ee-client` runtime | 桌面 main 与 CLI 经 Promise 门面（如 `apps/cli/src/lib/e2ee/workspace-legacy.ts`） | 宿主拥有的托管与 workspace Scope | [e2ee-core 规则](../../../../packages/e2ee-core/AGENTS.md)；协议代码保持纯函数，公开 workflow 使用 `Effect.fn`；加密执行接入 Session/Turn 仍属上方待迁移的 Promise 单元 |
 | Renderer / Electron / supervisor 上层编排 | 各单元真实的平台与同步依赖                            | 待迁移    | 既有孤岛与进程调用方            | 上层资源/任务拥有者待完成               | 既有孤岛未评估；统一进程调用不代表上层 workflow 完成，交付前继续拆单元                                                                                                                                                           |
 
 | 本机 MCP 授权 / 凭证中继                  | MCP SDK 2.0.0、系统凭证库、Node 监听器                | 原生（本地变更） | Legacy SessionManager 与本机 RPC 门面 | 工作区服务 Scope；授权尝试与确切运行实例的子 Scope | [授权决定](../../implemented/architecture/2026-10-26-mcp-oauth-local-credentials.zh.md)；模拟流程/隔离测试；系统验收与 Slim 真实授权待完成                                                                       |

@@ -52,14 +52,6 @@ extension UIColor {
     return .lodySoftDarkBackground
   }
 
-  static let lodySidebar = UIColor { traits in
-    let high = traits.accessibilityContrast == .high
-    if traits.userInterfaceStyle != .dark {
-      return UIColor(white: high ? 0xEE / 255 : 0xF7 / 255, alpha: 1)
-    }
-    return UIColor(white: high ? 0x20 / 255 : 0x18 / 255, alpha: 1)
-  }
-
   static let lodyGroupedBackground = UIColor { traits in
     traits.userInterfaceStyle == .dark
       ? UIColor.lodyBackground.resolvedColor(with: traits)

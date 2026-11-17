@@ -1,4 +1,8 @@
 import {
+  getLocalIpcServerCredentials,
+  LOCAL_IPC_TOKEN_HEADER,
+} from '@lody/shared/node/local-ipc-auth';
+import {
   type LocalE2eePrepareReply,
   type LocalE2eePrepareResponse,
 } from '@lody/shared/e2ee-local-pairing';
@@ -132,6 +136,7 @@ function postOversizedControlBody(
         method: 'POST',
         headers: {
           [LOCAL_CONTROL_HEADER]: '1',
+          [LOCAL_IPC_TOKEN_HEADER]: getLocalIpcServerCredentials().token,
           'Content-Type': 'application/json',
         },
       },
@@ -168,6 +173,30 @@ describe('local IPC socket server', () => {
     vi.clearAllMocks();
   });
 
+  it('refuses missing and incorrect tokens before dispatch, and accepts the published token', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    const run = await startLocalIpcSocketServers(config);
+    for (const token of ['', 'b'.repeat(64)]) {
+      const result = await Effect.runPromise(
+        Effect.flip(
+          makeLocalControlClientSocket({
+            socketPath: paths.controlSocketPath,
+            token,
+          }).sessionControl(createSessionRequest())
+        )
+      );
+      expect(result).toMatchObject({ _tag: 'IpcProtocolError', status: 401 });
+    }
+    const responses = await Effect.runPromise(
+      makeLocalControlClientSocket({ runFilePath: paths.runFilePath }).sessionControl(
+        createSessionRequest()
+      )
+    );
+    expect(responses.at(-1)).toMatchObject({ type: 'session/create_response', success: true });
+    expect(run.token).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it('aborts an in-flight machine RPC when the local socket disconnects', async () => {
     const paths = makePaths();
     const config = makeServerConfig(paths);
@@ -196,7 +225,11 @@ describe('local IPC socket server', () => {
       socketPath: paths.controlSocketPath,
       path: LOCAL_MACHINE_RPC_PATH,
       method: 'POST',
-      headers: { [LOCAL_CONTROL_HEADER]: '1', 'Content-Type': 'application/json' },
+      headers: {
+        [LOCAL_CONTROL_HEADER]: '1',
+        [LOCAL_IPC_TOKEN_HEADER]: getLocalIpcServerCredentials().token,
+        'Content-Type': 'application/json',
+      },
     });
     request.on('error', () => {});
     request.end(
@@ -224,7 +257,7 @@ describe('local IPC socket server', () => {
     });
 
     await expect(
-      Effect.runPromise(makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health())
+      Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
     ).resolves.toMatchObject({
       ok: true,
       machineId: 'machine-1',
@@ -235,7 +268,7 @@ describe('local IPC socket server', () => {
     await expect(
       Effect.runPromise(
         makeLocalControlClientSocket({
-          socketPath: paths.controlSocketPath,
+          runFilePath: paths.runFilePath,
         }).sessionControl(createSessionRequest())
       )
     ).resolves.toEqual([
@@ -267,7 +300,7 @@ describe('local IPC socket server', () => {
       version: first.version,
     });
     await expect(
-      Effect.runPromise(makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health())
+      Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
     ).resolves.toMatchObject({ machineId: 'machine-1' });
   });
 
@@ -290,9 +323,7 @@ describe('local IPC socket server', () => {
       await startLocalIpcSocketServers(makeServerConfig(paths));
 
       await expect(
-        Effect.runPromise(
-          makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health()
-        )
+        Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
       ).resolves.toMatchObject({ machineId: 'machine-1' });
     }
   );
@@ -347,7 +378,7 @@ describe('local IPC socket server', () => {
     await startLocalIpcSocketServers(makeServerConfig(paths));
 
     await expect(
-      Effect.runPromise(makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health())
+      Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
     ).resolves.toMatchObject({ machineId: 'machine-1' });
   });
 
@@ -388,7 +419,7 @@ describe('local IPC socket server', () => {
 
     await startLocalIpcSocketServers(makeServerConfig(paths));
     await expect(
-      Effect.runPromise(makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health())
+      Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
     ).resolves.toMatchObject({ machineId: 'machine-1', pid: process.pid });
   });
 
@@ -410,7 +441,7 @@ describe('local IPC socket server', () => {
     await startLocalIpcSocketServers(config);
     await expect(
       Effect.runPromise(
-        makeLocalControlClientSocket({ socketPath: paths.controlSocketPath }).sessionControl({
+        makeLocalControlClientSocket({ runFilePath: paths.runFilePath }).sessionControl({
           type: 'session/image-prepare-local',
           machineId: 'machine-1',
           workspaceId: 'workspace-1',
@@ -462,7 +493,7 @@ describe('local E2EE pairing transport', () => {
         },
       },
     });
-    const client = makeLocalControlClientSocket({ socketPath: paths.controlSocketPath });
+    const client = makeLocalControlClientSocket({ runFilePath: paths.runFilePath });
     const request = {
       type: 'prepare' as const,
       machineId: 'machine-1',
@@ -515,7 +546,7 @@ describe('local E2EE pairing transport', () => {
         },
       },
     });
-    const client = makeLocalControlClientSocket({ socketPath: paths.controlSocketPath });
+    const client = makeLocalControlClientSocket({ runFilePath: paths.runFilePath });
     const request = {
       type: 'prepare' as const,
       machineId: 'machine-1',

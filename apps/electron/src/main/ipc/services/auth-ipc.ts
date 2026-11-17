@@ -1,6 +1,7 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { closeDesktopE2eeAccount } from '../../services/e2ee-account-runtime'
 import { productWindows } from '../../window-state'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   ElectronDevEmailPasswordSignInInputSchema,
   type ElectronDevEmailPasswordSignInInput
@@ -18,7 +19,7 @@ const workspaceSelections = new WeakMap<
   { organizationId?: string; organizationSlug?: string }
 >()
 
-export class AuthIpc extends IpcService {
+export class AuthIpc extends ProductWindowIpcService {
   static override readonly groupName = 'auth'
 
   @IpcMethod()

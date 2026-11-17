@@ -1,3 +1,8 @@
+import { LoroRepo } from 'loro-repo';
+import {
+  runWithSessionCommandEnvironment,
+  type SessionCommandEnvironment,
+} from '@/lib/session-command-environment';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
@@ -23,7 +28,6 @@ import {
   type AgentRoleId,
   type MachineId,
   type SessionId,
-  type SessionMeta,
   type SessionTurnInputConfig,
   type WorkspaceId,
 } from '@lody/shared';
@@ -48,6 +52,7 @@ import {
 import {
   __lodyMcpServerInternals,
   buildLodyMcpServer,
+  buildSessionToolServer,
   runWithMcpSessionContext,
 } from './lody-mcp-server';
 
@@ -70,7 +75,7 @@ const {
   assertBatchSize,
   resolveSessionRenameItems,
   applySessionRenameItems,
-  persistSessionRenameItems,
+  persistSessionRenameItems: persistWithAdmission,
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
@@ -89,6 +94,18 @@ const {
   makeMachineLivenessLookupForMcp,
   truncateUtf8HeadTail,
 } = __lodyMcpServerInternals;
+const persistSessionRenameItems = (
+  manager: LoroDocumentManager,
+  items: Parameters<typeof persistWithAdmission>[1],
+  reason: string
+) =>
+  persistWithAdmission(
+    manager,
+    items,
+    reason,
+    async (id) =>
+      ({ ...(await manager.repo.getDocMeta(getSessionRoomId(id)))!.meta, id }) as SessionMeta
+  );
 
 const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   machineId: 'machine-id',
@@ -1448,7 +1465,7 @@ describe('session MCP input schemas', () => {
         [{ sessionId: 'current', title: 'Current title' }],
         createMcpContext()
       )
-    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title', scope: 'tab' }]);
+    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title' }]);
     expect(() =>
       resolveSessionRenameItems(
         [
@@ -1461,9 +1478,9 @@ describe('session MCP input schemas', () => {
 
     const results = await applySessionRenameItems(
       [
-        { sessionId: 'session-1' as SessionId, title: 'One', scope: 'tab' },
-        { sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' },
-        { sessionId: 'session-3' as SessionId, title: 'Three', scope: 'tab' },
+        { sessionId: 'session-1' as SessionId, title: 'One' },
+        { sessionId: 'missing' as SessionId, title: 'Missing' },
+        { sessionId: 'session-3' as SessionId, title: 'Three' },
       ],
       async ({ sessionId }) => {
         if (sessionId === 'missing') {
@@ -1477,7 +1494,7 @@ describe('session MCP input schemas', () => {
     );
 
     expect(results).toEqual([
-      { sessionId: 'session-1', ok: true, title: 'One', scope: 'tab' },
+      { sessionId: 'session-1', ok: true, title: 'One' },
       {
         sessionId: 'missing',
         ok: false,
@@ -1487,9 +1504,94 @@ describe('session MCP input schemas', () => {
           retryable: false,
         },
       },
-      { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
+      { sessionId: 'session-3', ok: true, title: 'Three' },
     ]);
   });
+
+  it.each(
+    ['reader', 'editor', 'host-owner'].flatMap((requester) =>
+      ['rename', 'archive'].map((operation) => [requester, operation] as const)
+    )
+  )(
+    'authorizes %s %s batches as the active Turn user, never the host owner',
+    async (requesterUserId, operation) => {
+      const repo = await LoroRepo.create({});
+      const privateId = 'read-shared' as SessionId;
+      const editableId = 'editable' as SessionId;
+      for (const [id, machineId] of [
+        [privateId, 'private-machine'],
+        [editableId, 'shared-machine'],
+      ])
+        await repo.upsertDocMeta(getSessionRoomId(id as SessionId), {
+          id,
+          machineId,
+          userId: 'reader',
+          title: 'Original',
+        });
+      const manager = {
+        repo,
+        syncMetaOrThrow: async () => {},
+        waitUntilMetaSynced: async () => true,
+      } as unknown as LoroDocumentManager;
+      const environment = {
+        auth: { userId: 'host-owner', machineId: 'host-machine', token: 'synthetic-token' },
+        workspace: { id: 'workspace-1', slug: 'synthetic' },
+        manager,
+        host: {
+          readInvocation: () => ({
+            active: true,
+            requesterUserId,
+            sourceTurnId: 'active-turn',
+            inputConfig: {},
+          }),
+        },
+        checkMachineAccess: async (target: { requesterUserId: string; machineId: string }) =>
+          target.requesterUserId === 'host-owner' ||
+          (target.requesterUserId === 'editor' && target.machineId === 'shared-machine')
+            ? { allowed: true }
+            : { allowed: false, reason: 'not_visible' },
+      } as unknown as SessionCommandEnvironment;
+      const handlers: NonNullable<Parameters<typeof buildSessionToolServer>[0]> = new Map();
+      const server = buildSessionToolServer(handlers);
+      try {
+        const response = await runWithSessionCommandEnvironment(environment, () =>
+          runWithMcpSessionContext(
+            { sessionId: 'caller', workspaceId: 'workspace-1', machineId: 'host-machine' },
+            () =>
+              handlers.get(`lody_session_${operation === 'rename' ? 'rename_many' : 'archive'}`)!(
+                operation === 'rename'
+                  ? {
+                      items: [
+                        { sessionId: privateId, title: 'Changed private' },
+                        { sessionId: editableId, title: 'Changed shared' },
+                      ],
+                    }
+                  : { sessionIds: [privateId, editableId] }
+              )
+          )
+        );
+        const results = JSON.parse((response.content![0] as { text: string }).text).items;
+        for (const [index, id] of [privateId, editableId].entries()) {
+          const allowed =
+            requesterUserId === 'host-owner' || (requesterUserId === 'editor' && id === editableId);
+          expect(results[index]).toMatchObject(
+            allowed
+              ? { ok: true }
+              : { ok: false, error: { code: 'SESSION_MANAGEMENT_DENIED', retryable: false } }
+          );
+          const meta = (await repo.getDocMeta(getSessionRoomId(id)))?.meta;
+          if (operation === 'rename')
+            expect(meta?.title).toBe(
+              allowed ? (index === 0 ? 'Changed private' : 'Changed shared') : 'Original'
+            );
+          else expect(meta?.isArchived === true).toBe(allowed);
+        }
+      } finally {
+        await server.close();
+        await repo.destroy();
+      }
+    }
+  );
 
   it('persists only existing sessions as user titles and confirms successful writes', async () => {
     const upsertDocMeta = vi.fn(async () => undefined);
@@ -1509,15 +1611,15 @@ describe('session MCP input schemas', () => {
     const results = await persistSessionRenameItems(
       manager,
       [
-        { sessionId: 'session-1' as SessionId, title: 'One', scope: 'tab' },
-        { sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' },
-        { sessionId: 'session-3' as SessionId, title: 'Three', scope: 'tab' },
+        { sessionId: 'session-1' as SessionId, title: 'One' },
+        { sessionId: 'missing' as SessionId, title: 'Missing' },
+        { sessionId: 'session-3' as SessionId, title: 'Three' },
       ],
       'mcp.session_rename_many:current-session-id'
     );
 
     expect(results).toEqual([
-      { sessionId: 'session-1', ok: true, title: 'One', scope: 'tab' },
+      { sessionId: 'session-1', ok: true, title: 'One' },
       {
         sessionId: 'missing',
         ok: false,
@@ -1527,7 +1629,7 @@ describe('session MCP input schemas', () => {
           retryable: false,
         },
       },
-      { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
+      { sessionId: 'session-3', ok: true, title: 'Three' },
     ]);
     expect(upsertDocMeta.mock.calls).toEqual([
       [getSessionRoomId('session-1' as SessionId), { title: 'One', titleSource: 'user' }],
@@ -1538,60 +1640,6 @@ describe('session MCP input schemas', () => {
       reason: 'mcp.session_rename_many:current-session-id',
       timeoutMs: 30_000,
     });
-  });
-
-  it('renames a tab and its group sidebar title independently', async () => {
-    const rootId = 'root-session' as SessionId;
-    const childId = 'child-session' as SessionId;
-    const metas = new Map<string, Partial<SessionMeta>>([
-      [getSessionRoomId(rootId), { id: rootId, title: 'Generated root', titleSource: 'generated' }],
-      [getSessionRoomId(childId), { id: childId, title: 'Child', parentSessionId: rootId }],
-    ]);
-    const manager = {
-      repo: {
-        getDocMeta: vi.fn(async (roomId: string) => {
-          const meta = metas.get(roomId);
-          return meta ? { meta, exists: true } : undefined;
-        }),
-        upsertDocMeta: vi.fn(async (roomId: string, patch: Partial<SessionMeta>) => {
-          metas.set(roomId, { ...metas.get(roomId), ...patch });
-        }),
-      },
-      waitUntilMetaSynced: vi.fn(async () => true),
-    } as unknown as LoroDocumentManager;
-    const reason = 'mcp.session_rename_many:current-session-id';
-
-    await persistSessionRenameItems(
-      manager,
-      [{ sessionId: rootId, title: 'Root tab', scope: 'tab' }],
-      reason
-    );
-    // The sidebar keeps the name it showed before the tab was renamed.
-    expect(metas.get(getSessionRoomId(rootId))).toMatchObject({
-      title: 'Root tab',
-      titleSource: 'user',
-      groupTitle: 'Generated root',
-      groupTitleSource: 'generated',
-    });
-
-    await persistSessionRenameItems(
-      manager,
-      [{ sessionId: rootId, title: 'Sidebar name', scope: 'group' }],
-      reason
-    );
-    expect(metas.get(getSessionRoomId(rootId))).toMatchObject({
-      title: 'Root tab',
-      groupTitle: 'Sidebar name',
-      groupTitleSource: 'user',
-    });
-
-    const [rejected] = await persistSessionRenameItems(
-      manager,
-      [{ sessionId: childId, title: 'Not a group', scope: 'group' }],
-      reason
-    );
-    expect(rejected).toMatchObject({ ok: false, error: { code: 'COMMAND_REJECTED' } });
-    expect(metas.get(getSessionRoomId(childId))).not.toHaveProperty('groupTitle');
   });
 
   it('does not request write confirmation when every session is missing', async () => {
@@ -1607,7 +1655,7 @@ describe('session MCP input schemas', () => {
     await expect(
       persistSessionRenameItems(
         manager,
-        [{ sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' }],
+        [{ sessionId: 'missing' as SessionId, title: 'Missing' }],
         'mcp.session_rename_many:current-session-id'
       )
     ).resolves.toEqual([

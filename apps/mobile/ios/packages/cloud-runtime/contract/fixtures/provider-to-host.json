@@ -1,0 +1,206 @@
+[
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "provider-0",
+    "method": "agentProviders",
+    "payload": {
+      "machines": [
+        {
+          "id": "machine-1",
+          "name": "Studio",
+          "os": "darwin",
+          "readOnly": false,
+          "online": true,
+          "supportsSetup": true
+        }
+      ],
+      "providers": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "machineId": "machine-1",
+          "readOnly": false,
+          "name": "Codex",
+          "prompt": "",
+          "cliType": "builtin",
+          "agentType": "codex",
+          "command": "",
+          "args": []
+        }
+      ],
+      "setups": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "machineId": "machine-1",
+          "name": "Codex",
+          "agentType": "codex",
+          "status": "failed",
+          "attempt": 1,
+          "canRetry": true,
+          "canDelete": true,
+          "failureCode": "verification-failed"
+        }
+      ],
+      "catalog": [
+        {
+          "id": "codex",
+          "name": "Codex",
+          "cliType": "builtin",
+          "agentType": "codex"
+        }
+      ],
+      "authRequired": true
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "advanced-detail",
+    "method": "agentProviderDetail",
+    "payload": {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "machineId": "machine-1",
+      "revision": "synthetic-revision",
+      "description": "Synthetic provider",
+      "env": [
+        {
+          "key": "API_KEY",
+          "hasValue": true
+        }
+      ],
+      "endpoints": [],
+      "runtimeOverrides": {},
+      "titleGeneration": null,
+      "capabilities": {
+        "models": [
+          {
+            "id": "small",
+            "name": "Small"
+          }
+        ],
+        "modes": [],
+        "options": [],
+        "authMethods": [],
+        "sessionTitle": false
+      },
+      "supportsAuthentication": true,
+      "supportsMethodSelection": true,
+      "supportsCodexProfiles": true,
+      "supportsPiExtensions": false,
+      "supportsRateLimitsRefresh": false,
+      "unavailableActions": [
+        {
+          "action": "rate-limits-refresh",
+          "reason": "provider_quota_capability_missing"
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "advanced-probe",
+    "method": "agentProviderProbe",
+    "payload": {
+      "success": true,
+      "authRequired": false,
+      "capabilities": {
+        "models": [
+          {
+            "id": "small",
+            "name": "Small"
+          }
+        ],
+        "modes": [],
+        "options": [],
+        "authMethods": [],
+        "sessionTitle": false
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "advanced-auth",
+    "method": "agentProviderAuth",
+    "payload": {
+      "flowId": "20000000-0000-4000-8000-000000000001",
+      "status": "verifying",
+      "methods": [],
+      "fields": [],
+      "acceptsAuthorizationCode": false,
+      "requiresAuthorizationConsent": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "advanced-binary",
+    "method": "agentProviderOperation",
+    "payload": {
+      "action": "binary-status",
+      "success": true,
+      "status": "incompatible-host",
+      "current": "v1",
+      "required": "v2"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "advanced-draft-pi",
+    "method": "agentProviderOperation",
+    "payload": {
+      "action": "pi-extension-scan",
+      "success": true,
+      "extensions": [
+        {
+          "path": "/synthetic/extension",
+          "name": "Synthetic",
+          "source": "directory"
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "agentProviderAuthChanged",
+    "payload": {
+      "flowId": "20000000-0000-4000-8000-000000000001",
+      "status": "verifying",
+      "methods": [],
+      "fields": [],
+      "acceptsAuthorizationCode": false,
+      "requiresAuthorizationConsent": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "agentProviderOperationProgress",
+    "payload": {
+      "machineId": "machine-1",
+      "id": "10000000-0000-4000-8000-000000000001",
+      "status": "downloading",
+      "percent": 50
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "agentProvidersChanged",
+    "payload": {
+      "machineId": "machine-1"
+    }
+  }
+]

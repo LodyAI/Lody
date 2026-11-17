@@ -2,13 +2,41 @@ import { E2eeIdentityRecovery } from './pages/e2ee-identity-recovery';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import type { ElectronCliState } from '@lody/shared';
 import { Button } from '@lody/ui/button';
-import { AlertDialog } from '@lody/ui/alert-dialog';
+// The product adapter mounts the window drag strip on the overlay, so the desktop
+// window stays movable while the confirmation is open.
+import { AlertDialog } from '@/ui/dialog';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 
 type Pairing = Awaited<ReturnType<NonNullable<E2eeWorkspaceRuntime['prepareLocalAgent']>>>;
+type Runtime = Pick<
+  E2eeWorkspaceRuntime,
+  'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent' | 'resetIdentity'
+>;
+
+/** The longest this view shows one preparation or admission as in progress. Main keeps
+ * working past it; the view moves to waiting, and an exact retry rejoins that work. */
+export const LOCAL_AGENT_STEP_DEADLINE_MS = 45_000;
+/** While waiting, check again after these delays; then wait for the user to retry. */
+export const LOCAL_AGENT_RECHECK_DELAYS_MS = [3_000, 6_000, 12_000, 24_000, 30_000, 30_000];
+const PENDING = 'e2ee_local_agent_pending';
+const withinDeadline = <T,>(work: Promise<T>) =>
+  new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(PENDING)), LOCAL_AGENT_STEP_DEADLINE_MS);
+    work.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        window.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 const styles = stylex.create({
   notice: {
     display: 'flex',
@@ -23,20 +51,42 @@ const styles = stylex.create({
   message: { margin: 0 },
 });
 
-/** Each new local pairing session requires consent, including an already admitted machine. */
-export function E2eeLocalAgentApproval({
+/** Whether the local CLI currently runs this workspace, from its reported runtime state;
+ * `null` until the first snapshot. Only an activated identity starts an encrypted
+ * workspace, so a listed workspace already has a working local agent. */
+export function localAgentRunsWorkspace(
+  state: ElectronCliState | null,
+  workspaceId: string
+): boolean | null {
+  if (!state) return null;
+  // A stopped, failed or (re)starting process may still carry its last runtime snapshot.
+  if (!['running', 'degraded', 'reconnecting', 'offline'].includes(state.phase)) return false;
+  return state.runtime?.connectedWorkspaces?.some((item) => item.id === workspaceId) === true;
+}
+
+/** Each new local pairing session requires consent, including an already admitted machine.
+ * The offer is shown only while the local agent does not already run this workspace:
+ * component state is per mount, so the running workspace is the durable answer. */
+export function E2eeLocalAgentApproval(props: {
+  workspaceId: string;
+  runtime: Runtime | undefined;
+  enabled: boolean;
+  localAgentRunning: boolean | null;
+}) {
+  // No pairing, approval or phase crosses to another workspace.
+  return <LocalAgentApproval key={props.workspaceId} {...props} />;
+}
+
+function LocalAgentApproval({
   workspaceId,
   runtime,
   enabled,
+  localAgentRunning,
 }: {
   workspaceId: string;
-  runtime:
-    | Pick<
-        E2eeWorkspaceRuntime,
-        'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent' | 'resetIdentity'
-      >
-    | undefined;
+  runtime: Runtime | undefined;
   enabled: boolean;
+  localAgentRunning: boolean | null;
 }) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<
@@ -46,6 +96,7 @@ export function E2eeLocalAgentApproval({
   const [recoveryMachine, setRecoveryMachine] = useState(true);
   const [admitted, setAdmitted] = useState(false);
   const [pairing, setPairing] = useState<Pairing | null>(null);
+  const pairingRef = useRef<Pairing | null>(null);
   const approved = useRef(false);
   const [available, setAvailable] = useState<boolean | null>(null);
   useEffect(() => {
@@ -75,8 +126,42 @@ export function E2eeLocalAgentApproval({
       active.current = false;
     };
   }, []);
+  // Each attempt owns the phase only until a newer one starts; a result that arrives
+  // after its deadline or after a newer attempt changes nothing.
+  const attempt = useRef(0);
+  const current = (owner: number) => active.current && attempt.current === owner;
+  const [recheck, setRecheck] = useState(0);
+  const prepareRef = useRef<(automatic: boolean) => Promise<void>>(async () => {});
+  // A running workspace answers an idle offer or a pending activation. An attempt the
+  // user is in the middle of (confirming, admitting, recovering) keeps its own phase.
+  const runningHere = localAgentRunning === true && (phase === 'idle' || phase === 'waiting');
+  // While waiting, reconcile on a bounded backoff so a slow start completes without a
+  // click. A hidden window waits until it is visible again; any other phase cancels.
+  useEffect(() => {
+    if (phase !== 'waiting' || runningHere || recheck >= LOCAL_AGENT_RECHECK_DELAYS_MS.length)
+      return undefined;
+    let visibilityWait: (() => void) | undefined;
+    const run = () => void prepareRef.current(true);
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState !== 'hidden') return run();
+      const visible = () => {
+        if (document.visibilityState === 'hidden') return;
+        document.removeEventListener('visibilitychange', visible);
+        visibilityWait = undefined;
+        run();
+      };
+      document.addEventListener('visibilitychange', visible);
+      visibilityWait = () => document.removeEventListener('visibilitychange', visible);
+    }, LOCAL_AGENT_RECHECK_DELAYS_MS[recheck]);
+    return () => {
+      window.clearTimeout(timer);
+      visibilityWait?.();
+    };
+  }, [phase, recheck, runningHere]);
   if (
     !enabled ||
+    localAgentRunning === null ||
+    runningHere ||
     available === false ||
     (available === null && phase !== 'error') ||
     !runtime?.prepareLocalAgent ||
@@ -87,59 +172,60 @@ export function E2eeLocalAgentApproval({
   const prepareLocalAgent = runtime.prepareLocalAgent;
   const admitLocalAgent = runtime.admitLocalAgent;
   const busy = phase === 'preparing' || phase === 'admitting';
-  const admit = async (material: Pairing) => {
+  const fail = (owner: number, error: unknown) => {
+    if (!current(owner)) return;
+    if (error instanceof Error) {
+      setRecoveryError(error.message);
+      setRecoveryMachine(/\be2ee_machine_/.test(error.message));
+    }
+    setPhase(error instanceof Error && error.message.includes(PENDING) ? 'waiting' : 'error');
+  };
+  const admit = async (material: Pairing, owner = ++attempt.current) => {
     approved.current = true;
     setPhase('admitting');
     try {
-      const result = await admitLocalAgent(workspaceId, material.pairingSessionId);
-      if (active.current) {
-        setAdmitted(true);
-        setPhase(result.ready ? 'ready' : 'waiting');
-      }
+      const result = await withinDeadline(admitLocalAgent(workspaceId, material.pairingSessionId));
+      if (!current(owner)) return;
+      setAdmitted(true);
+      setPhase(result.ready ? 'ready' : 'waiting');
     } catch (error) {
-      if (active.current && error instanceof Error) {
-        setRecoveryError(error.message);
-        setRecoveryMachine(/\be2ee_machine_/.test(error.message));
-      }
-      if (active.current)
-        setPhase(
-          error instanceof Error && error.message.includes('e2ee_local_agent_pending')
-            ? 'waiting'
-            : 'error'
-        );
+      fail(owner, error);
     }
   };
-  const prepare = async () => {
+  const prepare = async (automatic = false) => {
     if (busy) return;
+    // A click starts a fresh round of automatic checks; an automatic check uses one.
+    setRecheck((count) => (automatic ? count + 1 : 0));
+    const owner = ++attempt.current;
     setPhase('preparing');
     try {
-      const status = await runtime.status(workspaceId);
-      if (!active.current) return;
+      const status = await withinDeadline(runtime.status(workspaceId));
+      if (!current(owner)) return;
       setAvailable(status.hasDeviceCredential === true);
-      if (!status.hasDeviceCredential) return;
-      const material = await prepareLocalAgent(workspaceId);
-      if (!active.current) return;
+      if (!status.hasDeviceCredential) {
+        setPhase('idle');
+        return;
+      }
+      const material = await withinDeadline(prepareLocalAgent(workspaceId));
+      if (!current(owner)) return;
+      const previousSession = pairingRef.current?.pairingSessionId;
+      pairingRef.current = material;
       setPairing(material);
       setAdmitted(material.admitted);
-      if (approved.current && pairing?.pairingSessionId === material.pairingSessionId)
-        await admit(material);
+      // Only the session the user already approved, or the same already-admitted machine
+      // after main rotated the settled session while activation was still finishing,
+      // continues without asking again. A lost CLI identity (`admitted: false`) asks again.
+      if (approved.current && (previousSession === material.pairingSessionId || material.admitted))
+        await admit(material, owner);
       else {
         approved.current = false;
         setPhase('confirm');
       }
     } catch (error) {
-      if (active.current && error instanceof Error) {
-        setRecoveryError(error.message);
-        setRecoveryMachine(/\be2ee_machine_/.test(error.message));
-      }
-      if (active.current)
-        setPhase(
-          error instanceof Error && error.message.includes('e2ee_local_agent_pending')
-            ? 'waiting'
-            : 'error'
-        );
+      fail(owner, error);
     }
   };
+  prepareRef.current = prepare;
   return (
     <>
       <section {...stylex.props(styles.notice)} aria-label={t('e2ee.localAgent.title')}>
@@ -158,7 +244,12 @@ export function E2eeLocalAgentApproval({
                 : 'e2ee.localAgent.description'
           )}
         </p>
-        <Button size="small" variant="secondary" disabled={busy} onClick={() => void prepare()}>
+        <Button
+          size="small"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => void prepare(false)}
+        >
           {t(
             busy
               ? 'e2ee.localAgent.working'
@@ -176,6 +267,7 @@ export function E2eeLocalAgentApproval({
           machine={recoveryMachine}
           onReset={() => {
             approved.current = false;
+            pairingRef.current = null;
             setPairing(null);
             setRecoveryError('');
             setPhase('idle');
@@ -186,6 +278,7 @@ export function E2eeLocalAgentApproval({
         open={phase === 'confirm'}
         onOpenChange={(open) => {
           if (!open && phase === 'confirm' && !approved.current) {
+            pairingRef.current = null;
             setPairing(null);
             setPhase('idle');
           }

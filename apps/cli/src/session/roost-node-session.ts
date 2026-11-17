@@ -1,3 +1,4 @@
+import { isMissingHistoryUserTurn } from '@lody/shared';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { readRoostHistoryPatches } from './roost-history-patches';
@@ -3572,7 +3573,7 @@ const createNodeServicesForLease = async (
             if (
               meta &&
               !meta.isArchived &&
-              meta.lastMissingHistoryUserMsgId !== entry.id &&
+              !isMissingHistoryUserTurn(meta, entry.id) &&
               meta.lastHandledUserMsgId !== entry.id
             ) {
               // The existing writer queue orders this check and activation with

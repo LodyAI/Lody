@@ -1090,8 +1090,6 @@ export function SidebarSectionHeader({
   icon?: ReactNode;
   label: ReactNode;
   collapsed?: boolean;
-  /** @deprecated The collapsed count badge has been removed; this prop is ignored. */
-  count?: number;
   action?: ReactNode;
   /**
    * Status of the Sessions this section hides. Drawn only while collapsed, as

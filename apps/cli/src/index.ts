@@ -4,6 +4,10 @@
 // 32-bit ARM has no prebuild. See utils/sqlite-runtime-support.ts.
 import './utils/sqlite-runtime-support';
 import './instrument';
+import {
+  configureManagedProcessObservation,
+  getManagedWorkerLaunchContext,
+} from './lib/managed-process-observation';
 import { Command } from 'commander';
 import { Cause, Effect, Layer } from 'effect';
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
@@ -25,7 +29,6 @@ import {
   WorkspacePresenceLegacyFailure,
 } from './lib/loro/presence-legacy';
 import { version } from '@/pkg';
-import { internalCommand } from './commands/internal';
 import { loadEnv } from './utils/const';
 import { getLogger } from './utils/logger';
 import { registerProcessErrorHandlers, reportError } from './utils/telemetry';
@@ -34,6 +37,8 @@ import { applyDefaultDnsResultOrder } from './utils/dns-result-order';
 
 // Internal MCP processes use the same runtime and cleanup policy without retaining
 // the daemon, interactive commands and their unrelated implementation modules.
+configureManagedProcessObservation(getManagedWorkerLaunchContext().protocol);
+
 const registerUserCommands =
   process.argv[2] === '__internal'
     ? undefined
@@ -86,7 +91,7 @@ program
 if (registerUserCommands) {
   registerUserCommands(program);
 } else {
-  program.addCommand(internalCommand);
+  program.addCommand((await import('./commands/internal')).internalCommand);
 }
 // Configure commander to show help when no arguments provided
 program.configureHelp({

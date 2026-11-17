@@ -145,27 +145,19 @@ post-upload billing eligibility re-check that lived in the journal is gone; the
 composer still checks eligibility at send time. There is no automatic retry of a
 failed dispatch RPC; the CLI watcher picks the turn up from synchronized history.
 
-## Legacy migration
+## Legacy data
 
-`lib/legacy-session-send-migration.ts` runs once per runtime after the first meta
-sync, under `navigator.locks`. It reads only the current account and workspace:
-
-- A leftover record whose turn is absent is written as an ordinary local send.
-  Version-2 `committed` rows are never appended again, because a fresh replica
-  may simply not have synchronized them yet.
-- Dispatch records and never-offered guides are activated and dispatched on a
-  best-effort basis. Guides with `guideOffer: 'offered'` are left untouched.
-- A record with an unprepared attachment is dropped with `console.warn`.
-- Handled rows are deleted. Failed rows are retried at the next start. The
-  database is deleted once it is empty.
-
-Delete the migration, and the forced-clear flag reading, a few releases after
-this change ships.
+No tagged desktop release shipped the journal: it entered in cf5c925bb and was
+removed before v0.102.0. A cache clear still deletes a leftover
+`lody-session-send-v1` database. The one-time row migration and the reading of
+the `force-cache` / `force-all` clear flags were removed once their stated
+window had passed ([decision](2026-11-16-drop-pre-october-compatibility.md)); a row left on an untagged build from that
+period is discarded with the database.
 
 ## Verification
 
 Behavioral suites under `packages/components/tests/` cover this change, including
-`legacy-session-send-migration.test.ts`, `session-pending-sends-host.test.tsx`,
+`session-pending-sends-host.test.tsx`,
 `use-session-actions.test.ts`, `session-attachment-preparation.test.ts`,
 `session-pending-message-row.test.tsx`, `clear-local-cache.test.ts`,
 `runtime-provider.test.tsx` and `warm-window-lifecycle.test.ts`. The journal,
@@ -178,8 +170,6 @@ results: see PR.
   runtime is disposed, before its attachments finish. Browsers may not show the
   `beforeunload` prompt (notably on mobile), and a workspace switch does not ask.
 - No packaged-device or native-mobile acceptance was run.
-- The legacy migration can only replay what older builds stored. Records with
-  unfinished uploads are dropped.
 
 Supersedes [local-first session sending](2026-09-29-local-first-session-send.md),
 the journal parts of the [deferred attachment design](../architecture/2026-09-14-deferred-attachment-send.md)

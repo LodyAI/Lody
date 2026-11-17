@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import i18next from 'i18next';
 

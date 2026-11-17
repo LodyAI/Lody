@@ -39,3 +39,36 @@ export async function mintPreviewControlProof(
     requestToken: token.requestToken,
   };
 }
+
+/** Only the short-lived read proof, never the app credential, crosses machine RPC. */
+export async function mintSessionHistoryReadProof(
+  intent: {
+    workspaceId: string;
+    machineId: string;
+    sessionId: string;
+    requestId?: string;
+    intentDigest?: string;
+  },
+  sessionToken: string | null,
+  edit = false
+): Promise<string> {
+  const baseUrl = requireCloudAuthBaseUrl('teamSharing');
+  if (!sessionToken) throw new Error('Session history authorization is unavailable.');
+  const response = await fetch(
+    new URL(
+      edit ? '/api/session-history/request-edit-token' : '/api/session-history/request-token',
+      baseUrl
+    ),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+      body: JSON.stringify(intent),
+      signal: AbortSignal.timeout(10_000),
+    }
+  );
+  if (!response.ok) throw new Error('Session history authorization was refused.');
+  return z
+    .object({ requestToken: z.string().min(1).max(8192) })
+    .strict()
+    .parse(await response.json()).requestToken;
+}

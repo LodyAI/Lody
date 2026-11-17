@@ -11,14 +11,81 @@ const object = (value: unknown): Record<string, unknown> =>
     : {};
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 
-// Settings are read on demand inside the native-owned runtime. A fresh bootstrap
-// before an edit preserves fields changed by another client while the editor was open.
+// Settings are read on demand inside the native-owned runtime. List reads may opt
+// into a per-runtime cache of each stream's last read, so the next list only catches
+// up from its offset instead of bootstrapping the whole history. Callers always
+// receive a private copy, so a write that fails to append never leaks into the
+// cache; writes and turn-time reads still bootstrap fresh.
+type Cached = {
+  flock: Flock;
+  offset: string;
+  cursor: string | undefined;
+  size: number;
+};
+const replicas = new Map<string, Cached>();
+const SETTINGS_LIMIT = 8 * 1024 * 1024;
+
+/** Drops every cached settings read (a new account or workspace). */
+export function forgetSettings() {
+  replicas.clear();
+}
+
+function copy(flock: Flock) {
+  const result = new Flock(`lody-ios-settings-${crypto.randomUUID()}`);
+  result.importFile(flock.exportFile());
+  return result;
+}
+
+async function catchUp(
+  client: Awaited<ReturnType<typeof clientFor>>,
+  cached: Cached,
+  signal: AbortSignal,
+) {
+  const apply = (bytes: Uint8Array) => {
+    cached.size += bytes.length;
+    if (cached.size > SETTINGS_LIMIT) throw new Error('catalog_limit');
+    for (const frame of decodeFrames(bytes))
+      cached.flock.importJson(JSON.parse(new TextDecoder().decode(frame)));
+  };
+  for (let page = 0; ; page++) {
+    signal.throwIfAborted();
+    if (page >= 100) throw new Error('catalog_limit');
+    const next = await client.readOnce({
+      offset: cached.offset,
+      cursor: cached.cursor,
+      signal,
+    });
+    if (!next.ok) throw new Error(next.result.code);
+    if (next.result.payload) apply(next.result.payload.body);
+    if (next.result.upToDate) {
+      cached.offset = next.result.nextOffset;
+      cached.cursor = next.result.cursor;
+      return;
+    }
+    if (cached.offset === next.result.nextOffset)
+      throw new Error('stalled_cursor');
+    cached.offset = next.result.nextOffset;
+    cached.cursor = next.result.cursor;
+  }
+}
+
 export async function openSettings(
   stream: string,
   grant: Grant,
   signal: AbortSignal,
+  options: { cached?: boolean } = {},
 ) {
   const client = await clientFor(stream, grant);
+  const cached = options.cached ? replicas.get(stream) : undefined;
+  if (cached) {
+    try {
+      await catchUp(client, cached, signal);
+      return { flock: copy(cached.flock), client };
+    } catch (error) {
+      replicas.delete(stream);
+      if (signal.aborted) throw error;
+    }
+  }
   const initial = await client.bootstrap({ signal });
   if (!initial.ok) throw new Error(initial.result.code);
   const flock = new Flock(`lody-ios-settings-${crypto.randomUUID()}`);
@@ -26,7 +93,7 @@ export async function openSettings(
   let size = 0;
   const bound = (bytes: Uint8Array) => {
     size += bytes.length;
-    if (size > 8 * 1024 * 1024) throw new Error('catalog_limit');
+    if (size > SETTINGS_LIMIT) throw new Error('catalog_limit');
   };
   const apply = (bytes: Uint8Array) => {
     bound(bytes);
@@ -59,7 +126,10 @@ export async function openSettings(
       throw new Error('stalled_cursor');
     ({ nextOffset: offset, cursor, upToDate } = next.result);
   }
-  return { flock, client };
+  if (!options.cached) return { flock, client };
+  if (replicas.size >= 64) replicas.delete(replicas.keys().next().value!);
+  replicas.set(stream, { flock, offset, cursor, size });
+  return { flock: copy(flock), client };
 }
 
 export function settingsRows(
@@ -101,58 +171,12 @@ export function settingsRows(
         prompt: text(value.prompt),
         detail: text(value.agentType),
       });
-    } else {
-      if (
-        row.key[0] !== 'mcpServer' ||
-        value.id !== id ||
-        !['stdio', 'http'].includes(text(value.transport))
-      )
-        continue;
-      rows.push({
-        kind,
-        id,
-        name: text(value.name),
-        detail: text(value.transport),
-        enabledByDefault: value.enabledByDefault === true,
-        configured:
-          object(value.connection).transport === value.transport &&
-          (value.transport === 'http'
-            ? !!text(object(value.connection).url).trim()
-            : !!text(object(value.connection).command).trim()),
-        updatedAt:
-          typeof value.updatedAt === 'number' ? value.updatedAt : undefined,
-      });
     }
   }
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function editSetting(flock: Flock, request: SettingsRequest) {
-  if (request.remove) {
-    const item = request.remove;
-    if (
-      request.edit ||
-      request.kind !== 'mcp' ||
-      item.kind !== 'mcp' ||
-      !item.id
-    )
-      throw new Error('invalid_setting');
-    const current = settingsRows('mcp', flock).find(
-      (row) => row.id === item.id,
-    );
-    if (!current) throw new Error('setting_not_found');
-    if (
-      ['name', 'enabledByDefault', 'detail', 'configured', 'updatedAt'].some(
-        (field) =>
-          current[field as keyof RemoteSetting] !==
-          item[field as keyof RemoteSetting],
-      )
-    )
-      throw new Error('setting_conflict');
-    flock.delete(['mcpServer', item.id]);
-    flock.commit();
-    return;
-  }
   const edit = request.edit;
   if (
     !edit ||
@@ -168,50 +192,22 @@ export function editSetting(flock: Flock, request: SettingsRequest) {
     (row) => row.id === edit.item.id,
   );
   if (!current) throw new Error('setting_not_found');
-  if (
-    request.kind === 'mcp' &&
-    edit.enabledByDefault &&
-    current.configured === false
-  )
-    throw new Error('mcp_connection_missing');
-  const fields = ['name', 'prompt', 'enabledByDefault'] as const;
+  const fields = ['name', 'prompt'] as const;
   for (const field of fields)
     if (edit[field] !== undefined && current[field] !== edit.item[field])
       throw new Error('setting_conflict');
   if (request.kind === 'machine') {
     flock.set(['m', `machine-${current.id}`, 'name'], name);
   } else {
-    const key = [
-      request.kind === 'agent' ? 'agentConfig' : 'mcpServer',
-      current.id,
-    ];
+    const key = ['agentConfig', current.id];
     const value = { ...object(flock.get(key)), name };
-    if (request.kind === 'agent') {
-      if (
-        typeof edit.prompt !== 'string' ||
-        edit.prompt.length > 32000 ||
-        edit.prompt.includes('\0')
-      )
-        throw new Error('invalid_setting');
-      Object.assign(value, { prompt: edit.prompt });
-    } else {
-      if (typeof edit.enabledByDefault !== 'boolean')
-        throw new Error('invalid_setting');
-      if (
-        settingsRows('mcp', flock).some(
-          (row) =>
-            row.id !== current.id &&
-            row.name.localeCompare(name, undefined, {
-              sensitivity: 'accent',
-            }) === 0,
-        )
-      )
-        throw new Error('setting_duplicate');
-      Object.assign(value, {
-        enabledByDefault: edit.enabledByDefault,
-        updatedAt: Date.now(),
-      });
-    }
+    if (
+      typeof edit.prompt !== 'string' ||
+      edit.prompt.length > 32000 ||
+      edit.prompt.includes('\0')
+    )
+      throw new Error('invalid_setting');
+    Object.assign(value, { prompt: edit.prompt });
     flock.set(key, value);
   }
   flock.commit();
@@ -223,16 +219,12 @@ export async function remoteSettings(
   grant: Grant,
   signal: AbortSignal,
 ) {
-  if (!['machine', 'agent', 'mcp'].includes(request.kind))
+  if (!['machine', 'agent'].includes(request.kind))
     throw new Error('invalid_setting');
-  const { workspaceId, kind, edit, remove } = request;
-  const writing = !!(edit || remove);
-  if (remove && (kind !== 'mcp' || edit)) throw new Error('invalid_setting');
-  const meta =
-    kind === 'mcp'
-      ? undefined
-      : await openSettings(`${workspaceId}:meta`, grant, signal);
-  const machines = meta ? settingsRows('machine', meta.flock) : [];
+  const { workspaceId, kind, edit } = request;
+  const writing = !!edit;
+  const meta = await openSettings(`${workspaceId}:meta`, grant, signal);
+  const machines = settingsRows('machine', meta.flock);
   const owned = (id: string) => {
     const room = `machine-${id}`;
     const owner =
@@ -243,7 +235,6 @@ export async function remoteSettings(
   let ids = machines.map((machine) => machine.id);
   if (
     edit &&
-    kind !== 'mcp' &&
     !owned(kind === 'machine' ? edit.item.id : (edit.item.machineId ?? ''))
   )
     throw new Error('setting_read_only');
@@ -261,7 +252,7 @@ export async function remoteSettings(
   else
     streams = [
       {
-        stream: `${workspaceId}:${kind === 'machine' ? 'meta' : 'wf:workspace'}`,
+        stream: `${workspaceId}:meta`,
       },
     ];
   const result: RemoteSetting[] = [];
@@ -304,7 +295,7 @@ export async function remoteSettings(
     result.push(
       ...settingsRows(kind, flock, machineId).map((item) => ({
         ...item,
-        readOnly: kind !== 'mcp' && !owned(machineId ?? item.id),
+        readOnly: !owned(machineId ?? item.id),
         ...(machineId
           ? {
               machineName: machines.find((machine) => machine.id === machineId)

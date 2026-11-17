@@ -30,10 +30,12 @@ final class CatalogSession {
     let key: String
     let refresh: Int
     let localReady: Bool
+    let mode: WorkspaceContentMode
   }
 
   private weak var runtime: DataRuntime?
   private var observer: NSObjectProtocol?
+  private var modeObserver: NSObjectProtocol?
   private var choice = (user: "", workspace: "")
   private var trigger: Trigger?
   private var refreshes = 0
@@ -61,11 +63,21 @@ final class CatalogSession {
         MainActor.assumeIsolated { CatalogSession.shared.reconcile() }
       }
     }
+    if modeObserver == nil {
+      modeObserver = NotificationCenter.default.addObserver(forName: .lodyWorkspaceEncryptionObserved, object: nil, queue: .main) { _ in
+        MainActor.assumeIsolated { CatalogSession.shared.reconcile() }
+      }
+    }
     reconcile()
   }
 
   func selectWorkspace(_ id: String) {
     guard let account = AuthSession.shared.catalogScope.account else { return }
+    if let selected = account.workspaces.first(where: { $0.id == id }), selected.resolvedMode != .plaintext {
+      let key = selected.resolvedMode == .e2ee ? "workspace.e2ee.unsupported" : "workspace.mode.unknown"
+      if selected.resolvedMode == .e2ee { toast(key) }
+      if selected.resolvedMode == .unknown { Task { await AuthSession.shared.refreshWorkspaceModes() } }
+    }
     choice = (account.user.id, id)
     let key = "workspace:\(account.user.id)"
     let generation = LocalStore.shared.generation
@@ -94,7 +106,7 @@ final class CatalogSession {
     let workspaceId = !userId.isEmpty && choice.user == userId ? choice.workspace : scope.initialWorkspace
     let selected = account?.workspaces.first { $0.id == workspaceId } ?? account?.workspaces.first
     let key = selected.map { "catalog:\(userId):\($0.id)" } ?? ""
-    let next = Trigger(userId: userId, key: key, refresh: refreshes, localReady: scope.localReady)
+    let next = Trigger(userId: userId, key: key, refresh: refreshes, localReady: scope.localReady, mode: selected?.resolvedMode ?? .unknown)
     guard trigger != next else { return }
     trigger = next
     let previous = watch
@@ -110,6 +122,16 @@ final class CatalogSession {
       snapshot.connected = false
       snapshot.syncedAt = nil
       if scope.localReady { snapshot.connection = CatalogConnection(state: "offline", machines: 0) }
+      publish()
+      return
+    }
+    guard selected.resolvedMode == .plaintext else {
+      setCatalog("null", sessions: [:])
+      snapshot.key = key
+      snapshot.loading = false
+      snapshot.connected = false
+      snapshot.syncedAt = nil
+      snapshot.connection = CatalogConnection(state: "offline", machines: 0)
       publish()
       return
     }
@@ -231,7 +253,7 @@ final class CatalogSession {
 
   private func publish() {
     let outbox = OutboxSession.shared
-    snapshot.pendingSessions = outbox.pendingSessions(user: snapshot.userId, workspace: snapshot.workspaceId, excluding: latestUserMessages)
+    snapshot.pendingSessions = WorkspaceModePins.shared.mode(snapshot.workspaceId) == .plaintext ? outbox.pendingSessions(user: snapshot.userId, workspace: snapshot.workspaceId, excluding: latestUserMessages) : []
     guard Self.published.set(snapshot.json, catalog: raw) else { return }
     NotificationCenter.default.post(name: .lodyCatalogDidChange, object: nil)
     outbox.catalogChanged(snapshot, latestUserMessages: latestUserMessages)

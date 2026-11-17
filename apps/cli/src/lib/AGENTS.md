@@ -7,7 +7,13 @@
 
 **Before dispatch/sync read context/message-flow.md; before catalog/Fleet changes read [E2EE rules](e2ee/AGENTS.md).** WS/DO is deprecated; do not extend it.
 
+Credential JSON publication creates an exclusive 0600 temporary file and atomically
+replaces its destination on POSIX. New state roots use 0700; existing custom
+directories keep their permissions. Windows retains direct file writes.
+
 ## Composition and transports
+
+- Bound ordinary daemon owners read history and manage Session metadata locally; other accounts and remote targets still require cloud authorization.
 
 - Daemon commands borrow its replica; command cleanup failures never fence.
 - Before changing GitHub authentication or agent PATH merging, read the
@@ -83,6 +89,11 @@ never pushed to renderers as local room health.
 
 ## Sessions and turns
 
+- Manual terminal PTYs belong to Fleet, not the agent runtime. Agent termination,
+  cancellation, and idle or memory-pressure GC must preserve them. Close them on
+  explicit terminal close, conversation archive/delete, or Fleet shutdown. ACP
+  agent-owned terminals retain their separate execution lifecycle.
+
 - `session-gc-manager.ts`: `evaluateMemoryPressure` returns TWO verdicts, `evict` and
   `block`, sharing no threshold. Probes fail OPEN; `null` Windows commit growth
   never becomes `0`. Sweeps never force the cached commit probe; never act on a
@@ -92,6 +103,9 @@ never pushed to renderers as local room health.
   native work: never clean `running`, cap background waits. Post-turn output resets
   it only for `sessionActivity` agents.
   Eligibility read failures retain only that session; foreground reclamation waits at most 10s.
+  Candidates include every cached Session doc (`combineGCSessionSources`): an untracked
+  doc idles from its last hand-out, unloads with status preserved, and GC checks peek
+  rather than open it. A Loro heap past 3 GiB shortens the idle timeout until restart.
 - **Session attachments**: before changing preparation, transfer, materialization,
   or backfill, read the [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md).
   CLI/MCP input preparation must finish before history/dispatch; recovery uses frozen

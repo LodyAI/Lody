@@ -42,8 +42,8 @@ or a restored baseline" for this case. Only Codex met it, through `usageTurnId`.
   what the result added to the query-wide reading. A reading below the previous one
   marks a new `query()`, so the whole reading counts. Nothing carries across query
   replacement.
-- **Codex**: the native turn id is sent as the Core scope and, for one release, as
-  the legacy `codex.usageTurnId`.
+- **Codex**: the native turn id is sent as the Core scope. The adapter still
+  duplicates it as `codex.usageTurnId`, which the CLI no longer reads.
 - **Kimi**: each activation has a random scope.
 - **CLI**: any provider's scope becomes `nativeSessionId:scope:encodedId`. Unscoped
   updates keep the ACP session ID.

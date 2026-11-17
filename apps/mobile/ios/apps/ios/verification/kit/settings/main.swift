@@ -46,12 +46,12 @@ enum AuthKeychain { static func read() throws -> String? { "fixture" } }
     var missing=own;missing["localProjectId"]="unregistered"
     do {_=try await WorkspaceSettingsCloud.execute(missing,workspace:"w",user:"owner",call:call);fatalError("unregistered write allowed")} catch {}
 
-    var repoEnabled=true,githubWrites=0,authState="expired",personalEnabled=true
+    var repoEnabled=true,githubWrites=0,installationStates=0,authState="expired",personalEnabled=true
     let github:WorkspaceSettingsCloud.Call = { kind,path,args in
       if path=="github:listWorkspaceReposWithStatus" {return [["repoFullName":"LodyAI/Lody","name":"Lody","repositoryId":1,"private":false,"enabled":repoEnabled,"token":"must-not-leave-native"]]}
       if path=="github:getPersonalOperationSettings" {return ["enabled":personalEnabled,"authorization":["state":authState,"githubAccountId":"fixture","token":"must-not-leave-native"]] as [String:Any]}
       if kind=="mutation" {githubWrites += 1;if path=="github:setRepoEnabled" {repoEnabled=args["enabled"] as! Bool;return ["updated":true]};personalEnabled=args["enabled"] as! Bool;return NSNull()}
-      if path=="github:createGitHubInstallState" {return ["state":"fixture&injection=no"]}
+      if path=="github:createGitHubInstallState" {installationStates += 1;return ["state":"fixture&injection=no"]}
       throw GitHubCloud.failure()
     }
     let repo:[String:Any] = ["page":"github","action":"repository","repoFullName":"LodyAI/Lody","enabled":false]
@@ -63,11 +63,25 @@ enum AuthKeychain { static func read() throws -> String? { "fixture" } }
     let personal:[String:Any] = ["page":"github","action":"preference","enabled":true]
     do {_=try await WorkspaceSettingsCloud.execute(personal,workspace:"w",user:"owner",role:"admin",call:github);fatalError("expired identity enabled")} catch {}
     precondition(githubWrites==1)
+    // Personal authorization is required before an installation state is minted; its operation preference is independent.
+    for missing in ["missing", "expired"] {
+      authState=missing
+      let outcome=try await WorkspaceSettingsCloud.execute(["page":"github","action":"install"],workspace:"w",user:"owner",role:"owner",call:github)
+      precondition(outcome["authorizationRequired"] as? Bool == true && outcome["url"] == nil)
+      precondition(installationStates == 0, "Missing or expired personal authorization must never start GitHub installation")
+    }
+    do {
+      _=try await WorkspaceSettingsCloud.execute(["page":"github","action":"install"],workspace:"w",user:"owner",role:"owner") { _,_,_ in throw GitHubCloud.failure() }
+      fatalError("A failed grant lookup was treated as missing authorization")
+    } catch {}
+    precondition(installationStates == 0)
     authState="authorized"
     _=try await WorkspaceSettingsCloud.execute(personal,workspace:"w",user:"owner",role:"admin",call:github)
     precondition(githubWrites==2)
+    personalEnabled=false
     let installation=try await WorkspaceSettingsCloud.execute(["page":"github","action":"install"],workspace:"w",user:"owner",role:"owner",call:github)
     let url=URLComponents(string:installation["url"] as! String)!
+    precondition(installationStates == 1, "Authorized installation does not require Act as you")
     precondition(url.host=="github.com" && url.queryItems?.first?.value=="fixture&injection=no")
     print("GitHub role fences, independent identity state and bounded installation URL passed")
 

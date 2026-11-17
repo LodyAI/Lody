@@ -6,8 +6,8 @@ belong to `platform`. This package never constructs a cloud SDK client.
 
 ```text
 Desktop owner intent → validate current personal ownership
-  → authenticate latest ledger/head and consecutive history
-  → apply complete machine/project switches
+  → authenticate latest ledger/head and its current owner signature
+  → apply complete machine/project switches and independent read-only session grants
   → retain requestId + exact ciphertext + full expected head
   → reconcile request → commit exact original under CAS
 
@@ -42,11 +42,22 @@ acknowledges the original intent, which a later policy may already have replaced
 
 Execution caches exist only in RAM. Wall and monotonic clocks both enforce a
 strictly shorter than 15-minute interval from before ledger/head I/O. A fresh read
-clears the old policy before I/O; known withdrawal, issuer revocation, rollback,
+clears the old policy before I/O; known withdrawal, rollback,
 fork or removal cannot fall back to an older grant. At actual start the caller
 also checks the returned synchronous fence and the current ledger generation.
 Every new start checks its actual localProjectId; the RPC receipt alone never
 starts an agent. Withdrawal leaves already-started work running.
+
+A fresh cached grant is reused without head I/O. Before refusing a cached
+`machine-not-shared` or `project-not-shared` decision, authorization forces an
+authenticated latest read and verifies the resulting policy. Per binding (including
+generation), concurrent denial refreshes share one workspace-owned producer, with
+at most one attempt per five seconds from read start. During that cooldown, callers
+reuse the verified result; a failed attempt retains only its retry timestamp and
+falls back to the existing pinned denial or unavailable outcome, never permission.
+Invalidation clears this coordination together with the policy cache. This short
+window bounds request traffic and newly granted access delay without changing the
+15-minute revocation trade-off or the actual-start fence.
 
 Desktop ledger ingest retires RAM policies only when the genuine verified view's
 `(length, head hash)` changes. An unchanged page, replay or transport cursor does
@@ -65,12 +76,20 @@ may retry. No lock or new wait spans ledger, network or crypto work. A malformed
 input grants no authority; rejected history retains the existing workspace-close
 fence. This does not change withdrawal semantics, TTL or UI polling frequency.
 
-Owner re-signing may read an authenticated historical body after its signer was
-revoked. It preserves the complete project list and signs a new explicit intent
-with a current personal device; that historical body never supplies execution
-evidence or advances an accepted pin. Policy history verification is bounded to
-4096 consecutive versions per read and the same freshness interval. Purged gaps
-without a retained original cannot be skipped; policy-dependent work fails closed.
+Policies are current-only v3; no v2 reader, writer or migration exists. Encrypted
+workspaces have no production data requiring an upgrade path. Read only the latest
+original, including on cold open and before writes. Verify its historically admitted owner-personal
+signature, binding and generation; reject revisions below the local pin and differing
+digests at the same revision. Revision gaps and missing intermediate originals are
+allowed. `previousDigest` still participates in server CAS, never client chain traversal.
+
+A service-accepted policy remains effective when its personal signer is revoked.
+Historical ledger admission must bind that signer to the current owner's membership;
+Guest/recovery/machine signers still fail. `needsResign` is a nonblocking reminder.
+Another active owner-personal device can review/edit and re-sign the entire current
+machine/project/session list without dropping grants. Publication still requires a
+current eligible owner device; clients trust that backend commit-time admission
+and latest-head delivery rather than claiming cryptographic evidence of signing time.
 
 The CLI's retained identity remains machine-only, so it can consume policy but
 cannot impersonate a personal owner to publish a change. Its host write method
@@ -78,8 +97,8 @@ returns the ownership refusal for that identity. The desktop exposes only
 `readMachineSharing` (returns generation) and `updateMachineSharing` (requires that
 generation before requestId/change); stale window intents cannot enable a new
 generation. Reads also return current personal-owner authority, the verified
-signer and whether the complete historical policy needs re-signing. Historical
-state remains separate from execution credentials; only an active verified policy
+signer and whether the policy needs re-signing. Invalidated
+state grants nothing; only an active verified policy
 can advance accepted pins. No signing or private-key IPC is introduced. Proxy
 dispatch retains the existing two-actor access intersection;
 entries without authenticated actor evidence remain closed.
@@ -91,6 +110,13 @@ behavior, not a deployed backend or two-device product acceptance.
 `inspectCache(machineId)` is passive RAM evidence for diagnostics. It counts
 retained policies and team-enabled policy objects for that machine only, without
 opening a lazy owner, reading a clock, touching storage/network or renewing any
-stamp. Counts are not current authorization: an expired/revoked policy object may
+stamp. Counts are not current authorization: an expired/removed-generation policy object may
 still be retained until a real operation invalidates it. `authorize` remains the
 only execution decision, with all existing freshness and ledger checks.
+
+Native exact-session history admission returns a view with a synchronous policy
+fence. The fence binds that view's head and machine binding to the retained cache
+object and its freshness. Unchanged cached reads preserve it; invalidation, a new
+head, expiry or shutdown retires it. The CLI combines it with the ledger generation
+and checks it across waits, reads, encryption and sending. This enables no new
+history storage backend.

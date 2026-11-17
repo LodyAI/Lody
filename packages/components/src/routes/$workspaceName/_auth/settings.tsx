@@ -1,3 +1,4 @@
+import { readGitHubInstallError } from '@/lib/github-installation-recovery';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Outlet, createFileRoute, useLocation, useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +12,11 @@ import {
 import type { MachineId } from '@lody/shared';
 import { AppThemeShell } from '@/components/app-theme-shell';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { getSettingsBackDestination, resolveSettingsCloseTo } from '@/lib/settings-navigation';
+import {
+  getSettingsBackDestination,
+  resolveSettingsCloseTo,
+  isSettingsPath,
+} from '@/lib/settings-navigation';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { SettingsDataCacheProvider } from '@/components/settings/settings-data-cache';
 import {
@@ -24,12 +29,15 @@ import type { MobileWorkspaceTab } from '@/components/mobile/mobile-workspace-ta
 
 type SettingsSearch = {
   from?: string;
+  github_install_error?: string;
 };
 
 export const Route = createFileRoute('/$workspaceName/_auth/settings')({
   component: SettingsLayoutComponent,
   validateSearch: (search: Record<string, unknown>): SettingsSearch => ({
     from: typeof search.from === 'string' ? search.from : undefined,
+    github_install_error:
+      typeof search.github_install_error === 'string' ? search.github_install_error : undefined,
   }),
 });
 
@@ -121,7 +129,7 @@ export function SettingsLayoutComponent() {
   const setSettingsMachineTarget = useSetAtom(settingsSelectedMachineIdAtom);
   const setSettingsProjectTarget = useSetAtom(settingsSelectedProjectKeyAtom);
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || !isSettingsPath(location.pathname, workspaceName)) return;
     setSettingsModalTab(activeTabId ?? SETTINGS_DEFAULT_TAB);
     setSettingsMachineTarget(
       typeof locationSearch.machine === 'string' ? (locationSearch.machine as MachineId) : null
@@ -131,14 +139,30 @@ export function SettingsLayoutComponent() {
     );
     setSettingsModalOpen(true);
     // OAuth returns through this route before the desktop GitHub settings modal mounts.
-    const hash = window.location.hash.startsWith('#github-personal=')
-      ? window.location.hash.slice(1)
-      : undefined;
+    const hash =
+      location.hash?.startsWith('github-personal=') ||
+      location.hash?.startsWith('github-install-retry=')
+        ? location.hash
+        : undefined;
+    const githubInstallError = readGitHubInstallError(location.searchStr ?? '') ?? undefined;
+    const search = (prev: Record<string, unknown>) => {
+      const safe = { ...prev };
+      delete safe.state;
+      delete safe['github-install-retry'];
+      delete safe.github_install_retry;
+      return { ...safe, github_install_error: githubInstallError };
+    };
     const closeTo = resolveSettingsCloseTo(settingsFrom);
     if (closeTo) {
-      void navigate({ to: closeTo, replace: true, hash });
+      void navigate({ to: closeTo, replace: true, hash, search });
     } else {
-      void navigate({ to: '/$workspaceName/chat', params: { workspaceName }, replace: true, hash });
+      void navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName },
+        replace: true,
+        hash,
+        search,
+      });
     }
   }, [
     isMobile,
@@ -152,6 +176,9 @@ export function SettingsLayoutComponent() {
     setSettingsProjectTarget,
     locationSearch.machine,
     locationSearch.project,
+    location.hash,
+    location.searchStr,
+    location.pathname,
   ]);
 
   // Esc closes the settings page — unless a modal/menu/popover (incl. shortcut recording,

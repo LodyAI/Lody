@@ -18,13 +18,20 @@ export async function workspaceRoleMentions(
   machines: Map<string, Flock>,
   getGrant: Parameters<typeof openSettings>[1],
   getPresence: () => MachinePresence,
+  machineNames: Record<string, string> = {},
 ): Promise<MentionCatalog> {
   const { flock } = await openSettings(
     `${workspaceId}:wf:workspace`,
     getGrant,
     AbortSignal.timeout(30000),
   );
-  return roleMentions(flock.scan(), userId, machines, getPresence());
+  return roleMentions(
+    flock.scan(),
+    userId,
+    machines,
+    getPresence(),
+    machineNames,
+  );
 }
 
 export function roleMentions(
@@ -32,6 +39,7 @@ export function roleMentions(
   userId: string,
   machines: Map<string, Pick<Flock, 'get'>>,
   presence: MachinePresence,
+  machineNames: Record<string, string> = {},
 ): MentionCatalog {
   if (presence.state !== 'live')
     return { items: [], truncated: false, incomplete: true };
@@ -61,7 +69,11 @@ export function roleMentions(
       const multi = role.targets.length > 1;
       const path = multi ? `${role.id}@${target.machineId}` : role.id;
       let name = role.name;
-      if (multi) name = target.alias || `${role.name} · ${target.machineId}`;
+      // Like web, a multi-machine target reads by the computer's name, never its id.
+      if (multi)
+        name =
+          target.alias ||
+          `${role.name} · ${machineNames[target.machineId] || '未命名电脑'}`;
       items.push({
         path,
         name,

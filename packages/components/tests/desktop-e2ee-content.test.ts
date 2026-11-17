@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { LoroDoc } from 'loro-crdt';
+import { PersonalHostError } from '@lody/e2ee-client';
 import {
   createDesktopE2eeContent,
+  KEY_PENDING_REFRESH_INTERVAL_MS,
   KEY_PENDING_WAIT_MS,
 } from '../src/providers/desktop-e2ee-content';
 
@@ -292,62 +294,20 @@ describe('desktop E2EE content epoch safety', () => {
     }
   });
 
-  it('requests repair without blocking replay, then clears the recovery hint on a valid read', async () => {
-    const requests: unknown[][] = [];
-    const statuses: boolean[] = [];
-    const release = Promise.withResolvers<unknown>();
-    let valid = false;
-    const runtime = {
-      openContent: async () => {
-        if (!valid) throw new Error('snapshot rejected');
-        return new Uint8Array([7]);
-      },
-      contentStreamsToken: (...args: unknown[]) => {
-        requests.push(args);
-        return release.promise;
-      },
-    } as unknown as E2eeWorkspaceRuntime;
+  it('configures snapshot upload with a hard max byte threshold for multi-writer rooms', () => {
     const access = createDesktopE2eeContent({
-      runtime,
+      runtime: {} as unknown as E2eeWorkspaceRuntime,
       workspaceId: 'workspace',
       genesisHash: '11'.repeat(32),
       epoch: 0,
       authToken: () => null,
-      onSnapshotRecoveryChange: (pending) => statuses.push(pending),
     });
     if (access.content.mode !== 'protected') throw new Error('expected protected content');
-    const room = access.content.resolve({ kind: 'meta' });
-    if (room.mode !== 'protected') throw new Error('expected protected room');
-    const request = {
-      context: { ...context, kind: 'snapshot' as const, continuationOffset: '00000001' },
-      header: new Uint8Array([4]),
-      sealed: new Uint8Array([1]),
-      additionalData: new Uint8Array([2]),
-    };
-    try {
-      await expect(room.config.provider.open(request)).rejects.toThrow('snapshot rejected');
-      access.content.snapshotUpload.onSnapshotRecovery!(
-        'https://streams.invalid/ds/encrypted/workspace%3Ameta',
-        true
-      );
-      access.content.snapshotUpload.onSnapshotRecovery!(
-        'https://streams.invalid/ds/encrypted/workspace%3Ameta',
-        true
-      );
-      await expect(room.config.provider.open(request)).rejects.toThrow('snapshot rejected');
-      expect(requests).toEqual([['workspace', undefined, 'workspace:meta']]);
-      expect(statuses.at(-1)).toBe(true);
-      valid = true;
-      // The request action is still unsettled; retained history remains usable.
-      expect(await room.config.provider.open({ ...request, context })).toEqual(new Uint8Array([7]));
-      access.content.snapshotUpload.onSnapshotRecovery!(
-        'https://streams.invalid/ds/encrypted/workspace%3Ameta',
-        false
-      );
-      expect(statuses.at(-1)).toBe(false);
-    } finally {
-      release.resolve(undefined);
-    }
+    expect(access.content.snapshotUpload).toMatchObject({
+      debounceMs: 30_000,
+      minBytesSinceRemoteSnapshot: 1024 * 1024,
+      maxBytesSinceRemoteSnapshot: 4 * 1024 * 1024,
+    });
   });
   it('keeps one selected snapshot epoch across a concurrent key transition', async () => {
     const entered = Promise.withResolvers<void>(),
@@ -460,14 +420,17 @@ describe('desktop E2EE content epoch safety', () => {
   });
 });
 
+const desktopLoss = (code: string) => () =>
+  new Error(`Error invoking remote method 'e2ee.contentStreamsToken': Error: ${code}`);
 it.each([
-  ['token', 'e2ee_member_removed'],
-  ['snapshot', 'e2ee_member_removed'],
-  ['token', 'e2ee_device_revoked'],
-  ['snapshot', 'e2ee_device_revoked'],
+  ['token', 'e2ee_member_removed', desktopLoss('e2ee_member_removed')],
+  ['token', 'e2ee_device_revoked', desktopLoss('e2ee_device_revoked')],
+  // A phone or browser's personal host rejects its own revoked device from the verified
+  // ledger; that must reach the re-pairing route instead of endless reconnecting.
+  ['token', 'e2ee_device_revoked', () => new PersonalHostError({ code: 'revoked' })],
 ] as const)(
   'native access loss from %s (%s) retires content without waiting on the failed request',
-  async (source, code) => {
+  async (source, code, failure) => {
     let retire = (_reason: string) => {};
     const retired = new Promise<string>((resolve) => {
       retire = resolve;
@@ -480,20 +443,13 @@ it.each([
       onMemberRemoved: (reason) => retire(reason),
       runtime: {
         contentStreamsToken: async () => {
-          throw new Error(
-            `Error invoking remote method 'e2ee.contentStreamsToken': Error: ${code}`
-          );
+          throw failure();
         },
       } as unknown as E2eeWorkspaceRuntime,
     });
     const token = access.e2ee.createTokenProvider(new AbortController().signal);
     try {
-      if (source === 'token') await expect(token.getToken()).rejects.toThrow();
-      else
-        access.content.snapshotUpload?.onSnapshotRecovery?.(
-          'https://synthetic.invalid/stream/doc',
-          true
-        );
+      await expect(token.getToken()).rejects.toThrow();
       expect(await retired).toBe(code);
       expect(await access.content.snapshotUpload?.canUpload()).toBe(false);
       const room = access.content.resolve({ kind: 'doc', docId: 'session' });
@@ -561,10 +517,43 @@ describe('reading an epoch whose key this device has not received yet', () => {
       expect(await first).toEqual(Uint8Array.of(42));
       expect(await second).toEqual(Uint8Array.of(42));
       expect(refresh).toHaveBeenCalledTimes(1);
+      // Explicit reception: a portable host's bare refresh would skip the key round.
+      expect(refresh).toHaveBeenCalledWith('rotated', { keyMode: 'receive' });
       expect(opens).toEqual([false, false, true, true]);
     } finally {
       await access.close();
     }
+  });
+
+  it("receives the key for a portable host's typed pending failure, but not for other codes", async () => {
+    const typed = (code: string) =>
+      Object.assign(new Error(''), { _tag: 'PersonalHostError', code });
+    let keyInstalled = false;
+    const refresh = vi.fn(async () => {
+      keyInstalled = true;
+      return { epoch: 3, rotationRequired: false, hasCurrentKey: true };
+    });
+    const pending = setup({
+      openContent: async () => {
+        if (!keyInstalled) throw typed('key-pending');
+        return Uint8Array.of(7);
+      },
+      refresh,
+    } as unknown as Partial<E2eeWorkspaceRuntime>);
+    expect(await pending.open()).toEqual(Uint8Array.of(7));
+    expect(refresh).toHaveBeenCalledWith('rotated', { keyMode: 'receive' });
+    await pending.access.close();
+
+    const other = vi.fn();
+    const unrelated = setup({
+      openContent: async () => {
+        throw typed('missing-read-key');
+      },
+      refresh: other,
+    } as unknown as Partial<E2eeWorkspaceRuntime>);
+    await expect(unrelated.open()).rejects.toMatchObject({ code: 'missing-read-key' });
+    expect(other).not.toHaveBeenCalled();
+    await unrelated.access.close();
   });
 
   it('fails after the bounded wait, or after one retry, without reading again', async () => {
@@ -597,6 +586,44 @@ describe('reading an epoch whose key this device has not received yet', () => {
       await expect(again.open()).rejects.toThrow('e2ee_key-pending');
       expect(retried).toBe(2);
       await again.access.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('spaces receptions so frames the ledger cannot verify yet cost at most one refresh per interval', async () => {
+    vi.useFakeTimers();
+    try {
+      // Streams ahead of the ledger feed: every open stays pending until the ledger
+      // catches up, as a peer streaming unverifiable frames would keep it.
+      let caughtUp = false;
+      const refresh = vi.fn(async () => ({
+        epoch: 3,
+        rotationRequired: false,
+        hasCurrentKey: true,
+      }));
+      const { access, open } = setup({
+        openContent: async () => {
+          if (!caughtUp) throw pendingKey();
+          return Uint8Array.of(9);
+        },
+        refresh,
+      } as unknown as Partial<E2eeWorkspaceRuntime>);
+      await expect(open()).rejects.toThrow('e2ee_key-pending');
+      expect(refresh).toHaveBeenCalledTimes(1);
+      // Reads arriving inside the interval share one reception that waits for it.
+      const later = [open(), open(), open()];
+      await vi.advanceTimersByTimeAsync(KEY_PENDING_REFRESH_INTERVAL_MS - 1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      caughtUp = true;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await Promise.all(later)).toEqual([
+        Uint8Array.of(9),
+        Uint8Array.of(9),
+        Uint8Array.of(9),
+      ]);
+      expect(refresh).toHaveBeenCalledTimes(2);
+      await access.close();
     } finally {
       vi.useRealTimers();
     }

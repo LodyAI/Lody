@@ -14,6 +14,8 @@ extension SessionController {
       githubScope = state.key
       githubUpdates = SessionPullRequestUpdates()
       githubOperation = nil
+      githubSettle?.cancel()
+      githubSettle = nil
     }
     let session = githubUpdates.apply(session)
     let project = state.catalog.projects.first { $0.id == session.projectId }
@@ -21,13 +23,28 @@ extension SessionController {
     let bar = SessionInfoBar(session: session, repository: repository, busy: busy)
     infoBar = bar
     var result: [String: Any] = [:]
-    result["items"] = resourceItems
-    if let context = contextItem(bar, projectName: project?.name) { result["context"] = context }
-    if bar.added + bar.removed > 0 {
-      result["diff"] = [
+    var items = resourceItems
+    let relations = SessionRelations.tree(sessions: state.catalog.sessions, current: sessionId)
+    if relations.hasRelations {
+      items.append(["id": "relations", "symbol": "bubble.left.and.bubble.right", "tap": true,
+        "accessibilityLabel": String(localized: "session.relations.title", bundle: .lody)])
+    }
+    result["items"] = items
+    if let run = bar.group {
+      result["context"] = groupContextItem(run)
+    } else if let context = contextItem(bar, projectName: project?.name) {
+      result["context"] = context
+    }
+    if bar.hasDiff {
+      let summary = bar.added + bar.removed > 0
+        ? "+\(bar.added) −\(bar.removed)"
+        : String.localizedStringWithFormat(String(localized: "changes.fileCount", bundle: .lody), bar.files ?? 0)
+      var diff: [String: Any] = [
         "added": bar.added, "removed": bar.removed, "tap": reviewable,
-        "accessibilityLabel": "\(String(localized: "workspaceChanges.title", bundle: .lody)), +\(bar.added) −\(bar.removed)",
+        "accessibilityLabel": "\(String(localized: "workspaceChanges.title", bundle: .lody)), \(summary)",
       ]
+      if let files = bar.files { diff["files"] = files }
+      result["diff"] = diff
     }
     if let first = bar.actions.first {
       result["primary"] = [
@@ -79,6 +96,52 @@ extension SessionController {
       "menuTitle": bar.repository.isEmpty ? (projectName ?? "") : bar.repository,
       "repository": bar.repository,
       "prStatus": bar.pullRequest?.status ?? "", "prCI": bar.pullRequest?.ci ?? "",
+      // A PR write in flight: the mark spins until GitHub answers, then shows the real status.
+      "busy": bar.pullRequest != nil && githubOperation != nil,
+    ]
+  }
+
+  /// A Project group: the capsule summarises the repositories and their PRs; its popover lists
+  /// every member with its own branch, ±diff and PR (web's Repositories chip, without a hidden
+  /// selected member). A PR row opens that PR's page, which carries its PR-bound actions.
+  private func groupContextItem(_ run: SessionProjectRun) -> [String: Any] {
+    let repositories = String.localizedStringWithFormat(String(localized: "bar.group.repositories", bundle: .lody), run.members.count)
+    let pullRequests = run.pullRequests
+    let prs = String.localizedStringWithFormat(String(localized: "bar.group.pullRequests", bundle: .lody), pullRequests.count)
+    let label = pullRequests.isEmpty ? repositories : repositories + " · " + prs
+    // A failing check anywhere is the one thing worth colour on the capsule.
+    let failing = pullRequests.contains { ["open", "draft"].contains($0.status) && ["f", "e"].contains($0.ci ?? "") }
+    let members: [[String: Any]] = run.members.map { member in
+      var row: [String: Any] = [
+        "id": member.id, "title": member.identity, "kind": member.kind, "depth": member.depth, "submodule": member.submodule,
+      ]
+      var detail: [String] = []
+      if member.path != member.identity { detail.append(member.path) }
+      if member.inPlace {
+        detail.append(String(localized: "bar.group.inPlace", bundle: .lody))
+      } else if let branch = member.branch {
+        detail.append(branch)
+        row["branch"] = branch
+      }
+      row["detail"] = detail.joined(separator: " · ")
+      if let repository = member.repoFullName { row["repository"] = repository }
+      if let diff = member.diff { row["added"] = diff.add; row["removed"] = diff.del }
+      if let pr = member.pullRequest {
+        row["prNumber"] = pr.number
+        row["prStatus"] = pr.status
+        if let ci = pr.ci { row["prCI"] = ci }
+      }
+      return row
+    }
+    var description = [run.name, repositories]
+    if !pullRequests.isEmpty { description.append(prs) }
+    return [
+      "label": label, "symbol": "square.stack", "tint": failing ? "danger" : "secondary", "actions": [] as [[String: Any]],
+      "accessibilityLabel": description.filter { !$0.isEmpty }.joined(separator: ", "),
+      "menuTitle": run.name,
+      "menuSubtitle": String.localizedStringWithFormat(String(localized: "create.context.groupMembers", bundle: .lody), run.members.count)
+        + (pullRequests.isEmpty ? "" : " · " + prs),
+      "members": members,
     ]
   }
 
@@ -96,9 +159,10 @@ extension SessionController {
 
   /// `item` or `item:menuAction`, from the action bar.
   func infoBarAction(_ id: String) {
+    if id == "relations" { presentRelations(); return }
     if githubOperation != nil && (id == "act" || id.hasPrefix("more:")) { return }
     let parts = id.split(separator: ":", maxSplits: 1).map(String.init)
-    if ["browser", "simulator"].contains(parts[0]) { resourceAction(parts[0], parts.count > 1 ? parts[1] : "open"); return }
+    if ["browser", "simulator", "emulator"].contains(parts[0]) { resourceAction(parts[0], parts.count > 1 ? parts[1] : "open"); return }
     guard let bar = infoBar else { return }
     switch id {
     case "diff", "context:diff":
@@ -109,11 +173,28 @@ extension SessionController {
       if let pr = bar.pullRequest { openPullRequest(pr) }
     case "context:branch":
       guard !bar.branch.isEmpty else { return }
-      UIPasteboard.general.string = bar.branch
-      LodyToastOverlay.shared.show(message: String(localized: "session.title.branchCopied", bundle: .lody), kind: .neutral)
+      copyBranch(bar.branch)
     default:
+      if id.hasPrefix("context:member:"), let member = groupMember(id, prefix: "context:member:") {
+        if let pr = member.pullRequest { openPullRequest(pr) }
+        return
+      }
+      if id.hasPrefix("context:memberBranch:"), let branch = groupMember(id, prefix: "context:memberBranch:")?.branch {
+        copyBranch(branch)
+        return
+      }
       if id.hasPrefix("more:"), let action = SessionInfoBar.Action(rawValue: String(id.dropFirst(5))) { performInfoBarAction(action) }
     }
+  }
+
+  private func groupMember(_ id: String, prefix: String) -> SessionProjectMember? {
+    let memberId = String(id.dropFirst(prefix.count))
+    return infoBar?.group?.members.first { $0.id == memberId }
+  }
+
+  private func copyBranch(_ branch: String) {
+    UIPasteboard.general.string = branch
+    LodyToastOverlay.shared.show(message: String(localized: "session.title.branchCopied", bundle: .lody), kind: .neutral)
   }
 
   private func performInfoBarAction(_ action: SessionInfoBar.Action) {
@@ -128,19 +209,15 @@ extension SessionController {
   /// chosen leads (web `usePreferredPrMergeMethod`, default merge commit).
   private func chooseMergeMethod() {
     guard let pr = infoBar?.pullRequest else { return }
-    let preferred = UserDefaults.standard.string(forKey: Self.mergeMethodKey) ?? "merge"
     let anchor = chat.composer.primaryActionAnchor
     let sheet = MergeOptionsController(
-      title: "\(pr.repository) #\(pr.number)", preferred: preferred,
+      title: "\(pr.repository) #\(pr.number)", preferred: MergeOptionsController.preferred,
       source: anchor.view, rect: anchor.rect
     ) { [weak self] method in
-      UserDefaults.standard.set(method, forKey: Self.mergeMethodKey)
       self?.writePullRequest("merge", method: method)
     }
     present(sheet, animated: true)
   }
-
-  private static let mergeMethodKey = "lody.prMergeMethod"
 
   /// One GitHub write at a time, scoped to the account and workspace that started it. Never
   /// retried: an unknown result says so instead of claiming failure.
@@ -152,8 +229,9 @@ extension SessionController {
     renderComposer()
     var payload: [String: Any] = ["workspaceId": state.workspaceId, "repository": pr.repository, "number": pr.number, "operation": operation]
     if let method { payload["method"] = method }
-    let pending = operation == "merge" ? "bar.merge.pending" : "bar.ready.pending"
-    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(pending), bundle: .lody), kind: .neutral)
+    if operation == "merge" {
+      LodyToastOverlay.shared.show(message: String(localized: "bar.merge.pending", bundle: .lody), kind: .neutral)
+    }
     Task { @MainActor [weak self] in
       defer {
         if let self, self.source.state.key == state.key {
@@ -167,13 +245,33 @@ extension SessionController {
         guard let self, self.source.state.key == state.key else { return }
         self.githubUpdates.finish(success: true)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        let done = operation == "merge" ? "bar.merge.done" : "bar.ready.done"
-        LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(done), bundle: .lody), kind: .neutral)
+        if operation == "merge" {
+          LodyToastOverlay.shared.show(message: String(localized: "bar.merge.done", bundle: .lody), kind: .neutral)
+        } else {
+          self.settleMergeState(pr, workspaceId: state.workspaceId, scope: state.key)
+        }
       } catch {
         guard let self, self.source.state.key == state.key else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.error)
         LodyToastOverlay.shared.show(message: Self.writeError(error, operation: operation), kind: .error)
       }
+    }
+  }
+
+  /// After Ready for review, read GitHub's merge state directly so Merge appears as soon as
+  /// GitHub has computed it, instead of when the computer's PR poller next refreshes the catalog.
+  private func settleMergeState(_ pr: SessionPullRequest, workspaceId: String, scope: String) {
+    githubSettle?.cancel()
+    let payload = Self.json(["workspaceId": workspaceId, "repository": pr.repository, "number": pr.number, "operation": "mergeState"])
+    githubSettle = Task { @MainActor [weak self] in
+      let merge = await PullRequestMergeSettle.run(read: { [weak self] in
+        guard let self, self.source.state.key == scope else { throw CancellationError() }
+        let raw = try await GitHubPullRequests.run(payload)
+        return (try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])?["merge"] as? String
+      }, sleep: { try await Task.sleep(for: PullRequestMergeSettle.interval) })
+      guard let self, let merge, !Task.isCancelled, self.source.state.key == scope else { return }
+      self.githubUpdates.observeMerge(pr, merge: merge)
+      self.renderComposer()
     }
   }
 

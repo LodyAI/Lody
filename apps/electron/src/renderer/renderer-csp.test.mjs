@@ -40,3 +40,12 @@ void test('renderer entries allow exactly the current inline boot shell script',
     assert.ok(getDirectiveSources(html, 'script-src').includes(`'sha256-${digest}'`))
   }
 })
+
+void test('renderer entries may frame direct HTML previews but never load them as code or data', () => {
+  for (const html of [rendererHtml, devbarHtml]) {
+    assert.ok(getDirectiveSources(html, 'frame-src').includes('lody-html-preview:'))
+    for (const directive of ['default-src', 'script-src', 'connect-src', 'img-src']) {
+      assert.ok(!getDirectiveSources(html, directive).includes('lody-html-preview:'), directive)
+    }
+  }
+})

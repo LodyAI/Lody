@@ -1,3 +1,8 @@
+import { createIrohDaily, installIrohDailyRecorder, observeIrohDaily } from '@/lib/iroh-daily';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
+import { isElectronRenderer } from '@/lib/electron';
+import { isNativeAppShell, isIOSRuntimeEnvironment } from '@/lib/native-platform';
+import { readNativeAppInfo } from '@/lib/native-app-info';
 import { useEffect, type ReactNode } from 'react';
 import posthog from 'posthog-js';
 import { PostHogProvider, usePostHog } from '@posthog/react';
@@ -38,6 +43,7 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
   const client = getPostHogClient(enabled);
   return (
     <PostHogProvider client={client}>
+      {enabled && <IrohDailyReporting />}
       {enabled && <PostHogIdentitySync />}
       {enabled && <PostHogInitialPageView />}
       {enabled && import.meta.env.VITE_PUBLIC_POSTHOG_KEY && POSTHOG_HOST && (
@@ -74,5 +80,52 @@ function PostHogIdentitySync() {
     identifyPostHogUser(postHog, user);
   }, [postHog, user]);
 
+  return null;
+}
+
+/** One shared origin store, with Web Locks fencing every read/modify/enqueue/write. */
+function IrohDailyReporting() {
+  useEffect(() => {
+    if (
+      !import.meta.env.VITE_PUBLIC_POSTHOG_KEY ||
+      !POSTHOG_HOST ||
+      !navigator.locks ||
+      (!isElectronRenderer() && !isNativeAppShell())
+    )
+      return;
+    let active = true;
+    let reporting: ReturnType<typeof observeIrohDaily> | undefined;
+    const daily = createIrohDaily({
+      enabled: () => active,
+      onActivity: () => reporting?.activate(),
+      now: Date.now,
+      storage: localStorage,
+      exclusive: async (run) => await navigator.locks.request('lody:iroh-daily', run),
+      digest: async (text) => {
+        const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+        return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(
+          ''
+        );
+      },
+      random: () => crypto.randomUUID(),
+      online: () => navigator.onLine,
+      // Use the initialized SDK, rather than its evictable deferred queue. Undefined
+      // means disabled/not initialized, so retain the counters for a later check.
+      enqueue: (properties, uuid) =>
+        active && !!capturePostHogEvent(posthog, 'e2ee/iroh_daily', properties, { uuid }),
+      platform: isElectronRenderer() ? 'desktop' : isIOSRuntimeEnvironment() ? 'ios' : 'android',
+      version: () =>
+        readNativeAppInfo().app_version ??
+        readNativeAppInfo().version ??
+        (typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'unknown'),
+    });
+    const remove = installIrohDailyRecorder(daily.record, daily);
+    reporting = observeIrohDaily(daily, window, document);
+    return () => {
+      active = false;
+      remove();
+      reporting?.dispose();
+    };
+  }, []);
   return null;
 }

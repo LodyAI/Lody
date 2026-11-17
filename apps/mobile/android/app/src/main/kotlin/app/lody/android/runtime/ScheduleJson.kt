@@ -90,6 +90,37 @@ internal object ScheduleJson {
         )
     }
 
+    fun encodeList(value: ScheduleList): JSONObject = JSONObject()
+        .put("items", JSONArray(value.items.map { item -> JSONObject().apply {
+            put("scheduleId", item.scheduleId)
+            put("title", item.title)
+            put("ownerId", item.ownerId)
+            put("isOwner", item.isOwner)
+            put("machineId", item.machineId)
+            put("machineName", item.machineName)
+            put("machineSupported", item.machineSupported)
+            put("agentConfigId", item.agentConfigId)
+            put("agentName", item.agentName)
+            put("agentType", item.agentType)
+            put("enabled", item.enabled)
+            put("scheduledMessage", item.scheduledMessage)
+            put("destination", item.destination)
+            put("destinationSessionId", item.destinationSessionId)
+            put("projectKind", item.projectKind)
+            put("projectKey", item.projectKey)
+            put("projectName", item.projectName)
+            put("lastRunAt", item.lastRunAt)
+            put("lastSessionId", item.lastSessionId)
+            put("createdAt", item.createdAt)
+            put("updatedAt", item.updatedAt)
+            put("rule", encodeRule(item.rule))
+            put("state", JSONObject().put("group", item.state.group).put("kind", item.state.kind)
+                .put("at", item.state.at).put("blockedCode", item.state.blockedCode))
+        } }))
+        .put("deviceTimeZone", value.deviceTimeZone)
+        .put("machineTimeZones", JSONObject(value.machineTimeZones))
+        .put("ownedMachineIds", JSONArray(value.ownedMachineIds.toList()))
+
     fun detail(json: JSONObject) = ScheduleDetail(
         item(json.getJSONObject("item")), json.optString("prompt"), json.text("modelId"), json.text("modeId"),
         json.optJSONObject("project")?.let(::project),

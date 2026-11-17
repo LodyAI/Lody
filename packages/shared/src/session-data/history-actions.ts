@@ -49,7 +49,7 @@ export type HistoryAction =
       kind: 'user-status';
       turnId: string;
       status: SessionTurnStatus;
-      cancellationReason?: 'user_stop';
+      cancellationReason?: 'user_stop' | 'machine_update';
       requeueUndelivered?: boolean;
       onlyPendingApply?: boolean;
       /** Settle only input no execution has claimed: every copy is still pending or seen. */

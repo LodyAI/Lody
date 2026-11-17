@@ -42,6 +42,15 @@ automatically collected. See the [implementation decision and validation limits]
 The pure codecs in `src/e2ee-wire.ts` also define nested error and presence
 bodies; those codecs do not enable additional RPC methods or presence transport.
 
+Feature RPC signs an 11-minute read deadline or a 25-minute write deadline: the
+usual 1/15-minute TTL plus 10 minutes for a slow sender. Admission allows another
+10 minutes above that TTL for a fast sender. Thus relative clock offsets up to
+±10 minutes preserve the usual minimum lifetime. The receiver uses the original
+signed deadline throughout; query work still has its 45-second bound. This widens
+the time a delayed unclaimed frame can be admitted; exact originals, current
+authorization and at-most-once write claims remain required. Presence body codecs
+only bound the sender's issued-to-expiry interval; they do not compare device clocks.
+
 ## Request deadlines
 
 JSON appends keep a 10-second upload deadline by default. A configured
@@ -92,6 +101,11 @@ codec with read authority and no execution journal. See the
 [read boundary](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-read-queries.md). The format,
 room boundaries and acceptance limits are recorded in the
 [availability decision](../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md).
+
+`session/history-read` also permits requests to another member's machine, including
+from Guests. Preparation, retained-request reuse and response verification keep the
+same target signer. Streams and Iroh receivers share the actual-session authorization
+check; other feature methods retain the same-member machine restriction.
 
 The optional personal-device host in [`@lody/e2ee-client`](../e2ee-client/README.md)
 uses `ClientRpcOriginalStore`/IndexedDB for the same encrypted RPC implementation.

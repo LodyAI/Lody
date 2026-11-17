@@ -1,9 +1,8 @@
+// @vitest-environment jsdom
 import * as React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useMentionFileSearch } from '../src/components/mentions/file-search/use-file-search';
-// @vitest-environment jsdom
-// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildMentionFileIndex,

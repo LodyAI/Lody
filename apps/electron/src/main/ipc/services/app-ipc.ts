@@ -1,3 +1,4 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { assertProductWindowSender } from '../assert-sender'
 import { parseSessionLink, INSTALLATION_LINK_SCHEMES } from '@lody/shared/session-link'
 import { desktopInstallationProfile, mainPlatformKind } from '../../platform'
@@ -9,11 +10,11 @@ import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../s
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
   IPC_PUSH_CHANNELS,
-  LaunchLocalPathInputSchema,
+  PathLauncherRequestSchema,
   PathLauncherProbeSchema,
   type NativeThemeSource,
   type RendererFatalErrorReport,
@@ -31,8 +32,14 @@ import {
   setWindowWarmupEnabled
 } from '../../window-warm-service'
 import { setMenuLanguage } from '../../menu'
+import { resolveOpenableLocalPath } from '../../services/local-file-open-policy'
 import { localFileActionError } from '../../services/local-file-action-error'
-import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
+import {
+  approvePathLauncher,
+  resolvePathLauncher,
+  hasPathLauncher,
+  launchLocalPath
+} from '../../services/local-path-launcher-service'
 import { takePendingRendererLocalClear } from '../../services/local-reset-service'
 import {
   clearDesktopLocalResetRequest,
@@ -117,7 +124,7 @@ export function installNativeThemeWatch(): void {
   }
 }
 
-export class AppIpc extends IpcService {
+export class AppIpc extends ProductWindowIpcService {
   static override readonly groupName = 'app'
 
   @IpcMethod()
@@ -535,9 +542,8 @@ export class AppIpc extends IpcService {
   }
 
   // Hands a workspace file to the OS default handler — the same thing a
-  // double-click in Finder/Explorer does. It is the only way to see a file the
-  // in-app viewer refuses (too large, unsupported), so the renderer offers it
-  // beside `revealLocalPath` on those error states.
+  // double-click in Finder/Explorer does. Limit this to known documents and
+  // ordinary folders; unsupported types can still use `revealLocalPath`.
   @IpcMethod()
   async openLocalPath(pathRaw: unknown) {
     if (typeof pathRaw !== 'string') {
@@ -547,14 +553,16 @@ export class AppIpc extends IpcService {
     if (!targetPath || !isAbsolute(targetPath)) {
       return { opened: false as const, error: 'invalid_path' }
     }
+    let openPath: string | null
     try {
-      await access(targetPath)
+      openPath = await resolveOpenableLocalPath(targetPath)
+      if (!openPath) return { opened: false as const, error: 'unsupported_file_type' }
     } catch (error) {
       return { opened: false as const, error: localFileActionError(error) }
     }
     // `shell.openPath` resolves to '' on success and to the failure message
     // otherwise; it never rejects.
-    const failure = await shell.openPath(targetPath)
+    const failure = await shell.openPath(openPath)
     if (failure) {
       return { opened: false as const, error: failure }
     }
@@ -563,11 +571,20 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async launchLocalPath(payload: unknown) {
-    const parsed = LaunchLocalPathInputSchema.safeParse(payload)
+    const parsed = PathLauncherRequestSchema.safeParse(payload)
     if (!parsed.success) {
       return { launched: false as const, error: 'invalid_payload' }
     }
-    return await launchLocalPath(parsed.data)
+    const input = resolvePathLauncher(parsed.data)
+    return input
+      ? await launchLocalPath(input)
+      : { launched: false as const, error: 'unknown_launcher' }
+  }
+
+  @IpcMethod()
+  async approvePathLauncher(payload: unknown) {
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)!
+    return approvePathLauncher(payload, owner)
   }
 
   @IpcMethod()
@@ -577,10 +594,13 @@ export class AppIpc extends IpcService {
       return { availableIds: [] }
     }
     const availability = await Promise.all(
-      parsed.data.launchers.map(async ({ launcherId, input }) => ({
-        launcherId,
-        available: await hasPathLauncher(input)
-      }))
+      parsed.data.launchers.map(async (request) => {
+        const input = resolvePathLauncher(request)
+        return {
+          launcherId: request.launcherId,
+          available: input ? await hasPathLauncher(input) : false
+        }
+      })
     )
     return {
       availableIds: availability

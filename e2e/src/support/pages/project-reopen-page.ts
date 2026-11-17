@@ -42,7 +42,8 @@ export class ProjectReopenPage {
   }
 
   async switchToSecondProjectAndReopenFirstFromPicker(): Promise<void> {
-    await this.selectProjectFromSidebar(this.fixture.secondProject);
+    await this.selectProjectFromPicker(this.fixture.firstProject);
+    await this.selectProjectFromPicker(this.fixture.secondProject);
     await this.selectProjectFromPicker(this.fixture.firstProject);
   }
 
@@ -77,9 +78,9 @@ export class ProjectReopenPage {
     }
   }
 
-  async expectSidebarAndPickerAgreeOnFirstProject(): Promise<void> {
+  async expectEmptyProjectsStayInPicker(): Promise<void> {
     for (const project of [this.fixture.firstProject, this.fixture.secondProject]) {
-      await expect(this.projectRow(project)).toHaveCount(1);
+      await expect(this.projectRow(project)).toHaveCount(0);
     }
 
     await this.openProjectPicker();
@@ -88,7 +89,7 @@ export class ProjectReopenPage {
     }
     await this.page.keyboard.press('Escape');
 
-    await this.selectProjectFromSidebar(this.fixture.firstProject);
+    await this.selectProjectFromPicker(this.fixture.firstProject);
   }
 
   private async addProjectThroughProductUi(project: ProjectReopenFixtureProject): Promise<void> {
@@ -109,13 +110,6 @@ export class ProjectReopenPage {
     if (!registered)
       throw new Error(`Added project is missing from the local catalog: ${project.name}`);
     this.recordsByRootPath.set(project.rootPath, registered);
-    await expect(this.projectRow(project)).toBeVisible();
-  }
-
-  private async selectProjectFromSidebar(project: ProjectReopenFixtureProject): Promise<void> {
-    const row = this.projectRow(project);
-    await row.click();
-    await expect(row).toHaveAttribute('aria-current', 'page');
     await expect(this.selectedProjectTrigger(project)).toBeVisible();
   }
 

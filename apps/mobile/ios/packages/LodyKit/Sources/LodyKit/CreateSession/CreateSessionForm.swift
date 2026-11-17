@@ -40,16 +40,21 @@ struct CreateSessionSelection: Equatable {
     return machines.first { $0.id == machineId }
   }
   var unavailableMessage: String? {
-    if failed { return String(localized: "create.devices.failed", bundle: .lody) }
-    if options?.availability == "unknown" { return String(localized: "devices.unknown", bundle: .lody) }
+    unavailableKey.map { String(localized: String.LocalizationValue($0), bundle: .lody) }
+  }
+  /// The read failed, or listed no assistant: the page note ("Tap to retry") reads the options again.
+  var retriesOptions: Bool { unavailableKey == "create.devices.failed" || unavailableKey == "create.devices.noAgents" }
+  private var unavailableKey: String? {
+    if failed { return "create.devices.failed" }
+    if options?.availability == "unknown" { return "devices.unknown" }
     if !machineId.isEmpty && machine == nil {
-      return String(localized: String.LocalizationValue(!chat && !github ? "create.devices.projectOffline" : "create.devices.selectedOffline"), bundle: .lody)
+      return !chat && !github ? "create.devices.projectOffline" : "create.devices.selectedOffline"
     }
     if options?.availability == "offline" {
-      return String(localized: String.LocalizationValue(!chat && !github ? "create.devices.projectOffline" : "create.devices.offline"), bundle: .lody)
+      return !chat && !github ? "create.devices.projectOffline" : "create.devices.offline"
     }
-    if !agents.isEmpty && agent == nil { return String(localized: "create.devices.chooseAgent", bundle: .lody) }
-    if options != nil && agent == nil { return String(localized: "create.devices.noAgents", bundle: .lody) }
+    if !agents.isEmpty && agent == nil { return "create.devices.chooseAgent" }
+    if options != nil && agent == nil { return "create.devices.noAgents" }
     return nil
   }
   var agents: [CreationAgent] { (options?.agents ?? []).filter { $0.machineId == machine?.id } }
@@ -138,7 +143,11 @@ struct CreateSessionForm {
           current.choice = restored.choice
           return
         }
-        current.agentKey = current.agents.first?.key ?? ""
+        // The computer's own last agent and choice, as when it is picked.
+        let machine = CreateLogic.restoreMachine(prefs, machineId: current.machine?.id ?? previous.machineId, options: options)
+        current.agentKey = machine.agentKey
+        current.choice = machine.choice
+        return
       }
       current.choice = previous.choice
       if let agent = current.agent {
@@ -217,10 +226,10 @@ struct CreateSessionForm {
       current.projectId = ""
     }
     current.machineId = id
-    let first = current.options?.agents.first { $0.machineId == id }
-    current.agentKey = first?.key ?? ""
-    updateChoice(CreateLogic.rememberedModelChoice(
-      prefs, agentKey: first?.key ?? "", capability: CreateLogic.capabilityFor(current.options, first)))
+    // The last agent and choice used on this computer, else its first agent.
+    let restored = CreateLogic.restoreMachine(prefs, machineId: id, options: current.options)
+    current.agentKey = restored.agentKey
+    updateChoice(restored.choice)
   }
 
   mutating func selectAgent(_ key: String) {
@@ -241,6 +250,47 @@ struct CreateSessionForm {
     prefs = CreateLogic.withSelection(prefs, target: prefsTarget, selection: ProjectPrefs(
       modelId: next.modelId, effort: next.effort, modeId: next.modeId, configOptionValues: next.configOptionValues,
       machineId: agent.machineId, agentKey: agent.key), chat: current.chat)
+  }
+
+  /// Records the configuration a chat is started with (web: on start, never on a knob change).
+  mutating func recordRecent(at usedAt: Date = Date()) {
+    guard let agent = current.agent else { return }
+    prefs = CreateLogic.withRecent(prefs, RecentRunConfig(
+      machineId: agent.machineId, agentKey: agent.key, choice: current.choice,
+      agentRoleId: activeRole?.role.id, usedAt: usedAt.timeIntervalSince1970 * 1000))
+  }
+
+  /// Recent configurations offered now (web `buildRecentRunConfigItems`): on the selected
+  /// computer, with the agent still offered and a recorded Role still runnable, excluding
+  /// the current one.
+  var recentRunConfigs: [(key: String, record: RecentRunConfig)] {
+    guard let machine = current.machine else { return [] }
+    let currentKey = current.agent.map {
+      CreateLogic.recentKey(agentKey: $0.key, choice: current.choice, agentRoleId: activeRole?.role.id)
+    }
+    let runnableRoles = Set(roleItems.filter { $0.unavailable == nil }.map(\.role.id))
+    var seen = Set<String>()
+    var items: [(key: String, record: RecentRunConfig)] = []
+    for record in prefs?.recents ?? [] where items.count < CreateLogic.maxVisibleRecents {
+      let key = CreateLogic.recentKey(record)
+      guard record.machineId == machine.id, key != currentKey, !seen.contains(key),
+            current.agents.contains(where: { $0.key == record.agentKey }) else { continue }
+      if let role = record.agentRoleId, !runnableRoles.contains(role) { continue }
+      seen.insert(key)
+      items.append((key, record))
+    }
+    return items
+  }
+
+  /// Applies one recent configuration whole. One recorded as a Role re-applies the Role,
+  /// whose instruction and provenance ride with it, not just the values it set.
+  mutating func selectRecent(_ key: String) {
+    guard let record = recentRunConfigs.first(where: { $0.key == key })?.record else { return }
+    if let role = record.agentRoleId { return selectRole(role) }
+    guard let agent = current.agents.first(where: { $0.key == record.agentKey }) else { return }
+    current.roleId = ""
+    current.agentKey = agent.key
+    updateChoice(CreateLogic.applicableChoice(record.choice, capability: CreateLogic.capabilityFor(current.options, agent)))
   }
 
   var canSend: Bool {

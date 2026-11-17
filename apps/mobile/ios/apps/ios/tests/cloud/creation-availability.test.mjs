@@ -83,6 +83,33 @@ test('creation lists a healthy online machine while another machine cannot sync'
     /metadata_not_ready/,
   );
 });
+test('schedule targets keep an offline computer that new chats cannot use', () => {
+  const { state } = fixture(),
+    handlers = new Map();
+  registerProjects({
+    state,
+    channel: { handle: (name, fn) => handlers.set(name, fn) },
+    getGrant: () => assert.fail('listing must not request a grant'),
+    publish() {},
+  });
+  const options = (args) =>
+    handlers.get('creationOptions')({ workspaceId: 'w', ...args });
+  for (const presence of [
+    { state: 'live', onlineMachineIds: [] },
+    { state: 'syncing', onlineMachineIds: [] },
+  ]) {
+    state.presence = presence;
+    assert.deepEqual(options({}).agents, []);
+    const schedule = options({ includeOffline: true });
+    assert.deepEqual(
+      schedule.agents.map((a) => [a.machineId, a.id]),
+      [['online', 'coder']],
+    );
+    assert.equal(schedule.availability, undefined);
+  }
+  state.unhealthy.add('online');
+  assert.deepEqual(options({ includeOffline: true }).agents, []);
+});
 test('creation uses matching per-model declarations instead of the probed model snapshot', () => {
   const { meta, machine, state } = fixture();
   machine.set(['acpCapability', 'coder'], {
@@ -127,36 +154,90 @@ test('creation uses matching per-model declarations instead of the probed model 
   assert.equal(stale.fastModes, undefined);
 });
 
-test('partial machine updates wake the picker without claiming the whole catalog synced', async () => {
-  const { readFile } = await import('node:fs/promises');
-  const { transform } = await import('esbuild');
-  const { runInNewContext } = await import('node:vm');
-  const source = await readFile(
-    new URL(
-      '../../../../packages/cloud-runtime/src/runtime/index.ts',
-      import.meta.url,
-    ),
-    'utf8',
-  );
-  const fn = source.slice(
-    source.indexOf('function publish()'),
-    source.indexOf('function apply('),
-  );
-  const events = [];
-  runInNewContext(
-    (await transform(fn, { loader: 'ts' })).code + ';publish();',
-    {
-      catalogs: new Map([['meta', { machineIds: ['online', 'broken'] }]]),
-      watchers: new Map([
-        ['meta', {}],
-        ['online', {}],
-        ['broken', {}],
-      ]),
-      unhealthy: new Set(['broken']),
-      channel: { emit: (type) => events.push(type) },
-    },
-  );
-  assert.deepEqual(events, ['creationOptionsChanged']);
+test('creation follows each model’s recorded options from a refresh that read every model', () => {
+  const { meta, machine, state } = fixture();
+  const effort = (values) => ({
+    id: 'thought_level',
+    category: 'thought_level',
+    name: 'Thinking',
+    type: 'select',
+    currentValue: values[0],
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const fast = {
+    id: 'fast',
+    name: 'Fast',
+    type: 'boolean',
+    currentValue: false,
+    options: [],
+  };
+  // Dimcode probed on mimo: its snapshot ladder alone would serve every model.
+  machine.set(['acpCapability', 'dim'], {
+    cliType: 'builtin',
+    agentType: 'dimcode',
+    sourceVersion: 'v1',
+    fetchedAt: 2,
+    models: [],
+    configOptions: [
+      {
+        id: 'model',
+        category: 'model',
+        name: 'Model',
+        type: 'select',
+        currentValue: 'mimo',
+        options: ['mimo', 'flash', 'qwen', 'plain'].map((value) => ({
+          value,
+          name: value,
+        })),
+      },
+      effort(['auto', 'none']),
+    ],
+  });
+  machine.set(['acpModelConfigOptionsShape', 'dim', 's1'], {
+    version: 1,
+    configOptions: [effort(['auto', 'low', 'max']), fast],
+  });
+  machine.set(['acpModelConfigOptionsShape', 'dim', 's2'], {
+    version: 1,
+    configOptions: [],
+  });
+  machine.set(['acpModelConfigOptions', 'dim', 'flash'], {
+    version: 1,
+    sourceVersion: 'v0',
+    shape: 's1',
+  });
+  machine.set(['acpModelConfigOptions', 'dim', 'plain'], {
+    version: 1,
+    sourceVersion: 'v1',
+    shape: 's2',
+  });
+  // A pointer whose shape has not synced yet stays unknown.
+  machine.set(['acpModelConfigOptions', 'dim', 'qwen'], {
+    version: 1,
+    sourceVersion: 'v1',
+    shape: 'missing',
+  });
+
+  const result = creationOptions(undefined, meta, state.machineReplicas)
+    .capabilities[0];
+  assert.deepEqual(result.reasoningEfforts.flash, ['auto', 'low', 'max']);
+  assert.deepEqual(result.reasoningEfforts.plain, []);
+  assert.equal(result.reasoningEfforts.qwen, undefined);
+  assert.deepEqual(result.fastModes, { flash: true, plain: false });
+  // Fast exists only on a recorded model, so the control is offered and
+  // hidden per model through fastModes.
+  assert.ok(result.configOptions.some((option) => option.id === 'fast'));
+
+  // A declaration still decides over a recorded list.
+  machine.set(['acpModelCapability', 'dim'], {
+    version: 1,
+    sourceVersion: 'v1',
+    models: { flash: { effortValues: ['high'], fastMode: false } },
+  });
+  const declared = creationOptions(undefined, meta, state.machineReplicas)
+    .capabilities[0];
+  assert.deepEqual(declared.reasoningEfforts.flash, ['high']);
+  assert.equal(declared.fastModes.flash, false);
 });
 
 test('creating on a healthy machine is not rejected by an unrelated sync failure', async () => {

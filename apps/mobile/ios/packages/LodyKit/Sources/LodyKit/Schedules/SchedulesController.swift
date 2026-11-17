@@ -3,36 +3,47 @@ import LodyDesignSystem
 import SwiftUI
 import UIKit
 
-/// iPhone Schedules tab: the Chats header without a title (workspace capsule, search filtering by
-/// name), an overview of four state-group count tiles (Active, Needs attention, Paused, Ended; a
-/// tile filters both sections to its group), then inset-grouped Scheduled tasks and Scheduled
-/// messages (hidden when empty) with counts. Rows, needing a look first: an Agent tile badged with
-/// the state glyph; name (dimmed once ended) with the state in words (tinted only for attention);
-/// frequency; Agent · computer · project; the reason when it needs a look. Trailing swipe and the
-/// context menu run, pause / resume, open the last chat and delete (always confirmed); the row
-/// opens `ScheduleEditorController`. Reloads on appear, pull to refresh, after every command and on
+/// iPhone Schedules tab, in the Chats list's design language: the Chats header without a title
+/// (workspace capsule, search filtering by name, a view menu with a Show finished switch), then a
+/// plain list without separators grouped as on web into Scheduled tasks and Scheduled messages
+/// (empty groups hidden) under Chats-style group labels; within a group, what needs a look first,
+/// then active, paused and ended. Ended schedules (they will not run again) are hidden unless the
+/// view menu shows them. Rows match chat rows: name (dimmed once ended) with the state in
+/// words trailing (tinted only for attention); a footnote line with the kind glyph, frequency and
+/// computer; the reason when it needs a look. Trailing swipe and the context menu run, pause /
+/// resume, open the last chat and delete (always confirmed); the row opens
+/// `ScheduleEditorController`. Reloads on appear, pull to refresh, after every command and on
 /// workspace change.
 @MainActor
 final class SchedulesController: UIViewController, UICollectionViewDelegate {
-  private enum Section: String { case overview, tasks, messages }
-  private static let overviewId = "overview:groups"
+  private typealias Section = ScheduleListSection
 
   private let source: SessionSource
   private let service: ScheduleService
   private let chrome = InboxChrome(searchPlaceholder: String(localized: "schedules.search", bundle: .lody))
+  /// Regular width shows Schedules in the detail column, as the desktop main area: a titled page
+  /// whose schedules open in a sheet (the desktop's 720 px dialog) instead of pushing.
+  var inDetailColumn = false {
+    didSet {
+      guard inDetailColumn != oldValue else { return }
+      chrome.setDetailTitle(inDetailColumn ? String(localized: "schedules.title", bundle: .lody) : nil)
+    }
+  }
   private var list: UICollectionView!
   private var data: UICollectionViewDiffableDataSource<Section, String>!
   private let refresh = UIRefreshControl()
-  private var result: RuntimeContract.SchedulesResult?
+  private let topBackdrop = LodyPinnedLabelBackdrop()
+  private var cache = ScheduleCache()
+  private var result: RuntimeContract.SchedulesResult? {
+    get { cache.result }
+    set { cache.result = newValue }
+  }
   private var items: [String: ScheduleItem] = [:]
   private var loading = false
   private var failure: String?
   private var query = ""
-  private var filter: RuntimeContract.ScheduleStateGroup?
-  private var counts: [RuntimeContract.ScheduleStateGroup: Int] = [:]
   private var scope = ""
   private var version = 0
-  private var busy = Set<String>()
   private var observers: [NSObjectProtocol] = []
   private var clock: Timer?
 
@@ -53,24 +64,30 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   override func viewDidLoad() {
     super.viewDidLoad()
     view.backgroundColor = LodyUIColor.bgBase
-    let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
-      let section = self?.data?.sectionIdentifier(for: index)
-      var configuration = UICollectionLayoutListConfiguration(appearance: section == .overview ? .plain : .insetGrouped)
-      configuration.backgroundColor = .clear
-      if section == .overview {
-        configuration.showsSeparators = false
-        configuration.headerMode = .none
-      } else {
-        configuration.headerMode = .supplementary
-        configuration.headerTopPadding = LodySpacing.xs
-        configuration.separatorConfiguration.bottomSeparatorInsets.leading = 68
-        configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
-          self?.swipeActions(at: indexPath)
-        }
-      }
-      return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+    var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+    configuration.showsSeparators = false
+    configuration.backgroundColor = .clear
+    configuration.headerMode = .supplementary
+    configuration.headerTopPadding = 0
+    configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+      self?.swipeActions(at: indexPath)
     }
-    list = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
+    // Group labels pin under the bar over the same blurred backdrop as Chats.
+    let layout = UICollectionViewCompositionalLayout { _, environment in
+      let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+      section.boundarySupplementaryItems.forEach {
+        $0.pinToVisibleBounds = true
+        $0.zIndex = 2
+      }
+      return section
+    }
+    // Group spacing belongs between sections, as in Chats.
+    let layoutConfiguration = UICollectionViewCompositionalLayoutConfiguration()
+    layoutConfiguration.interSectionSpacing = LodySpacing.md
+    layout.configuration = layoutConfiguration
+    let list = ChatListCollectionView(frame: view.bounds, collectionViewLayout: layout)
+    list.onLayout = { [weak self] in self?.updateBackdrop() }
+    self.list = list
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.backgroundColor = .clear
     list.alwaysBounceVertical = true
@@ -80,36 +97,24 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     refresh.addAction(UIAction { [weak self] _ in self?.reload() }, for: .valueChanged)
     list.refreshControl = refresh
     view.addSubview(list)
+    topBackdrop.layer.zPosition = 1
+    topBackdrop.isHidden = true
+    list.addSubview(topBackdrop)
     let cell = UICollectionView.CellRegistration<UICollectionViewListCell, String> { [weak self] cell, _, id in
       guard let self, let item = self.items[id] else { return }
       self.configure(cell, item)
     }
-    let overview = UICollectionView.CellRegistration<UICollectionViewListCell, String> { [weak self] cell, _, _ in
-      guard let self else { return }
-      cell.contentConfiguration = UIHostingConfiguration {
-        ScheduleOverviewView(counts: self.counts, selected: self.filter) { [weak self] group in self?.pick(group) }
-      }
-      .margins(.horizontal, LodyLayout.screenPaddingX)
-      .margins(.vertical, LodySpacing.sm)
-      var background = UIBackgroundConfiguration.clear()
-      background.backgroundColor = .clear
-      cell.backgroundConfiguration = background
-      cell.accessibilityIdentifier = "schedules-overview"
-    }
     let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(elementKind: UICollectionView.elementKindSectionHeader) {
       [weak self] header, _, indexPath in
       guard let self, let section = self.data.sectionIdentifier(for: indexPath.section) else { return }
-      var content = UIListContentConfiguration.header()
-      content.text = ScheduleFormat.text(section == .messages ? "section.messages" : "section.tasks")
-      content.secondaryText = String(self.data.snapshot().numberOfItems(inSection: section))
-      content.prefersSideBySideTextAndSecondaryText = true
-      header.contentConfiguration = content
+      header.contentConfiguration = UIHostingConfiguration { ScheduleSectionTitle(text: section.label) }
+        .margins(.all, 0)
+      header.backgroundConfiguration = .clear()
+      header.layer.zPosition = 2
       header.accessibilityIdentifier = "schedules-section:" + section.rawValue
     }
     data = UICollectionViewDiffableDataSource(collectionView: list) { collection, indexPath, id in
-      id == Self.overviewId
-        ? collection.dequeueConfiguredReusableCell(using: overview, for: indexPath, item: id)
-        : collection.dequeueConfiguredReusableCell(using: cell, for: indexPath, item: id)
+      collection.dequeueConfiguredReusableCell(using: cell, for: indexPath, item: id)
     }
     data.supplementaryViewProvider = { collection, _, indexPath in
       collection.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)
@@ -149,6 +154,10 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     }
   }
 
+  private func updateBackdrop() {
+    topBackdrop.update(in: list, pinsLabels: true)
+  }
+
   // MARK: Loading
 
   private func sourceChanged() {
@@ -156,6 +165,9 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let next = source.state.key
     guard next != scope else { return }
     scope = next
+    cache.valid = false
+    cache = ScheduleCache()
+    failure = nil
     result = nil
     items = [:]
     reload()
@@ -164,6 +176,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private func reload() {
     guard isViewLoaded else { return }
     let state = source.state
+    guard cache.pending.isEmpty else { refresh.endRefreshing(); return }
     version += 1
     let id = version
     guard !state.workspaceId.isEmpty else {
@@ -175,15 +188,33 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     }
     loading = true
     let pulled = refresh.isRefreshing
+    let generation = LocalStore.shared.generation
+    let restore = result == nil
     render()
     Task { [weak self, service, workspaceId = state.workspaceId] in
+      if restore {
+        let saved = await service.cachedList(state.userId, workspaceId)
+        guard let self, self.version == id, self.source.state.key == state.key,
+              LocalStore.shared.generation == generation, self.cache.pending.isEmpty else { return }
+        if self.result == nil, let saved {
+          self.result = saved
+          self.render()
+        }
+      }
       var value: RuntimeContract.SchedulesResult?
       var failure: String?
       do { value = try await service.list(workspaceId) }
       catch { failure = ScheduleFailure.message(error, write: false) }
-      guard let self, self.version == id else { return }
+      guard let self, self.version == id, self.source.state.key == state.key,
+            LocalStore.shared.generation == generation, self.cache.pending.isEmpty else { return }
+      // Persist only accepted runtime reads, never a pending command's optimistic preview.
       // A failed refresh keeps the last list; the error shows only when there is nothing to show.
-      if let value { self.result = value }
+      if let value {
+        self.result = value
+        service.persistList(state.userId, workspaceId, value, generation)
+        let ids = Set(value.items.map(\.scheduleId))
+        self.cache.details = self.cache.details.filter { ids.contains($0.key) }
+      }
       if pulled, self.result != nil, let failure { LodyToastOverlay.shared.show(message: failure, kind: .error) }
       self.failure = failure
       self.loading = false
@@ -195,7 +226,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   // MARK: Rendering
 
   private func wireChrome() {
-    chrome.showsViewMenu = false
+    chrome.pageMenu = { [weak self] in self?.viewMenu() ?? UIMenu() }
     chrome.selectWorkspace = { id in
       guard NativeHomeFixture.active else {
         CatalogSession.shared.selectWorkspace(id)
@@ -206,6 +237,8 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     chrome.openSettings = { [weak self] in LodyShell.shared.openPage("settings", options: ["present": true], from: self?.parent) }
     chrome.openDebug = { [weak self] in LodyShell.shared.openPage("debug", from: self?.parent) }
     chrome.newSession = { [weak self] in self?.newSchedule() }
+    chrome.destination = .schedules
+    chrome.selectDestination = { HomeController.current?.selectTab($0) }
     chrome.searchChanged = { [weak self] text in
       guard let self, text != self.query else { return }
       self.query = text
@@ -224,13 +257,12 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       accountEmail: state.accountEmail,
       workspaces: state.workspaces, selected: state.workspace,
       devices: InboxDevices(catalog: state.catalog, presence: state.presence),
-      running: state.catalog.sessions.filter { !$0.archived && SessionState($0) == .live }.count,
-      mode: 0, sort: .activity, connection: Self.connection(state)
+      connection: Self.connection(state)
     ))
   }
 
   private static func connection(_ state: SessionListState) -> HomeSyncState {
-    if !state.connected { return .offline }
+    if !state.connected { return .connecting }
     return state.loading ? .syncing : .live
   }
 
@@ -239,49 +271,33 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let all = result?.items ?? []
     let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
     let searched = term.isEmpty ? all : all.filter { $0.title.localizedCaseInsensitiveContains(term) }
-    counts = Dictionary(grouping: searched, by: \.state.group).mapValues(\.count)
-    // A filter whose group emptied (after a command or a search) falls away.
-    if let filter, (counts[filter] ?? 0) == 0 { self.filter = nil }
-    let rank = Dictionary(uniqueKeysWithValues: ScheduleTone.order.enumerated().map { ($1, $0) })
-    // Needing a look first, then active, paused and ended; the runtime's order within each group.
-    let shown = searched.enumerated()
-      .filter { filter == nil || $0.element.state.group == filter }
-      .sorted { (rank[$0.element.state.group] ?? 0, $0.offset) < (rank[$1.element.state.group] ?? 0, $1.offset) }
-      .map(\.element)
     let previous = items
     items = Dictionary(all.map { ($0.scheduleId, $0) }, uniquingKeysWith: { first, _ in first })
+    let shown = ScheduleFinishedVisibility.shown ? searched : searched.filter { $0.state.group != .ended }
+    // Tasks, then messages; within each, needing a look first, then active, paused and ended,
+    // keeping the runtime's order inside a state.
     var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
-    if !searched.isEmpty {
-      snapshot.appendSections([.overview])
-      snapshot.appendItems([Self.overviewId], toSection: .overview)
-    }
-    let tasks = shown.filter { !$0.scheduledMessage }.map(\.scheduleId)
-    let messages = shown.filter(\.scheduledMessage).map(\.scheduleId)
-    if !tasks.isEmpty {
-      snapshot.appendSections([.tasks])
-      snapshot.appendItems(tasks, toSection: .tasks)
-    }
-    if !messages.isEmpty {
-      snapshot.appendSections([.messages])
-      snapshot.appendItems(messages, toSection: .messages)
+    for section in Section.allCases {
+      let members = shown.filter { Section($0) == section }
+      let ids = ScheduleTone.order.flatMap { group in members.filter { $0.state.group == group }.map(\.scheduleId) }
+      guard !ids.isEmpty else { continue }
+      snapshot.appendSections([section])
+      snapshot.appendItems(ids, toSection: section)
     }
     let changed = snapshot.itemIdentifiers.filter { id in
       guard let before = previous[id] else { return false }
       return reconfigure || before != items[id]
     }
     snapshot.reconfigureItems(changed)
-    if data.snapshot().indexOfItem(Self.overviewId) != nil, snapshot.indexOfItem(Self.overviewId) != nil {
-      snapshot.reconfigureItems([Self.overviewId])
+    data.apply(snapshot, animatingDifferences: view.window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
+      self?.updateBackdrop()
     }
-    // Counts live in the headers; rebuild them with the sections.
-    snapshot.reloadSections(snapshot.sectionIdentifiers.filter { $0 != .overview })
-    data.apply(snapshot, animatingDifferences: view.window != nil && !UIAccessibility.isReduceMotionEnabled)
     setNeedsUpdateContentUnavailableConfiguration()
   }
 
   override func updateContentUnavailableConfiguration(using state: UIContentUnavailableConfigurationState) {
     let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    let empty = (data?.snapshot().itemIdentifiers.filter { $0 != Self.overviewId }.count ?? 0) == 0
+    let empty = (data?.snapshot().numberOfItems ?? 0) == 0
     var configuration: UIContentUnavailableConfiguration?
     if !source.state.workspaceId.isEmpty, empty {
       if result == nil, loading {
@@ -296,7 +312,18 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
         error.button = retry
         error.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.reload() }
         configuration = error
-      } else if !term.isEmpty || filter != nil {
+      } else if !ScheduleFinishedVisibility.shown, result?.items.contains(where: { $0.state.group == .ended }) == true,
+                term.isEmpty || result?.items.contains(where: { $0.title.localizedCaseInsensitiveContains(term) }) == true {
+        // Everything left (or matching) has finished and is hidden by the view menu.
+        var none = UIContentUnavailableConfiguration.empty()
+        none.image = LodyIcon.clock.uiImage
+        none.text = ScheduleFormat.text("finishedHidden")
+        var show = UIButton.Configuration.bordered()
+        show.title = ScheduleFormat.text("view.showFinished")
+        none.button = show
+        none.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.setFinishedShown(true) }
+        configuration = none
+      } else if !term.isEmpty {
         var none = UIContentUnavailableConfiguration.search()
         none.text = ScheduleFormat.text("noMatches")
         configuration = none
@@ -322,12 +349,15 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let zone = ScheduleFormat.zone(item, result: result)
     let status = ScheduleFormat.state(item.state, zone: zone)
     cell.contentConfiguration = UIHostingConfiguration { ScheduleRowView(item: item, zone: zone) }
-      .margins(.horizontal, LodyLayout.listRowPaddingX)
-      .margins(.vertical, LodySpacing.md)
+      .margins(.all, 0)
+      .minSize(height: LodySize.listRow)
     cell.accessories = []
-    var background = UIBackgroundConfiguration.listCell()
-    background.backgroundColor = .lodyOpaqueCard
-    cell.backgroundConfiguration = background
+    // Pressed rows tint like chat rows.
+    cell.configurationUpdateHandler = { cell, state in
+      var background = UIBackgroundConfiguration.clear()
+      background.backgroundColor = state.isHighlighted || state.isSelected ? LodyUIColor.fillPressed : .clear
+      cell.backgroundConfiguration = background
+    }
     cell.isAccessibilityElement = true
     cell.accessibilityTraits = .button
     cell.accessibilityLabel = item.title
@@ -336,15 +366,28 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     cell.accessibilityIdentifier = "schedule:" + item.scheduleId
   }
 
-  private func pick(_ group: RuntimeContract.ScheduleStateGroup) {
-    filter = filter == group ? nil : group
-    UISelectionFeedbackGenerator().selectionChanged()
+  /// The trailing view menu: one Show finished switch, uncached so its check follows the stored
+  /// value each time the menu opens.
+  private func viewMenu() -> UIMenu {
+    UIMenu(children: [UIDeferredMenuElement.uncached { completion in
+      let shown = ScheduleFinishedVisibility.shown
+      completion([UIAction(
+        title: ScheduleFormat.text("view.showFinished"), image: UIImage(systemName: "checkmark.circle"),
+        state: shown ? .on : .off
+      ) { [weak self] _ in self?.setFinishedShown(!shown) }])
+    }])
+  }
+
+  private func setFinishedShown(_ value: Bool) {
+    guard value != ScheduleFinishedVisibility.shown else { return }
+    ScheduleFinishedVisibility.shown = value
     render()
   }
 
   // MARK: Actions
 
-  /// The tab bar's "+": a new schedule's editor, pushed over the list.
+  /// The tab bar's (or iPad bottom bar's) create action: a new schedule's editor, pushed over the
+  /// list, or in a sheet over it when Schedules fills the regular-width detail column.
   func newSchedule() {
     let state = source.state
     guard state.workspace != nil, !state.workspaceId.isEmpty else {
@@ -355,17 +398,35 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   }
 
   private func open(_ item: ScheduleItem?) {
+    if let item, cache.pending.contains(item.scheduleId) { return }
     let editor = ScheduleEditorController(
-      workspaceId: source.state.workspaceId, item: item, zones: result, catalog: source.state.catalog, service: service
+      workspaceId: source.state.workspaceId, item: item, zones: result, catalog: source.state.catalog, service: service, cache: cache
     )
-    editor.changed = { [weak self] in self?.reload() }
-    editor.openChat = { [weak self] item in self?.openChat(item) }
-    LodyShell.shared.pushNative(editor, title: item?.title ?? ScheduleFormat.text("new"), from: self)
+    let owner = cache
+    editor.changed = { [weak self] in
+      guard let self, self.cache === owner, owner.valid else { return }
+      self.version += 1
+      self.render(reconfigure: true)
+      self.reload()
+    }
+    let title = item?.title ?? ScheduleFormat.text("new")
+    guard inDetailColumn else {
+      editor.openChat = { [weak self] item in self?.openChat(item) }
+      LodyShell.shared.pushNative(editor, title: title, from: self)
+      return
+    }
+    // The chat replaces Schedules in the detail column, so the sheet closes first.
+    editor.openChat = { [weak self, weak editor] item in
+      LodyShell.shared.close(from: editor)
+      self?.openChat(item)
+    }
+    let height = min(860, (view.window?.bounds.height ?? 900) - 80)
+    LodyShell.shared.presentNative(editor, title: title, size: CGSize(width: 720, height: height))
   }
 
   /// Owner-only commands; resume and run also need a computer whose CLI runs schedules.
   private func actions(_ item: ScheduleItem) -> [ScheduleAction] {
-    guard item.isOwner, !busy.contains(item.scheduleId) else { return [] }
+    guard item.isOwner, !cache.pending.contains(item.scheduleId) else { return [] }
     var result: [ScheduleAction] = []
     if !item.scheduledMessage, item.machineSupported { result.append(.run) }
     if !item.scheduledMessage, item.rule.kind != .manual {
@@ -422,21 +483,32 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
 
   private func perform(_ action: ScheduleAction, _ item: ScheduleItem) {
     let workspaceId = source.state.workspaceId
-    guard !workspaceId.isEmpty, busy.insert(item.scheduleId).inserted else { return }
+    guard !workspaceId.isEmpty, actions(item).contains(action), cache.pending.insert(item.scheduleId).inserted else { return }
+    let owner = cache
+    let original = items[item.scheduleId] ?? item
+    version += 1 // A read started before this intent must not undo its preview.
+    if let optimistic = ScheduleCache.optimistic(original, action: action) { cache.update(optimistic) }
+    render(reconfigure: true)
     let params = RuntimeContract.ScheduleCommandParams(
       workspaceId: workspaceId, action: action, scheduleId: item.scheduleId, requestId: ScheduleService.requestId()
     )
     Task { [weak self, service] in
       do {
         _ = try await service.command(params)
+        guard let self, self.cache === owner, owner.valid else { return }
+        if action == .delete { owner.remove(item.scheduleId) }
+        owner.details[item.scheduleId] = nil
         if action == .run {
           LodyToastOverlay.shared.show(message: String(format: ScheduleFormat.text("runStarted"), item.title), kind: .neutral)
         }
       } catch {
+        guard let self, self.cache === owner, owner.valid else { return }
+        owner.update(original)
         LodyToastOverlay.shared.show(message: ScheduleFailure.message(error, write: true), kind: .error)
       }
-      guard let self else { return }
-      self.busy.remove(item.scheduleId)
+      guard let self, self.cache === owner, owner.valid else { return }
+      self.cache.pending.remove(item.scheduleId)
+      self.render(reconfigure: true)
       self.reload()
     }
   }
@@ -450,10 +522,6 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   }
 
   // MARK: Collection view
-
-  func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
-    data.itemIdentifier(for: indexPath) != Self.overviewId
-  }
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
     collectionView.deselectItem(at: indexPath, animated: true)

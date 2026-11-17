@@ -36,7 +36,7 @@ internal class PushBinding(private val device: PushDevice) {
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { }
             currentCoroutineContext().ensureActive()
-            device.oneSignal("lody-push-v2:$userId")
+            device.oneSignal(userId)
         }
     }
     fun detach() { direct = false; device.oneSignal(null) }

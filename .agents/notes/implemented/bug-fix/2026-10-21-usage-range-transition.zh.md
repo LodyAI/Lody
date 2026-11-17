@@ -27,7 +27,7 @@ AI 用量从 24 小时切换到全部时，退场的小时图会短暂绘制到�
 行为继续受支持。
 
 仅调整动画时长仍会保留错误坐标，在页面层裁剪则只是遮住内容。固定视图框在其归属处
-修正定位，不改变 [UTC 时间线约定](../../../../specs/usage-timeline.zh.md)、
+修正定位，保留[时间线展示约定](../../../../specs/usage-timeline.zh.md)、
 [选中日期生命周期](2026-10-02-usage-range-selection.zh.md)或
 [日详情缓存](2026-09-21-usage-detail-cache.zh.md)。
 

@@ -3,6 +3,7 @@ import type { SessionMeta } from '../src/schema';
 import {
   planPullRequestLifecycle,
   resolveSessionPrimaryPullRequest,
+  resolveSessionPullRequestHistory,
   resolveSessionPullRequests,
   resolveSessionPullRequestViews,
   selectPrimarySessionPullRequest,
@@ -176,5 +177,41 @@ describe('session PR views', () => {
     expect(resolveSessionPrimaryPullRequest(meta, 'example/web')?.url).toBe(web);
     expect(resolveSessionPrimaryPullRequest(meta, null)).toBeNull();
     expect(resolveSessionPrimaryPullRequest({ ...meta, projectRun: undefined })?.url).toBe(web);
+  });
+
+  it('keeps every earlier PR in the history after a newer one becomes primary', () => {
+    const first = 'https://github.com/example/api/pull/1';
+    const second = 'https://github.com/example/api/pull/2';
+    const third = 'https://github.com/example/api/pull/3';
+    const meta = {
+      pullRequests: [
+        { url: first, status: 'merged' },
+        { url: second, status: 'closed' },
+        { url: third, status: 'open' },
+      ],
+    } as SessionMeta;
+    const history = resolveSessionPullRequestHistory(meta);
+    expect(history.map((view) => view.url)).toEqual([third, second, first]);
+    expect(history[0]?.url).toBe(resolveSessionPrimaryPullRequest(meta)?.url);
+    expect(history.map((view) => view.status)).toEqual(['open', 'closed', 'merged']);
+  });
+
+  it('scopes the history to the repository the surface describes', () => {
+    const olderApi = 'https://github.com/example/api/pull/7';
+    const meta = {
+      project: { kind: 'github', repoFullName: 'example/api' },
+      projectRun: { name: 'group', members: {} },
+      pullRequests: [
+        { url: olderApi, status: 'merged' },
+        { url: api, status: 'open' },
+        { url: web, status: 'open' },
+      ],
+    } as unknown as SessionMeta;
+    expect(resolveSessionPullRequestHistory(meta).map((view) => view.url)).toEqual([api, olderApi]);
+    expect(resolveSessionPullRequestHistory(meta, 'example/web').map((view) => view.url)).toEqual([
+      web,
+    ]);
+    expect(resolveSessionPullRequestHistory(meta, null)).toEqual([]);
+    expect(resolveSessionPullRequestHistory({})).toEqual([]);
   });
 });

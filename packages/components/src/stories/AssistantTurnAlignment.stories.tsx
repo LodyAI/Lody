@@ -1577,6 +1577,15 @@ export const DeepSeekIndependentProse: Story = {
     });
     await userEvent.click(workedButton());
     await waitFor(async () => {
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.querySelectorAll('button[aria-expanded]').length).toBeGreaterThan(
+        1
+      );
+    });
+    await userEvent.click(
+      canvasElement.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')[1]!
+    );
+    await waitFor(async () => {
       const paragraphs = Array.from(canvasElement.querySelectorAll('p'));
       const thought = paragraphs.find(
         (node) => node.textContent === '先检查输入边界，再执行测试。'

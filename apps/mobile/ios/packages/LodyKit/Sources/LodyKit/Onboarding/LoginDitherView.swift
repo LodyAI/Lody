@@ -7,8 +7,10 @@ import UIKit
 /// plain paper surface, and Reduce Motion leaves one still frame.
 @MainActor
 final class LoginDitherView: UIView, MTKViewDelegate {
-  /// Points per dither cell, as web's CSS pixels per cell.
-  private static let cell: CGFloat = 3
+  /// Points per dither cell before snapping to whole device pixels. Web uses
+  /// 3 CSS pixels on a wide panel; the phone's inset visual is only about 100
+  /// such cells across, which reads as a blurred jellyfish, so cells are halved.
+  private static let targetCell: CGFloat = 1.5
   /// The entrance: the dither develops outward from the centre over this long.
   private static let revealDuration: CFTimeInterval = 1.6
 
@@ -20,6 +22,7 @@ final class LoginDitherView: UIView, MTKViewDelegate {
   private var pointer = (x: Float(0.5), y: Float(0.5), targetX: Float(0.5), targetY: Float(0.5))
   private var columns = 0
   private var rows = 0
+  private var cellPixels = 0
   private var observers: [NSObjectProtocol] = []
 
   override init(frame: CGRect) {
@@ -32,7 +35,7 @@ final class LoginDitherView: UIView, MTKViewDelegate {
       view.isOpaque = true
       view.preferredFramesPerSecond = 60
       // The drawable is sized in whole cells and magnified without filtering, so
-      // every cell is exactly `cell` points and the pattern never swims on resize.
+      // every cell is the same whole number of device pixels and the pattern never swims on resize.
       view.layer.magnificationFilter = .nearest
       view.isUserInteractionEnabled = false
       metal = view
@@ -53,6 +56,7 @@ final class LoginDitherView: UIView, MTKViewDelegate {
       addSubview(metal)
     }
     registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: LoginDitherView, _: UITraitCollection) in view.metal?.setNeedsDisplay() }
+    registerForTraitChanges([UITraitDisplayScale.self]) { (view: LoginDitherView, _: UITraitCollection) in view.setNeedsLayout() }
     let pan = UIPanGestureRecognizer(target: self, action: #selector(track(_:)))
     pan.cancelsTouchesInView = false
     addGestureRecognizer(pan)
@@ -70,16 +74,22 @@ final class LoginDitherView: UIView, MTKViewDelegate {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    guard let metal, bounds.width >= Self.cell, bounds.height >= Self.cell else { return }
+    // A cell is a whole number of device pixels so nearest-neighbour
+    // magnification keeps every cell the same size and edge-sharp.
+    let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : UIScreen.main.scale
+    let nextCellPixels = max(2, Int((Self.targetCell * scale).rounded()))
+    let cell = CGFloat(nextCellPixels) / scale
+    guard let metal, bounds.width >= cell, bounds.height >= cell else { return }
     // Auto Layout applies the folded model height before its presentation layer
     // finishes collapsing. Keep the full drawable while that layer clips it;
     // resizing to one row here stretches a vertical ink stripe through the fold.
-    let nextColumns = max(1, Int(floor(bounds.width / Self.cell)))
-    let nextRows = max(1, Int(floor(bounds.height / Self.cell)))
-    metal.frame = CGRect(x: 0, y: 0, width: CGFloat(nextColumns) * Self.cell, height: CGFloat(nextRows) * Self.cell)
-    guard nextColumns != columns || nextRows != rows else { return }
+    let nextColumns = max(1, Int(floor(bounds.width / cell)))
+    let nextRows = max(1, Int(floor(bounds.height / cell)))
+    metal.frame = CGRect(x: 0, y: 0, width: CGFloat(nextColumns) * cell, height: CGFloat(nextRows) * cell)
+    guard nextColumns != columns || nextRows != rows || nextCellPixels != cellPixels else { return }
     columns = nextColumns
     rows = nextRows
+    cellPixels = nextCellPixels
     metal.drawableSize = CGSize(width: nextColumns, height: nextRows)
     metal.setNeedsDisplay()
   }

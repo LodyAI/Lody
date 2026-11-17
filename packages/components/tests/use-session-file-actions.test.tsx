@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 // Two rules this hook must not get wrong:
 //
 // 1. Reaching a shell needs a RESOLVED host path, not merely "Electron on the
@@ -9,7 +8,6 @@
 // 2. Oversized remote downloads use the paid chunk path when available;
 //    unsupported machines retain the explicit size-limit explanation.
 
-// @vitest-environment jsdom
 // Two rules this hook must not get wrong:
 //
 // 1. Reaching a shell needs a RESOLVED host path, not merely "Electron on the

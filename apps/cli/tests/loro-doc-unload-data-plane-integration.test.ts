@@ -60,6 +60,7 @@ import {
   loadOrCreateLocalIdentity,
 } from '../src/lib/cli-platform';
 import { LoroDocumentManager } from '../src/lib/loro/doc';
+import { combineGCSessionSources, SessionGCManager } from '../src/lib/session-gc-manager';
 import { makeLocalWorkspaceCatalog } from '../src/lib/local-workspace-catalog';
 import type { Logger } from '../src/utils/logger';
 
@@ -334,6 +335,101 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
       throw error;
     }
   };
+
+  it('idle GC unloads Session docs that only a reader cached, by their last hand-out', async () => {
+    applyLocalPlatformEnv();
+    const logger = createSilentLogger();
+    const identity = await loadOrCreateLocalIdentity(logger);
+    const catalog = makeLocalWorkspaceCatalog({
+      filePath: path.join(tempDir, '.lody-oss', 'workspace-catalog.json'),
+      lockName: `doc-cached-gc-${process.pid}`,
+      cacheTtlMs: Number.POSITIVE_INFINITY,
+    });
+    const workspace = await ensureImplicitLocalWorkspace({
+      catalog,
+      identity,
+      machineId: 'local-machine',
+      machineName: 'local-host',
+      logger,
+    });
+    const cloudPort = createLocalCloudPort({
+      identity: { userId: identity.userId },
+      workspaces: [workspace],
+    });
+    const manager = await LoroDocumentManager.create(workspace.id, identity.userId, logger, {
+      streamsTokens: cloudPort.streamsTokens,
+      cloudBilling: cloudPort.billing,
+    });
+    // Only Date is faked: the repo's SQLite and room I/O still need real timers.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const minute = 60_000;
+      const start = Date.now();
+      const stale = await manager.createSession('local-machine', 'builtin', 'claude');
+      const reread = await manager.createSession('local-machine', 'builtin', 'claude');
+      // Readers such as same-machine MCP tools adopt docs that no turn ever tracks.
+      await manager.getOrCreateSessionDoc(stale);
+      await manager.getOrCreateSessionDoc(reread);
+      const unloadDoc = vi.spyOn(manager.repo, 'unloadDoc');
+      const noWork = async () => false;
+      const gc = new SessionGCManager(
+        {
+          idleTimeoutMs: 20 * minute,
+          sweepIntervalMs: minute,
+          nativeBackgroundMaxIdleMs: 24 * 60 * minute,
+          enabled: true,
+          memoryThresholdBytes: 1024 ** 3,
+          maxEvictionsPerCall: 3,
+          pressureRecheckAttempts: 0,
+          pressureRecheckDelayMs: 0,
+          wasmPressureHeapBytes: 3 * 1024 ** 3,
+          wasmPressureIdleTimeoutMs: 2 * minute,
+        },
+        {
+          ...combineGCSessionSources(
+            { sessionIds: () => [], has: () => false, lastActivityMs: () => undefined },
+            {
+              sessionIds: () => manager.cachedSessionDocIds(),
+              lastActivityMs: (sessionId) => manager.cachedSessionDocLastAccessMs(sessionId),
+            }
+          ),
+          getNativeWork: () => null,
+          hasActiveTurn: () => false,
+          hasActiveGoal: noWork,
+          hasPendingUpdates: () => false,
+          hasPendingUserWork: noWork,
+          isArchiveInFlight: () => false,
+          cleanSession: (sessionId) => manager.cleanSessionDoc(sessionId, { preserveStatus: true }),
+          memoryPressure: {
+            getLatest: async () => ({ availableMemoryBytes: 64 * 1024 ** 3 }),
+            refresh: async () => ({ availableMemoryBytes: 64 * 1024 ** 3 }),
+          },
+          logger,
+        }
+      );
+
+      vi.setSystemTime(start + 15 * minute);
+      await manager.getOrCreateSessionDoc(reread);
+      // Observing a cached doc, as GC's own eligibility checks do, is not an access.
+      expect(manager.peekSessionDoc(stale)).toBeDefined();
+      expect(manager.cachedSessionDocLastAccessMs(stale)).toBe(start);
+
+      vi.setSystemTime(start + 21 * minute);
+      await gc.sweep();
+
+      expect(unloadDoc).toHaveBeenCalledWith(getSessionRoomId(stale));
+      expect(unloadDoc).not.toHaveBeenCalledWith(getSessionRoomId(reread));
+      expect(manager.cachedSessionDocIds()).toEqual([reread]);
+
+      vi.setSystemTime(start + 36 * minute);
+      await gc.sweep();
+      expect(manager.cachedSessionDocIds()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      await manager.cleanUp({ fast: true, preserveSessionStatus: true });
+      await cloudPort.dispose();
+    }
+  });
 
   it('bounds and releases renderer-only cloud reconciles without SessionDocuments', async () => {
     applyLocalPlatformEnv();

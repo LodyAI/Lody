@@ -28,6 +28,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +53,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.platform.LocalDensity
 import app.lody.android.designsystem.LodyMotion
@@ -68,7 +70,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -118,6 +122,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -157,6 +162,7 @@ data class ChatListUiState(
     val workspaces: List<Workspace>,
     val workspaceId: String?,
     val members: Map<String, WorkspaceMember> = emptyMap(),
+    val accountEmail: String = "",
 )
 
 enum class HomeTab(@StringRes val label: Int) {
@@ -183,11 +189,20 @@ fun ChatListScreen(
     onSelectWorkspace: (Workspace) -> Unit,
     onSignOut: () -> Unit,
     onOpenChat: (ChatItem) -> Unit,
+    /** Archives or unarchives a conversation (runtime `archiveSession`); null while no workspace is selected. */
+    onSetArchived: (suspend (String, Boolean) -> Unit)? = null,
     onNewChat: () -> Unit,
     /** The Schedules tab's list and writes; none leaves the tab loading. */
     schedules: app.lody.android.schedules.ScheduleService? = null,
     /** Computers, agents, models and modes for the schedule editor. */
     creation: app.lody.android.create.CreationService? = null,
+    agentProviders: AgentProviderService? = null,
+    roleSettings: RoleSettingsService? = null,
+    shortcutSettings: ShortcutSettingsService? = null,
+    /** Last accepted settings-page reads (display only). */
+    settingsCache: SettingsSnapshotStore? = null,
+    githubSettings: GitHubSettingsService? = null,
+    projectVisibility: ProjectVisibilityService? = null,
     scope: app.lody.android.runtime.RuntimeScope? = null,
     /** Opens a conversation by id (a schedule's last run). */
     onOpenSession: (String) -> Unit = {},
@@ -212,6 +227,13 @@ fun ChatListScreen(
     val notice = { text: String -> notices.launch { snackbar.showSnackbar(text) }; Unit }
     // Schedules: the list for this workspace and the open editor (a schedule id or [NEW_SCHEDULE]).
     val scheduleList = app.lody.android.schedules.rememberSchedulesState(schedules, scope)
+    var agentsOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var preferencesOpen by rememberSaveable { mutableStateOf(false) }
+    var rolesOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var shortcutsOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var githubOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var projectsOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    val deferredMessage = stringResource(R.string.settings_deferred)
     var scheduleEditor by rememberSaveable(scope) { mutableStateOf<String?>(null) }
     LaunchedEffect(tab, scheduleList, state.sync) {
         if (tab == HomeTab.Schedules) scheduleList?.refresh()
@@ -229,9 +251,59 @@ fun ChatListScreen(
     val selectScope = { next: HomeScope -> homeScope = next; HomeGroupings.saveScope(context, next) }
     var idleExpanded by rememberSaveable { mutableStateOf(false) }
     val owner = state.userId.takeIf { homeScope == HomeScope.Mine }
-    val sections = remember(state.snapshot, grouping, owner) { state.snapshot?.let { ChatListModel.home(it, grouping, owner) }.orEmpty() }
+    val archivedDone = stringResource(R.string.home_archived_done)
+    val archiveFailed = stringResource(R.string.home_archive_failed)
+    val unarchived = stringResource(R.string.home_unarchived)
+    val unarchiveFailed = stringResource(R.string.home_unarchive_failed)
+    // Long-press Archive / Unarchive (iOS row actions): one write per tap, never retried; the
+    // catalog then moves the row between the open and archived lists.
+    val setArchived: ((ChatItem, Boolean) -> Unit)? = onSetArchived?.let { write -> { chat: ChatItem, value: Boolean ->
+        notices.launch {
+            val ok = try { write(chat.id, value); true }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { false }
+            snackbar.showSnackbar(when {
+                value && ok -> archivedDone
+                value -> archiveFailed
+                ok -> unarchived
+                else -> unarchiveFailed
+            })
+        }
+        Unit
+    } }
+    // The view menu's Archived switch (iOS `HomeArchive`): in memory, so every launch opens on open chats.
+    var archived by remember { mutableStateOf(false) }
+    // The Schedules view menu's Show finished switch: in memory, so ended schedules start hidden.
+    var showFinished by remember { mutableStateOf(false) }
+    val sections = remember(state.snapshot, grouping, owner, archived) { state.snapshot?.let { ChatListModel.home(it, grouping, owner, archived = archived) }.orEmpty() }
+    val archivedTimeline = remember(state.snapshot, archived) { if (archived) state.snapshot?.let { ChatListModel.timeline(it, archived = true) }.orEmpty() else emptyList() }
 
     BackHandler(enabled = searching) { closeSearch() }
+
+    if (preferencesOpen) {
+        PreferencesScreen(onBack = { preferencesOpen = false })
+        return
+    }
+    if (shortcutsOpen) {
+        ShortcutsScreen(state, shortcutSettings, scope, settingsCache, onBack = { shortcutsOpen = false })
+        return
+    }
+    if (githubOpen) {
+        GitHubSettingsScreen(githubSettings, scope, onBack = { githubOpen = false })
+        return
+    }
+    if (projectsOpen) {
+        ProjectGroupsScreen(state, creation, scope, projectVisibility, settingsCache, onBack = { projectsOpen = false })
+        return
+    }
+    if (rolesOpen) {
+        RolesScreen(state, roleSettings, scope, onBack = { rolesOpen = false })
+        return
+    }
+    if (agentsOpen) {
+        AgentSettingsScreen(state, agentProviders, scope, onBack = { agentsOpen = false })
+        return
+    }
 
     val editing = scheduleEditor
     if (editing != null && scheduleList != null) {
@@ -244,9 +316,10 @@ fun ChatListScreen(
         return
     }
 
+    CompositionLocalProvider(LocalArchivedPage provides (archived && tab == HomeTab.Chats)) {
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        containerColor = colors.bgBase,
+        containerColor = homePageColor(),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -254,13 +327,15 @@ fun ChatListScreen(
                 searching -> SearchTopBar(query, onQueryChange = { query = it }, onClose = closeSearch)
                 tab == HomeTab.Chats -> Box {
                     HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {
-                        ViewMenu(homeScope, selectScope, grouping, selectGrouping, details, toggleDetail)
+                        ViewMenu(homeScope, selectScope, grouping, selectGrouping, details, toggleDetail, archived) { archived = it }
                     }
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
-                // Schedules keeps the Chats header (workspace, sync, search) without a title or view menu.
+                // Schedules keeps the Chats header (workspace, sync, search) with its own view menu.
                 tab == HomeTab.Schedules -> Box {
-                    HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {}
+                    HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {
+                        ScheduleViewMenu(showFinished) { showFinished = it }
+                    }
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
                 else -> TitleTopBar(stringResource(tab.label), onBack = null)
@@ -272,25 +347,46 @@ fun ChatListScreen(
                 HomeBottomBar(
                     selected = tab,
                     collapsed = tab == HomeTab.Chats && barCollapsed,
-                    onSelect = { tab = it },
+                    onSelect = { next ->
+                        // The compact bar shows only the selected tab; tapping it restores the full bar.
+                        if (next == tab && barCollapsed) {
+                            barScroll.expand()
+                            barCollapsed = false
+                        } else tab = next
+                    },
                     adds = adds,
-                    onCreate = { if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
+                    onCreate = { if (state.workspaces.firstOrNull { it.id == state.workspaceId }?.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT) notice(state.placeholder) else if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
                 )
             }
         },
     ) { padding ->
+        val selectedWorkspace = state.workspaces.firstOrNull { it.id == state.workspaceId }
         when {
+            tab != HomeTab.Settings && selectedWorkspace?.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT -> {
+                Column(Modifier.fillMaxSize().padding(padding), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Text(state.placeholder, style = LodyTheme.typography.body, modifier = Modifier.padding(horizontal = app.lody.android.designsystem.LodySpacing.lg))
+                    if (selectedWorkspace?.contentMode == app.lody.android.auth.WorkspaceContentMode.UNKNOWN) {
+                        TextButton(onClick = { onSelectWorkspace(selectedWorkspace) }) { Text(stringResource(R.string.workspace_mode_retry)) }
+                    }
+                }
+            }
             tab == HomeTab.Schedules -> app.lody.android.schedules.SchedulesList(
-                scheduleList, if (searching) query else "", padding,
+                scheduleList, if (searching) query else "", showFinished, { showFinished = true }, padding,
                 onOpen = { scheduleEditor = it.scheduleId },
                 onNew = { scheduleEditor = NEW_SCHEDULE },
                 onOpenSession = onOpenSession,
                 onNotice = notice,
             )
+            // First run (web `showChatOnboarding`): a loaded catalog with no computers and no chats at all,
+            // archived included, regardless of the view menu's scope. Never while loading, searching or archived.
+            tab == HomeTab.Chats && !searching && !archived && state.snapshot?.let { it.machineIds.isEmpty() && it.sessions.isEmpty() } == true ->
+                HomeOnboarding(padding)
             searching -> HomeList(
-                ChatListModel.searchTimeline(state.timeline, query).map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) },
+                ChatListModel.searchTimeline(if (archived && tab == HomeTab.Chats) archivedTimeline else state.timeline, query).map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) },
                 details, padding, empty = stringResource(R.string.home_search_empty, query.trim()).takeIf { query.isNotBlank() },
                 pinsLabels = false, onOpenChat = onOpenChat,
+                onSetArchived = setArchived,
+                archivedList = archived && tab == HomeTab.Chats,
                 owners = state.members.takeIf { homeScope == HomeScope.Team },
             )
             // A project header already names the project, so rows drop it from their detail line.
@@ -298,16 +394,20 @@ fun ChatListScreen(
                 sections,
                 details,
                 padding,
-                empty = state.placeholder,
+                // The catalog placeholder (loading / offline) wins; a loaded catalog without archived chats says so.
+                empty = if (archived && state.snapshot != null) stringResource(R.string.home_archived_empty) else state.placeholder,
                 listState = chatsListState,
-                projectIndex = grouping == HomeGrouping.Project,
+                projectIndex = !archived && grouping == HomeGrouping.Project,
                 owners = state.members.takeIf { homeScope == HomeScope.Team },
                 idleExpanded = idleExpanded,
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
+                onSetArchived = setArchived,
+                archivedList = archived,
             )
-            else -> SettingsList(state, padding, onSelectWorkspace, onSignOut)
+            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onGitHub = { githubOpen = true }, onProjects = { projectsOpen = true }, onDeferred = { notice(deferredMessage) })
         }
+    }
     }
     }
 }
@@ -332,7 +432,7 @@ private fun HomeTopBar(
             }
             menu()
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.bgBase, scrolledContainerColor = colors.bgBase),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = homePageColor(), scrolledContainerColor = homePageColor()),
     )
 }
 
@@ -350,7 +450,7 @@ private fun TitleTopBar(title: String, onBack: (() -> Unit)?) {
                 }
             }
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.bgBase, scrolledContainerColor = colors.bgBase),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = homePageColor(), scrolledContainerColor = homePageColor()),
     )
 }
 
@@ -382,7 +482,10 @@ private fun WorkspaceCapsule(state: ChatListUiState, onSelect: (Workspace) -> Un
                 modifier = Modifier.widthIn(max = LodyLayout.trailingMetaMaxWidth),
             )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = colors.bgOverlay) {
+        // A menu-width panel (iOS #2574 / #2586): 200–260 dp, each name on one line fading out at
+        // its trailing edge, never wrapping.
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = colors.bgOverlay,
+            modifier = Modifier.widthIn(min = 200.dp, max = 260.dp)) {
             if (state.workspaces.isEmpty()) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.home_no_workspaces), style = LodyTheme.typography.body, color = colors.textSecondary) },
@@ -392,10 +495,13 @@ private fun WorkspaceCapsule(state: ChatListUiState, onSelect: (Workspace) -> Un
             }
             state.workspaces.forEach { workspace ->
                 DropdownMenuItem(
-                    text = { Text(workspace.name, style = LodyTheme.typography.body, color = colors.textPrimary) },
+                    text = { app.lody.android.designsystem.LodyFadingText(workspace.name, LodyTheme.typography.body, colors.textPrimary, Modifier.fillMaxWidth()) },
                     leadingIcon = { Avatar(workspace.image, workspace.name, LodyIconSize.lg) },
-                    trailingIcon = { if (workspace.id == state.workspaceId) Glyph(LodyIcons.Check, colors.accentFg, LodyIconSize.sm) },
-                    onClick = { open = false; if (workspace.id != state.workspaceId) onSelect(workspace) },
+                    trailingIcon = { Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+                        if (workspace.contentMode == app.lody.android.auth.WorkspaceContentMode.E2EE) Icon(LodyIcons.Lock, contentDescription = "E2EE", tint = colors.textSecondary, modifier = Modifier.size(LodyIconSize.sm))
+                        if (workspace.id == state.workspaceId) Glyph(LodyIcons.Check, colors.accentFg, LodyIconSize.sm)
+                    } },
+                    onClick = { open = false; if (workspace.id != state.workspaceId || workspace.contentMode != app.lody.android.auth.WorkspaceContentMode.PLAINTEXT) onSelect(workspace) },
                 )
             }
         }
@@ -414,6 +520,8 @@ private fun ViewMenu(
     onSelectGrouping: (HomeGrouping) -> Unit,
     details: Set<ChatRowDetail>,
     onToggle: (ChatRowDetail) -> Unit,
+    archived: Boolean,
+    onArchived: (Boolean) -> Unit,
 ) {
     val colors = LodyTheme.colors
     var open by remember { mutableStateOf(false) }
@@ -458,12 +566,70 @@ private fun ViewMenu(
                     Glyph(LodyIcons.Check, if (checked) colors.accentFg else Color.Transparent, LodyIconSize.sm)
                 }
             }
+            // Last, as iOS #2563: the Archived switch swaps the list for archived chats.
+            HorizontalDivider(Modifier.padding(top = LodySpacing.xs), thickness = 0.5.dp, color = colors.borderSubtle)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = LodySize.controlMd)
+                    .toggleable(value = archived, role = Role.Switch) { onArchived(it) }
+                    .padding(horizontal = LodySpacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
+            ) {
+                Glyph(LodyIcons.Inbox, colors.iconSecondary, LodyIconSize.sm)
+                Text(stringResource(R.string.home_view_archived), style = LodyTheme.typography.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                Switch(checked = archived, onCheckedChange = null)
+            }
             Spacer(Modifier.height(LodySpacing.xs))
         }
     }
 }
 
+/** The Schedules view menu: one Show finished switch; off hides schedules that will not run again. */
+@Composable
+private fun ScheduleViewMenu(showFinished: Boolean, onShowFinished: (Boolean) -> Unit) {
+    val colors = LodyTheme.colors
+    var open by remember { mutableStateOf(false) }
+    val label = stringResource(R.string.home_view)
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.semantics { contentDescription = label }) {
+            Glyph(LodyIcons.Filter, colors.iconPrimary)
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(LodyRadius.lg),
+            containerColor = colors.bgOverlay,
+            tonalElevation = 0.dp,
+            shadowElevation = LodyElevations.md.blur / 2,
+            border = BorderStroke(0.5.dp, colors.borderSubtle),
+            modifier = Modifier.width(MenuWidth),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = LodySize.controlMd)
+                    .toggleable(value = showFinished, role = Role.Switch) { onShowFinished(it) }
+                    .padding(horizontal = LodySpacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
+            ) {
+                Glyph(LodyIcons.Check, colors.iconSecondary, LodyIconSize.sm)
+                Text(stringResource(R.string.schedules_view_show_finished), style = LodyTheme.typography.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                Switch(checked = showFinished, onCheckedChange = null)
+            }
+        }
+    }
+}
+
 private val MenuWidth = 280.dp
+
+/** Whether the Chats page lists archived chats; it then uses the grey archived page colour. */
+private val LocalArchivedPage = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+@Composable
+private fun homePageColor() = if (LocalArchivedPage.current) LodyTheme.colors.bgArchived else LodyTheme.colors.bgBase
 
 /**
  * A single choice as a segmented control (the iOS one's shape on design tokens): a sunken
@@ -544,7 +710,7 @@ private fun SearchTopBar(query: String, onQueryChange: (String) -> Unit, onClose
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.bgBase)
+            .background(homePageColor())
             .statusBarsPadding()
             .padding(horizontal = LodySpacing.xs, vertical = LodySpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
@@ -671,6 +837,9 @@ internal fun HomeList(
     owners: Map<String, WorkspaceMember>? = null,
     pinsLabels: Boolean = true,
     projectIndex: Boolean = false,
+    /** A long press offers Archive, or in an [archivedList] Unarchive only (iOS row actions). */
+    onSetArchived: ((ChatItem, Boolean) -> Unit)? = null,
+    archivedList: Boolean = false,
     onOpenChat: (ChatItem) -> Unit,
 ) {
     if (sections.isEmpty()) {
@@ -687,7 +856,17 @@ internal fun HomeList(
         folded = if (id in folded) folded - id else folded + id
         FoldedOpeners.save(context, folded)
     }
-    val shown = remember(sections, folded) { sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded)) } }
+    // Home labels collapse their group; search labels never do. Archived buckets reuse activity ids.
+    var collapsedGroups by remember { mutableStateOf(CollapsedGroups.load(context)) }
+    val groupKey = { id: String -> if (archivedList) "archived:$id" else id }
+    val toggleGroup = { id: String ->
+        val key = groupKey(id)
+        collapsedGroups = if (key in collapsedGroups) collapsedGroups - key else collapsedGroups + key
+        CollapsedGroups.save(context, collapsedGroups)
+    }
+    val shown = remember(sections, folded, collapsedGroups, pinsLabels, archivedList) {
+        sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded), collapsed = pinsLabels && groupKey(it.id) in collapsedGroups) }
+    }
     val direction = LocalLayoutDirection.current
     // Keep the sticky slot below the app bar; content padding alone scrolls away.
     ProjectIndexList(shown, titles, listState, projectIndex, padding.calculateBottomPadding(),
@@ -702,17 +881,25 @@ internal fun HomeList(
             ),
         ) {
             shown.forEach { section ->
+                // Project groups lead their label with the project's logo.
+                val logo = section.repository.takeIf { section.header is HomeSection.Header.Project }
                 if (pinsLabels) {
-                    stickyHeader(key = section.id) { SectionTitle(titles.getValue(section.id)) }
+                    stickyHeader(key = section.id) {
+                        SectionTitle(titles.getValue(section.id), logo, collapsed = section.collapsed, onToggle = { toggleGroup(section.id) })
+                    }
                 } else {
-                    item(key = section.id) { SectionTitle(titles.getValue(section.id)) }
+                    item(key = section.id) { SectionTitle(titles.getValue(section.id), logo) }
                 }
                 items(section.visibleChats(idleExpanded), key = { "${section.id}/${it.id}" }) { chat ->
+                    // Rows fade and slide as their group collapses or expands.
                     ChatRow(
                         chat, if (section.header is HomeSection.Header.Project && chat.nestedUnder == null) details - ChatRowDetail.Project else details, now,
                         owner = owners?.let { it[chat.ownerId] ?: WorkspaceMember(chat.ownerId.orEmpty(), "") },
                         expanded = if (chat.treeParent) chat.id !in folded else null,
                         onToggle = { toggleOpener(chat.id) },
+                        archived = archivedList,
+                        onSetArchived = onSetArchived?.let { action -> { action(chat, !archivedList) } },
+                        modifier = Modifier.animateItem(),
                     ) { onOpenChat(chat) }
                 }
                 if (section.folds) {
@@ -720,6 +907,7 @@ internal fun HomeList(
                         MoreRow(
                             if (idleExpanded) showLess else pluralStringResource(R.plurals.home_group_show_all, section.rootCount, section.rootCount),
                             onToggleIdle,
+                            Modifier.animateItem(),
                         )
                     }
                 }
@@ -746,12 +934,12 @@ private fun HomeSection.Header.title(): String = when (this) {
 }
 
 @Composable
-private fun MoreRow(title: String, onClick: () -> Unit) {
+private fun MoreRow(title: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Text(
         title,
         style = LodyTheme.typography.body,
         color = LodyTheme.colors.textTertiary,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .heightIn(min = LodySize.listRow)
             .clickable(role = Role.Button, onClick = onClick)
@@ -915,44 +1103,32 @@ private val ProjectSource.label: Int
         ProjectSource.Local -> R.string.home_projects_source_local
     }
 
-@Composable
-private fun SettingsList(state: ChatListUiState, padding: PaddingValues, onSelectWorkspace: (Workspace) -> Unit, onSignOut: () -> Unit) {
-    val colors = LodyTheme.colors
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
-        item { SectionTitle(stringResource(R.string.home_settings_account)) }
-        item {
-            SettingsRow(state.accountName.ifEmpty { "—" }, null, colors.textPrimary, onClick = null) {
-                Avatar(state.accountImage, state.accountName.ifEmpty { "?" }, LodySize.avatarMd)
-            }
-        }
-        item { SectionTitle(stringResource(R.string.home_settings_workspace)) }
-        items(state.workspaces, key = { it.id }) { workspace ->
-            SettingsRow(
-                title = workspace.name,
-                icon = if (workspace.id == state.workspaceId) LodyIcons.Check else null,
-                tint = colors.textPrimary,
-                onClick = { if (workspace.id != state.workspaceId) onSelectWorkspace(workspace) },
-            ) { Avatar(workspace.image, workspace.name, LodyIconSize.lg) }
-        }
-        item { Spacer(Modifier.height(LodySpacing.xxl)) }
-        item { SettingsRow(stringResource(R.string.home_sign_out), LodyIcons.LogOut, colors.dangerDefault, onClick = onSignOut) }
-    }
-}
-
 // MARK: - Rows
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = LodyTheme.typography.subhead,
-        color = LodyTheme.colors.textSecondary,
-        modifier = Modifier
+private fun SectionTitle(text: String, repository: String? = null, collapsed: Boolean? = null, onToggle: () -> Unit = {}) {
+    // `collapsed` is null where the group cannot fold (search). The chevron points down while open.
+    val angle by animateFloatAsState(if (collapsed == true) 0f else 90f, LodySpring.snappy(), label = "group")
+    val action = stringResource(if (collapsed == true) R.string.home_group_expand else R.string.home_group_collapse)
+    val state = stringResource(if (collapsed == true) R.string.home_tree_collapsed else R.string.home_tree_expanded)
+    Row(
+        Modifier
             .fillMaxWidth()
-            .background(LodyTheme.colors.bgBase)
-            .semantics { heading() }
+            .background(homePageColor())
+            .then(if (collapsed != null) Modifier.clickable(role = Role.Button, onClickLabel = action, onClick = onToggle) else Modifier)
+            .semantics(mergeDescendants = true) {
+                heading()
+                if (collapsed != null) stateDescription = state
+            }
             .padding(start = LodyLayout.screenPaddingX, end = LodyLayout.screenPaddingX, top = LodySpacing.lg, bottom = LodySpacing.xs),
-    )
+        horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // The project's logo in its original colours, unlike the muted row marks.
+        if (!repository.isNullOrBlank()) RepositoryIcon(repository, muted = false)
+        Text(text, style = LodyTheme.typography.subhead, color = LodyTheme.colors.textSecondary)
+        if (collapsed != null) Glyph(LodyIcons.Forward, LodyTheme.colors.textSecondary, FamilyChevron, Modifier.rotate(angle))
+    }
 }
 
 /**
@@ -962,6 +1138,7 @@ private fun SectionTitle(text: String) {
  * [expanded] is set on a row with nested chats: whether they are shown. A "⌄ 4 opened chats" line
  * below the row heads the family. Nested rows read one size down and have rounded branches.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatRow(
     chat: ChatItem,
@@ -970,10 +1147,15 @@ private fun ChatRow(
     owner: WorkspaceMember? = null,
     expanded: Boolean? = null,
     onToggle: () -> Unit = {},
+    /** Whether the row is in the archived list: its long-press action is then Unarchive. */
+    archived: Boolean = false,
+    onSetArchived: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
+    var menu by remember { mutableStateOf(false) }
     val place = chat.place.takeIf { ChatRowDetail.Project in details && it.isNotEmpty() }
     val branch = chat.branch.takeIf { ChatRowDetail.Branch in details && it.isNotEmpty() }
     val pr = chat.prStatus.takeIf { ChatRowDetail.PullRequest in details && it in PrStatuses }
@@ -983,15 +1165,23 @@ private fun ChatRow(
     val rail = colors.borderDefault
     var titleHeight by remember { mutableFloatStateOf(0f) }
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
             .drawBehind { if (nested) drawRail(rail, chat.lastChild, if (twoLine) LodySpacing.sm.toPx() + titleHeight / 2 else size.height / 2) },
     ) {
+        // A popup: it takes no space in the column and anchors to this row.
+        if (onSetArchived != null) DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = colors.bgOverlay) {
+            DropdownMenuItem(
+                text = { Text(stringResource(if (archived) R.string.home_unarchive else R.string.home_archive), style = LodyTheme.typography.body, color = colors.textPrimary) },
+                leadingIcon = { Glyph(LodyIcons.Inbox, colors.iconSecondary, LodyIconSize.sm) },
+                onClick = { menu = false; onSetArchived() },
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = if (nested) LodySize.controlMd else LodySize.listRow)
-                .clickable(onClick = onClick)
+                .combinedClickable(onClick = onClick, onLongClick = onSetArchived?.let { { menu = true } })
                 .padding(horizontal = LodyLayout.screenPaddingX)
                 .padding(vertical = if (twoLine) LodySpacing.sm else 0.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1006,7 +1196,8 @@ private fun ChatRow(
                             chat.unread -> type.bodyEmphasis
                             else -> type.body
                         },
-                        color = colors.textPrimary,
+                        // Archived chats read in tertiary ink on the grey page (iOS #2541).
+                        color = if (LocalArchivedPage.current) colors.textTertiary else colors.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -1049,7 +1240,7 @@ private fun ChatRow(
                 }
             }
         }
-        if (expanded != null) FamilyToggle(chat.childCount, expanded, chat.childAttention, onToggle, onOpen = onClick)
+        if (expanded != null) FamilyToggle(chat.childCount, expanded, chat.childAttention, onToggle)
     }
 }
 
@@ -1084,32 +1275,28 @@ private fun DrawScope.drawRail(color: Color, last: Boolean, turn: Float) {
 /**
  * The family's own line under the opener (Slack's "7 replies"): chevron + "7 opened chats",
  * aligned with the opener's title. Same place folded or open; the chevron turns down when the
- * family shows and the rail starts beneath it. Only the chevron and count toggle (spoken as
- * "7 opened chats, expanded"); the rest of the line opens the opener, so a tap meant for the
- * opener never folds its family. iOS: `ChatRowContent.familyToggle`.
+ * family shows and the rail starts beneath it. The whole line toggles the family and announces
+ * its count and expansion state; the separate opener row opens the conversation.
  */
 @Composable
-private fun FamilyToggle(count: Int, expanded: Boolean, childAttention: ChatAttention?, onToggle: () -> Unit, onOpen: () -> Unit) {
+private fun FamilyToggle(count: Int, expanded: Boolean, childAttention: ChatAttention?, onToggle: () -> Unit) {
     val colors = LodyTheme.colors
     val action = stringResource(if (expanded) R.string.home_tree_collapse else R.string.home_tree_expand)
     val label = pluralStringResource(R.plurals.home_tree_count, count, count)
     val description = label + ", " + stringResource(if (expanded) R.string.home_tree_expanded else R.string.home_tree_collapsed)
     val angle by animateFloatAsState(if (expanded) 90f else 0f, LodySpring.snappy(), label = "family")
-    // The line's spare width opens the opener (hidden from accessibility: the row above is it).
     Box(
         Modifier
             .fillMaxWidth()
             .heightIn(min = LodySize.controlSm)
-            .clickable(onClick = onOpen)
-            .clearAndSetSemantics {},
+            .clickable(role = Role.Button, onClickLabel = action, onClick = onToggle)
+            .clearAndSetSemantics { contentDescription = description; role = Role.Button; onClick(action) { onToggle(); true } },
     ) {
         Row(
             Modifier
                 .padding(start = LodyLayout.screenPaddingX - LodySpacing.xs)
                 .heightIn(min = LodySize.controlSm)
                 .clip(RoundedCornerShape(LodyRadius.sm))
-                .clickable(role = Role.Button, onClickLabel = action, onClick = onToggle)
-                .clearAndSetSemantics { contentDescription = description; role = Role.Button; onClick(action) { onToggle(); true } }
                 .padding(start = LodySpacing.xs, end = LodySpacing.md),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),

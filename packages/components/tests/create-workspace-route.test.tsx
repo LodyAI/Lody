@@ -15,7 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlatformE2eeWorkspaces } from '@lody/platform';
 import {
   listPendingE2eeWorkspaces,
+  listPendingE2eeWorkspacesByArchive,
   savePendingE2eeWorkspace,
+  setPendingE2eeWorkspaceArchived,
 } from '../src/lib/e2ee-workspace-storage';
 import { writePreferredWorkspaceSlug } from '../src/lib/workspace';
 
@@ -37,6 +39,8 @@ const fixture = vi.hoisted(() => ({
   referralListeners: new Set<() => void>(),
   createOrganization: undefined as unknown as (name: string, slug: string) => Promise<unknown>,
   create: undefined as unknown as PlatformE2eeWorkspaces['create'],
+  // Synthetic server workspaces that count against the account's allowance.
+  serverWorkspaces: new Set<string>(),
 }));
 
 vi.mock('@tanstack/react-router', async (original) => ({
@@ -123,6 +127,9 @@ vi.mock('@/hooks/useStableSession', () => ({
 vi.mock('@/hooks/useOrganization', () => ({
   useOrganization: () => ({
     createOrganization: (name: string, slug: string) => fixture.createOrganization(name, slug),
+    deleteOrganization: async (id: string) => {
+      if (!fixture.serverWorkspaces.delete(id)) throw new Error('no such workspace');
+    },
     organizations: fixture.organizations,
     loading: false,
     activeOrganization: fixture.activeOrganization,
@@ -153,7 +160,10 @@ vi.mock('../src/providers/convex-provider', () => ({
   },
 }));
 vi.mock('@/lib/native-platform', () => ({ isNativeAppShell: () => false }));
-vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => false }));
+vi.mock('@/lib/electron', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/electron')>()),
+  isElectronRenderer: () => false,
+}));
 vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => false }));
 
 import { Route } from '../src/routes/workspace/create';
@@ -167,6 +177,7 @@ let container: HTMLDivElement | undefined;
 
 beforeEach(() => {
   localStorage.clear();
+  stable.session = { status: 'authenticated', user: { id: 'account' } };
   fixture.redirect = undefined;
   fixture.allowExisting = undefined;
   fixture.mobile = false;
@@ -176,6 +187,7 @@ beforeEach(() => {
   fixture.activeOrganization = null;
   fixture.creationEnabled = false;
   fixture.referralLead = false;
+  fixture.serverWorkspaces = new Set();
   stable.availability.canCreateFree = true;
   fixture.createOrganization = vi.fn(async (name: string, slug: string) => ({
     id: 'w',
@@ -204,6 +216,18 @@ const input = (id: string) => container!.querySelector<HTMLInputElement>(`#${id}
 const button = (label: string) =>
   [...container!.querySelectorAll('button')].find((item) => item.textContent?.includes(label));
 const click = (label: string) => act(async () => button(label)!.click());
+const rowButton = (requestId: string, label: string) =>
+  [
+    ...container!.querySelectorAll<HTMLButtonElement>(`[data-request-id="${requestId}"] button`),
+  ].find((item) => item.textContent?.includes(label));
+const typeInto = (id: string, value: string) =>
+  act(async () => {
+    const field = input(id);
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+const byArchive = (accountId = 'account') =>
+  listPendingE2eeWorkspacesByArchive(localStorage, accountId);
 
 describe('create workspace route with a saved encrypted request', () => {
   it('lets a user set a saved request aside and create a regular workspace with the toggle off', async () => {
@@ -426,4 +450,199 @@ it('follows an in-app post-creation redirect through the desktop hash router', a
   expect(container.textContent).toBe('Workspace chat');
   router.history.destroy();
   window.location.hash = '';
+});
+
+describe('archiving saved encrypted creation requests', () => {
+  const second = { accountId: 'account', requestId: 'request-2', name: 'Second', slug: 'second' };
+  const createdRequestIds = () =>
+    vi.mocked(fixture.create).mock.calls.map(([request]) => request.requestId);
+
+  it('archives the selected request, starts an independent intent, and restores the original after reopening', async () => {
+    fixture.creationEnabled = true;
+    savePendingE2eeWorkspace(localStorage, pending);
+    savePendingE2eeWorkspace(localStorage, second);
+    fixture.create = vi.fn(async () => {
+      throw new Error('reply lost');
+    });
+    await render();
+    expect(input('workspace-name').value).toBe('Saved');
+    await act(async () => rowButton('request-1', 'e2ee.create.archiveRequest')!.click());
+    expect(byArchive()).toEqual({ active: [second], archived: [pending] });
+    expect(input('workspace-name').disabled).toBe(false);
+    expect(input('workspace-name').value).toBe('');
+    expect(container!.querySelector('[data-request-id="request-1"]')).toBeNull();
+
+    await typeInto('workspace-name', 'Fresh');
+    await typeInto('workspace-slug', 'fresh');
+    await click('organization.createWorkspace');
+    const [fresh] = createdRequestIds();
+    expect(fresh).not.toBe('request-1');
+    expect(fresh).not.toBe('request-2');
+    // Neither saved original was rewritten by the new intent.
+    expect(byArchive().archived).toEqual([pending]);
+    expect(byArchive().active).toContainEqual(second);
+
+    // Reopen: the archived request is never resumed automatically.
+    act(() => root?.unmount());
+    container?.remove();
+    await render();
+    expect(input('workspace-name').value).not.toBe('Saved');
+    await act(async () => {
+      container!
+        .querySelector<HTMLButtonElement>('[data-testid="e2ee-creation-archived-toggle"]')!
+        .click();
+    });
+    await act(async () => rowButton('request-1', 'e2ee.create.restoreRequest')!.click());
+    expect(byArchive().archived).toEqual([]);
+    await act(async () => rowButton('request-1', 'Saved · saved')!.click());
+    expect(input('workspace-name').value).toBe('Saved');
+    await click('e2ee.create.resume');
+    // The restored request retries the same request ID, name and slug.
+    expect(vi.mocked(fixture.create).mock.calls.at(-1)![0]).toMatchObject({
+      requestId: 'request-1',
+      name: 'Saved',
+      slug: 'saved',
+      genesisRecordHex: 'aa',
+    });
+  });
+
+  it('keeps an in-flight request selected when another window archives it, then leaves it archived on a late failure', async () => {
+    fixture.creationEnabled = true;
+    savePendingE2eeWorkspace(localStorage, pending);
+    let fail!: (error: unknown) => void;
+    fixture.create = vi.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          fail = reject;
+        })
+    );
+    await render();
+    await click('e2ee.create.resume');
+    expect(rowButton('request-1', 'e2ee.create.archiveRequest')!.disabled).toBe(true);
+    setPendingE2eeWorkspaceArchived(localStorage, pending, true);
+    await act(async () => {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: 'lody-e2ee-pending-creation-archived:account:request-1',
+        })
+      );
+    });
+    // The submitting form is not moved away from its own in-flight intent.
+    expect(input('workspace-name').value).toBe('Saved');
+    await act(async () => fail(new Error('reply lost')));
+    expect(container!.textContent).toContain('e2ee.create.failed');
+    expect(byArchive()).toEqual({ active: [], archived: [pending] });
+    expect(input('workspace-name').disabled).toBe(false);
+    expect(input('workspace-name').value).toBe('');
+    expect(button('e2ee.create.resume')).toBeUndefined();
+  });
+
+  it('ignores a late result from the previous account after an account switch', async () => {
+    fixture.creationEnabled = true;
+    savePendingE2eeWorkspace(localStorage, pending);
+    const otherAccount = { ...second, accountId: 'account-B' };
+    savePendingE2eeWorkspace(localStorage, otherAccount);
+    setPendingE2eeWorkspaceArchived(localStorage, otherAccount, true);
+    let fail!: (error: unknown) => void;
+    fixture.create = vi.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          fail = reject;
+        })
+    );
+    await render();
+    await click('e2ee.create.resume');
+    stable.session = { status: 'authenticated', user: { id: 'account-B' } };
+    const Component = (Route as unknown as { options: { component: () => JSX.Element } }).options
+      .component;
+    await act(async () => root!.render(<Component />));
+    // Account B sees only its own archive and starts free.
+    expect(container!.querySelector('[data-request-id="request-1"]')).toBeNull();
+    expect(input('workspace-name').value).toBe('');
+    await act(async () => fail(new Error('reply lost')));
+    expect(container!.textContent).not.toContain('e2ee.create.failed');
+    expect(input('workspace-name').value).toBe('');
+    expect(byArchive('account')).toEqual({ active: [pending], archived: [] });
+    expect(byArchive('account-B')).toEqual({ active: [], archived: [otherAccount] });
+  });
+
+  it('shows a storage failure and keeps the request when the archive cannot be saved', async () => {
+    fixture.creationEnabled = true;
+    savePendingE2eeWorkspace(localStorage, pending);
+    await render();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+    try {
+      await act(async () => rowButton('request-1', 'e2ee.create.archiveRequest')!.click());
+    } finally {
+      setItem.mockRestore();
+    }
+    expect(container!.textContent).toContain('e2ee.create.archiveFailed');
+    expect(byArchive()).toEqual({ active: [pending], archived: [] });
+    expect(input('workspace-name').value).toBe('Saved');
+    expect(input('workspace-name').disabled).toBe(true);
+  });
+});
+
+describe('permanently deleting saved encrypted creation requests', () => {
+  const hash = 'bb'.repeat(32);
+  const confirmDelete = async (requestId: string) => {
+    await act(async () => rowButton(requestId, 'e2ee.create.deleteRequest')!.click());
+    await act(async () => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="e2ee-creation-delete-confirm"]')!
+        .click();
+    });
+  };
+
+  it('deletes an archived request and the workspace it already created on the server', async () => {
+    fixture.creationEnabled = true;
+    savePendingE2eeWorkspace(localStorage, pending);
+    setPendingE2eeWorkspaceArchived(localStorage, pending, true);
+    // The request was reserved although this device never saw the result.
+    fixture.serverWorkspaces.add('workspace-1');
+    fixture.create = vi.fn(async (request) => ({
+      workspaceId: 'workspace-1',
+      name: request.name,
+      slug: request.slug,
+      contentMode: 'e2ee' as const,
+      contentModeVersion: 1 as const,
+      genesisHash: hash,
+      cryptoOrgId: hash,
+      activation: 'control-only' as const,
+    }));
+    await render();
+    await act(async () => {
+      container!
+        .querySelector<HTMLButtonElement>('[data-testid="e2ee-creation-archived-toggle"]')!
+        .click();
+    });
+    await confirmDelete('request-1');
+    expect(fixture.serverWorkspaces.size).toBe(0);
+    expect(byArchive()).toEqual({ active: [], archived: [] });
+    expect(container!.querySelector('[data-request-id="request-1"]')).toBeNull();
+    expect(container!.textContent).not.toContain('e2ee.create.delete');
+  });
+
+  it('deletes the selected request, frees the form, and keeps it when the result is unknown', async () => {
+    fixture.creationEnabled = true;
+    const second = { accountId: 'account', requestId: 'request-2', name: 'Second', slug: 'second' };
+    savePendingE2eeWorkspace(localStorage, pending);
+    savePendingE2eeWorkspace(localStorage, second);
+    fixture.create = vi.fn(async (request) => {
+      if (request.requestId === 'request-2') throw new Error('reply lost');
+      // Never reserved: the server refuses a new reservation at the allowance limit.
+      throw Object.assign(new Error('limit'), { data: { code: 'free_workspace_limit_reached' } });
+    });
+    await render();
+    expect(input('workspace-name').value).toBe('Saved');
+    await confirmDelete('request-2');
+    expect(container!.textContent).toContain('e2ee.create.deleteFailed');
+    expect(byArchive().active).toEqual([pending, second]);
+    await confirmDelete('request-1');
+    expect(byArchive()).toEqual({ active: [second], archived: [] });
+    expect(input('workspace-name').disabled).toBe(false);
+    expect(input('workspace-name').value).toBe('');
+  });
 });

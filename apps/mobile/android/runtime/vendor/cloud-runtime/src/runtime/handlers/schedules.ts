@@ -160,6 +160,22 @@ function projectRef(
   };
 }
 
+/** A machine as schedules see it: owner, clock and schedule protocol support. */
+export function scheduleMachine(meta: Flock, machineId: string) {
+  const fields = machineMeta(meta, `machine-${machineId}`);
+  const capabilities = fields.protocolCapabilities;
+  const version =
+    capabilities && typeof capabilities === 'object'
+      ? Number((capabilities as Record<string, unknown>).schedules)
+      : 0;
+  return {
+    name: text(fields.name) || undefined,
+    owner: text(fields.ownerUserId),
+    timeZone: text(fields.timeZone) || undefined,
+    supported: version >= SCHEDULES_PROMPT_PROTOCOL_VERSION,
+  };
+}
+
 export function registerSchedules(ctx: RuntimeContext) {
   const { channel, state, getGrant } = ctx;
 
@@ -181,20 +197,7 @@ export function registerSchedules(ctx: RuntimeContext) {
     };
   };
 
-  const machine = (meta: Flock, machineId: string) => {
-    const fields = machineMeta(meta, `machine-${machineId}`);
-    const capabilities = fields.protocolCapabilities;
-    const version =
-      capabilities && typeof capabilities === 'object'
-        ? Number((capabilities as Record<string, unknown>).schedules)
-        : 0;
-    return {
-      name: text(fields.name) || undefined,
-      owner: text(fields.ownerUserId),
-      timeZone: text(fields.timeZone) || undefined,
-      supported: version >= SCHEDULES_PROMPT_PROTOCOL_VERSION,
-    };
-  };
+  const machine = scheduleMachine;
 
   const agents = (meta: Flock) =>
     creationOptions(
@@ -288,7 +291,10 @@ export function registerSchedules(ctx: RuntimeContext) {
     const agentList = agents(meta);
     const machineTimeZones: Record<string, string> = {};
     const ownedMachineIds: string[] = [];
+    // Ownership and clocks are metadata: a machine whose own stream is still
+    // syncing is already listed, so an early list cannot hide owned computers.
     for (const id of new Set([
+      ...(state.catalogs.get('meta')?.machineIds ?? []),
       ...state.machineReplicas.keys(),
       ...rows.map((row) => row.machineId),
     ])) {

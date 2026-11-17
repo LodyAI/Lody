@@ -21,10 +21,11 @@ struct ChatMessageShare: Codable {
     if let execution = entry.executionId {
       entries = transcript.entries.filter { $0.executionId == execution }
     } else { entries = [entry] }
-    let parts = ChatTranscript(entries: entries).rows().filter { $0.entryID == entryID }.compactMap { row -> Part? in
-      if row.kind == "text", !row.text.isEmpty { return Part(text: row.text) }
-      if row.kind == "image", let image = row.image { return Part(image: image) }
-      return nil
+    let parts = ChatTranscript(entries: entries).rows().filter { $0.entryID == entryID }.flatMap { row -> [Part] in
+      if row.kind == "text", !row.text.isEmpty { return [Part(text: row.text)] }
+      if row.kind == "image", let image = row.image { return [Part(image: image)] }
+      if row.kind == "imageStack" { return row.stack.map { Part(image: $0.image) } }
+      return []
     }
     guard !parts.isEmpty else { return nil }
     let name = entry.modelInfo?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

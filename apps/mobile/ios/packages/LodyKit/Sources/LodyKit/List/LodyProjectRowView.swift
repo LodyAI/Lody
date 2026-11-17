@@ -2,7 +2,6 @@ import UIKit
 
 struct LodyProjectRowContent: UIContentConfiguration {
   var row: LodyListRow
-  var density: LodyRowDensity = .regular
   var expanded: Bool?
   var highlighted = false
   var onToggle: (@MainActor () -> Void)?
@@ -112,16 +111,9 @@ final class LodyProjectRowView: UIView, UIContentView {
   private func apply() {
     guard let content = configuration as? LodyProjectRowContent else { return }
     let row = content.row
-    let compact = content.density == .compact
-    directionalLayoutMargins = .init(
-      top: 0,
-      leading: compact ? LodyDesign.Rail.compactText : LodyDesign.Rail.text,
-      bottom: 0,
-      trailing: compact ? 10 : LodyDesign.Rail.trailing
-    )
+    directionalLayoutMargins = .init(top: 0, leading: LodyDesign.Rail.text, bottom: 0, trailing: LodyDesign.Rail.trailing)
     backgroundColor = content.highlighted ? .lodyBandPressed : .lodyBand
-    layer.cornerRadius = compact ? 10 : 0
-    glyphCenter.constant = compact ? LodyDesign.Rail.compactCenter : LodyDesign.Rail.center
+    glyphCenter.constant = LodyDesign.Rail.center
     let url = LodyListPhoto.url(row.image)
     let image = url == nil && !row.image.isEmpty ? UIImage(systemName: row.image) : nil
     symbol.image = image
@@ -134,15 +126,15 @@ final class LodyProjectRowView: UIView, UIContentView {
         self.showAvatar(photo)
       })
     }, symbol: image != nil)
-    let nameFont = LodyDesign.font(.subheadline, size: compact ? 14 : 15, weight: .semibold)
+    let nameFont = LodyDesign.font(.subheadline, size: 15, weight: .semibold)
     let nameText = NSMutableAttributedString(string: row.title, attributes: [.font: nameFont, .foregroundColor: UIColor.lodyInk])
     LodySessionRowView.emphasize(nameText, in: NSRange(location: 0, length: nameText.length), query: row.highlight)
     name.font = nameFont
     name.attributedText = nameText
-    detail.font = LodyDesign.mono(compact ? 10.5 : 11)
+    detail.font = LodyDesign.mono(11)
     detail.text = row.subtitle
     detail.isHidden = row.subtitle.isEmpty
-    count.font = LodyDesign.mono(compact ? 11 : 11.5)
+    count.font = LodyDesign.mono(11.5)
     count.text = row.badge.isEmpty ? row.value : row.badge
     count.textColor = row.badge.isEmpty && row.imageTint == "warning" ? .lodyAttention : .lodySecondary
     count.isHidden = count.text?.isEmpty ?? true

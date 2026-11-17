@@ -10,10 +10,10 @@ PR: [#1196](https://github.com/LodyAI/Lody/pull/1196)
 
 The Usage page labelled the skyline's columns as fixed UTC hours while its split
 charts labelled local bucket ends, placing the same activity under different
-times. The client now uses UTC bucket starts, a timestamp-derived skyline axis
-and the returned window's full endpoints. It also retains the eighth UTC date
-when a seven-day window starts after midnight. This fixes presentation using
-synthetic data; hosted aggregation and real invoices remain unverified.
+times. The fix established bucket starts, a timestamp-derived skyline axis and
+the returned window's full endpoints. The calendar and day-detail query use UTC
+dates. The [hourly display decision](../feature/2026-11-16-usage-local-time.md)
+applies the device time zone to those hourly timestamps.
 
 ## Evidence and decision
 
@@ -33,12 +33,11 @@ A synthetic UTC 23:00 bucket appeared as 08:00 in UTC+08, and a partial final
 with a UTC formatter: 23:00 became 00:00. This establishes a label defect, not
 lost tokens or incorrect cost totals.
 
-UTC was chosen over converting the calendar to each viewer's local time because
-the calendar and day-detail identity are already UTC. Returning to local labels
-would require a different day query contract. Bucket starts preserve the actual
+The calendar and day-detail identity use UTC. Local calendar-day totals require
+a different day query contract. Bucket starts preserve the actual
 timestamp identity; using ends alone shifts complete buckets and makes the last
-partial bucket a special case. Dates and explicit UTC resolve midnight ambiguity;
-tooltips preserve partial extents. The mobile surface now passes its selected
+partial bucket a special case. Dates and offsets resolve midnight ambiguity.
+Tooltips preserve partial extents. The mobile surface passes its selected
 timeline to the same visualization.
 
 Current behavior belongs to the [timeline Spec](../../../../specs/usage-timeline.md).

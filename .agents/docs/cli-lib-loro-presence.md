@@ -120,9 +120,11 @@ liveness over the local plane while offline.
 
 ## Session active presence has exactly one owner
 
-`session-active-presence.ts` alone owns session active presence. It starts once for a
-visible CLI turn, accepts phase updates, heartbeats while active, and clears on the
-owning Effect release. Never publish or clear session presence from `setStatus`, RPC
+`session-active-presence.ts` alone owns session active presence. It owns visible Turn leases and native agent activity. Turn phases take precedence; after
+a Turn releases, the latest native running or background level remains visible until the
+agent reports idle or its process exits. Native levels reconcile on a one-second timer and
+heartbeat while active, so repeated agent notifications cannot flood the shared channel.
+A Turn lease clears only on the owning Effect release. Never publish or clear session presence from `setStatus`, RPC
 dispatch, permission or image callbacks, or watcher recovery paths — a second writer
 makes the clear path unreliable and leaves sessions showing work that ended.
 

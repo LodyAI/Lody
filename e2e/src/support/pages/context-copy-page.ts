@@ -73,6 +73,8 @@ export class ContextCopyPage {
       .filter({ hasText: FIRST_PROMPT_MARKER })
       .getByRole('button', { name: /^(Fork session|分叉会话)$/u });
     await expect(forkButton).toBeInViewport({ ratio: 1 });
+    await forkButton.hover();
+    await expect(forkButton).toHaveAttribute('aria-haspopup', 'menu');
     await forkButton.click();
     await this.copyFromForkMenu();
   }
@@ -235,6 +237,9 @@ export class ContextCopyPage {
       .locator(`[data-assistant-turn-id="${turnId}"]`)
       .getByRole('button', { name: /^(Fork session|分叉会话)$/u });
     await expect(forkButton).toBeVisible();
+    await expect(forkButton).toBeInViewport({ ratio: 1 });
+    await forkButton.hover();
+    await expect(forkButton).toHaveAttribute('aria-haspopup', 'menu');
     await forkButton.click();
   }
 

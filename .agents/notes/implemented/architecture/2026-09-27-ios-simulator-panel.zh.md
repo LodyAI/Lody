@@ -138,7 +138,7 @@ Start 立即返回 preparing 操作；status 只观察、不续期。Stop 同时
 - `session-browser-panel.tsx` 同时拥有导航、地址和标注流程；`managed-preview-surface.tsx` 依赖标注与 Browser postMessage，因此不直接用作模拟器播放器。`preview-connection-status.tsx` 可提取通用展示，但文案需去除地址语义。
 - `apps/cli/src/preview/preview-service.ts` 的 activeTunnels、operations、取消和状态写入按 SessionId；当前同会话只有一个 remote owner。
 - `local-preview-proxy.ts` 当前两向 WS 数据消息均调用 `onActivity(true)`；视频必需有明确的续期策略，不能原样套用。
-- 相关决策：[Quick Tunnel](../../proposed/architecture/2026-09-21-quick-tunnel-preview.md)、[可选标注](../../implemented/bug-fix/2026-09-15-preview-optional-annotation.md)。这里只扩展模拟器产品边界，不撤回既有代理安全约束。
+- 相关决策：[Quick Tunnel](../../implemented/architecture/2026-09-21-quick-tunnel-preview.md)、[可选标注](../../implemented/bug-fix/2026-09-15-preview-optional-annotation.md)。这里只扩展模拟器产品边界，不撤回既有代理安全约束。
 
 ## 验收与限制
 

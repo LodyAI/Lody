@@ -1,3 +1,7 @@
+import { loadEnv } from '@/utils/const';
+import * as cloudCliPort from '@/lib/cloud-cli-port';
+import { ConvexHttpClient } from 'convex/browser';
+import { getFunctionName } from 'convex/server';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -92,8 +96,12 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
   let daemon: DaemonWorkspace;
 
   beforeEach(async () => {
+    vi.spyOn(cloudCliPort, 'canReadSessionForCliRequester').mockResolvedValue(true);
     presenceApplication = bindTestPresenceApplication(createSilentLogger());
     originalEnv = { ...process.env };
+    // This cloud fixture explicitly supplies its control-plane endpoint.
+    process.env.LODY_AUTH_URL = 'https://daemon-fixture.convex.cloud';
+    loadEnv();
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-daemon-tools-'));
     process.env.LODY_DATA_DIR = path.join(tempDir, '.lody');
     delete process.env.LODY_PLATFORM;
@@ -130,6 +138,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     await manager.cleanUp({ fast: true });
     await presenceApplication.closeLegacy();
     process.env = originalEnv;
+    loadEnv();
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -149,6 +158,20 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     machineId,
     machineName: 'Daemon',
   });
+
+  function admitSharedMachineManagement() {
+    // Keep ordinary cloud admission in the production path; only the service I/O is synthetic.
+    vi.spyOn(ConvexHttpClient.prototype, 'query').mockImplementation(async (reference, args) => {
+      if (getFunctionName(reference) !== 'machines:canDelegateMachineUseFromCliToken')
+        throw new Error('Unexpected cloud request in the management fixture');
+      const allowed =
+        args?.cliToken === 'synthetic-token' &&
+        args.workspaceId === workspaceId &&
+        args.machineId === machineId &&
+        [ownerUserId, 'synthetic-collaborator'].includes(args.requesterUserId);
+      return allowed ? { allowed: true } : { allowed: false, reason: 'not_visible' };
+    });
+  }
 
   function createEnvironment() {
     return createLocalSessionCommandEnvironment({
@@ -663,6 +686,9 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
   it('returns local create options without starting Streams sync', async () => {
     const projectId = 'synthetic-project' as LocalProjectId;
     const agentConfigId = await seedCreateOptionsCatalog(projectId);
+    const agentRoleId = 'synthetic-role' as AgentRoleId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), { agentRoleId });
+    await manager.repo.flush();
     stubCreateOptionsReaders();
     const { metaSync, flockSync } = rejectStreamsSync();
 
@@ -677,6 +703,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       agentConfigs: [{ id: agentConfigId }],
       localProjects: [{ id: projectId, name: 'Synthetic project' }],
       current: {
+        agentRoleId,
         workContext: {
           kind: 'local',
           projectId,
@@ -723,12 +750,14 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(metaSync).not.toHaveBeenCalled();
     expect(flockSync).not.toHaveBeenCalled();
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
-    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+    const options = JSON.parse(result.content[0]?.text ?? '{}');
+    expect(options).toMatchObject({
       ok: true,
       agentConfigs: [],
       localProjects: [],
       current: { workContext: { kind: 'chat' } },
     });
+    expect(options.current).not.toHaveProperty('agentRoleId');
   });
 
   it('keeps an unauthorized machine denied without starting create-option sync', async () => {
@@ -815,6 +844,75 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(item.value).not.toHaveProperty('lastTurnFailure');
   });
 
+  it('keeps bound owner history and archive usable without cloud configuration while other identities stay denied', async () => {
+    delete process.env.LODY_AUTH_URL;
+    delete process.env.LODY_AUTH_SITE_URL;
+    delete process.env.LODY_SERVER_URL;
+    loadEnv();
+    vi.mocked(cloudCliPort.canReadSessionForCliRequester).mockRestore();
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(workspaceApi, 'listWorkspacesForToken').mockRejectedValue(
+      new Error('Discovery is down')
+    );
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    daemon.readInvocation = (id) => ({
+      type: 'session/active-invocation-context',
+      active: true,
+      sessionId: id,
+      requesterUserId: ownerUserId,
+      sourceTurnId: 'owner-turn',
+      inputConfig: { cliType: 'custom', agentType: 'claude' },
+    });
+    daemon.readAccess = () => ({
+      status: 'authorized',
+      workspace: { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'owner' },
+    });
+    const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+    await backend.appendHistoryTurn({
+      id: 'owner-local-context',
+      role: 'user',
+      timestamp: '2026-11-10T00:00:00Z',
+      items: [{ type: 'text', text: 'owner local history' }],
+      fileDiff: [],
+    } as never);
+    const call = (name: string, args: Record<string, unknown>) =>
+      runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
+    const read = await call('lody_session_history', { sessionId });
+    expect(read.isError, JSON.stringify(read)).not.toBe(true);
+    expect(read.content[0]?.text).toContain('owner local history');
+    const authorized = daemon.readAccess;
+    daemon.readAccess = () => ({ status: 'revoked' });
+    const revoked = await call('lody_session_archive', { sessionId });
+    expect(revoked.isError).toBe(true);
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta.isArchived).toBe(
+      false
+    );
+    daemon.readAccess = authorized;
+    const archived = await call('lody_session_archive', { sessionId });
+    expect(archived.isError, JSON.stringify(archived)).not.toBe(true);
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta.isArchived).toBe(
+      true
+    );
+    // Neither a different driving human nor a different target machine inherits native ownership.
+    const ownerInvocation = daemon.readInvocation;
+    daemon.readInvocation = (id) => ({
+      ...ownerInvocation(id),
+      requesterUserId: 'synthetic-collaborator',
+    });
+    const sharedReader = await call('lody_session_history', { sessionId });
+    expect(sharedReader.isError).toBe(true);
+    expect(sharedReader.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+    expect(sharedReader.content[0]?.text).not.toContain('owner local history');
+    daemon.readInvocation = ownerInvocation;
+    const foreign = await manager.createSession(machineId, 'custom', 'claude');
+    await manager.repo.upsertDocMeta(getSessionRoomId(foreign), { machineId: 'foreign-machine' });
+    const remote = await call('lody_session_history', { sessionId: foreign });
+    expect(remote.isError).toBe(true);
+    expect(remote.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+    expect(remote.content[0]?.text).not.toContain('owner local history');
+  });
+
   it('reports the latest failed turn and marks its history entry', async () => {
     stubCreateOptionsReaders();
     const doc = await manager.getOrCreateSessionDoc(sessionId);
@@ -878,6 +976,57 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       })
     );
   });
+
+  it.each(['synthetic', 'local'])(
+    'reads individual grants as the active human in a cloud workspace named %s, never as the daemon owner',
+    async (slug) => {
+      stubCreateOptionsReaders();
+      vi.mocked(commandRuntime.resolveWorkspaceOrThrow).mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug,
+        role: 'owner',
+      });
+      const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+      await backend.appendHistoryTurn({
+        id: 'private-context',
+        role: 'user',
+        timestamp: '2026-11-10T00:00:00.000Z',
+        items: [{ type: 'text', text: 'individual context' }],
+        fileDiff: [],
+      } as never);
+      let recipient = 'synthetic-collaborator';
+      vi.mocked(cloudCliPort.canReadSessionForCliRequester).mockImplementation(
+        async (input) =>
+          input.requester.userId === recipient &&
+          input.machineId === machineId &&
+          input.rootSessionId === sessionId
+      );
+      const read = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), 'lody_session_history', { sessionId })
+        );
+      const granted = await read();
+      expect(granted.isError, JSON.stringify(granted)).not.toBe(true);
+      expect(JSON.parse(granted.content[0]?.text ?? '{}').items).toContainEqual(
+        expect.objectContaining({ id: 'private-context' })
+      );
+      recipient = ownerUserId;
+      const denied = await read();
+      expect(denied.isError).toBe(true);
+      expect(denied.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+      expect(denied.content[0]?.text).not.toContain('individual context');
+      daemon.readInvocation = (id) => ({
+        type: 'session/active-invocation-context',
+        active: true,
+        sessionId: id,
+        requesterUserId: ownerUserId,
+        sourceTurnId: 'owner-turn',
+        inputConfig: {},
+      });
+      expect((await read()).isError).not.toBe(true);
+    }
+  );
 
   async function createRemoteSession() {
     const otherMachineId = 'synthetic-other-machine' as MachineId;
@@ -1224,6 +1373,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         },
       });
       if (composition === 'cloud') {
+        admitSharedMachineManagement();
         vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
         vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
           id: workspaceId,
@@ -1285,6 +1435,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
       vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
       if (composition === 'cloud') {
+        admitSharedMachineManagement();
         vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
         vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
           id: workspaceId,
@@ -1355,6 +1506,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
   );
 
   it('serves bound Session tools from the daemon access verdict while workspace discovery is down', async () => {
+    admitSharedMachineManagement();
     const list = vi
       .spyOn(workspaceApi, 'listWorkspacesForToken')
       .mockRejectedValue(new Error('Synthetic workspace discovery outage'));

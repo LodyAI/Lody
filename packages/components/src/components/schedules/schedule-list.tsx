@@ -26,6 +26,7 @@ import {
   Search,
   Square,
   Trash2,
+  UserRound,
 } from 'lucide-react';
 import { getServerNow, type ScheduleRegistryRow, type ScheduleRuntimeRow } from '@lody/shared';
 import { Button } from '@lody/ui/button';
@@ -84,6 +85,8 @@ export function indexScheduleRuntimes(runtimes: ScheduleRuntimeRow[]) {
 }
 
 export type ScheduleRowContext = {
+  /** Display only; ownership checks always use the Registry ownerId. */
+  owner?: string;
   machine: string;
   timeZone?: string;
   agent: string;
@@ -107,6 +110,7 @@ export type ScheduleListProjectFilter =
   | { kind: 'none' }
   | { kind: 'project'; name: string };
 export type ScheduleListStatusFilter = 'all' | ScheduleStatus['group'];
+export type ScheduleListOwnerFilter = 'all' | 'mine' | 'others';
 export type ScheduleListSort = 'next' | 'recent' | 'name' | 'created';
 
 const styles = stylex.create({
@@ -446,6 +450,7 @@ type RowHandlers = {
 };
 
 type Entry = {
+  owner: string;
   row: ScheduleRegistryRow;
   runtime?: ScheduleRuntimeRow;
   context?: ScheduleRowContext;
@@ -701,6 +706,13 @@ function ScheduleListRow({
         </span>
         <span {...stylex.props(styles.summary)}>
           <span {...stylex.props(styles.summaryPart)}>{frequency}</span>
+          <span {...stylex.props(styles.separator)}>·</span>
+          <span
+            {...stylex.props(styles.summaryPart)}
+            title={t('schedules.owner.label', 'Owner: {{name}}', { name: entry.owner })}
+          >
+            {entry.owner}
+          </span>
           {context?.chat ? (
             <span {...stylex.props(styles.narrowOnly)}>
               <span {...stylex.props(styles.separator)}>·</span>
@@ -891,7 +903,9 @@ export function ScheduleListView({
   initialFilters,
   now = getServerNow(),
   viewerTimeZone,
+  currentUserId,
 }: {
+  currentUserId?: string;
   rows: ScheduleRegistryRow[];
   runtimes: ScheduleRuntimeRow[];
   ready: boolean;
@@ -917,6 +931,7 @@ export function ScheduleListView({
   query?: string;
   /** Stories and tests start from a given filter. */
   initialFilters?: {
+    owner?: ScheduleListOwnerFilter;
     project?: ScheduleListProjectFilter;
     status?: ScheduleListStatusFilter;
     sort?: ScheduleListSort;
@@ -960,6 +975,9 @@ export function ScheduleListView({
   const [statusFilter, setStatusFilter] = useState<ScheduleListStatusFilter>(
     initialFilters?.status ?? 'all'
   );
+  const [ownerFilter, setOwnerFilter] = useState<ScheduleListOwnerFilter>(
+    initialFilters?.owner ?? 'all'
+  );
   const [sort, setSort] = useState<ScheduleListSort>(initialFilters?.sort ?? 'next');
 
   const runtimeOf = indexScheduleRuntimes(runtimes);
@@ -967,6 +985,10 @@ export function ScheduleListView({
     const runtime = runtimeOf(row);
     const context = contextForRow?.(row);
     return {
+      owner:
+        row.ownerId === currentUserId
+          ? t('schedules.owner.you', 'You')
+          : (context?.owner ?? row.ownerId),
       row,
       runtime,
       context,
@@ -985,6 +1007,25 @@ export function ScheduleListView({
     (filter.kind === 'none' ? projectOf(entry) === null : projectOf(entry) === filter.name);
   const matchesStatus = (entry: Entry, filter: ScheduleListStatusFilter) =>
     filter === 'all' || entry.status.group === filter;
+  const matchesOwner = (entry: Entry, filter: ScheduleListOwnerFilter) =>
+    filter === 'all' ||
+    (!!currentUserId &&
+      (filter === 'mine'
+        ? entry.row.ownerId === currentUserId
+        : entry.row.ownerId !== currentUserId));
+  const ownerOptions: { value: ScheduleListOwnerFilter; label: string; count: number }[] = [
+    { value: 'all', label: t('schedules.filter.allOwners', 'Everyone'), count: entries.length },
+    {
+      value: 'mine',
+      label: t('schedules.filter.mine', 'Mine'),
+      count: entries.filter((entry) => matchesOwner(entry, 'mine')).length,
+    },
+    {
+      value: 'others',
+      label: t('schedules.filter.others', 'Other members'),
+      count: entries.filter((entry) => matchesOwner(entry, 'others')).length,
+    },
+  ];
   const projectNames = [
     ...new Set(entries.map(projectOf).filter((name): name is string => !!name)),
   ].sort();
@@ -1002,11 +1043,13 @@ export function ScheduleListView({
     .filter(
       (entry) =>
         nameOf(entry.row).toLowerCase().includes(query) &&
+        matchesOwner(entry, currentUserId ? ownerFilter : 'all') &&
         matchesProject(entry, project) &&
         matchesStatus(entry, statusFilter)
     )
     .sort((a, b) => compare(a, b) || nameOf(a.row).localeCompare(nameOf(b.row)));
-  const filtering = project.kind !== 'all' || statusFilter !== 'all';
+  const filtering =
+    project.kind !== 'all' || statusFilter !== 'all' || (!!currentUserId && ownerFilter !== 'all');
 
   const projectOptions = [
     {
@@ -1192,6 +1235,16 @@ export function ScheduleListView({
                 role="toolbar"
                 aria-label={t('schedules.filter.label', 'Filter and sort')}
               >
+                {currentUserId ? (
+                  <FilterMenu
+                    label={t('schedules.filter.owner', 'Owner')}
+                    icon={<UserRound {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
+                    value={ownerFilter}
+                    options={ownerOptions}
+                    active={ownerFilter !== 'all'}
+                    onChange={setOwnerFilter}
+                  />
+                ) : null}
                 <FilterMenu
                   label={t('schedules.filter.project', 'Project')}
                   icon={<Folder {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
@@ -1222,6 +1275,7 @@ export function ScheduleListView({
                     onClick={() => {
                       setProject({ kind: 'all' });
                       setStatusFilter('all');
+                      setOwnerFilter('all');
                     }}
                   >
                     {t('schedules.filter.clear', 'Clear filters')}

@@ -1,3 +1,4 @@
+import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
@@ -65,6 +66,7 @@ import {
   Copy,
   CornerLeftUp,
   Ellipsis,
+  FileText,
   Folder,
   GitBranch,
   GitBranchPlus,
@@ -72,6 +74,7 @@ import {
   Github,
   History,
   Image,
+  Link,
   LockKeyhole,
   MessageCircle,
   Monitor,
@@ -81,6 +84,7 @@ import {
   Plus,
   Search,
   Share2,
+  SquareArrowOutUpRight,
   Trash2,
   UserRoundCog,
   Users,
@@ -114,6 +118,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import type {
   LocalProjectId,
+  LineChange,
   MessageContent,
   MessageQueueItemInput,
   MessageQueueItem,
@@ -138,7 +143,6 @@ import {
   countPendingQueuedUserTurns,
   collectConversationMessages,
   type ConversationMessage,
-  deriveSessionPullRequestReadiness,
   evaluateBillingQuota,
   FREE_SESSION_TURN_LIMIT,
   FREE_SESSION_TURN_WARNING_REMAINING,
@@ -169,7 +173,9 @@ import {
   ScheduleRepository,
   type McpServerId,
   type ScheduleDocument,
+  type SessionPullRequestView,
 } from '@lody/shared';
+import { encryptedRemoteEditAndResendAvailable } from '../../lib/encrypted-machine-controls';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useAppCapability } from '@/lib/app-platform';
@@ -226,6 +232,7 @@ import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
   buildPathLauncherLaunchInput,
+  executePathLauncher,
   buildPathLauncherProbes,
   getAvailablePathLauncherOptions,
   getPathLauncherId,
@@ -1312,6 +1319,7 @@ export function SessionProjectInfo({
  */
 export type SessionOwnerMenuState = {
   members: WorkspaceMember[];
+  getDisabledReason?: (userId: string) => string | null;
   /** Current `SessionMeta.userId`; may name someone who already left. */
   ownerUserId: string;
   onChangeOwner: (userId: string) => void | Promise<void>;
@@ -1862,18 +1870,24 @@ export function SessionHeaderMenu({
                   onValueChange={(userId) => {
                     // Guard in the handler, not just via `disabled`: the
                     // menu stays mounted while the write is in flight.
-                    if (userId === owner.ownerUserId || owner.pendingUserId != null) return;
+                    if (
+                      userId === owner.ownerUserId ||
+                      owner.pendingUserId != null ||
+                      owner.getDisabledReason?.(userId)
+                    )
+                      return;
                     void owner.onChangeOwner(userId);
                   }}
                 >
                   {owner.members.map((member) => {
                     const isPending = owner.pendingUserId === member.userId;
+                    const disabledReason = owner.getDisabledReason?.(member.userId);
                     return (
                       <Menu.RadioItem
                         key={member.userId}
                         value={member.userId}
-                        disabled={owner.pendingUserId != null}
-                        title={member.email ?? member.name}
+                        disabled={owner.pendingUserId != null || !!disabledReason}
+                        title={disabledReason ?? member.email ?? member.name}
                         indicator="check"
                         indicatorSide="end"
                         endContent={
@@ -1886,6 +1900,7 @@ export function SessionHeaderMenu({
                           className="shrink-0"
                         />
                         {member.name}
+                        {disabledReason ? <span>{disabledReason}</span> : null}
                       </Menu.RadioItem>
                     );
                   })}
@@ -1960,7 +1975,7 @@ export function SessionHeaderMenu({
                   trimmedWorkspacePath ||
                   t('sessions.copyPathUnavailable', 'Workspace path unavailable')
                 }
-                icon={Copy}
+                icon={Folder}
               >
                 {t('sessions.copyPath', 'Copy path')}
               </Menu.Item>
@@ -1978,7 +1993,7 @@ export function SessionHeaderMenu({
                         'Conversation history is unavailable for this tab'
                       ))
                 }
-                icon={Copy}
+                icon={FileText}
               >
                 {t('sessions.copyAsMarkdown', 'Copy as Markdown')}
               </Menu.Item>
@@ -1986,12 +2001,12 @@ export function SessionHeaderMenu({
                 onClick={() => {
                   void onCopyUrl();
                 }}
-                icon={Copy}
+                icon={Link}
               >
                 {t('sessions.copyUrl', 'Copy URL')}
               </Menu.Item>
               {onCopyDeepLink ? (
-                <Menu.Item onClick={() => void onCopyDeepLink()} icon={Copy}>
+                <Menu.Item onClick={() => void onCopyDeepLink()} icon={SquareArrowOutUpRight}>
                   {t('sessions.copyDeepLink', 'Copy deeplink')}
                 </Menu.Item>
               ) : null}
@@ -2333,7 +2348,7 @@ export interface SessionChatInterfaceProps {
    */
   paintSessionMentionOverlay?: boolean;
   /** All-Changes totals for the context strip; null/undefined hides the diffstat. */
-  changesDiffStat?: { add: number; del: number } | null;
+  changesDiffStat?: LineChange | null;
   /** Called when the context strip's diffstat is clicked. */
   onOpenAllChanges?: () => void;
   /** Native ACP fork action for the latest completed assistant turn. */
@@ -2643,18 +2658,20 @@ export const SessionChatInterface = memo(
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
     const liveSessionStatus = liveSessionPresence?.status ?? null;
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
-    const automationSupported =
-      !!runtime &&
-      workspaceSupports(
-        { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
-        'automations'
-      );
+    const automationContent = {
+      mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext',
+    } as const;
+    const automationSupported = !!runtime && workspaceSupports(automationContent, 'automations');
     const continuation = useLocalSessionContinuation(
       automationSupported &&
         workspaceId &&
         session.machineId &&
         (isLocalSession ||
-          (!!localMachineId && !!getAutomationProofIssuer() && currentUser?.id === session.userId))
+          // Remote control rides workspace Machine RPC; encrypted workspaces withhold it.
+          (!!localMachineId &&
+            !!getAutomationProofIssuer() &&
+            workspaceSupports(automationContent, 'rpc') &&
+            currentUser?.id === session.userId))
         ? {
             workspaceId,
             machineId: session.machineId,
@@ -2949,6 +2966,7 @@ export const SessionChatInterface = memo(
       repoFullName,
       latestPr,
       latestPrState,
+      pullRequestHistory,
       canShowGitHubActions,
       hasExistingPr,
       workspaceDirty,
@@ -2977,6 +2995,10 @@ export const SessionChatInterface = memo(
       void openExternalUrl(latestPr.url);
     });
     const prLinkHandler = latestPr ? openLatestPr : undefined;
+    // The PR tab follows the current PR, so an earlier PR opens on GitHub.
+    const openHistoryPr = useStableCallback((view: SessionPullRequestView) => {
+      void openExternalUrl(view.url);
+    });
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
       sessionId: prSessionId,
@@ -2989,7 +3011,6 @@ export const SessionChatInterface = memo(
     const {
       data: activePrData,
       state: activePrState,
-      refreshCheckRuns: refreshActivePrCheckRuns,
       mergePullRequest: mergeActivePullRequest,
       isMerging: isActivePrMerging,
       markReadyForReview: markActivePrReadyForReview,
@@ -3137,17 +3158,26 @@ export const SessionChatInterface = memo(
       },
       [session.id, t, transferSessionOwner, workspaceMembers]
     );
+    const getOwnerAccessReason = useSessionOwnerAccess();
     const ownerMenuState = useMemo<SessionOwnerMenuState | undefined>(
       () =>
         isMultiMember
           ? {
               members: workspaceMembers,
+              getDisabledReason: (userId) => getOwnerAccessReason(session, userId),
               ownerUserId: session.userId,
               onChangeOwner: handleChangeOwner,
               pendingUserId: pendingOwnerUserId,
             }
           : undefined,
-      [handleChangeOwner, isMultiMember, pendingOwnerUserId, session.userId, workspaceMembers]
+      [
+        handleChangeOwner,
+        isMultiMember,
+        pendingOwnerUserId,
+        session,
+        workspaceMembers,
+        getOwnerAccessReason,
+      ]
     );
     const [sendingMessageIds, setSendingMessageIds] = useState<ReadonlySet<string>>(new Set());
     const [dismissedProposedPlanDecisionKeys, setDismissedProposedPlanDecisionKeys] = useState<
@@ -3238,7 +3268,7 @@ export const SessionChatInterface = memo(
     );
 
     // How current the shown conversation is: a skeleton while nothing is cached,
-    // "Updating" in the info bar while a cached copy catches up. "Caught up"
+    // "Syncing" in the info bar while a cached copy catches up. "Caught up"
     // is sticky per open, so later sync blips (live output) stay quiet.
     const contentCaughtUpRef = useRef({ sessionId: session.id, caughtUp: false });
     if (contentCaughtUpRef.current.sessionId !== session.id) {
@@ -3717,9 +3747,17 @@ export const SessionChatInterface = memo(
       t,
       workspaceId,
     ]);
+    // Encrypted remote machines cannot take ordinary RPC, but their owner reaches edit and
+    // resend through the signed feature channel once the machine supports it.
+    const encryptedRemoteEditAvailable = encryptedRemoteEditAndResendAvailable({
+      contentMode: runtime?.contentMode,
+      accountId: runtime?.accountId,
+      machine: sessionMachine,
+    });
+    const editRpcReason = encryptedRemoteEditAvailable ? undefined : rpcReason;
     const editableLastUserMessageId = useMemo(() => {
       if (
-        rpcReason ||
+        editRpcReason ||
         session.isArchived ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
@@ -3762,7 +3800,7 @@ export const SessionChatInterface = memo(
       return userMessage.id;
     }, [
       capabilityAuthority,
-      rpcReason,
+      editRpcReason,
       isGoalActive,
       session.agentConfigId,
       session.agentType,
@@ -5443,15 +5481,13 @@ export const SessionChatInterface = memo(
       [conversationView]
     );
 
-    // Composed, not two fully-inlined strings: the upkeep paragraph then lives in
-    // one key per language instead of being repeated inside both prompts.
-    const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
     // The origin line tells the user, reading back, that this message came from
     // the button rather than from something they typed.
-    // A Project group conversation publishes every repository it changed, the
-    // submodules before their parents, so the same actions carry that scope.
+    // A Project group conversation publishes every repository it changed, so the
+    // same actions carry the group facts.
     const scopeToProjectGroup = (prompt: string) =>
       session.projectRun ? withProjectGroupPrScope(prompt) : prompt;
+    const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
     const createPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
       scopeToProjectGroup(
@@ -5556,8 +5592,10 @@ export const SessionChatInterface = memo(
       workspaceDirty,
     ]);
 
+    // The CI verdict already comes from Session metadata, so the action sends only
+    // the PR identity; the agent reads the failing checks itself.
     const handleFixCiErrors = useCallback(async () => {
-      if (isPrActionPending) return;
+      if (isPrActionPending || !latestPr?.url) return;
       const targetSessionId = session.id;
       setPrActionPendingSessionId(targetSessionId);
       captureSessionEvent('session/quick_action_selected', {
@@ -5566,31 +5604,20 @@ export const SessionChatInterface = memo(
         workspace_dirty: workspaceDirty,
       });
       try {
-        const refreshed = await refreshActivePrCheckRuns();
-        if (!refreshed) {
-          toast.error(t('sessions.fixCiErrors.fetchError', 'Failed to load the failed CI checks'));
-          return;
-        }
-        const prompt = buildFixCiErrorsPrompt(
-          {
-            repoFullName: latestPrRepoFullName,
-            pullRequest: refreshed.pullRequest,
-            checkRuns: refreshed.checkRuns,
-          },
-          t
+        const accepted = await dispatchPrompt(
+          buildFixCiErrorsPrompt(
+            {
+              repoFullName: latestPrRepoFullName,
+              prNumber: latestPrNumber,
+              prUrl: latestPr.url,
+            },
+            t
+          ),
+          executionTurnConfigOverrides
         );
-        if (!prompt) {
-          toast.info(t('sessions.fixCiErrors.noFailures', 'No failing CI checks were found'));
-          return;
-        }
-        const accepted = await dispatchPrompt(prompt, executionTurnConfigOverrides);
         if (!accepted) {
           toast.error(t('sessions.fixCiErrors.sendError', 'Failed to send the CI fix request'));
         }
-      } catch (error) {
-        toast.error(t('sessions.fixCiErrors.fetchError', 'Failed to load the failed CI checks'), {
-          description: getErrorMessage(error),
-        });
       } finally {
         setPrActionPendingSessionId((current) => (current === targetSessionId ? null : current));
       }
@@ -5599,8 +5626,9 @@ export const SessionChatInterface = memo(
       dispatchPrompt,
       executionTurnConfigOverrides,
       isPrActionPending,
+      latestPr,
+      latestPrNumber,
       latestPrRepoFullName,
-      refreshActivePrCheckRuns,
       session.id,
       t,
       workspaceDirty,
@@ -5734,6 +5762,7 @@ export const SessionChatInterface = memo(
         if (!runtime) return null;
         return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
           protectedContent: runtime.contentMode === 'e2ee',
+          signDeclaration: runtime.signScheduleDeclaration,
         }).read(scheduleId);
       },
       [runtime]
@@ -5810,6 +5839,7 @@ export const SessionChatInterface = memo(
           await runtime.withScheduleStore(item.scheduleId, () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',
+              signDeclaration: runtime.signScheduleDeclaration,
             }).setEnabled({
               scheduleId: item.scheduleId,
               actorId: currentUser.id,
@@ -5983,7 +6013,6 @@ export const SessionChatInterface = memo(
         isAgentBusy,
         prCiState: latestPrState?.s,
         prMergeState: latestPrState?.m,
-        prReadiness: deriveSessionPullRequestReadiness(latestPrState),
         prStatus: effectivePrStatus,
       }).map((actionId) => {
         const disabledForHydration = shouldDisableSessionInfoBarGitHubActionForHydration(
@@ -6890,8 +6919,9 @@ export const SessionChatInterface = memo(
     ]);
     const pathLauncherOptions = useMemo(
       () =>
-        launcherCandidates.filter((launcher) =>
-          availableLauncherIds.has(getPathLauncherId(launcher))
+        launcherCandidates.filter(
+          (launcher) =>
+            launcher.kind === 'custom' || availableLauncherIds.has(getPathLauncherId(launcher))
         ),
       [availableLauncherIds, launcherCandidates]
     );
@@ -6951,7 +6981,8 @@ export const SessionChatInterface = memo(
             return;
           }
 
-          const result = await getIpcServices()!.app.launchLocalPath(request);
+          const result = await executePathLauncher(launcher, path);
+          if (!result.launched && result.error === 'launcher_not_approved') return;
           if (!result.launched) {
             captureSessionEvent('session/open_in_ide_failed', {
               ...analyticsProperties,
@@ -7409,7 +7440,9 @@ export const SessionChatInterface = memo(
                         !shareSelection.active &&
                         !shouldReplaceComposerWithPermission
                       }
-                      onQuote={(text) => inputAreaRef.current?.addMessageQuote(text) ?? false}
+                      onQuote={(text, options) =>
+                        inputAreaRef.current?.addMessageQuote(text, options) ?? false
+                      }
                     />
                     <div
                       ref={setMessageArea}
@@ -7649,6 +7682,8 @@ export const SessionChatInterface = memo(
                         workspaceLocation={infoBarWorkspaceLocation}
                         pr={canShowGitHubActions ? latestPr : null}
                         onOpenPr={prLinkHandler}
+                        prHistory={canShowGitHubActions ? pullRequestHistory : undefined}
+                        onOpenHistoryPr={openHistoryPr}
                         contextActions={infoBarContextActions}
                         onOpenAllChanges={onOpenAllChanges}
                         // Opener + every Session/Tab created here: the in-stream

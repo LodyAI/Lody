@@ -187,7 +187,72 @@ public enum CreateLogic {
     var projects = next.projects ?? [:]
     projects[target] = selection
     next.projects = projects
+    if let machineId = selection.machineId, !machineId.isEmpty {
+      var machines = next.machines ?? [:]
+      machines[machineId] = selection
+      next.machines = machines
+    }
     return next
+  }
+
+  /// The agent and choice to show when a computer is picked: the last ones used there, while
+  /// that agent is still offered, else its first agent with that agent's remembered choice.
+  public static func restoreMachine(_ prefs: CreatePrefs?, machineId: String, options: CreationOptions?)
+    -> (agentKey: String, choice: ModelChoice)
+  {
+    let agents = (options?.agents ?? []).filter { $0.machineId == machineId }
+    let saved = prefs?.machines?[machineId]
+    let agent = agents.first { $0.key == saved?.agentKey } ?? agents.first
+    let capability = capabilityFor(options, agent)
+    let legacy = saved?.agentKey == agent?.key ? saved : nil
+    let modelId = capability?.models.contains { $0.id == legacy?.modelId } == true ? legacy?.modelId : nil
+    return (
+      agent?.key ?? "",
+      rememberedModelChoice(prefs, agentKey: agent?.key ?? "", capability: capability, modelId: modelId, legacy: legacy)
+    )
+  }
+
+  // MARK: Recently used run configurations (web `lib/recent-run-configs.ts`)
+
+  /// Stored deeper than shown, so one one-off run cannot evict a combination used every day.
+  public static let maxStoredRecents = 12
+  public static let maxVisibleRecents = 3
+
+  private struct RecentIdentity: Encodable {
+    let agentKey: String
+    let choice: ModelChoice
+    let agentRoleId: String?
+  }
+
+  /// Two runs are the same configuration only when every value matches.
+  public static func recentKey(agentKey: String, choice: ModelChoice, agentRoleId: String?) -> String {
+    CreateJSON.encode(RecentIdentity(agentKey: agentKey, choice: choice, agentRoleId: agentRoleId))
+  }
+
+  public static func recentKey(_ record: RecentRunConfig) -> String {
+    recentKey(agentKey: record.agentKey, choice: record.choice, agentRoleId: record.agentRoleId)
+  }
+
+  /// Most recent first, deduplicated by identity, capped.
+  public static func withRecent(_ prefs: CreatePrefs?, _ record: RecentRunConfig) -> CreatePrefs {
+    var next = prefs ?? CreatePrefs()
+    let key = recentKey(record)
+    next.recents = Array(([record] + (next.recents ?? []).filter { recentKey($0) != key }).prefix(maxStoredRecents))
+    return next
+  }
+
+  /// A recorded choice limited to what the agent offers now: a model, effort, mode or option
+  /// it dropped is left out rather than forced back in.
+  public static func applicableChoice(_ saved: ModelChoice, capability: Capability?) -> ModelChoice {
+    let modelId = capability?.models.contains { $0.id == saved.modelId } == true ? saved.modelId : nil
+    let effort = saved.effort.flatMap { effortsFor(capability, modelId: modelId).contains($0) ? $0 : nil }
+    let modeId = saved.modeId.flatMap { id in capability?.modes.contains { $0.id == id } == true ? id : nil }
+    var values: [String: ConfigValue] = [:]
+    for option in capability?.configOptions ?? [] where option.category != "model" && !isThoughtLevel(option) {
+      let value = saved.configOptionValues?[option.id]
+      if validConfigValue(option, value) { values[option.id] = value }
+    }
+    return ModelChoice(modelId: modelId, effort: effort, modeId: modeId, configOptionValues: values.isEmpty ? nil : values)
   }
 }
 

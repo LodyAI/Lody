@@ -2,6 +2,7 @@
 import AVFoundation
 import Photos
 import UIKit
+import UniformTypeIdentifiers
 
 private final class ChatPhotoCell: UICollectionViewCell {
   let image = UIImageView()
@@ -648,9 +649,15 @@ final class ChatAttachmentSheet: UIViewController, UICollectionViewDataSource, U
         }
         continue
       }
-      let name = PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "\(UUID().uuidString).jpg"
-      self.images.requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
+      let original = PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "\(UUID().uuidString).jpg"
+      self.images.requestImageDataAndOrientation(for: asset, options: options) { data, dataUTI, _, _ in
         defer { group.leave() }
+        // `.current` renders edits (crops, markup) in a new format; name the file after the data.
+        var name = original
+        if let type = dataUTI.flatMap(UTType.init), let ext = type.preferredFilenameExtension,
+           UTType(filenameExtension: (original as NSString).pathExtension)?.conforms(to: type) != true {
+          name = (original as NSString).deletingPathExtension + "." + ext
+        }
         guard let data, let url = ChatAttachment.store(data, name: name) else { return }
         attachments.add(index, ChatAttachment(id: id, name: name, url: url, isImage: true))
       }

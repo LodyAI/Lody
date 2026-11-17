@@ -8,7 +8,7 @@ import catalog
 
 ui = UI(sys.argv[1], sys.argv[2])
 ui.axe('tap', '--label', catalog.text('accessibility.closeSheet', title=catalog.text('settings.preferences.title')), '--post-delay', '.4')
-ui.open_case('appearance-preview')
+ui.open_case('settings-baseline-live')
 entry = ui.element('preferences')
 assert catalog.text('settings.preferences.subtitle') in entry['AXLabel']
 ui.capture('settings-language-entry')

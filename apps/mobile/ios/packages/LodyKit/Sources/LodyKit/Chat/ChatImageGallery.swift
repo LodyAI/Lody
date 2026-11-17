@@ -13,6 +13,7 @@ enum ChatImageGallery {
       if row.kind == "image", let image = row.image {
         return [ChatImagePreviewItem(id: row.id, image: image, localURI: row.localImageURI)]
       }
+      if row.kind == "imageStack" { return row.stack }
       if row.kind == "attachments" {
         return row.attachments.compactMap { attachment in
           guard let image = attachment.image else { return nil }

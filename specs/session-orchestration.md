@@ -226,6 +226,13 @@ machine and project, and executes the same Role resolution and durable Operation
 state machine used by cloud. Hosted repository contexts remain unavailable;
 registered local projects and plain chat are supported.
 
+An Agent may keep working after its Turn ends, woken by its own background task,
+scheduled wake-up or cron. Until Stop, the Agent's exit or replacement, a
+collaboration stop or the next Turn, that same Agent's calls act for the last Turn
+that ended without Stop or cancellation, with that Turn's frozen identity. Only
+that Agent holds the Session's tool binding, so Lody does not require it to report
+its own activity; providers such as Codex report none.
+
 Recovery uses the frozen prompt, Role revision and dispatch configuration. Before
 replaying a missing target input, cloud confirms remote document catch-up; OSS
 confirms the authoritative daemon repo and rechecks the fixed Turn under the

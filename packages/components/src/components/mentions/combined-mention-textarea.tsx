@@ -65,6 +65,7 @@ import { getAgentRoleEmoji, type AcpCommandSummary, type MachineId } from '@lody
 import { Mention, MentionInput, MentionLabel, useMentionContext } from '@/ui/mention';
 import type { Mention as MentionRange, MentionChipResolver } from '@/ui/mention/index';
 import { Textarea, type TextareaProps } from '@lody/ui/textarea';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
@@ -606,7 +607,13 @@ function AgentRoleMentionHydrator({
  */
 export type CombinedMentionTextareaHandle = {
   /** Insert an externally owned atom through the same splice as menu/drop edits. */
-  insertExternalMention: (request: { text: string; id: string; at: number }) => boolean;
+  insertExternalMention: (request: {
+    text: string;
+    id: string;
+    at: number;
+    /** Plain text written right after the atom in the same transaction. */
+    suffix?: string;
+  }) => boolean;
   /**
    * Append a session mention. Returns false when nothing was written: an
    * unknown/archived/own session, or one the draft already mentions.
@@ -645,9 +652,9 @@ function MentionActionsBridge({
   React.useImperativeHandle(
     actionsRef,
     () => ({
-      insertExternalMention: ({ text, id, at }) => {
+      insertExternalMention: ({ text, id, at, suffix }) => {
         if (context.disabled || context.readonly || !text) return false;
-        onMentionInsert({ text, value: id, kind: 'pasted_text', at });
+        onMentionInsert({ text, value: id, kind: 'pasted_text', at, suffix });
         return true;
       },
       insertSessionMention: (sessionId, options) => {
@@ -689,10 +696,25 @@ function MentionActionsBridge({
 // Main Component
 // ============================================================================
 
-export interface CombinedMentionTextareaProps extends Omit<
-  TextareaProps,
-  'value' | 'defaultValue' | 'onChange'
-> {
+/** Handlers a composer accepts; they receive the mention editor or, without
+ * mention sources, the plain textarea. */
+type ComposerEventProps = {
+  onKeyDown?: React.KeyboardEventHandler<ComposerInputElement>;
+  onPaste?: React.ClipboardEventHandler<ComposerInputElement>;
+  onCopy?: React.ClipboardEventHandler<ComposerInputElement>;
+  onCut?: React.ClipboardEventHandler<ComposerInputElement>;
+  onBeforeInput?: React.FormEventHandler<ComposerInputElement>;
+  onCompositionStart?: React.CompositionEventHandler<ComposerInputElement>;
+  onCompositionEnd?: React.CompositionEventHandler<ComposerInputElement>;
+  onFocus?: React.FocusEventHandler<ComposerInputElement>;
+  onBlur?: React.FocusEventHandler<ComposerInputElement>;
+  onClick?: React.MouseEventHandler<ComposerInputElement>;
+};
+
+export interface CombinedMentionTextareaProps
+  extends
+    Omit<TextareaProps, 'value' | 'defaultValue' | 'onChange' | keyof ComposerEventProps>,
+    ComposerEventProps {
   /** Explicit template scope. Disables token hydration and context-dependent session/command mentions. */
   templateScope?: PromptShortcutScope;
   promptShortcutSource?: MentionCategorySources['promptShortcut'];
@@ -773,7 +795,7 @@ export interface CombinedMentionTextareaProps extends Omit<
 }
 
 export const CombinedMentionTextarea = React.forwardRef<
-  HTMLTextAreaElement,
+  ComposerInputElement,
   CombinedMentionTextareaProps
 >(
   (
@@ -1067,7 +1089,7 @@ export const CombinedMentionTextarea = React.forwardRef<
     if (!enableMentions) {
       const textarea = (
         <Textarea
-          ref={ref}
+          ref={ref as React.Ref<HTMLTextAreaElement>}
           // Marks the message composer so the ⇧Tab "cycle mode" command can scope
           // itself to the composer and not hijack reverse-Tab elsewhere.
           data-lody-composer-input=""
@@ -1158,13 +1180,13 @@ export const CombinedMentionTextarea = React.forwardRef<
         </React.Fragment>
         <MentionLabel className="sr-only">{label}</MentionLabel>
         <MentionInput
-          ref={ref}
+          ref={ref as React.Ref<HTMLDivElement>}
           // See the data attribute note above — scopes the ⇧Tab mode cycle.
           data-lody-composer-input=""
           value={value}
           containerClassName={cn(containerClassName, fillHeight && 'h-full')}
           className={cn('resize-none', fillHeight && 'h-full', className)}
-          {...props}
+          {...(props as Omit<React.ComponentProps<typeof MentionInput>, 'ref'>)}
         />
         <TwoLevelMentionMenu
           templateScope={templateScope}

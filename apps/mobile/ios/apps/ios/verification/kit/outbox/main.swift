@@ -111,8 +111,44 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
   return (dispatcher, store, disk)
 }
 
+// The production submit method runs against injected mode and actual OutboxStore ports.
+@MainActor struct CreateSessionService {
+  var workspaceMode: (String) -> WorkspaceContentMode
+  var put: (String, String, String) -> Task<Void, Error>
+}
+
 @main struct OutboxCheck {
   @MainActor static func main() async throws {
+    let admissionDisk = Disk()
+    let admissionStore = OutboxStore(key: "pending-sends:u:guarded", generation: 0, persistence: admissionDisk.persistence, awaitingConfirmation: "waiting")
+    var mode: WorkspaceContentMode = .unknown
+    let service = CreateSessionService(workspaceMode: { _ in mode }, put: { _, _, json in
+      guard let record = OutboxRecord.decode(json) else { return Task { throw OutboxError.invalidRecord } }
+      return admissionStore.put(record)
+    })
+    let json = String(decoding: try JSONEncoder().encode(record("blocked-prompt")), as: UTF8.self)
+    for blocked in [WorkspaceContentMode.e2ee, .unknown] {
+      mode = blocked
+      do { _ = try service.submit(user: "u", workspace: "guarded", json: json); preconditionFailure("Blocked creation entered the outbox") }
+      catch WorkspaceContentError.blocked { }
+      precondition(admissionStore.snapshot.records.isEmpty && admissionDisk.values.isEmpty, "Encrypted/unknown creation must not publish or persist prompt/attachments")
+    }
+    mode = .plaintext
+    try await service.submit(user: "u", workspace: "guarded", json: json).value
+    precondition(admissionDisk.records("pending-sends:u:guarded").count == 1 && admissionStore.snapshot.records.count == 1)
+    print("PASS: production CreateSessionService.submit blocks encrypted/unknown prompts before outbox publication and persistence; plaintext still writes")
+    let lateDisk = Disk(), hydration = Gate()
+    lateDisk.hydration["late-admission"] = hydration
+    var admitted = true
+    let lateStore = OutboxStore(key: "late-admission", generation: 0, persistence: lateDisk.persistence, awaitingConfirmation: "waiting", admit: {
+      if !admitted { throw WorkspaceContentError.blocked }
+    })
+    let queued = lateStore.put(record("queued-before-encryption"))
+    admitted = false; hydration.open()
+    do { try await queued.value; preconditionFailure("A queued plaintext write must recheck admission") }
+    catch WorkspaceContentError.blocked { }
+    precondition(lateDisk.values.isEmpty, "Encryption discovered before queued write admission must prevent disk persistence")
+    print("PASS: queued outbox writes recheck mode immediately before persistence without blocking cleanup")
     try await pendingSends()
     try await dispatch()
     try await foreground()
@@ -343,6 +379,12 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     (dispatcher, store, _) = await harness([record("s1")], network)
     precondition(phases(store) == ["unknown"] && network.alerts.isEmpty, "an unreadable ACK is ambiguous, not failed")
     print("PASS: session_not_ready waits again, definite rejections fail with an alert, ambiguous replies become unknown")
+
+    network = Network()
+    network.send = { _ in #"{"state":"not_sent","reason":"previous_input_pending"}"# }
+    (dispatcher, store, _) = await harness([record("s1")], network)
+    precondition(network.sent.count == 1 && phases(store) == ["waiting"] && network.alerts.isEmpty)
+    print("PASS: a background send behind an unconfirmed Roost input stays waiting without an alert")
     _ = dispatcher
   }
 
@@ -386,6 +428,15 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     await settle()
     precondition(network.sent.count == 2 && network.sent[1]["id"] == network.sent[0]["id"])
     print("PASS: page failures keep the draft, unknown results never replay, and an explicit retry reuses the identity")
+
+    network = Network()
+    var behind = [#"{"state":"not_sent","reason":"previous_input_pending"}"#, #"{"state":"queued"}"#]
+    network.send = { _ in behind.removeFirst() }
+    (dispatcher, store, _) = await harness([record("s1")], network, inputs: page(), foreground: "s1")
+    await settle()
+    precondition(network.sent.count == 2 && network.sent[1]["id"] == network.sent[0]["id"])
+    precondition(phases(store) == ["queued"] && network.alerts.isEmpty)
+    print("PASS: a page send behind an unconfirmed Roost input keeps waiting and continues with the same identity")
 
     network = Network()
     network.create = { _ in #"{"state":"created","session":{"id":"s1","machineId":"m1"}}"# }
@@ -476,7 +527,41 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     ack.open()
     await settle()
     precondition(network.sent.count == 1 && phases(store) == ["accepted"], "a page opened mid-send leaves the background write alone")
+    try await pageWakesAfterBackgroundRelease()
     print("PASS: the page and background dispatchers hand a session over without dispatching the same id twice")
+  }
+
+  /// A page opened while the background dispatcher still holds its session must settle the record
+  /// once that hold ends, even when nothing else on the page changes afterwards.
+  @MainActor static func pageWakesAfterBackgroundRelease() async throws {
+    let network = Network()
+    let ack = Gate()
+    network.send = { _ in try await ack.wait(); throw OutboxError.invalidRecord }
+    let disk = Disk()
+    disk.values["pending-sends:u1:w"] = OutboxRecord.encode([record("s1", sendId: "R")])
+    let stores = OutboxStores(persistence: disk.persistence, awaitingConfirmation: { "send.reason.awaitingConfirmation" })
+    let store = stores.store(user: "u1", workspace: "w")!
+    let inflight = OutboxInflight()
+    let global = OutboxDispatcher(services: network.services, inflight: inflight, text: { $0 })
+    let owned = OutboxDispatcher(services: network.services, inflight: inflight, foreground: "s1", text: { $0 })
+    stores.onChange = { [weak global, weak owned] _ in global?.schedule(); owned?.schedule() }
+    global.update(store: store, inputs: .init(userId: "u1", connected: true, latestUserMessages: ["s1": ""]))
+    await settle()
+    precondition(network.sent.count == 1 && phases(store) == ["sending"], "the background dispatcher sends first")
+    // The reply is already on the page; the background result's write is still in flight when the page runs.
+    let entries: [[String: Any]] = [["id": "R", "role": "user"], ["id": "a1", "role": "assistant", "userTurnId": "R", "finished": true]]
+    global.update(store: store, inputs: .init(userId: "u1", connected: true, foregroundSessionId: "s1", latestUserMessages: ["s1": ""]))
+    owned.update(store: store, inputs: page(entries))
+    let write = Gate()
+    disk.block = write
+    ack.open()
+    await settle()
+    precondition(phases(store) == ["unknown"] && inflight.contains("s1"), "the ambiguous result is published while its write is pending")
+    write.open()
+    await settle()
+    precondition(phases(store).isEmpty && network.sent.count == 1,
+      "the page clears a replied turn once the background hold ends instead of staying on confirming: \(phases(store))")
+    stores.onChange = nil
   }
 }
 

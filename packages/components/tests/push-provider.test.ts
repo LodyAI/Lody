@@ -71,9 +71,9 @@ it('registers the authenticated native account with OneSignal by default and rev
   const client = (await t.module.initPush())!;
   await client.login('alice');
   await client.User.PushSubscription.optIn();
-  expect(t.state()).toEqual({ owner: 'lody-push-v2:alice', optedIn: true, direct: false });
+  expect(t.state()).toEqual({ owner: 'alice', optedIn: true, direct: false });
   await client.login('bob');
-  expect(t.state().owner).toBe('lody-push-v2:bob');
+  expect(t.state().owner).toBe('bob');
   await t.module.logoutPush();
   expect(t.state()).toEqual({ owner: undefined, optedIn: false, direct: false });
 });

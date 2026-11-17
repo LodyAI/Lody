@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
-// @vitest-environment jsdom
-// @vitest-environment jsdom
 import { webcrypto } from 'node:crypto';
 import { prepareSharePackage, createShareDeliveryKey } from '@lody/shared/session-sharing';
 import { act, Component, type ReactNode } from 'react';

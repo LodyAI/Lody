@@ -112,14 +112,13 @@ await registration.drain()
 precondition(backend.binding == nil && !ready, "logout drains remote registration without retaining a deliverable installation")
 print("PASS: session-authorized APNs lifecycle, exact capability, topic binding, transitions, failure recovery and stale write fencing")
 
-precondition(PushRegistration.externalID("alice") == "lody-push-v2:alice", "OneSignal delivery uses the current versioned identity")
-for recipient: String? in [nil, "bob", "lody-push-v2:alice"] {
-  precondition(!PushClickBuffer.shouldDisplay(userId: "alice", recipient: recipient, route: "/work/sessions/a", visibleRoute: ""), "foreign or namespaced recipients cannot display for a raw account")
+for recipient: String? in [nil, "", "bob", " alice "] {
+  precondition(!PushClickBuffer.shouldDisplay(userId: "alice", recipient: recipient, route: "/work/sessions/a", visibleRoute: ""), "missing or mismatched recipients cannot display for a raw account")
 }
 precondition(!PushClickBuffer.shouldDisplay(userId: nil, recipient: "alice", route: nil, visibleRoute: ""), "signed-out foreground delivery is suppressed")
 precondition(!PushClickBuffer.shouldDisplay(userId: "alice", recipient: "alice", route: "/work/sessions/a", visibleRoute: "/work/sessions/a"), "the visible conversation does not notify twice")
 precondition(PushClickBuffer.shouldDisplay(userId: "alice", recipient: "alice", route: "/work/sessions/b", visibleRoute: "/work/sessions/a"), "another conversation still notifies its owner")
-print("PASS: raw recipient foreground ownership and versioned OneSignal identity")
+print("PASS: verified recipient foreground ownership")
 
 let direct: [AnyHashable: Any] = ["route": "/work/sessions/a", "recipientUserId": "alice"]
 let wrapped: [AnyHashable: Any] = ["custom": ["i": "push-a", "a": direct]]

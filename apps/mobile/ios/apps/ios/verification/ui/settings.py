@@ -158,18 +158,4 @@ if agents_only:
     sys.exit(0)
 
 back()
-tap('settings-mcp')
-ui.wait(lambda items: any(item.get('AXUniqueId') == 'setting:mcp::c1' and 'Documentation' in (item.get('AXLabel') or '') for item in items), 'MCP section did not open')
-assert catalog.text('settings.mcp.defaultOff') in label('setting:mcp::c1')
-tap('setting:mcp::c1')
-ui.capture('mcp-editor')
-toggle = ui.element('setting-enabled')['frame']
-ui.axe('drag', '--start-x', str(toggle['x'] + 10), '--start-y', str(toggle['y'] + toggle['height'] / 2), '--end-x', str(toggle['x'] + toggle['width'] - 10), '--end-y', str(toggle['y'] + toggle['height'] / 2), '--duration', '.3', '--post-delay', '.5')
-ui.wait(lambda items: any(item.get('AXUniqueId') == 'setting-enabled' and item.get('AXValue') == '1' for item in items), 'MCP toggle did not turn on')
-save()
-ui.wait(lambda items: any(item.get('AXUniqueId') == 'setting:mcp::c1' and catalog.text('settings.mcp.defaultOn') in spoken(item) for item in items), 'MCP default did not persist')
-ui.capture('mcp-saved')
-tap('setting:mcp::c1')
-assert ui.element('setting-enabled').get('AXValue') == '1'
-ui.capture('mcp-reopened')
-print(json.dumps({'machineName': machine_name, 'agentPrompt': prompt, 'mcpEnabledByDefault': True, 'failuresRetainedDraft': True}))
+print(json.dumps({'machineName': machine_name, 'agentPrompt': prompt, 'failuresRetainedDraft': True}))

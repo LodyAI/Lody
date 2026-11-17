@@ -1,5 +1,7 @@
 package app.lody.android.home
 
+import app.lody.android.auth.WorkspaceContentMode
+
 import app.lody.android.BackendEnvironment
 
 import app.lody.android.auth.WorkspaceMember
@@ -139,7 +141,7 @@ class HomeActivity : ComponentActivity() {
                         app.notifications.consumeClick()
                     }
                 }
-                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments) }
+                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments, app.mergeStates, app.branches, app.pullRequestDetails) }
                 val selectedSession = catalog.snapshot?.sessions?.firstOrNull { it.id == selectedId }
                 LaunchedEffect(selectedSession, activeScope, resumed) {
                     if (resumed && activeScope != null && selectedSession != null) {
@@ -173,15 +175,18 @@ class HomeActivity : ComponentActivity() {
                     ) { destination ->
                         val id = destination.takeUnless { it == "create" || it == "home" }
                         if (id != null && workspace != null) {
-                            ChatScreen(repository, RuntimeScope(user.id, workspace.id), id, chatContext(catalog, id, selectedTitle, user), onBack = { selectedId = null }, onSelectTab = { selectedId = it; selectedTitle = "" }, creation = submissions[id]?.takeIf { it.scope == activeScope })
+                            ChatScreen(repository, RuntimeScope(user.id, workspace.id), id, chatContext(catalog, id, selectedTitle, user), onBack = { selectedId = null }, onSelectTab = { selectedId = it; selectedTitle = "" }, creation = submissions[id]?.takeIf { it.scope == activeScope }, persistDraft = workspace.contentMode == WorkspaceContentMode.PLAINTEXT)
                         } else if (destination == "create" && workspace != null) {
                             // Like web, new session is its own full screen over Home; back returns.
                             BackHandler { creating = false }
-                            CreateSessionScreen(catalog.snapshot, creator, RuntimeScope(user.id, workspace.id), onSubmit = { request -> app.submissions.submit(RuntimeScope(user.id, workspace.id), request); selectedId = request.sessionId; selectedTitle = request.text.take(200); creating = false }, onBack = { creating = false })
+                            CreateSessionScreen(catalog.snapshot, creator, RuntimeScope(user.id, workspace.id), onSubmit = { request -> app.submissions.submit(RuntimeScope(user.id, workspace.id), request); selectedId = request.sessionId; selectedTitle = request.text.take(200); creating = false }, onBack = { creating = false }, persistDraft = workspace.contentMode == WorkspaceContentMode.PLAINTEXT)
                         } else screens.SaveableStateProvider("list/${user.id}/${workspace?.id}") {
                             ChatListScreen(
                                 state = uiState(account, catalog).copy(members = members + listOfNotNull(user?.let { it.id to (members[it.id] ?: WorkspaceMember(it.id, it.name, it.image)) }).toMap()),
-                                onSelectWorkspace = { app.cloud.select(it) },
+                                onSelectWorkspace = {
+                                    app.cloud.select(it)
+                                    if (it.contentMode == WorkspaceContentMode.UNKNOWN) app.account.refreshWorkspaceModes()
+                                },
                                 onSignOut = { app.account.logout() },
                                 onOpenChat = { row ->
                                     val session = catalog.snapshot?.sessions?.firstOrNull { it.id == row.id }
@@ -191,8 +196,18 @@ class HomeActivity : ComponentActivity() {
                                 onNewChat = { creating = true },
                                 schedules = app.schedules,
                                 creation = creator,
+                                agentProviders = remember { RuntimeAgentProviderService(app.runtimeOwner) },
+                                roleSettings = remember { RuntimeRoleSettingsService(app.runtimeOwner) },
+                                shortcutSettings = remember { RuntimeShortcutSettingsService(app.runtimeOwner) },
+                                settingsCache = app.settingsCache,
+                                githubSettings = remember { LiveGitHubSettingsService(app.account) },
+                                projectVisibility = remember { LiveProjectVisibilityService(app.account) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },
+                                onSetArchived = workspace?.let { selected ->
+                                    val write: suspend (String, Boolean) -> Unit = { id, archived -> repository.setArchived(RuntimeScope(user.id, selected.id), id, archived) }
+                                    write
+                                },
                             )
                         }
                     }
@@ -210,10 +225,12 @@ private fun uiState(auth: AuthState, catalog: CatalogState): ChatListUiState {
     // Only actionable connection state reaches the sync pill; a live list shows none.
     val sync = when (catalog.phase) {
         ConnectionPhase.CONNECTING, ConnectionPhase.SYNCING -> HomeSyncState.Syncing
-        ConnectionPhase.UNAVAILABLE, ConnectionPhase.PAUSED -> HomeSyncState.Offline
+        ConnectionPhase.UNAVAILABLE, ConnectionPhase.PAUSED -> HomeSyncState.Connecting
         else -> HomeSyncState.Live
     }
     val placeholder = when {
+        workspace?.contentMode == app.lody.android.auth.WorkspaceContentMode.E2EE -> stringResource(R.string.workspace_e2ee_unsupported)
+        workspace?.contentMode == app.lody.android.auth.WorkspaceContentMode.UNKNOWN -> stringResource(R.string.workspace_mode_unconfirmed)
         snapshot == null && catalog.phase in setOf(ConnectionPhase.UNAVAILABLE, ConnectionPhase.PAUSED) -> stringResource(R.string.home_offline)
         snapshot == null && user?.workspaces?.isEmpty() == true -> stringResource(R.string.home_no_workspaces)
         snapshot == null -> stringResource(R.string.home_loading)
@@ -228,6 +245,7 @@ private fun uiState(auth: AuthState, catalog: CatalogState): ChatListUiState {
         accountImage = user?.image,
         sync = sync,
         accountName = user?.name.orEmpty(),
+        accountEmail = user?.email.orEmpty(),
         timeline = snapshot?.let { ChatListModel.timeline(it) }.orEmpty(),
         snapshot = snapshot,
         userId = user?.id,
@@ -247,10 +265,14 @@ private fun chatContext(catalog: CatalogState, id: String, title: String, user: 
     val repository = project?.repoFullName ?: session?.projectId?.removePrefix("github:")?.takeIf { session.projectId.startsWith("github:") }
     return app.lody.android.chat.ChatContext(
         session?.title?.ifBlank { null } ?: title, subtitle, session, user,
+        relatedSessions = snapshot?.sessions.orEmpty(),
         closedTabs = session?.let { app.lody.android.chat.DirectoryTabs.closed(it, snapshot.sessions) }.orEmpty(),
         tabs = session?.let { app.lody.android.chat.DirectoryTabs.sessions(it, snapshot.sessions) }.orEmpty(),
         repository = repository.orEmpty(),
+        repositories = (listOfNotNull(repository?.takeIf { it.isNotEmpty() }) + project?.repositories.orEmpty()).distinctBy { it.lowercase() },
         machineName = session?.let { snapshot?.machineNames?.get(it.machineId) }.orEmpty(),
+        machineSimulator = session?.let { snapshot?.machineSimulators?.get(it.machineId) },
+        machineEmulator = session?.let { snapshot?.machineEmulators?.get(it.machineId) } == "available",
         machineKind = snapshot?.let { app.lody.android.create.CreateSessionModel.machineKind(it, session?.machineId) }
             ?: app.lody.android.create.CreateSessionModel.MachineKind.Laptop,
     )

@@ -8,7 +8,7 @@ final class AppIconController: UIViewController {
 
   init() {
     super.init(nibName: nil, bundle: nil)
-    title = String(localized: "settings.appearance.appIcon", bundle: .lody)
+    title = String(localized: "settings.preferences.appIcon", bundle: .lody)
   }
 
   @available(*, unavailable)
@@ -21,7 +21,7 @@ final class AppIconController: UIViewController {
     grid.frame = view.bounds
     grid.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     grid.setItems([
-      LodyAppIconItem(id: "default", title: String(localized: "settings.appearance.defaultIcon", bundle: .lody)),
+      LodyAppIconItem(id: "default", title: String(localized: "settings.preferences.defaultIcon", bundle: .lody)),
       LodyAppIconItem(id: "Aqua", title: "Aqua"),
     ])
     grid.selectHandler = { [weak self] id in self?.select(id) }
@@ -54,8 +54,8 @@ final class AppIconController: UIViewController {
 
   private func showFailure() {
     let alert = UIAlertController(
-      title: String(localized: "settings.appearance.appIcon", bundle: .lody),
-      message: String(localized: "settings.appearance.iconFailed", bundle: .lody),
+      title: String(localized: "settings.preferences.appIcon", bundle: .lody),
+      message: String(localized: "settings.preferences.iconFailed", bundle: .lody),
       preferredStyle: .alert
     )
     alert.addAction(UIAlertAction(title: String(localized: "common.ok", bundle: .lody), style: .default))

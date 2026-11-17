@@ -28,6 +28,10 @@ UI rows and leaves attachment preparation in the trailing slot. It retains local
 bodies until matching formal history is hydrated; only real owner receipts mark
 delivery. The wrapper component keeps the standalone pending-message surface.
 
+The composer sharing reminder follows the selected machine and projects, and only
+offers sharing to their owner. Private resources elsewhere in the workspace do
+not trigger it; the Inbox retains its workspace-wide sharing review.
+
 ## Home dashboard transitions
 
 The Now summary and running session rows reuse the sidebar's

@@ -1,3 +1,4 @@
+import type { ManagedDaemonUpdateStatus, ManagedDaemonUpgradeOptions } from './daemon-update';
 import type { ProjectLocalMemberProbe, SessionProjectRun } from './workspace-project';
 import type {
   MachineId,
@@ -245,6 +246,7 @@ export interface MachineStatusRequest {
   workspaceId: WorkspaceId;
   /** Only for daemons advertising `machineDiskStatus`. */
   includeDisk?: true;
+  includeDaemonUpdate?: true;
 }
 
 export type MachineLifecycleLaunchMode = 'daemon' | 'foreground' | 'electron' | 'unknown';
@@ -267,6 +269,7 @@ export interface MachineStatusResponse {
   /** Sent only when the request asked with `includeDisk`. */
   disk?: { totalGB: number; freeGB: number; usedPercent: number };
   lifecycle?: MachineLifecycleCapability;
+  daemonUpdate?: ManagedDaemonUpdateStatus | null;
   error?: string;
 }
 
@@ -305,6 +308,8 @@ export type MachineLifecycleDisposition =
 
 export interface MachineRestartRequest {
   type: 'machine/restart';
+  /** Restore an owned, retired installation identity before the next worker starts. */
+  restoreMachineId?: MachineId;
   machineId: MachineId;
   workspaceId: WorkspaceId;
   requesterUserId: string;
@@ -335,6 +340,7 @@ export interface MachineUpgradeRequest {
   requestId: string;
   /** Defaults to `latest`; exact semver-like versions are also accepted. */
   targetVersion?: string;
+  upgrade?: ManagedDaemonUpgradeOptions;
 }
 
 export interface MachineUpgradeResponse {
@@ -375,6 +381,13 @@ export interface MachineAcpCapabilitiesRefreshRequest {
    * default path answers from the cache when it can.
    */
   force?: boolean;
+  /**
+   * Switch the probe session to every advertised model and record each model's
+   * own option list, reporting `reading-model-options` progress. Sent only to
+   * daemons that advertise `acpModelOptionsRead`; the strict schema of older
+   * daemons rejects the key.
+   */
+  readModelOptions?: true;
 }
 
 export interface MachineAcpCapabilitiesRefreshResponse {
@@ -621,7 +634,9 @@ export type MachineAcpBinaryProgressStatus =
   | 'installed'
   | 'unsupported-platform'
   | 'incompatible-host'
-  | 'error';
+  | 'error'
+  /** Not a binary phase: a forced refresh is reading one model's options. */
+  | 'reading-model-options';
 
 export interface MachineAcpBinaryProgressMessage {
   type: 'machine/acp-binary-progress';
@@ -637,6 +652,15 @@ export interface MachineAcpBinaryProgressMessage {
   required?: string;
   command?: string;
   error?: string;
+  /**
+   * `reading-model-options` only: the config being refreshed and the model
+   * whose options are being read, `modelIndex` of `modelCount` (1-based).
+   */
+  configId?: string;
+  modelId?: string;
+  modelName?: string;
+  modelIndex?: number;
+  modelCount?: number;
 }
 
 /**
@@ -670,39 +694,6 @@ export interface MachineBugReportResponse {
   success: boolean;
   bugReportId?: string;
   error?: string;
-}
-
-/**
- * @deprecated Legacy compatibility only. Code Collab v1's session-scoped host
- * runtime has been removed; v2 file operations use machine RPC methods under
- * `code-collab/*`.
- */
-export interface SessionCodeCollabHostStartRequest {
-  type: 'session/code-collab-host-start';
-  machineId: MachineId;
-  workspaceId: WorkspaceId;
-  sessionId: SessionId;
-  requestedByUserId: string;
-}
-
-export type SessionCodeCollabHostStartStatus =
-  | 'started'
-  | 'already-running'
-  | 'disabled'
-  | 'failed'
-  | 'stopped';
-
-/**
- * @deprecated Legacy compatibility response for `session/code-collab-host-start`.
- * Current CLIs return `success: false` / `status: 'disabled'`.
- */
-export interface SessionCodeCollabHostStartResponse {
-  type: 'session/code-collab-host-start_response';
-  sessionId: SessionId;
-  success: boolean;
-  status?: SessionCodeCollabHostStartStatus;
-  error?: string;
-  message?: string;
 }
 
 export interface SessionImageUploadRequest {
@@ -993,7 +984,6 @@ export type LocalSessionControlRequest =
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
   | MachineAcpBinaryInstallRequest
-  | SessionCodeCollabHostStartRequest
   | SessionImageUploadRequest
   | SessionFileUploadRequest
   | SessionFileSendLocalRequest
@@ -1027,7 +1017,6 @@ export type LocalSessionControlResponse =
   | MachineAcpBinaryStatusResponse
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage
-  | SessionCodeCollabHostStartResponse
   | SessionImageUploadResponse
   | SessionFileUploadResponse
   | SessionFileSendLocalResponse

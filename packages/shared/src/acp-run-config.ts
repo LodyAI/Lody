@@ -4,6 +4,7 @@ import {
   getModelEffortChoices,
   isBuiltinEffortConfigId,
 } from './acp-model-capabilities';
+import { resolveAcpConfigOptionsForModel } from './acp-model-config-options';
 /**
  * Semantic run-config selection (model / reasoning effort / fast mode / plan mode)
  * resolved against an agent's ACP capabilities.
@@ -120,7 +121,12 @@ export type AgentRunConfigResolution = {
 
 type RunConfigCapabilitySource = Pick<
   AcpCapabilityCacheEntry,
-  'modes' | 'models' | 'configOptions' | 'modelReasoningEfforts' | 'declaredModelControls'
+  | 'modes'
+  | 'models'
+  | 'configOptions'
+  | 'modelReasoningEfforts'
+  | 'declaredModelControls'
+  | 'observedModelConfigOptions'
 > &
   Partial<Pick<AcpCapabilityCacheEntry, 'cliType' | 'agentType'>>;
 
@@ -244,6 +250,61 @@ const findPlanPermissionModeId = (
   return capability?.modes?.find((mode) => mode.id === ACP_PLAN_PERMISSION_MODE_ID)?.id;
 };
 
+/**
+ * The capability as the agent described it for `modelId`: the snapshot's own
+ * model keeps the snapshot, and another model with an observed option list
+ * uses that list. Without an observation the snapshot is returned unchanged.
+ */
+const forObservedModel = <T extends RunConfigCapabilitySource>(
+  capability: T,
+  modelId: string | undefined
+): { capability: T; observed: boolean } => {
+  const resolved = resolveAcpConfigOptionsForModel(
+    capability.configOptions,
+    capability.observedModelConfigOptions,
+    modelId
+  );
+  return resolved.source === 'observed'
+    ? { capability: { ...capability, configOptions: resolved.configOptions }, observed: true }
+    : { capability, observed: false };
+};
+
+/**
+ * Effort values a model accepts: its declaration first, then the legacy
+ * per-model map, then the effort option of the model's own observed list.
+ * Undefined means unknown; an empty list means the model has no effort control.
+ */
+export const getAcpModelEffortChoices = (
+  capability: RunConfigCapabilitySource,
+  modelId: string | undefined
+): string[] | undefined => {
+  const known = getModelEffortChoices(capability, modelId);
+  if (known) return known;
+  const target = forObservedModel(capability, modelId);
+  if (!target.observed) return undefined;
+  return (findReasoningEffortOption(target.capability)?.options ?? []).map((value) => value.value);
+};
+
+/** The capability's options as the agent described them for `modelId`. */
+export const withAcpConfigOptionsForModel = <T extends RunConfigCapabilitySource>(
+  capability: T,
+  modelId: string | undefined
+): T => forObservedModel(capability, modelId).capability;
+
+/**
+ * Whether a model has a Fast toggle: its declaration first, then whether its
+ * own observed list has one. Undefined means unknown.
+ */
+export const getAcpModelFastSupport = (
+  capability: RunConfigCapabilitySource,
+  modelId: string | undefined
+): boolean | undefined => {
+  const declared = getDeclaredModelControls(capability, modelId)?.fastMode;
+  if (declared !== undefined) return declared;
+  const target = forObservedModel(capability, modelId);
+  return target.observed ? findFastModeOption(target.capability) !== undefined : undefined;
+};
+
 /** The model the agent had selected when these capabilities were captured. */
 const findCurrentModelId = (
   capability: RunConfigCapabilitySource | undefined
@@ -321,7 +382,7 @@ export const summarizeAgentRunConfigCapabilities = (
       })),
     })),
     models: listModels(capability).map((model) => {
-      const efforts = getModelEffortChoices(capability, model.id);
+      const efforts = capability ? getAcpModelEffortChoices(capability, model.id) : undefined;
       return { ...model, ...(efforts ? { reasoningEffortValues: efforts } : {}) };
     }),
     reasoningEffortValues: (findReasoningEffortOption(capability)?.options ?? []).map(
@@ -370,11 +431,13 @@ export const resolveAgentRunConfigSelection = (
   const probedModelId = findCurrentModelId(capability);
   const targetModelId = selection.modelId ?? probedModelId;
   const switchesModel = targetModelId !== undefined && targetModelId !== probedModelId;
+  // The target model's own reported options, when the agent has answered for it.
+  const target = forObservedModel(capability, targetModelId);
   let modeId: string | undefined;
 
   if (selection.reasoningEffort !== undefined) {
-    const option = findReasoningEffortOption(capability);
-    const targetModelEfforts = getModelEffortChoices(capability, targetModelId);
+    const option = findReasoningEffortOption(target.capability);
+    const targetModelEfforts = getAcpModelEffortChoices(capability, targetModelId);
     if (!option && !targetModelEfforts) {
       throw new Error('The selected agent does not offer a reasoning effort option.');
     }
@@ -404,8 +467,9 @@ export const resolveAgentRunConfigSelection = (
   }
 
   if (selection.fastMode !== undefined) {
-    const option = findFastModeOption(capability);
-    const declaredFast = getDeclaredModelControls(capability, targetModelId)?.fastMode;
+    const option = findFastModeOption(target.capability);
+    // A declaration decides; otherwise the target model's own list does.
+    const declaredFast = getAcpModelFastSupport(capability, targetModelId);
     const builtinFastId = getBuiltinModelControlBinding(capability)?.fastConfigId;
     if (declaredFast === false) {
       // Off on a model without Fast is already the case; nothing to send.
@@ -428,7 +492,7 @@ export const resolveAgentRunConfigSelection = (
   }
 
   if (selection.planMode !== undefined) {
-    const option = findPlanModeOption(capability);
+    const option = findPlanModeOption(target.capability);
     if (option) {
       configOptionValues[option.id] = planModeValue(option, selection.planMode);
     } else if (selection.planMode) {

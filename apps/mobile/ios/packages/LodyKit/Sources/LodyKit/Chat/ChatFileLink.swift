@@ -6,6 +6,11 @@ struct ChatFileLink {
 
   init?(_ href: String) {
     var value = href.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\\", with: "/")
+    // `file:///Users/a/report.html` and `file:///C:/a/report.html` name a file on the session's computer.
+    if let range = value.range(of: #"^file://(?:localhost)?/"#, options: [.regularExpression, .caseInsensitive]) {
+      let rest = String(value[range.upperBound...])
+      value = rest.range(of: #"^[A-Za-z]:/"#, options: .regularExpression) != nil ? rest : "/" + rest
+    }
     let suffix = #"(?:#L([1-9][0-9]*)(?:C[0-9]+)?(?:-L?[0-9]+(?:C[0-9]+)?)?|:L([1-9][0-9]*)(?:C[0-9]+)?|:([1-9][0-9]*)(?::[0-9]+)?)$"#
     var start: Int?
     if let range = value.range(of: suffix, options: .regularExpression) {
@@ -21,6 +26,22 @@ struct ChatFileLink {
     guard !value.contains("\0"), value.utf8.count <= 32768 else { return nil }
     path = value
     line = start
+  }
+
+  private static let bareDomainTLDs: Set<String> = ["com", "org", "net", "io", "dev", "app", "co", "ai", "gov", "edu", "info"]
+
+  /// Web `matchWholeFilePath` for inline code, narrowed to Markdown, the only type the native
+  /// preview opens: the whole span must be one file path. Native clients have no session file
+  /// index to confirm relative paths, so a missing file shows the preview's not-found state.
+  static func markdownCode(_ code: String) -> String? {
+    let value = code.trimmingCharacters(in: .whitespaces)
+    guard !value.isEmpty, value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+      let link = ChatFileLink(value), iconName(for: link.path) == "markdown" else { return nil }
+    // `example.com/readme.md` is an unschemed URL, not a file.
+    let first = link.path.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+    if link.path.contains("/"), first.contains("."), let tld = first.split(separator: ".").last,
+      bareDomainTLDs.contains(tld.lowercased()) { return nil }
+    return value
   }
 
   static func iconName(for path: String) -> String {

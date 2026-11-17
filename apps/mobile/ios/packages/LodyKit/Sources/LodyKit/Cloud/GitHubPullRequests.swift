@@ -10,10 +10,10 @@ import Foundation
           repo.range(of: #"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$"#, options: .regularExpression) != nil,
           ![".", ".."].contains(repo.components(separatedBy: "/").last ?? ""),
           let number = args["number"] as? Int, number > 0,
-          let operation = args["operation"] as? String, ["read", "comment", "merge", "ready"].contains(operation)
+          let operation = args["operation"] as? String, ["read", "mergeState", "comment", "merge", "ready", "deleteBranch"].contains(operation)
     else { throw failure("invalid_request") }
     guard let credential = try AuthKeychain.read(), !credential.isEmpty else { throw failure("unauthorized") }
-    let writing = operation != "read"
+    let writing = !["read", "mergeState"].contains(operation)
     let body = (args["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     if operation == "comment" && (body.isEmpty || body.count > 65536) { throw failure("invalid_comment") }
     let auth = try await request("\(BackendEnvironment.site)/api/auth/convex/token", token: credential)
@@ -31,6 +31,18 @@ import Foundation
     if operation == "merge" || operation == "ready" {
       return try await transition(operation, base: base, number: number, method: args["method"] as? String, token: token, credential: credential)
     }
+    if operation == "deleteBranch" {
+      return try await deleteBranch(base: base, repo: repo, number: number, token: token, credential: credential)
+    }
+    if operation == "mergeState" {
+      let pr = try await request("\(base)/pulls/\(number)", token: token)
+      try checkIdentity(credential)
+      let open = pr["state"] as? String == "open" && pr["merged"] as? Bool != true
+      let merge = open ? PullRequestMergeSettle.code(
+        state: pr["mergeable_state"] as? String, mergeable: pr["mergeable"] as? Bool, draft: pr["draft"] as? Bool == true
+      ) : nil
+      return String(decoding: try JSONSerialization.data(withJSONObject: ["merge": merge.map { $0 as Any } ?? NSNull()]), as: UTF8.self)
+    }
     if writing {
       // A transport failure may follow a successful write. Never replay it.
       _ = try await request("\(base)/issues/\(number)/comments", token: token, body: ["body": body], mutation: true)
@@ -46,8 +58,12 @@ import Foundation
     var state = pr["state"] as? String ?? "closed"
     if pr["merged"] as? Bool == true { state = "merged" }
     else if pr["draft"] as? Bool == true && state == "open" { state = "draft" }
+    let open = state == "open"
+    let merge = open ? PullRequestMergeSettle.code(
+      state: pr["mergeable_state"] as? String, mergeable: pr["mergeable"] as? Bool, draft: false
+    ) : nil
     var result: [String: Any] = [
-      "repository": repo, "number": number, "state": state,
+      "repository": repo, "number": number, "state": state, "mergeState": merge.map { $0 as Any } ?? NSNull(),
       "title": pr["title"] as? String ?? "", "body": pr["body"] as? String ?? "",
       "author": (pr["user"] as? [String: Any])?["login"] as? String ?? "",
       "headRef": head["ref"] as? String ?? "", "baseRef": target["ref"] as? String ?? "", "headSha": sha,
@@ -82,7 +98,46 @@ import Foundation
       result["commentsTruncated"] = response["hasNext"] as? Bool ?? false
     } catch { result["commentsError"] = code(error) }
     try checkIdentity(credential)
+    // Web `githubBranchExists`: Delete branch shows only while a merged PR's own head branch lives.
+    if state == "merged", let ref = head["ref"] as? String, Self.deletable(head: head, base: target, repo: repo) {
+      if let exists = try? await branchExists(base: base, ref: ref, token: token) { result["branchExists"] = exists }
+      try checkIdentity(credential)
+    }
     return String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
+  }
+
+  /// A head branch in this same repository (never a fork's, whose name may collide with ours),
+  /// and never the base branch itself.
+  private static func deletable(head: [String: Any], base: [String: Any], repo: String) -> Bool {
+    guard let ref = head["ref"] as? String, !ref.isEmpty, ref != base["ref"] as? String,
+          let owner = (head["repo"] as? [String: Any])?["full_name"] as? String
+    else { return false }
+    return owner.lowercased() == repo.lowercased()
+  }
+
+  private static func branchPath(_ ref: String) -> String {
+    ref.split(separator: "/").map { String($0).addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? "" }.joined(separator: "/")
+  }
+
+  private static func branchExists(base: String, ref: String, token: String) async throws -> Bool {
+    do {
+      _ = try await request("\(base)/branches/\(branchPath(ref))", token: token)
+      return true
+    } catch let error as NSError where error.localizedDescription == "not_found" { return false }
+  }
+
+  /// Web `githubDeleteBranch` after a merge, with the write grant. Re-reads the PR so only a merged
+  /// PR's own head branch can go; a branch already gone counts as deleted. Never retried.
+  private static func deleteBranch(base: String, repo: String, number: Int, token: String, credential: String) async throws -> String {
+    let pr = try await request("\(base)/pulls/\(number)", token: token)
+    try checkIdentity(credential)
+    guard pr["merged"] as? Bool == true else { throw failure("not_merged") }
+    guard let head = pr["head"] as? [String: Any], let target = pr["base"] as? [String: Any],
+          let ref = head["ref"] as? String, deletable(head: head, base: target, repo: repo)
+    else { throw failure("branch_not_deletable") }
+    _ = try await request("\(base)/git/refs/heads/\(branchPath(ref))", token: token, mutation: true, method: "DELETE", unknown: "delete_unknown")
+    try checkIdentity(credential)
+    return #"{"deleted":true}"#
   }
 
   /// Web `useGitHubPrDetails` merge / ready for review, with the workspace's brokered write grant.
@@ -141,6 +196,8 @@ import Foundation
       request.httpMethod = method
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
       request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    } else if method == "DELETE" {
+      request.httpMethod = method
     }
     let data: Data
     let response: URLResponse
@@ -154,6 +211,11 @@ import Foundation
     // Merge: 405 not mergeable, 409 the head moved since it was read.
     if response.statusCode == 405 { throw failure("not_mergeable") }
     if response.statusCode == 409 { throw failure("head_changed") }
+    // Branch deletion: 422 for a protected or default branch, or one already gone (a success).
+    if response.statusCode == 422 && method == "DELETE" {
+      if String(decoding: data, as: UTF8.self).range(of: "reference does not exist", options: .caseInsensitive) != nil { return [:] }
+      throw failure("branch_protected")
+    }
     guard (200..<300).contains(response.statusCode) else {
       if response.statusCode >= 500, let unknownCode { throw failure(unknownCode) }
       throw failure("request_failed")

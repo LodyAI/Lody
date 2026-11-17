@@ -195,13 +195,38 @@ export function resolveSessionPrimaryPullRequest(
   meta: SessionPullRequestViewSource | null | undefined,
   activeRepository?: string | null
 ): SessionPullRequestView | null {
-  const legacyRepository =
-    (resolveProjectGitHubRepo(meta?.project) ?? meta?.repoFullName)?.trim() || null;
-  const repository =
-    activeRepository !== undefined
-      ? activeRepository?.trim() || null
-      : meta?.projectRun
-        ? legacyRepository
-        : undefined;
-  return selectPrimarySessionPullRequest(resolveSessionPullRequestViews(meta), repository);
+  return selectPrimarySessionPullRequest(
+    resolveSessionPullRequestViews(meta),
+    resolveDescribedRepository(meta, activeRepository)
+  );
+}
+
+/** The repository a single-PR surface describes; see `selectPrimarySessionPullRequest`. */
+function resolveDescribedRepository(
+  meta: SessionPullRequestViewSource | null | undefined,
+  activeRepository: string | null | undefined
+): string | null | undefined {
+  if (activeRepository !== undefined) return activeRepository?.trim() || null;
+  if (!meta?.projectRun) return undefined;
+  return (resolveProjectGitHubRepo(meta.project) ?? meta.repoFullName)?.trim() || null;
+}
+
+/**
+ * Every PR a single-PR surface can list as its history, in the scope
+ * `resolveSessionPrimaryPullRequest` describes. Associations are append-only,
+ * so an older PR stays listed after a newer one becomes primary. The primary
+ * PR comes first; the rest follow newest association first.
+ */
+export function resolveSessionPullRequestHistory(
+  meta: SessionPullRequestViewSource | null | undefined,
+  activeRepository?: string | null
+): SessionPullRequestView[] {
+  const repository = resolveDescribedRepository(meta, activeRepository);
+  if (repository === null) return [];
+  const target = repository?.toLowerCase();
+  const views = resolveSessionPullRequestViews(meta).filter(
+    (view) => !target || view.repoFullName?.toLowerCase() === target
+  );
+  const primary = selectPrimarySessionPullRequest(views);
+  return primary ? [primary, ...views.filter((view) => view !== primary).reverse()] : [];
 }

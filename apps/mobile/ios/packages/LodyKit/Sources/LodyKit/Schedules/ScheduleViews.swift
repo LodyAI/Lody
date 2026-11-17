@@ -31,17 +31,28 @@ enum ScheduleTone {
     }
   }
 
-  static func label(_ group: RuntimeContract.ScheduleStateGroup) -> String {
-    switch group {
-    case .running: ScheduleFormat.text("overview.active")
-    case .attention: ScheduleFormat.text("overview.attention")
-    case .paused: ScheduleFormat.text("overview.paused")
-    case .ended: ScheduleFormat.text("overview.ended")
-    }
+  /// The order rows follow within a list group: what needs a look first.
+  static let order: [RuntimeContract.ScheduleStateGroup] = [.attention, .running, .paused, .ended]
+}
+
+/// The Schedules list's groups, as web `ScheduleList`: recurring and manual tasks, then one-off
+/// messages written in a chat with "Schedule send…".
+enum ScheduleListSection: String, CaseIterable, Sendable {
+  case tasks
+  case messages
+
+  init(_ item: ScheduleItem) {
+    self = item.scheduledMessage ? .messages : .tasks
   }
 
-  /// The order rows and overview tiles follow: what needs a look first.
-  static let order: [RuntimeContract.ScheduleStateGroup] = [.attention, .running, .paused, .ended]
+  @MainActor var label: String { ScheduleFormat.text("section." + rawValue) }
+}
+
+/// The view menu's "Show finished" switch. In memory like `HomeArchive`, so every launch hides
+/// schedules that will not run again (state group `ended`) until asked for.
+@MainActor
+enum ScheduleFinishedVisibility {
+  static var shown = false
 }
 
 /// The schedule's Agent mark inside a tinted rounded tile, with the state glyph as a badge.
@@ -82,8 +93,9 @@ struct ScheduleMarkView: View {
   }
 }
 
-/// One list row: mark tile; name and the short state; rule summary; computer · project;
-/// a reason line only when the schedule needs a look.
+/// One list row in the chat row's shape: name with the short state trailing where Chats shows the
+/// age; a footnote line with the kind glyph, frequency and computer; a reason line only when the
+/// schedule needs a look.
 struct ScheduleRowView: View {
   let item: ScheduleItem
   let zone: TimeZone
@@ -92,51 +104,77 @@ struct ScheduleRowView: View {
     let status = ScheduleFormat.state(item.state, zone: zone)
     let attention = item.state.group == .attention
     let ended = item.state.group == .ended
-    HStack(alignment: .top, spacing: LodySpacing.md) {
-      ScheduleMarkView(agentType: item.agentType, group: item.state.group)
-        .padding(.top, 2)
-      VStack(alignment: .leading, spacing: 3) {
-        HStack(alignment: .firstTextBaseline, spacing: LodySpacing.sm) {
-          Text(item.title)
-            .lodyTextStyle(.headline)
-            .foregroundStyle(ended ? LodyColor.textTertiary : LodyColor.textPrimary)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-          Text(status.label)
-            .lodyTextStyle(.footnote)
-            .fontWeight(.medium)
-            .foregroundStyle(attention ? LodyColor.warningDefault : LodyColor.textSecondary)
-            .lineLimit(1)
-            .frame(maxWidth: LodyLayout.trailingMetaMaxWidth, alignment: .trailing)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        Label {
-          Text(ScheduleFormat.summary(item.rule, zone: zone)).lineLimit(1)
-        } icon: {
-          Image(systemName: item.rule.kind == .manual ? "hand.tap" : "repeat")
-        }
-        .labelStyle(ScheduleInlineLabel())
-        .lodyTextStyle(.bodySmall)
-        .foregroundStyle(LodyColor.textSecondary)
-        Text(meta)
-          .lodyTextStyle(.caption)
-          .foregroundStyle(LodyColor.textTertiary)
+    VStack(alignment: .leading, spacing: LodySpacing.xxs) {
+      HStack(alignment: .center, spacing: LodySpacing.sm) {
+        Text(item.title)
+          .lodyTextStyle(.body)
+          .foregroundStyle(ended ? LodyColor.textTertiary : LodyColor.textPrimary)
           .lineLimit(1)
-        if attention || item.state.kind == .blocked, let detail = status.detail, !detail.isEmpty {
-          Text(detail)
-            .lodyTextStyle(.caption)
-            .foregroundStyle(LodyColor.warningDefault)
-            .lineLimit(2)
-            .padding(.top, 1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        Text(status.label)
+          .lodyTextStyle(.footnote)
+          .foregroundStyle(attention ? LodyColor.warningDefault : LodyColor.textTertiary)
+          .lineLimit(1)
+          .frame(maxWidth: LodyLayout.trailingMetaMaxWidth, alignment: .trailing)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      HStack(spacing: LodySpacing.xs) {
+        ScheduleGlyph(icon: kindIcon, color: LodyColor.iconSecondary)
+        Text(ScheduleFormat.summary(item.rule, zone: zone))
+          .lodyTextStyle(.footnote).foregroundStyle(LodyColor.textSecondary).lineLimit(1)
+        if !machine.isEmpty {
+          ScheduleGlyph(icon: .desktop, color: LodyColor.iconTertiary).padding(.leading, LodySpacing.xs)
+          Text(machine).lodyTextStyle(.footnote).foregroundStyle(LodyColor.textTertiary).lineLimit(1)
         }
+        Spacer(minLength: 0)
+      }
+      if attention || item.state.kind == .blocked, let detail = status.detail, !detail.isEmpty {
+        Text(detail)
+          .lodyTextStyle(.footnote)
+          .foregroundStyle(LodyColor.warningDefault)
+          .lineLimit(2)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, LodyLayout.listEdgeX)
+    .padding(.vertical, LodySpacing.sm)
+    .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .leading)
     .accessibilityHidden(true)
   }
 
-  private var meta: String {
+  /// A message, a manual task or a timed task.
+  private var kindIcon: LodyIcon {
+    if item.scheduledMessage { return .session }
+    return item.rule.kind == .manual ? .hand : .clock
+  }
+
+  private var machine: String {
     [item.machineName ?? "", item.projectName ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+  }
+}
+
+/// A Lucide glyph at the chat detail line's size.
+struct ScheduleGlyph: View {
+  let icon: LodyIcon
+  var color: Color = LodyColor.iconSecondary
+
+  var body: some View {
+    icon.image.resizable().renderingMode(.template).foregroundStyle(color)
+      .frame(width: LodyIconSize.sm, height: LodyIconSize.sm)
+  }
+}
+
+/// The Chats group label: tertiary `groupLabel` text at the screen's reading edge.
+struct ScheduleSectionTitle: View {
+  let text: String
+
+  var body: some View {
+    Text(text)
+      .lodyTextStyle(.groupLabel)
+      .foregroundStyle(LodyColor.textTertiary)
+      .padding(.horizontal, LodyLayout.listEdgeX)
+      .padding(.vertical, LodySpacing.xs)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityAddTraits(.isHeader)
   }
 }
 
@@ -146,64 +184,6 @@ struct ScheduleInlineLabel: LabelStyle {
       configuration.icon.font(.system(size: 11, weight: .semibold)).foregroundStyle(LodyColor.iconTertiary)
       configuration.title
     }
-  }
-}
-
-/// Four count tiles above the list. Tapping one filters both sections to that state group;
-/// tapping it again clears the filter.
-struct ScheduleOverviewView: View {
-  let counts: [RuntimeContract.ScheduleStateGroup: Int]
-  let selected: RuntimeContract.ScheduleStateGroup?
-  let pick: (RuntimeContract.ScheduleStateGroup) -> Void
-
-  var body: some View {
-    HStack(spacing: LodySpacing.sm) {
-      ForEach([RuntimeContract.ScheduleStateGroup.running, .attention, .paused, .ended], id: \.self) { group in
-        tile(group)
-      }
-    }
-  }
-
-  private func tile(_ group: RuntimeContract.ScheduleStateGroup) -> some View {
-    let count = counts[group] ?? 0
-    let on = selected == group
-    let tint = ScheduleTone.color(group)
-    return Button { pick(group) } label: {
-      VStack(alignment: .leading, spacing: LodySpacing.xs) {
-        HStack(spacing: 0) {
-          Image(systemName: ScheduleTone.symbol(group))
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(on ? .white : tint)
-            .frame(width: 24, height: 24)
-            .background(on ? tint : ScheduleTone.fill(group), in: Circle())
-          Spacer(minLength: 0)
-          Text("\(count)")
-            .font(.system(.title3, design: .rounded).weight(.semibold))
-            .monospacedDigit()
-            .foregroundStyle(count == 0 ? LodyColor.textTertiary : LodyColor.textPrimary)
-        }
-        Text(ScheduleTone.label(group))
-          .lodyTextStyle(.caption)
-          .foregroundStyle(LodyColor.textSecondary)
-          .lineLimit(1)
-          .minimumScaleFactor(0.8)
-      }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 10)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Color(uiColor: .lodyOpaqueCard), in: RoundedRectangle(cornerRadius: LodyRadius.lg, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: LodyRadius.lg, style: .continuous)
-          .strokeBorder(on ? tint : .clear, lineWidth: 1.5)
-      }
-      .contentShape(RoundedRectangle(cornerRadius: LodyRadius.lg, style: .continuous))
-    }
-    .buttonStyle(.plain)
-    .disabled(count == 0 && !on)
-    .accessibilityLabel(ScheduleTone.label(group))
-    .accessibilityValue("\(count)")
-    .accessibilityAddTraits(on ? .isSelected : [])
-    .accessibilityIdentifier("schedules-filter:" + group.rawValue)
   }
 }
 
@@ -287,7 +267,7 @@ struct ScheduleHeroView: View {
     }
     .padding(LodySpacing.lg)
     .background(Color(uiColor: .lodyOpaqueCard), in: RoundedRectangle(cornerRadius: LodyRadius.xl, style: .continuous))
-    .padding(.horizontal, LodyLayout.screenPaddingX)
+    .padding(.horizontal, LodyLayout.listEdgeX)
   }
 
   private var facts: [(symbol: String, text: String)] {

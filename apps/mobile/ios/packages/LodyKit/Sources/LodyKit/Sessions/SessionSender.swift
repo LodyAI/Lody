@@ -114,6 +114,12 @@ final class SessionSender {
     }
   }
 
+  func discardPending(_ inputId: String) async throws {
+    guard let store, let record, record.sendId == inputId else { return }
+    guard ["unknown", "uploaded"].contains(record.phase), !dispatching else { throw OutboxError.scopeExpired }
+    try await store.remove(sessionId).value
+  }
+
   func retry() {
     guard let store, let record, record.phase == "failed", !dispatching else { return }
     var next = record.with(phase: "waiting")
@@ -208,5 +214,6 @@ extension SessionItem {
 
 extension Notification.Name {
   static let lodyOutboxDidChange = Notification.Name("LodyOutboxDidChange")
+  static let lodyOutboxInflightReleased = Notification.Name("LodyOutboxInflightReleased")
   static let lodyAttachmentUploadProgress = Notification.Name("LodyAttachmentUploadProgress")
 }

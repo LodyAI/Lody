@@ -1,7 +1,13 @@
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { settingsDialogOpenAtom } from '@/atoms';
+import { Button } from '@lody/ui/button';
+import { CompactRow } from './compact-layout';
 import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -69,8 +75,17 @@ export async function persistUserAvatar({
 
 export function AccountSettingsComponent({
   surface = 'account',
+  encryptedTeamManagement = true,
+  onOpenEncryptionConsole,
+  workspaceSecuritySlot,
 }: {
   surface?: AccountSettingsSurface;
+  /** Desktop General leaves encrypted invitations to the encryption console. */
+  encryptedTeamManagement?: boolean;
+  /** Opens the encryption console on its members page, where encrypted ownership moves. */
+  onOpenEncryptionConsole?: () => void;
+  /** The encrypted workspace's security entry, laid out as the page's first section. */
+  workspaceSecuritySlot?: ReactNode;
 }) {
   // Personal account and workspace administration are cloud-account surfaces.
   // Registry-level gating hides their tabs without `cloudAccount`; this is the
@@ -79,10 +94,27 @@ export function AccountSettingsComponent({
   if (!cloudAccountAvailable) {
     return null;
   }
-  return <CloudAccountSettings surface={surface} />;
+  return (
+    <CloudAccountSettings
+      surface={surface}
+      encryptedTeamManagement={encryptedTeamManagement}
+      onOpenEncryptionConsole={onOpenEncryptionConsole}
+      workspaceSecuritySlot={workspaceSecuritySlot}
+    />
+  );
 }
 
-function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) {
+function CloudAccountSettings({
+  surface,
+  encryptedTeamManagement,
+  onOpenEncryptionConsole,
+  workspaceSecuritySlot,
+}: {
+  surface: AccountSettingsSurface;
+  encryptedTeamManagement: boolean;
+  onOpenEncryptionConsole: (() => void) | undefined;
+  workspaceSecuritySlot: ReactNode;
+}) {
   const { t } = useTranslation();
   const authClient = useAuthClient();
   const transferOwnership = useLegacyWorkspaceMutation(
@@ -90,6 +122,19 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   );
   const signOut = useAuthSignOut();
   const router = useRouter();
+  const closeSettings = useSetAtom(settingsDialogOpenAtom);
+  const recoveryEntry =
+    surface === 'account' && router?.options?.context?.recoveryPage ? (
+      <Button
+        variant="secondary"
+        onClick={() => {
+          closeSettings(false);
+          void router.navigate({ to: '/recovery' });
+        }}
+      >
+        {t('e2ee.recovery.manage')}
+      </Button>
+    ) : null;
   const {
     activeOrganization,
     organizations,
@@ -190,6 +235,16 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   const sessionToken = rawSession?.session?.token ?? session?.session?.token ?? null;
   const authBaseUrl = import.meta.env.VITE_CONVEX_SITE_URL;
   const canGenerateCliApiKey = Boolean(authBaseUrl && sessionToken);
+  // Names the machines each CLI token signs in, and marks this computer's.
+  const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const cliApiKeyMachineNames = useMemo(
+    () =>
+      new Map(
+        Array.from(machineMetaMap.values(), (machine) => [machine.id, machine.name || machine.id])
+      ),
+    [machineMetaMap]
+  );
   const billingUiAvailable = !isNativeAppShell();
   const openAdmissionBilling = billingUiAvailable
     ? () => {
@@ -698,15 +753,132 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
 
   if (orgLoading) {
     return (
+      <>
+        {recoveryEntry}
+        <AccountSettingsPure
+          surface={surface}
+          loading
+          workspaceSecuritySlot={workspaceSecuritySlot}
+          currentUser={currentUser}
+          organization={{ id: '', name: '' }}
+          role="member"
+          hasAdminPermission={false}
+          members={[]}
+          pendingInvitations={[]}
+          onSignOut={() => {
+            void signOut();
+          }}
+          onInviteMember={handleInviteMember}
+          onRemoveMember={handleRemoveMember}
+          onUpdateRole={handleUpdateRole}
+          onCopyInviteLink={handleCopyInviteLink}
+          onCancelInvitation={handleCancelInvitation}
+          onLeaveOrganization={handleLeaveOrganization}
+          onDeleteOrganization={handleDeleteOrganization}
+          onDeleteAccount={handleDeleteAccount}
+          onRenameOrganization={handleRenameOrganization}
+          getInviteLink={getInviteLink}
+        />
+      </>
+    );
+  }
+
+  if (!activeOrganization) {
+    return (
+      <>
+        {recoveryEntry}
+        <>
+          <p {...stylex.props(styles.empty)}>No organization</p>
+          {surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : null}
+        </>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {recoveryEntry}
       <AccountSettingsPure
         surface={surface}
-        loading
         currentUser={currentUser}
-        organization={{ id: '', name: '' }}
-        role="member"
-        hasAdminPermission={false}
-        members={[]}
-        pendingInvitations={[]}
+        organization={activeOrganization}
+        role={role as 'owner' | 'admin' | 'member'}
+        hasAdminPermission={hasAdminPermission && !encrypted}
+        members={sortedMembers}
+        pendingInvitations={pendingInvitations}
+        accountMachinesSlot={surface === 'account' ? <AccountMachinesOverview /> : undefined}
+        accountBillingSlot={
+          surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : undefined
+        }
+        workspaceOwnershipSlot={
+          !encrypted && role === 'owner' && currentUserId ? (
+            <WorkspaceOwnershipTransfer
+              key={activeOrganization.id}
+              workspaceName={activeOrganization.name}
+              currentUserId={currentUserId}
+              members={sortedMembers}
+              onTransfer={async (targetMemberId) => {
+                await transferOwnership({ workspaceId: activeOrganization.id, targetMemberId });
+                // A cache refresh failure must never turn a committed transfer into a failure.
+                void Promise.all([authClient.updateSession(), refetchActiveOrganization()]).catch(
+                  console.error
+                );
+                toast.success(t('workspace.transfer.success'));
+              }}
+            />
+          ) : encrypted && role === 'owner' && onOpenEncryptionConsole ? (
+            <CompactRow
+              label={t('workspace.transfer.title')}
+              helper={t('workspace.transfer.encryptedHelper')}
+            >
+              <Button
+                variant="secondary"
+                size="small"
+                tone="destructive"
+                data-testid="e2ee-danger-transfer"
+                onClick={onOpenEncryptionConsole}
+              >
+                {t('workspace.transfer.encryptedButton')}
+              </Button>
+            </CompactRow>
+          ) : undefined
+        }
+        encryptedWorkspace={encrypted}
+        workspaceSecuritySlot={workspaceSecuritySlot}
+        workspaceJoinRequestsSlot={
+          encrypted &&
+          encryptedTeamManagement &&
+          platform.e2eeWorkspaces?.runtime &&
+          currentUserId ? (
+            <E2eeTeamSettingsHost
+              runtime={platform.e2eeWorkspaces.runtime}
+              workspaceId={activeOrganization.id}
+              accountId={currentUserId}
+              onOpenBilling={openAdmissionBilling}
+              onRefreshBilling={() =>
+                refreshAdmissionBilling({ workspaceId: activeOrganization.id })
+              }
+              labels={
+                new Map(
+                  activeOrganization.members.map(
+                    (member) => [member.id, member.user.name || member.user.email] as const
+                  )
+                )
+              }
+            />
+          ) : role === 'owner' && !encrypted ? (
+            <WorkspaceJoinRequestsSettings
+              key={`${currentUserId}:${activeOrganization.id}`}
+              workspaceId={activeOrganization.id}
+              onOpenBilling={openAdmissionBilling}
+              onMembersChanged={refetchActiveOrganization}
+            />
+          ) : undefined
+        }
+        memberLimit={memberLimitState?.memberLimit ?? null}
+        memberLimitReached={memberLimitReachedFromError || memberLimitState?.canInvite === false}
+        billingUiAvailable={billingUiAvailable}
+        seatPreview={seatInvitePreview}
         onSignOut={() => {
           void signOut();
         }}
@@ -717,125 +889,44 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         onCancelInvitation={handleCancelInvitation}
         onLeaveOrganization={handleLeaveOrganization}
         onDeleteOrganization={handleDeleteOrganization}
+        deleteBillingGuard={deleteBillingGuard}
         onDeleteAccount={handleDeleteAccount}
         onRenameOrganization={handleRenameOrganization}
+        onOpenBilling={
+          billingUiAvailable
+            ? () => {
+                if (!activeOrganization.slug) return;
+                void router.navigate({
+                  to: '/$workspaceName/settings/billing',
+                  params: { workspaceName: activeOrganization.slug },
+                });
+              }
+            : undefined
+        }
         getInviteLink={getInviteLink}
+        onUpdateUserName={handleUpdateUserName}
+        onUploadAvatar={handleUploadAvatar}
+        linkedAccounts={linkedAccounts}
+        isLoadingLinkedAccounts={isLoadingLinkedAccounts}
+        onConnectAccount={canLinkOAuthAccounts ? handleConnectProvider : undefined}
+        showLinkedAccounts={canLinkOAuthAccounts}
+        hasPasswordCredential={hasPasswordCredential}
+        onChangePassword={handleChangePassword}
+        onVerifyCurrentPassword={handleVerifyCurrentPassword}
+        onSetupPassword={handleSetupPassword}
+        canGenerateCliApiKey={canGenerateCliApiKey}
+        cliApiKeys={cliApiKeys}
+        cliApiKeyMachineNames={cliApiKeyMachineNames}
+        currentMachineId={localMachineId}
+        isLoadingCliApiKeys={isLoadingCliApiKeys}
+        isCreatingCliApiKey={isCreatingCliApiKey}
+        hasGeneratedCliApiKey={Boolean(generatedCliApiKey)}
+        onGenerateCliApiKey={handleGenerateCliApiKey}
+        onCopyGeneratedCliApiKey={handleCopyGeneratedCliApiKey}
+        onClearGeneratedCliApiKey={() => setGeneratedCliApiKey(null)}
+        onRevokeCliApiKey={handleRevokeCliApiKey}
+        revokingCliApiKeyId={revokingCliApiKeyId}
       />
-    );
-  }
-
-  if (!activeOrganization) {
-    return (
-      <>
-        <p {...stylex.props(styles.empty)}>No organization</p>
-        {surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : null}
-      </>
-    );
-  }
-
-  return (
-    <AccountSettingsPure
-      surface={surface}
-      currentUser={currentUser}
-      organization={activeOrganization}
-      role={role as 'owner' | 'admin' | 'member'}
-      hasAdminPermission={hasAdminPermission && !encrypted}
-      members={sortedMembers}
-      pendingInvitations={pendingInvitations}
-      accountMachinesSlot={surface === 'account' ? <AccountMachinesOverview /> : undefined}
-      accountBillingSlot={
-        surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : undefined
-      }
-      workspaceOwnershipSlot={
-        !encrypted && role === 'owner' && currentUserId ? (
-          <WorkspaceOwnershipTransfer
-            key={activeOrganization.id}
-            workspaceName={activeOrganization.name}
-            currentUserId={currentUserId}
-            members={sortedMembers}
-            onTransfer={async (targetMemberId) => {
-              await transferOwnership({ workspaceId: activeOrganization.id, targetMemberId });
-              // A cache refresh failure must never turn a committed transfer into a failure.
-              void Promise.all([authClient.updateSession(), refetchActiveOrganization()]).catch(
-                console.error
-              );
-              toast.success(t('workspace.transfer.success'));
-            }}
-          />
-        ) : undefined
-      }
-      workspaceJoinRequestsSlot={
-        encrypted && platform.e2eeWorkspaces?.runtime && currentUserId ? (
-          <E2eeTeamSettingsHost
-            runtime={platform.e2eeWorkspaces.runtime}
-            workspaceId={activeOrganization.id}
-            accountId={currentUserId}
-            onOpenBilling={openAdmissionBilling}
-            onRefreshBilling={() => refreshAdmissionBilling({ workspaceId: activeOrganization.id })}
-            labels={
-              new Map(
-                activeOrganization.members.map(
-                  (member) => [member.id, member.user.name || member.user.email] as const
-                )
-              )
-            }
-          />
-        ) : role === 'owner' && !encrypted ? (
-          <WorkspaceJoinRequestsSettings
-            workspaceId={activeOrganization.id}
-            onOpenBilling={openAdmissionBilling}
-          />
-        ) : undefined
-      }
-      memberLimit={memberLimitState?.memberLimit ?? null}
-      memberLimitReached={memberLimitReachedFromError || memberLimitState?.canInvite === false}
-      billingUiAvailable={billingUiAvailable}
-      seatPreview={seatInvitePreview}
-      onSignOut={() => {
-        void signOut();
-      }}
-      onInviteMember={handleInviteMember}
-      onRemoveMember={handleRemoveMember}
-      onUpdateRole={handleUpdateRole}
-      onCopyInviteLink={handleCopyInviteLink}
-      onCancelInvitation={handleCancelInvitation}
-      onLeaveOrganization={handleLeaveOrganization}
-      onDeleteOrganization={handleDeleteOrganization}
-      deleteBillingGuard={deleteBillingGuard}
-      onDeleteAccount={handleDeleteAccount}
-      onRenameOrganization={handleRenameOrganization}
-      onOpenBilling={
-        billingUiAvailable
-          ? () => {
-              if (!activeOrganization.slug) return;
-              void router.navigate({
-                to: '/$workspaceName/settings/billing',
-                params: { workspaceName: activeOrganization.slug },
-              });
-            }
-          : undefined
-      }
-      getInviteLink={getInviteLink}
-      onUpdateUserName={handleUpdateUserName}
-      onUploadAvatar={handleUploadAvatar}
-      linkedAccounts={linkedAccounts}
-      isLoadingLinkedAccounts={isLoadingLinkedAccounts}
-      onConnectAccount={canLinkOAuthAccounts ? handleConnectProvider : undefined}
-      showLinkedAccounts={canLinkOAuthAccounts}
-      hasPasswordCredential={hasPasswordCredential}
-      onChangePassword={handleChangePassword}
-      onVerifyCurrentPassword={handleVerifyCurrentPassword}
-      onSetupPassword={handleSetupPassword}
-      canGenerateCliApiKey={canGenerateCliApiKey}
-      cliApiKeys={cliApiKeys}
-      isLoadingCliApiKeys={isLoadingCliApiKeys}
-      isCreatingCliApiKey={isCreatingCliApiKey}
-      hasGeneratedCliApiKey={Boolean(generatedCliApiKey)}
-      onGenerateCliApiKey={handleGenerateCliApiKey}
-      onCopyGeneratedCliApiKey={handleCopyGeneratedCliApiKey}
-      onClearGeneratedCliApiKey={() => setGeneratedCliApiKey(null)}
-      onRevokeCliApiKey={handleRevokeCliApiKey}
-      revokingCliApiKeyId={revokingCliApiKeyId}
-    />
+    </>
   );
 }

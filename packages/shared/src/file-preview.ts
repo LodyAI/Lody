@@ -192,6 +192,52 @@ export const FilePreviewV3ErrorSchema = z
   .strict();
 export type FilePreviewV3Error = z.infer<typeof FilePreviewV3ErrorSchema>;
 
+/** `file/list-dir` (capability `sessionDirectoryListing` v1). */
+export const SESSION_DIRECTORY_LIST_MAX_ENTRIES = 10_000;
+
+/**
+ * One folder of a session's own workspace (its worktree when it has one), the
+ * same root `file/preview` reads from. A plain read: it must never activate
+ * Code Collab, and it travels in the same owner-session envelope.
+ */
+export const SessionDirectoryListRequestSchema = z
+  .object({
+    v: z.literal(FILE_PREVIEW_PROTOCOL_VERSION),
+    sessionId: z.string().trim().min(1),
+    /** Workspace-relative folder; the empty string is the workspace root. */
+    path: z.string().max(4096),
+    limit: z.number().int().positive().max(SESSION_DIRECTORY_LIST_MAX_ENTRIES).optional(),
+  })
+  .strict();
+export type SessionDirectoryListRequest = z.infer<typeof SessionDirectoryListRequestSchema>;
+
+export const SessionDirectoryEntrySchema = z
+  .object({
+    name: z.string().min(1),
+    type: z.enum(['file', 'directory']),
+  })
+  .strict();
+export type SessionDirectoryEntry = z.infer<typeof SessionDirectoryEntrySchema>;
+
+export const SessionDirectoryListOkSchema = z
+  .object({
+    status: z.literal('ok'),
+    v: z.literal(FILE_PREVIEW_PROTOCOL_VERSION),
+    /** The listed folder, workspace-relative ('' for the root). */
+    path: z.string(),
+    /** Folders first, then files, each by name. */
+    entries: z.array(SessionDirectoryEntrySchema),
+    truncated: z.boolean(),
+  })
+  .strict();
+export type SessionDirectoryListOk = z.infer<typeof SessionDirectoryListOkSchema>;
+
+export const SessionDirectoryListResponseSchema = z.union([
+  SessionDirectoryListOkSchema,
+  FilePreviewV3ErrorSchema,
+]);
+export type SessionDirectoryListResponse = z.infer<typeof SessionDirectoryListResponseSchema>;
+
 export const FileLinkCandidateSchema = z
   .object({
     path: z.string().min(1),

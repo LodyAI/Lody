@@ -16,7 +16,13 @@ enum ChatMarkdownTheme {
     theme.fonts.footnote = .dynamic(of: 13, compatibleWith: traits)
     theme.colors.body = secondary ? .secondaryLabel : .label
     theme.colors.code = secondary ? .secondaryLabel : .lodyInk
-    theme.colors.highlight = .systemBlue
+    // Web markdown links: hsl(200 72% 34%) / hsl(200 69% 70%).
+    theme.colors.highlight = UIColor { traits in
+      if traits.userInterfaceStyle == .dark {
+        return UIColor(red: 0.493, green: 0.769, blue: 0.907, alpha: 1)
+      }
+      return UIColor(red: 0.0952, green: 0.4216, blue: 0.5848, alpha: 1)
+    }
     theme.colors.emphasis = .lodyAccent
     theme.colors.codeBackground = .lodyInset
     theme.colors.codeBlockBackground = .lodyInset

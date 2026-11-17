@@ -139,4 +139,36 @@ precondition(LodyRelativeTime.text(noon - 72 * hour, now: noon, calendar: calend
              LodyRelativeTime.text(noon - 72 * hour, now: noon, calendar: calendar))
 precondition(LodyRelativeTime.text(.nan, now: noon, calendar: calendar) == "")
 
+// Old list dates retain localized month/day ordering and the caller's time zone,
+// including when successive rows use a different configuration of the shared formatter.
+let oldDate = calendar.date(from: DateComponents(year: 2026, month: 10, day: 13, hour: 0, minute: 30))!.timeIntervalSince1970 * 1000
+let later = oldDate + 14 * 24 * hour
+var westCalendar = calendar
+westCalendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+var buddhistCalendar = Calendar(identifier: .buddhist)
+buddhistCalendar.timeZone = calendar.timeZone
+let dateCases: [(Calendar, Locale, String)] = [
+  (calendar, Locale(identifier: "en_US"), "Oct 13"),
+  (westCalendar, Locale(identifier: "en_US"), "Oct 12"),
+  (calendar, Locale(identifier: "fr_FR"), "13 oct."),
+  (westCalendar, Locale(identifier: "fr_FR"), "12 oct."),
+  (buddhistCalendar, Locale(identifier: "en_US"), "Oct 13"),
+]
+for _ in 0..<3 {
+  for (zoneCalendar, locale, expected) in dateCases {
+    precondition(LodyRelativeTime.compact(oldDate, now: later, calendar: zoneCalendar, locale: locale) == expected)
+    precondition(LodyRelativeTime.text(oldDate, now: later, calendar: zoneCalendar, locale: locale) == expected)
+  }
+}
+DispatchQueue.concurrentPerform(iterations: 128) { index in
+  let (zoneCalendar, locale, expected) = dateCases[index % dateCases.count]
+  precondition(LodyRelativeTime.compact(oldDate, now: later, calendar: zoneCalendar, locale: locale) == expected)
+  precondition(LodyRelativeTime.text(oldDate, now: later, calendar: zoneCalendar, locale: locale) == expected)
+}
+precondition(LodyRelativeTime.compact(noon - 30_000, now: noon, calendar: calendar) == "time.compact.now")
+precondition(LodyRelativeTime.compact(noon - 5 * 60_000, now: noon, calendar: calendar) == "time.compact.minutes")
+precondition(LodyRelativeTime.compact(noon - 2 * hour, now: noon, calendar: calendar) == "time.compact.hours")
+precondition(LodyRelativeTime.compact(noon - 48 * hour, now: noon, calendar: calendar) == "time.compact.days")
+precondition(LodyRelativeTime.compact(.nan, now: noon, calendar: calendar) == "")
+
 print("PASS: usage formatting, sections, chart merge, snapshot validation, list state, relative time")

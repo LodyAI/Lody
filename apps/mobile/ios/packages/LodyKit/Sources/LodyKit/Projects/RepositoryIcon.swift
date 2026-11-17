@@ -3,11 +3,13 @@ import SwiftUI
 import UIKit
 import CoreImage
 
-/// Web sidebar identity: the repository owner's cached avatar, gently muted.
+/// Web sidebar identity: the repository owner's cached avatar, gently muted
+/// unless `muted` is false (Home's project group labels keep the original colours).
 struct RepositoryIcon: View {
   let repository: String
   var size: CGFloat = LodyIconSize.sm
   var opacity: Double = 0.6
+  var muted = true
   @State private var loaded: UIImage?
   @State private var loadedURL: URL?
 
@@ -17,7 +19,7 @@ struct RepositoryIcon: View {
     Group {
       if let url, loadedURL == url, let loaded {
         Image(uiImage: loaded).resizable().scaledToFill()
-          .saturation(0.55).opacity(opacity)
+          .saturation(muted ? 0.55 : 1).opacity(muted ? opacity : 1)
       } else {
         LodyIcon.github.image.resizable().renderingMode(.template)
           .foregroundStyle(LodyColor.iconSecondary)

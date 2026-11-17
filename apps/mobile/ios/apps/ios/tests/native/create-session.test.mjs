@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { LoroDoc } from 'loro-crdt/base64';
+import { SESSION_HISTORY_PROTOCOL_VERSION } from '../../../../packages/cloud-runtime/vendor/upstream-roost/packages/shared/src/machine-protocol-capabilities.ts';
 
 test('create a project session, open its empty history and dispatch the first turn; reject invalid targets and never replay an uncertain create', async () => {
   const meta = new Flock('meta'),
@@ -692,4 +693,84 @@ test('legacy capability keys preserve all builtin agent types', async () => {
   assert.equal(result.capabilities[0].agentConfigId, undefined);
   assert.equal(result.capabilities[0].agentType, 'grok');
   assert.equal(result.capabilities[1].models[0].id, 'codex');
+});
+
+test('new sessions persist the upstream Roost preference only for compatible machines', async () => {
+  const bundle = await build({
+    stdin: {
+      contents: "export { createSession } from './create-session.ts'",
+      resolveDir: new URL(
+        '../../../../packages/cloud-runtime/src/runtime/',
+        import.meta.url,
+      ).pathname,
+      loader: 'ts',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    plugins: [
+      {
+        name: 'streams-fixture',
+        setup(builder) {
+          builder.onResolve({ filter: /^@loro-dev\/streams-client$/ }, () => ({
+            path: 'mock',
+            namespace: 'fixture',
+          }));
+          builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({
+            contents:
+              'export class StreamsClient { async create() { return {ok:true,result:{}} } }',
+          }));
+        },
+      },
+    ],
+  });
+  const { createSession } = await import(
+    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
+  );
+  const flock = new Flock('create-roost-fixture');
+  const options = {
+    agents: [
+      { id: 'a', machineId: 'm', cliType: 'builtin', agentType: 'codex' },
+    ],
+  };
+  const replica = {
+    flock,
+    client: {
+      async append() {
+        return { ok: true, result: {} };
+      },
+    },
+  };
+  const grant = async () => ({
+    token: 'synthetic',
+    gatewayBaseUrl: 'https://example.invalid',
+  });
+  for (const [preference, capability, expected] of [
+    [false, SESSION_HISTORY_PROTOCOL_VERSION, 'loro'],
+    [true, SESSION_HISTORY_PROTOCOL_VERSION - 1, 'loro'],
+    [true, SESSION_HISTORY_PROTOCOL_VERSION, 'roost'],
+  ]) {
+    flock.set(['m', 'machine-m'], {
+      protocolCapabilities: { sessionHistory: capability },
+    });
+    flock.commit();
+    const id = crypto.randomUUID();
+    const result = await createSession(
+      {
+        workspaceId: 'w',
+        sessionId: id,
+        machineId: 'm',
+        agentConfigId: 'a',
+        userId: 'u',
+        title: 'test',
+        preferRoost: preference,
+      },
+      options,
+      replica,
+      grant,
+    );
+    assert.equal(result.state, 'created');
+    assert.equal(flock.get(['m', `session-${id}`]).historyBackend, expected);
+  }
 });

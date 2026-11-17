@@ -1,3 +1,4 @@
+import { restoreGitHubInstallationRecovery } from '@/lib/github-installation-recovery';
 import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import { useLegacyWorkspaceAction } from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useEffect } from 'react';
@@ -21,19 +22,32 @@ export function usePersonalGitHubAuthorization(
   const legacyStatus = useLegacyWorkspaceQueryStatus(workspaceId);
   useEffect(() => {
     if (!workspaceId || legacyStatus !== 'allowed') return;
+    let active = true;
     try {
       const callback = takePersonalGitHubCallback();
       if (!callback) return;
-      void complete({ workspaceId, ...callback }).catch(() => {
-        toast.error(
-          t('settings.integrations.github.personalIdentityAuthFailed', 'Authorization failed')
-        );
-      });
+      const callbackLocation = window.location.href;
+      const { installationRecovery, ...authorization } = callback;
+      void complete({ workspaceId, ...authorization })
+        .then(() => {
+          if (active && window.location.href === callbackLocation && installationRecovery)
+            restoreGitHubInstallationRecovery(installationRecovery);
+        })
+        .catch(() => {
+          if (active && window.location.href === callbackLocation && installationRecovery)
+            restoreGitHubInstallationRecovery(installationRecovery);
+          toast.error(
+            t('settings.integrations.github.personalIdentityAuthFailed', 'Authorization failed')
+          );
+        });
     } catch {
       toast.error(
         t('settings.integrations.github.personalIdentityAuthFailed', 'Authorization failed')
       );
     }
+    return () => {
+      active = false;
+    };
   }, [workspaceId, complete, legacyStatus, t]);
   return useCallback(async () => {
     if (!workspaceId || !workspaceSlug) return;

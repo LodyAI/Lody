@@ -1,0 +1,82 @@
+{
+  "runtimeSource": "82e848b8e01937bec9768c64d342b81f1d44bd6e",
+  "snapshotFiles": 119,
+  "checks": {
+    "gradle": [
+      "testDebugUnitTest",
+      "assembleDebug",
+      "lintDebug",
+      "assembleDebugAndroidTest"
+    ],
+    "jvm": {
+      "tests": 228,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "javascript": {
+      "tests": 67,
+      "passed": 67
+    },
+    "docsCheck": "passed",
+    "npmAuditVulnerabilities": 0
+  },
+  "nativeUi": {
+    "device": "emulator-5556",
+    "avd": "SettingsVerify",
+    "api": 34,
+    "fixture": "AgentSettingsProbeActivity (synthetic only)",
+    "status": "passed",
+    "checks": [
+      "Settings has no Machines destination",
+      "machine picker",
+      "create on empty machine",
+      "other-machine providers retained",
+      "readonly create and edit disabled",
+      "offline create disabled",
+      "final method-required starts fresh UUID flow",
+      "secret input authentication",
+      "runtime status",
+      "write-only environment controls",
+      "Pi extension discovery"
+    ],
+    "screenshots": "evidence/agent-settings/",
+    "screenshotCount": 14
+  },
+  "webViewInstrumentation": {
+    "status": "passed",
+    "device": "emulator-5556",
+    "api": 34,
+    "webView": "com.google.android.webview 113.0.5672.136",
+    "classes": [
+      "app.lody.android.runtime.WebViewRuntimeTest",
+      "app.lody.android.runtime.RuntimeOwnerDeviceTest"
+    ],
+    "tests": 20,
+    "failures": 0,
+    "durationSeconds": 77.151,
+    "checks": [
+      "DataRuntime.html and NetworkRuntime.html readiness and typed commands",
+      "Flock WASM snapshot round trip",
+      "Loro WASM framed snapshot round trip",
+      "Web Crypto secure origin and Zstd",
+      "Unicode bridge and canonical schema decoding",
+      "native command deadlines and cancellation",
+      "background suspension and heartbeat",
+      "native watchdog and renderer termination recovery without replay",
+      "workspace switch fencing and Activity recreation",
+      "navigation containment and capability mismatch"
+    ],
+    "rootCause": "Android alias selected loro-crdt/base64, which synchronously compiled approximately 3 MiB with new WebAssembly.Module on the WebView main thread, exceeding its 4 KiB limit.",
+    "fix": "Android-only wrapper imports official loro-crdt/web, initializes bundled WASM bytes asynchronously before consumers run, and serves both root and base64 imports. Vendor snapshot unchanged.",
+    "comparison": "The original round-trip failed at STARTING with the main-thread WASM compile error; it passed after the fix on the same emulator and unchanged WebView version. No engine upgrade was required.",
+    "additionalFix": "RuntimeProtocol.schema reads machine ids from the canonical machines object; the contract fixture now matches that envelope.",
+    "environment": "Only API 34 system images were installed locally. emulator-5554 was not operated on."
+  },
+  "limits": [
+    "No real account sign-in or provider mutations were attempted.",
+    "Synthetic UI acceptance does not establish authenticated cloud integration.",
+    "Only Sorbet connection/endpoint-store management lacks native encrypted feature transport.",
+    "Other Settings inner pages remain explicit placeholders."
+  ]
+}

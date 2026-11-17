@@ -12,9 +12,12 @@ import {
 } from '@/components/session-list';
 import { buildOpenedBySessionTree, countOpenedByTreeRoots } from '@/lib/session-opened-by-tree';
 import {
+  buildSidebarUpdatedBuckets,
   getVisibleUpdatedItems,
   sortUpdatedItems,
   SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
+  updatedBucketCanFold,
+  type SidebarUpdatedBucketKey,
   type SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
 
@@ -68,10 +71,13 @@ export type SidebarNavigationModelOptions = {
     chatSessions: SessionListRow[];
     chatsCollapsed: boolean;
   };
+  /** Rows of the Updated and Status organize modes, which split them differently. */
   updated: {
     items: SidebarUpdatedItem[];
-    collapsed: boolean;
-    showFull: boolean;
+    /** Per-section collapse state; missing keys are expanded. */
+    collapsedBuckets: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
+    /** Per-section "Show all" state; missing keys show the preview. */
+    showFullBuckets: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
   };
 };
 
@@ -177,16 +183,19 @@ export function buildSidebarNavigationItems({
     }
   }
 
-  if (organizeMode === 'updated') {
-    if (updated.collapsed) return items;
-    const orderedItems = sortUpdatedItems(updated.items);
-    for (const item of getVisibleUpdatedItems(
-      orderedItems,
-      true,
-      updated.showFull,
-      collapsedOpenedBySessions
-    )) {
-      items.push({ kind: 'session', sessionId: item.id, groupKey: '__updated__' });
+  if (organizeMode === 'updated' || organizeMode === 'status') {
+    const grouping = organizeMode === 'updated' ? 'recency' : 'status';
+    for (const bucket of buildSidebarUpdatedBuckets(updated.items, grouping)) {
+      if (updated.collapsedBuckets[bucket.key]) continue;
+      const groupKey = bucket.key === 'all' ? '__updated__' : `__status:${bucket.key}__`;
+      for (const item of getVisibleUpdatedItems(
+        bucket.items,
+        updatedBucketCanFold(bucket.key),
+        Boolean(updated.showFullBuckets[bucket.key]),
+        collapsedOpenedBySessions
+      )) {
+        items.push({ kind: 'session', sessionId: item.id, groupKey });
+      }
     }
     return items;
   }

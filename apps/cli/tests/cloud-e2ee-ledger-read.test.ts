@@ -41,6 +41,15 @@ describe('latest ledger read failures through the Convex SDK', () => {
     ['a timeout', () => Promise.reject(new DOMException('timed out', 'TimeoutError'))],
     ['a bad gateway page', async () => new Response('<html>Bad gateway</html>', { status: 502 })],
     ['an empty 503', async () => new Response('', { status: 503 })],
+    ['a 408', async () => new Response('Request Timeout', { status: 408 })],
+    ...[408, 429, 502, 503, 504].map((status): [string, () => Promise<Response>] => [
+      `a ${status} gateway template naming forbidden and unauthorized`,
+      async () => new Response('<html>forbidden / unauthorized upstream</html>', { status }),
+    ]),
+    [
+      'an HTTP 200 internal error',
+      async () => json({ status: 'error', errorMessage: '[Server Error]' }, 200),
+    ],
     ['a 429', async () => new Response('Too many requests', { status: 429 })],
     [
       'a server error with no business code',
@@ -60,6 +69,27 @@ describe('latest ledger read failures through the Convex SDK', () => {
       'a 502 naming a refusal',
       async () => json({ code: 'e2ee_member_removed', message: 'refused' }, 502),
     ],
+    [
+      'an unstructured unauthorized code',
+      () => Promise.reject(new Error('e2ee_device_unauthorized')),
+    ],
+    [
+      'an HTTP 560 unstructured refusal',
+      async () => json({ status: 'error', errorMessage: 'e2ee_device_unauthorized' }, UDF_FAILED),
+    ],
+    [
+      'an HTTP 200 structured business refusal',
+      async () =>
+        json(
+          { status: 'error', errorMessage: '[Server Error]', errorData: { code: 'access_denied' } },
+          200
+        ),
+    ],
+    [
+      'an HTTP 200 unknown error',
+      async () => json({ status: 'error', errorMessage: 'unrecognized reply' }, 200),
+    ],
+    ['a 401', async () => new Response('Unauthorized', { status: 401 })],
     ['a 403', async () => new Response('Forbidden', { status: 403 })],
     ['a 200 success with no value', async () => json({ status: 'success' }, 200)],
     ['a 200 with an unknown status', async () => json({ status: 'pending' }, 200)],

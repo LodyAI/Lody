@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import { AGENT_ROLE_VERSION, type AgentRole } from '../src/agent-role';
 import type { AgentConfigId, AgentRoleId, MachineId, McpServerId } from '../src/ids';
-import { applyWorkspaceFlockRowEvents, getProjectMcpDefaults, listWorkspaceAgentRoles, writeWorkspaceAgentRoleToFlock, listWorkspaceMcpServers, readWorkspaceFlockRowsFromFlock, workspaceFlockKeys, writeWorkspaceMcpServerToFlock, type WorkspaceFlockKey, type WorkspaceFlockWritableFlock } from '../src/workspace-flock';
+import {
+  applyWorkspaceFlockRowEvents,
+  getProjectMcpDefaults,
+  listWorkspaceAgentRoles,
+  writeWorkspaceAgentRoleToFlock,
+  listWorkspaceMcpServers,
+  readWorkspaceFlockRowsFromFlock,
+  workspaceFlockKeys,
+  writeWorkspaceMcpServerToFlock,
+  type WorkspaceFlockKey,
+  type WorkspaceFlockWritableFlock,
+} from '../src/workspace-flock';
 import { getProjectMcpKey, type WorkspaceMcpServerMeta } from '../src/workspace-mcp';
 import { splitMcpAuthentication, assertPublicMcpServer } from '../src/mcp-authentication';
 
@@ -112,7 +123,6 @@ class FakeWorkspaceFlock implements WorkspaceFlockWritableFlock {
 }
 
 describe('workspace Flock helpers', () => {
-
   it('normalizes a secret-shaped option out of a stored role row', () => {
     const flock = new FakeWorkspaceFlock();
     const role = agentRole('role-1');

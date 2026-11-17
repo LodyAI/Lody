@@ -79,7 +79,11 @@ import UIKit
     let previous = stream
     stream = next
     next?.preview = self
-    if let previous, next == nil, motion != "hide", !isHidden, window != nil, previous.superview === content {
+    if let next { label(android: next.android) }
+    if let previous, next != nil, previous.fullscreen?.window != nil {
+      // The other platform's full-screen page still borrows this stream; let that page own it.
+      previous.preview = nil
+    } else if let previous, next == nil, motion != "hide", !isHidden, window != nil, previous.superview === content {
       powerOff(previous)
     } else {
       endMotion()
@@ -89,6 +93,12 @@ import UIKit
     if next == nil, motion == nil { isHidden = true }
     if next != nil { attach() }
     superview?.setNeedsLayout()
+  }
+
+  private func label(android: Bool) {
+    let prefix = android ? "native.emulator." : "native.simulator."
+    expand.accessibilityLabel = String(localized: String.LocalizationValue(prefix + "expand"), bundle: .lody)
+    close.accessibilityLabel = String(localized: String.LocalizationValue(prefix + "close"), bundle: .lody)
   }
 
   // A zoom transition already carried the device here, so returning skips the entrance.

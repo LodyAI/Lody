@@ -1,6 +1,3 @@
-// @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import { getMessageItemPrefix } from '../src/lib/session-chat-search';
@@ -77,14 +74,13 @@ const makeConversation = () => {
   return { finishedTurn, streamingTurn, items: [finishedTurn, streamingTurn] };
 };
 
-describe('DSH thought visibility', () => {
+describe('Thought visibility', () => {
   const thought: MessageContent = { type: 'thought', text: 'Synthetic reasoning.' };
   const nextThought: MessageContent = { type: 'thought', text: 'Continue after the command.' };
   const fixture = (id: string, content: MessageContent[], finished = false) => ({
     items: [wrap(makeMessage(id, 'assistant', content, finished))],
     lastAssistantMessageId: id,
     expansionVersion: 0,
-    showThoughts: true,
   });
   const visibleContents = (rows: ReturnType<typeof buildChatVirtualRows>) =>
     rows.flatMap((row) => {
@@ -118,13 +114,13 @@ describe('DSH thought visibility', () => {
       ],
     ]);
 
-  it('keeps visible thought rows and keys when commands stream into the turn', () => {
+  it('keeps collapsed thought groups and keys when commands stream into the turn', () => {
     const id = 'dsh-streaming';
     const before = buildChatVirtualRows(fixture(id, [thought]));
     const tool = toolCall();
     const after = buildChatVirtualRows(fixture(id, [thought, tool, nextThought]));
-    expect(visibleContents(after)).toEqual([thought, nextThought]);
-    expect(headers(after).map((header) => header.expanded)).toEqual([true, false, true]);
+    expect(visibleContents(after)).toEqual([]);
+    expect(headers(after).map((header) => header.expanded)).toEqual([false, false, false]);
     expect(after.slice(0, before.length).map((row) => row.key)).toEqual(
       before.map((row) => row.key)
     );
@@ -138,8 +134,8 @@ describe('DSH thought visibility', () => {
     const answer = text('Answer');
     const contents = [thought, tool, progress, nextThought, answer];
     const live = buildChatVirtualRows(fixture(id, contents));
-    expect(visibleContents(live)).toEqual([thought, progress, nextThought, answer]);
-    expect(headers(live).map((header) => header.expanded)).toEqual([true, false, true]);
+    expect(visibleContents(live)).toEqual([progress, answer]);
+    expect(headers(live).map((header) => header.expanded)).toEqual([false, false, false]);
 
     const args = fixture(id, contents, true);
     const rows = buildChatVirtualRows(args);
@@ -155,8 +151,8 @@ describe('DSH thought visibility', () => {
       ...args,
       selectionLayouts: expansion(id, {}, { [`segment:${id}:0`]: true }),
     });
-    expect(visibleContents(expanded)).toEqual([thought, progress, nextThought, answer]);
-    expect(headers(expanded).map((group) => group.expanded)).toEqual([true, false, true]);
+    expect(visibleContents(expanded)).toEqual([progress, answer]);
+    expect(headers(expanded).map((group) => group.expanded)).toEqual([false, false, false]);
     expect(
       visibleContents(
         buildChatVirtualRows({
@@ -175,7 +171,6 @@ describe('DSH thought visibility', () => {
     expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: searched }))).toEqual([
       thought,
       progress,
-      nextThought,
       answer,
     ]);
   });
@@ -188,8 +183,8 @@ describe('DSH thought visibility', () => {
     const [first, command, last] = headers(defaults);
     const selected = expansion(id, { [first!.block.key]: false, [command!.block.key]: true });
     const changed = buildChatVirtualRows({ ...args, selectionLayouts: selected });
-    expect(visibleContents(changed)).toEqual([tool, nextThought]);
-    expect(headers(changed).map((header) => header.expanded)).toEqual([false, true, true]);
+    expect(visibleContents(changed)).toEqual([tool]);
+    expect(headers(changed).map((header) => header.expanded)).toEqual([false, true, false]);
     const reopened = expansion(id, {
       [first!.block.key]: true,
       [command!.block.key]: false,
@@ -205,42 +200,12 @@ describe('DSH thought visibility', () => {
     expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: search }))).toEqual([
       thought,
       tool,
-      nextThought,
     ]);
   });
 
-  it('invalidates both caches on provider changes and preserves other providers folding', () => {
-    const args = fixture(
-      'dsh-provider-switch',
-      [thought, toolCall(), text('progress'), toolCall(), text('answer')],
-      true
-    );
-    const expandedArgs = {
-      ...args,
-      selectionLayouts: expansion(
-        'dsh-provider-switch',
-        {},
-        { 'segment:dsh-provider-switch:0': true }
-      ),
-    };
-    const dsh = buildChatVirtualRows(expandedArgs);
-    expect(visibleContents(dsh)).toEqual([thought, text('progress'), text('answer')]);
-    const other = buildChatVirtualRows({ ...expandedArgs, showThoughts: false });
-    expect(visibleContents(other)).toEqual([text('progress'), text('answer')]);
-    expect(
-      other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
-    ).toBe(true);
-    expect(buildChatVirtualRows(expandedArgs)).toEqual(dsh);
-  });
-
-  it('keeps interrupted thoughts readable without exposing them for other providers', () => {
-    const args = fixture('dsh-interrupted', [thought, toolCall(), nextThought], true);
-    expect(visibleContents(buildChatVirtualRows(args))).toEqual([thought, nextThought]);
-    const other = buildChatVirtualRows({ ...args, showThoughts: false });
-    expect(visibleContents(other)).toEqual([]);
-    expect(headers(other)).toHaveLength(1);
-    expect(
-      other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
-    ).toBe(false);
+  it('keeps interrupted thoughts in their own closed groups', () => {
+    const args = fixture('interrupted', [thought, toolCall(), nextThought], true);
+    expect(visibleContents(buildChatVirtualRows(args))).toEqual([]);
+    expect(headers(buildChatVirtualRows(args))).toHaveLength(3);
   });
 });

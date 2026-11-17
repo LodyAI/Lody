@@ -1,7 +1,8 @@
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { ProductWindowIpcService } from '../product-window-ipc-service'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class CliIpc extends IpcService {
+export class CliIpc extends ProductWindowIpcService {
   static override readonly groupName = 'cli'
 
   @IpcMethod()

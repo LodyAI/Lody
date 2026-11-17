@@ -99,7 +99,7 @@ export const buildPrompt = (
     appendIssuePrMentionsToPrompt(prompt, issuePRMentions) + groupContext;
   const normalizedFeedbackPostId = feedbackPostId?.trim();
   const feedbackInstruction = normalizedFeedbackPostId
-    ? `\n\nThe postId is ${normalizedFeedbackPostId}. Use the feedback-progress-reporter skill when appropriate.`
+    ? `\n\nThe feedback postId is ${normalizedFeedbackPostId}.`
     : '';
   const instructions = `${options?.branchToRename ? newWorktreeSystemCommands(options.branchToRename) : ''}${project?.kind === 'github' ? GITHUB_SYSTEM_COMMANDS : ''}`;
   const systemCommands = instructions

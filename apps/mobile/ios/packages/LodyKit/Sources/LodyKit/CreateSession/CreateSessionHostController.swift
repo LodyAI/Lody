@@ -39,8 +39,10 @@ struct CreateSessionHostParams: Decodable {
   }
 }
 
+/// Owns its header: the shell page hides its bar for the form's own, so the edge swipe back
+/// to Home is restored through the owned-header pop delegate.
 @MainActor
-class CreateSessionHostController: UIViewController {
+class CreateSessionHostController: UIViewController, LodyPageOwnedHeader {
   private let params: CreateSessionHostParams
   private let service: CreateSessionService
   private let input = LodyComposerView(frame: .zero)
@@ -53,6 +55,9 @@ class CreateSessionHostController: UIViewController {
   private var optionsRefresh: Task<Void, Never>?
   private var capabilityTask: Task<Void, Never>?
   private var capabilityConfig: String?
+  /// Set once the Outbox holds the typed turn, so a composer that keeps its text visible while
+  /// the page dismisses does not write it back as the next new-chat draft.
+  private var draftSubmitted = false
   var onCreated: (@MainActor ([String: Any]) async throws -> Void)?
 
   init(params: CreateSessionHostParams, service: CreateSessionService = .live) {
@@ -86,9 +91,14 @@ class CreateSessionHostController: UIViewController {
     wire()
     if service.persistShare {
       optionsObservers.add(NotificationCenter.default.addObserver(forName: .lodyDataRuntimeEvent, object: nil, queue: .main) { [weak self] note in
-        guard note.userInfo?["creationOptionsChanged"] as? Bool == true else { return }
+        let optionsChanged = note.userInfo?["creationOptionsChanged"] as? Bool == true
+        let live = note.userInfo?["state"] as? String == "live"
+        guard optionsChanged || live else { return }
         MainActor.assumeIsolated {
           guard let self, DataRuntime.current?.workspace == self.params.workspaceId else { return }
+          // A read that failed before the runtime was ready (or while it was offline) is read
+          // again once it is live, so the page does not stay on "Tap to retry".
+          guard optionsChanged || self.controller.optionsFailed else { return }
           self.optionsRefresh?.cancel()
           self.optionsRefresh = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
@@ -113,6 +123,9 @@ class CreateSessionHostController: UIViewController {
     navigation.didMove(toParent: self)
   }
 
+  // A pushed picker takes the edge swipe back to the form first.
+  var allowsPageSwipeBack: Bool { navigation.viewControllers.count <= 1 }
+
   // A pushed form covers Home's destination: waiting for its viewDidAppear to adopt the
   // composer would deadlock navigation. Close the form with the native transition instead.
   var relays: Bool { params.relay == true && params.sendHandoff != false && params.pushed != true }
@@ -129,7 +142,10 @@ class CreateSessionHostController: UIViewController {
       default: break
       }
     }
-    controller.restoreDraft = { [weak self] token in self?.input.restoreDraft(token: token) }
+    controller.restoreDraft = { [weak self] token in
+      self?.draftSubmitted = false
+      self?.input.restoreDraft(token: token)
+    }
     controller.showMessage = { LodyToastOverlay.shared.show(message: $0, kind: $1) }
     controller.onCancel = { [weak self] in self?.close() }
     let prefsKey = CreateSessionService.prefsKey(userId: params.userId, workspaceId: params.workspaceId)
@@ -191,6 +207,35 @@ class CreateSessionHostController: UIViewController {
     controller.form.open(projectId: params.projectId, context: params.context)
     if let text = params.initialText, !text.isEmpty { input.composer.setInitialDraft(text) }
     if let attachments = params.initialAttachmentsJSON, !attachments.isEmpty { input.composer.setInitialAttachments(attachments) }
+    persistDraft()
+  }
+
+  static func draftKey(userId: String, workspaceId: String) -> String { "create-draft:v1:" + CreateJSON.encode([userId, workspaceId]) }
+
+  /// The typed new-chat text is kept per account and workspace, as a conversation's draft is.
+  /// Shared content opens its own page and leaves the stored draft alone; encrypted workspaces
+  /// never write plaintext.
+  private func persistDraft() {
+    guard service.persistShare, service.workspaceMode(params.workspaceId) == .plaintext,
+      params.initialText?.isEmpty != false, params.initialAttachmentsJSON?.isEmpty != false else { return }
+    let key = Self.draftKey(userId: params.userId, workspaceId: params.workspaceId)
+    let store = LocalStore.shared
+    input.composer.onDraftChange = { [weak self] text in
+      guard self?.draftSubmitted != true else { return }
+      LocalStore.queue.async { try? store.write(key, text) }
+    }
+    LocalStore.queue.async { [weak self] in
+      guard let text = try? store.read(key), !text.isEmpty else { return }
+      DispatchQueue.main.async { self?.input.composer.setStoredDraft(text) }
+    }
+  }
+
+  private func clearStoredDraft() {
+    guard input.composer.onDraftChange != nil, !draftSubmitted else { return }
+    draftSubmitted = true
+    let key = Self.draftKey(userId: params.userId, workspaceId: params.workspaceId)
+    let store = LocalStore.shared
+    LocalStore.queue.async { try? store.write(key, "") }
   }
 
   private func selectionChanged(_ form: CreateSessionForm) {
@@ -213,8 +258,8 @@ class CreateSessionHostController: UIViewController {
       workspaceId: form.workspaceId, projectId: page.chat ? nil : page.projectId.nilIfEmpty, machineId: machineId,
       agentConfigId: page.agent?.id, cliType: page.agent?.cliType, agentType: page.agent?.agentType
     )
-    guard mentions?.source != source else { return }
-    let store = MentionCatalogStore(source: source)
+    guard mentions?.source != source || mentions?.userId != form.userId else { return }
+    let store = MentionCatalogStore(source: source, userId: form.userId)
     store.changed = { [weak self, weak store] in
       guard let self, let store, mentions === store else { return }
       input.composer.setMentionItems(store.composerItemsJSON())
@@ -248,14 +293,17 @@ class CreateSessionHostController: UIViewController {
   }
 
   private func submit(_ draft: CreateSessionDraft, _ payload: [String: Any]) {
-    guard !opening else { return controller.submissionFailed() }
+    guard !opening, service.workspaceMode(draft.workspaceId) == .plaintext else { return controller.submissionFailed() }
     let built = CreateDraftRecord(draft: draft, payload: payload)
     let userId = params.userId, workspaceId = params.workspaceId
     let failed = built.record?.with(phase: "failed", reason: String(localized: "send.error.draftSaveShort", bundle: .lody))
-    let task = service.put(userId, workspaceId, built.recordJSON)
+    let task: Task<Void, Error>
+    do { task = try service.submit(user: userId, workspace: workspaceId, json: built.recordJSON) }
+    catch { controller.submissionFailed(); return }
+    clearStoredDraft()
     Task { [service] in
       guard (try? await task.value) == nil, let failed else { return }
-      _ = try? await service.put(userId, workspaceId, String(decoding: (try? JSONEncoder().encode(failed)) ?? Data(), as: UTF8.self)).value
+      _ = try? await service.submit(user: userId, workspace: workspaceId, json: String(decoding: (try? JSONEncoder().encode(failed)) ?? Data(), as: UTF8.self)).value
     }
     created = built.created
     guard relays, input.relayPayload != nil else {

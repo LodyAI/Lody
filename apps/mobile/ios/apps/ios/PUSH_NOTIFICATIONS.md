@@ -1,7 +1,7 @@
 # Native push integration
 
 The iOS-only app keeps bundle ID `ai.lody.mobile` and uses the public OneSignal App
-ID `e383bf31-7c8e-4641-b3f6-3486e77b9a82`. `LODY_ONESIGNAL_APP_ID` can override it at
+ID `930dcd5c-3534-46aa-805d-f279f008f80b`. `LODY_ONESIGNAL_APP_ID` can override it at
 prebuild time (an empty value disables initialization). No REST API key or APNs
 private key is shipped in the app.
 
@@ -34,7 +34,8 @@ its native login credential to the process-owned registration lifecycle.
 false uses OneSignal. Missing/malformed responses and network errors do not select
 a default; a previously confirmed provider is retained and the next foreground or
 permission refresh retries. OneSignal initializes lazily and logs in with
-`lody-push-v2:<userId>`. Native account IDs and notification recipients stay raw.
+the original verified `userId`, unchanged. Native account IDs and notification
+recipients use that same ID.
 
 Direct APNs registration sends platform `ios`, purpose `notification`, the token,
 language, a persistent random installation ID, and the running app's actual Bundle

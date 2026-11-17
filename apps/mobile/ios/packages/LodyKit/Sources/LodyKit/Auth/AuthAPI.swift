@@ -18,6 +18,14 @@ struct AuthWorkspace: Codable, Equatable, Sendable {
   let name: String
   let slug: String?
   let image: String?
+  var contentMode: WorkspaceContentMode? = nil
+  var genesisHash: String? = nil
+
+  var resolvedMode: WorkspaceContentMode {
+    let retained = WorkspaceModePins.shared.mode(id)
+    if retained == .e2ee || contentMode == .e2ee || genesisHash != nil { return .e2ee }
+    return retained
+  }
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
@@ -25,6 +33,8 @@ struct AuthWorkspace: Codable, Equatable, Sendable {
     try container.encode(name, forKey: .name)
     try container.encode(slug, forKey: .slug)
     try container.encodeIfPresent(image, forKey: .image)
+    try container.encodeIfPresent(contentMode, forKey: .contentMode)
+    try container.encodeIfPresent(genesisHash, forKey: .genesisHash)
   }
 }
 
@@ -92,6 +102,8 @@ struct AuthAPI: Sendable {
     configuration.timeoutIntervalForRequest = 30
     return URLSession(configuration: configuration, delegate: RedirectPolicy(), delegateQueue: nil)
   }()
+
+  var modePins = WorkspaceModePins.shared
 
   var transport: Transport = { request in
     let reply = try await nativeTransport(request)
@@ -206,6 +218,7 @@ struct AuthAPI: Sendable {
       throw AuthFailure(message: String(localized: "auth.error.invalidWorkspaceList", bundle: .lody))
     }
     let email = try Self.requiredString(user["email"])
+    let workspaces = try await workspaceModes(token: token, workspaces: list.map(Self.workspace))
     return AuthAccount(
       user: AuthUser(
         id: try Self.requiredString(user["id"]),
@@ -213,8 +226,68 @@ struct AuthAPI: Sendable {
         email: email,
         image: Self.optionalHTTPS(user["image"])
       ),
-      workspaces: try list.map(Self.workspace)
+      workspaces: workspaces
     )
+  }
+
+  /// Refresh mode evidence without replacing credentials or account/catalog ownership.
+  var modeTimeout: TimeInterval { 6 }
+
+  func workspaceModes(token: String, workspaces: [AuthWorkspace]) async throws -> [AuthWorkspace] {
+    var rows = workspaces.map { row in
+      var next = row
+      next.contentMode = (try? modePins.observe(row.id, mode: row.contentMode == .e2ee || row.genesisHash != nil ? .e2ee : .unknown, genesis: row.genesisHash)) ?? modePins.mode(row.id)
+      return next
+    }
+    let indices = rows.indices.filter { rows[$0].contentMode != .e2ee }
+    guard !indices.isEmpty else { return rows }
+    let started = ProcessInfo.processInfo.systemUptime
+    let jwt = try? await request("/convex/token", token: token, timeout: modeTimeout)
+    try Task.checkCancellation()
+    guard let auth = try? Self.record(jwt), let bearer = auth["token"] as? String, !bearer.isEmpty else { return rows }
+    let inputs = rows
+    await withTaskGroup(of: (Int, AuthWorkspace).self) { group in
+      var offset = 0
+      func enqueue(_ index: Int) {
+        group.addTask { (index, await describe(token: bearer, row: inputs[index], started: started)) }
+      }
+      while offset < min(4, indices.count) { enqueue(indices[offset]); offset += 1 }
+      while let (index, row) = await group.next() {
+        rows[index] = row
+        if offset < indices.count { enqueue(indices[offset]); offset += 1 }
+      }
+    }
+    try Task.checkCancellation()
+    return rows
+  }
+
+  private func describe(token: String, row: AuthWorkspace, started: TimeInterval) async -> AuthWorkspace {
+    var result = row
+    do {
+      let remaining = modeTimeout - (ProcessInfo.processInfo.systemUptime - started)
+      guard remaining > 0 else { return row }
+      var query = URLRequest(url: URL(string: BackendEnvironment.convex + "/api/query")!, timeoutInterval: remaining)
+      query.httpMethod = "POST"
+      query.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+      query.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      query.httpBody = try JSONSerialization.data(withJSONObject: ["path": "e2eeWorkspaces:describe", "format": "convex_encoded_json", "args": [["workspaceId": row.id]]])
+      let (data, status) = try await transport(query)
+      try Task.checkCancellation()
+      let reply = try Self.record(Self.json(data))
+      let value = try Self.record(reply["value"])
+      guard status == 200, reply["status"] as? String == "success", value["workspaceId"] as? String == row.id else { return row }
+      let genesis = value["genesisHash"] as? String
+      let mode: WorkspaceContentMode
+      let noCrypto = value["genesisHash"] == nil && value["cryptoOrgId"] == nil
+      if value["contentMode"] as? String == "e2ee" || genesis != nil { mode = .e2ee }
+      else if value["contentMode"] as? String == "plaintext", value["contentModeVersion"] as? Int == 1, noCrypto, value["admission"] == nil { mode = .plaintext }
+      else if value["admission"] as? String == "legacy-unclassified", noCrypto, value["contentMode"] == nil, value["contentModeVersion"] == nil { mode = .plaintext }
+      else { mode = .unknown }
+      if mode == .unknown { modePins.rejectPlaintext(row.id) }
+      result.contentMode = try modePins.observe(row.id, mode: mode, genesis: genesis)
+      result.genesisHash = genesis ?? row.genesisHash
+    } catch { result.contentMode = modePins.mode(row.id) }
+    return result
   }
 
   func updateWorkspace(token: String, id: String, name: String) async throws -> AuthWorkspace {
@@ -280,8 +353,8 @@ struct AuthAPI: Sendable {
     _ = try await request("/sign-out", token: token, body: [:])
   }
 
-  private func request(_ path: String, token: String? = nil, body: [String: Any]? = nil) async throws -> Any {
-    var request = URLRequest(url: URL(string: "\(Self.authOrigin)/api/auth\(path)")!)
+  private func request(_ path: String, token: String? = nil, body: [String: Any]? = nil, timeout: TimeInterval = 30) async throws -> Any {
+    var request = URLRequest(url: URL(string: "\(Self.authOrigin)/api/auth\(path)")!, timeoutInterval: timeout)
     request.httpMethod = body == nil ? "GET" : "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -330,7 +403,9 @@ struct AuthAPI: Sendable {
       id: try requiredString(item["id"]),
       name: try requiredString(item["name"]),
       slug: item["slug"] as? String,
-      image: optionalHTTPS(item["logo"])
+      image: optionalHTTPS(item["logo"]),
+      contentMode: item["contentMode"] as? String == "e2ee" || item["genesisHash"] is String ? .e2ee : nil,
+      genesisHash: item["genesisHash"] as? String
     )
   }
 

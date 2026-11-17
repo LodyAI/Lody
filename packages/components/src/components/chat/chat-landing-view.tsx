@@ -29,6 +29,7 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
+import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
 
 export type ChatLandingTone = 'light' | 'dark';
 
@@ -57,9 +58,9 @@ export interface ChatLandingViewProps {
   /** Callback when prompt changes */
   onPromptChange: (value: string) => void;
   /** Callback for prompt keydown events */
-  onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPromptKeyDown?: (event: KeyboardEvent<ComposerInputElement>) => void;
   /** Callback for prompt paste events */
-  onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onPromptPaste?: (event: ClipboardEvent<ComposerInputElement>) => void;
   /** Callback when files are dropped onto the composer */
   onImageDrop?: (files: File[]) => void;
   /** Placeholder text for the prompt textarea */
@@ -68,7 +69,7 @@ export interface ChatLandingViewProps {
   /** Mobile keyboard action hint for the prompt textarea */
   promptEnterKeyHint?: 'send' | 'enter';
   /** Ref for the prompt textarea */
-  promptRef?: Ref<HTMLTextAreaElement>;
+  promptRef?: Ref<ComposerInputElement>;
   /** Inline pasted text drafts rendered as protected tokens inside the textarea */
   pastedTextDrafts?: PastedTextDraft[];
   /** Callback when pasted text draft ranges change */
@@ -93,8 +94,6 @@ export interface ChatLandingViewProps {
   onFileRetry?: (id: string) => void;
   /** Per-turn MCP selection, rendered inside the composer's "+" menu. */
   mcp?: AttachmentAddMenuMcp;
-  /** @deprecated Use topSelector and footerSelector instead */
-  selector?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, branch) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -225,7 +224,6 @@ export function ChatLandingView({
   onFileRemove,
   onFileRetry,
   mcp,
-  selector,
   topSelector,
   footerSelector,
   bottomBar,
@@ -277,7 +275,7 @@ export function ChatLandingView({
   );
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const handlePromptPasteWithSessionUrl = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const text = event.clipboardData.getData('text/plain');
       // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
       const sessionUrl = text
@@ -291,8 +289,7 @@ export function ChatLandingView({
           });
         } else {
           const target = event.currentTarget;
-          const at = target.selectionStart ?? target.value.length;
-          const replaceEnd = target.selectionEnd ?? at;
+          const { start: at, end: replaceEnd } = getComposerSelection(target);
           if (
             mentionActionsRef.current?.insertSessionMention(sessionUrl.sessionId, {
               at,
@@ -387,7 +384,7 @@ export function ChatLandingView({
       <div className="mt-1 text-xs text-muted-foreground">{composerCrashed}</div>
       <textarea
         id={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
-        ref={promptRef}
+        ref={promptRef as Ref<HTMLTextAreaElement>}
         value={submissionPending ? '' : promptValue}
         onChange={(event) => onPromptChange(event.target.value)}
         onKeyDown={onPromptKeyDown}
@@ -417,7 +414,7 @@ export function ChatLandingView({
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">{selector ?? footerSelector}</div>
+        <div className="flex flex-wrap items-center gap-1">{footerSelector}</div>
         <div className="ml-auto flex items-center gap-2">
           {primaryActionNode}
           <button
@@ -475,7 +472,7 @@ export function ChatLandingView({
         onFileRetry={submissionPending ? undefined : onFileRetry}
         mcp={mcp}
         topSelector={topSelector}
-        footerSelector={footerSelector ?? selector}
+        footerSelector={footerSelector}
         bottomBar={bottomBar}
         statusMessage={composerStatusMessage}
         statusTone={composerStatusTone}

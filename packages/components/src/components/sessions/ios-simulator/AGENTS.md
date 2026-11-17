@@ -63,7 +63,10 @@ Decision and rationale:
 - `SessionDevicePreviewPanel` also serves Android through `android-emulator/control`
   and the independent `androidEmulator: 1` capability. Keep its state/preferences
   separate from iOS, never request iOS exterior assets for it, and expose only
-  supported controls. Android IDs are exact AVD names on the wire.
+  supported controls. Android IDs are exact AVD names on the wire. Consume Android
+  preview requests once per device in localStorage, independently of iOS, so closing
+  the panel remains effective across app restarts. Preserve this dismissal preference
+  during cache clearing; a new request may reveal the panel again.
 
 - Keep Stop preview directly accessible in ready desktop/mobile headers, bound to
   the current operation. Android starts Clear on the local machine and Balanced remotely, and exposes quality switching while ready inside the controls' More menu; switching

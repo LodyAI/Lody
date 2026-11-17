@@ -29,6 +29,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 - Files, Sessions, Roles, Issues, and PRs use vendored VS Code `scoreFuzzy`
   with source ordering. Skills rank alone; typed slash queries merge Commands
   and Prompt Shortcuts after source gates.
+- Typed `@` results rank across categories: selectable rows first, Agent Roles
+  next, then descending fuzzy score. Category links follow matching rows.
 - Side panels render neutral `MentionCandidateDetail` fields verbatim: use
   i18n'd text, never raw enums. `detail.agentRole` instead renders
   `sessions/agent-role-detail-pane.tsx` on desktop. The list sets pane height.
@@ -119,8 +121,8 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 
 - An Agent Role mention has the session mention's shape (plain `@<token>`; the
   RANGE carries `formatAgentRoleMentionValue`: Role id, plus machine for a
-  multi-machine Role), but its rewrite asks the agent to CREATE a Session and
-  names only that id/machine (root `AGENTS.md` owns MCP create/freeze). An
+  multi-machine Role), but its rewrite is a reference naming only that id/machine,
+  never an instruction to create a Session (root `AGENTS.md` owns MCP create/freeze). An
   unavailable or bare multi-machine Role stays plain text. Tokens derive from
   the name or alias; uniqueness uses them.
 - A Role candidate's emoji REPLACES the category glyph

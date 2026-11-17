@@ -1,5 +1,6 @@
 import Foundation
 import LodyCore
+import UIKit
 
 /// Scripted schedules for the offline Home fixture (`--ui-verify-home`): every row state the list
 /// words, an unsupported rule, a teammate's schedule, an outdated computer and a scheduled message.
@@ -15,13 +16,97 @@ final class ScheduleFixture {
   private var drafts: [String: RuntimeContract.ScheduleDraft] = [:]
   private(set) var runs: [String] = []
 
+  // Explicit UI-verification gates: no timers, and no production cache logic in the fixture.
+  private var held: Set<String> = []
+  private var pending: [String: [CheckedContinuation<Void, Error>]] = [:]
+  private var signals: [String: UIView] = [:]
+  private var usesDiskCache = false
+
+  func control(_ action: String) {
+    guard LodyUIVerify.enabled, NativeHomeFixture.active else { return }
+    if action == "seed-cache" {
+      Task { await seedCache() }
+      return
+    }
+    let parts = action.split(separator: "-", maxSplits: 1).map(String.init)
+    guard parts.count == 2, ["list", "detail", "options", "command"].contains(parts[1]) else { return }
+    let key = parts[1]
+    if parts[0] == "hold" {
+      held.insert(key)
+      signal(key, "armed")
+    } else if parts[0] == "fail" || parts[0] == "release" {
+      held.remove(key)
+      let requests = pending.removeValue(forKey: key) ?? []
+      for request in requests {
+        if parts[0] == "fail" { request.resume(throwing: Self.failure("schedule_conflict")) }
+        else { request.resume() }
+      }
+      signal(key, parts[0] == "fail" ? "failed" : "released")
+    }
+  }
+
+  // Exercise the production SQLite adapter, including independent account and workspace keys.
+  // Only the current scope's row should reach the first Schedules page.
+  private func seedCache() async {
+    usesDiskCache = true
+    let state = SessionSource.live.state
+    let cloud = ScheduleService.cloud
+    let generation = LocalStore.shared.generation
+    let scopes = [
+      (state.userId, state.workspaceId, "Cached daily review"),
+      (state.userId + "-other", state.workspaceId, "Other account review"),
+      (state.userId, state.workspaceId + "-other", "Other workspace review"),
+    ]
+    for (user, workspace, title) in scopes {
+      var item = items[0]
+      item.title = title
+      cloud.persistList(user, workspace,
+        .init(items: [item], deviceTimeZone: "UTC", machineTimeZones: ["ui": "Asia/Shanghai"], ownedMachineIds: ["ui"]),
+        generation)
+    }
+    // A reply from before logout must not overwrite the current account's snapshot.
+    // Inject the stale generation without clearing the fixture's shared app store.
+    cloud.persistList(state.userId, state.workspaceId,
+      .init(items: [], deviceTimeZone: "UTC", machineTimeZones: [:], ownedMachineIds: []),
+      generation - 1)
+    // Reads share the store queue with writes, so readiness needs no timer or polling.
+    for (user, workspace, title) in scopes {
+      let saved = await cloud.cachedList(user, workspace)
+      guard saved?.items.map(\.title) == [title] else {
+        signal("cache", "scope-mismatch")
+        return
+      }
+    }
+    signal("cache", "ready")
+  }
+
+  private func signal(_ key: String, _ state: String) {
+    let view = signals[key] ?? UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+    view.isAccessibilityElement = true
+    view.accessibilityIdentifier = "schedule-fixture-" + key
+    view.accessibilityLabel = "Schedule fixture " + key
+    view.accessibilityValue = state
+    if view.superview == nil { LodyShell.shared.presenter?.view.window?.addSubview(view) }
+    signals[key] = view
+  }
+
+  private func gate(_ key: String) async throws {
+    guard held.contains(key) else { return }
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      pending[key, default: []].append(continuation)
+      signal(key, "pending")
+    }
+  }
+
   var service: ScheduleService {
     ScheduleService(
       list: { [unowned self] _ in
-        RuntimeContract.SchedulesResult(items: self.items, deviceTimeZone: "UTC", machineTimeZones: ["ui": "Asia/Shanghai", "mini": "UTC"],
+        try await self.gate("list")
+        return RuntimeContract.SchedulesResult(items: self.items, deviceTimeZone: "UTC", machineTimeZones: ["ui": "Asia/Shanghai", "mini": "UTC"],
           ownedMachineIds: ["mini", "ui"])
       },
       detail: { [unowned self] _, scheduleId in
+        try await self.gate("detail")
         guard let item = self.items.first(where: { $0.scheduleId == scheduleId }) else { throw Self.failure("schedule_not_found") }
         let draft = self.drafts[scheduleId]
         return RuntimeContract.ScheduleDetail(
@@ -29,8 +114,22 @@ final class ScheduleFixture {
           modelId: draft?.modelId, modeId: draft?.modeId, project: draft?.project
         )
       },
-      command: { [unowned self] params in try self.apply(params) },
-      options: { _ in Self.options }
+      command: { [unowned self] params in
+        try await self.gate("command")
+        return try self.apply(params)
+      },
+      options: { [unowned self] _ in
+        try await self.gate("options")
+        return Self.options
+      },
+      cachedList: { [unowned self] userId, workspaceId in
+        guard self.usesDiskCache else { return nil }
+        return await ScheduleService.cloud.cachedList(userId, workspaceId)
+      },
+      persistList: { [unowned self] userId, workspaceId, result, generation in
+        guard self.usesDiskCache else { return }
+        ScheduleService.cloud.persistList(userId, workspaceId, result, generation)
+      }
     )
   }
 

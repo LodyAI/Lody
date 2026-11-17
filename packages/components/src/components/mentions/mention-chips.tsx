@@ -16,10 +16,10 @@ import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/ind
  *
  * ## The one rule
  *
- * A mention may not change the advance width of the range it decorates. The
- * highlighter mirrors the textarea character for character; a decoration one
- * pixel wider than its raw text drags every following glyph out from under the
- * caret. So the classes below never add padding, borders or font changes.
+ * A mention may not change the advance width of the range it decorates: a chip
+ * lays out exactly like its raw text, so a draft wraps the same with or without
+ * its chips and the composer looks as it did when a textarea sat under a painted
+ * mirror. So the classes below never add padding, borders or font changes.
  * Quotes use their real gutter characters to carry a filled surface; other
  * mentions keep the surrounding surface and only change text colour.
  *
@@ -150,8 +150,8 @@ const getMentionPath = (mention: Mention, text: string): string =>
   (mention.value || text).replace(/^@/, '');
 
 /**
- * The composer's chip resolver. Stable across renders so the highlighter's memo
- * still holds.
+ * The composer's chip resolver. Module-level, so it stays stable across renders
+ * and chip views do not re-render for nothing.
  *
  * It decides only slot geometry — which is the composer-specific half. Which
  * glyph and which colour come from the shared table above, so the transcript

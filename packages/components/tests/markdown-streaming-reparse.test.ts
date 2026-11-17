@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,12 +6,9 @@ import { createStore, Provider } from 'jotai';
 
 import { inlineMathEnabledAtom } from '../src/atoms/settings';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
-  }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -119,7 +114,7 @@ describe('MarkdownRenderer streaming rendering', () => {
     }
 
     await act(async () => {
-      root?.render(createElement(MarkdownRenderer, { text, ...props }));
+      root?.render(withTestI18n(createElement(MarkdownRenderer, { text, ...props }), testI18n));
     });
   };
 
@@ -134,7 +129,10 @@ describe('MarkdownRenderer streaming rendering', () => {
 
     await act(async () => {
       root?.render(
-        createElement(Provider, { store }, createElement(MarkdownRenderer, { text, ...props }))
+        withTestI18n(
+          createElement(Provider, { store }, createElement(MarkdownRenderer, { text, ...props })),
+          testI18n
+        )
       );
     });
   };
@@ -369,7 +367,7 @@ End of synthetic document.`,
     const source =
       'Hello <strong>raw</strong><img src="x" onerror="alert(1)"><script>alert(1)</script>.';
     for (const allowHtml of [true, false, true]) {
-      await act(async () => root?.render(null));
+      await act(async () => root?.render(withTestI18n(null, testI18n)));
       await renderMarkdown(source, { allowHtml });
       expect(container?.querySelector('strong')?.textContent ?? null).toBe(
         allowHtml ? 'raw' : null

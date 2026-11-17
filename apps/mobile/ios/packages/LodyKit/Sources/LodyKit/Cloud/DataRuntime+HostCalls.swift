@@ -60,13 +60,7 @@ extension DataRuntime {
     let user = userId
     shareTasks[id] = Task { [weak self] in
       var value: RuntimeContract.JSONValue?
-      if let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user, useLink: { action, url in
-        if action == "copy" {
-          UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: url.absoluteString]], options: [.localOnly: true])
-        } else if action == "open" {
-          guard await UIApplication.shared.open(url) else { throw SessionSharing.ManagementFailure(code: "shares_link_failed") }
-        }
-      }) {
+      if let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user) {
         value = try? RuntimeJSON.decode(RuntimeContract.JSONValue.self, from: result)
       }
       guard !Task.isCancelled, let self, self.channel === channel else { return }
@@ -77,7 +71,7 @@ extension DataRuntime {
   }
   private func fetchGrant() {
     guard grantTask == nil else { return }
-    guard let workspace, let view = webView else { deliverGrant(nil); return }
+    guard let workspace, WorkspaceModePins.shared.mode(workspace) == .plaintext, let view = webView else { deliverGrant(nil); return }
     do {
       guard let token = try AuthKeychain.read() else { throw NSError(domain: "MissingAuth", code: 1) }
       var request = URLRequest(url: URL(string: "\(BackendEnvironment.site)/api/loro-streams/token")!, timeoutInterval: 15)
@@ -90,7 +84,7 @@ extension DataRuntime {
           guard let self, let view, self.webView === view else { return }
           self.grantTask = nil
           var grant: RuntimeContract.Grant?
-          if error == nil, (response as? HTTPURLResponse)?.statusCode == 200, let data,
+          if WorkspaceModePins.shared.mode(workspace) == .plaintext, error == nil, (response as? HTTPURLResponse)?.statusCode == 200, let data,
              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
              let token = value["token"] as? String, !token.isEmpty,
              let address = value["gatewayBaseUrl"] as? String,

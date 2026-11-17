@@ -1,12 +1,5 @@
 import { z } from 'zod/v4';
 
-const ShareManagementTarget = {
-  workspaceId: z.string().min(1),
-  shareId: z.string().min(1),
-  rootSessionId: z.string().min(1),
-  expectedRevision: z.number().int().nonnegative().optional(),
-};
-
 export const ShareRequestParams = z
   .discriminatedUnion('operation', [
     z.object({
@@ -99,21 +92,6 @@ export const ShareRequestParams = z
         }),
       }),
     }),
-    z.object({
-      workspaceId: z.string().min(1),
-      operation: z.literal('management'),
-      args: z.discriminatedUnion('action', [
-        z.object({
-          workspaceId: z.string().min(1),
-          action: z.literal('list'),
-          cursor: z.string().nullable(),
-        }),
-        z.object({ ...ShareManagementTarget, action: z.literal('detail') }),
-        z.object({ ...ShareManagementTarget, action: z.literal('copy') }),
-        z.object({ ...ShareManagementTarget, action: z.literal('open') }),
-        z.object({ ...ShareManagementTarget, action: z.literal('revoke') }),
-      ]),
-    }),
   ])
   .meta({ id: 'ShareRequestParams' });
 export type ShareRequestParams = z.input<typeof ShareRequestParams>;
@@ -130,69 +108,7 @@ export const ShareProgressEvent = z
   })
   .meta({ id: 'ShareProgressEvent' });
 
-export const PublishedSharesParams = z
-  .discriminatedUnion('action', [
-    z.object({
-      workspaceId: z.string().min(1),
-      userId: z.string(),
-      action: z.literal('list'),
-      cursor: z.string().optional(),
-    }),
-    z.object({
-      ...ShareManagementTarget,
-      userId: z.string(),
-      action: z.literal('detail'),
-    }),
-    z.object({
-      ...ShareManagementTarget,
-      userId: z.string(),
-      action: z.literal('copy'),
-    }),
-    z.object({
-      ...ShareManagementTarget,
-      userId: z.string(),
-      action: z.literal('open'),
-    }),
-    z.object({
-      ...ShareManagementTarget,
-      userId: z.string(),
-      action: z.literal('revoke'),
-    }),
-  ])
-  .meta({ id: 'PublishedSharesParams' });
-
 const shareCount = z.number().int().nonnegative();
-
-export const PublishedSharesResult = z
-  .discriminatedUnion('outcome', [
-    z.object({
-      outcome: z.literal('page'),
-      workspaceId: z.string().min(1),
-      userId: z.string().min(1),
-      page: z.array(
-        z.object({
-          shareId: z.string().min(1),
-          rootSessionId: z.string().min(1),
-          publisherUserId: z.string().min(1),
-          status: z.enum(['active', 'revoked']),
-          title: z.string(),
-          revision: shareCount,
-          credentialVersion: shareCount,
-          createdAt: shareCount,
-          updatedAt: shareCount,
-          totalBytes: shareCount.optional(),
-          conversationCount: shareCount.optional(),
-          canManage: z.boolean(),
-          canRevoke: z.boolean(),
-          hasLocalLink: z.boolean(),
-        }),
-      ),
-      isDone: z.boolean(),
-      continueCursor: z.string(),
-    }),
-    z.object({ outcome: z.literal('failed'), error: z.string().min(1) }),
-  ])
-  .meta({ id: 'PublishedSharesResult' });
 
 export const SessionSharingParams = z
   .object({

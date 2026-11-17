@@ -6,6 +6,7 @@ import sys
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'ui'))
 import catalog
+from driver import UI
 
 udid, output = sys.argv[1], Path(sys.argv[2])
 output.mkdir(parents=True, exist_ok=True)
@@ -53,6 +54,21 @@ page_two_of_three = catalog.text('native.chat.image.page', current=2, total=3)
 page_three_of_three = catalog.text('native.chat.image.page', current=3, total=3)
 assert any(item.get('AXLabel') == page_one_of_three for item in elements()), 'A user turn with several photos must open as a gallery'
 capture('opened')
+
+# Exercise the real Photos callback: Swift actor isolation failures terminate the
+# app before it can report success, even when add-only permission is granted.
+subprocess.run(['xcrun', 'simctl', 'privacy', udid, 'grant', 'photos-add', 'ai.lody.mobile'], check=True)
+ui = UI(udid, output)
+frame = next(item for item in ui.state() if item.get('AXLabel') == name)['frame']
+ui.axe('touch', '-x', str(frame['x'] + frame['width'] / 2),
+       '-y', str(frame['y'] + frame['height'] / 2), '--down', '--up', '--delay', '.8')
+save = catalog.text('native.chat.image.save')
+ui.wait(lambda items: any(item.get('AXLabel') == save for item in items), 'Image actions did not open')
+ui.axe('tap', '--label', save)
+saved = catalog.text('native.chat.image.saved')
+ui.wait(lambda items: any(item.get('AXLabel') == saved for item in items), 'Photos save did not complete')
+assert any(item.get('AXLabel') == CLOSE for item in ui.state()), 'Saving must leave the viewer open'
+capture('saved-to-photos')
 
 
 def double_tap(label=None):

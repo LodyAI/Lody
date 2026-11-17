@@ -40,3 +40,13 @@ environment conventions, the schedule draft format, and confirmation-worthy comm
 Built-in `--help` remains the flag authority.
 `.claude/skills/lody-cli` links to it. See the
 [decision note](../notes/proposed/process/2026-10-21-lody-cli-skill.md).
+
+## Session execution verification
+
+[`verify-session-execution`](verify-session-execution/SKILL.md) covers one historically
+error-prone subsystem: Session Inbox delivery, admission, submission, reply waiting
+and continuation scheduling. [The explanation](../docs/app-state-machines.md) records
+the history-based selection, failure isolation, current statecharts and verification
+limits. The default verifier checks current code and catches deliberately broken
+variants; failed current properties remain nonzero. Dependencies and raw output stay
+outside the app workspace.

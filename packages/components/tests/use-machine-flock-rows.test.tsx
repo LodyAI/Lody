@@ -1,18 +1,37 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { createElement, Fragment, useEffect } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ACP_CAPABILITY_CACHE_VERSION, getMachineRoomId, getBuiltinRuntimeOverrideSourceVersionSuffix, type AcpCapabilityCacheEntry, machineFlockKeys, serializeMachineFlockKey, type AgentConfigId, type AgentConfigMeta, type MachineId, type MachineFlockEvent, type MachineFlockRowFamily, type MachineFlockRowMap, type MachineMeta, type MachineViewMeta, type SessionMeta, type WorkspaceId } from '@lody/shared';
+import {
+  ACP_CAPABILITY_CACHE_VERSION,
+  getMachineRoomId,
+  getBuiltinRuntimeOverrideSourceVersionSuffix,
+  type AcpCapabilityCacheEntry,
+  machineFlockKeys,
+  serializeMachineFlockKey,
+  type AgentConfigId,
+  type AgentConfigMeta,
+  type MachineId,
+  type MachineFlockEvent,
+  type MachineFlockRowFamily,
+  type MachineFlockRowMap,
+  type MachineMeta,
+  type MachineViewMeta,
+  type SessionMeta,
+  type WorkspaceId,
+} from '@lody/shared';
 
 import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { setMachineFlockRowsForMachineAtom } from '../src/atoms/machine-flock';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
-import { resyncMachineFlockRows, useMachineFlockRows, useMachineFlockRowsByMachineIdsState } from '../src/hooks/use-machine-flock-rows';
+import {
+  resyncMachineFlockRows,
+  useMachineFlockRows,
+  useMachineFlockRowsByMachineIdsState,
+} from '../src/hooks/use-machine-flock-rows';
 import { useSessionForkCapabilities } from '../src/hooks/use-session-fork-capabilities';
 import { useSessionAcpSelectorContext } from '../src/hooks/use-session-acp-selector-context';
 import { useResolvedMachineMeta } from '../src/hooks/use-resolved-machine-meta';
@@ -186,7 +205,6 @@ function render(node: ReturnType<typeof createElement>): void {
 }
 
 describe('useMachineFlockRows', () => {
-
   it('does not count a zero-transport (offline) sync report as remote sync', async () => {
     // syncOnce resolving with no transports means nothing reached a remote:
     // requireRemoteSync must fail instead of claiming confirmation.

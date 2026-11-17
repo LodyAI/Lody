@@ -37,6 +37,12 @@ struct PullRequestSnapshot: Codable {
   var comments: [Comment]
   var commentsError: String?
   var commentsTruncated: Bool?
+  /// GitHub's merge state for an open PR (`c`, `b`, `d`, `h`, `u`; nil while it is computed).
+  var mergeState: String?
+  /// Whether a merged PR's own head branch still exists; nil when unknown or not applicable.
+  var branchExists: Bool?
+  var mergeable: Bool { state == "open" }
+  var canDeleteBranch: Bool { state == "merged" && branchExists == true && headRef != baseRef }
   var summary: String {
     if checksError != nil { return "unavailable" }
     if checksTruncated == true { return "partial" }
@@ -51,6 +57,8 @@ struct PullRequestSnapshot: Codable {
 struct PullRequestService {
   var read: @MainActor () async throws -> PullRequestSnapshot
   var comment: @MainActor (String) async throws -> Bool
+  var merge: @MainActor (String) async throws -> Void
+  var deleteBranch: @MainActor () async throws -> Void
 
   @MainActor static func live(workspaceId: String, repository: String, number: Int) -> Self {
     struct Request: Encodable {
@@ -59,9 +67,10 @@ struct PullRequestService {
       let number: Int
       let operation: String
       let body: String?
+      let method: String?
     }
-    func request(_ operation: String, body: String? = nil) async throws -> String {
-      let payload = Request(workspaceId: workspaceId, repository: repository, number: number, operation: operation, body: body)
+    func request(_ operation: String, body: String? = nil, method: String? = nil) async throws -> String {
+      let payload = Request(workspaceId: workspaceId, repository: repository, number: number, operation: operation, body: body, method: method)
       return try await GitHubPullRequests.run(String(decoding: JSONEncoder().encode(payload), as: UTF8.self))
     }
     return Self(read: {
@@ -70,6 +79,10 @@ struct PullRequestService {
     }, comment: { body in
       _ = try await request("comment", body: body)
       return true
+    }, merge: { method in
+      _ = try await request("merge", method: method)
+    }, deleteBranch: {
+      _ = try await request("deleteBranch")
     })
   }
 }
@@ -88,6 +101,8 @@ final class PullRequestStore {
   private(set) var error: String?
   private(set) var loading = false
   private(set) var posting = false
+  /// The GitHub write in flight (`merge` / `deleteBranch`); one at a time, never retried.
+  private(set) var writing: String?
   var valid: Bool { scope.valid && scope.key == scopeKey }
   var url: URL { URL(string: "https://github.com/\(repository)/pull/\(number)")! }
 
@@ -145,6 +160,30 @@ final class PullRequestStore {
       } else { refresh() }
     }
     return accepted
+  }
+
+  /// Merging cannot be undone; the caller's method choice is the confirmation. A failed or unknown
+  /// result is thrown for the page to report; success re-reads the PR so Delete branch can appear.
+  func merge(_ method: String) async throws {
+    try await write("merge") { try await self.service.merge(method) }
+  }
+
+  func deleteBranch() async throws {
+    try await write("deleteBranch") { try await self.service.deleteBranch() }
+    data?.branchExists = false
+    publish()
+  }
+
+  private func write(_ operation: String, _ run: () async throws -> Void) async throws {
+    guard valid, writing == nil else { throw Self.failure("unauthorized") }
+    writing = operation; publish()
+    defer { writing = nil; publish() }
+    try await run()
+    guard valid else { throw Self.failure("unauthorized") }
+    // Finish the write independently; a failed refresh must never invite replay.
+    if let task {
+      Task { [weak self] in await task.value; self?.refresh() }
+    } else { refresh() }
   }
 
   static func failure(_ code: String) -> NSError {

@@ -7,6 +7,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
@@ -45,6 +46,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +58,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import app.lody.android.runtime.TurnItem
 import app.lody.android.runtime.StepDetail
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -73,16 +78,24 @@ import app.lody.android.designsystem.LodyLayout
 import app.lody.android.designsystem.LodyRadius
 import app.lody.android.designsystem.LodySpacing
 import app.lody.android.designsystem.LodyTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /** Who wrote a turn and when, for its header: avatar (or agent mark), name, time. */
 data class TurnIdentity(val name: String, val image: String? = null, val time: String = "")
 
 /** A user turn's delivery as web's `UserMessageSendStatus` shows it. */
-enum class Delivery { Sending, Sent, Queued, Seen, Failed }
+enum class Delivery { Sending, Sent, Queued, Seen, Failed, Unknown }
 
 /** A transcript entry. Assistant replies render as Markdown blocks; user turns as plain text. */
 sealed interface ChatEntry {
     val id: String
+
+    /** A system entry: operation receipts and the Agent's Role / schedule proposals. */
+    data class Operations(
+        override val id: String, val events: List<app.lody.android.runtime.OperationEvent>,
+        val proposals: List<app.lody.android.runtime.ProposalCard> = emptyList(),
+    ) : ChatEntry
 
     data class User(
         override val id: String, val text: String, val who: TurnIdentity, val delivery: Delivery = Delivery.Sent,
@@ -130,19 +143,44 @@ fun ChatTranscript(
     contentPadding: PaddingValues = PaddingValues(),
     state: LazyListState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE),
     scrollToLatest: Int = 0,
+    historyHasMore: Boolean = false,
+    historyLoading: Boolean = false,
+    loadEarlier: (suspend () -> Unit)? = null,
+    onForgetPending: ((String) -> Unit)? = null,
+    onRetryPending: ((String) -> Unit)? = null,
+    retryablePendingIds: Set<String> = emptySet(),
     actions: MessageActionState = MessageActionState(),
+    relatedSessions: List<app.lody.android.runtime.CatalogSession> = emptyList(),
+    navigateSession: (String) -> Unit = {},
     /** Opens a step's detail; null where there is no runtime (previews, the stream probe). */
     loadDetail: (suspend (entryId: String, itemId: String) -> StepDetail)? = null,
     /** Opens a changed file's diff for a turn; null where there is no runtime. */
     loadDiff: (suspend (entryId: String, path: String) -> app.lody.android.runtime.FileDiff)? = null,
+    /** The signed-in user, who alone decides the Role proposals they asked for. */
+    meId: String? = null,
+    /** Decides an Agent's proposal; null where there is no runtime. */
+    decideProposal: ProposalDecider? = null,
+    /** Answers a permission request; null where there is no runtime or the session cannot take an answer. */
+    respondPermission: PermissionResponder? = null,
 ) {
     // Only an actual drag leaves follow mode. Programmatic positioning and IME layout
     // changes must not look like the reader scrolled away from the end.
     var following by remember(state) { mutableStateOf(true) }
+    val canLoadEarlier by rememberUpdatedState(historyHasMore && !historyLoading)
+    val requestEarlier by rememberUpdatedState(loadEarlier)
+    val historyScope = rememberCoroutineScope()
     LaunchedEffect(state) {
         state.interactionSource.interactions.collect { interaction ->
             if (interaction is DragInteraction.Start) following = false
         }
+    }
+    LaunchedEffect(state) {
+        snapshotFlow { !following && canLoadEarlier && state.firstVisibleItemIndex <= 2 }
+            .collect { shouldLoad ->
+                if (shouldLoad) try { requestEarlier?.invoke() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { }
+            }
     }
     LaunchedEffect(state) {
         snapshotFlow { state.isScrollInProgress to state.canScrollForward }
@@ -198,6 +236,23 @@ fun ChatTranscript(
             state.scrollBy(-target.offset.toFloat())
         }
     }
+    // A permission request that newly waits on the reader is brought into view once, when it is
+    // not already fully on screen, and the list then stops following so it stays there.
+    val announced = remember { HashSet<Any>() }
+    LaunchedEffect(entries) {
+        withFrameNanos { }
+        val fresh = keys.pending.firstOrNull { it !in announced } ?: return@LaunchedEffect
+        announced += keys.pending
+        val index = keys.indexOf(fresh)
+        if (index < 0) return@LaunchedEffect
+        val layout = state.layoutInfo
+        val row = layout.visibleItemsInfo.firstOrNull { it.key == fresh }
+        val shown = row != null && row.offset >= 0 && row.offset + row.size <= layout.viewportEndOffset - layout.afterContentPadding
+        if (!shown) {
+            following = false
+            state.animateScrollToItem(index)
+        }
+    }
     val details = remember(loadDetail != null) { StepDetails(loadDetail) }
     // The turn whose tasks / files a sheet shows, by id, so running tasks keep updating inside it.
     var shownTasks by remember { mutableStateOf<String?>(null) }
@@ -216,7 +271,28 @@ fun ChatTranscript(
     }
     LazyColumn(modifier, state = state, contentPadding = contentPadding) content@{
         keys.reset()
-        with(KeyRecorder(this@content, keys)) { transcriptRows(entries, open, toggle, details, openTasks, openFiles, actions) }
+        if (historyHasMore || historyLoading) {
+            keys.add("history-earlier")
+            item(key = "history-earlier", contentType = "history") {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    if (historyLoading) CircularProgressIndicator(Modifier.size(LodyIconSize.md))
+                    else TextButton(onClick = { historyScope.launch {
+                        try { requestEarlier?.invoke() }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { }
+                    } }) {
+                        Text(stringResource(R.string.chat_load_earlier))
+                    }
+                }
+            }
+        }
+        with(KeyRecorder(this@content, keys)) {
+            transcriptRows(
+                entries, open, toggle, details, openTasks, openFiles, actions,
+                relatedSessions, navigateSession, onForgetPending, onRetryPending, retryablePendingIds, meId, decideProposal,
+                respondPermission,
+            )
+        }
         // A small stable end anchor avoids enormous scroll offsets and measuring the
         // whole final Markdown block merely to discover its bottom.
         item(key = "transcript-end", contentType = "end") { Spacer(Modifier.height(LodySpacing.xxs)) }
@@ -235,7 +311,9 @@ private data class Anchor(val key: Any, val offset: Int, val serial: Int)
 private class KeyOrder {
     private val keys = ArrayList<Any>()
     private var index = HashMap<Any, Int>()
-    fun reset() { keys.clear(); index = HashMap() }
+    /** Rows whose permission request waits on the reader, in list order. */
+    val pending = ArrayList<Any>()
+    fun reset() { keys.clear(); index = HashMap(); pending.clear() }
     fun add(key: Any?) { if (key != null) { index[key] = keys.size }; keys += key ?: Unit }
     fun indexOf(key: Any): Int = index[key] ?: -1
 }
@@ -244,6 +322,7 @@ private class KeyOrder {
 private class KeyRecorder(private val scope: LazyListScope, private val keys: KeyOrder) : LazyListScope by scope {
     override fun item(key: Any?, contentType: Any?, content: @Composable LazyItemScope.() -> Unit) {
         keys.add(key)
+        if (contentType == PendingPermissionRow && key != null) keys.pending += key
         scope.item(key, contentType, content)
     }
 
@@ -266,10 +345,26 @@ private fun LazyListScope.transcriptRows(
     onOpenTasks: (String) -> Unit,
     onOpenFiles: (String) -> Unit,
     actions: MessageActionState,
+    relatedSessions: List<app.lody.android.runtime.CatalogSession>,
+    navigateSession: (String) -> Unit,
+    onForgetPending: ((String) -> Unit)?,
+    onRetryPending: ((String) -> Unit)?,
+    retryablePendingIds: Set<String>,
+    meId: String?,
+    decideProposal: ProposalDecider?,
+    respondPermission: PermissionResponder?,
 ) {
         entries.forEach { entry ->
             when (entry) {
-                is ChatEntry.User -> item(key = entry.id, contentType = "user") { UserTurn(entry, actions) }
+                is ChatEntry.Operations -> {
+                    if (entry.events.isNotEmpty()) item(key = entry.id, contentType = "operations") { OperationCards(entry.events, relatedSessions, navigateSession) }
+                    if (entry.proposals.isNotEmpty()) item(key = "${entry.id}#proposals", contentType = "proposals") {
+                        ProposalCards(entry.proposals, meId, decideProposal, Modifier.animateItem().padding(bottom = LodySpacing.md))
+                    }
+                }
+                is ChatEntry.User -> item(key = entry.id, contentType = "user") {
+                    UserTurn(entry, actions, onForgetPending, onRetryPending?.takeIf { entry.id in retryablePendingIds })
+                }
                 is ChatEntry.Assistant -> {
                     val layout = entry.layout
                     if (layout.folded) {
@@ -283,9 +378,9 @@ private fun LazyListScope.transcriptRows(
                                 Modifier.animateItem().padding(top = LodySpacing.md),
                             ) { toggle(key, it) }
                         }
-                        if (expanded) turnBlocks(entry, layout.folding, open, toggle, details)
+                        if (expanded) turnBlocks(entry, layout.folding, open, toggle, details, respondPermission)
                     }
-                    turnBlocks(entry, layout.visible, open, toggle, details)
+                    turnBlocks(entry, layout.visible, open, toggle, details, respondPermission)
                     if (entry.working) {
                         val last = layout.blocks.lastOrNull()
                         val thinking = last is TurnLayout.Activity && last.items.lastOrNull() is TurnItem.Thought
@@ -307,8 +402,11 @@ val TranscriptMargin = LodySpacing.lg
  * rounded bubble, with the sender's avatar beside the bubble's top.
  */
 @Composable
-private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
+private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState, onForgetPending: ((String) -> Unit)?, onRetryPending: ((String) -> Unit)?) {
     val colors = LodyTheme.colors
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable(entry.id) { mutableStateOf(false) }
+    var overflowing by remember(entry.text) { mutableStateOf(false) }
+    var bubbleLayout by remember(entry.text) { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     var menu by remember(entry.id) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     Row(
@@ -326,8 +424,19 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
                 horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
             ) {
                 DeliveryMark(entry.delivery)
+                if (entry.delivery == Delivery.Unknown) Text(stringResource(R.string.chat_delivery_unknown), style = LodyTheme.typography.footnote, color = colors.textTertiary, maxLines = 1)
                 if (entry.who.time.isNotEmpty()) Text(entry.who.time, style = LodyTheme.typography.footnote, color = colors.textTertiary, maxLines = 1)
                 Text(entry.who.name, style = LodyTheme.typography.footnote, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (onRetryPending != null) {
+                androidx.compose.material3.TextButton(onClick = { onRetryPending(entry.id) }) {
+                    Text(stringResource(R.string.chat_retry), style = LodyTheme.typography.footnote)
+                }
+            }
+            if (entry.delivery == Delivery.Unknown && onForgetPending != null) {
+                androidx.compose.material3.TextButton(onClick = { onForgetPending(entry.id) }) {
+                    Text(stringResource(R.string.chat_forget_action), style = LodyTheme.typography.footnote)
+                }
             }
             // Attachments sit above the bubble, trailing-aligned, one chip each (name + kind glyph).
             if (entry.attachments.isNotEmpty()) {
@@ -343,18 +452,27 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
             if (entry.text.isNotBlank()) Text(
                 androidx.compose.ui.text.buildAnnotatedString {
                     append(entry.text)
+                    // References read as the composer's chips (MentionPresentation): accent text
+                    // on a rounded accent-subtle capsule drawn behind each line's run.
                     entry.references.forEach { reference ->
                         if (reference.start >= 0 && reference.end <= length && reference.end > reference.start)
-                            addStyle(androidx.compose.ui.text.SpanStyle(color = colors.accentDefault), reference.start, reference.end)
+                            addStyle(androidx.compose.ui.text.SpanStyle(color = colors.accentOnSubtle, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium), reference.start, reference.end)
                     }
                 },
                 style = LodyTheme.typography.reading,
                 color = colors.textPrimary,
+                maxLines = if (expanded) Int.MAX_VALUE else 6,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { bubbleLayout = it; if (!expanded) overflowing = it.hasVisualOverflow },
                 modifier = Modifier
                     .widthIn(max = LodyLayout.readableMaxWidth)
                     .background(colors.fillSecondary, RoundedCornerShape(UserBubbleRadius))
-                    .padding(horizontal = LodySpacing.lg, vertical = LodySpacing.lg),
+                    .padding(horizontal = LodySpacing.lg, vertical = LodySpacing.lg)
+                    .drawBehind { bubbleLayout?.let { drawReferenceChips(it, entry.references, colors.accentSubtle) } },
             )
+            if (overflowing || expanded) app.lody.android.designsystem.LodyTextButton(onClick = { expanded = !expanded }) {
+                Text(stringResource(if (expanded) R.string.message_show_less else R.string.message_show_more), color = colors.textSecondary)
+            }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.message_copy)) },
@@ -371,6 +489,40 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
         }
         // Beside the bubble's top: past the header line and the gap under it.
         Avatar(entry.who.image, entry.who.name, UserAvatarSize, Modifier.padding(top = UserHeaderHeight + LodySpacing.xs))
+    }
+}
+
+/** A rounded chip behind each line's run of every reference, as the composer shows them. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawReferenceChips(
+    layout: androidx.compose.ui.text.TextLayoutResult,
+    references: List<app.lody.android.runtime.MessageReference>,
+    fill: androidx.compose.ui.graphics.Color,
+) {
+    val length = layout.layoutInput.text.length
+    val pad = 3.dp.toPx()
+    val inset = 1.dp.toPx()
+    references.forEach { reference ->
+        if (reference.start < 0 || reference.end > length || reference.end <= reference.start) return@forEach
+        val first = layout.getLineForOffset(reference.start)
+        val last = layout.getLineForOffset(reference.end - 1)
+        for (line in first..last) {
+            if (line >= layout.lineCount) break
+            val start = maxOf(reference.start, layout.getLineStart(line))
+            val end = minOf(reference.end, layout.getLineEnd(line, visibleEnd = true))
+            if (end <= start) continue
+            val left = layout.getBoundingBox(start).left
+            val right = layout.getBoundingBox(end - 1).right
+            val top = layout.getLineTop(line) + inset
+            val bottom = layout.getLineBottom(line) - inset
+            if (right <= left || bottom <= top) continue
+            val radius = minOf(6.dp.toPx(), (bottom - top) / 2)
+            drawRoundRect(
+                fill,
+                topLeft = androidx.compose.ui.geometry.Offset(left - pad, top),
+                size = androidx.compose.ui.geometry.Size(right - left + pad * 2, bottom - top),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+            )
+        }
     }
 }
 
@@ -410,12 +562,14 @@ private fun DeliveryMark(delivery: Delivery) {
             Delivery.Queued -> R.string.chat_delivery_queued
             Delivery.Seen -> R.string.chat_delivery_seen
             Delivery.Failed -> R.string.chat_delivery_failed
+            Delivery.Unknown -> R.string.chat_delivery_unknown
         },
     )
     val mark = Modifier.size(size).semantics { contentDescription = label }
     when (delivery) {
         Delivery.Sending -> app.lody.android.designsystem.LodyLoadingIndicator(mark.padding(LodySpacing.xxs), color = colors.iconTertiary)
         Delivery.Seen -> Icon(LodyIcons.StateDone, contentDescription = label, tint = colors.accentDefault, modifier = Modifier.size(size))
+        Delivery.Unknown -> Icon(LodyIcons.Alert, contentDescription = label, tint = colors.iconTertiary, modifier = Modifier.size(size))
         Delivery.Failed -> Icon(LodyIcons.Alert, contentDescription = label, tint = colors.dangerDefault, modifier = Modifier.size(size))
         Delivery.Queued -> Icon(LodyIcons.StateWaiting, contentDescription = label, tint = colors.iconTertiary, modifier = Modifier.size(size))
         Delivery.Sent -> Box(mark.padding(LodySpacing.xxs).border(1.dp, colors.iconTertiary, CircleShape))
@@ -429,9 +583,21 @@ private fun DeliveryMark(delivery: Delivery) {
  */
 @Composable
 fun MarkdownBlock(text: String, modifier: Modifier = Modifier, secondary: Boolean = false) {
+    // A block that is one closed ```mermaid fence draws as its diagram, else stays code.
+    val mermaid = remember(text) { mermaidSource(text) }
+    if (mermaid != null) {
+        MermaidBlock(mermaid, modifier) { MarkdownText(text, modifier, secondary) }
+    } else {
+        MarkdownText(text, modifier, secondary)
+    }
+}
+
+@Composable
+private fun MarkdownText(text: String, modifier: Modifier, secondary: Boolean) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
     val state = rememberMarkdownState(content = text, retainState = true)
+    val (fileLinks, fileLinkIcons) = rememberFileLinkMarkdown()
     Markdown(
         markdownState = state,
         modifier = modifier.fillMaxWidth(),
@@ -462,5 +628,7 @@ fun MarkdownBlock(text: String, modifier: Modifier = Modifier, secondary: Boolea
             table = type.bodySmall,
         ),
         components = markdownComponents(codeBlock = highlightedCodeBlock, codeFence = highlightedCodeFence),
+        annotator = fileLinks,
+        inlineContent = fileLinkIcons,
     )
 }

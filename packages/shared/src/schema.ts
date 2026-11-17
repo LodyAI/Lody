@@ -157,8 +157,7 @@ export type AgentConfigMeta = {
    * each machine has its own binaries, auth state, env, and rate-limit context.
    *
    * Legacy configs written before this field existed are normalized by the one-time
-   * migration tracked in docs/backward-compatibility.md (BC-AGENT-CONFIG-MACHINE-
-   * ASSOCIATION); see also plans/20260420-machine-agent-settings.md. Consumers should filter
+   * `useAgentConfigMigration` hook in `@lody/components`. Consumers should filter
    * out configs without a resolved machineId while the migration is running.
    */
   machineId: MachineId;
@@ -639,15 +638,6 @@ export const resolveSessionHistoryStatus = (
   return undefined;
 };
 
-export const getLegacyReadForSessionHistoryStatus = (
-  status: SessionHistoryStatus | undefined
-): boolean | undefined => {
-  if (!status) {
-    return undefined;
-  }
-  return status !== 'pending' && status !== 'pending_apply';
-};
-
 export const isSessionHistoryDelivered = (
   entry: SessionHistoryStatusReadable | null | undefined
 ): boolean => {
@@ -714,7 +704,10 @@ export const sessionHistorySchema = schema.LoroMap({
   /** Encrypted only: this machine wrote the row by promoting a queue item. The row's
    * signer is then not its author, so the start needs the input's own evidence. */
   queuedInput: schema.Boolean({ required: false }),
-  cancellationReason: schema.String<'user_stop'>({ required: false }),
+  /** Encrypted only: the signed execution intent record, written in the same commit
+   * as the content it covers. See `e2ee-execution-intent.ts`. */
+  e2eeIntent: schema.String({ required: false }),
+  cancellationReason: schema.String<'user_stop' | 'machine_update'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**
    * @deprecated Use `status` instead.
@@ -836,11 +829,20 @@ export function deriveSessionPullRequestReadiness(
 export type LineChange = {
   add: number;
   del: number;
+  /** Changed paths in the complete workspace comparison; absent on older writers. */
+  files?: number;
 };
 
 export type SessionDiffStats = {
+  /** Workspace base versus current files, including committed and uncommitted changes. */
   allChange: LineChange;
 };
+
+/** Explicit path counts own presence; old daemons only published text line totals. */
+export function hasWorkspaceChanges(change: LineChange | null | undefined): boolean {
+  if (!change) return false;
+  return change.files === undefined ? change.add + change.del > 0 : change.files > 0;
+}
 
 export type SessionContextWindowUsage = {
   size: number;
@@ -862,60 +864,6 @@ export const deriveDraftSessionTitle = (prompt: string): string | undefined =>
     .map((line) => line.trim())
     .find((line) => line.length > 0)
     ?.slice(0, DRAFT_SESSION_TITLE_MAX_CHARS);
-
-/**
- * Sidebar title of a root Session's conversation group (all of its tabs). It is
- * independent of the root tab's own `title`; absent means the group still shows
- * the root title (Sessions created before group titles, or not yet named).
- */
-export const getSessionGroupTitle = (
-  meta: Pick<SessionMeta, 'title' | 'groupTitle'> | null | undefined
-): string | undefined => meta?.groupTitle?.trim() || meta?.title?.trim() || undefined;
-
-/**
- * Root-Session meta fields that copy a newly generated root title into the group
- * title exactly once: while the group has no title of its own, or only a draft.
- * Returns undefined for child Sessions and for groups that are already named.
- * `rootTitleApplied` says whether the root tab title itself accepted the write,
- * which is what keeps an absent group showing the root title until then.
- */
-export const resolveGeneratedGroupTitleUpdate = (
-  meta: Pick<SessionMeta, 'parentSessionId' | 'groupTitle' | 'groupTitleSource'> | null | undefined,
-  title: string,
-  rootTitleApplied: boolean
-): Pick<SessionMeta, 'groupTitle' | 'groupTitleSource'> | undefined => {
-  if (!meta || meta.parentSessionId) return undefined;
-  const hasGroupTitle = Boolean(meta.groupTitle?.trim());
-  const eligible = hasGroupTitle ? meta.groupTitleSource === 'draft' : rootTitleApplied;
-  return eligible ? { groupTitle: title, groupTitleSource: 'generated' } : undefined;
-};
-
-/**
- * Meta patch for a user rename of one tab. Renaming a root tab whose group has no
- * title of its own first freezes the group at the root's current title, so the
- * sidebar keeps its name instead of following the tab.
- */
-export const buildSessionTabRenamePatch = (
-  meta:
-    | Pick<SessionMeta, 'parentSessionId' | 'title' | 'titleSource' | 'groupTitle'>
-    | null
-    | undefined,
-  title: string
-): Partial<SessionMeta> => {
-  const patch: Partial<SessionMeta> = { title, titleSource: 'user' };
-  const currentTitle = meta?.title?.trim();
-  if (meta && !meta.parentSessionId && !meta.groupTitle?.trim() && currentTitle) {
-    patch.groupTitle = currentTitle;
-    patch.groupTitleSource = meta.titleSource ?? 'user';
-  }
-  return patch;
-};
-
-/** Meta patch for a user rename of a conversation group's sidebar title. */
-export const buildSessionGroupRenamePatch = (title: string): Partial<SessionMeta> => ({
-  groupTitle: title,
-  groupTitleSource: 'user',
-});
 
 export type ExternalAcpHistorySyncMeta = {
   provider: LocalProjectHistoryProvider;
@@ -1098,13 +1046,6 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   title?: string;
   /** Indicates whether the current title was entered by a user, generated by the agent, or copied from a draft tab prompt. */
   titleSource?: SessionTitleSource;
-  /**
-   * Root Sessions only: the conversation group's sidebar title, independent of
-   * the root tab's `title`. Read through `getSessionGroupTitle`.
-   */
-  groupTitle?: string;
-  /** Provenance of `groupTitle`; a generated title is copied into it at most once. */
-  groupTitleSource?: SessionTitleSource;
   userId: string;
   status?: SessionStatus;
   isArchived?: boolean;
@@ -1180,13 +1121,22 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
   lastHandledUserMsgId?: string;
+  /**
+   * Latest user history entry id whose turn ended in failure, written together with
+   * `lastHandledUserMsgId`. It stays set; read it only through
+   * {@link hasFailedLatestTurn}, so a later handled or canceled turn retires it without
+   * another write.
+   */
+  lastFailedUserMsgId?: string;
   /** User history entry id currently being processed by the machine. */
   processingUserMsgId?: string;
   /**
-   * Exact dispatch activation negatively acknowledged because its history
-   * payload never synced. It suppresses only a matching producer pointer.
+   * Legacy latest missing-history acknowledgement. Read with the retained map;
+   * producers must not clear this receipt when publishing a fresh activation.
    */
   lastMissingHistoryUserMsgId?: string;
+  /** Host-owned append-only acknowledgements; a newer timeout must not revive an older input. */
+  missingHistoryUserMsgIds?: Record<string, true>;
   /**
    * Exact dispatch activation retired because its history entry is already
    * terminal — the turn ran, only the pointer was stale. Recorded beside the
@@ -1256,25 +1206,51 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   autoReview?: { runId: string; t: number };
 };
 
+/** Match a retained missing-payload acknowledgement, including legacy metadata. */
+export function isMissingHistoryUserTurn(
+  meta: Pick<SessionMeta, 'lastMissingHistoryUserMsgId' | 'missingHistoryUserMsgIds'> | undefined,
+  turnId: string | undefined
+): boolean {
+  return (
+    !!turnId &&
+    (meta?.lastMissingHistoryUserMsgId === turnId ||
+      meta?.missingHistoryUserMsgIds?.[turnId] === true)
+  );
+}
+
+/**
+ * Whether the conversation's latest finished turn ended in failure: the failed marker still
+ * names the turn the machine handled last. Lets lists show a failed conversation from
+ * metadata alone, without opening its history.
+ */
+export function hasFailedLatestTurn(
+  meta: Pick<SessionMeta, 'lastFailedUserMsgId' | 'lastHandledUserMsgId'>
+): boolean {
+  return (
+    typeof meta.lastFailedUserMsgId === 'string' &&
+    meta.lastFailedUserMsgId.length > 0 &&
+    meta.lastFailedUserMsgId === meta.lastHandledUserMsgId
+  );
+}
+
 /**
  * Resolve the dispatch activation a machine still owes work for.
  *
- * The pointer pair alone is NOT the answer: two suppression slots retire an
+ * The pointer pair alone is NOT the answer: the negative-ack ledger and terminal slot retire an
  * activation without rewriting the producer-owned pointers, so raw
  * `latestUserMsgId !== lastHandledUserMsgId` reports pending work forever once
- * either fires. `lastMissingHistoryUserMsgId` is a permanent negative ack for a
- * turn whose payload never synced; `settledActivationUserMsgId` retires a turn
+ * either fires. `missingHistoryUserMsgIds` preserves every failed identity (including the legacy
+ * `lastMissingHistoryUserMsgId` marker); `settledActivationUserMsgId` retires a turn
  * whose history entry is already terminal. Every consumer that asks "does this
  * session still owe a turn?" — dispatch, idle GC, MCP status —
  * must go through here, or they disagree with the watcher and hang.
  */
 export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
-  const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
   const settledUserTurnId = meta.settledActivationUserMsgId;
   if (
     typeof meta.processingUserMsgId === 'string' &&
     meta.processingUserMsgId.length > 0 &&
-    meta.processingUserMsgId !== missingUserTurnId &&
+    !isMissingHistoryUserTurn(meta, meta.processingUserMsgId) &&
     meta.processingUserMsgId !== settledUserTurnId
   ) {
     return meta.processingUserMsgId;
@@ -1283,7 +1259,7 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
     typeof meta.latestUserMsgId === 'string' &&
     meta.latestUserMsgId.length > 0 &&
     meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
-    meta.latestUserMsgId !== missingUserTurnId &&
+    !isMissingHistoryUserTurn(meta, meta.latestUserMsgId) &&
     meta.latestUserMsgId !== settledUserTurnId
   ) {
     return meta.latestUserMsgId;
@@ -1291,7 +1267,7 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
   return Object.keys(meta.steerTurnStatuses ?? {}).find(
     (id) =>
       meta.steerTurnStatuses?.[id] === 'pending' &&
-      id !== missingUserTurnId &&
+      !isMissingHistoryUserTurn(meta, id) &&
       id !== settledUserTurnId
   );
 }
@@ -1345,6 +1321,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   // killed tab). See `popMessageQueue` in `apps/cli/src/lib/loro/doc.ts`.
   editingStartedAt: schema.Number({ required: false }),
   acpSessionConfig: acpSessionConfigSchema,
+  /** Encrypted only: the author's signed execution intent; promotion copies it. */
+  e2eeIntent: schema.String({ required: false }),
 });
 
 export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'project'> & {
@@ -1443,11 +1421,6 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
-  /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
-  rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
-  /** Exact purpose-8 originals of queued input, written before the queue row. Separate from
-   * `rpcDispatchOriginals` because promotion adds `resume` to the input it signed. */
-  queueDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1552,13 +1525,7 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<
-  SessionDoc,
-  '$cid' | 'history' | 'rpcDispatchOriginals' | 'queueDispatchOriginals'
-> & {
-  /** Omitted by control-only readers; execution reads the selected original from the document. */
-  rpcDispatchOriginals?: Record<string, string>;
-  queueDispatchOriginals?: Record<string, string>;
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

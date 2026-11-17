@@ -31,7 +31,7 @@ extension LodyChatView {
   func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
     guard let id = dataSource.itemIdentifier(for: indexPath), let row = rows[id] else { return false }
     if let cell = collectionView.cellForItem(at: indexPath) as? ChatCell, cell.expandable && !cell.expanded { return true }
-    return row.actionable || row.image != nil
+    return row.actionable || row.image != nil || row.kind == "imageStack"
   }
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -46,6 +46,10 @@ extension LodyChatView {
       openImageGallery(id: id, source: cell)
       return
     }
+    if let cell = collectionView.cellForItem(at: indexPath) as? ChatImageStackCell, let id = cell.topID {
+      openImageGallery(id: id, source: cell.topCard)
+      return
+    }
     guard let id = dataSource.itemIdentifier(for: indexPath), let row = rows[id], row.actionable else { return }
     if row.kind == "duration", row.processStartID == "__work__" {
       // Open or close the turn's folded work in place; the row stays put while rows animate below.
@@ -53,6 +57,14 @@ extension LodyChatView {
       UISelectionFeedbackGenerator().selectionChanged()
       toggleAnchor = row.id
       // Opening work is reading, not following the tail.
+      followsBottom = false
+      applyRows()
+      return
+    }
+    if row.kind == "summary", row.processStartID == "__thought__" {
+      if !expandedThoughts.insert(row.id).inserted { expandedThoughts.remove(row.id) }
+      UISelectionFeedbackGenerator().selectionChanged()
+      toggleAnchor = row.id
       followsBottom = false
       applyRows()
       return
@@ -71,6 +83,18 @@ extension LodyChatView {
       openAttachment(file)
       return
     }
+    if let pendingSend, pendingSend.phase == "unknown", id == pendingSend.id + ":delivery" {
+      onRetrySend(["forget": true])
+      return
+    }
+    if id == row.entryID + ":retryPending" {
+      onRetrySend(["retryPending": true, "id": row.entryID])
+      return
+    }
+    if id == row.entryID + ":delivery", transcript.entries.contains(where: { $0.id == row.entryID && $0.inputState == "unknown" }) {
+      onRetrySend(["forget": true, "id": row.entryID])
+      return
+    }
     if let pendingSend, id == pendingSend.id + ":pending", pendingSend.failed == true {
       onRetrySend([:])
       return
@@ -82,10 +106,19 @@ extension LodyChatView {
     ChatImageGallery.items(from: dataSource.snapshot().itemIdentifiers.compactMap { rows[$0] })
   }
 
-  func imageCell(id: String) -> ChatImageCell? {
+  /// `reveal` brings a stacked image to its stack's top, so the preview zooms back into it.
+  func imageCell(id: String, reveal: Bool = false) -> ChatImageCell? {
     if let index = dataSource.indexPath(for: id),
        let cell = collection.cellForItem(at: index) as? ChatImageCell {
       return cell
+    }
+    if let row = rows.values.first(where: { $0.kind == "imageStack" && $0.stack.contains { $0.id == id } }) {
+      guard let index = dataSource.indexPath(for: row.id),
+        let cell = collection.cellForItem(at: index) as? ChatImageStackCell else {
+        if reveal { imageStackTops[row.id] = id }
+        return nil
+      }
+      return reveal ? cell.reveal(id: id) : cell.card(id: id)
     }
     guard let row = rows.values.first(where: {
       $0.kind == "attachments" && id.hasPrefix($0.entryID + ":attachment:")
@@ -112,7 +145,7 @@ extension LodyChatView {
       session: imageSession,
       placeholders: placeholders,
       sourceView: { [weak self] pageId in
-        guard let cell = self?.imageCell(id: pageId), cell.window != nil else { return nil }
+        guard let cell = self?.imageCell(id: pageId, reveal: true), cell.window != nil else { return nil }
         return cell.zoomSource
       }
     )
@@ -399,6 +432,7 @@ extension LodyChatView {
       let height = ChatImageCell.size(image, width: width).height
       return height
     }
+    if row.kind == "imageStack" { return ChatImageStackCell.height(row, width: width) }
     let textWidth = ChatCell.textWidth(row, width: width)
     if row.kind == "text" || row.kind == "thought" {
       return store.height(id: row.id, text: row.text, secondary: row.kind == "thought", streaming: row.streaming, width: textWidth)
@@ -457,15 +491,21 @@ extension LodyChatView {
         expanded: expandedAttachments.contains(row.entryID), author: !row.author.isEmpty)
     }
     if row.kind == "chat_failed" { return ChatErrorCell.height(row, width: width, traits: traitCollection) }
+    if row.kind == "proposal" { return ChatProposalCell.height(row, width: width, traits: traitCollection) }
+    if row.kind == "file", row.file != nil { return ChatFileCardCell.height(traits: traitCollection) }
     if row.kind == "tasksHeader" { return row.detail.isEmpty ? ChatFileCell.headerHeight : 56 }
     if row.subagent != nil { return ChatSubagentCell.height(row, width: width, traits: traitCollection) }
+    if row.kind.hasPrefix("operation") { return ChatOperationCell.height(row, traits: traitCollection) }
     if row.kind == "meta" { return 44 }
+    if row.kind == "imageStack" { return ChatImageStackCell.height(row, width: width) }
     if row.kind == "duration" { return ChatCell.processHeight(for: row, width: width, traits: traitCollection) }
     if row.kind == "changesHeader" { return ChatFileCell.headerHeight }  // Same height as the tasks row without a step.
     let measured = measure(row, width: width)
     if row.kind == "user" {
+      measuringText.setText(text(for: row))
+      let limit = ChatMessageContent.collapsedHeight(label: measuringText, width: ChatCell.textWidth(row, width: width))
       return ChatMessageContent.height(textHeight: measured,
-        limit: collapsedMessageHeights[row.entryID] ?? ChatMessageContent.maximumCollapsedHeight,
+        limit: limit,
         expanded: expandedMessages.contains(row.entryID)) + ChatRowPadding.content + 12
     }
     let measuredHeight = measured + ChatCell.rowExtra(for: row, previousKind: previousKind ?? kind(before: row.id))
@@ -719,44 +759,5 @@ final class ChatPerformanceProbe: NSObject {
       }
     }
     return result == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
-  }
-}
-
-
-extension LodyChatView {
-  func messageMenu(entryID: String, source: UIButton) -> UIMenu {
-    UIMenu(children: [UIDeferredMenuElement.uncached { [weak self, weak source] completion in
-      guard let self, let source,
-        let content = ChatMessageShare.content(in: self.transcript, entryID: entryID) else {
-        completion([])
-        return
-      }
-      @MainActor func action(_ key: String, symbol: String, disabled: Bool = false) -> UIAction {
-        UIAction(title: String(localized: String.LocalizationValue("native.chat.message." + key), bundle: .lody), image: UIImage(systemName: symbol),
-          attributes: disabled ? .disabled : []) { [weak self, weak source] _ in
-          guard let self, let source else { return }
-          if key == "copy" {
-            UIPasteboard.general.setMessageMarkdown(content.text)
-            LodyToastOverlay.shared.show(message: String(localized: "native.chat.message.copied", bundle: .lody), kind: .neutral)
-          } else if key == "image" {
-            var snapshot = content
-            snapshot.workspace = self.imageWorkspace
-            snapshot.session = self.imageSession
-            guard let data = try? JSONEncoder().encode(snapshot), let json = String(data: data, encoding: .utf8) else { return }
-            self.onShareImage(["contentJSON": json])
-          } else if let owner = self.presenter(), owner.presentedViewController == nil {
-            let sheet = UIActivityViewController(activityItems: [content.text], applicationActivities: nil)
-            sheet.popoverPresentationController?.sourceView = source
-            sheet.popoverPresentationController?.sourceRect = source.bounds
-            owner.present(sheet, animated: true)
-          }
-        }
-      }
-      completion([
-        action("copy", symbol: "doc.on.doc", disabled: content.text.isEmpty),
-        action("image", symbol: "photo", disabled: !self.imageSharingEnabled),
-        action("share", symbol: "square.and.arrow.up", disabled: content.text.isEmpty),
-      ])
-    }])
   }
 }

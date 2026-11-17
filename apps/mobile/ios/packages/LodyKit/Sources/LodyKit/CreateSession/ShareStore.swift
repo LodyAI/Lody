@@ -101,6 +101,12 @@ enum ShareStore {
   static func prefs() -> CreatePrefs? { read(CreatePrefs.self, "prefs.json") }
   static func options(_ target: String) -> CreationOptions? { read(CreationOptions.self, optionsPath(target)) }
 
+  static func clearCatalog() {
+    for path in ["catalog.json", "options", "branches", "prefs.json"] {
+      if let file = url(path) { try? FileManager.default.removeItem(at: file) }
+    }
+  }
+
   static func clear() {
     guard let root else { return }
     try? FileManager.default.removeItem(at: root)

@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
+import * as localIpc from '@lody/shared/node/local-ipc';
 import { LoroDoc } from 'loro-crdt';
 import { withHistoryPort } from '../../../tests/history-port-fixture';
 import {
@@ -7,9 +9,22 @@ import {
   type ScheduleCommand,
   type ScheduleRepositoryPort,
 } from '@lody/shared';
+import {
+  scheduleRequesterSessionId,
+  sendScheduleCommand,
+  sendDaemonScheduleCommand,
+} from './schedule-command-client';
 import { executeScheduleCommand, type ScheduleCommandContext } from './schedule-command-service';
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+
 async function fixture() {
+  vi.stubEnv('LODY_SESSION_ID', '');
+  vi.stubEnv('LODY_PARENT_SESSION_ID', '');
+  vi.stubEnv('LODY_AGENT_SESSION_ID', '');
   const docs = new Map<string, LoroDoc>();
   const rows = new Map<string, unknown>();
   const registrySync = vi.fn(async () => {});
@@ -60,12 +75,15 @@ async function fixture() {
   });
   let history: any[] = [];
   let owner = 'owner';
+  let targetAvailable = false;
+  let metaReady = true;
+  let syncMeta = async () => true;
   const context = {
     manager: {
       repo: {
         ...port,
         getDocMeta: async (id: string) =>
-          id.startsWith('session-')
+          id.startsWith('session-') && metaReady
             ? {
                 meta: {
                   id: 'session',
@@ -74,7 +92,30 @@ async function fixture() {
                   processingUserMsgId: 'turn',
                 },
               }
-            : undefined,
+            : targetAvailable && id === 'machine-machine'
+              ? {
+                  meta: {
+                    id: 'machine',
+                    ownerUserId: 'owner',
+                    protocolCapabilities: { schedules: 2 },
+                  },
+                }
+              : targetAvailable && id === 'agent-agent'
+                ? {
+                    meta: {
+                      id: 'agent',
+                      machineId: 'machine',
+                      name: 'Synthetic',
+                      cliType: 'custom',
+                      agentType: 'synthetic',
+                    },
+                  }
+                : undefined,
+      },
+      waitUntilMetaSynced: async () => {
+        const synced = await syncMeta();
+        if (synced) metaReady = true;
+        return synced;
       },
       getOrCreateSessionDoc: async () =>
         withHistoryPort({
@@ -97,6 +138,23 @@ async function fixture() {
     registrySync,
     documentSync,
     notificationSync,
+    targetAvailable: () => {
+      targetAvailable = true;
+    },
+    coldMeta: (sync: () => Promise<boolean>) => {
+      metaReady = false;
+      syncMeta = sync;
+    },
+    draft: {
+      title: definition.title,
+      machineId: definition.machineId,
+      trigger: definition.trigger,
+      misfirePolicy: definition.misfirePolicy,
+      overlapPolicy: definition.overlapPolicy,
+      retryPolicy: definition.retryPolicy,
+      agent: definition.agent,
+      prompt: 'Synthetic prompt',
+    },
     history: () => history,
     owner: (value: string) => {
       owner = value;
@@ -149,6 +207,7 @@ describe('Schedule command authorization', () => {
 it('records attributable MCP pauses and an idempotent ordinary Session notice', async () => {
   const h = await fixture();
   h.context.requesterSessionId = 'session' as never;
+  h.context.workspace.contentMode = 'e2ee';
   const command = {
     action: 'pause',
     scheduleId: 'schedule',
@@ -269,4 +328,194 @@ describe('proposing a schedule from a conversation', () => {
     ).rejects.toThrow();
     expect(h.history()).toHaveLength(0);
   });
+});
+
+it.each(['requesterSessionId', 'LODY_AGENT_SESSION_ID'])(
+  'restricts commands with inherited %s before any schedule mutation',
+  async (variable) => {
+    const h = await fixture();
+    const requester = variable === 'requesterSessionId' ? ('session' as never) : undefined;
+    if (variable === 'LODY_AGENT_SESSION_ID') vi.stubEnv(variable, 'session');
+    h.context.requesterSessionId = scheduleRequesterSessionId(requester);
+    const d = await h.repository.read('schedule');
+    if (!d) throw new Error('missing schedule');
+    const draft = {
+      misfirePolicy: d.definition.misfirePolicy,
+      overlapPolicy: d.definition.overlapPolicy,
+      retryPolicy: d.definition.retryPolicy,
+      title: d.definition.title,
+      machineId: d.definition.machineId,
+      trigger: d.definition.trigger,
+      agent: d.definition.agent,
+      prompt: d.prompt,
+    };
+    for (const command of [
+      { action: 'create', scheduleId: 'new', draft, requestId: 'create' },
+      {
+        action: 'edit',
+        scheduleId: 'schedule',
+        draft: { ...draft, prompt: 'edited' },
+        requestId: 'edit',
+      },
+      { action: 'resume', scheduleId: 'schedule', requestId: 'resume' },
+      { action: 'run', scheduleId: 'schedule', requestId: 'run' },
+      { action: 'delete', scheduleId: 'schedule' },
+    ] as ScheduleCommand[]) {
+      await expect(executeScheduleCommand(h.context, command)).rejects.toThrow('human');
+      await expect(
+        sendScheduleCommand(command, { requesterSessionId: h.context.requesterSessionId })
+      ).rejects.toThrow('human');
+    }
+    expect(await h.repository.read('schedule')).toEqual(d);
+    await executeScheduleCommand(h.context, {
+      action: 'pause',
+      scheduleId: 'schedule',
+      requestId: 'pause-env',
+    });
+    expect((await h.repository.read('schedule'))?.definition.enabled).toBe(false);
+    expect(h.history()).toHaveLength(1);
+  }
+);
+
+it.each(['LODY_SESSION_ID', 'LODY_PARENT_SESSION_ID', 'LODY_AGENT_SESSION_ID'])(
+  'ignores daemon-owned %s when the client sends no requester',
+  async (variable) => {
+    const h = await fixture();
+    h.targetAvailable();
+    vi.stubEnv(variable, 'stale-daemon-session');
+    await executeScheduleCommand(h.context, {
+      action: 'create',
+      scheduleId: 'human',
+      requestId: 'create-human',
+      draft: h.draft,
+    });
+    await executeScheduleCommand(h.context, {
+      action: 'pause',
+      scheduleId: 'human',
+      requestId: 'pause-human',
+    });
+    await executeScheduleCommand(h.context, {
+      action: 'resume',
+      scheduleId: 'human',
+      requestId: 'resume-human',
+    });
+    expect((await h.repository.read('human'))?.definition.enabled).toBe(true);
+    expect(h.history()).toEqual([]);
+  }
+);
+
+function useDaemon(h: Awaited<ReturnType<typeof fixture>>) {
+  vi.spyOn(localIpc, 'makeLocalControlClientAuto').mockReturnValue({
+    scheduleControl: (request) =>
+      Effect.promise(async () => ({
+        ok: true as const,
+        result: await executeScheduleCommand(
+          {
+            ...h.context,
+            requesterSessionId:
+              request.requesterSessionId as ScheduleCommandContext['requesterSessionId'],
+          },
+          request.command
+        ),
+      })),
+  } as ReturnType<typeof localIpc.makeLocalControlClientAuto>);
+  return (command: ScheduleCommand) =>
+    sendDaemonScheduleCommand(command, { machineId: 'machine', workspaceId: 'workspace' });
+}
+
+it.each(['LODY_SESSION_ID', 'LODY_PARENT_SESSION_ID'])(
+  'allows human CLI authoring when only %s is present',
+  async (variable) => {
+    const h = await fixture();
+    h.targetAvailable();
+    vi.stubEnv(variable, 'human-terminal-session');
+    const send = useDaemon(h);
+    expect(scheduleRequesterSessionId()).toBeUndefined();
+    await send({ action: 'create', scheduleId: 'human', requestId: 'create', draft: h.draft });
+    await send({ action: 'pause', scheduleId: 'human', requestId: 'pause' });
+    await send({ action: 'resume', scheduleId: 'human', requestId: 'resume' });
+    expect((await h.repository.read('human'))?.definition.enabled).toBe(true);
+    expect(h.history()).toEqual([]);
+  }
+);
+
+it('keeps the four Agent CLI actions scoped to their invoking Session', async () => {
+  const h = await fixture();
+  vi.stubEnv('LODY_AGENT_SESSION_ID', 'session');
+  const send = useDaemon(h);
+  await expect(send({ action: 'list', limit: 30 })).resolves.toMatchObject({ matched: 1 });
+  await expect(send({ action: 'show', scheduleId: 'schedule' })).resolves.toMatchObject({
+    schedule: { prompt: 'Synthetic prompt' },
+  });
+  await send({ action: 'pause', scheduleId: 'schedule', requestId: 'agent-pause' });
+  await send({
+    action: 'propose',
+    requestId: 'agent-propose',
+    title: 'Daily',
+    prompt: 'Synthetic',
+    rule: { kind: 'daily', hour: 9, minute: 0 },
+  });
+  expect((await h.repository.read('schedule'))?.definition.enabled).toBe(false);
+  expect(h.history()).toHaveLength(2);
+  h.owner('other');
+  await expect(
+    executeScheduleCommand(
+      { ...h.context, requesterSessionId: 'session' as never },
+      { action: 'list', limit: 30 }
+    )
+  ).rejects.toThrow('owner');
+});
+
+it.each(['list', 'pause', 'propose'] as const)(
+  'waits for cold workspace metadata before authorizing %s',
+  async (action) => {
+    const h = await fixture();
+    h.context.localOnly = false;
+    h.context.requesterSessionId = 'session' as never;
+    h.notificationSync.mockResolvedValue(true);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<boolean>();
+    h.coldMeta(() => {
+      entered.resolve();
+      return release.promise;
+    });
+    const command: ScheduleCommand =
+      action === 'list'
+        ? { action, limit: 30 }
+        : action === 'pause'
+          ? { action, scheduleId: 'schedule', requestId: 'pause-cold' }
+          : {
+              action,
+              requestId: 'propose-cold',
+              title: 'Daily',
+              prompt: 'Synthetic prompt',
+              rule: { kind: 'daily', hour: 9, minute: 0 },
+            };
+    const result = executeScheduleCommand(h.context, command);
+    await entered.promise;
+    expect(h.history()).toEqual([]);
+    expect((await h.repository.read('schedule'))?.definition.enabled).toBe(true);
+    release.resolve(true);
+    await expect(result).resolves.toMatchObject(action === 'list' ? { matched: 1 } : { ok: true });
+    if (action === 'pause')
+      expect((await h.repository.read('schedule'))?.definition.enabled).toBe(false);
+    if (action === 'propose') expect(h.history()[0].items[0].name).toBe('schedule_proposal');
+  }
+);
+
+it('keeps a cold metadata failure retryable without changing the Schedule', async () => {
+  const h = await fixture();
+  h.context.localOnly = false;
+  h.context.requesterSessionId = 'session' as never;
+  h.notificationSync.mockResolvedValue(true);
+  h.coldMeta(async () => false);
+  const command = { action: 'pause', scheduleId: 'schedule', requestId: 'pause-retry' } as const;
+  await expect(executeScheduleCommand(h.context, command)).rejects.toThrow(
+    'metadata changes were not confirmed'
+  );
+  expect((await h.repository.read('schedule'))?.definition.enabled).toBe(true);
+  expect(h.history()).toEqual([]);
+  h.coldMeta(async () => true);
+  await expect(executeScheduleCommand(h.context, command)).resolves.toMatchObject({ ok: true });
+  expect((await h.repository.read('schedule'))?.definition.enabled).toBe(false);
 });

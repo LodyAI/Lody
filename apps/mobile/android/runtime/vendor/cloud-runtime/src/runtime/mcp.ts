@@ -1,4 +1,10 @@
-import { openSettings, settingsRows } from './settings';
+import { openSettings } from './settings';
+
+const object = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+const text = (value: unknown) => (typeof value === 'string' ? value : '');
 
 // Selection is absent for a fresh draft, but [] explicitly disables all servers.
 export async function sessionMcpSelection(
@@ -14,7 +20,26 @@ export async function sessionMcpSelection(
       grant,
       signal,
     );
-    const servers = settingsRows('mcp', flock);
+    const servers = [];
+    for (const row of flock.scan()) {
+      if (row.key.length !== 2 || row.key[0] !== 'mcpServer') continue;
+      const id = text(row.key[1]),
+        value = object(row.value);
+      if (value.id !== id || !['stdio', 'http'].includes(text(value.transport)))
+        continue;
+      const connection = object(value.connection);
+      servers.push({
+        id,
+        name: text(value.name),
+        enabledByDefault: value.enabledByDefault === true,
+        configured:
+          connection.transport === value.transport &&
+          (value.transport === 'http'
+            ? !!text(connection.url).trim()
+            : !!text(connection.command).trim()),
+      });
+    }
+    servers.sort((a, b) => a.name.localeCompare(b.name));
     const selected = Array.isArray(persisted)
       ? persisted
       : servers

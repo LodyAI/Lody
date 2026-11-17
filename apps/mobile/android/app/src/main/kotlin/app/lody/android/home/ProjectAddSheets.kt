@@ -281,6 +281,7 @@ fun GitHubRepoSheet(service: ProjectAdding, scope: RuntimeScope, onDismiss: () -
     var query by remember { mutableStateOf("") }
     var adding by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var authorizationRequired by remember(scope) { mutableStateOf(false) }
     val addFailed = stringResource(R.string.projects_github_add_failed)
     val installFailed = stringResource(R.string.projects_github_install_failed)
     LaunchedEffect(attempt) {
@@ -293,9 +294,25 @@ fun GitHubRepoSheet(service: ProjectAdding, scope: RuntimeScope, onDismiss: () -
         coroutines.launch {
             try { onOpenUrl(service.installUrl(scope)) }
             catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: GitHubSettingsFailure) {
+                if (failure.code == "authorization_required") authorizationRequired = true
+                else error = installFailed
+            }
             catch (_: Exception) { error = installFailed }
         }
         Unit
+    }
+    if (authorizationRequired) {
+        AlertDialog(
+            onDismissRequest = { authorizationRequired = false },
+            title = { Text(stringResource(R.string.github_settings_authorization_required)) },
+            text = { Text(stringResource(R.string.github_settings_authorization_hint)) },
+            confirmButton = { TextButton(onClick = {
+                authorizationRequired = false
+                onOpenUrl(GitHubSettingsCloud.authorizationUrl())
+            }) { Text(stringResource(R.string.github_settings_authorize_in_web)) } },
+            dismissButton = { TextButton(onClick = { authorizationRequired = false }) { Text(stringResource(R.string.settings_agent_cancel)) } },
+        )
     }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = colors.bgBase) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {

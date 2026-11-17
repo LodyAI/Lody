@@ -1,12 +1,13 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { clipboard } from 'electron'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   TerminalClientMessageSchema,
   type TerminalOpenParams
 } from '@lody/shared/terminal-protocol'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class TerminalIpc extends IpcService {
+export class TerminalIpc extends ProductWindowIpcService {
   static override readonly groupName = 'terminal'
 
   @IpcMethod()

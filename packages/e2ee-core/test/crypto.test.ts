@@ -2351,6 +2351,26 @@ describe('ledger-bound signed document workflows', () => {
       bad.rotate(1, bad.k1, bad.k0, packet);
       expect(code(EpochKeys.recoverLedgerHistory(bad.view(), bad.k1))).toBe('history-invalid');
     });
+    it('authenticates older recovery starting keys, including epoch zero, against the verified ledger', () => {
+      const f = epochFixture();
+      f.rotate(1, f.k1, f.k0);
+      f.rotate(2, f.k2, f.k1);
+      const view = f.view();
+      for (const [epoch, key] of [f.k0, f.k1, f.k2].entries()) {
+        const recovered = read(EpochKeys.recoverLedgerHistory(view, key, epoch));
+        expect([...recovered.keys()]).toEqual(
+          Array.from({ length: epoch + 1 }, (_, i) => epoch - i)
+        );
+        for (const [number, restored] of recovered)
+          expect(copyEpochKeyBytes(restored)).toEqual(new Uint8Array(32).fill(7 + number));
+        expect(code(EpochKeys.recoverLedgerHistory(view, opaque(99), epoch))).toBe(
+          'commitment-mismatch'
+        );
+      }
+      for (const epoch of [-1, 3, 0.5, NaN, Infinity])
+        expect(code(EpochKeys.recoverLedgerHistory(view, f.k1, epoch))).toBe('invalid-input');
+      expect(code(EpochKeys.recoverLedgerHistory({ ...view }, f.k1, 1))).toBe('unauthorized');
+    });
     it('wipes operation-owned key buffers on recovery/random failure without touching caller keys', () => {
       const f = epochFixture();
       f.rotate(1, f.k1, opaque(99));

@@ -112,10 +112,9 @@ internal class LiveProjectAdding(
 
     override suspend fun installUrl(scope: RuntimeScope): String = withAccount(scope) { credential ->
         if (!canManage(credential, scope.workspaceId)) throw ProjectAddFailure("forbidden")
-        val result = convex(credential, "action", "github:createGitHubInstallState", JSONObject().put("workspaceId", scope.workspaceId).put("returnTarget", "web")) as? JSONObject
-        val state = result?.optString("state").orEmpty()
-        if (state.isEmpty() || state.length > 4096) throw ProjectAddFailure("install_failed")
-        "https://github.com/apps/lodyai/installations/new?state=" + URLEncoder.encode(state, "UTF-8")
+        GitHubSettingsCloud.installationUrl(scope.workspaceId) { kind, path, args ->
+            convex(credential, kind, path, args)
+        }
     }
 
     /** Admins and owners manage the workspace's GitHub (iOS `WorkspaceSettingsCloud.github`). */

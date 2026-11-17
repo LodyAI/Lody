@@ -13,9 +13,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import app.lody.android.designsystem.*
 
-/** Web sidebar identity: the repository owner's cached avatar, gently muted. */
+/**
+ * Web sidebar identity: the repository owner's cached avatar, gently muted unless [muted] is
+ * false (Home's project group labels keep the original colours).
+ */
 @Composable
-fun RepositoryIcon(repository: String?, size: Dp = LodyIconSize.sm, opacity: Float = 0.6f) {
+fun RepositoryIcon(repository: String?, size: Dp = LodyIconSize.sm, opacity: Float = 0.6f, muted: Boolean = true) {
     val url = repository?.let(ProjectCards::ownerAvatar)
     var image by remember(url) { mutableStateOf(url?.let(AvatarImages::cached)) }
     LaunchedEffect(url) { if (url != null && image == null) image = AvatarImages.load(url) { image = it } }
@@ -26,6 +29,6 @@ fun RepositoryIcon(repository: String?, size: Dp = LodyIconSize.sm, opacity: Flo
     } else {
         val filter = remember { ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0.55f) }) }
         Image(loaded, contentDescription = null, contentScale = ContentScale.Crop,
-            modifier = modifier, alpha = opacity, colorFilter = filter)
+            modifier = modifier, alpha = if (muted) opacity else 1f, colorFilter = if (muted) filter else null)
     }
 }

@@ -6,7 +6,6 @@ final class ChatMessageActionsCell: UICollectionViewCell {
   let copyButton = UIButton(type: .system)
   let detailsButton = UIButton(type: .system)
   let forkButton = UIButton(type: .system)
-  let actionButton = UIButton(type: .system)
   private let label = UILabel()
   private let actions = UIStackView()
   private var identity = ""
@@ -25,16 +24,15 @@ final class ChatMessageActionsCell: UICollectionViewCell {
       (copyButton, LodyIcon.copy, "native.chat.message.copy"),
       (detailsButton, LodyIcon.info, "message.details.title"),
       (forkButton, LodyIcon.branch, "message.fork.title"),
-      (actionButton, LodyIcon.more, "native.chat.message.actions"),
     ] {
       button.setImage(Self.image(icon), for: .normal)
       button.tintColor = .secondaryLabel
+      button.contentHorizontalAlignment = .left
       button.accessibilityLabel = String(localized: String.LocalizationValue(key), bundle: .lody)
       button.widthAnchor.constraint(equalToConstant: 44).isActive = true
       button.heightAnchor.constraint(equalToConstant: 44).isActive = true
       actions.addArrangedSubview(button)
     }
-    actionButton.showsMenuAsPrimaryAction = true
     copyButton.addAction(UIAction { [weak self] _ in
       guard let self else { return }
       self.onCopy?()
@@ -61,7 +59,7 @@ final class ChatMessageActionsCell: UICollectionViewCell {
     label.text = row.text
     copyButton.isEnabled = copyable
     copyButton.setImage(Self.image(.copy), for: .normal)
-    for (button, suffix) in [(copyButton,"copy"), (detailsButton,"details"), (forkButton,"fork"), (actionButton,"actions")] {
+    for (button, suffix) in [(copyButton,"copy"), (detailsButton,"details"), (forkButton,"fork")] {
       button.accessibilityIdentifier = row.id + ":" + suffix
     }
     setNeedsLayout()
@@ -70,7 +68,7 @@ final class ChatMessageActionsCell: UICollectionViewCell {
     super.layoutSubviews()
     let count = CGFloat(actions.arrangedSubviews.filter { !$0.isHidden }.count)
     let width = count * 44 + max(0, count - 1) * actions.spacing
-    let timeX = width + LodySpacing.xs
+    let timeX = width - (44 - LodyIconSize.sm) + LodySpacing.md
     label.frame = CGRect(x: timeX, y: 0, width: max(0, bounds.width - timeX), height: 44)
     actions.frame = CGRect(x: 0, y: 0, width: width, height: 44)
   }

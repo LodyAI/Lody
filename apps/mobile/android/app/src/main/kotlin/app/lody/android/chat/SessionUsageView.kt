@@ -43,22 +43,7 @@ internal fun SessionUsageButton(usage: SessionUsage?) {
                 }
                 usage.quota?.let { quota ->
                     if (usage.context != null || usage.compacting) HorizontalDivider()
-                    Text(quota.name ?: stringResource(R.string.usage_model), style = LodyTheme.typography.subhead)
-                    if (usage.windows.isEmpty()) Text(stringResource(R.string.usage_unavailable), style = LodyTheme.typography.caption)
-                    usage.windows.forEach { window ->
-                        val duration = when (window.duration) {
-                            604800.0 -> stringResource(R.string.usage_weekly)
-                            18000.0 -> stringResource(R.string.usage_five_hours)
-                            null -> stringResource(R.string.usage_title)
-                            else -> {
-                                val seconds = window.duration
-                                val unit = if (seconds % 86400 == 0.0) 86400 else if (seconds % 3600 == 0.0) 3600 else 60
-                                stringResource(if (unit == 86400) R.string.usage_days else if (unit == 3600) R.string.usage_hours else R.string.usage_minutes, NumberFormat.getNumberInstance().format(seconds / unit))
-                            }
-                        }
-                        UsageMeter(listOfNotNull(duration, window.label).joinToString(" · "), window.usedPercent)
-                        window.resetsAt?.let { ResetTime(it) }
-                    }
+                    UsageQuotaView(quota)
                 }
             }
         }
@@ -88,5 +73,27 @@ private fun ResetTime(epochSeconds: Double) {
         TextButton(onClick = { absolute = !absolute }) {
             Text(stringResource(if (absolute) R.string.usage_relative else R.string.usage_absolute), style = LodyTheme.typography.caption)
         }
+    }
+}
+
+@Composable
+internal fun UsageQuotaView(quota: app.lody.android.runtime.UsageQuota) {
+    Column(verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+                    Text(quota.name ?: stringResource(R.string.usage_model), style = LodyTheme.typography.subhead)
+                    if (quota.windows.sortedByDescending { it.duration ?: 0.0 }.isEmpty()) Text(stringResource(R.string.usage_unavailable), style = LodyTheme.typography.caption)
+                    quota.windows.sortedByDescending { it.duration ?: 0.0 }.forEach { window ->
+                        val duration = when (window.duration) {
+                            604800.0 -> stringResource(R.string.usage_weekly)
+                            18000.0 -> stringResource(R.string.usage_five_hours)
+                            null -> stringResource(R.string.usage_title)
+                            else -> {
+                                val seconds = window.duration
+                                val unit = if (seconds % 86400 == 0.0) 86400 else if (seconds % 3600 == 0.0) 3600 else 60
+                                stringResource(if (unit == 86400) R.string.usage_days else if (unit == 3600) R.string.usage_hours else R.string.usage_minutes, NumberFormat.getNumberInstance().format(seconds / unit))
+                            }
+                        }
+                        UsageMeter(listOfNotNull(duration, window.label).joinToString(" · "), window.usedPercent)
+                        window.resetsAt?.let { ResetTime(it) }
+                    }
     }
 }

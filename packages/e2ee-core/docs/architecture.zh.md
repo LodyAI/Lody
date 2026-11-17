@@ -93,7 +93,8 @@ src/
 算法、域与 AAD。Ed25519 复用已固定的 noble 后端，HPKE 使用上游固定版本的 JS
 X25519 KEM。seal 无需原生 X25519；原生收件人句柄继续走原路径。WASM 不可用时，
 仅明确的原生 Ed25519 不支持或缺少 SubtleCrypto 才转入固定的严格 JS 验签；签名
-不匹配或其他后端故障不会选择另一套接受规则。
+不匹配或其他后端故障不会选择另一套接受规则。WASM 验签器及其差分证据记录在
+[WASM Ed25519 决定](../../../.agents/notes/implemented/architecture/2026-10-20-e2ee-wasm-ed25519.zh.md)。
 
 上游 JS key 对象的私钥字段不能通过 `CryptoKeyPair` 形状暴露。core 用私有 WeakMap
 保留它，只返回冻结的元数据句柄。HPKE 借用保留私钥到实际加密工作结束，即使调用

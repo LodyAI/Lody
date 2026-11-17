@@ -56,7 +56,7 @@ export function detectPlatform(userAgent: string, platform?: string): PlatformKe
 export function resolvePrimaryDownloadAction(input: {
   platform: PlatformKey | null;
   labels: PlatformDownloadLabels;
-  webAppHref: string;
+  allPlatforms: { label: string; href: string };
 }): PrimaryDownloadAction {
   const key = input.platform ?? 'browser';
   switch (key) {
@@ -105,8 +105,8 @@ export function resolvePrimaryDownloadAction(input: {
     default:
       return {
         key: 'browser',
-        label: input.labels.browser,
-        href: input.webAppHref,
+        label: input.allPlatforms.label,
+        href: input.allPlatforms.href,
       };
   }
 }

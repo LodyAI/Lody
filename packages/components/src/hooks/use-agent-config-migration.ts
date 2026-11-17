@@ -22,7 +22,6 @@ type MigrationStatus = 'idle' | 'running' | 'done' | 'error';
  * reads find no legacy configs and do nothing.
  *
  * The mutex guards against two tabs racing through the same migration.
- * See docs/backward-compatibility.md for removal plan.
  */
 export function useAgentConfigMigration(): {
   status: MigrationStatus;

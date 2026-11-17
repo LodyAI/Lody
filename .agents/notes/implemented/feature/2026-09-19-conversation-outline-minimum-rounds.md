@@ -1,4 +1,4 @@
-# Conversation outline rail waits for ten user rounds
+# Conversation outline rail waits for four user rounds
 
 Status: implemented
 Translation: current
@@ -11,7 +11,9 @@ The conversation outline rail — the left table of contents with one tick per
 round — was mounted for every desktop conversation with at least two rounds,
 so a short session showed a handful of ticks that decorated rather than
 navigated. The rail now mounts only once a conversation reaches
-`OUTLINE_MIN_USER_ROUNDS` (10) user-driven rounds. The gate lives at the
+`OUTLINE_MIN_USER_ROUNDS` (4) user-driven rounds — more than three; the
+threshold was 10 until 2026-11-17, when it was lowered so mid-length
+conversations get the rail too. The gate lives at the
 `SessionChatStreamView` mount site, not inside `ConversationOutlineRail`, so
 the component stays usable standalone (stories, previews) with only its
 degenerate `< 2` tick guard.
@@ -36,6 +38,6 @@ active-index state is warm when the rail first appears.
 `packages/components/tests/conversation-outline.test.ts` covers
 `countUserDrivenRounds`: plain counting, the leading-agent-round exclusion at
 the exact boundary, and the empty outline. The `ShortStreamHidesRail` story
-documents the hidden state inside the real `SessionChatStreamView` (four
+documents the hidden state inside the real `SessionChatStreamView` (three
 rounds mount no rail), while `InsideTheConversationStream` at fourteen rounds
 still shows it.

@@ -48,6 +48,7 @@ for (const key of [
   'CFBundleDisplayName',
   'NSCameraUsageDescription',
   'NSLocalNetworkUsageDescription',
+  'NSPhotoLibraryAddUsageDescription',
   'NSPhotoLibraryUsageDescription',
 ]) {
   if (!(key in info)) problems.push(`InfoPlist.xcstrings: missing ${key}`);

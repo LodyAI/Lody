@@ -112,7 +112,12 @@ export type LedgerCommand =
       readonly machineId?: string;
       readonly replaces?: Bytes.SigningPublicKey | null;
     }
-  | { readonly _tag: 'RevokeDevice'; readonly target: Bytes.SigningPublicKey }
+  | {
+      readonly _tag: 'RevokeDevice';
+      readonly target: Bytes.SigningPublicKey;
+      /** Explicit acknowledgement that recovery credentials are now the only way back. Workflow-only; never encoded. */
+      readonly confirmedRecoveryOnly?: boolean;
+    }
   | { readonly _tag: 'RemoveMember'; readonly membershipId: Bytes.MembershipId }
   | { readonly _tag: 'DeclareCapabilities'; readonly capabilities: readonly number[] }
   | { readonly _tag: 'TransferOwner'; readonly successorMembershipId: Bytes.MembershipId };

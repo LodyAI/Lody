@@ -63,7 +63,11 @@ export interface E2eeDeviceApprovalGuideProps {
   /** Opens the full ledger and diagnostics view. */
   onShowDetails: () => void;
   onBack: () => void;
+  /** Returns to the automatic request after the person chose code pairing. */
+  onAutomatic?: () => void;
   refreshing?: boolean;
+  /** The way out when no other device can approve; replaces the re-invitation note. */
+  lostAccess?: ReactNode;
   /** The existing explicit pairing exchange, kept during the transition. */
   children?: ReactNode;
 }
@@ -100,7 +104,9 @@ export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
           <li>{t('e2ee.approvalGuide.stepAdd')}</li>
           <li>{t('e2ee.approvalGuide.stepCompare')}</li>
         </ol>
-        <p {...stylex.props(styles.note)}>{t('e2ee.approvalGuide.noDevice')}</p>
+        {props.lostAccess ?? (
+          <p {...stylex.props(styles.note)}>{t('e2ee.approvalGuide.noDevice')}</p>
+        )}
         <div {...stylex.props(styles.actions)}>
           <Button variant="secondary" disabled={props.refreshing} onClick={props.onRefresh}>
             <RefreshCw size={14} aria-hidden="true" />
@@ -109,6 +115,11 @@ export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
           <Button variant="ghost" onClick={props.onShowDetails}>
             {t('e2ee.approvalGuide.details')}
           </Button>
+          {props.onAutomatic && (
+            <Button variant="ghost" onClick={props.onAutomatic}>
+              {t('e2ee.approvalGuide.automatic')}
+            </Button>
+          )}
         </div>
         {props.children}
       </div>

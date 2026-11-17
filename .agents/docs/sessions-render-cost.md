@@ -68,10 +68,9 @@ readiness requirement.
 
 ## Desktop windows
 
-`MainLayout` uses one Web Lock per workspace for completion notifications, dock
-badge, PR auto-archive and Task status checks. The lock releases on renderer exit;
-Task Index stays mounted in every workspace window because visible Tasks pages
-also consume it. Sidebar hiding unmounts the sidebar subtree and disables the
+`MainLayout` uses one Web Lock per workspace for completion notifications, the
+dock badge and Agent Role schema reconciliation. The lock releases on renderer
+exit. Sidebar hiding unmounts the sidebar subtree and disables the
 runtime eager-sync environment until it is shown again. Current Session sync is
 independent of that prefetch gate. See [window behavior](../../specs/desktop-windows.zh.md).
 

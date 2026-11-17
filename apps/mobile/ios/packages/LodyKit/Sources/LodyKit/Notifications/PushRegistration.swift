@@ -10,7 +10,6 @@ final class PushRegistration {
     let installation: String
   }
   enum Provider { case oneSignal, apns }
-  static func externalID(_ rawUser: String) -> String { "lody-push-v2:" + rawUser }
   struct Configuration: Decodable { let selfHostedEnabled: Bool }
   typealias Call = (Session, String, String, [String: String]) async throws -> Data
   private let installation: String
@@ -43,8 +42,12 @@ final class PushRegistration {
     }
   }
 
-  func deviceToken(_ token: String, bundle: String?) {
+  /// Returns false for a repeated callback with the same token and Bundle ID.
+  @discardableResult
+  func deviceToken(_ token: String, bundle: String?) -> Bool {
+    guard self.token != token || self.bundle != bundle else { return false }
     self.token = token; self.bundle = bundle
+    return true
   }
 
   func refresh(authorized: Bool) {

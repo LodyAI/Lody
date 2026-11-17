@@ -36,6 +36,14 @@ class MentionPresentationTest {
         val result = MentionPresentation(emptyList(), Color.Blue).filter(AnnotatedString("@session:private-id @role:private-role"))
         assertEquals("@Session 🪼 Role", result.text.text)
     }
+    @Test fun referencesAndShortcutRoleLabelsReadAsChips() {
+        val input = "Ask 🧪 Reviewer about @src/a.ts and \$lint"
+        val result = MentionPresentation(emptyList(), Color.Blue, Color.Cyan, listOf("🧪 Reviewer")).filter(AnnotatedString(input))
+        assertEquals(input, result.text.text)
+        val chips = result.text.spanStyles.filter { it.item.background == Color.Cyan }.map { input.substring(it.start, it.end) }
+        assertEquals(listOf("🧪 Reviewer", "@src/a.ts", "\$lint"), chips)
+        assertEquals(input.length, result.offsetMapping.originalToTransformed(input.length))
+    }
     @Test fun insertionKeepsDistinctTokensForDuplicateNames() {
         val a = MentionCandidate("one", "Same", "session", insertText = "@session:one")
         val b = a.copy(path = "two", insertText = "@session:two")

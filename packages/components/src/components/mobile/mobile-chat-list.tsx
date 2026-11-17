@@ -421,7 +421,6 @@ export function MobileChatListCard({
   onRequestDelete,
   selection,
   preview,
-  secondaryField = 'branch',
 }: {
   chats: MobileConversationItem[];
   selectedConversationId?: string | null;
@@ -446,9 +445,6 @@ export function MobileChatListCard({
      and appends a "Show all (N)" toggle. Omit to render every row (what a
      standalone card without a `MobileChatList` around it does). */
   preview?: MobileChatPreviewState;
-  /** @deprecated Conversation rows are single-line; branch/project meta
-     is no longer shown. Kept for call-site compatibility. */
-  secondaryField?: 'branch' | 'project';
 }) {
   /* The archived list swaps the pin/archive chips for restore/delete;
      each list mode only honours its own callbacks so a stray handler
@@ -556,13 +552,18 @@ export function MobileChatListCard({
               onClick={() => onSelect?.(conversation.id)}
               archived={archived}
               treeSlot={treeSlot}
-              selectionMode={selection?.active ?? false}
+              selectionMode={!conversation.readOnly && (selection?.active ?? false)}
               isSelected={selection?.isSelected(conversation.id) ?? false}
               onToggleSelect={
-                selection ? () => selection.onToggleSelect(conversation.id) : undefined
+                selection && !conversation.readOnly
+                  ? () => selection.onToggleSelect(conversation.id)
+                  : undefined
               }
-              onLongPress={selection ? () => selection.onLongPress(conversation.id) : undefined}
-              secondaryField={secondaryField}
+              onLongPress={
+                selection && !conversation.readOnly
+                  ? () => selection.onLongPress(conversation.id)
+                  : undefined
+              }
             />
           );
           return (
@@ -595,11 +596,15 @@ export function MobileChatListCard({
                     variant="archived"
                     liftAboveEdgeSwipeZone={showsTreeToggle}
                     onRestore={
-                      rowActions?.onRestore
+                      !conversation.readOnly && rowActions?.onRestore
                         ? () => rowActions.onRestore!(conversation.id)
                         : undefined
                     }
-                    onDelete={onRequestDelete ? () => onRequestDelete(conversation.id) : undefined}
+                    onDelete={
+                      !conversation.readOnly && onRequestDelete
+                        ? () => onRequestDelete(conversation.id)
+                        : undefined
+                    }
                   >
                     {row}
                   </MobileSwipeableRow>
@@ -616,7 +621,7 @@ export function MobileChatListCard({
                         : undefined
                     }
                     onArchive={
-                      rowActions?.onArchive
+                      !conversation.readOnly && rowActions?.onArchive
                         ? () => rowActions.onArchive!(conversation.id)
                         : undefined
                     }
@@ -984,7 +989,6 @@ export function MobileChatList({
   archived = false,
   onPermanentDelete,
   selectionLabels,
-  rowSecondaryField,
   capGroupPreviews = false,
   privateLabel,
   privateHelpAriaLabel,
@@ -1053,9 +1057,6 @@ export function MobileChatList({
   privateLabel?: string;
   privateHelpAriaLabel?: string;
   onPrivateHelp?: () => void;
-  /** @deprecated Conversation rows are single-line; branch/project meta
-     is no longer shown. Kept for call-site compatibility. */
-  rowSecondaryField?: 'branch' | 'project';
 }) {
   /* Multi-select state is owned here so a Select-All hits every row,
      including rows that live in separate group cards when
@@ -1097,7 +1098,7 @@ export function MobileChatList({
 
   /* The full id set for "select-all" computations. Memoized so the
      toolbar can read it cheaply on every render. */
-  const allIds = useMemo(() => chats.map((c) => c.id), [chats]);
+  const allIds = useMemo(() => chats.filter((c) => !c.readOnly).map((c) => c.id), [chats]);
 
   /* When the underlying chat set changes (e.g. user flips the archive
      toggle off, or a delete completes), drop any ids that are no
@@ -1205,14 +1206,6 @@ export function MobileChatList({
     </div>
   ) : null;
 
-  /* Default secondary-text source: flat list → project label so users
-     can tell rows apart across projects; grouped list → branch name
-     (the bucket heading already carries the project identity). Caller
-     can override via `rowSecondaryField` — project sub-pages do that
-     to keep their original branch-name look regardless of groupBy. */
-  const resolvedSecondaryField: 'branch' | 'project' =
-    rowSecondaryField ?? (groupBy === 'none' ? 'project' : 'branch');
-
   /* `firstGroupTrailing` only mounts on the first *visible* group
      heading while multi-select is off — selection toolbar already owns
      that vertical band. */
@@ -1273,7 +1266,6 @@ export function MobileChatList({
             onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
             selection={selectionState}
             preview={bucketPreview}
-            secondaryField={resolvedSecondaryField}
           />
         </Fragment>
       );
@@ -1363,7 +1355,6 @@ export function MobileChatList({
             onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
             selection={selectionState}
             preview={bucketPreview}
-            secondaryField={resolvedSecondaryField}
           />
         ) : null}
       </Fragment>

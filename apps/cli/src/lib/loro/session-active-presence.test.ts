@@ -71,6 +71,54 @@ const harness = Effect.fnUntraced(function* (options: SessionActivePresenceOptio
 const close = (scope: Scope.Closeable) => Scope.close(scope, Exit.void);
 
 describe('native session presence leases', () => {
+  it.effect('hands presence between native work and a turn without releasing the turn early', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const h = yield* harness({ intervalMs: 3_000 });
+        h.owner.setNativeWork(sessionId, 'background');
+        yield* TestClock.adjust(1_000);
+        expect(h.entries.get(sessionId)).toEqual({ type: 'running' });
+        expect(h.owner.has(sessionId)).toBe(false);
+
+        const turn = yield* Scope.make();
+        yield* Scope.provide(h.owner.hold(sessionId, 'requestPermission'), turn);
+        expect(h.entries.get(sessionId)).toEqual({ type: 'requestPermission' });
+        h.owner.setNativeWork(sessionId, null);
+        yield* TestClock.adjust(1_000);
+        expect(h.entries.get(sessionId)).toEqual({ type: 'requestPermission' });
+        h.owner.setNativeWork(sessionId, 'running');
+        yield* close(turn);
+        expect(h.entries.get(sessionId)).toEqual({ type: 'running' });
+        yield* TestClock.adjust(3_000);
+        expect(h.entries.get(sessionId)).toEqual({ type: 'running' });
+        h.owner.setNativeWork(sessionId, null);
+        yield* TestClock.adjust(1_000);
+        expect(h.entries.has(sessionId)).toBe(false);
+      })
+    )
+  );
+
+  it.effect('coalesces rapid native changes and retires native presence', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const h = yield* harness();
+        h.owner.setNativeWork(sessionId, 'running');
+        h.owner.setNativeWork(sessionId, null);
+        yield* TestClock.adjust(1_000);
+        expect(h.entries.has(sessionId)).toBe(false);
+        expect(h.writes).toEqual([]);
+        h.owner.setNativeWork(sessionId, 'background');
+        yield* TestClock.adjust(1_000);
+        expect(h.entries.get(sessionId)).toEqual({ type: 'running' });
+        h.owner.retire();
+        expect(h.entries.has(sessionId)).toBe(false);
+        h.owner.setNativeWork(sessionId, 'running');
+        yield* TestClock.adjust(2_000);
+        expect(h.entries.has(sessionId)).toBe(false);
+      })
+    )
+  );
+
   it.effect('latches a deadline detected before the Turn installs its waiter', () =>
     Effect.scoped(
       Effect.gen(function* () {

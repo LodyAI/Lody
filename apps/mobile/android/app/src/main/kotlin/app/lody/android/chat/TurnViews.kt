@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,7 +55,6 @@ import app.lody.android.designsystem.LodyIconSize
 import app.lody.android.designsystem.LodyIcons
 import app.lody.android.designsystem.LodySpacing
 import app.lody.android.designsystem.LodyTheme
-import app.lody.android.designsystem.LodyWorkingGrid
 import app.lody.android.runtime.TurnItem
 
 /**
@@ -69,14 +69,15 @@ internal fun LazyListScope.turnBlocks(
     open: Map<String, Boolean>,
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
+    respond: PermissionResponder? = null,
 ) {
-    val active = if (entry.working) entry.layout.blocks.lastOrNull()?.key else null
+    val active = entry.layout.activeActivityKey(entry.working)
     for (block in blocks) {
         when (block) {
-            is TurnLayout.Content -> content(entry, block, open, toggle, details)
+            is TurnLayout.Content -> content(entry, block, open, toggle, details, respond)
             is TurnLayout.Activity -> {
-                // Tool groups stay collapsed during streaming too; only an explicit toggle opens them.
-                val expanded = open[block.key] ?: block.opensByDefault
+                // A step waiting on the reader's answer is never hidden inside a closed group (web).
+                val expanded = block.attention || (open[block.key] ?: false)
                 val running = block.key == active
                 item(key = block.key, contentType = "disclosure") {
                     Disclosure(activityLabel(block, running), expanded, Modifier.animateItem(), shimmer = running) { toggle(block.key, it) }
@@ -86,7 +87,7 @@ internal fun LazyListScope.turnBlocks(
                         val key = "${block.key}:${step.id}"
                         when (step) {
                             is TurnItem.Thought -> prose(key, entry.prose[step.id], secondary = true)
-                            is TurnItem.Tool -> step(entry, step, key, running && step == block.items.last(), open, toggle, details)
+                            is TurnItem.Tool -> step(entry, step, key, running && step == block.items.last(), open, toggle, details, respond)
                             else -> Unit
                         }
                     }
@@ -102,12 +103,19 @@ private fun LazyListScope.content(
     open: Map<String, Boolean>,
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
+    respond: PermissionResponder?,
 ) {
     when (val value = block.item) {
-        is TurnItem.Text, is TurnItem.ProposedPlan -> prose(block.key, entry.prose[value.id], secondary = false)
+        is TurnItem.Text -> prose(block.key, entry.prose[value.id], secondary = false)
+        is TurnItem.ProposedPlan -> proposedPlan(entry, value, block.key, open, toggle)
         is TurnItem.Checklist -> item(key = block.key, contentType = "checklist") { Checklist(value, Modifier.animateItem()) }
         is TurnItem.Notice -> item(key = block.key, contentType = "notice") { Notice(value, Modifier.animateItem()) }
-        is TurnItem.Tool -> step(entry, value, block.key, entry.working && value.status == "in_progress", open, toggle, details)
+        is TurnItem.Images -> item(key = block.key, contentType = "images") { TurnImages(value, Modifier.animateItem()) }
+        is TurnItem.File -> item(key = block.key, contentType = "file") { AgentFileCard(value, Modifier.animateItem()) }
+        // A plan approval renders as the plan and its decision; a bare mode switch stays a step.
+        is TurnItem.Tool ->
+            if (value.kind == "switch_mode" && (value.plan != null || value.permission != null)) planExit(entry, value, block.key, open, toggle, details, respond)
+            else step(entry, value, block.key, entry.working && value.status == "in_progress", open, toggle, details, respond)
         is TurnItem.Thought -> prose(block.key, entry.prose[value.id], secondary = true)
         is TurnItem.Task -> Unit
     }
@@ -115,7 +123,8 @@ private fun LazyListScope.content(
 
 /**
  * A step row, and when it is open its detail card as the next sibling row (web's ONE
- * `ToolDetailSheet`): the step's sentence is the disclosure, the card loads on first open.
+ * `ToolDetailSheet`): the step's sentence is the disclosure, the card loads on first open. A
+ * step with a permission request is followed by it ([stepPermission]).
  */
 private fun LazyListScope.step(
     entry: ChatEntry.Assistant,
@@ -125,6 +134,7 @@ private fun LazyListScope.step(
     open: Map<String, Boolean>,
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
+    respond: PermissionResponder?,
 ) {
     val detailKey = "$key#detail"
     val expandable = tool.hasDetail && details.available
@@ -139,6 +149,7 @@ private fun LazyListScope.step(
     if (expanded) {
         item(key = detailKey, contentType = "step-detail") { StepDetailCard(entry.id, tool, details, Modifier.animateItem()) }
     }
+    stepPermission(entry, tool, key, details, respond)
 }
 
 /** Each top-level Markdown block is its own lazy row, so streaming re-renders only the tail. */
@@ -190,7 +201,7 @@ internal fun Disclosure(label: String, expanded: Boolean, modifier: Modifier = M
     }
 }
 
-/** Web's live status at the end of a running turn: the working grid and what it is doing. */
+/** Text-only live status at the end of a running turn. */
 @Composable
 internal fun LiveStatus(thinking: Boolean, modifier: Modifier = Modifier) {
     val colors = LodyTheme.colors
@@ -199,7 +210,6 @@ internal fun LiveStatus(thinking: Boolean, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
     ) {
-        LodyWorkingGrid()
         Text(
             stringResource(if (thinking) R.string.chat_activity_thinking else R.string.chat_working),
             style = LodyTheme.typography.footnote,
@@ -527,22 +537,25 @@ private fun OutputRow(
 }
 
 /**
- * The line that closes a finished turn, always last: the agent mark, model and finish time (web's
- * footer shows config, not author identity).
+ * The line that closes a finished turn, always last, as iOS `ChatMessageActionsCell`: Copy, Info
+ * and Fork packed tightly at the message edge (48 dp touch targets overlapping), then the finish
+ * time beside them; no model line.
  */
 internal fun LazyListScope.turnFooter(entry: ChatEntry.Assistant, actions: MessageActionState) {
     if (entry.working) return
-    val text = listOf(entry.who.name, entry.who.time).filter { it.isNotBlank() }.joinToString(" · ")
     item(key = "${entry.id}#footer", contentType = "footer") {
-        Column(Modifier.animateItem().fillMaxWidth().padding(horizontal = TranscriptMargin, vertical = LodySpacing.xs)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
-                app.lody.android.home.AgentMark(entry.agentCliType, entry.agentType, LodyTheme.colors.iconTertiary, Modifier.size(LodyIconSize.sm))
-                Text(text, style = LodyTheme.typography.footnote, color = LodyTheme.colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Row {
-                MessageCopyButton(entry.layout.visible.filterIsInstance<TurnLayout.Content>().mapNotNull { (it.item as? app.lody.android.runtime.TurnItem.Text)?.text }.joinToString("\n\n"))
-                MessageActionButton(LodyIcons.Info, stringResource(R.string.message_info)) { actions.info(entry.id) }
-                MessageActionButton(LodyIcons.Branch, stringResource(R.string.message_fork)) { actions.fork(entry.id) }
+        val inset = (app.lody.android.designsystem.LodySize.controlLg - LodyIconSize.sm) / 2
+        Row(
+            Modifier.animateItem().fillMaxWidth().padding(horizontal = TranscriptMargin).offset(x = -inset),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(-LodySpacing.lg),
+        ) {
+            MessageCopyButton(entry.layout.visible.filterIsInstance<TurnLayout.Content>().mapNotNull { (it.item as? app.lody.android.runtime.TurnItem.Text)?.text }.joinToString("\n\n"))
+            MessageActionButton(LodyIcons.Info, stringResource(R.string.message_info)) { actions.info(entry.id) }
+            MessageActionButton(LodyIcons.Branch, stringResource(R.string.message_fork)) { actions.fork(entry.id) }
+            if (entry.who.time.isNotBlank()) {
+                Text(entry.who.time, style = LodyTheme.typography.footnote, color = LodyTheme.colors.textTertiary, maxLines = 1,
+                    modifier = Modifier.padding(start = LodySpacing.md))
             }
         }
     }
@@ -764,11 +777,11 @@ private fun DiffLineRow(line: LineDiff.Line, style: androidx.compose.ui.text.Tex
     }
 }
 
-private enum class Segment { Only, First, Middle, Last }
+internal enum class Segment { Only, First, Middle, Last }
 
 /** One row's slice of the task card: rounded only where the card starts or ends, ruled between rows. */
 @Composable
-private fun Modifier.cardSegment(segment: Segment): Modifier {
+internal fun Modifier.cardSegment(segment: Segment): Modifier {
     val colors = LodyTheme.colors
     val radius = LodySpacing.md
     val shape = when (segment) {

@@ -40,6 +40,7 @@ export type RuntimeContext = {
   watch: (mode: string) => void;
   startPresence: () => void;
   stopPresence: () => void;
+  disposeProviderOperations?: () => Promise<{ unconfirmedFlowIds: string[] }>;
 };
 
 export function scopedShortcutCloud(

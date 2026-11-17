@@ -97,20 +97,54 @@ export interface DaemonWorkspace {
   readAccess?(): DaemonWorkspaceAccess;
   /**
    * Encrypted only: classify an Agent-delegated input by its verified driving Turn.
-   * `owner` keeps today's behavior; `member` must be written with `derivedFrom` and
-   * may target only this machine. Rejects when the origin cannot be verified, is
-   * itself derived, has exhausted its derivations or targets another machine.
+   * Same-machine delegation returns the verified principal and human root. Machine-owned
+   * inputs and cross-machine Owner delegation return `owner` without local provenance.
+   * Members require a live driving turn; accepted writes reserve once per target input ID.
    */
   classifyEncryptedDerivation?(
     origin: { sessionId: string; userTurnId: string },
-    target: { machineId: string }
-  ): Promise<'owner' | 'member'>;
+    target: { machineId: string; userTurnId: string }
+  ): Promise<
+    'owner' | { principal: 'owner' | 'member'; origin: { sessionId: string; userTurnId: string } }
+  >;
   /** Encrypted only: machine access decided locally, without the workspace service. */
   checkEncryptedMachineAccess?(target: {
     machineId: string;
     requesterUserId: string;
     localProjectId?: string;
   }): Promise<MachineAccessCheckResult>;
+}
+
+/** Native ownership comes from the bound daemon identity, never SessionMeta.userId.
+ * This only covers its own account on its own machine; other accounts and remote
+ * targets retain their control-plane checks. Undefined means no native verdict. */
+export async function readBoundDaemonOwnerAccess(args: {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  manager: LoroDocumentManager;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+}): Promise<boolean | undefined> {
+  if (getSessionCommandEnvironment()) return undefined;
+  const daemon = getDaemonWorkspace();
+  if (
+    !daemon ||
+    daemon.manager !== args.manager ||
+    daemon.workspaceId !== args.workspaceId ||
+    daemon.userId !== args.auth.userId ||
+    daemon.machineId !== args.auth.machineId ||
+    args.machineId !== daemon.machineId ||
+    args.requesterUserId !== daemon.userId
+  )
+    return undefined;
+  if (args.manager.isEncryptedWorkspace()) return undefined;
+  const row = await args.manager.repo.getDocMeta(getMachineRoomId(args.machineId));
+  const access = daemon.readAccess?.();
+  if (access?.status === 'revoked' || access?.status === 'unauthorized') return false;
+  if (access?.status === 'unknown') return undefined;
+  if (!row || isLoroRepoDocDeleted(row) || (row.meta as MachineMeta).ownerUserId !== daemon.userId)
+    return undefined;
+  return true;
 }
 
 /** A one-shot command's own encrypted replica decides machine access for that command. */
@@ -183,3 +217,12 @@ export function createLocalSessionCommandEnvironment(args: {
     },
   };
 }
+
+/** Exact human driving this command; a cached backend must read it for each operation. */
+export type SessionHistoryRequester = { userId: string; machineId: string };
+const historyRequesters = new AsyncLocalStorage<SessionHistoryRequester>();
+export const getSessionHistoryRequester = () => historyRequesters.getStore();
+export const runWithSessionHistoryRequester = <T>(
+  requester: SessionHistoryRequester,
+  run: () => T
+): T => historyRequesters.run(requester, run);

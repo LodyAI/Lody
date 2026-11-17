@@ -1,5 +1,4 @@
-"""iPad Sidebar layout and relocated actions, using offline Home fixtures."""
-import subprocess
+"""iPad split list (the Chats list) and its relocated actions, using offline Home fixtures."""
 import sys
 import catalog
 from driver import UI
@@ -30,26 +29,7 @@ workspace = workspace_item['frame']
 fab = chrome['create']['frame']
 ui.capture('sidebar-glass-fab')
 
-ui.screenshot('sidebar-ground')
-screen_width = round(ui.element('ipad-home')['frame']['width'])
-pixels = subprocess.check_output([
-    'ffmpeg', '-v', 'error', '-i', str(ui.output / 'sidebar-ground.png'),
-    '-vf', f'scale={screen_width}:-1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
-], timeout=20)
-
-
-def sample(x, y):
-    return tuple(pixels[(round(y) * screen_width + round(x)) * 3 + channel] for channel in range(3))
-
-
-ground = sample(panel['x'] + panel['width'] / 2, fab['y'] - 60)
-assert max(ground) - min(ground) <= 3, ('The sidebar canvas is neutral, not the bluish system gray', ground)
-
-head = ui.element('toggle:ui:local:lody')['frame']
-assert abs(head['x'] - panel['x'] - 12) <= 1 and abs(panel['x'] + panel['width'] - head['x'] - head['width'] - 12) <= 1, \
-    ('iPad section heads are inset bands with 12 pt side margins', head, panel)
-
-# Record the landscape sidebar hiding and returning; the bottom search must travel with its column.
+# Record the landscape column hiding and returning; the bottom Settings / New Session bar travels with it.
 rotation.rotate(ui, 'landscape')
 try:
     pad.show_list(ui)
@@ -57,7 +37,7 @@ try:
     ui.capture('landscape-sidebar')
     home = ui.element('ipad-home')['frame']
     screen = (round(home['width']), round(home['height']))
-    band = (0, wide['search']['frame']['y'], wide['panel']['width'] + 10, wide['search']['frame']['height'])
+    band = (0, wide['settings']['frame']['y'], wide['panel']['width'] + 10, wide['settings']['frame']['height'])
     pad.record_tap(ui, catalog.system('hideSidebar'), 'landscape-hide', screen, band)
     labeled(catalog.system('showSidebar'))
     ui.capture('landscape-sidebar-hidden')
@@ -69,15 +49,47 @@ finally:
     rotation.restore_portrait(ui)
 pad.show_list(ui)
 
+# The split list is the Chats list: same view menu (scope, grouping, row details, archive) as iPhone.
+ui.element('home-chat-list')
 tap_label(catalog.text('inbox.settings.section.view'))
-for key in ('view.projects', 'view.activity', 'view.chat', 'sort.name', 'sort.activity', 'sort.urgency'):
-    labeled(catalog.text(f'inbox.settings.{key}'))
+for key in ('scope.mine', 'scope.team', 'grouping.time', 'grouping.project', 'grouping.status', 'view.project', 'view.archived'):
+    labeled(catalog.text(f'home.{key}'))
 ui.capture('sidebar-view-menu')
-tap_label(catalog.text('inbox.settings.view.activity'))
-ui.wait(lambda items: not any(item.get('AXUniqueId') == 'toggle:ui:local:lody' for item in items), 'Activity view retained the project outline')
-tap_label(catalog.text('inbox.settings.section.view'))
-tap_label(catalog.text('inbox.settings.view.projects'))
-ui.element('toggle:ui:local:lody')
+tap_label(catalog.text('home.grouping.time'))
+ui.element('ui-design')
+
+# As on desktop, the list column keeps Chats (the sidebar) and Schedules fills the detail column
+# (the main area); a schedule opens in a centred sheet over it. Checked in the wide layout.
+rotation.rotate(ui, 'landscape')
+try:
+    pad.show_list(ui)
+    ui.axe('tap', '--id', 'home-tab-schedules', '--tap-style', 'physical', '--post-delay', '.8')
+    schedules_list = ui.element('home-schedules-list')['frame']
+    panel_frame = ui.element('ipad-panel')['frame']
+    assert schedules_list['x'] >= panel_frame['x'] + panel_frame['width'] - 1, ('Schedules fills the detail column', schedules_list, panel_frame)
+    ui.element('home-chat-list')
+    labeled(catalog.text('schedules.title'))
+    create = ui.element('home-create')
+    assert create.get('AXLabel') == catalog.text('schedules.new'), create
+    ui.capture('schedules-detail')
+    ui.axe('tap', '--id', 'home-create', '--tap-style', 'physical', '--post-delay', '1')
+    editor = ui.element('schedule-time')['frame']
+    screen_frame = ui.state()[0]['frame']
+    assert screen_frame['x'] + 40 < editor['x'] and editor['x'] + editor['width'] < screen_frame['x'] + screen_frame['width'] - 40, \
+        ('The schedule editor is a centred sheet, not a column page', editor, screen_frame)
+    ui.capture('schedule-editor-sheet')
+    tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('schedules.new')))
+    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'schedule-time' for i in items) or None, 'The schedule sheet did not close')
+    ui.element('home-schedules-list')
+    # Opening a conversation from the list replaces Schedules, and the bar returns to Chats.
+    ui.axe('tap', '--id', 'ui-design', '--tap-style', 'physical', '--post-delay', '.8')
+    ui.element('session-input')
+    assert not any(i.get('AXUniqueId') == 'home-schedules-list' for i in ui.state()), 'A conversation replaces Schedules'
+    assert ui.element('home-create').get('AXLabel') == catalog.text('tabs.newSession')
+    ui.capture('schedules-to-chat')
+finally:
+    rotation.restore_portrait(ui)
+pad.show_list(ui)
 tap_label(catalog.text('tabs.settings'))
 close_settings = catalog.text('accessibility.closeSheet', title=catalog.text('tabs.settings'))
 labeled(close_settings)
@@ -105,4 +117,4 @@ ui.capture('new-session')
 tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('create.title')))
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'create-session-input' for item in items), 'New Session did not close')
 pad.show_list(ui)
-print('PASS: Workspace at the top; view/settings at the bottom; workspace, view, settings and new-session actions remain usable.')
+print('PASS: Workspace, search and view menu on top; Settings and New Session at the bottom; all remain usable.')

@@ -100,66 +100,6 @@ describe('session steer RPC schema', () => {
   });
 });
 
-describe('session preparation RPC schema', () => {
-  const baseRequest = {
-    jsonrpc: '2.0',
-    id: 'request-prepare-1',
-    rpcVersion: '1',
-    workspaceId: 'workspace-1',
-    machineId: 'machine-1',
-    replyTo: 'workspace-1:rpc:res',
-    sentAt: 1,
-    expiresAt: 2,
-  } as const;
-
-  it('accepts identifier-only preparation and cancellation payloads', () => {
-    expect(
-      LoroStreamsRpcRequestSchema.safeParse({
-        ...baseRequest,
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-        },
-      }).success
-    ).toBe(true);
-    expect(
-      LoroStreamsRpcRequestSchema.safeParse({
-        ...baseRequest,
-        method: 'session/prepare-cancel',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-        },
-      }).success
-    ).toBe(true);
-  });
-
-  it('rejects preparation payloads containing draft content or secrets', () => {
-    const result = LoroStreamsRpcRequestSchema.safeParse({
-      ...baseRequest,
-      method: 'session/prepare',
-      params: {
-        preparationId: 'prepare-1',
-        sessionId: 'session-1',
-        requestedByUserId: 'user-1',
-        agentConfigId: 'config-1',
-        cliType: 'builtin',
-        agentType: 'codex',
-        prompt: 'private draft',
-        env: { API_KEY: 'secret' },
-      },
-    });
-
-    expect(result.success).toBe(false);
-  });
-});
-
 const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 
 const getLastStreamsClientInstance = (): MockStreamsClientInstance => {

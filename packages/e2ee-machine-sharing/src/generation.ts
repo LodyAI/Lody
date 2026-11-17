@@ -1,4 +1,5 @@
 import { Effect, Result } from 'effect';
+import { hex as bytesHex } from './hex';
 import {
   decodeRecord,
   verifyLedgerEffect,
@@ -17,7 +18,7 @@ export const machineSharingGenerationFromHistory = Effect.fnUntraced(function* (
   originals: readonly MachineSharingAdmission[];
 }) {
   const admissions = new Map<string, { step: MachineSharingAdmission; replaces: string | null }>();
-  const hex = (key: Bytes.SigningPublicKey) => Buffer.from(key.toBytes()).toString('hex');
+  const hex = (key: Bytes.SigningPublicKey) => bytesHex(key.toBytes());
   for (const step of input.originals) {
     const decoded = yield* Effect.fromResult(decodeRecord(step.record));
     const body = decoded.body;

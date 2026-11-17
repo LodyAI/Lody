@@ -4,7 +4,7 @@ data class CreationChoice(val id: String, val name: String)
 data class CreationAgent(val id: String, val name: String, val machineId: String, val cliType: String, val agentType: String)
 /** An agent switch the composer may offer (ACP config option); [options] are a select's value ids. */
 data class CreationConfigOption(val id: String, val category: String?, val type: String, val currentValue: Any?, val options: List<String> = emptyList())
-data class CreationCapability(val machineId: String, val cliType: String, val agentType: String, val models: List<CreationChoice>, val modes: List<CreationChoice>, val efforts: Map<String, List<String>>, val agentConfigId: String? = null, val defaultModelId: String? = null, val defaultEfforts: List<String> = emptyList(), val switches: List<CreationConfigOption> = emptyList(), val fastModes: Map<String, Boolean> = emptyMap()) {
+data class CreationCapability(val machineId: String, val cliType: String, val agentType: String, val models: List<CreationChoice>, val modes: List<CreationChoice>, val efforts: Map<String, List<String>>, val agentConfigId: String? = null, val defaultModelId: String? = null, val defaultEfforts: List<String> = emptyList(), val switches: List<CreationConfigOption> = emptyList(), val fastModes: Map<String, Boolean> = emptyMap(), val steer: Boolean = false) {
     fun effortsFor(modelId: String?): List<String> = efforts[modelId ?: defaultModelId] ?: defaultEfforts
 
     /** Web's Plan switch: Lody's boolean `plan_mode`, or a collaboration mode with a `plan` value. */
@@ -58,6 +58,10 @@ data class CreateRequest(
     /** Option values the Role pins beyond model / mode / effort (strings or booleans). */
     val configOptionValues: Map<String, Any> = emptyMap(),
     val attachments: List<org.json.JSONObject> = emptyList(),
+    /** The prompt as the composer showed it (references as their chips' labels); display only. */
+    val displayText: String? = null,
+    /** The chips' ranges in [displayText]. */
+    val displayReferences: List<MessageReference> = emptyList(),
 )
 
 /** What one machine target of an Agent Role pins (runtime listing; secrets never cross). */
@@ -65,4 +69,14 @@ data class RoleRunConfig(val modelId: String? = null, val modeId: String? = null
 data class AgentRoleTarget(val machineId: String, val agentConfigId: String, val state: String, val runConfig: RoleRunConfig = RoleRunConfig())
 /** A workspace Agent Role readable by this user (web `AgentRole`); [emoji] defaults like web's. */
 data class AgentRole(val id: String, val name: String, val emoji: String, val revision: Int, val targets: List<AgentRoleTarget>)
-data class CreationReceipt(val sessionId: String, val state: String)
+/** A new chat's run configuration on one computer: its agent and model / mode / reasoning. */
+data class RunSelection(val agentId: String, val modelId: String? = null, val modeId: String? = null, val effort: String? = null)
+/**
+ * One whole configuration a chat was started with (web `RecentRunConfigRecord`). A Role is not
+ * interchangeable with the values it set, so [agentRoleId] is part of its identity.
+ */
+data class RecentRunConfig(val machineId: String, val selection: RunSelection, val agentRoleId: String? = null, val usedAt: Long = 0)
+/** Device-local, per account + workspace: the last selection on each computer and recent configurations, newest first. */
+data class RunConfigPrefs(val machines: Map<String, RunSelection> = emptyMap(), val recents: List<RecentRunConfig> = emptyList())
+/** [reason]: the runtime's refusal (`free_session_limit_reached`, …) when [state] is `rejected`. */
+data class CreationReceipt(val sessionId: String, val state: String, val reason: String? = null)

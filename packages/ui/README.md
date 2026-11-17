@@ -887,6 +887,8 @@ import { ScrollArea } from '@lody/ui/scroll-area';
 a narrow track for tab strips. The viewport ref remains the real native scroll
 element for virtualization, keyboard handling and scroll restoration. Root and
 viewport classes/styles carry caller layout, not thumb appearance.
+`contentStyle` can constrain the content wrapper's layout, for example to allow
+a horizontal tab strip to shrink to the viewport before its contents overflow.
 `scrollbarClassName` carries layout or interaction constraints on both tracks,
 such as hiding them during a parent frame's animation; track appearance stays token-owned.
 

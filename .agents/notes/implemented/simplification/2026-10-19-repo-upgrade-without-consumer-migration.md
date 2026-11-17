@@ -47,8 +47,8 @@ contracts over them. A local wait is not a server acknowledgement or durability
 receipt. The removed residency no longer protects a cached Session from concurrent
 GC; that pre-existing race remains separate work under the restored ownership.
 
-The [native ownership record](../../proposed/architecture/2026-10-16-native-workspace-repo.md)
-and [Session residency record](../../proposed/architecture/2026-10-17-session-residency.md)
+The [native ownership record](../../rejected/architecture/2026-10-16-native-workspace-repo.md)
+and [Session residency record](../../rejected/architecture/2026-10-17-session-residency.md)
 preserve the historical implementation and its evidence. They are not current
 consumer contracts. The [release-only record](../architecture/2026-10-16-streams-repo-release-adoption.md)
 still explains the retained upgrade.

@@ -5,19 +5,23 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 ## Sidebar and session rows
 
 - Sidebar rows represent Sessions, never Tasks.
-- Desktop project grouping shows only projects with session rows after pinned-tree
-  separation and opener placement. Hide empty machine sections, while retaining
-  machines with populated multi-repository projects.
+- Desktop project grouping applies `selectVisibleLocalProjectSections`; its
+  "Hide Empty Projects" switch is documented in the [README](README.md).
 - Desktop Workspace, Local Project, Updated and Pinned rows support mention drag
   and Mark as unread (hide on unread). Use `lib/session-mention-drag.ts` for
   conversation/landing drops; parent tabs use HTML5 drag, child tabs dnd-kit.
   `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
   `draggable={false}`; rows own `draggable`.
+- Workspace selection navigates in place and preserves the current workspace's route
+  on reselection. Browser `/chat` links retain native modified-click, middle-click and
+  context-menu actions without switching the source page. Electron Cmd-click
+  (Ctrl-click on Windows/Linux) and context menus open native workspace windows.
 - Full-width sidebar stays mounted/inert with scroll; Cmd+B animates content width
   (zero for reduced motion); pause hidden eager-sync/keyboard-nav. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,
-  nested Escape first. [Spec](../../../../specs/desktop-windows.md).
+  nested Escape first. [Spec](../../../../specs/desktop-windows.md). It opens only once
+  the synced compact state agrees, and a close that never finishes is unmounted.
 - Every list uses `lib/session-opened-by-tree.ts`; keyboard navigation uses
   `sidebar-navigation-model.ts`.
 - `openedBySessionId` is the precise opener; `openedByRowSessionId` is its row.
@@ -63,6 +67,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 ## Entry points, drafts, and layout
 
 - iOS divisions separate workspace panes; never save the temporary sidebar width. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-ios-vertical-division.md).
+- Keep the touch resize grip and narrower navigation sidebar minimum scoped to wide mobile Web layouts.
 - The window is `bg-sidebar`; pages use one inset `WorkspaceCard`. Keep the sidebar on the
   window, never as a floating surface. See [layout docs](../../../../.agents/docs/components-package.md).
 - Child-tab drafts send through the same accept unit as every other first message:
@@ -87,12 +92,13 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Conversation access
 
-- `session-sharing.tsx` owns one desktop header control for team and web access: team visibility
-  selects menu/button, public status selects the label, and its audience strip shows current access.
-  Unavailable audiences are disabled with a reason; narrowing, tabs, search, and a second badge are
-  forbidden. Paths and base branch stay in `⋯`. Closed headers read only the `useSessionShareStatus`
-  management row (`unknown` means not shared). The inline panel and `⋯` dialog reuse one keyed
-  publisher; the panel stays open while publishing. [Contract](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
+- `session-sharing.tsx` owns the shared header control. Its button states Private,
+  Team read-only or Team can edit. The panel offers Private and Team read-only;
+  shared-machine editing links to machine settings. Only the machine owner can
+  change session access; other members see disabled choices with a reason.
+  Public links remain a separate section and a busy publisher keeps the panel open.
+  Authoritative access comes through the platform `sessionAccess` port, never
+  SessionMeta. [Contract](../../../../specs/session-access.md).
 
 ## Local projects
 

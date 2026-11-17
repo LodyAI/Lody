@@ -33,7 +33,7 @@ it.each([undefined, 'false'])(
     vi.stubGlobal('window', {});
     const { initPush } = await import('../src/lib/push-notifications');
     await (await initPush())!.login('alice');
-    expect(sdk.login).toHaveBeenCalledWith('lody-push-v2:alice');
+    expect(sdk.login).toHaveBeenCalledWith('alice');
     expect(sdk.User.PushSubscription.optOut).toHaveBeenCalledTimes(preference === 'false' ? 1 : 0);
     expect(sdk.User.PushSubscription.optIn).toHaveBeenCalledTimes(preference === 'false' ? 0 : 1);
   }

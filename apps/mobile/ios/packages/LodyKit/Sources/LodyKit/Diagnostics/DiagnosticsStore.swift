@@ -255,7 +255,7 @@ final class DiagnosticsStore: @unchecked Sendable {
       case "httpStatus": return Int(value).map { (100...599).contains($0) } ?? false
       case "cfRay":
         return value.utf8.count <= 36 && value.range(of: "^[0-9a-f]{16,32}-[A-Z]{3}$", options: .regularExpression) != nil
-      case "requestBytes", "responseBytes", "sourceBytes", "imageBytes", "elapsedMs":
+      case "requestBytes", "responseBytes", "sourceBytes", "imageBytes", "sessionBytes", "elapsedMs":
         return value.utf8.count <= 16 && !value.isEmpty && value.utf8.allSatisfy { (48...57).contains($0) }
       case "sourceType", "uploadType": return Self.attachmentMediaType(value) == value
       case "converted": return ["true", "false"].contains(value)

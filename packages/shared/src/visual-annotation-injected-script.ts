@@ -12,6 +12,7 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
   var BROWSER_STATE = "LODY_MANAGED_BROWSER_STATE";
   var BROWSER_READY = "LODY_MANAGED_BROWSER_READY";
   var BROWSER_NAVIGATION_REQUEST = "LODY_MANAGED_BROWSER_NAVIGATION_REQUEST";
+  var BROWSER_DOCUMENT_UNLOAD = "LODY_MANAGED_BROWSER_DOCUMENT_UNLOAD";
   var STATIC_HTML_PREVIEW_DOCUMENT_MARKER = "${STATIC_HTML_PREVIEW_DOCUMENT_MARKER}";
   var STATIC_HTML_PREVIEW_NAVIGATION_BASE = "https://html-file-preview.invalid/";
   var OVERLAY_ATTR = "data-lody-visual-annotation-overlay";
@@ -1112,6 +1113,23 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
     scheduleBrowserState();
     return result;
   };
+  if (staticHtmlPreviewDocument) {
+    // Page script can replace the policy-owned srcdoc (location.assign, a form
+    // submit, meta refresh) without any event this runtime can cancel. Tell the
+    // parent as the document unloads so it can tear the frame down before the
+    // replacement page is usable, instead of waiting for that page's load event,
+    // which a hostile page can delay forever. Capture the parent now, before page
+    // script can shadow window.parent, and keep the listener private: destroy()
+    // is reachable from page script, so it must not remove this signal.
+    var unloadSignalTarget = window.parent;
+    window.addEventListener(
+      "pagehide",
+      function () {
+        unloadSignalTarget.postMessage({ type: BROWSER_DOCUMENT_UNLOAD }, "*");
+      },
+      { capture: true }
+    );
+  }
   // No page data is sent until a source-checked parent control message arrives.
   window.parent.postMessage({ type: BROWSER_READY }, "*");
   scheduleBrowserState();

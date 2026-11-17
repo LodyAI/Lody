@@ -182,7 +182,8 @@ export function useAgentRoleMentionItems(
 // ---------------------------------------------------------------------------
 
 /**
- * The instruction the current agent receives in place of the chip.
+ * The reference the current agent receives in place of the chip. It names the
+ * Role, not an action: the user's own words say what to do with it.
  *
  * Carries the Role id and nothing else that matters: the machine, agent config,
  * model, reasoning, and prompt prefix come from the workspace catalog, so the
@@ -195,8 +196,8 @@ export const buildAgentRoleMentionPrompt = (
   machineId?: string
 ): string =>
   machineId
-    ? `use lody mcp to create a session with agent role[id: ${role.id}, agentRoleMachineId: ${machineId}, name: ${role.name}]`
-    : `use lody mcp to create a session with agent role[id: ${role.id}, name: ${role.name}]`;
+    ? `[Agent Role: ${role.name} (agentRoleId: ${role.id}, agentRoleMachineId: ${machineId})]`
+    : `[Agent Role: ${role.name} (agentRoleId: ${role.id})]`;
 
 export const buildAgentRoleMentionRewrites = (
   text: string,

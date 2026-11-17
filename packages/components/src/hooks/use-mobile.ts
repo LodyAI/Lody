@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { MOBILE_LAYOUT_BREAKPOINT } from '@lody/shared/layout';
 import { detectAppDeviceClass, isDesktopLayoutShell } from '@/lib/device-class';
-import { isNativeIOSAppShell } from '@/lib/native-platform';
+import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 
 /**
  * Which layout family renders: the mobile renderer or the desktop renderer.
@@ -149,4 +149,23 @@ export function useIsCompactDesktop() {
 
   const resolvedMobile = forced ?? isMobile;
   return !resolvedMobile && belowBreakpoint;
+}
+
+/**
+ * Whether this device is held in the hand and scans codes (phone, tablet, a native
+ * shell, an iPad reporting a desktop agent), rather than a computer that shows them.
+ * Unlike `useIsMobile`, it never follows the viewport width, so rotating or resizing
+ * never swaps the role (or unmounts a running camera). Force providers still decide.
+ */
+export function useIsHandheldScanner() {
+  const forced = React.useContext(ForceMobileLayoutContext);
+  const [handheld] = React.useState(checkIsHandheldScanner);
+  return forced ?? handheld;
+}
+export function checkIsHandheldScanner(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (isNativeAppShell()) return true;
+  if (detectAppDeviceClass() !== 'desktop') return true;
+  const nav = window.navigator;
+  return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;
 }

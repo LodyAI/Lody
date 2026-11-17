@@ -40,30 +40,48 @@ enum AgentRoleSections {
     return (text("unknown"), true)
   }
 
+  /// Web `DEFAULT_AGENT_ROLE_EMOJI`.
+  static let defaultEmoji = "🪼"
+
+  /// Your Roles first, then the workspace's shared ones; each row leads with its emoji and
+  /// reads its description (else where it runs) on the second line.
   static func make(_ roles: [AgentRole], userId: String) -> [LodyListSection] {
-    let labels: [RuntimeContract.AgentRoleItemVisibility: String] = [.private: text("private"), .workspace: text("sharedValue")]
-    var section = LodyListSection()
-    section.id = "roles"
-    section.footer = text("hint")
-    section.rows = roles.map { role in
-      let targets = role.targets.map { target in
-        let state = target.state == .configured ? "" : " · \(text(target.state.rawValue))"
-        return "\(target.machineName) · \(target.agentName)\(state)"
-      }
-      let owner = role.ownerUserId != userId ? text("ownerOnly") : ""
-      var row = LodyListRow()
-      row.id = "role:\(role.id)"
-      row.title = role.name
-      row.image = "person.crop.square"
-      row.subtitle = ([role.description] + targets + [owner]).filter { !$0.isEmpty }.joined(separator: "\n")
-      row.wrapSubtitle = true
-      row.value = labels[role.visibility] ?? ""
-      row.accessibilityValue = row.value
-      row.action = true
-      row.disclosure = true
-      return row
+    let mine = roles.filter { $0.ownerUserId == userId }
+    let others = roles.filter { $0.ownerUserId != userId }
+    var sections: [LodyListSection] = []
+    for (id, header, items) in [("mine", text("mine"), mine), ("shared", text("sharedByOthers"), others)] where !items.isEmpty {
+      var section = LodyListSection()
+      section.id = id
+      section.header = header
+      section.rows = items.map { row($0, mine: id == "mine") }
+      sections.append(section)
     }
-    return [section]
+    if !sections.isEmpty { sections[sections.count - 1].footer = text("hintShort") }
+    return sections
+  }
+
+  private static func row(_ role: AgentRole, mine: Bool) -> LodyListRow {
+    var row = LodyListRow()
+    row.id = "role:\(role.id)"
+    row.title = role.name
+    row.emoji = role.emoji ?? defaultEmoji
+    row.imageOriginal = true
+    let unavailable = role.targets.contains { $0.state != .configured }
+    let place = role.targets.map { "\($0.agentName) · \($0.machineName)" }.first ?? ""
+    let summary = role.description.trimmingCharacters(in: .whitespacesAndNewlines)
+    row.subtitle = summary.isEmpty ? place : summary
+    if unavailable {
+      let state = role.targets.first { $0.state != .configured }?.state.rawValue ?? ""
+      row.subtitle = [text(state), row.subtitle].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+    if mine {
+      row.value = text(role.visibility == .workspace ? "sharedValue" : "private")
+    }
+    row.accessibilityValue = row.value
+    row.action = true
+    row.disclosure = true
+    row.navigates = true
+    return row
   }
 
   static func text(_ key: String) -> String {

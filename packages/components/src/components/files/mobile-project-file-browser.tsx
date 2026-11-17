@@ -23,6 +23,10 @@ import {
 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { ReadOnlyHtmlPreview } from '@/components/sessions/read-only-html-preview';
+import { StaticHtmlScriptPreview } from '@/components/sessions/static-html-script-preview';
+import { useTextBoundScriptOptIn } from '@/components/sessions/use-text-bound-script-opt-in';
+import { getExecutableHtmlPreviewSupport } from '@/components/sessions/managed-preview-frame-cache';
+import { toast } from '@/lib/toast';
 import { Spinner } from '@/ui/spinner';
 import type { FileTreeItem } from '@lody/shared';
 
@@ -755,6 +759,7 @@ function MobileFilePreview({
 
   const textPreview = (
     <MobileTextPreview
+      key={content.path}
       path={content.path}
       text={snapshot.text}
       truncated={snapshot.truncated}
@@ -808,6 +813,15 @@ function MobileTextPreview({
 }) {
   const { t } = useTranslation();
   const [showHtml, setShowHtml] = useState(true);
+  // Repository HTML is untrusted (it may come from a cloned third-party repo),
+  // so it opens script-free and runs only after an explicit, labelled opt-in on
+  // every engine, for this exact text.
+  const {
+    optedIn: runHtmlScripts,
+    toggle: toggleHtmlScripts,
+    revoke: revokeHtmlScripts,
+  } = useTextBoundScriptOptIn(text);
+  const canRunHtmlScripts = getExecutableHtmlPreviewSupport() !== 'unsupported';
   const resolvedTheme = useResolvedTheme();
   const activeVSCodeTheme = useActiveVSCodeTheme();
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
@@ -827,12 +841,41 @@ function MobileTextPreview({
                 ? t('sessions.fileViewer.preview.hide', 'Hide preview')
                 : t('sessions.fileViewer.preview.show', 'Preview')
             }
-            onClick={() => setShowHtml((value) => !value)}
+            onClick={() => {
+              revokeHtmlScripts();
+              setShowHtml((value) => !value);
+            }}
           >
             {showHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
           </Button>
+          {showHtml && canRunHtmlScripts ? (
+            <Button
+              variant="ghost"
+              size="small"
+              aria-pressed={runHtmlScripts}
+              onClick={toggleHtmlScripts}
+            >
+              {runHtmlScripts
+                ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')}
+            </Button>
+          ) : null}
         </div>
-        {showHtml ? (
+        {showHtml && runHtmlScripts ? (
+          <StaticHtmlScriptPreview
+            path={path}
+            text={text}
+            onNavigationRequest={() => {
+              revokeHtmlScripts();
+              toast.warning(
+                t(
+                  'sessions.fileViewer.htmlPreview.navigationDisabled',
+                  'Navigation is disabled for self-contained HTML previews.'
+                )
+              );
+            }}
+          />
+        ) : showHtml ? (
           <ReadOnlyHtmlPreview text={text} />
         ) : (
           <SessionMonacoTextViewer

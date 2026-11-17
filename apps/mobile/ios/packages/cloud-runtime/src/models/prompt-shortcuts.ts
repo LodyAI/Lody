@@ -5,7 +5,7 @@ import type { PromptShortcutIndexEntry } from '../protocol/prompt-shortcuts/cata
 export type ShortcutRequest = {
   workspaceId: string;
 } & (
-  | { action: 'list' }
+  | { action: 'list'; fresh?: boolean }
   | { action: 'read'; entry: PromptShortcutIndexEntry }
   | {
       action: 'save';

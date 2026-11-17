@@ -170,7 +170,7 @@ Inspected OSS `b83e2fdec0f7bc871243c138486c6fb1ce5c1007`:
 - `session-browser-panel.tsx` owns navigation/address/annotation; `managed-preview-surface.tsx` depends on annotation and Browser postMessage, so neither should become the simulator player. General status presentation can be extracted from `preview-connection-status.tsx`, removing address-specific language.
 - `apps/cli/src/preview/preview-service.ts` keys activeTunnels, operations, cancellation and publication by SessionId, allowing one remote owner today.
 - `local-preview-proxy.ts` calls `onActivity(true)` for WS messages in both directions. Video requires an explicit renewal policy.
-- Related decisions: [Quick Tunnel](../../proposed/architecture/2026-09-21-quick-tunnel-preview.md), [optional annotation](../../implemented/bug-fix/2026-09-15-preview-optional-annotation.md). Simulator integration does not remove existing proxy security boundaries.
+- Related decisions: [Quick Tunnel](../../implemented/architecture/2026-09-21-quick-tunnel-preview.md), [optional annotation](../../implemented/bug-fix/2026-09-15-preview-optional-annotation.md). Simulator integration does not remove existing proxy security boundaries.
 
 ## Verification and limits
 

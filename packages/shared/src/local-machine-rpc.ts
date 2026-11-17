@@ -22,6 +22,7 @@ import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspa
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
+import { SessionHistoryReadQuerySchema, SessionHistoryReadResponseSchema } from './message-schemas';
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
@@ -58,10 +59,6 @@ import {
   SessionForkSpecSchema,
   SessionIdSchema,
   AgentConfigIdSchema,
-  SessionPreparationCancelSpecSchema,
-  SessionPreparationSpecSchema,
-  SessionPrepareCancelResponseSchema,
-  SessionPrepareResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewCreateRequestSchema,
   SessionPreviewCreateResponseSchema,
@@ -261,6 +258,10 @@ export const E2eeAcpInteractionResultSchema = z
   .strict();
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/history-read'),
+    params: z.object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema }).strict(),
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/acp-interaction'),
     params: E2eeAcpInteractionParamsSchema,
@@ -497,14 +498,6 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('session/prepare'),
-    params: SessionPreparationSpecSchema,
-  }).strict(),
-  BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('session/prepare-cancel'),
-    params: SessionPreparationCancelSpecSchema,
-  }).strict(),
-  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/steer'),
     params: z
       .object({
@@ -667,6 +660,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 ]);
 
 export const LocalMachineRpcResultSchema = z.union([
+  SessionHistoryReadResponseSchema,
   E2eeAcpInteractionResultSchema,
   SorbetProvidersResultSchema,
   MachineStatusResponseSchema,
@@ -701,8 +695,6 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
   SessionForkResponseSchema,
-  SessionPrepareResponseSchema,
-  SessionPrepareCancelResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   SessionSteerResponseSchema,

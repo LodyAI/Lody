@@ -70,15 +70,22 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onSteer: ([String: Any]) -> Void = { _ in }
   var onErrorRetry: ([String: Any]) -> Void = { _ in }
   var onPlanDecision: ([String: Any]) -> Void = { _ in }
+  /// Accept (`true`) or dismiss an Agent's proposal row; the owner reports back through `setProposalState`.
+  var onProposalDecision: (_ row: ChatRow, _ accept: Bool) -> Void = { _, _ in }
+  var onProposalOpenSchedule: (String) -> Void = { _ in }
+  /// Decisions in flight or failed, by `entryId/itemId`.
+  var proposalStates: [String: ChatProposalState] = [:]
+  /// The signed-in user: a Role proposal is decided only by the member who asked for it.
+  var proposalUserID = ""
   var planDecisionState: ChatPlanDecisionState?
   var errorRetryState: ChatErrorRetryState?
   var onActivityPress: ([String: Any]) -> Void = { _ in }
   var onTurnInfoPress: ([String: Any]) -> Void = { _ in }
   weak var messageDetailsPage: MessageDetailsController?
   var turnInfoEnabled = false
-  var onShareImage: ([String: Any]) -> Void = { _ in }
-  var imageSharingEnabled = false
   var onFilePress: ([String: Any]) -> Void = { _ in }
+  /// Opens a GitHub PR link in the native PR page; false leaves it to the browser.
+  var onPullRequestLink: (ChatPullRequestLink) -> Bool = { _ in false }
   var onTurnChangesPress: ([String: Any]) -> Void = { _ in }
   var onReconnect: ([String: Any]) -> Void = { _ in }
   var onRetrySend: ([String: Any]) -> Void = { _ in }
@@ -93,7 +100,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onComposerOptionChange: ([String: Any]) -> Void = { _ in }
   var onMentionBrowse: ([String: Any]) -> Void = { _ in }
   let titleButton = ChatNavigationTitleButton()
-  var pageOwnsHeader = false
+  var pageOwnsHeader = false { didSet { composer.fullScreenTopInset = pageHeaderHeight } }
   var pageHeaderHeight: CGFloat { pageOwnsHeader ? 56 : 0 }
   var tabsAnchorView: UIView { titleButton }
   private var navigationTitle = ""
@@ -123,16 +130,20 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   let overlay = ChatOverlay()
   var localAttachments: [String: [ChatMessageAttachment]] = [:]
   var expandedPlans = Set<String>()
+  /// Plans already opened in full for a pending approval, so a reader's fold sticks.
+  var awaitingPlansOpened = Set<String>()
   var expandedMessages = Set<String>()
   /// Finished turns whose "Worked for …" fold the reader opened in place.
   var expandedWork = Set<String>()
+  var expandedThoughts = Set<String>()
   /// A row the reader just toggled: the next layout keeps it where it was on screen.
   var toggleAnchor: String?
   var expandedAttachments = Set<String>()
-  var collapsedMessageHeights: [String: CGFloat] = [:]
   var imageWorkspace = ""
   var imageSession = ""
   weak var imagePreview: ChatImagePreview?
+  /// Each image stack's top image, kept across cell reuse and preview paging.
+  var imageStackTops: [String: String] = [:]
   var mentionRepository = "" {
     didSet {
       guard oldValue != mentionRepository else { return }
@@ -147,6 +158,15 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     didSet { if members != oldValue { applyRows() } }
   }
   var transcript = ChatTranscript()
+  var operationCurrentID = ""
+  var operationTitles: [String: String] = [:]
+  var operationRoots: [String: String] = [:]
+  var operationOpened = Set<String>()
+  var operationAgentTypes: [String: String] = [:]
+  var operationCLITypes: [String: String] = [:]
+  var expandedOperations = Set<String>()
+  var onOperationOpen: (String) -> Void = { _ in }
+  var onOperationReply: (ChatOperationCard, String) -> Void = { _, _ in }
   /// Builtin DSH only (web `showThoughts`): its thoughts stay in the transcript.
   var showsThoughts = false
   var processEntryID = ""
@@ -171,12 +191,17 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var displayError: String? { didSet { composer.displayError = displayError } }
   var applying = false
   var needsApply = false
+  var needsTextRefresh = false
   var historyPreparation: DispatchWorkItem?
   var historyStartID: String?
   var historyTargetID: String?
   var historyLayoutAnchor: (String, CGFloat)?
   var scrollingToTop = false
   var hasEarlierHistory = false
+  var remoteHasEarlierHistory = false
+  var remoteHistoryLoading = false
+  var historyFirstID: String?
+  var onLoadEarlierHistory: () -> Void = {}
   var hasPagedHistory = false
   var preparingHistory = false
   var preparedHistory: [String: ChatRow] = [:]
@@ -338,8 +363,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     }
     collection.register(ChatMessageAttachmentsCell.self, forCellWithReuseIdentifier: "attachments")
     collection.register(ChatImageCell.self, forCellWithReuseIdentifier: "image")
+    collection.register(ChatImageStackCell.self, forCellWithReuseIdentifier: "image-stack")
     collection.register(ChatHistoryHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "history")
     collection.register(ChatErrorCell.self, forCellWithReuseIdentifier: "error")
+    collection.register(ChatProposalCell.self, forCellWithReuseIdentifier: "proposal")
+    collection.register(ChatFileCardCell.self, forCellWithReuseIdentifier: "file-card")
+    collection.register(ChatOperationCell.self, forCellWithReuseIdentifier: "operation")
     collection.register(ChatSubagentCell.self, forCellWithReuseIdentifier: "subagent")
     collection.register(ChatCell.self, forCellWithReuseIdentifier: "message")
     collection.register(ChatMessageActionsCell.self, forCellWithReuseIdentifier: "meta")
@@ -352,6 +381,41 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         cell.configure(row)
         cell.onDetail = { [weak self] in self?.onActivityPress(["entryId": row.entryID, "itemId": row.itemID]) }
         cell.onRetry = { [weak self] in self?.onErrorRetry(["entryId": row.entryID, "itemId": row.itemID, "id": UUID().uuidString.lowercased()]) }
+        return cell
+      }
+      if row.kind == "proposal" {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "proposal", for: index) as! ChatProposalCell
+        cell.configure(row)
+        cell.onDecision = { [weak self] accept in self?.onProposalDecision(row, accept) }
+        cell.onOpenSchedule = { [weak self] id in self?.onProposalOpenSchedule(id) }
+        return cell
+      }
+      if row.kind == "file", row.file != nil {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "file-card", for: index) as! ChatFileCardCell
+        cell.configure(row)
+        return cell
+      }
+      if row.kind.hasPrefix("operation") {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "operation", for: index) as! ChatOperationCell
+        cell.configure(row)
+        cell.onOpen = { [weak self] in
+          if row.actionable, let card = row.operation { self?.onOperationOpen(card.sessionId) }
+        }
+        cell.onReply = { [weak self] in
+          if let card = row.operation { self?.onOperationReply(card, row.text) }
+        }
+        cell.onPeerOpen = { [weak self] peer in
+          if peer.actionable { self?.onOperationOpen(peer.card.sessionId) }
+        }
+        cell.onPeerReply = { [weak self] peer in self?.onOperationReply(peer.card, peer.text) }
+        cell.onToggle = { [weak self] in
+          guard let self, row.actionable else { return }
+          let group = row.entryID + ":" + row.itemID
+          if !expandedOperations.insert(group).inserted { expandedOperations.remove(group) }
+          toggleAnchor = row.id
+          followsBottom = false
+          applyRows()
+        }
         return cell
       }
       if row.subagent != nil {
@@ -375,7 +439,6 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
           LodyShell.shared.presentNative(page, title: String(localized: "message.details.title", bundle: .lody), detents: [0.75, 1], grabber: true)
           self.onTurnInfoPress(["entryId": row.entryID])
         }, for: .touchUpInside)
-        cell.actionButton.menu = messageMenu(entryID: row.entryID, source: cell.actionButton)
         return cell
       }
       if row.kind == "changesHeader" {
@@ -398,6 +461,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
           }
           self.openAttachment(attachment)
         }
+        return cell
+      }
+      if row.kind == "imageStack" {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "image-stack", for: index) as! ChatImageStackCell
+        cell.configure(row, topID: self.imageStackTops[row.id], workspace: self.imageWorkspace, session: self.imageSession)
+        cell.onTopChange = { [weak self] top in self?.imageStackTops[row.id] = top }
         return cell
       }
       if row.image != nil {
@@ -439,7 +508,6 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         self.collectionView(self.collection, didSelectItemAt: index)
       }
       cell.expanded = self.expandedMessages.contains(row.entryID)
-      cell.collapsedHeight = self.collapsedMessageHeights[row.entryID] ?? ChatMessageContent.maximumCollapsedHeight
       cell.configure(row, text: self.text(for: row))
       return cell
     }
@@ -447,7 +515,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     dataSource.supplementaryViewProvider = { [weak self] collection, kind, index in
       let header = collection.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "history", for: index) as! ChatHistoryHeader
       if let self {
-        header.configure(loading: self.preparingHistory, hasEarlier: self.hasEarlierHistory)
+        header.configure(loading: self.preparingHistory || self.remoteHistoryLoading, hasEarlier: self.hasEarlierHistory)
         header.load = { [weak self] in self?.loadEarlierHistory() }
       }
       return header
@@ -698,14 +766,32 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     measurements.removeAll()
     empty.font = .dynamic(of: 16, compatibleWith: traitCollection)
     guard dataSource != nil else { return }
+    guard !applying else { needsTextRefresh = true; return }
     var snapshot = dataSource.snapshot()
     let ids = snapshot.itemIdentifiers
     if !ids.isEmpty {
+      applying = true
       snapshot.reconfigureItems(ids)
       dataSource.apply(snapshot, animatingDifferences: false)
+      applying = false
+      if needsApply || needsTextRefresh {
+        DispatchQueue.main.async { [weak self] in self?.drainChatUpdates() }
+      }
     }
     collection.collectionViewLayout.invalidateLayout()
     setNeedsLayout()
+  }
+
+  func drainChatUpdates() {
+    guard !applying else { return }
+    if needsTextRefresh {
+      needsTextRefresh = false
+      refreshTextRendering()
+    }
+    if needsApply {
+      needsApply = false
+      applyRows()
+    }
   }
 
   override func didMoveToWindow() {
@@ -751,6 +837,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     pauseTracking()
     if let target = ChatFileLink(href) {
       onFilePress(["path": target.path, "line": target.line ?? 0])
+    } else if let pr = ChatPullRequestLink(href), onPullRequestLink(pr) {
+      return
     } else if let url = URL(string: href), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
       UIApplication.shared.open(url)
     }
@@ -807,7 +895,10 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
 
   func setPendingSend(_ pending: ChatPendingSend) {
     var value = pending
-    if value.displayText == nil, pendingSend?.id == value.id { value.displayText = pendingSend?.displayText }
+    if value.displayText == nil, pendingSend?.id == value.id {
+      value.displayText = pendingSend?.displayText
+      value.references = pendingSend?.references
+    }
     var start = turnStartedAt[value.id]
     if start == nil, let supplied = value.startedAt, supplied.isFinite {
       start = supplied
@@ -937,6 +1028,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     incoming.onComposerOptionChange = old.onComposerOptionChange
     incoming.onDraftChange = old.onDraftChange
     incoming.allowsFullScreen = old.allowsFullScreen
+    incoming.fullScreenTopInset = old.fullScreenTopInset
     // The conversation's run config, not the creation page's, answers the chip from here on.
     incoming.onRunConfig = old.onRunConfig
     incoming.cardStyle = old.cardStyle

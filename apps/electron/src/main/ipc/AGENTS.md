@@ -2,6 +2,50 @@
 
 `CLAUDE.md` symlinks here. Edit `AGENTS.md` only. Parent main-process rules apply.
 
+## Renderer authority
+
+All product service classes extend `ProductWindowIpcService`. Register one-way product
+messages through `onProductWindowMessage`; both admit only a registered product
+window's trusted main frame. Packaged file URLs match exact renderer paths,
+ignoring path case only on Windows after Windows path normalization. The trusted
+recovery page may invoke only
+`app.requestRendererReload` and `app.reportRendererFatalError`; it has no other
+product IPC authority. Public browser views and preview frames have no product
+IPC authority. Launch requests carry only a launcher id and absolute target path;
+main resolves built-ins and natively approved, main-stored custom commands. Never
+accept command specifications from a launch or probe request.
+Default-application opening accepts only known document suffixes or ordinary
+folders and opens the policy-checked real path. Unknown file types return
+`unsupported_file_type`; Reveal and configured editors remain available. On macOS,
+refuse bundle targets by their own name and documents inside ancestors with a
+bundle suffix and an `Info.plist` marker; bundle-like repository names alone do
+not block their documents.
+
+## Personal-device approval
+
+`E2eeIpc` keeps every `@IpcMethod()` with its input and sender/reader validation and
+public failure projection, then delegates. Key delivery lives in
+`services/e2ee-key-delivery.mts`; local-agent and remote-machine pairing orchestration
+lives in `services/e2ee-agent-pairing-service.mts`. Those modules receive the validated
+reader id and must not become renderer-facing.
+
+Confirm and persist the signed admission through the verified ledger feed, using
+inline originals or a ledger-only refresh, before publishing its invitation. Key distribution belongs to the existing account/workspace-bound main
+owner and must not block the approval response. Register that delivery before the
+publication await so reset or sign-out can stop it; a late publication result must
+never recreate a stopped task. Invitation publication is not key receipt or content
+readiness.
+
+Capture a personal approval's account generation before its first await and its
+original native owner on first access. Reset invalidates matching in-flight
+approvals even without a delivery slot. Check that operation and owner while
+registering delivery under the account lock; same-account re-login cannot revive
+it. Retire the operation ticket on settlement without gating other workspaces.
+Control-only senders receive a missing current key before distributing; failed
+key delivery retains the approved admission and its bounded retry owner. Delivery
+slots retain their login generation; starts, retries and result settlement cannot
+borrow a later same-account login.
+
 ## E2EE access loss
 
 Only parsed HTTP 560 codes `e2ee_member_removed`/`e2ee_device_revoked` from explicitly

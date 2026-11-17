@@ -1,18 +1,12 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionContinuationNote } from '../src/components/sessions/session-continuation-note';
 import type { SessionContinuationView } from '../src/components/sessions/session-continuation';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback: string) => fallback,
-    i18n: { language: 'zh-CN' },
-  }),
-}));
+const testI18n = createTestI18n({ language: 'zh-CN' });
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -49,12 +43,15 @@ describe('SessionContinuationNote', () => {
     const onResume = vi.fn();
     act(() => {
       root.render(
-        <SessionContinuationNote
-          view={view({ phase: 'matched', continuation: 'blocked', block: 'stopped' })}
-          now={NOW}
-          onCancel={() => {}}
-          onResume={onResume}
-        />
+        withTestI18n(
+          <SessionContinuationNote
+            view={view({ phase: 'matched', continuation: 'blocked', block: 'stopped' })}
+            now={NOW}
+            onCancel={() => {}}
+            onResume={onResume}
+          />,
+          testI18n
+        )
       );
     });
 
@@ -73,12 +70,15 @@ describe('SessionContinuationNote', () => {
   it('never announces an uncertain delivery as success', () => {
     act(() => {
       root.render(
-        <SessionContinuationNote
-          view={view({ phase: 'matched', continuation: 'unknown' })}
-          now={NOW}
-          onCancel={() => {}}
-          onAskAgent={() => {}}
-        />
+        withTestI18n(
+          <SessionContinuationNote
+            view={view({ phase: 'matched', continuation: 'unknown' })}
+            now={NOW}
+            onCancel={() => {}}
+            onAskAgent={() => {}}
+          />,
+          testI18n
+        )
       );
     });
 

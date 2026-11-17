@@ -29,7 +29,7 @@ private final class PromptShortcutsFixture {
 
   func request(_ request: PromptShortcutRequest) async throws -> RuntimeContract.PromptShortcutsResult {
     switch request {
-    case .list:
+    case .list, .refresh:
       if failLoad {
         failLoad = false
         throw CocoaError(.fileReadUnknown)

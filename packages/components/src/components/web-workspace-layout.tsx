@@ -3,15 +3,12 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useReducedMotion } from 'framer-motion';
 import { useLocation } from '@tanstack/react-router';
 import { LoroAppSidebar } from './loro-app-sidebar';
-import {
-  DEFAULT_DESKTOP_SIDEBAR_WIDTH,
-  MAX_DESKTOP_SIDEBAR_WIDTH,
-  MIN_DESKTOP_SIDEBAR_WIDTH,
-} from './loro-sidebar';
+import { DEFAULT_DESKTOP_SIDEBAR_WIDTH, MAX_DESKTOP_SIDEBAR_WIDTH } from './loro-sidebar';
 import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
 import { useIsCompactDesktop } from '../hooks/use-mobile';
 import {
+  compactDesktopLayoutAtom,
   navigationSidebarVisibleAtom,
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
@@ -20,6 +17,7 @@ import {
 import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
 import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
+import { getNavigationSidebarMinWidth } from '@/lib/boot-shell-script';
 import { cn } from '@/lib/utils';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
 import { WorkspaceCard } from './workspace-frame';
@@ -53,6 +51,12 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // Effective on-screen visibility: compact may auto-suppress the sidebar even
   // while the persisted preference says open — see atoms/layout-state.ts.
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
+  // The viewport hook knows the window is compact one commit before the layout bridge
+  // syncs that into atom state, and only the synced state applies the compact
+  // auto-hide. Until then the navigation would mount open and close again before its
+  // opening frame, an exit Base UI never finishes. Open it only once they agree.
+  const compactSynced = useAtomValue(compactDesktopLayoutAtom);
+  const compactNavigationOpen = compact && compactSynced && sidebarVisible;
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const sidebarLastWidth = useAtomValue(sidebarLastWidthAtom);
   const shouldReduceMotion = useReducedMotion();
@@ -102,7 +106,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   const sidebarSlideWidth = Math.min(
     Math.max(
       sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_DESKTOP_SIDEBAR_WIDTH,
-      MIN_DESKTOP_SIDEBAR_WIDTH
+      getNavigationSidebarMinWidth()
     ),
     MAX_DESKTOP_SIDEBAR_WIDTH
   );
@@ -123,7 +127,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     >
       {compact ? (
         <CompactNavigationDialog
-          open={sidebarVisible}
+          open={compactNavigationOpen}
           onOpenChange={(open) => setSidebarCollapsed(!open)}
           container={layoutRoot}
           returnFocus={returnFocusRef}
@@ -153,7 +157,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       <FocusScope
         ref={contentRef}
         id={WORKSPACE_FOCUS_SCOPES.content}
-        inert={compact && sidebarVisible}
+        inert={compactNavigationOpen}
         onFocusCapture={(event) => {
           // Capture before inert can blur the opener during the open commit.
           returnFocusRef.current = event.target;

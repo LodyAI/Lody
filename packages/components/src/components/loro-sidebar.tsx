@@ -1,3 +1,4 @@
+import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useTranslation } from 'react-i18next';
 import { isElectronRenderer, isMacOSElectronRenderer } from '@/lib/electron';
@@ -5,12 +6,14 @@ import { ContextMenu } from '@lody/ui/context-menu';
 import { isNewWindowClick, openDesktopWindow } from '@/lib/desktop-window';
 import {
   type ComponentPropsWithoutRef,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   forwardRef,
   memo,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -19,6 +22,7 @@ import {
 } from 'react';
 import { useStore } from 'jotai';
 import { cn } from '@/lib/utils';
+import { BOOT_SHELL_SIDEBAR_WIDTH, isMobileSidebarDevice } from '@/lib/boot-shell-script';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
@@ -101,6 +105,8 @@ export type LoroSidebarWorkspace = {
   planTier?: 'plus' | 'enterprise' | null;
   /** Member count, when known (the active workspace). Shown in the switcher header. */
   memberCount?: number | null;
+  /** Listed as end-to-end encrypted: a lock beside the name, explained on hover. */
+  encrypted?: boolean;
 };
 
 export type LoroSidebarRepoItemDelta = {
@@ -172,6 +178,9 @@ export interface LoroSidebarProps {
    */
   workspaceSwitcherEnabled?: boolean;
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
+  /** Hover text for the Offline mark, supplied as a leaf so its clock never
+   * re-renders the sidebar. */
+  offlineDetail?: ReactNode;
   /**
    * The network may already be online while the target workspace runtime and
    * metadata are still converging. Keep that scoped readiness visible in the
@@ -207,13 +216,14 @@ export interface LoroSidebarProps {
   /**
    * How sidebar contents are grouped. 'workspace' (default) keeps the existing Chats /
    * Local Projects / GitHub Worktrees layout. 'updated' renders {@link updatedItems} as
-   * a single flat recency-sorted "Chats" list — when 'updated' is selected,
-   * {@link topContent} and {@link sessionListProps} are not rendered.
+   * a single flat recency-sorted "Chats" list; 'status' renders the same items split
+   * into status groups. In either, {@link topContent} and {@link sessionListProps}
+   * are not rendered.
    */
   organizeMode?: LoroSidebarOrganizeMode;
   /** Current chat scope (My Tasks / All Tasks). Surfaced in the footer filter popover. */
   chatScope?: LoroSidebarChatScope;
-  /** Items rendered when {@link organizeMode} is 'updated'. */
+  /** Items rendered when {@link organizeMode} is 'updated' or 'status'. */
   updatedItems?: SidebarUpdatedItem[];
   /** Pinned sessions rendered as a dedicated section above every organize mode. */
   pinnedItems?: SidebarUpdatedItem[];
@@ -241,6 +251,9 @@ export interface LoroSidebarProps {
   /** Whether rows with a branch show the branch segment on their meta line. */
   showBranchNames?: boolean;
   onShowBranchNamesChange?: (next: boolean) => void;
+  /** Project view: whether projects without Session rows are hidden. */
+  hideEmptyProjects?: boolean;
+  onHideEmptyProjectsChange?: (next: boolean) => void;
   onOrganizeModeChange?: (mode: LoroSidebarOrganizeMode) => void;
   onChatScopeChange?: (scope: LoroSidebarChatScope) => void;
   onSelectUpdatedItem?: (id: string, tabSessionId?: string) => void;
@@ -277,6 +290,7 @@ export interface LoroSidebarProps {
   /** Shows the Schedules entry; absent where there is nowhere to go. */
   onSchedulesClicked?: () => void;
   onSettingsClicked?: () => void;
+  onSettingsIntent?: () => void;
   settingsIcon?: ReactNode;
   onDocsClicked?: () => void;
   onGithubClicked?: () => void;
@@ -305,10 +319,11 @@ export interface LoroSidebarProps {
 }
 
 /**
- * Drag the resize edge to the LEFT so the unclamped width drops below this
- * value -> the sidebar collapses. Matches VSCode's drag-to-collapse behavior.
+ * Dragging past this width collapses the sidebar. On wide mobile layouts, a
+ * finger drag stops at the minimum so it can safely make the sidebar narrower.
  */
 const COLLAPSE_DRAG_THRESHOLD = 160;
+const KEYBOARD_RESIZE_STEP = 16;
 
 const resizeStyles = stylex.create({
   handle: {
@@ -324,6 +339,7 @@ const resizeStyles = stylex.create({
     '--sidebar-resize-opacity': {
       default: 0,
       ':hover': 0.42,
+      ':focus-visible': 0.65,
     },
   },
   dragging: {
@@ -339,6 +355,23 @@ const resizeStyles = stylex.create({
     backgroundImage: 'linear-gradient(to bottom, transparent, currentColor, transparent)',
     pointerEvents: 'none',
     opacity: 'var(--sidebar-resize-opacity)',
+  },
+  touchTarget: {
+    display: 'grid',
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '44px',
+    height: '44px',
+    placeItems: 'center',
+  },
+  touchGrip: {
+    width: '3px',
+    height: space[6],
+    borderRadius: radius.full,
+    backgroundColor: 'currentColor',
+    opacity: 'max(0.46, var(--sidebar-resize-opacity))',
   },
 });
 
@@ -388,8 +421,10 @@ const defaultLabels: LoroSidebarLabels = {
     detailsHeading: 'Details',
     organizeProject: 'Project',
     organizeUpdated: 'Updated',
+    organizeStatus: 'Status',
     updatedProjectNames: 'Show Project',
     showBranchNames: 'Show Branch',
+    hideEmptyProjects: 'Hide Empty Projects',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
     emptyMyTasks: 'No tasks match this view',
@@ -511,12 +546,15 @@ type WorkspaceIdentityStatus = 'loading' | 'reconnecting' | 'offline' | 'syncing
 function ConnectionPill({
   state,
   labels,
+  offlineDetail,
 }: {
   state: WorkspaceIdentityStatus;
   labels: Pick<
     LoroSidebarLabels,
     'connectionLoading' | 'connectionReconnecting' | 'connectionOffline' | 'workspaceSyncing'
   >;
+  /** Hover text for Offline: how long, and what this machine can still do. */
+  offlineDetail?: ReactNode;
 }) {
   const isLoading = state !== 'offline';
   const label =
@@ -527,7 +565,7 @@ function ConnectionPill({
         : state === 'loading'
           ? labels.connectionLoading
           : labels.connectionOffline;
-  return (
+  const badge = (
     <Badge
       tone={isLoading ? 'running' : 'danger'}
       icon={isLoading ? <WorkingGrid className="h-3 w-3" /> : undefined}
@@ -536,6 +574,15 @@ function ConnectionPill({
     >
       {label}
     </Badge>
+  );
+  if (state !== 'offline' || !offlineDetail) return badge;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span className="inline-flex">{badge}</span>} />
+      <Tooltip.Content side="bottom" className="max-w-[280px]">
+        {offlineDetail}
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -817,8 +864,8 @@ export function getLoroSidebarFooterClassName(isMobile: boolean): string {
 }
 
 export const DEFAULT_DESKTOP_SIDEBAR_WIDTH = 300;
-export const MIN_DESKTOP_SIDEBAR_WIDTH = 240;
-export const MAX_DESKTOP_SIDEBAR_WIDTH = 420;
+export const MIN_DESKTOP_SIDEBAR_WIDTH = BOOT_SHELL_SIDEBAR_WIDTH.min;
+export const MAX_DESKTOP_SIDEBAR_WIDTH = BOOT_SHELL_SIDEBAR_WIDTH.max;
 
 export const LoroSidebar = memo(function LoroSidebar({
   className,
@@ -829,11 +876,12 @@ export const LoroSidebar = memo(function LoroSidebar({
   scrollStateKey,
   workspaceSwitcherEnabled = true,
   connectionUiState,
+  offlineDetail,
   workspaceSyncing = false,
   isElectron = false,
   isElectronMacOS: _isElectronMacOS = false,
   defaultWidth = DEFAULT_DESKTOP_SIDEBAR_WIDTH,
-  minWidth = MIN_DESKTOP_SIDEBAR_WIDTH,
+  minWidth,
   maxWidth = MAX_DESKTOP_SIDEBAR_WIDTH,
   activeNav = null,
   topContent,
@@ -856,6 +904,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   onShowUpdatedProjectNamesChange,
   showBranchNames = false,
   onShowBranchNamesChange,
+  hideEmptyProjects = true,
+  onHideEmptyProjectsChange,
   onOrganizeModeChange,
   onChatScopeChange,
   onSelectUpdatedItem,
@@ -879,6 +929,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onArchiveClicked,
   onSchedulesClicked,
   onSettingsClicked,
+  onSettingsIntent,
   settingsIcon,
   onDocsClicked,
   onGithubClicked,
@@ -921,7 +972,11 @@ export const LoroSidebar = memo(function LoroSidebar({
     updated: { ...defaultLabels.updated, ...(labels?.updated ?? {}) },
   };
   const now = useStableNow();
-  const resolvedMinWidth = useMemo(() => Math.max(160, minWidth), [minWidth]);
+  const mobileResize = minWidth === undefined && isMobileSidebarDevice();
+  const resolvedMinWidth = Math.max(
+    160,
+    minWidth ?? (mobileResize ? BOOT_SHELL_SIDEBAR_WIDTH.mobileMin : MIN_DESKTOP_SIDEBAR_WIDTH)
+  );
   const resolvedMaxWidth = useMemo(
     () => Math.max(resolvedMinWidth + 40, maxWidth),
     [resolvedMinWidth, maxWidth]
@@ -931,15 +986,31 @@ export const LoroSidebar = memo(function LoroSidebar({
   );
   const [isResizing, setIsResizing] = useState(false);
   const resizeStateRef = useRef({ pointerId: -1, startX: 0, startWidth: 0 });
+  const sidebarContentId = useId();
+  const canResize = !isMobile && !overlay;
 
   useEffect(() => {
     setSidebarWidth(clamp(defaultWidth, resolvedMinWidth, resolvedMaxWidth));
   }, [defaultWidth, resolvedMinWidth, resolvedMaxWidth]);
 
+  useEffect(() => {
+    if (canResize) return;
+    resizeStateRef.current.pointerId = -1;
+    setIsResizing(false);
+  }, [canResize]);
+
+  const changeSidebarWidth = useCallback(
+    (width: number) => {
+      const nextWidth = clamp(width, resolvedMinWidth, resolvedMaxWidth);
+      setSidebarWidth(nextWidth);
+      onWidthChange?.(nextWidth);
+    },
+    [resolvedMinWidth, resolvedMaxWidth, onWidthChange]
+  );
+
   const handleResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isMobile) return;
-      if (event.button !== 0) return;
+      if (!event.isPrimary || event.button !== 0 || resizeStateRef.current.pointerId !== -1) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
       resizeStateRef.current = {
@@ -949,49 +1020,53 @@ export const LoroSidebar = memo(function LoroSidebar({
       };
       setIsResizing(true);
     },
-    [isMobile, sidebarWidth]
+    [sidebarWidth]
   );
+
+  const handleResizeEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeStateRef.current.pointerId !== event.pointerId) return;
+    resizeStateRef.current.pointerId = -1;
+    setIsResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
 
   const handleResizeMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isMobile) return;
       const { pointerId, startX, startWidth } = resizeStateRef.current;
       if (pointerId !== event.pointerId) return;
       const rawWidth = startWidth + (event.clientX - startX);
-      if (onRequestCollapse && rawWidth < COLLAPSE_DRAG_THRESHOLD) {
-        // VSCode-style: dragging past the threshold collapses immediately and ends drag.
-        resizeStateRef.current.pointerId = -1;
-        setIsResizing(false);
-        try {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        } catch {
-          // Ignore release errors when pointer capture is already gone.
-        }
+      if (
+        onRequestCollapse &&
+        (!mobileResize || event.pointerType !== 'touch') &&
+        rawWidth < COLLAPSE_DRAG_THRESHOLD
+      ) {
+        handleResizeEnd(event);
         onRequestCollapse();
         return;
       }
-      const nextWidth = clamp(rawWidth, resolvedMinWidth, resolvedMaxWidth);
-      setSidebarWidth(nextWidth);
-      onWidthChange?.(nextWidth);
+      changeSidebarWidth(rawWidth);
     },
-    [isMobile, resolvedMinWidth, resolvedMaxWidth, onWidthChange, onRequestCollapse]
+    [changeSidebarWidth, mobileResize, handleResizeEnd, onRequestCollapse]
   );
 
-  const handleResizeEnd = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isMobile) return;
-      const { pointerId } = resizeStateRef.current;
-      if (pointerId !== event.pointerId) return;
-      resizeStateRef.current.pointerId = -1;
-      setIsResizing(false);
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Ignore release errors when pointer capture is already gone.
-      }
-    },
-    [isMobile]
-  );
+  const handleResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const nextWidth =
+      event.key === 'ArrowLeft'
+        ? sidebarWidth - KEYBOARD_RESIZE_STEP
+        : event.key === 'ArrowRight'
+          ? sidebarWidth + KEYBOARD_RESIZE_STEP
+          : event.key === 'Home'
+            ? resolvedMinWidth
+            : event.key === 'End'
+              ? resolvedMaxWidth
+              : null;
+    if (nextWidth === null) return;
+    event.preventDefault();
+    changeSidebarWidth(nextWidth);
+  };
   const fallbackChatSessions: SessionListRow[] = chats.map((chat) => ({
     sessionId: chat.id,
     title: chat.title,
@@ -1031,6 +1106,8 @@ export const LoroSidebar = memo(function LoroSidebar({
           onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
           showBranchNames={showBranchNames}
           onShowBranchNamesChange={onShowBranchNamesChange}
+          hideEmptyProjects={hideEmptyProjects}
+          onHideEmptyProjectsChange={onHideEmptyProjectsChange}
           labels={mergedLabels.filter}
           side="right"
           align="start"
@@ -1098,6 +1175,9 @@ export const LoroSidebar = memo(function LoroSidebar({
       : workspaceSyncing
         ? 'syncing'
         : null;
+  const currentWorkspaceEncrypted = workspaces.some(
+    (ws) => ws.id === currentWorkspaceId && ws.encrypted
+  );
   const workspaceIdentity = (
     <>
       <WorkspaceAvatar
@@ -1108,9 +1188,15 @@ export const LoroSidebar = memo(function LoroSidebar({
         size="small"
       />
       <span className="min-w-0 flex flex-1 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-medium">{workspaceName}</span>
+        <span className="min-w-0 truncate font-medium">{workspaceName}</span>
+        {currentWorkspaceEncrypted ? <EncryptedWorkspaceMark /> : null}
+        <span className="flex-1" />
         {workspaceIdentityStatus ? (
-          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
+          <ConnectionPill
+            state={workspaceIdentityStatus}
+            labels={mergedLabels}
+            offlineDetail={offlineDetail}
+          />
         ) : null}
       </span>
     </>
@@ -1129,9 +1215,15 @@ export const LoroSidebar = memo(function LoroSidebar({
         />
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate">{workspaceName}</span>
+        <span className="min-w-0 truncate">{workspaceName}</span>
+        {currentWorkspaceEncrypted ? <EncryptedWorkspaceMark /> : null}
+        <span className="flex-1" />
         {workspaceIdentityStatus ? (
-          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
+          <ConnectionPill
+            state={workspaceIdentityStatus}
+            labels={mergedLabels}
+            offlineDetail={offlineDetail}
+          />
         ) : null}
       </span>
     </>
@@ -1178,7 +1270,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
-                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1192,7 +1284,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
-                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1218,13 +1310,20 @@ export const LoroSidebar = memo(function LoroSidebar({
               </Menu.GroupLabel>
               <Menu.RadioGroup
                 value={currentWorkspaceId}
-                onValueChange={(value) => onWorkspaceSelected?.(value)}
+                onValueChange={(value) => {
+                  if (value !== currentWorkspaceId) onWorkspaceSelected?.(value);
+                }}
               >
                 {/* Local provider: hosts may render the sidebar without a root one. */}
                 <Tooltip.Provider delay={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
-                    const supportsNewWindow = isElectronRenderer() && !!workspaceSlug;
+                    const desktop = isElectronRenderer();
+                    const supportsNewWindow = desktop && !!workspaceSlug;
+                    const workspaceHref =
+                      !desktop && workspaceSlug
+                        ? `/${encodeURIComponent(workspaceSlug)}/chat`
+                        : undefined;
                     // The avatar carries identity, so the check moves to the
                     // row's trailing edge. ps-2/pe-8 replace the ps-8 selection
                     // indent: the 20px avatar and the action rows' 20px icon
@@ -1239,23 +1338,25 @@ export const LoroSidebar = memo(function LoroSidebar({
                         // Resolve the radio item in the dropdown's context before
                         // introducing the separate right-click menu in its render.
                         render={
-                          supportsNewWindow
-                            ? (props) => (
-                                <ContextMenu.Root>
-                                  <ContextMenu.Trigger render={<div {...props} />} />
-                                  <ContextMenu.Content>
-                                    <ContextMenu.Item
-                                      icon={AppWindow}
-                                      onClick={() => {
-                                        openDesktopWindow(undefined, workspaceSlug, 'context_menu');
-                                      }}
-                                    >
-                                      {t('workspace.openInNewWindow')}
-                                    </ContextMenu.Item>
-                                  </ContextMenu.Content>
-                                </ContextMenu.Root>
-                              )
-                            : undefined
+                          supportsNewWindow ? (
+                            (props) => (
+                              <ContextMenu.Root>
+                                <ContextMenu.Trigger render={<div {...props} />} />
+                                <ContextMenu.Content>
+                                  <ContextMenu.Item
+                                    icon={AppWindow}
+                                    onClick={() => {
+                                      openDesktopWindow(undefined, workspaceSlug, 'context_menu');
+                                    }}
+                                  >
+                                    {t('workspace.openInNewWindow')}
+                                  </ContextMenu.Item>
+                                </ContextMenu.Content>
+                              </ContextMenu.Root>
+                            )
+                          ) : workspaceHref ? (
+                            <a href={workspaceHref} />
+                          ) : undefined
                         }
                         icon={
                           <WorkspaceAvatar
@@ -1265,6 +1366,21 @@ export const LoroSidebar = memo(function LoroSidebar({
                         }
                         className="gap-1.5 ps-2"
                         onClickCapture={(event) => {
+                          if (workspaceHref) {
+                            if (
+                              event.button !== 0 ||
+                              event.metaKey ||
+                              event.ctrlKey ||
+                              event.shiftKey ||
+                              event.altKey
+                            ) {
+                              // Preserve native link actions without selecting in this page.
+                              event.stopPropagation();
+                            } else {
+                              event.preventDefault();
+                            }
+                            return;
+                          }
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
                           if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
                             event.preventDefault();
@@ -1300,7 +1416,10 @@ export const LoroSidebar = memo(function LoroSidebar({
                           ) : null
                         }
                       >
-                        {ws.name}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate">{ws.name}</span>
+                          {ws.encrypted ? <EncryptedWorkspaceMark /> : null}
+                        </span>
                       </Menu.RadioItem>
                     );
 
@@ -1353,25 +1472,45 @@ export const LoroSidebar = memo(function LoroSidebar({
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn('relative h-full select-none bg-sidebar text-sidebar-foreground', className)}
       style={
-        isMobile || overlay
-          ? undefined
-          : { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
+        canResize
+          ? { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
+          : undefined
       }
     >
-      {!isMobile && !overlay && (
+      {canResize && (
         <div
           data-sidebar-resize-handle
+          {...(mobileResize && {
+            role: 'separator',
+            tabIndex: 0,
+            'aria-label': t('sidebar.resize', 'Resize navigation sidebar'),
+            'aria-orientation': 'vertical' as const,
+            'aria-controls': sidebarContentId,
+            'aria-valuemin': resolvedMinWidth,
+            'aria-valuemax': resolvedMaxWidth,
+            'aria-valuenow': Math.round(sidebarWidth),
+            onKeyDown: handleResizeKeyDown,
+          })}
           {...stylex.props(resizeStyles.handle, isResizing && resizeStyles.dragging)}
           onPointerDown={handleResizeStart}
           onPointerMove={handleResizeMove}
           onPointerUp={handleResizeEnd}
           onPointerCancel={handleResizeEnd}
+          onLostPointerCapture={handleResizeEnd}
         >
           <div aria-hidden="true" {...stylex.props(resizeStyles.feedback)} />
+          {mobileResize && (
+            <div aria-hidden="true" {...stylex.props(resizeStyles.touchTarget)}>
+              <div {...stylex.props(resizeStyles.touchGrip)} />
+            </div>
+          )}
         </div>
       )}
 
-      <div className="relative flex h-full flex-col overflow-hidden">
+      <div
+        id={mobileResize ? sidebarContentId : undefined}
+        className="relative flex h-full flex-col overflow-hidden"
+      >
         <div
           className={cn(
             'relative flex items-center justify-between gap-2',
@@ -1514,7 +1653,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   now={now}
                   isMobile={isMobile}
                   showPinnedIcon={false}
-                  showProjectContext={organizeMode === 'updated' && showUpdatedProjectNames}
+                  showProjectContext={organizeMode !== 'workspace' && showUpdatedProjectNames}
                   selectedItemId={updatedSelectedItemId ?? null}
                   collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
                   labels={{
@@ -1537,7 +1676,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 />
               </div>
             ) : null}
-            {organizeMode === 'updated' ? (
+            {organizeMode !== 'workspace' ? (
               // Design intent: 'updated' mode is a flat firehose of recent
               // sessions. It deliberately drops Workspace-mode structure
               // (per-repo groups with collapse/reorder, per-project headers
@@ -1548,7 +1687,8 @@ export const LoroSidebar = memo(function LoroSidebar({
               // Per-row actions (rename, pin, archive, copy URL, copy branch,
               // open PR) are wired through the props below so the two modes
               // are at parity for individual sessions even though section-
-              // level affordances diverge.
+              // level affordances diverge. 'status' mode lists the same rows,
+              // split into status groups.
               !hasPinnedItems || updatedIsLoading || Boolean(updatedItems?.length) ? (
                 <div className={hasPinnedItems ? undefined : 'pt-1'}>
                   <SidebarUpdatedSessionList
@@ -1556,6 +1696,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     now={now}
                     isMobile={isMobile}
                     isLoading={updatedIsLoading}
+                    grouping={organizeMode === 'status' ? 'status' : 'recency'}
                     showProjectContext={showUpdatedProjectNames}
                     selectedItemId={updatedSelectedItemId ?? null}
                     labels={mergedLabels.updated}
@@ -1753,7 +1894,12 @@ export const LoroSidebar = memo(function LoroSidebar({
               </IconButton>
             )}
 
-            <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
+            <IconButton
+              label={t('settings.title', 'Settings')}
+              onClick={onSettingsClicked}
+              onPointerEnter={onSettingsIntent}
+              onFocus={onSettingsIntent}
+            >
               {settingsIcon ?? <Settings className="size-full" strokeWidth={1.5} />}
             </IconButton>
           </div>
@@ -1768,6 +1914,8 @@ export const LoroSidebar = memo(function LoroSidebar({
               onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
               showBranchNames={showBranchNames}
               onShowBranchNamesChange={onShowBranchNamesChange}
+              hideEmptyProjects={hideEmptyProjects}
+              onHideEmptyProjectsChange={onHideEmptyProjectsChange}
               labels={mergedLabels.filter}
             />
           ) : null}

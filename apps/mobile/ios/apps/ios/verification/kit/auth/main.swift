@@ -6,6 +6,7 @@ final class Fixture: @unchecked Sendable {
 
   func api() -> AuthAPI {
     var api = AuthAPI()
+    api.modePins = WorkspaceModePins(file: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("pins.json"))
     api.transport = { request in
       self.requests.append(request)
       precondition(!self.replies.isEmpty, "Unexpected request \(request.url!)")
@@ -28,12 +29,34 @@ final class Fixture: @unchecked Sendable {
   static func main() async throws {
     if AuthAPI.authOrigin != "https://backend.lody.ai" {
       var api = AuthAPI()
+    api.modePins = WorkspaceModePins(file: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("pins.json"))
       api.loginTransport = { _ in preconditionFailure("Nonproduction reset must never send a request") }
       let rejected = await failure { try await api.requestPasswordReset(email: "person@example.test") }
       precondition(rejected?.message == "auth.reset.unsupportedLocal")
       print("PASS: nonproduction password reset is rejected before any network request")
       return
     }
+    let pinFile = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("pins.json")
+    let pins = WorkspaceModePins(file: pinFile)
+    precondition(pins.mode("encrypted") == .unknown)
+    try pins.observe("encrypted", mode: .e2ee, genesis: String(repeating: "a", count: 64))
+    let restarted = WorkspaceModePins(file: pinFile)
+    precondition(restarted.mode("encrypted") == .e2ee)
+    let downgrade = try restarted.observe("encrypted", mode: .plaintext)
+    precondition(downgrade == .e2ee)
+    try restarted.observe("ordinary", mode: .plaintext)
+    precondition(WorkspaceModePins(file: pinFile).mode("ordinary") == .plaintext)
+    let modes = Fixture()
+    modes.replies = [
+      (["user": ["id": "u", "email": "test@example.test"]], 200),
+      ([["id": "encrypted", "name": "Encrypted", "contentMode": "e2ee"], ["id": "unknown", "name": "Unknown"]], 200),
+      ([:], 503),
+    ]
+    var modeAPI = modes.api()
+    modeAPI.modePins = restarted
+    let classified = try await modeAPI.account(token: "token")
+    precondition(classified.workspaces.map(\.contentMode) == [.e2ee, .unknown])
+    print("PASS: encrypted list evidence survives restart and downgrade; failed classification blocks unknown while ordinary mode persists")
     var fixture = Fixture()
     var native = AuthAPI()
     native.loginTransport = { request in
@@ -141,11 +164,13 @@ final class Fixture: @unchecked Sendable {
       fixture.replies = [
         (["user": ["id": "u1", "email": "i@example.test", "name": "Innei", "image": image]], 200),
         ([["id": "w1", "name": "Innei", "slug": "innei", "logo": image]], 200),
+        (["token": "jwt"], 200),
+        (["status": "success", "value": ["workspaceId": "w1", "contentMode": "plaintext", "contentModeVersion": 1]], 200),
       ]
       let account = try await fixture.api().account(token: "token")
       precondition(account.user.image == expected && account.workspaces[0].image == expected)
-      precondition(fixture.requests.map { $0.value(forHTTPHeaderField: "Authorization") } == ["Bearer token", "Bearer token"])
-      precondition(fixture.requests.map { $0.httpMethod } == ["GET", "GET"])
+      precondition(fixture.requests.map { $0.value(forHTTPHeaderField: "Authorization") } == ["Bearer token", "Bearer token", "Bearer token", "Bearer jwt"])
+      precondition(fixture.requests.map { $0.httpMethod } == ["GET", "GET", "GET", "POST"])
     }
     fixture = Fixture()
     fixture.replies = [(NSNull(), 200)]

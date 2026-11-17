@@ -10,7 +10,9 @@ enum NativeDebug {
       catch { preconditionFailure("Invalid offline fixture: \(error)") }
     }
     let root: UIViewController
-    if LodyUIVerify.has("--ui-review-list") {
+    if _isDebugAssertConfiguration(), let review = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-review-cards=") }) {
+      root = SessionPreviewController(scenario: "cards-" + String(review.dropFirst("--ui-review-cards=".count)))
+    } else if LodyUIVerify.has("--ui-review-list") {
       root = ChatListPreviewController()
     } else if LodyUIVerify.has("--ui-review-mentions") {
       root = SessionPreviewController(scenario: "mentions")
@@ -33,6 +35,10 @@ enum NativeDebug {
     guard LodyUIVerify.enabled || _isDebugAssertConfiguration() else { return }
     guard let scenario = params["verifyCase"] else {
       LodyShell.shared.pushRootNative(NativeDebugController(), title: "Debug")
+      return
+    }
+    if scenario.hasPrefix("schedule-fixture-") {
+      ScheduleFixture.shared.control(String(scenario.dropFirst("schedule-fixture-".count)))
       return
     }
     if scenario.hasPrefix("toast-") {
@@ -96,7 +102,7 @@ enum NativeDebug {
       fields["queuedMessageBehavior"] = scenario.hasSuffix("guide") ? "guide" : "queue"
     }
     let aliases = ["pull-request-preview": "pull-request-native-preview", "permission-native-waiting": "permission-native-preview",
-      "appearance-preview": "settings", "diagnostics-settings-preview": "settings",
+      "diagnostics-settings-preview": "settings",
       "preferences-preview": "preferences", "queued-message-behavior-preview": "preferences",
       "project-preview-empty": "project-preview", "project-preview-offline": "project-preview"]
     id = aliases[id] ?? id
@@ -112,7 +118,7 @@ enum NativeDebug {
       }
       content = page
     }
-    if scenario.hasPrefix("session-preview-bar-") || scenario.hasPrefix("session-preview-usage") {
+    if scenario.hasPrefix("session-preview-bar-") || scenario.hasPrefix("session-preview-usage") || scenario.hasPrefix("session-preview-cards-") {
       LodyShell.shared.pushRootNative(content, title: "")
       return
     }
@@ -137,24 +143,21 @@ final class NativeDebugController: UIViewController {
       ("push-subscription-verify", String(localized: "debug.native.verify.onesignal.subscription", bundle: .lody), "bell.badge"),
       ("permission-native-preview", String(localized: "debug.native.permission.verification", bundle: .lody), "hand.raised"),
       ("onboarding-preview", String(localized: "debug.native.onboarding.verification", bundle: .lody), "hand.wave"),
-      ("project-history-preview", String(localized: "debug.native.project.conversation.sync.verification", bundle: .lody), "arrow.triangle.2.circlepath"),
       ("directory-preview", "Folder browser", "folder"),
       ("project-preview", "Project page", "folder.badge.gearshape"),
       ("activity-preview", "Activity page", "bolt.horizontal"),
+      ("agent-providers-preview", "Agent providers", "sparkles"),
+      ("agent-presets-preview", "Agent provider presets", "sparkles"),
+      ("agent-auth-methods-preview", "Agent authentication methods", "sparkles"),
+      ("agent-pi-preview", "Agent Pi extensions", "sparkles"),
       ("settings-preview", String(localized: "debug.native.remote.settings.verification", bundle: .lody), "gear"),
       ("settings-baseline-live", "Settings baseline", "gearshape.2"),
       ("ai-usage-preview", "AI usage", "chart.bar"),
-      ("mcp-settings-preview", String(localized: "debug.native.mcp.settings.verification", bundle: .lody), "server.rack"),
-      ("memory-preview", "Memory acceptance", "brain"),
-      ("published-shares-preview", "Published shares acceptance", "link"),
-      ("memory-states-preview", "Memory states", "brain"),
       ("agent-roles-preview", String(localized: "debug.native.agent.role.verification", bundle: .lody), "person.crop.square"),
-      ("archived-sessions-preview", "Archived sessions", "archivebox"),
       ("session-preview-live", "Native session", "bubble.left"),
       ("machine-settings-preview", String(localized: "debug.native.machine.settings.verification", bundle: .lody), "desktopcomputer"),
       ("preferences-preview", String(localized: "debug.native.preferences.verification", bundle: .lody), "slider.horizontal.3"),
       ("diagnostics-preview", "Diagnostics", "waveform.path.ecg"),
-      ("appearance-preview", String(localized: "debug.native.appearance.verification", bundle: .lody), "circle.lefthalf.filled"),
       ("queued-message-behavior-preview", String(localized: "debug.native.queued.message.behavior.verification", bundle: .lody), "arrow.uturn.forward"),
       ("model-memory", "Model memory verification", "brain"),
       ("create-parity", "Create parity verification", "square.on.square"),
@@ -294,6 +297,17 @@ enum NativeHomeFixture {
     }
     statesCatalog = relative(fixture["statesCatalog"] as! [String: Any], now: Date().timeIntervalSince1970 * 1000)
     workspaces = fixture["workspaces"] as! [[String: Any]]
+    // Offline fixtures supply the explicit describe admission that a live account
+    // obtains from the server. Missing fields alone never authorize plaintext.
+    precondition(LodyUIVerify.enabled)
+    for workspace in workspaces {
+      precondition(workspace["admission"] as? String == "legacy-unclassified"
+        && workspace["contentMode"] == nil && workspace["contentModeVersion"] == nil
+        && workspace["genesisHash"] == nil && workspace["cryptoOrgId"] == nil,
+        "Home fixtures require an explicit legacy admission without encrypted evidence")
+      let mode = try WorkspaceModePins.shared.observe(workspace["id"] as! String, mode: .plaintext)
+      precondition(mode == .plaintext, "Home fixtures must not replace retained encrypted admission")
+    }
     for case let (photo, source as String) in fixture["photoCache"] as? [String: Any] ?? [:] {
       if let url = URL(string: photo), let data = URL(string: source) { LodyListPhoto.prime(url, from: data) }
     }
@@ -307,9 +321,10 @@ enum NativeHomeFixture {
         syncPreview = false; publish()
       }
     }
-    for key in ["inboxView", "inboxProjectSort", "inboxExpansion", "inboxPinOrder.ui-home.ui-home"] {
-      UserDefaults.standard.removeObject(forKey: key)
-    }
+    UserDefaults.standard.removeObject(forKey: "inboxProjectSort")
+    // Every offline Home run starts expanded, even after a failed interaction check.
+    UserDefaults.standard.removeObject(forKey: "homeFoldedOpeners")
+    UserDefaults.standard.removeObject(forKey: "homeCollapsedGroups")
     let catalogJSON = SessionController.json(["catalog": catalog, "syncedAt": 0])
     try LocalStore.queue.sync {
       let store = LocalStore.shared
@@ -342,7 +357,14 @@ enum NativeHomeFixture {
 
   static func apply(_ action: String, _ fields: [String: Any]) throws {
     switch action {
-    case "selectWorkspace": selected = fields["workspaceId"] as! String
+    case "selectWorkspace":
+      selected = fields["workspaceId"] as! String
+      if selected == "ui-states" {
+        // These synthetic rows have no owner; the design-state scene displays the
+        // whole workspace under project headings, independently of saved preferences.
+        HomeScope.store(.team)
+        HomeGrouping.store(.project)
+      }
     case "updateWorkspace", "updateWorkspaceIcon":
       let id = fields["workspaceId"] as! String
       guard let index = workspaces.firstIndex(where: { $0["id"] as? String == id }) else { preconditionFailure("Unknown fixture workspace") }

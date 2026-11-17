@@ -1,7 +1,22 @@
-import { Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
+import {
+  Context,
+  Effect,
+  HashMap,
+  HashSet,
+  Layer,
+  Option,
+  Result,
+  Schema,
+  Semaphore,
+} from 'effect';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as Bytes from '../foundation/bytes';
-import { bytesEqual, decodeSnapshotCbor, encodeCbor, encodeSnapshotCbor } from '../foundation/cbor';
+import {
+  bytesEqual,
+  decodeCandidateEnvelopesCbor,
+  encodeCbor,
+  encodeCandidateEnvelopesCbor,
+} from '../foundation/cbor';
 import { copyEpochKeyBytes, disposeEpochKey } from '../foundation/epoch-key';
 import { keyId } from '../foundation/identifiers';
 import {
@@ -14,6 +29,7 @@ import {
   type LedgerView,
   type Operation,
 } from '../ledger';
+import { internalViewState } from '../ledger/replay';
 import { prepareLedgerRecord, signLedgerRecord } from '../ledger/signing';
 import { VerifiedLedger, type VerifiedLedgerError } from '../ledger/verified-ledger';
 import { makeAdmissionGate, own, ownIdentity } from '../lifecycle';
@@ -28,7 +44,7 @@ import { CandidateProtector, EpochStagingStore } from '../../services/keys';
 import type { SubmissionResult } from '../../services/ledger';
 import { EpochCandidateStore, type EpochCandidateRow } from '../../services/stores';
 import { DeviceIdentity, WorkspaceScope } from '../../services/workspace';
-import { prepareEpochEnvelope } from './envelope';
+import { prepareEpochEnvelope, verifiedEpochCandidate } from './envelope';
 import { commitEpochKey, openHistoryPacket, sealHistoryPacket } from './history';
 import { InstalledEpochKeys, type InstalledKeyError } from './installed-keys';
 import {
@@ -121,8 +137,13 @@ const purpose = new TextEncoder().encode('lody-e2ee/local-epoch-candidate/v1\0')
 const HEADER = purpose.length + 32 * 6 + 4 * 3;
 const publication = (
   operation: Operation
-): operation is Extract<Operation, { type: 'publishEpoch' | 'removeMemberAndPublishEpoch' }> =>
-  operation.type === 'publishEpoch' || operation.type === 'removeMemberAndPublishEpoch';
+): operation is Extract<
+  Operation,
+  { type: 'publishEpoch' | 'removeMemberAndPublishEpoch' | 'abandonEpoch' }
+> =>
+  operation.type === 'abandonEpoch' ||
+  operation.type === 'publishEpoch' ||
+  operation.type === 'removeMemberAndPublishEpoch';
 const fromHex = (hex: string) => Uint8Array.from(hex.match(/../g) ?? [], (x) => parseInt(x, 16));
 const same = (a: EpochCandidateRow, b: EpochCandidateRow) =>
   a.id === b.id &&
@@ -162,6 +183,8 @@ export class EpochPublisher extends Context.Service<
     publishRemoving(
       membership: Bytes.MembershipId
     ): Effect.Effect<EpochPublishResult, EpochPublishFailure>;
+    /** Owner-only recovery from a held, non-abandoned base key; requires declared capability 2. */
+    publishAbandoning(baseEpoch: number): Effect.Effect<EpochPublishResult, EpochPublishFailure>;
     /** Finish the unfinished rotation, if any. */
     resume(): Effect.Effect<EpochPublishResult | null, EpochPublishFailure>;
     /** The local result of the unconsumed rotation, without contacting the backend. */
@@ -205,9 +228,12 @@ export class EpochPublisher extends Context.Service<
         return view;
       });
       const manager = (view: LedgerView, removing?: Bytes.MembershipId) => {
-        const state = view.inspectState(),
-          device = state.devices.get(publisher),
-          member = device && state.members.get(keyId(device.membershipId.toBytes()));
+        const state = internalViewState(view);
+        if (!state) return Effect.fail(fail('unauthorized'));
+        const device = Option.getOrUndefined(HashMap.get(state.devices, publisher)),
+          member =
+            device &&
+            Option.getOrUndefined(HashMap.get(state.members, keyId(device.membershipId.toBytes())));
         if (
           device?.kind !== 'personal' ||
           !member ||
@@ -218,7 +244,7 @@ export class EpochPublisher extends Context.Service<
           removing &&
           (member.role !== 'owner' ||
             removing.equals(state.owner) ||
-            !state.members.has(keyId(removing.toBytes())))
+            !HashMap.has(state.members, keyId(removing.toBytes())))
         )
           return Effect.fail(fail('unauthorized'));
         return Effect.void;
@@ -271,7 +297,7 @@ export class EpochPublisher extends Context.Service<
         return undefined;
       });
       const group = (row: EpochCandidateRow): EpochStagedGroup => {
-        const decoded = Result.getOrThrow(decodeSnapshotCbor(row.envelopes));
+        const decoded = Result.getOrThrow(decodeCandidateEnvelopesCbor(row.envelopes));
         if (!Array.isArray(decoded)) throw fail('corrupt');
         const envelopes = decoded.map((item) => {
           if (
@@ -396,7 +422,9 @@ export class EpochPublisher extends Context.Service<
           !bytesEqual(packet.packet, record.body.operation.previousEpochKey)
         )
           throw fail('corrupt');
-        return view.inspectState().epoch.number === row.epoch ? 'current' : 'historical';
+        const state = internalViewState(view);
+        if (!state) throw fail('corrupt');
+        return state.epoch.number === row.epoch ? 'current' : 'historical';
       };
       const bindingOf = (view: LedgerView, row: EpochCandidateRow) =>
         Effect.try({
@@ -422,16 +450,9 @@ export class EpochPublisher extends Context.Service<
         const bound = yield* bindingOf(view, row);
         if (outcome === 'Committed') {
           if (!bound || !key) return yield* fail('context-changed');
+          const commitment = yield* Effect.fromResult(commitEpochKey(anchor, row.epoch, key));
+          if (!bytesEqual(commitment.toBytes(), row.commitment)) return yield* fail('corrupt');
           yield* installed.saveAndReload(row.epoch, key);
-          yield* Effect.acquireUseRelease(
-            installed.read(row.epoch),
-            Effect.fnUntraced(function* (copy) {
-              const commitment = yield* Effect.fromResult(commitEpochKey(anchor, row.epoch, copy));
-              if (!bytesEqual(commitment.toBytes(), row.commitment)) return yield* fail('corrupt');
-              return undefined;
-            }),
-            (copy) => Effect.sync(() => disposeEpochKey(copy))
-          );
         } else if (bound || view.length <= row.parentCount) return yield* fail('context-changed');
         if (row.outcome && row.outcome !== outcome) return yield* fail('corrupt');
         // Binding reports the first confirmed local installation. A later epoch must
@@ -452,7 +473,8 @@ export class EpochPublisher extends Context.Service<
             const bound = yield* bindingOf(view, row);
             const entry = yield* submit(submission.pending());
             if (entry.record && !bytesEqual(entry.record, row.record)) return yield* fail('busy');
-            if (row.outcome && !entry.record) return yield* confirm(row, row.outcome, key);
+            if (row.outcome && (!entry.record || entry.outcome === row.outcome))
+              return yield* confirm(row, row.outcome, key);
             // The immutable complete group is durable locally and remotely before the
             // first CAS may be attempted. A matching submission journal original
             // has already passed staging/readback; resume it without staging I/O.
@@ -470,7 +492,6 @@ export class EpochPublisher extends Context.Service<
               if (!stored) return yield* fail('stage-readback');
               const owned = yield* Effect.fromResult(ownEpochStagedGroup(stored));
               if (!sameEpochStagedGroup(original, owned)) return yield* fail('stage-readback');
-              yield* Effect.fromResult(authenticateEpochStagedGroup(proposed, owned, true));
             }
             const submitted = entry.record
               ? yield* submit(submission.resume())
@@ -546,7 +567,7 @@ export class EpochPublisher extends Context.Service<
           binding:
             done.outcome === 'Conflict'
               ? null
-              : view.inspectState().epoch.number === epoch
+              : internalViewState(view)?.epoch.number === epoch
                 ? ('current' as const)
                 : ('historical' as const),
         };
@@ -563,24 +584,38 @@ export class EpochPublisher extends Context.Service<
         view: LedgerView,
         target: Bytes.MembershipId | undefined,
         previous: Bytes.EpochKey,
-        key: Bytes.EpochKey
+        key: Bytes.EpochKey,
+        baseEpoch?: number
       ) {
-        const state = view.inspectState(),
-          epoch = yield* Effect.fromResult(Bytes.epochNumber(state.epoch.number + 1));
-        const old = yield* Effect.fromResult(commitEpochKey(anchor, state.epoch.number, previous));
-        if (!old.equals(state.epoch.keyCommitment)) return yield* fail('corrupt');
+        const state = internalViewState(view);
+        if (!state) return yield* fail('corrupt');
+        const epoch = yield* Effect.fromResult(Bytes.epochNumber(state.epoch.number + 1));
+        const old = yield* Effect.fromResult(
+          commitEpochKey(anchor, baseEpoch ?? state.epoch.number, previous)
+        );
+        const prior = yield* Effect.fromResult(
+          epochHistoryPacket(view, baseEpoch ?? state.epoch.number)
+        );
+        if (!old.equals(prior.commitment)) return yield* fail('corrupt');
         const commitment = yield* Effect.fromResult(commitEpochKey(anchor, epoch, key)),
           packet = yield* Effect.fromResult(
-            sealHistoryPacket({ genesis: anchor, epoch, currentKey: key, previousKey: previous })
+            sealHistoryPacket({
+              genesis: anchor,
+              epoch,
+              baseEpoch,
+              currentKey: key,
+              previousKey: previous,
+            })
           );
         yield* Effect.acquireUseRelease(
-          Effect.fromResult(openHistoryPacket({ genesis: anchor, epoch, currentKey: key, packet })),
+          Effect.fromResult(
+            openHistoryPacket({ genesis: anchor, epoch, baseEpoch, currentKey: key, packet })
+          ),
           Effect.fnUntraced(function* (restored) {
             const restoredCommitment = yield* Effect.fromResult(
-              commitEpochKey(anchor, state.epoch.number, restored)
+              commitEpochKey(anchor, baseEpoch ?? state.epoch.number, restored)
             );
-            if (!restoredCommitment.equals(state.epoch.keyCommitment))
-              return yield* fail('corrupt');
+            if (!restoredCommitment.equals(prior.commitment)) return yield* fail('corrupt');
             return undefined;
           }),
           (restored) => Effect.sync(() => disposeEpochKey(restored))
@@ -589,9 +624,11 @@ export class EpochPublisher extends Context.Service<
           encodeCbor([
             view.head.toBytes(),
             publicKey.toBytes(),
-            target
-              ? [8, target.toBytes(), epoch, commitment.toBytes(), packet]
-              : [7, epoch, commitment.toBytes(), packet],
+            baseEpoch !== undefined
+              ? [11, epoch, commitment.toBytes(), baseEpoch, packet]
+              : target
+                ? [8, target.toBytes(), epoch, commitment.toBytes(), packet]
+                : [7, epoch, commitment.toBytes(), packet],
           ])
         );
         const proposal = yield* Effect.fromResult(prepareLedgerRecord(view, body));
@@ -599,8 +636,11 @@ export class EpochPublisher extends Context.Service<
         const proposed = yield* Effect.fromResult(
           extendLedger(view, [record], { head: hashRecordBytes(record), length: view.length + 1 })
         );
+        const proposedState = internalViewState(proposed);
+        if (!proposedState) return yield* fail('corrupt');
+        const candidate = verifiedEpochCandidate(view, record, proposed);
         const envelopes: { recipient: string; frame: Uint8Array }[] = [];
-        for (const [recipient] of [...proposed.inspectState().devices].sort(([a], [b]) =>
+        for (const recipient of [...HashMap.keys(proposedState.devices)].sort((a, b) =>
           a.localeCompare(b)
         )) {
           envelopes.push({
@@ -615,7 +655,7 @@ export class EpochPublisher extends Context.Service<
               key,
               signer,
               ledger: current,
-              candidate: { before: view, record },
+              candidate,
             }),
           });
         }
@@ -631,7 +671,7 @@ export class EpochPublisher extends Context.Service<
         );
         yield* Effect.fromResult(authenticateEpochStagedGroup(proposed, originals, true));
         const envelopeBytes = yield* Effect.fromResult(
-          encodeSnapshotCbor(
+          encodeCandidateEnvelopesCbor(
             originals.envelopes.map((item) => [fromHex(item.recipient), item.frame])
           )
         );
@@ -665,7 +705,10 @@ export class EpochPublisher extends Context.Service<
         return { ...row, blob };
       });
 
-      const publish = Effect.fnUntraced(function* (removing?: Bytes.MembershipId) {
+      const publish = Effect.fnUntraced(function* (
+        removing?: Bytes.MembershipId,
+        baseEpoch?: number
+      ) {
         const target = removing
           ? yield* Effect.fromResult(Bytes.membershipId(removing.toBytes()))
           : undefined;
@@ -675,10 +718,13 @@ export class EpochPublisher extends Context.Service<
           const decoded = yield* Effect.fromResult(decodeRecord(existing.record));
           if (
             decoded.body.type !== 'ordinary' ||
-            (target
-              ? decoded.body.operation.type !== 'removeMemberAndPublishEpoch' ||
-                !decoded.body.operation.membershipId.equals(target)
-              : decoded.body.operation.type !== 'publishEpoch')
+            (baseEpoch !== undefined
+              ? decoded.body.operation.type !== 'abandonEpoch' ||
+                decoded.body.operation.baseEpoch !== baseEpoch
+              : target
+                ? decoded.body.operation.type !== 'removeMemberAndPublishEpoch' ||
+                  !decoded.body.operation.membershipId.equals(target)
+                : decoded.body.operation.type !== 'publishEpoch')
           )
             return yield* fail('busy');
           return yield* settle(existing);
@@ -690,20 +736,37 @@ export class EpochPublisher extends Context.Service<
             return yield* fail('busy');
           const operation = decoded.body.operation;
           if (
-            target
-              ? operation.type !== 'removeMemberAndPublishEpoch' ||
-                !operation.membershipId.equals(target)
-              : operation.type !== 'publishEpoch'
+            baseEpoch !== undefined
+              ? operation.type !== 'abandonEpoch' || operation.baseEpoch !== baseEpoch
+              : target
+                ? operation.type !== 'removeMemberAndPublishEpoch' ||
+                  !operation.membershipId.equals(target)
+                : operation.type !== 'publishEpoch'
           )
             return yield* fail('busy');
           const recovered = yield* recoverMissing();
           return recovered ?? (yield* fail('candidate-missing'));
         }
         yield* manager(view, target);
-        if (!target && !view.inspectState().epoch.rotationRequired)
+        const viewState = internalViewState(view);
+        if (!viewState) return yield* fail('unauthorized');
+        if (baseEpoch !== undefined) {
+          const device = Option.getOrUndefined(HashMap.get(viewState.devices, publisher));
+          if (
+            !device?.membershipId.equals(viewState.owner) ||
+            !HashSet.has(viewState.capabilities, 2) ||
+            !Number.isSafeInteger(baseEpoch) ||
+            baseEpoch < 0 ||
+            baseEpoch >= viewState.epoch.number
+          )
+            return yield* fail('unauthorized');
+          const prior = yield* Effect.fromResult(epochHistoryPacket(view, baseEpoch));
+          if (prior.abandoned) return yield* fail('unauthorized');
+        }
+        if (baseEpoch === undefined && !target && !viewState.epoch.rotationRequired)
           return yield* fail('rotation-not-required');
         const row = yield* Effect.acquireUseRelease(
-          installed.read(view.inspectState().epoch.number),
+          installed.read(baseEpoch ?? viewState.epoch.number),
           (previous) =>
             Effect.acquireUseRelease(
               Effect.try({
@@ -717,7 +780,7 @@ export class EpochPublisher extends Context.Service<
                 },
                 catch: () => fail('storage'),
               }),
-              (key) => generate(view, target, previous, key),
+              (key) => generate(view, target, previous, key, baseEpoch),
               (key) => Effect.sync(() => disposeEpochKey(key))
             ),
           (previous) => Effect.sync(() => disposeEpochKey(previous))
@@ -761,12 +824,36 @@ export class EpochPublisher extends Context.Service<
         )
           return yield* fail('corrupt');
         if (row.consumed) return undefined;
-        const settled = yield* settle(row);
-        if (settled.outcome !== expected.outcome || settled.binding !== expected.binding)
-          return yield* fail('corrupt');
         const entry = yield* submit(submission.pending());
-        if (entry.record) {
-          if (!bytesEqual(entry.record, original) || entry.outcome !== expected.outcome)
+        if (entry.record && !bytesEqual(entry.record, original)) return yield* fail('busy');
+        // Fast path when `row` is already settled (`row.outcome !== null` and the submission
+        // journal either has no pending record or already recorded the matching outcome):
+        // verify ledger binding and installed key directly without re-opening the candidate
+        // protector or re-writing the installed key store. Fall back to `settle(row)` only
+        // when the submission is still unconfirmed or the installed key needs repair.
+        let verifiedAlreadySettled = false;
+        if (!entry.record || entry.outcome === row.outcome) {
+          const view = yield* current();
+          const bound = yield* bindingOf(view, row);
+          if (row.outcome === 'Committed') {
+            if (!bound) return yield* fail('context-changed');
+            const installedCheck = yield* Effect.result(installed.check(row.epoch));
+            if (Result.isSuccess(installedCheck)) verifiedAlreadySettled = true;
+            else if (installedCheck.failure.reason !== 'missing-key')
+              return yield* installedCheck.failure;
+          } else {
+            if (bound || view.length <= row.parentCount) return yield* fail('context-changed');
+            verifiedAlreadySettled = true;
+          }
+        }
+        if (!verifiedAlreadySettled) {
+          const settled = yield* settle(row);
+          if (settled.outcome !== expected.outcome || settled.binding !== expected.binding)
+            return yield* fail('corrupt');
+        }
+        const afterEntry = verifiedAlreadySettled ? entry : yield* submit(submission.pending());
+        if (afterEntry.record) {
+          if (!bytesEqual(afterEntry.record, original) || afterEntry.outcome !== expected.outcome)
             return yield* fail('busy');
           yield* submit(submission.acknowledge({ outcome: expected.outcome, record: original }));
         }
@@ -794,6 +881,11 @@ export class EpochPublisher extends Context.Service<
         publishRemoving: Effect.fn('@lody/e2ee-core/EpochPublisher.publishRemoving')(
           function* (membership) {
             return yield* lease(publish(membership));
+          }
+        ),
+        publishAbandoning: Effect.fn('@lody/e2ee-core/EpochPublisher.publishAbandoning')(
+          function* (baseEpoch) {
+            return yield* lease(publish(undefined, baseEpoch));
           }
         ),
         resume: Effect.fn('@lody/e2ee-core/EpochPublisher.resume')(function* () {

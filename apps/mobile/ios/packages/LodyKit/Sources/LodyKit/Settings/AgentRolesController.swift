@@ -13,7 +13,12 @@ class AgentRolesController: UIViewController {
   private var pulled = false
   private var syncedAt: Double?
   private var version = 0
+  /// Whether the shown list is from a live read; cached rows never authorize writes.
+  private var live = false
   private var observer: NSObjectProtocol?
+  private var store: SettingsSnapshotStore<AgentRoleSnapshot> {
+    SettingsSnapshotStore(kind: "agent-roles", userId: workspace.userId, workspaceId: workspace.workspaceId)
+  }
 
   init(scope: SettingsScope = .catalog, service: @escaping AgentRoleService = AgentRolesController.cloud) {
     self.scope = scope
@@ -53,7 +58,16 @@ class AgentRolesController: UIViewController {
     workspace = next
     snapshot = nil
     syncedAt = nil
-    refresh()
+    live = false
+    version += 1
+    let id = version, store = store
+    Task { [weak self] in
+      // The last accepted list shows at once; the live read replaces it.
+      let cached = await store.read()
+      guard let self, self.version == id else { return }
+      if let cached, self.snapshot == nil { self.snapshot = cached }
+      self.refresh()
+    }
   }
 
   private func refresh() {
@@ -66,8 +80,7 @@ class AgentRolesController: UIViewController {
       let next = try? await service(.list)
       guard let self, self.version == id else { return }
       if let next {
-        self.snapshot = next
-        self.syncedAt = LodyRelativeTime.now()
+        self.accept(next)
       } else {
         self.failed = true
       }
@@ -75,6 +88,14 @@ class AgentRolesController: UIViewController {
       self.pulled = false
       self.render()
     }
+  }
+
+  private func accept(_ next: AgentRoleSnapshot) {
+    snapshot = next
+    syncedAt = LodyRelativeTime.now()
+    live = true
+    failed = false
+    store.write(next)
   }
 
   private func render() {
@@ -95,7 +116,7 @@ class AgentRolesController: UIViewController {
     let add = LodyFormController.barButton(symbol: "plus", label: AgentRoleSections.text("add")) { [weak self] in
       self?.edit(nil)
     }
-    add.isEnabled = snapshot?.agents.isEmpty == false && !loading && !failed
+    add.isEnabled = live && snapshot?.agents.isEmpty == false
     parent?.navigationItem.rightBarButtonItems = [add]
   }
 
@@ -115,16 +136,43 @@ class AgentRolesController: UIViewController {
   }
 
   private func edit(_ role: AgentRole?) {
-    guard let snapshot, !loading, !failed else { return }
-    let id = version
+    guard let snapshot else { return }
+    if role == nil, !live { return }
+    let key = workspace.key
     let editor = AgentRoleEditorController(
       workspace: workspace, scope: scope, role: role, agents: snapshot.agents, service: service
     )
-    editor.saved = { [weak self] in
-      guard let self, self.version == id else { return }
+    var previous: AgentRoleSnapshot?
+    editor.willChange = { [weak self] id, next in
+      guard let self, self.workspace.key == key, var current = self.snapshot else { return }
+      previous = current
+      // Older reads must not overwrite the optimistic row.
+      self.version += 1
+      self.loading = false
+      if let next {
+        if let index = current.roles.firstIndex(where: { $0.id == id }) { current.roles[index] = next }
+        else { current.roles.append(next) }
+        current.roles.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+      } else {
+        current.roles.removeAll { $0.id == id }
+      }
+      self.snapshot = current
+      self.render()
+    }
+    editor.failed = { [weak self] in
+      guard let self, self.workspace.key == key else { return }
+      if let previous { self.snapshot = previous }
+      self.render()
       self.refresh()
     }
-    LodyShell.shared.presentNative(editor, title: AgentRoleSections.text("edit"))
+    editor.saved = { [weak self] next in
+      guard let self, self.workspace.key == key else { return }
+      self.version += 1
+      self.loading = false
+      self.accept(next)
+      self.render()
+    }
+    LodyShell.shared.presentNative(editor, title: AgentRoleSections.text(role == nil ? "add" : "edit"))
   }
 
   static func cloud(_ request: AgentRoleRequest) async throws -> AgentRoleSnapshot {

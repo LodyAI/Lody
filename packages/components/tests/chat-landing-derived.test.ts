@@ -10,6 +10,7 @@ import {
   getChatLandingSelectedMachineState,
   getChatLandingSubmitDisabled,
   getChatLandingVisibleComposerStatus,
+  getChatLandingSharingReviewActionTarget,
   getSharingReviewSourcesReady,
   getSharingReviewTeamHasNoVisibleLocalResources,
   getSharingReviewTeamLooksEmpty,
@@ -33,6 +34,100 @@ describe('sharing review readiness and action', () => {
     expect(
       getSharingReviewSourcesReady({ ...readySources, isMetaRoomFirstSyncPending: true })
     ).toBe(false);
+  });
+});
+
+describe('composer sharing review target', () => {
+  const ownPrivate = {
+    machineId: 'own-private',
+    ownerUserId: 'viewer',
+    sharedWithTeam: false,
+    updatedAt: 1,
+  };
+  const args = {
+    currentUserId: 'viewer',
+    machineId: 'teammate-shared',
+    localProjectIds: [] as string[],
+    machineAccessByMachineId: new Map([
+      [ownPrivate.machineId, ownPrivate],
+      [
+        'teammate-shared',
+        {
+          ...ownPrivate,
+          machineId: 'teammate-shared',
+          ownerUserId: 'teammate',
+          sharedWithTeam: true,
+        },
+      ],
+      ['own-shared', { ...ownPrivate, machineId: 'own-shared', sharedWithTeam: true }],
+    ]),
+    localProjectAccessByKey: new Map([
+      [
+        'own-shared:private-project',
+        {
+          machineId: 'own-shared',
+          localProjectId: 'private-project',
+          ownerUserId: 'viewer',
+          sharedWithTeam: false,
+          updatedAt: 1,
+        },
+      ],
+      [
+        'own-shared:shared-project',
+        {
+          machineId: 'own-shared',
+          localProjectId: 'shared-project',
+          ownerUserId: 'viewer',
+          sharedWithTeam: true,
+          updatedAt: 1,
+        },
+      ],
+    ]),
+  };
+
+  it('keeps unrelated private machines out of a teammate’s shared-machine composer', () => {
+    expect(getChatLandingSharingReviewActionTarget(args)).toBeNull();
+    expect(getChatLandingSharingReviewActionTarget({ ...args, machineId: null })).toBeNull();
+  });
+
+  it('offers machine sharing only when the selected machine belongs to the user and is private', () => {
+    expect(getChatLandingSharingReviewActionTarget({ ...args, machineId: 'own-private' })).toBe(
+      'machines'
+    );
+    expect(
+      getChatLandingSharingReviewActionTarget({ ...args, machineId: 'own-shared' })
+    ).toBeNull();
+    expect(
+      getChatLandingSharingReviewActionTarget({
+        ...args,
+        machineId: 'own-private',
+        currentUserId: 'teammate',
+      })
+    ).toBeNull();
+  });
+
+  it('ignores private projects outside the selected project or project group', () => {
+    expect(
+      getChatLandingSharingReviewActionTarget({
+        ...args,
+        machineId: 'own-shared',
+        localProjectIds: ['shared-project'],
+      })
+    ).toBeNull();
+    expect(
+      getChatLandingSharingReviewActionTarget({
+        ...args,
+        machineId: 'own-shared',
+        localProjectIds: ['private-project'],
+      })
+    ).toBe('projects');
+    expect(
+      getChatLandingSharingReviewActionTarget({
+        ...args,
+        machineId: 'own-shared',
+        localProjectIds: ['shared-project', 'private-project'],
+      })
+    ).toBe('projects');
   });
 });
 
