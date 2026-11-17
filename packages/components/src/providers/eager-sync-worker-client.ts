@@ -7,7 +7,10 @@ import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-trans
 import type { PrefetchOutcome } from './background-sync-coordinator';
 import { readEagerSyncSnapshot } from './eager-sync-snapshot-cache';
 import {
-  CACHE_REJECTION_COOLDOWN_MS,
+  clearEagerSyncRejection,
+  eagerSyncRetryAt,
+  eagerSyncRetryDelay,
+  type EagerSyncRejection,
   readEagerSyncRejection,
   writeEagerSyncRejection,
 } from './eager-sync-admission';
@@ -31,6 +34,11 @@ export type EagerSyncWorkerClientDeps = {
   now?: () => number;
   readRejection?: typeof readEagerSyncRejection;
   writeRejection?: typeof writeEagerSyncRejection;
+  clearRejection?: typeof clearEagerSyncRejection;
+  scheduler?: {
+    setTimeout(handler: () => void, ms: number): unknown;
+    clearTimeout(handle: unknown): void;
+  };
   resolveTransport(roomId: string): Promise<EagerSyncTransport>;
   auth(context?: EagerSyncAuthContext): Promise<string | undefined>;
   localConnection(): { connection: LocalLoroDataPlaneConnection; dispose(): void } | null;
@@ -42,7 +50,12 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
   const jobs = new Map<string, AbortController>();
   let disposed = false;
   // Bounded fallback if browser storage refuses even the small rejection row.
-  const rejections = new Map<string, { lastMessageAt: number; rejectedAt: number }>();
+  const rejections = new Map<string, EagerSyncRejection>();
+  const rememberRejection = (roomId: string, row: EagerSyncRejection) => {
+    rejections.delete(roomId);
+    rejections.set(roomId, row);
+    if (rejections.size > 1000) rejections.delete(rejections.keys().next().value!);
+  };
 
   // These ports only read. Cancellation can abandon their result safely; a
   // late read must never construct a Worker or retain the renderer's slot.
@@ -90,9 +103,7 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
       deps.scope,
       deps.authorizationScope,
       transport.plane,
-      ...(transport.plane === 'cloud'
-        ? [transport.options.baseUrl, transport.options.bucketId, transport.streamId]
-        : []),
+      ...(transport.plane === 'cloud' ? [transport.streamUrl] : []),
     ]);
     // Optional background work must not fall back to overlapping downloads when
     // the browser cannot coordinate windows. Foreground opens remain independent.
@@ -100,41 +111,72 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
     if (!locks) return 'skipped';
     return locks.request(`lody:eager-sync:${key}`, { ifAvailable: true }, async (lock) => {
       if (!lock || signal.aborted || disposed) return 'skipped';
-      // Re-read AFTER the claim: a previous owner may have committed while this
-      // renderer was resolving its transport. No Worker/WASM on a cache hit.
-      const cached = await readUntilCancelled(
+      let previous = rejections.get(roomId);
+      if (previous?.key !== key) previous = undefined;
+      let cached: Awaited<ReturnType<typeof readEagerSyncSnapshot>>;
+      const finishAttempt = async (raw: PrefetchOutcome): Promise<PrefetchOutcome> => {
+        const timedOut = signal.aborted && signal.reason?.name === 'TimeoutError';
+        if (signal.aborted && !timedOut) return 'skipped';
+        const outcome = timedOut ? 'failed' : raw;
+        if (outcome === 'synced') {
+          rejections.delete(roomId);
+          if (previous)
+            await (deps.clearRejection ?? clearEagerSyncRejection)(key, signal).catch(() => {});
+        } else if (outcome === 'failed' || outcome === 'cache_rejected') {
+          // Switching failure categories is not recovery. Only a successful
+          // cache resets the room's accumulated retry history.
+          const attempts = previous ? (previous.attempts ?? 1) + 1 : 1;
+          const rejectedAt = (deps.now ?? Date.now)();
+          const row = {
+            key,
+            lastMessageAt,
+            rejectedAt,
+            kind: outcome,
+            attempts,
+            retryAt: rejectedAt + eagerSyncRetryDelay(outcome, attempts, !!cached?.cloudCheckpoint),
+          };
+          rememberRejection(roomId, row);
+          // The expired task signal cannot persist its timeout receipt. Give
+          // this metadata-only finalizer its own bounded cancellation owner.
+          const cleanup = timedOut ? new AbortController() : undefined;
+          const timer = cleanup
+            ? (deps.scheduler?.setTimeout ?? setTimeout)(() => cleanup.abort(), 1000)
+            : undefined;
+          try {
+            await (deps.writeRejection ?? writeEagerSyncRejection)(
+              row,
+              cleanup?.signal ?? signal
+            ).catch(() => {});
+          } finally {
+            if (timer !== undefined)
+              (
+                deps.scheduler?.clearTimeout ??
+                ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>))
+              )(timer);
+          }
+        }
+        return outcome;
+      };
+      const stored = await readUntilCancelled(
+        (deps.readRejection ?? readEagerSyncRejection)(key, signal),
+        signal
+      );
+      if (stored && (!previous || stored.rejectedAt > previous.rejectedAt)) previous = stored;
+      if (previous) rememberRejection(roomId, previous);
+      if (signal.aborted || disposed) return finishAttempt('skipped');
+      // Both reads happen under the claim. A current snapshot resets a stale
+      // failure even if a previous metadata deletion could not be committed.
+      cached = await readUntilCancelled(
         (deps.readSnapshot ?? readEagerSyncSnapshot)(deps.scope, roomId),
         signal
       );
-      if (signal.aborted || disposed) return 'skipped';
-      if (cached?.plane === transport.plane && cached.lastMessageAt >= lastMessageAt) {
-        return 'synced';
+      if (signal.aborted || disposed) return finishAttempt('skipped');
+      if (cached?.plane === transport.plane && cached.lastMessageAt >= lastMessageAt)
+        return finishAttempt('synced');
+      if (previous && (deps.now ?? Date.now)() < eagerSyncRetryAt(previous)) {
+        return previous.kind ?? 'cache_rejected';
       }
-      const rejected =
-        (await readUntilCancelled(
-          (deps.readRejection ?? readEagerSyncRejection)(key, signal),
-          signal
-        )) ?? rejections.get(key);
-      if (signal.aborted || disposed) return 'skipped';
-      const now = (deps.now ?? Date.now)();
-      if (
-        rejected &&
-        rejected.lastMessageAt >= lastMessageAt &&
-        now - rejected.rejectedAt < CACHE_REJECTION_COOLDOWN_MS
-      )
-        return 'cache_rejected';
-      if (signal.aborted || disposed) return 'skipped';
-      const outcome = await runWorker(roomId, lastMessageAt, signal, transport);
-      // runWorker resolves only after terminating the Worker and detaching its
-      // local peer. Keep the claim through the durable rejection receipt too.
-      if (outcome === 'cache_rejected') {
-        const row = { key, lastMessageAt, rejectedAt: (deps.now ?? Date.now)() };
-        rejections.delete(key);
-        rejections.set(key, row);
-        if (rejections.size > 1000) rejections.delete(rejections.keys().next().value!);
-        await (deps.writeRejection ?? writeEagerSyncRejection)(row, signal).catch(() => {});
-      }
-      return outcome;
+      return finishAttempt(await runWorker(roomId, lastMessageAt, signal, transport));
     });
   };
 
@@ -188,14 +230,13 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
         }
         resolve(cleanupFailed ? 'failed' : outcome);
       };
-      const abort = () => finish('skipped');
+      const abort = () => finish(signal.reason?.name === 'TimeoutError' ? 'failed' : 'skipped');
       signal.addEventListener('abort', abort, { once: true });
       worker.onerror = () => finish('failed');
       worker.onmessageerror = () => finish('failed');
       worker.onmessage = ({ data }: MessageEvent<EagerSyncWorkerOutput>) => {
         if (settled) return;
-        if (data.type === 'ready') startWorker();
-        else if (data.type === 'complete') finish(data.outcome);
+        if (data.type === 'complete') finish(data.outcome);
         else if (data.type === 'local-send') {
           try {
             local?.connection.send(data.message);
@@ -258,10 +299,15 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
           finish('failed');
         }
       };
+      startWorker();
     });
   };
 
   return {
+    getRetryAt(roomId: string): number | undefined {
+      const row = rejections.get(roomId);
+      return row ? eagerSyncRetryAt(row) : undefined;
+    },
     async prefetch(
       roomId: string,
       lastMessageAt: number,
@@ -269,12 +315,16 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
     ): Promise<PrefetchOutcome> {
       if (disposed || signal.aborted || jobs.has(roomId)) return 'skipped';
       const controller = new AbortController();
-      const abort = () => controller.abort();
+      const abort = () => controller.abort(signal.reason);
       signal.addEventListener('abort', abort, { once: true });
       jobs.set(roomId, controller);
       let cancelWait: () => void = () => {};
       const cancelled = new Promise<PrefetchOutcome>((resolve) => {
-        cancelWait = () => resolve('skipped');
+        cancelWait = () => {
+          // A deadline failure returns after its bounded retry receipt is owned;
+          // ordinary cancellation still lets the caller leave immediately.
+          if (controller.signal.reason?.name !== 'TimeoutError') resolve('skipped');
+        };
         controller.signal.addEventListener('abort', cancelWait, { once: true });
       });
       const task = workerQueue

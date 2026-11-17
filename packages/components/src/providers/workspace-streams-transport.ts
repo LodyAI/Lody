@@ -57,6 +57,19 @@ export const getWorkspaceMetaStreamUrl = (
     baseUrl: streamsBaseUrl,
   });
 
+/** The document URL built from the same bucket and room mapping as the transport. */
+export const getWorkspaceDocStreamUrl = (
+  workspaceId: WorkspaceId,
+  docId: string,
+  streamsBaseUrl: string,
+  bucketId: string = LORO_STREAMS_BUCKET_ID
+): string =>
+  createLoroStreamUrl({
+    bucketId,
+    streamId: getLoroStreamIdForDocId(workspaceId, docId),
+    baseUrl: streamsBaseUrl,
+  });
+
 /** The renderer's durable Streams transport for one workspace repo. */
 export const createWorkspaceStreamsTransport = (
   options: WorkspaceStreamsTransportOptions

@@ -35,6 +35,7 @@ export type ResilientRemoteCursorStoreOptions<TVersion extends JsonObject = Json
   indexedDb?: IDBFactory;
   onWarning?: (message: string, context: RemoteCursorStoreWarningContext) => void;
   onEvent?: (message: string, event: RemoteCursorStoreEvent) => void;
+  locks?: Pick<LockManager, 'request'>;
   createPrimaryStore?: (options: IndexedDbRemoteCursorStoreOptions) => RemoteCursorStore<TVersion>;
   createFallbackStore?: () => RemoteCursorStore<TVersion>;
 };
@@ -86,9 +87,34 @@ export class ResilientRemoteCursorStore<
     | undefined;
   private readonly onEvent: ((message: string, event: RemoteCursorStoreEvent) => void) | undefined;
   private degraded = false;
+  private readonly locks: Pick<LockManager, 'request'> | undefined;
+
+  private async withWriter<T>(streamUrl: string, operation: () => Promise<T>): Promise<T> {
+    if (!this.locks) return operation();
+    return await this.locks.request(
+      JSON.stringify(['lody:remote-cursor-write', this.dbName, streamUrl]),
+      {
+        signal: AbortSignal.timeout(
+          this.timeoutMs > 0 ? this.timeoutMs : DEFAULT_REMOTE_CURSOR_STORE_TIMEOUT_MS
+        ),
+      },
+      operation
+    );
+  }
+
+  /** Conditional insertion for a cold replica; ordinary cursor writes use the same gate. */
+  saveIfAbsent(cursor: RemoteCursor<TVersion>): Promise<boolean> {
+    if (!this.locks) return Promise.resolve(false);
+    return this.withWriter(cursor.streamUrl, async () => {
+      if (await this.load(cursor.streamUrl)) return false;
+      await this.saveUnlocked(cursor);
+      return true;
+    });
+  }
 
   constructor(options: ResilientRemoteCursorStoreOptions<TVersion>) {
     this.dbName = options.dbName;
+    this.locks = options.locks ?? globalThis.navigator?.locks;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_REMOTE_CURSOR_STORE_TIMEOUT_MS;
     this.onWarning = options.onWarning;
     this.onEvent = options.onEvent;
@@ -116,7 +142,11 @@ export class ResilientRemoteCursorStore<
     );
   }
 
-  async save(cursor: RemoteCursor<TVersion>): Promise<void> {
+  save(cursor: RemoteCursor<TVersion>): Promise<void> {
+    return this.withWriter(cursor.streamUrl, () => this.saveUnlocked(cursor));
+  }
+
+  private async saveUnlocked(cursor: RemoteCursor<TVersion>): Promise<void> {
     if (this.degraded) {
       await this.fallback.save(cursor);
       return;
@@ -130,7 +160,11 @@ export class ResilientRemoteCursorStore<
     );
   }
 
-  async delete(streamUrl: string): Promise<void> {
+  delete(streamUrl: string): Promise<void> {
+    return this.withWriter(streamUrl, () => this.deleteUnlocked(streamUrl));
+  }
+
+  private async deleteUnlocked(streamUrl: string): Promise<void> {
     if (this.degraded) {
       await this.deleteFromStoreWithAliases(this.fallback, streamUrl);
       return;

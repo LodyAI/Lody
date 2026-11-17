@@ -1,5 +1,5 @@
 import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shared';
-import { CACHE_REJECTION_COOLDOWN_MS } from './eager-sync-admission';
+import { CACHE_REJECTION_COOLDOWN_MS, FAILED_PREFETCH_COOLDOWN_MS } from './eager-sync-admission';
 import type { EagerSyncPolicy } from './eager-sync-policy';
 
 /**
@@ -57,6 +57,7 @@ export interface BackgroundSyncCoordinatorDeps {
   };
   registry: CoordinatorRegistryView;
   prefetcher: {
+    getRetryAt?(sessionId: SessionId): number | undefined;
     /**
      * One-shot catch-up: hold a replica until caught up (or the signal aborts /
      * a timeout fires), persist and release. Resolves with the
@@ -306,7 +307,7 @@ export function createBackgroundSyncCoordinator(
       return false;
     }
     const rejected = cacheRejected.get(snap.sessionId);
-    if (rejected && snap.lastMessageAt <= rejected.activity && clock.now() < rejected.until) {
+    if (rejected && clock.now() < rejected.until) {
       return false;
     }
     const synced = getSyncedThrough(snap.sessionId);
@@ -373,7 +374,7 @@ export function createBackgroundSyncCoordinator(
     controllers.set(sessionId, controller);
 
     const timeoutHandle = scheduler.setTimeout(() => {
-      controller.abort();
+      controller.abort(new DOMException('Eager-sync task timed out', 'TimeoutError'));
     }, policy.prefetchTimeoutMs);
 
     void prefetcher
@@ -385,11 +386,14 @@ export function createBackgroundSyncCoordinator(
           // before it creates a worker.
           recordSyncedThrough(sessionId, lastMessageAt);
         }
-        if (outcome === 'cache_rejected') {
+        if (outcome === 'cache_rejected' || outcome === 'failed') {
           cacheRejected.delete(sessionId);
           cacheRejected.set(sessionId, {
             activity: lastMessageAt,
-            until: clock.now() + CACHE_REJECTION_COOLDOWN_MS,
+            until:
+              prefetcher.getRetryAt?.(sessionId) ??
+              clock.now() +
+                (outcome === 'failed' ? FAILED_PREFETCH_COOLDOWN_MS : CACHE_REJECTION_COOLDOWN_MS),
           });
           if (cacheRejected.size > 1000) cacheRejected.delete(cacheRejected.keys().next().value!);
         }

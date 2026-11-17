@@ -1,9 +1,36 @@
 // Rebuildable scheduling metadata only; never a document or remote cursor.
 export const EAGER_SYNC_ADMISSION_DB = 'lody:eager-sync-admission-v1';
 export const CACHE_REJECTION_COOLDOWN_MS = 30 * 60 * 1000;
+export const FAILED_PREFETCH_COOLDOWN_MS = 60 * 1000;
+export const MAX_PREFETCH_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+export type PrefetchRetryKind = 'cache_rejected' | 'failed';
 const STORE = 'rejections';
 const MAX_ENTRIES = 1000;
-type Rejection = { key: string; lastMessageAt: number; rejectedAt: number };
+export type EagerSyncRejection = {
+  key: string;
+  lastMessageAt: number;
+  rejectedAt: number;
+  kind?: PrefetchRetryKind;
+  attempts?: number;
+  retryAt?: number;
+};
+type Rejection = EagerSyncRejection;
+
+export function eagerSyncRetryAt(row: Rejection): number {
+  return row.retryAt ?? row.rejectedAt + CACHE_REJECTION_COOLDOWN_MS;
+}
+
+export function eagerSyncRetryDelay(
+  kind: PrefetchRetryKind,
+  attempts: number,
+  hasCheckpoint: boolean
+): number {
+  const initial =
+    kind === 'cache_rejected' ? CACHE_REJECTION_COOLDOWN_MS : FAILED_PREFETCH_COOLDOWN_MS;
+  const cap =
+    kind === 'failed' && hasCheckpoint ? CACHE_REJECTION_COOLDOWN_MS : MAX_PREFETCH_COOLDOWN_MS;
+  return Math.min(cap, initial * 2 ** Math.min(20, Math.max(0, attempts - 1)));
+}
 
 async function withStore<T>(
   mode: IDBTransactionMode,
@@ -128,6 +155,17 @@ export async function writeEagerSyncRejection(row: Rejection, signal?: AbortSign
         }
         result(undefined);
       };
+    },
+    signal
+  );
+}
+
+export async function clearEagerSyncRejection(key: string, signal?: AbortSignal): Promise<void> {
+  return withStore(
+    'readwrite',
+    (store, result) => {
+      store.delete(key);
+      result(undefined);
     },
     signal
   );

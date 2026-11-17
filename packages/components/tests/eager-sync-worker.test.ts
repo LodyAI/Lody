@@ -16,7 +16,11 @@ import {
   createEagerSyncWorkerClient,
 } from '../src/providers/eager-sync-worker-client';
 import { runEagerSyncWorkerTask } from '../src/providers/eager-sync-worker-task';
-import type { EagerSyncSnapshot } from '../src/providers/eager-sync-snapshot-cache';
+import {
+  readEagerSyncSnapshot,
+  writeEagerSyncSnapshot,
+  type EagerSyncSnapshot,
+} from '../src/providers/eager-sync-snapshot-cache';
 import type {
   EagerSyncAuthContext,
   EagerSyncTransport,
@@ -40,12 +44,7 @@ class TestWorker {
   onmessageerror: (() => void) | null = null;
   terminated = false;
   inputs: EagerSyncWorkerInput[] = [];
-  constructor(
-    private start: (worker: TestWorker) => void,
-    ready = true
-  ) {
-    if (ready) queueMicrotask(() => this.emit({ type: 'ready' }));
-  }
+  constructor(private start: (worker: TestWorker) => void) {}
   postMessage(input: EagerSyncWorkerInput) {
     if (this.terminated) throw new Error('Posting to a terminated worker');
     this.inputs.push(input);
@@ -66,7 +65,6 @@ function clientHarness(
   auth: (context?: EagerSyncAuthContext) => Promise<string | undefined> = async () => {
     throw new Error('Local prefetch must never request cloud credentials');
   },
-  ready = true,
   overrides: Partial<EagerSyncWorkerClientDeps> = {}
 ) {
   const starts = [deferred<TestWorker>(), deferred<TestWorker>(), deferred<TestWorker>()];
@@ -91,7 +89,7 @@ function clientHarness(
     auth,
     createWorker: () => {
       const index = workers.length;
-      const worker = new TestWorker((started) => starts[index].resolve(started), ready);
+      const worker = new TestWorker((started) => starts[index].resolve(started));
       created.resolve(worker);
       workers.push(worker);
       return worker as unknown as Worker;
@@ -257,16 +255,87 @@ describe('worker raw-document prefetch', () => {
   });
 });
 
+describe('worker module startup', () => {
+  it('accepts its start message before the WASM task module finishes loading', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    const doc = new LoroDoc();
+    await writeEagerSyncSnapshot({
+      scope: 'startup',
+      roomId: 'room',
+      plane: 'local',
+      lastMessageAt: 1,
+      savedAt: 1,
+      snapshot: new Blob([doc.export({ mode: 'snapshot' }).slice().buffer]),
+    });
+    doc.free();
+    const loading = deferred<void>();
+    const release = deferred<void>();
+    const complete = deferred<EagerSyncWorkerOutput>();
+    let finished = false;
+    const worker = {
+      onmessage: null as ((event: MessageEvent<EagerSyncWorkerInput>) => void) | null,
+      postMessage: (message: EagerSyncWorkerOutput) => {
+        finished = true;
+        complete.resolve(message);
+      },
+    };
+    vi.stubGlobal('self', worker);
+    vi.doMock('../src/providers/eager-sync-worker-task', async (importOriginal) => {
+      loading.resolve();
+      await release.promise;
+      return await importOriginal();
+    });
+    try {
+      await import('../src/providers/eager-sync.worker');
+      expect(worker.onmessage).toBeTypeOf('function');
+      worker.onmessage!({
+        data: {
+          type: 'start',
+          content: { mode: 'plaintext' },
+          scope: 'startup',
+          workspaceId: 'workspace',
+          roomId: 'room',
+          peerId: 'worker',
+          lastMessageAt: 1,
+          connected: false,
+          transport: { plane: 'local' },
+        },
+      } as MessageEvent<EagerSyncWorkerInput>);
+      await loading.promise;
+      worker.onmessage!({
+        data: { type: 'local-status', connected: true },
+      } as MessageEvent<EagerSyncWorkerInput>);
+      expect(finished).toBe(false);
+      release.resolve();
+      expect(await complete.promise).toEqual({ type: 'complete', outcome: 'synced' });
+    } finally {
+      release.resolve();
+      vi.doUnmock('../src/providers/eager-sync-worker-task');
+    }
+  });
+});
+
+describe('worker deadline cancellation', () => {
+  it('reports a timed-out room as failed, terminates its worker and releases the next task', async () => {
+    const h = clientHarness();
+    const controller = new AbortController();
+    const first = h.client.prefetch('stuck-room', 1, controller.signal);
+    const worker = await h.starts[0].promise;
+    controller.abort(new DOMException('task deadline', 'TimeoutError'));
+    expect(await first).toBe('failed');
+    expect(worker.terminated).toBe(true);
+    const next = h.client.prefetch('next-room', 1, new AbortController().signal);
+    const nextWorker = await h.starts[1].promise;
+    nextWorker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await next).toBe('synced');
+    h.client.dispose();
+  });
+});
+
 describe('eager-sync cloud auth bridge', () => {
   const cloudTransport = async (): Promise<EagerSyncTransport> => ({
     plane: 'cloud',
-    streamId: 'stream',
-    options: {
-      bucketId: 'bucket',
-      metaStreamId: 'meta',
-      baseUrl: 'https://streams.example.com',
-      shardUrls: undefined,
-    },
+    streamUrl: 'https://streams.example.com/ds/bucket/stream',
   });
 
   it('refreshes a rejected JWT through the held provider callback instead of returning it', async () => {
@@ -344,22 +413,6 @@ describe('eager-sync cloud auth bridge', () => {
   });
 });
 
-it('cancels a worker still initializing WASM without attaching a local peer', async () => {
-  const h = clientHarness(undefined, undefined, undefined, false);
-  const controller = new AbortController();
-  const outcome = h.client.prefetch('initializing', 1, controller.signal);
-  const worker = await h.created.promise;
-  expect(worker.inputs).toEqual([]);
-  controller.abort();
-  expect(await outcome).toBe('skipped');
-  expect(worker.terminated).toBe(true);
-  // Late ready cannot resurrect the retired task or start a download.
-  worker.emit({ type: 'ready' });
-  expect(worker.inputs).toEqual([]);
-  expect(h.sent).toEqual([]);
-  h.client.dispose();
-});
-
 it.each(['snapshot', 'rejection'] as const)(
   'releases the claim and serial slot when a %s read never answers',
   async (stage) => {
@@ -371,7 +424,7 @@ it.each(['snapshot', 'rejection'] as const)(
       reading.resolve();
       return staleRead.promise;
     };
-    const h = clientHarness(undefined, undefined, undefined, true, {
+    const h = clientHarness(undefined, undefined, undefined, {
       ...(stage === 'snapshot' ? { readSnapshot: wait } : { readRejection: wait }),
       locks: {
         request: async (_name: string, _options: LockOptions, run: (lock: Lock) => unknown) => {
@@ -480,7 +533,7 @@ it('retains the claim until the cancelled refusal writer confirms its transactio
   const abortSeen = deferred<void>();
   const transactionEnded = deferred<void>();
   let held = false;
-  const h = clientHarness(undefined, undefined, undefined, true, {
+  const h = clientHarness(undefined, undefined, undefined, {
     writeRejection: async (_row, signal) => {
       writing.resolve();
       signal?.addEventListener('abort', () => abortSeen.resolve(), { once: true });
@@ -518,4 +571,386 @@ it('retains the claim until the cancelled refusal writer confirms its transactio
   expect(await successor).toBe('synced');
   h.client.dispose();
   next.client.dispose();
+});
+
+it('bounds observed retry metadata even when every room was deferred by another window', async () => {
+  const h = clientHarness(undefined, undefined, undefined, {
+    now: () => 0,
+    readRejection: async (key) => ({
+      key,
+      lastMessageAt: 1,
+      rejectedAt: 0,
+      kind: 'failed',
+      retryAt: 60_000,
+    }),
+  });
+  try {
+    for (let room = 0; room <= 1000; room++) {
+      expect(await h.client.prefetch(`deferred-${room}`, 2, new AbortController().signal)).toBe(
+        'failed'
+      );
+    }
+    expect(h.client.getRetryAt('deferred-0')).toBeUndefined();
+    expect(h.client.getRetryAt('deferred-1000')).toBe(60_000);
+    expect(h.workers).toEqual([]);
+  } finally {
+    h.client.dispose();
+  }
+});
+
+it('bounds the separate timeout metadata owner before releasing its slot', async () => {
+  const writing = deferred<void>();
+  let expire: () => void = () => {
+    throw new Error('No metadata deadline');
+  };
+  const h = clientHarness(undefined, undefined, undefined, {
+    now: () => 0,
+    scheduler: {
+      setTimeout: (handler, ms) => {
+        expect(ms).toBe(1000);
+        expire = handler;
+        return 1;
+      },
+      clearTimeout: () => {},
+    },
+    writeRejection: async (_row, signal) => {
+      writing.resolve();
+      await new Promise<void>((_resolve, reject) =>
+        signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+      );
+    },
+  });
+  const controller = new AbortController();
+  const result = h.client.prefetch('deadline', 1, controller.signal);
+  const worker = await h.starts[0].promise;
+  controller.abort(new DOMException('deadline', 'TimeoutError'));
+  await writing.promise;
+  expect(worker.terminated).toBe(true);
+  const next = clientHarness();
+  const successor = next.client.prefetch('independent', 1, new AbortController().signal);
+  expect(next.workers).toEqual([]);
+  expire();
+  expect(await result).toBe('failed');
+  const nextWorker = await next.starts[0].promise;
+  nextWorker.emit({ type: 'complete', outcome: 'synced' });
+  expect(await successor).toBe('synced');
+  expect(h.client.getRetryAt('deadline')).toBe(60_000);
+  h.client.dispose();
+  next.client.dispose();
+});
+
+describe('cloud prefetch checkpoints', () => {
+  function harness() {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    const remote = new LoroDoc();
+    remote.setPeerId('1');
+    remote.getMap('fields').set('remote', 'first');
+    remote.commit();
+    const request = {
+      type: 'start' as const,
+      content: { mode: 'plaintext' as const },
+      scope: 'scope',
+      roomId: 'room',
+      workspaceId: 'workspace',
+      peerId: 'worker',
+      lastMessageAt: 1,
+      connected: false,
+      transport: {
+        plane: 'cloud' as const,
+        streamUrl: 'https://streams.example.com/ds/bucket/room',
+      },
+    };
+    const reads: URL[] = [];
+    let delta: Uint8Array | undefined;
+    let tail = '100';
+    let gone = false;
+    let status = 200;
+    let bootstrapOverride: Uint8Array | undefined;
+    const fetch = async (input: string, init?: RequestInit) => {
+      expect(init?.method ?? 'GET').toBe('GET');
+      const url = new URL(input);
+      reads.push(url);
+      if (status !== 200) return new Response(null, { status });
+      if (url.pathname.endsWith('/bootstrap')) {
+        return new Response(
+          new Blob([
+            '--cp\r\nContent-Type: application/octet-stream\r\n\r\n',
+            (bootstrapOverride ?? remote.export({ mode: 'snapshot' })).slice().buffer,
+            '\r\n--cp--\r\n',
+          ]),
+          {
+            headers: {
+              'Content-Type': 'multipart/mixed; boundary=cp',
+              'Stream-Snapshot-Offset': tail,
+              'Stream-Next-Offset': tail,
+              'Stream-Up-To-Date': 'true',
+            },
+          }
+        );
+      }
+      if (gone) {
+        gone = false;
+        return new Response(null, { status: 410 });
+      }
+      const body = delta ? new Uint8Array(delta.length + 4) : undefined;
+      if (body && delta) {
+        new DataView(body.buffer).setUint32(0, delta.length, false);
+        body.set(delta, 4);
+      }
+      return new Response(body?.buffer, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Stream-Next-Offset': tail,
+          'Stream-Up-To-Date': 'true',
+        },
+      });
+    };
+    const deps: Parameters<typeof runEagerSyncWorkerTask>[1] = {
+      fetch,
+      now: () => 100,
+      auth: async () => 'token',
+      connection: {
+        isConnected: () => false,
+        send: () => {
+          throw new Error('cloud must not use local');
+        },
+        onMessage: () => () => {},
+        onStatusChange: () => () => {},
+      },
+    };
+    return {
+      request,
+      deps,
+      remote,
+      reads,
+      fetch,
+      change() {
+        const before = remote.oplogVersion();
+        remote.getMap('fields').set('remote', 'second');
+        remote.commit();
+        delta = remote.export({ mode: 'update', from: before });
+        tail = '200';
+      },
+      setBootstrap(value: Uint8Array) {
+        bootstrapOverride = value;
+      },
+      setDelta(value: Uint8Array) {
+        delta = value;
+        tail = '200';
+      },
+      gone() {
+        gone = true;
+      },
+      fail() {
+        status = 403;
+      },
+      read: () => readEagerSyncSnapshot('scope', 'room'),
+    };
+  }
+
+  it('restarts from its own atomic snapshot and cursor and downloads only the suffix', async () => {
+    const h = harness();
+    try {
+      expect(await runEagerSyncWorkerTask(h.request, h.deps)).toBe('synced');
+      const first = await h.read();
+      expect(first?.cloudCheckpoint?.cursor.nextOffset).toBe('100');
+      h.change();
+      h.reads.length = 0;
+      expect(await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)).toBe(
+        'synced'
+      );
+      expect(h.reads.map((url) => [url.pathname, url.searchParams.get('offset')])).toEqual([
+        ['/ds/bucket/room', '100'],
+      ]);
+      const second = await h.read();
+      const restored = LoroDoc.fromSnapshot(new Uint8Array(await second!.snapshot.arrayBuffer()));
+      expect(restored.toJSON()).toEqual(h.remote.toJSON());
+      expect(second?.cloudCheckpoint?.cursor.nextOffset).toBe('200');
+      restored.free();
+    } finally {
+      h.remote.free();
+    }
+  });
+
+  it.each(['legacy', 'lost', 'uncovered', 'stream', 'format'] as const)(
+    'bootstraps safely for a %s checkpoint',
+    async (kind) => {
+      const h = harness();
+      try {
+        await runEagerSyncWorkerTask(h.request, h.deps);
+        const row = (await h.read())!;
+        if (kind === 'legacy' || kind === 'lost') delete row.cloudCheckpoint;
+        else if (kind === 'uncovered')
+          row.cloudCheckpoint!.cursor = {
+            ...row.cloudCheckpoint!.cursor,
+            serverLowerBoundVersion: { '1': 999 },
+          };
+        else if (kind === 'stream')
+          row.cloudCheckpoint!.cursor = {
+            ...row.cloudCheckpoint!.cursor,
+            streamUrl: 'https://other.example.com/ds/bucket/room',
+          };
+        else row.cloudCheckpoint!.format = 99 as 1;
+        await writeEagerSyncSnapshot(row);
+        h.change();
+        h.reads.length = 0;
+        await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps);
+        expect(h.reads[0].pathname).toBe('/ds/bucket/room/bootstrap');
+        const restored = LoroDoc.fromSnapshot(
+          new Uint8Array(await (await h.read())!.snapshot.arrayBuffer())
+        );
+        expect(restored.toJSON()).toEqual(h.remote.toJSON());
+        restored.free();
+      } finally {
+        h.remote.free();
+      }
+    }
+  );
+
+  it('retains the previous atomic pair on network failure, rejected writes and interrupted saves', async () => {
+    const h = harness();
+    try {
+      await runEagerSyncWorkerTask(h.request, h.deps);
+      const before = (await h.read())!;
+      h.change();
+      expect(
+        await runEagerSyncWorkerTask(
+          { ...h.request, lastMessageAt: 2 },
+          { ...h.deps, writeSnapshot: async () => false }
+        )
+      ).toBe('cache_rejected');
+      const saving = deferred<void>();
+      const release = deferred<void>();
+      const interrupted = runEagerSyncWorkerTask(
+        { ...h.request, lastMessageAt: 2 },
+        {
+          ...h.deps,
+          writeSnapshot: async () => {
+            saving.resolve();
+            await release.promise;
+            throw new Error('worker terminated before commit');
+          },
+        }
+      );
+      await saving.promise;
+      expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
+      release.resolve();
+      await expect(interrupted).rejects.toThrow('worker terminated');
+      h.fail();
+      await expect(
+        runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)
+      ).rejects.toBeDefined();
+      expect((await h.read())?.lastMessageAt).toBe(1);
+      expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
+    } finally {
+      h.remote.free();
+    }
+  });
+
+  it('persists incomplete-room backoff across clients without advancing the atomic checkpoint', async () => {
+    const h = harness();
+    let now = 0;
+    const clients: Array<ReturnType<typeof clientHarness>> = [];
+    const create = () => {
+      const client = clientHarness(
+        async () => h.request.transport,
+        h.read,
+        async () => 'token',
+        {
+          now: () => now,
+          readRejection: readEagerSyncRejection,
+          createWorker: () =>
+            new TestWorker((worker) => {
+              const input = worker.inputs.find((message) => message.type === 'start')!;
+              void runEagerSyncWorkerTask(input, h.deps).then(
+                (outcome) => worker.emit({ type: 'complete', outcome }),
+                () => worker.emit({ type: 'complete', outcome: 'failed' })
+              );
+            }) as unknown as Worker,
+        }
+      );
+      clients.push(client);
+      return client.client;
+    };
+    try {
+      await runEagerSyncWorkerTask(h.request, h.deps);
+      const before = (await h.read())!;
+      // A recovery bootstrap cannot supply the missing predecessor yet either.
+      h.setBootstrap(h.remote.export({ mode: 'snapshot' }));
+      const predecessor = h.remote.oplogVersion();
+      h.remote.getText('body').insert(0, 'missing');
+      h.remote.commit();
+      const afterMissing = h.remote.oplogVersion();
+      h.remote.getText('body').insert(7, 'pending');
+      h.remote.commit();
+      h.setDelta(h.remote.export({ mode: 'update', from: afterMissing }));
+      const first = create();
+      expect(await first.prefetch('room', 2, new AbortController().signal)).toBe('failed');
+      expect(first.getRetryAt('room')).toBe(60_000);
+      first.dispose();
+      h.reads.length = 0;
+      const restarted = create();
+      expect(await restarted.prefetch('room', 3, new AbortController().signal)).toBe('failed');
+      expect(h.reads).toEqual([]);
+      expect((await h.read())?.cloudCheckpoint).toEqual(before.cloudCheckpoint);
+      expect((await h.read())?.lastMessageAt).toBe(1);
+      h.setDelta(h.remote.export({ mode: 'update', from: predecessor }));
+      now = 60_000;
+      expect(await restarted.prefetch('room', 3, new AbortController().signal)).toBe('synced');
+      expect((await h.read())?.lastMessageAt).toBe(3);
+      expect(restarted.getRetryAt('room')).toBeUndefined();
+      const recovered = LoroDoc.fromSnapshot(
+        new Uint8Array(await (await h.read())!.snapshot.arrayBuffer())
+      );
+      expect(recovered.toJSON()).toEqual(h.remote.toJSON());
+      recovered.free();
+    } finally {
+      for (const client of clients) client.client.dispose();
+      h.remote.free();
+    }
+  });
+
+  it('does not persist pending imports or activity progress', async () => {
+    const h = harness();
+    try {
+      await runEagerSyncWorkerTask(h.request, h.deps);
+      h.setBootstrap(h.remote.export({ mode: 'snapshot' }));
+      const beforeA = h.remote.oplogVersion();
+      h.remote.getText('body').insert(0, 'missing');
+      h.remote.commit();
+      const beforeB = h.remote.oplogVersion();
+      h.remote.getText('body').insert(7, 'pending');
+      h.remote.commit();
+      h.setDelta(h.remote.export({ mode: 'update', from: beforeB }));
+      await expect(
+        runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)
+      ).rejects.toBeDefined();
+      expect((await h.read())?.lastMessageAt).toBe(1);
+      h.setDelta(h.remote.export({ mode: 'update', from: beforeA }));
+      expect(await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps)).toBe(
+        'synced'
+      );
+    } finally {
+      h.remote.free();
+    }
+  });
+
+  it('recovers a gone worker cursor through bootstrap', async () => {
+    const h = harness();
+    try {
+      await runEagerSyncWorkerTask(h.request, h.deps);
+      h.change();
+      h.gone();
+      h.reads.length = 0;
+      await runEagerSyncWorkerTask({ ...h.request, lastMessageAt: 2 }, h.deps);
+      expect(h.reads.some((url) => url.pathname.endsWith('/bootstrap'))).toBe(true);
+      const restored = LoroDoc.fromSnapshot(
+        new Uint8Array(await (await h.read())!.snapshot.arrayBuffer())
+      );
+      expect(restored.toJSON()).toEqual(h.remote.toJSON());
+      restored.free();
+    } finally {
+      h.remote.free();
+    }
+  });
 });

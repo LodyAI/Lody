@@ -165,23 +165,35 @@ try {
   await start(restarted, 'restart', 'large');
   assert.equal(await result(restarted, 'restart'), 'cache_rejected');
   assert.equal(downloads.length, 6);
-  arrived = nextDownload();
-  await start(restarted, 'new-activity', 'large', 2);
-  await arrived;
-  release(6);
-  assert.equal(await result(restarted, 'new-activity'), 'cache_rejected');
-  await restarted.evaluate(() => globalThis.advance(30 * 60 * 1000));
-  arrived = nextDownload();
-  await start(restarted, 'expired', 'large', 2);
-  await arrived;
-  release(7);
-  assert.equal(await result(restarted, 'expired'), 'cache_rejected');
-  console.log('PASS persisted rejection, restart, new activity and expiry');
+  for (let activity = 2; activity <= 20; activity++) {
+    await start(b, `active-${activity}`, 'large', activity);
+    assert.equal(await result(b, `active-${activity}`), 'cache_rejected');
+  }
+  assert.equal(downloads.length, 6, 'new messages cannot bypass a refused cache cooldown');
+  // Five more refused downloads at 30m, 1.5h, 3.5h, 7.5h, 15.5h.
+  let elapsed = 0;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const delay = 30 * 60 * 1000 * 2 ** (attempt - 1);
+    elapsed += delay;
+    await restarted.evaluate((ms) => globalThis.advance(ms), delay);
+    const index = downloads.length;
+    arrived = nextDownload();
+    await start(restarted, `retry-${attempt}`, 'large', 20 + attempt);
+    await arrived;
+    release(index);
+    assert.equal(await result(restarted, `retry-${attempt}`), 'cache_rejected');
+  }
+  await restarted.evaluate((ms) => globalThis.advance(ms), 24 * 60 * 60 * 1000 - elapsed);
+  await start(restarted, 'at-24h', 'large', 100);
+  assert.equal(await result(restarted, 'at-24h'), 'cache_rejected');
+  assert.equal(downloads.length, 11, 'a refused room performs only six actual downloads in 24h');
+  console.log('PASS persistent exponential refusal backoff and continuous-activity download bound');
+  const afterRefusals = downloads.length;
 
   const unavailable = await page({ locks: null });
   await start(unavailable, 'no-lock', 'no-lock');
   assert.equal(await result(unavailable, 'no-lock'), 'skipped');
-  assert.equal(downloads.length, 8, 'lock-unavailable degradation must not download');
+  assert.equal(downloads.length, afterRefusals, 'lock-unavailable degradation must not download');
   console.log('PASS unavailable locks');
 
   await context.close();
@@ -212,7 +224,7 @@ try {
       workspace,
       authority,
       plane,
-      ...(plane === 'cloud' ? [url, 'bucket', 'scope-room'] : []),
+      ...(plane === 'cloud' ? [`${url}/ds/bucket/scope-room`] : []),
     ];
     assert.ok(held.includes(`lody:eager-sync:${JSON.stringify(key)}`));
     if (i === 0) {
@@ -221,10 +233,10 @@ try {
       assert.equal(await result(contender, 'same-scope'), 'skipped');
       await contender.close();
     }
-    release(8 + i);
+    release(afterRefusals + i);
     assert.equal(await result(scopes[i], 'isolated'), 'cache_rejected');
   }
-  assert.equal(downloads.length, 12);
+  assert.equal(downloads.length, afterRefusals + 4);
   console.log('PASS independent account, plane and workspace claims');
 
   for (const stage of ['snapshot', 'rejection']) {
@@ -251,6 +263,53 @@ try {
     await successor.close();
   }
   console.log('PASS cancelled unanswered cache reads release native claims and queue slots');
+
+  const failing = await page({ fail: true });
+  let index = downloads.length;
+  arrived = nextDownload();
+  await start(failing, 'failed', 'failure-room');
+  await arrived;
+  release(index);
+  assert.equal(await result(failing, 'failed'), 'failed');
+  const failureReader = await page();
+  await start(failureReader, 'failure-cooldown', 'failure-room', 2);
+  assert.equal(await result(failureReader, 'failure-cooldown'), 'failed');
+  assert.equal(downloads.length, index + 1);
+  await failureReader.evaluate(() => globalThis.advance(60 * 1000));
+  index = downloads.length;
+  arrived = nextDownload();
+  await start(failureReader, 'recovery', 'failure-room', 2);
+  await arrived;
+  release(index);
+  assert.equal(await result(failureReader, 'recovery'), 'synced');
+  await failureReader.evaluate(() => globalThis.configure({ fail: true }));
+  index = downloads.length;
+  arrived = nextDownload();
+  await start(failureReader, 'failed-again', 'failure-room', 3);
+  await arrived;
+  release(index);
+  assert.equal(await result(failureReader, 'failed-again'), 'failed');
+  assert.equal(
+    await failureReader.evaluate(() => globalThis.retryAt('failure-room')),
+    2 * 60 * 1000,
+    'successful cache resets exponential attempts'
+  );
+
+  const timeout = await page({ fail: true });
+  index = downloads.length;
+  arrived = nextDownload();
+  await start(timeout, 'timeout', 'timeout-room');
+  await arrived;
+  await timeout.evaluate(() => globalThis.timeout('timeout'));
+  assert.equal(await result(timeout, 'timeout'), 'failed');
+  const timeoutLock = `lody:eager-sync:${JSON.stringify(['workspace', 'timeout-room', 'workspace', 'account', 'local'])}`;
+  await timeout.evaluate((key) => navigator.locks.request(key, () => {}), timeoutLock);
+  release(index);
+  const timeoutReader = await page();
+  await start(timeoutReader, 'after-timeout', 'timeout-room', 2);
+  assert.equal(await result(timeoutReader, 'after-timeout'), 'failed');
+  assert.equal(downloads.length, index + 1, 'timeout cooldown must survive to another window');
+  console.log('PASS failure persistence, successful reset and timeout receipts');
 } finally {
   clearTimeout(watchdog);
   await browser?.close();

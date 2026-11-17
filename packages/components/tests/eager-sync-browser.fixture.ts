@@ -14,6 +14,7 @@ Object.assign(globalThis, {
       authorizationScope?: string;
       locks?: null;
       reject?: boolean;
+      fail?: boolean;
       plane?: 'local' | 'cloud';
       pendingRead?: 'snapshot' | 'rejection';
     } = {}
@@ -38,11 +39,7 @@ Object.assign(globalThis, {
       ...(options.pendingRead === 'rejection' ? { readRejection: pendingRead } : {}),
       resolveTransport: async (roomId) =>
         options.plane === 'cloud'
-          ? {
-              plane: 'cloud',
-              streamId: roomId,
-              options: { baseUrl: location.origin, bucketId: 'bucket', metaStreamId: 'meta' },
-            }
+          ? { plane: 'cloud', streamUrl: new URL(`/ds/bucket/${roomId}`, location.href).href }
           : { plane: 'local' },
       auth: async () => {
         throw new Error('Unexpected cloud auth');
@@ -84,10 +81,10 @@ Object.assign(globalThis, {
       },
       // Exercise rejection with a real Worker that finishes only after receiving
       // real downloaded bytes, without allocating a >128MiB synthetic history.
-      ...(options.reject
+      ...(options.reject || options.fail
         ? {
             createWorker: () => {
-              const source = `onmessage = async ({data}) => { if(data.type !== 'start') return; await (await fetch(${JSON.stringify(new URL('/download', location.href).href)})).arrayBuffer(); postMessage({type:'complete',outcome:'cache_rejected'}); }; postMessage({type:'ready'});`;
+              const source = `onmessage = async ({data}) => { if(data.type !== 'start') return; await (await fetch(${JSON.stringify(new URL('/download', location.href).href)})).arrayBuffer(); postMessage({type:'complete',outcome:${JSON.stringify(options.fail ? 'failed' : 'cache_rejected')}}); };`;
               const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
               const worker = new Worker(url);
               URL.revokeObjectURL(url);
@@ -104,6 +101,8 @@ Object.assign(globalThis, {
   },
   enteredRead: () => enteredRead,
   result: (id: string) => results.get(id),
+  timeout: (id: string) => controllers.get(id)?.abort(new DOMException('deadline', 'TimeoutError')),
+  retryAt: (room: string) => client.getRetryAt(room),
   cancel: (id: string) => controllers.get(id)?.abort(),
   advance: (ms: number) => {
     now += ms;
