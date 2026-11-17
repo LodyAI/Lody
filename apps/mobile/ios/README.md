@@ -178,7 +178,8 @@ the panel with name and presence, owner avatar and name, then
 private/shared visibility. Visibility comes from the public machine-registration
 query on opening; unavailable data is shown as unknown, never inferred as private.
 The bottom machine capsule is omitted. The trailing Tabs button appears only with
-other open Tabs; More retains closed-Tab recovery and New current working directory
+other open Tabs. Its corner dot indicates unread output in other Tabs, respecting
+local visits; activity remains on each row in the expanded panel. More retains closed-Tab recovery and New current working directory
 conversation, using the existing create-Tab operation.
 Chat inline code matches the body size in a monospaced face. Prose blocks use
 secondary-label grey (links use web’s muted light/dark blue); fenced code retains its own sizing
