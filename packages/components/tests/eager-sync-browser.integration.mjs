@@ -84,7 +84,7 @@ try {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  let context = await browser.newContext();
   const page = async (options = {}) => {
     const p = await context.newPage();
     p.on('pageerror', (error) => console.error('Page error:', error));
@@ -184,6 +184,8 @@ try {
   assert.equal(downloads.length, 8, 'lock-unavailable degradation must not download');
   console.log('PASS unavailable locks');
 
+  await context.close();
+  context = await browser.newContext();
   // Claims and refusal records must not spread across authority/plane/workspace.
   const scopes = [
     await page({ reject: true }),
@@ -194,18 +196,33 @@ try {
   for (let i = 0; i < scopes.length; i++) {
     arrived = nextDownload();
     await start(scopes[i], 'isolated', 'scope-room');
-    await arrived;
+    assert.equal(
+      await Promise.race([arrived.then(() => 'download'), result(scopes[i], 'isolated')]),
+      'download'
+    );
+    const held = await scopes[i].evaluate(async () =>
+      (await navigator.locks.query()).held.map((lock) => lock.name)
+    );
+    const workspace = i === 3 ? 'another-workspace' : 'workspace';
+    const plane = i === 2 ? 'cloud' : 'local';
+    const authority = i === 1 ? 'another-account' : 'account';
+    const key = [
+      workspace,
+      'scope-room',
+      workspace,
+      authority,
+      plane,
+      ...(plane === 'cloud' ? [url, 'bucket', 'scope-room'] : []),
+    ];
+    assert.ok(held.includes(`lody:eager-sync:${JSON.stringify(key)}`));
     if (i === 0) {
-      await start(b, 'same-scope', 'scope-room');
-      assert.equal(await result(b, 'same-scope'), 'skipped');
+      const contender = await page();
+      await start(contender, 'same-scope', 'scope-room');
+      assert.equal(await result(contender, 'same-scope'), 'skipped');
+      await contender.close();
     }
-    // Keep at most two gated HTTP requests open per origin.
-    if (i % 2 === 1) {
-      release(8 + i - 1);
-      release(8 + i);
-      assert.equal(await result(scopes[i - 1], 'isolated'), 'cache_rejected');
-      assert.equal(await result(scopes[i], 'isolated'), 'cache_rejected');
-    }
+    release(8 + i);
+    assert.equal(await result(scopes[i], 'isolated'), 'cache_rejected');
   }
   assert.equal(downloads.length, 12);
   console.log('PASS independent account, plane and workspace claims');
