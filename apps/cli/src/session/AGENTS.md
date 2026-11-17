@@ -78,6 +78,7 @@ encrypted starts that run only signed input; the default ceiling had no room for
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Encrypted recovery preserves terminal
   decisions and newer pointers, closes partial replies with one notice, and isolates unrelated failures.
+- MCP selection changes retire ACP between prompts; changed-selection steer returns to dispatch for a new turn.
 - Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
