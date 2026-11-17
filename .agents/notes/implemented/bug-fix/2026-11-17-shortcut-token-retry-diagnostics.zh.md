@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/2836
 
 [English](2026-11-17-shortcut-token-retry-diagnostics.md)
 
