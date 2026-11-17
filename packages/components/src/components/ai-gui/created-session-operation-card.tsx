@@ -128,23 +128,23 @@ const styles = stylex.create({
   // A single shrinkable track: the nowrap row must ellipsize, not widen the card.
   root: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 },
   /**
-   * Who runs the Session, ahead of its title — the same "actor · what" line as
-   * a subagent row, so both kinds of delegated work read alike in one panel.
+   * Who runs the Session, at the row's end where a status word used to sit: the
+   * leading mark already says how the Session is doing.
    */
-  actor: {
+  agent: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
-    // The title gives way first; only then does a long Role name ellipsize,
-    // so the status never leaves the row.
+    // The title gives way first; only then does a long Role name ellipsize.
     flexShrink: 1,
     minWidth: '3em',
     maxWidth: '45%',
-    color: colors.label,
+    marginInlineStart: 'auto',
+    color: colors.secondaryLabel,
   },
-  actorIcon: { width: '13px', height: '13px', flexShrink: 0, color: colors.secondaryLabel },
-  // A fixed glyph box: an emoji's fallback-font width must not move the name.
-  actorEmoji: {
+  agentIcon: { width: '13px', height: '13px', flexShrink: 0 },
+  // A fixed glyph box, the width of the provider icon it stands in for.
+  agentEmoji: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -154,13 +154,13 @@ const styles = stylex.create({
     fontSize: '13px',
     lineHeight: 1,
   },
-  actorName: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  agentName: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   title: {
     flexGrow: 1,
-    // Shrink is weighted by base size, so the actor still receives a fraction of
-    // a pixel at a smaller ratio, and any fractional overflow draws an ellipsis
-    // on a name that fits. At this weight its share rounds to zero until the
-    // title reaches its minimum.
+    // Shrink is weighted by base size, so at a smaller ratio the agent name still
+    // receives a fraction of a pixel, and any fractional overflow draws an
+    // ellipsis on a name that fits. At this weight its share rounds to zero
+    // until the title reaches its minimum.
     flexShrink: 1_000_000,
     minWidth: '2em',
     overflow: 'hidden',
@@ -170,8 +170,18 @@ const styles = stylex.create({
     textAlign: 'start',
     fontWeight: 400,
   },
-  titleAfterActor: { color: colors.secondaryLabel },
-  status: { fontWeight: 400 },
+  /** The status word, for assistive technology only; sighted readers have the mark. */
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
   detail: {
     minWidth: 0,
     overflow: 'hidden',
@@ -198,8 +208,8 @@ export function CreatedSessionOperationCard({
   const { t } = useTranslation();
   const title = useOperationTargetTitle(sessionId, fallbackTitle);
   const identity = useCreatedSessionIdentity(sessionId);
-  const actor = identity ? (identity.roleName ?? identity.providerName) : null;
-  const actorDescription = identity
+  const agentName = identity ? (identity.roleName ?? identity.providerName) : null;
+  const agentDescription = identity
     ? identity.roleName
       ? t('sessions.openedBy.agentRoleOnProvider', '{{role}} (Agent Role) · {{provider}}', {
           role: identity.roleName,
@@ -221,15 +231,16 @@ export function CreatedSessionOperationCard({
         variant="ghost"
         size="small"
         disabled={!onNavigateSession}
-        title={actorDescription ? `${actorDescription}\n${title}` : title}
+        title={agentDescription ? `${agentDescription}\n${title}` : title}
         aria-label={`${t('sessions.openedBy.viewSession', 'View session')}: ${
-          actorDescription ? `${actorDescription} · ${title}` : title
+          agentDescription ? `${agentDescription} · ${title}` : title
         }`}
         onClick={onNavigateSession ? () => onNavigateSession({ sessionId }) : undefined}
       >
         <span {...stylex.props(taskStyles.line)}>
           <span
-            aria-hidden="true"
+            role="status"
+            data-session-creation-status={status}
             {...stylex.props(
               taskStyles.mark,
               status === 'succeeded'
@@ -242,54 +253,37 @@ export function CreatedSessionOperationCard({
             {status === 'running' ? (
               <Spinner size="small" label={null} />
             ) : (
-              <Glyph {...stylex.props(taskStyles.glyph)} />
+              <Glyph aria-hidden="true" {...stylex.props(taskStyles.glyph)} />
             )}
+            <span {...stylex.props(styles.srOnly)}>{t(statusLabels[status])}</span>
           </span>
-          {identity && actor ? (
-            <>
-              <span
-                data-created-session-agent={identity.roleName ? 'role' : 'provider'}
-                {...stylex.props(styles.actor)}
-              >
-                {identity.roleEmoji ? (
-                  <span aria-hidden="true" {...stylex.props(styles.actorEmoji)}>
-                    {identity.roleEmoji}
-                  </span>
-                ) : (
-                  <AgentIcon
-                    cliType={identity.cliType}
-                    agentType={identity.agentType}
-                    brandId={identity.brandId}
-                    env={identity.env}
-                    className={stylex.props(styles.actorIcon).className}
-                  />
-                )}
-                <span {...stylex.props(styles.actorName)}>{actor}</span>
-              </span>
-              <span aria-hidden="true" {...stylex.props(taskStyles.dot)}>
-                ·
-              </span>
-            </>
-          ) : null}
-          <span {...stylex.props(styles.title, Boolean(actor) && styles.titleAfterActor)}>
-            {title}
-          </span>
+          <span {...stylex.props(styles.title)}>{title}</span>
           {detail ? (
             <span title={detail} {...stylex.props(styles.detail)}>
               · {detail}
             </span>
           ) : null}
-          <span
-            role="status"
-            data-session-creation-status={status}
-            {...stylex.props(
-              taskStyles.meta,
-              styles.status,
-              status === 'failed' && taskStyles.danger
-            )}
-          >
-            {t(statusLabels[status])}
-          </span>
+          {identity && agentName ? (
+            <span
+              data-created-session-agent={identity.roleName ? 'role' : 'provider'}
+              {...stylex.props(styles.agent)}
+            >
+              {identity.roleEmoji ? (
+                <span aria-hidden="true" {...stylex.props(styles.agentEmoji)}>
+                  {identity.roleEmoji}
+                </span>
+              ) : (
+                <AgentIcon
+                  cliType={identity.cliType}
+                  agentType={identity.agentType}
+                  brandId={identity.brandId}
+                  env={identity.env}
+                  className={stylex.props(styles.agentIcon).className}
+                />
+              )}
+              <span {...stylex.props(styles.agentName)}>{agentName}</span>
+            </span>
+          ) : null}
         </span>
       </Button>
     </div>
