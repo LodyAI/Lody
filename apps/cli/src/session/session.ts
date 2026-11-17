@@ -497,6 +497,10 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     };
   }
 
+  getMcpServerIds(): Readonly<SessionConfig['mcpServerIds']> {
+    return [...this.config.mcpServerIds];
+  }
+
   getMemoryBinding(): SessionConfig['memory'] {
     return this.config.memory;
   }

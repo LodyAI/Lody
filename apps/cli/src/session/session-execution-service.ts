@@ -216,6 +216,12 @@ type FinalizeTurnContext = {
 
 type InboxExecutionHandle = Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
 
+function mcpSelectionChanged(session: ISession, input: SessionTurnInputConfig): boolean {
+  const selected = new Set(input.mcpServerIds ?? []);
+  const mounted = new Set(session.getMcpServerIds?.() ?? []);
+  return selected.size !== mounted.size || [...selected].some((id) => !mounted.has(id));
+}
+
 /** One message per definite encrypted refusal; only a sender without rights reads as one. */
 function encryptedRefusalMessage(
   reason: Exclude<
@@ -2414,6 +2420,9 @@ export class SessionExecutionService {
     const steerCapability = agentClient?.getAcknowledgedSteerCapability();
     if (!agentClient || !acpSessionId || !steerCapability) {
       return await rejectAndPromote('unsupported');
+    }
+    if (mcpSelectionChanged(runtime.session, options.inputConfig)) {
+      return await rejectAndPromote('unsupported', 'MCP selection requires a new turn.');
     }
     if (steerCapability.configPolicy === 'active') {
       const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
@@ -7863,10 +7872,13 @@ export class SessionExecutionService {
           self.captureStatusChanged(sessionId, 'initializing', undefined, 'chat_dispatch');
 
           let readySession = session;
+          // MCP servers are mounted at ACP startup. Replace between prompts so the
+          // driving turn's selection takes effect without hot-loading a busy agent.
           if (
             readySession &&
-            JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
-              JSON.stringify(acpSessionConfig.memory ?? null)
+            (mcpSelectionChanged(readySession, acpSessionConfig) ||
+              JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
+                JSON.stringify(acpSessionConfig.memory ?? null))
           ) {
             yield* ctx.abortIfCancelled();
             const previousSession = readySession;
