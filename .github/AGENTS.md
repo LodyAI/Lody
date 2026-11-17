@@ -12,7 +12,7 @@
 | Issue linking       | `scripts/pr-issue-link.mjs`                                    | Parse and normalize only `## Related issue`.                                                                                |
 | Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler.                                            |
 | Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                                                                      |
-| Code checks         | `workflows/ci.yml`, `scripts/select-ci-scope.mjs`              | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. Only main writes the pnpm store cache. |
+| Code checks         | `workflows/ci.yml`, `scripts/select-ci-scope.mjs`              | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. Only main writes the pnpm store cache. PR Vitest runs [narrow to related files](../.agents/notes/implemented/testing/2026-11-17-ci-vitest-related-tests.md). |
 | Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.                                                      |
 
 Do not duplicate a rule across these layers. Changes to required PR template

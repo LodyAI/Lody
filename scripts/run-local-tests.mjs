@@ -4,6 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { availableParallelism, totalmem } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { RELATED_FLAGS, relatedTestFiles } from '../.github/scripts/related-test-files.mjs';
 import { collectLocalScope } from './local-check-scope.mjs';
 import { REST_PACKAGES } from './vitest-rest.config.mjs';
 
@@ -51,6 +52,7 @@ export function buildSanitizedTestEnv(baseEnv = process.env, delimiter = path.de
 
 export function computeLocalTestWaves({
   scope = null,
+  related = null,
   cpus = availableParallelism(),
   perfCores = detectPerformanceCores(),
   platform = process.platform,
@@ -124,7 +126,7 @@ export function computeLocalTestWaves({
     Math.min(8, budget - Number(electronTask.env.LODY_ELECTRON_TEST_CONCURRENCY) - 1)
   );
 
-  const select = (waves) => selectAffectedTestWaves(waves, scope);
+  const select = (waves) => selectAffectedTestWaves(waves, scope, related);
 
   if (budget >= 16 && effectiveCores >= 16) {
     const dedicatedWorkers = Math.min(8, Math.floor(budget / 2));
@@ -142,11 +144,46 @@ export function computeLocalTestWaves({
   ]);
 }
 
-export function selectAffectedTestWaves(waves, scope) {
+const VITEST_PACKAGE_DIRECTORIES = { components: 'packages/components', cli: 'apps/cli' };
+
+/**
+ * Rewrite a Vitest suite task to `vitest related` over the changed modules.
+ * Package tasks run from their own directory, so paths are made relative to it.
+ */
+function relatedTask(task, related) {
+  if (task.id === 'rest') {
+    const [entry, , ...rest] = task.args;
+    return { ...task, args: [entry, 'related', ...RELATED_FLAGS, ...rest, ...related] };
+  }
+  // Package tasks are `pnpm --filter <name> run test ...flags`.
+  const directory = VITEST_PACKAGE_DIRECTORIES[task.id];
+  const name = task.args[task.args.indexOf('--filter') + 1];
+  const flags = task.args.slice(task.args.indexOf('test') + 1);
+  return {
+    ...task,
+    args: [
+      'pnpm',
+      '--filter',
+      name,
+      'exec',
+      'vitest',
+      'related',
+      ...RELATED_FLAGS,
+      ...flags,
+      ...related.map((file) => path.posix.relative(directory, file)),
+    ],
+  };
+}
+
+export function selectAffectedTestWaves(waves, scope, related = null) {
   if (!scope || !['affected', 'skip-tests'].includes(scope.mode)) return waves;
   if (!scope.runTests) return [];
   if (!Array.isArray(scope.testPackages) || scope.testPackages.length === 0) return waves;
   const selected = new Set(scope.testPackages);
+  const narrow = (task) =>
+    related?.length && (task.id === 'rest' || task.id in VITEST_PACKAGE_DIRECTORIES)
+      ? relatedTask(task, related)
+      : task;
   const dedicated = {
     components: '@lody/components',
     cli: 'lody',
@@ -162,9 +199,14 @@ export function selectAffectedTestWaves(waves, scope) {
         if (task.id === 'scripts') return scope.runScriptTests ? [task] : [];
         if (task.id === 'rest')
           return rest.length
-            ? [{ ...task, args: [...task.args, ...rest.map((dir) => `--project=${dir}:*`)] }]
+            ? [
+                narrow({
+                  ...task,
+                  args: [...task.args, ...rest.map((dir) => `--project=${dir}:*`)],
+                }),
+              ]
             : [];
-        return selected.has(dedicated[task.id]) ? [task] : [];
+        return selected.has(dedicated[task.id]) ? [narrow(task)] : [];
       })
     )
     .filter((wave) => wave.length);
@@ -231,7 +273,8 @@ async function main() {
   const verbose = process.argv.includes('--verbose') || process.env.LODY_CHECK_VERBOSE === '1';
   const env = buildSanitizedTestEnv(process.env);
   const scope = process.argv.includes('--affected') ? collectLocalScope() : null;
-  const waves = computeLocalTestWaves({ env: process.env, scope });
+  const related = relatedTestFiles(scope, { root: repoRoot });
+  const waves = computeLocalTestWaves({ env: process.env, scope, related });
   const failures = [];
 
   for (const wave of waves) {

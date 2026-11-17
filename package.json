@@ -18,6 +18,7 @@
     "test": "corepack pnpm -r --filter \"!{**/acp-extension-*}\" --workspace-concurrency=1 run test",
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:rest": "node packages/shared/node_modules/vitest/vitest.mjs run --config scripts/vitest-rest.config.mjs",
+    "test:rest:related": "node packages/shared/node_modules/vitest/vitest.mjs related --run --config scripts/vitest-rest.config.mjs",
     "docs": "node scripts/docs/main.mjs",
     "test:ci": "corepack pnpm test:scripts && corepack pnpm --filter @lody/site-docs run test && corepack pnpm --filter @lody/components run test --maxWorkers=2 && corepack pnpm --filter lody run test --maxWorkers=2 && corepack pnpm test:rest --maxWorkers=2 && corepack pnpm --filter @lody/electron run test",
     "test:watch": "corepack pnpm -r --filter \"!{**/acp-extension-*}\" run test:watch",
