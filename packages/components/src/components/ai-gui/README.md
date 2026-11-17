@@ -433,6 +433,10 @@ records the boundary and its trade-off. `message-quote-markdown.ts` converts the
 selected rendered content to a Markdown snapshot, preserving supported formatting,
 code lines and math source for the preview and Agent-bound text. It reconstructs
 Markdown from rendered content; it does not promise byte-identical source syntax.
+Clicking Quote inserts directly at the composer's last used caret and returns focus
+there. Questions are typed in the main composer. Its height follows the committed
+editor layout; after reaching the row limit, internal scrolling keeps the caret
+visible. `Chat/MessageQuotes` includes caret/growth and scrollable-draft stories.
 
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.
