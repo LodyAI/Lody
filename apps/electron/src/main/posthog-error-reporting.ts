@@ -128,7 +128,7 @@ export async function flushElectronMainErrorReporting(
 }
 
 export async function captureElectronMainException(
-  _error: unknown,
+  error: unknown,
   context?: { component?: string; extra?: Record<string, unknown> }
 ): Promise<void> {
   const posthog = getClient()
@@ -140,7 +140,10 @@ export async function captureElectronMainException(
     const pending = posthog.captureImmediate({
       event: '$exception',
       distinctId: resolveDistinctId(),
-      properties: { ...baseProperties(), ...redactedTelemetryException(context?.extra) }
+      properties: {
+        ...baseProperties(),
+        ...redactedTelemetryException({ ...baseProperties(), ...context?.extra }, error)
+      }
     })
     await Promise.race([
       pending.catch(() => {}),
