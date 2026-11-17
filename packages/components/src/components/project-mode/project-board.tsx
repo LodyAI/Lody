@@ -118,9 +118,15 @@ const BUCKET_LABELS: Record<ProjectBoardBucket, [key: string, fallback: string]>
 export function ProjectBoard({
   coordinatorSessionId,
   project,
+  onOpenSession,
+  hideTitle = false,
 }: {
   coordinatorSessionId: string | null;
   project: CoordinatorProjectKey | null;
+  /** Opens a row in place (the coordinator's right panel); defaults to the conversation's page. */
+  onOpenSession?: (sessionId: string) => void;
+  /** Inside the side panel the tab already names the board. */
+  hideTitle?: boolean;
 }) {
   const { allActiveSessions } = useVisibleSessionMetas();
   const { currentUserId } = useMySessionScope();
@@ -203,7 +209,12 @@ export function ProjectBoard({
     [router, workspaceSlug]
   );
   return (
-    <ProjectBoardView board={board} getSessionHref={getSessionHref} onOpenSession={openSession} />
+    <ProjectBoardView
+      board={board}
+      getSessionHref={getSessionHref}
+      onOpenSession={onOpenSession ?? openSession}
+      hideTitle={hideTitle}
+    />
   );
 }
 
@@ -212,15 +223,19 @@ export function ProjectBoardView({
   board,
   getSessionHref,
   onOpenSession,
+  hideTitle = false,
 }: {
   board: ProjectBoardData;
   getSessionHref: (sessionId: string) => string;
   onOpenSession: (sessionId: string) => void;
+  hideTitle?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <aside {...stylex.props(styles.column)} data-testid="project-board">
-      <h2 {...stylex.props(styles.title)}>{t('projectMode.board.title', 'All conversations')}</h2>
+      {hideTitle ? null : (
+        <h2 {...stylex.props(styles.title)}>{t('projectMode.board.title', 'All conversations')}</h2>
+      )}
       {PROJECT_BOARD_BUCKETS.map((bucket) => {
         const rows = board[bucket];
         // "In progress" is not one of the three columns the user watches; it shows only when busy.

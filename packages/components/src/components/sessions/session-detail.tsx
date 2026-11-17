@@ -48,6 +48,7 @@ import {
   getServerNow,
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
+  isCoordinatorSession,
   isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
@@ -372,6 +373,14 @@ import {
 } from '@/lib/session-create-analytics';
 import { persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { SessionChangesSidebar } from './session-changes-sidebar';
+import { developerModeEnabledAtom } from '@/atoms/settings';
+import { ProjectBoard } from '@/components/project-mode/project-board';
+import { getSessionCoordinatorProjectKey } from '@/components/project-mode/project-board-model';
+import {
+  OwnedSessionFileViewer,
+  PROJECT_BOARD_PANEL_TAB_ID,
+  usePanelSessionMetas,
+} from '@/components/project-mode/coordinator-side-panel';
 
 type SidebarTab = PersistedSidePanelTab;
 
@@ -387,6 +396,11 @@ type ViewerTab =
       focusRequestSeq?: number;
       /** One-shot request to enter the executable HTML preview after opening. */
       htmlPreviewRequestSeq?: number;
+      /**
+       * Project mode: opened from a conversation hosted in the panel, read from
+       * that conversation's own workspace. Never persisted.
+       */
+      ownerSessionId?: SessionId;
     }
   | {
       id: string;
@@ -1353,7 +1367,8 @@ const SessionDetail = ({
   );
   const codeCollabRequestedRole = useCodeCollabRequestedRole();
   const hasFileProviderViewerTabs = useMemo(
-    () => viewerTabs.some((tab) => tab.type === 'file' || tab.type === 'diff'),
+    () =>
+      viewerTabs.some((tab) => (tab.type === 'file' && !tab.ownerSessionId) || tab.type === 'diff'),
     [viewerTabs]
   );
   const isFileProviderSidebarActive =
@@ -1476,6 +1491,8 @@ const SessionDetail = ({
   // session doc per side chat on every session-detail mount — even for a user
   // who never expands the panel. A side chat mounts when it is first selected
   // and stays mounted afterwards, so switching panels never tears down its state.
+  /** Project mode: independent conversations opened from the board into the right panel. */
+  const [panelSessionIds, setPanelSessionIds] = useState<SessionId[]>([]);
   const [mountedSideSessionIds, setMountedSideSessionIds] = useState<Set<SessionId>>(
     () => new Set()
   );
@@ -1517,6 +1534,7 @@ const SessionDetail = ({
     setDirtyForkConfirmation(null);
     setClosingSideSessionIds(new Set());
     setMountedSideSessionIds(new Set());
+    setPanelSessionIds([]);
     setMountedChatSessionIds(new Set());
     setTabOrderState(readStoredTabOrder(sessionId));
     setViewerTabs(nextInitialTabState.viewerTabs);
@@ -1566,6 +1584,28 @@ const SessionDetail = ({
   const visibleSideSessions = useMemo(
     () => sideSessions.filter((sideSession) => !requestingForkTargetIds.has(sideSession.id)),
     [requestingForkTargetIds, sideSessions]
+  );
+  // Project mode (Developer mode): a coordinator keeps its board as a resident
+  // right-panel tab and opens its conversations there as tabs.
+  const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
+  const isProjectCoordinator = Boolean(
+    developerModeEnabled && activeSession && isCoordinatorSession(activeSession)
+  );
+  const coordinatorProject = useMemo(
+    () =>
+      isProjectCoordinator && activeSession ? getSessionCoordinatorProjectKey(activeSession) : null,
+    [activeSession, isProjectCoordinator]
+  );
+  const panelSessions = usePanelSessionMetas(isProjectCoordinator ? panelSessionIds : []);
+  const panelSessionIdSet = useMemo(
+    () => new Set<string>(panelSessions.map((panelSession) => panelSession.id)),
+    [panelSessions]
+  );
+  /** Everything rendered as a conversation inside the right panel. */
+  const panelHostedSessions = useMemo(
+    () =>
+      panelSessions.length > 0 ? [...visibleSideSessions, ...panelSessions] : visibleSideSessions,
+    [panelSessions, visibleSideSessions]
   );
 
   const sessionGroupIds = useMemo(
@@ -4223,7 +4263,7 @@ const SessionDetail = ({
     void (async () => {
       const resolutions = await Promise.all(
         viewerTabs.map(async (tab) => {
-          if (tab.type !== 'file') {
+          if (tab.type !== 'file' || tab.ownerSessionId) {
             return { tab, next: tab };
           }
 
@@ -4643,6 +4683,16 @@ const SessionDetail = ({
       return option ? [{ ...option, closeable: true }] : [];
     });
     return [
+      ...(isProjectCoordinator
+        ? [
+            {
+              id: PROJECT_BOARD_PANEL_TAB_ID,
+              label: t('projectMode.board.title', 'All conversations'),
+              kind: 'board' as const,
+              closeable: false,
+            },
+          ]
+        : []),
       ...fixedTabs,
       ...visibleSideSessions.map((sideSession): SessionSidePanelTabItem => ({
         id: getSideSessionPanelTabId(sideSession.id),
@@ -4650,6 +4700,12 @@ const SessionDetail = ({
         kind: 'session',
         closeable: true,
         pending: closingSideSessionIds.has(sideSession.id),
+      })),
+      ...panelSessions.map((panelSession): SessionSidePanelTabItem => ({
+        id: getSideSessionPanelTabId(panelSession.id),
+        label: panelSession.title?.trim() || t('sessions.untitled', 'Untitled session'),
+        kind: 'session',
+        closeable: true,
       })),
       ...viewerTabItems.map((tab): SessionSidePanelTabItem => ({
         ...tab,
@@ -4659,6 +4715,8 @@ const SessionDetail = ({
     ];
   }, [
     closingSideSessionIds,
+    isProjectCoordinator,
+    panelSessions,
     sidePanelFixedOptions,
     t,
     viewerTabItems,
@@ -5222,12 +5280,17 @@ const SessionDetail = ({
         : activeTabSessionId;
     writeStoredLastActiveTabState(sessionId, {
       sessionTabId: persistedSessionTabId,
-      viewerTab: activeViewerTab,
+      // Project-mode tabs are rebuilt on entry, never restored.
+      viewerTab:
+        activeViewerTab?.type === 'file' && activeViewerTab.ownerSessionId ? null : activeViewerTab,
       sidePanel: {
         open: isSidebarOpen,
-        tab: activeSidebarTab,
+        tab: (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ? null : activeSidebarTab,
         tabs: openedSidebarTabs,
-        sideSessionId: activeSideSessionId,
+        sideSessionId:
+          activeSideSessionId && panelSessionIdSet.has(activeSideSessionId)
+            ? null
+            : activeSideSessionId,
         split: sidePanelSplit,
       },
     });
@@ -5240,6 +5303,7 @@ const SessionDetail = ({
     activeViewerTab,
     isSidebarOpen,
     openedSidebarTabs,
+    panelSessionIdSet,
     sessionId,
     sidePanelSplit,
   ]);
@@ -5255,10 +5319,10 @@ const SessionDetail = ({
   const effectiveActiveSideSessionId = useMemo(
     () =>
       activeSideSessionId &&
-      visibleSideSessions.some((sideSession) => sideSession.id === activeSideSessionId)
+      panelHostedSessions.some((sideSession) => sideSession.id === activeSideSessionId)
         ? activeSideSessionId
         : null,
-    [activeSideSessionId, visibleSideSessions]
+    [activeSideSessionId, panelHostedSessions]
   );
   useEffect(() => {
     if (!effectiveActiveSideSessionId || mountedSideSessionIds.has(effectiveActiveSideSessionId)) {
@@ -5338,7 +5402,7 @@ const SessionDetail = ({
         handleViewerTabSelect(tabId);
         return;
       }
-      if (parseSideSessionPanelTabId(tabId)) {
+      if (parseSideSessionPanelTabId(tabId) || tabId === PROJECT_BOARD_PANEL_TAB_ID) {
         selectSidePanelTab(tabId);
         return;
       }
@@ -5350,6 +5414,13 @@ const SessionDetail = ({
   const handleSidePanelTabClose = useCallback(
     (tabId: string) => {
       const sideSessionId = parseSideSessionPanelTabId(tabId) as SessionId | null;
+      if (sideSessionId && panelSessionIdSet.has(sideSessionId)) {
+        // A board conversation is independent: closing its tab only hides it here.
+        const { fallbackTabId } = getSidePanelTabStateAfterClose(sidePanelTabIds, tabId);
+        setPanelSessionIds((current) => current.filter((id) => id !== sideSessionId));
+        if (activeSideSessionId === sideSessionId) selectSidePanelTab(fallbackTabId);
+        return;
+      }
       if (sideSessionId) {
         void handleCloseSideSession(sideSessionId);
         return;
@@ -5360,7 +5431,15 @@ const SessionDetail = ({
       }
       handleCloseSidebarTab(tabId as SidebarTab);
     },
-    [handleCloseSideSession, handleCloseSidebarTab, handleCloseViewerTab]
+    [
+      activeSideSessionId,
+      handleCloseSideSession,
+      handleCloseSidebarTab,
+      handleCloseViewerTab,
+      panelSessionIdSet,
+      selectSidePanelTab,
+      sidePanelTabIds,
+    ]
   );
 
   const activeSidePanelTabId =
@@ -5368,6 +5447,65 @@ const SessionDetail = ({
     (effectiveActiveSideSessionId
       ? getSideSessionPanelTabId(effectiveActiveSideSessionId)
       : activeSidebarTab);
+
+  // A coordinator's board is resident: entering one opens the panel on the board
+  // unless something else in the panel is already selected. A restored panel
+  // state must not animate, so the open bumps the restore sequence.
+  const boardEntrySessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isProjectCoordinator || isMobile) return;
+    if (boardEntrySessionRef.current === sessionId) return;
+    boardEntrySessionRef.current = sessionId;
+    if (activeSidePanelTabId === null) selectSidePanelTab(PROJECT_BOARD_PANEL_TAB_ID);
+    if (!isSidebarOpen) {
+      setIsSidebarOpen(true);
+      setSidebarRestoreSeq((seq) => seq + 1);
+    }
+  }, [
+    activeSidePanelTabId,
+    isMobile,
+    isProjectCoordinator,
+    isSidebarOpen,
+    selectSidePanelTab,
+    sessionId,
+  ]);
+
+  /** Opens a board conversation as a right-panel tab, keeping the coordinator on the left. */
+  const handleOpenPanelSession = useCallback(
+    (panelSessionId: string) => {
+      const id = panelSessionId as SessionId;
+      setPanelSessionIds((current) => (current.includes(id) ? current : [...current, id]));
+      selectSidePanelTab(getSideSessionPanelTabId(id));
+      setIsSidebarOpen(true);
+    },
+    [selectSidePanelTab]
+  );
+
+  /** A file link in a panel-hosted conversation opens a tab on that conversation's workspace. */
+  const handleOpenOwnedFile = useCallback(
+    (ownerSessionId: SessionId, rawPath: string, previewHtml = false) => {
+      const target = resolveDirectMarkdownFileOpenTarget(rawPath);
+      if (!target) {
+        void writeTextToClipboard(rawPath).then((copied) => {
+          if (copied) toast.success(t('sessions.fileViewer.pathCopied', 'File path copied'));
+        });
+        return;
+      }
+      const requestSeq = nextFocusRequestSeq();
+      upsertViewerTab({
+        id: `file:owned:${ownerSessionId}:${target.filePath}`,
+        type: 'file',
+        filePath: target.filePath,
+        label: getBasename(target.filePath),
+        startLine: target.startLine,
+        endLine: target.endLine,
+        focusRequestSeq: requestSeq,
+        ownerSessionId,
+        ...(previewHtml ? { htmlPreviewRequestSeq: requestSeq } : {}),
+      });
+    },
+    [nextFocusRequestSeq, t, upsertViewerTab]
+  );
   const resolveFocusedTabCloseTarget = useCallback(
     () =>
       getSessionTabCloseTarget({
@@ -6065,7 +6203,18 @@ const SessionDetail = ({
   );
 
   const renderViewerTabContent = (tab: ViewerTab, className = 'h-full', active = true) =>
-    tab.type === 'file' ? (
+    tab.type === 'file' && tab.ownerSessionId ? (
+      <OwnedSessionFileViewer
+        ownerSessionId={tab.ownerSessionId}
+        filePath={tab.filePath}
+        startLine={tab.startLine}
+        endLine={tab.endLine}
+        focusRequestSeq={tab.focusRequestSeq}
+        htmlPreviewRequestSeq={tab.htmlPreviewRequestSeq}
+        active={active}
+        className={className}
+      />
+    ) : tab.type === 'file' ? (
       <SessionFileContentView
         key={`${activeSession.id}:${tab.id}`}
         sessionId={activeSession.id}
@@ -7414,7 +7563,7 @@ const SessionDetail = ({
     );
   });
 
-  const desktopSideSessionSurfaces = visibleSideSessions
+  const desktopSideSessionSurfaces = panelHostedSessions
     .filter(
       (sideSession) =>
         mountedSideSessionIds.has(sideSession.id) ||
@@ -7439,6 +7588,22 @@ const SessionDetail = ({
           <SessionChatSurface
             {...getSharedChatSurfaceProps(sideSession, isActive, isActive && isSidebarVisible)}
             isChildTab
+            {...(panelSessionIdSet.has(sideSession.id)
+              ? {
+                  // An independent conversation: its own workspace, and its files
+                  // open as panel tabs on that workspace, not the coordinator's.
+                  workspaceSession: sideSession,
+                  onFilePathClick: (filePath: string) =>
+                    handleOpenOwnedFile(sideSession.id, filePath),
+                  onFileDiffClick: (_turnId: string, filePath: string) =>
+                    handleOpenOwnedFile(sideSession.id, filePath),
+                  onOpenHtmlFile: (filePath: string) =>
+                    handleOpenOwnedFile(sideSession.id, filePath, true),
+                  onOpenBrowser: undefined,
+                  onOpenPrTab: undefined,
+                  onOpenAllChanges: undefined,
+                }
+              : {})}
           />
         </div>
       );
@@ -7488,7 +7653,37 @@ const SessionDetail = ({
         )}
       />
       <div {...stylex.props(detailStyles.sidebarBody)}>
-        {showFixedSidePanelBody && activeSidebarTab !== null ? sidebarContent : null}
+        {showFixedSidePanelBody &&
+        activeSidebarTab !== null &&
+        (activeSidebarTab as string) !== PROJECT_BOARD_PANEL_TAB_ID
+          ? sidebarContent
+          : null}
+        {isProjectCoordinator && activeSession ? (
+          <div
+            className={
+              stylex.props(
+                detailStyles.absoluteFill,
+                !(
+                  showFixedSidePanelBody &&
+                  (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID
+                ) && detailStyles.hidden
+              ).className
+            }
+            aria-hidden={
+              !(
+                showFixedSidePanelBody &&
+                (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID
+              )
+            }
+          >
+            <ProjectBoard
+              coordinatorSessionId={activeSession.id}
+              project={coordinatorProject}
+              onOpenSession={handleOpenPanelSession}
+              hideTitle
+            />
+          </div>
+        ) : null}
         {showFixedSidePanelBody && activeSidebarTab === null && sidePanelTabs.length === 0 ? (
           <SessionSidePanelEmptyState
             panels={sidePanelOptions}

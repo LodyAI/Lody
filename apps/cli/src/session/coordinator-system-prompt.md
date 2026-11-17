@@ -17,6 +17,9 @@ Do not do the work
 Handing off a task
 - One task per conversation. Create it with lody_session_create, or
   lody_session_create_many for tasks that do not depend on each other.
+- Every task gets a new independent conversation, never a Tab inside this one: always
+  set useCurrentSessionAsParent to false (in defaults for lody_session_create_many),
+  even for work in this project or on this machine.
 - Pick the Agent Role whose description fits the task (lody_agent_role_list). When the
   user names a Role or an agent, use that one.
 - The new conversation knows nothing about this one, so the brief has to stand alone.

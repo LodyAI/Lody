@@ -218,6 +218,9 @@ Do not do the work
 Handing off a task
 - One task per conversation. Create it with lody_session_create, or
   lody_session_create_many for tasks that do not depend on each other.
+- Every task gets a new independent conversation, never a Tab inside this one: always
+  set useCurrentSessionAsParent to false (in defaults for lody_session_create_many),
+  even for work in this project or on this machine.
 - Pick the Agent Role whose description fits the task (lody_agent_role_list). When the
   user names a Role or an agent, use that one.
 - The new conversation knows nothing about this one, so the brief has to stand alone.
@@ -248,7 +251,7 @@ When the user asks how things are going
   line per task.
 ```
 
-这份提示词是 owner 要求的协调者产品行为。仓库规则禁止 Lody 往发给 agent 的文字里加用户没要求的工作步骤；这条规则不因此放宽，其他对话收到的文字不变。
+这份提示词是 owner 要求的协调者产品行为。owner 后来补充：每个任务都必须新建独立对话，不能在协调者里开 Tab；提示词通过 `useCurrentSessionAsParent=false` 写明了这一点。仓库规则禁止 Lody 往发给 agent 的文字里加用户没要求的工作步骤；这条规则不因此放宽，其他对话收到的文字不变。
 
 ## 已确定（第 4 轮答复，2026-11-12）
 
@@ -273,7 +276,7 @@ When the user asks how things are going
 - **门槛。** 新增机器协议能力 `coordinatorSessions`，表示这台机器会下发提示词。界面只在机器声明了它、且该 agent 配置的能力条目里 `systemPrompt: true` 时，才让它当协调者。这个字段出现之前写的条目算不支持，直到该配置启动过一次对话或在设置里刷新。旧机器和旧客户端不会碰到它们不认识的标记。
 - **入口。** 打开开发者模式后，本地项目行的菜单里有「开始协调者对话」。它打开带 `coordinator=true` 的新对话页，只列出符合条件的 agent，发第一条消息时写入标记。GitHub 仓库和多仓库项目暂时没有入口。
 
-- **项目页原型。** 按 owner 给的草图，开发者模式下还会显示项目布局。侧边栏导航行下面有「项目 / 对话」切换；「项目」列出所有本地项目和用户自己有对话的 GitHub 仓库，并带折叠分组的状态标记。每个项目对每个用户固定绑定一个协调者对话：该用户在这个项目里最新创建、未归档的那个。旧协调者里有新消息也不会改变绑定。打开项目就进入这个对话；没有时进入开始协调者对话的页面。协调者对话的 ⋯ 菜单里有「更换协调者」（owner 的要求），点击后回到开始页面；在新协调者真正创建之前，项目仍绑定旧对话。绑定由协调者标记和 `createdAt` 推出，不需要额外存储，随会话元数据同步。协调者页面左边是对话，右边是看板：协调者开出的所有对话，加上这个项目里其他对话（标「手动创建」）。看板和项目列表的状态标记只算用户自己的对话（owner 的决定，规则和侧边栏「我的」范围相同）。看板分为「需要你」（等待权限、待回答的问题或发送失败）、「进行中」（为空时不显示）、「未读」和「已完成」。点一行会打开那个对话自己的页面，右侧 tab 还没做（C3）。分组逻辑是 `packages/components/src/components/project-mode/` 里的 `buildProjectBoard`；Storybook 的「Project mode/Coordinator page」用真实组件渲染了这个页面。
+- **项目页原型。** 按 owner 给的草图，开发者模式下还会显示项目布局。侧边栏导航行下面有「项目 / 对话」切换；「项目」列出所有本地项目和用户自己有对话的 GitHub 仓库，并带折叠分组的状态标记。每个项目对每个用户固定绑定一个协调者对话：该用户在这个项目里最新创建、未归档的那个。旧协调者里有新消息也不会改变绑定。打开项目就进入这个对话；没有时进入开始协调者对话的页面。协调者对话的 ⋯ 菜单里有「更换协调者」（owner 的要求），点击后回到开始页面；在新协调者真正创建之前，项目仍绑定旧对话。绑定由协调者标记和 `createdAt` 推出，不需要额外存储，随会话元数据同步。协调者页面左边是对话，看板成为该会话右侧面板里常驻的第一个 tab（不能关闭，进入时自动打开；对话和面板之间就是面板原有的可拖动分隔线）。看板列出协调者开出的所有对话，加上这个项目里其他对话（标「手动创建」）。看板和项目列表的状态标记只算用户自己的对话（owner 的决定，规则和侧边栏「我的」范围相同）。看板分为「需要你」（等待权限、待回答的问题或发送失败）、「进行中」（为空时不显示）、「未读」和「已完成」。点一行会把那个对话作为同一面板里的另一个 tab 打开，和文件、变更、Side Chat 并列；关闭这个 tab 只是收起，不删除对话。在面板里打开的对话中点文件链接，会以面板 tab 打开，读的是那个对话自己的工作区，不是协调者的。这些项目模式的 tab 不随面板状态持久化。开始协调者页面把看板放在表单旁边，中间用可拖动的分隔线分开。C3 只在协调者页面上解决了。分组逻辑是 `packages/components/src/components/project-mode/` 里的 `buildProjectBoard`；Storybook 的「Project mode/Coordinator page」用真实组件渲染了这个页面。
 
 需要 owner 确认的决定：fork 保留标记；入口只给本地项目；在协调者页面选了 Role 时，Role 的 `promptPrefix` 仍和其他地方一样加在第一条消息前面；没有提升能力缓存版本，所以已有条目要启动一次对话或刷新后才符合条件。
 

@@ -28,6 +28,11 @@ import {
   type CoordinatorProjectKey,
 } from '@/components/project-mode/project-board-model';
 import { ProjectWorkspace } from '@/components/project-mode/project-workspace';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
+import {
+  SessionSidePanelTabBar,
+  type SessionSidePanelTabItem,
+} from '@/components/sessions/session-side-panel-tab-bar';
 import {
   SidebarProjectList,
   SidebarProjectViewSwitch,
@@ -153,22 +158,32 @@ const streamItems: ChatStreamItem[] = turns.map((turn, turnIndex) => ({
   },
 }));
 
-function CoordinatorConversation() {
+function ConversationPage({
+  sessionId,
+  title,
+  items,
+  placeholder,
+}: {
+  sessionId: SessionId;
+  title: string;
+  items: ChatStreamItem[];
+  placeholder: string;
+}) {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState('');
   return (
     <SessionConversationPage
       className="h-full"
-      headerSlot={<SessionConversationPageHeader titleSlot="项目协调者 · lody" />}
+      headerSlot={<SessionConversationPageHeader titleSlot={title} />}
       bodySlot={
         <SessionConversationPageBody
           streamSlot={
             <SessionChatStreamView
-              sessionId={coordinatorId}
-              items={streamItems}
+              sessionId={sessionId}
+              items={items}
               className="h-full"
-              renderMessageRow={({ message, sessionId }) => (
-                <MessageRowView message={message} sessionId={sessionId} />
+              renderMessageRow={({ message, sessionId: id }) => (
+                <MessageRowView message={message} sessionId={id} />
               )}
             />
           }
@@ -179,7 +194,7 @@ function CoordinatorConversation() {
               promptRef={promptRef}
               promptValue={prompt}
               onPromptChange={setPrompt}
-              promptPlaceholder="告诉协调者你想做什么"
+              promptPlaceholder={placeholder}
               primaryAction={
                 <Button icon aria-label="Send">
                   <ArrowUp size={16} />
@@ -195,23 +210,132 @@ function CoordinatorConversation() {
   );
 }
 
-function ProjectModePage() {
+const childId = 'asks' as SessionId;
+const childItems: ChatStreamItem[] = [
+  {
+    role: 'user' as const,
+    text: '把 E2EE 会话分享迁移到新协议。完成后发回结果和 PR 链接。',
+  },
+  {
+    role: 'assistant' as const,
+    text: '迁移需要先确定一件事：**旧的分享链接要继续有效，还是迁移后一律失效？** 两种做法都已准备好，等你决定。',
+  },
+].map((turn, turnIndex) => ({
+  turnIndex,
+  type: 'message',
+  sessionId: childId,
+  message: {
+    id: `child-turn-${turnIndex}`,
+    role: turn.role,
+    timestamp: new Date(minutesAgo(10 - turnIndex)).toISOString(),
+    read: true,
+    finished: true,
+    items: [{ type: 'text', text: turn.text }],
+  },
+}));
+
+const BOARD_TAB = 'project-board';
+const CHILD_TAB = `side-session:${childId}`;
+
+/**
+ * The coordinator's page as SessionDetail composes it: the conversation on the
+ * left and the session's own right panel, whose resident first tab is the board.
+ * A board row opens that conversation as another panel tab.
+ */
+function CoordinatorPage() {
+  const [openedChild, setOpenedChild] = useState(true);
+  const [activeTab, setActiveTab] = useState(BOARD_TAB);
+  const tabs: SessionSidePanelTabItem[] = [
+    { id: BOARD_TAB, label: '全部子对话', kind: 'board', closeable: false },
+    ...(openedChild
+      ? [
+          {
+            id: CHILD_TAB,
+            label: '迁移 E2EE 会话分享：要不要保留旧链接？',
+            kind: 'session' as const,
+            closeable: true,
+          },
+        ]
+      : []),
+  ];
+  return (
+    <DesktopSessionDetailLayout
+      defaultSizes={{ main: 58, sidebar: 42 }}
+      topBar={null}
+      chatSurfaces={
+        <ConversationPage
+          sessionId={coordinatorId}
+          title="项目协调者 · lody"
+          items={streamItems}
+          placeholder="告诉协调者你想做什么"
+        />
+      }
+      terminalDock={null}
+      secondaryPanel={
+        <div className="flex h-full min-h-0 flex-col">
+          <SessionSidePanelTabBar
+            tabs={tabs}
+            activeTabId={activeTab}
+            onTabSelect={setActiveTab}
+            onTabClose={(tabId) => {
+              if (tabId === CHILD_TAB) setOpenedChild(false);
+              setActiveTab(BOARD_TAB);
+            }}
+            closeTabLabel={(label) => `关闭 ${label}`}
+          />
+          <div className="relative min-h-0 flex-1">
+            {activeTab === BOARD_TAB ? (
+              <ProjectBoardView
+                board={board}
+                getSessionHref={(id) => `#${id}`}
+                onOpenSession={() => {
+                  setOpenedChild(true);
+                  setActiveTab(CHILD_TAB);
+                }}
+                hideTitle
+              />
+            ) : (
+              <ConversationPage
+                sessionId={childId}
+                title="迁移 E2EE 会话分享"
+                items={childItems}
+                placeholder="回复这个对话"
+              />
+            )}
+          </div>
+        </div>
+      }
+      sidebarOpen
+      onSidebarCollapse={() => {}}
+      deleteConfirmDialog={null}
+    />
+  );
+}
+
+function ProjectModePage({ page = 'coordinator' }: { page?: 'coordinator' | 'start' }) {
   const [view, setView] = useState<SidebarProjectView>('projects');
   const [selectedId, setSelectedId] = useState<string | null>(coordinatorProjectKeyId(project));
   const content = useMemo(
-    () => (
-      <ProjectWorkspace
-        main={<CoordinatorConversation />}
-        board={
-          <ProjectBoardView
-            board={board}
-            getSessionHref={(id) => `#${id}`}
-            onOpenSession={() => {}}
-          />
-        }
-      />
-    ),
-    []
+    () =>
+      page === 'coordinator' ? (
+        <CoordinatorPage />
+      ) : (
+        <ProjectWorkspace
+          main={
+            <div className="flex h-full items-center justify-center text-lg">
+              开始一个协调者对话
+            </div>
+          }
+          board={
+            <ProjectBoardView
+              board={board}
+              getSessionHref={(id) => `#${id}`}
+              onOpenSession={() => {}}
+            />
+          }
+        />
+      ),
+    [page]
   );
   return (
     <WorkspaceSidebarHarness
@@ -252,3 +376,8 @@ type Story = StoryObj<typeof meta>;
 export const LightZhCn: Story = { globals: { theme: 'light', locale: 'zh_CN' } };
 export const DarkZhCn: Story = { globals: { theme: 'dark', locale: 'zh_CN' } };
 export const LightEn: Story = { globals: { theme: 'light', locale: 'en' } };
+/** The start page: the board beside the start form, split by a resizable divider. */
+export const StartPageZhCn: Story = {
+  args: { page: 'start' },
+  globals: { theme: 'light', locale: 'zh_CN' },
+};
