@@ -2253,6 +2253,7 @@
   "sessions.operationReply.expand": "查看完整回复",
   "sessions.openedBy.deletedSession": "已删除的对话",
   "sessions.openedBy.expand": "展开 {{count}} 个打开的会话",
+  "sessions.openedBy.agentRoleOnProvider": "{{role}}（Agent 角色）· {{provider}}",
   "sessions.openedBy.backToOpener": "返回创建对话",
   "sessions.openedBy.openOpener": "由此会话打开",
   "sessions.openedBy.openedSessions": "打开的会话",

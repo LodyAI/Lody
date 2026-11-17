@@ -26,6 +26,14 @@ vi.mock('../src/hooks/use-session-actions', () => ({
   }),
 }));
 
+// The workspace Role catalog is a synced room; this suite supplies its readable rows.
+const readableRoles = vi.hoisted(() => ({
+  current: [] as { id: string; name: string; emoji?: string }[],
+}));
+vi.mock('../src/hooks/use-workspace-agent-roles', () => ({
+  useWorkspaceAgentRoles: () => ({ roles: readableRoles.current, synced: true }),
+}));
+
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -75,6 +83,76 @@ describe('Session relation cards', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    readableRoles.current = [];
+  });
+
+  it('names the Agent Role or provider running each created Session', async () => {
+    const store = createStore();
+    const childMeta = (id: string, title: string, extra: Record<string, unknown>) =>
+      store.set(setDocMetaByRoomIdAtom, getSessionRoomId(id as SessionId), {
+        id,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-08-14T12:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        title,
+        ...extra,
+      });
+    childMeta('role-child', 'Review PR security', { agentRoleId: 'role-ui' });
+    childMeta('plain-child', 'Fix flaky test', {});
+    childMeta('gone-role-child', 'Role was deleted', { agentRoleId: 'role-deleted' });
+    readableRoles.current = [{ id: 'role-ui', name: 'UI Designer', emoji: '🎨' }];
+
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <MessageRowView
+            sessionId={openerSessionId}
+            message={{
+              id: 'identity-progress',
+              role: 'system',
+              read: true,
+              timestamp: '2026-08-14T12:00:00.000Z',
+              items: [
+                {
+                  type: 'operation_progress',
+                  operationId: 'identity',
+                  operationKind: 'session_create_many',
+                  items: ['role-child', 'plain-child', 'gone-role-child', 'unsynced-child'].map(
+                    (id) => ({
+                      status: 'running' as const,
+                      label: `Label ${id}`,
+                      target: { sessionId: id as SessionId, userTurnId: `turn-${id}` },
+                    })
+                  ),
+                },
+              ],
+            }}
+          />
+        </Provider>
+      )
+    );
+
+    const cards = Array.from(container.querySelectorAll('[data-session-relation-card="opened"]'));
+    const agentOf = (index: number) =>
+      cards[index]?.querySelector('[data-created-session-agent]') ?? null;
+    expect(agentOf(0)?.getAttribute('data-created-session-agent')).toBe('role');
+    // A Role shows its own emoji, not the provider's icon.
+    expect(agentOf(0)?.textContent).toBe('🎨UI Designer');
+    expect(agentOf(0)?.querySelector('svg')).toBeNull();
+    expect(cards[0]?.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'View session: UI Designer (Agent Role) · Codex · Review PR security'
+    );
+    expect(agentOf(1)?.getAttribute('data-created-session-agent')).toBe('provider');
+    expect(agentOf(1)?.textContent).toBe('Codex');
+    expect(agentOf(1)?.querySelector('svg')).not.toBeNull();
+    // A Role the reader can no longer see falls back to the provider, never its id.
+    expect(agentOf(2)?.textContent).toBe('Codex');
+    expect(container.textContent).not.toContain('role-deleted');
+    // Before the target's metadata syncs there is no identity to state.
+    expect(agentOf(3)).toBeNull();
+    expect(cards[3]?.textContent).toContain('Label unsynced-child');
   });
 
   it('turns a successful session_create completion into a live Session card', async () => {
