@@ -1693,3 +1693,61 @@ export const DeepSeekThinking: Story = {
     );
   },
 };
+
+/** Alternating thoughts and commands share one disclosure while work streams. */
+export const AdjacentThoughtsAndTools: Story = {
+  args: { sessionId, items: [], renderMessageRow },
+  globals: { theme: 'dark', locale: 'zh_CN' },
+  render: () => {
+    const message: SessionHistoryParsed = {
+      ...dshMessage,
+      id: 'adjacent-thoughts-and-tools',
+      finished: false,
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'adjacent-inspect',
+          kind: 'execute',
+          status: 'completed',
+          title: 'git diff --stat',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'adjacent-find',
+          kind: 'execute',
+          status: 'completed',
+          title: 'rg activity_group view.tsx',
+        },
+        { type: 'thought', text: '找到分组逻辑了，接下来检查展开状态。' },
+        {
+          type: 'tool_call',
+          toolCallId: 'adjacent-test',
+          kind: 'execute',
+          status: 'completed',
+          title: 'pnpm test chat-virtual-rows-identity',
+        },
+        { type: 'thought', text: '相邻思考和工具已合并，继续确认内容顺序。' },
+        {
+          type: 'tool_call',
+          toolCallId: 'adjacent-check',
+          kind: 'execute',
+          status: 'completed',
+          title: 'git diff --check',
+        },
+        { type: 'thought', text: '检查通过，展开后仍按原来的顺序显示。' },
+      ],
+    };
+    return (
+      <Provider store={dshStore}>
+        <div {...stylex.props(rhythmStyles.frame)}>
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={[{ type: 'message', sessionId, message, turnIndex: 0 }]}
+            lastAssistantMessageId={message.id}
+            renderMessageRow={renderMessageRow}
+          />
+        </div>
+      </Provider>
+    );
+  },
+};
